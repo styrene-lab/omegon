@@ -75,7 +75,7 @@ pub(crate) fn split_preserving_trailing_empty_lines(text: &str) -> Vec<&str> {
     text.split('\n').collect()
 }
 
-fn split_trimmed_trailing_empty_lines(text: &str) -> Vec<&str> {
+pub(crate) fn split_trimmed_trailing_empty_lines(text: &str) -> Vec<&str> {
     let mut lines = split_preserving_trailing_empty_lines(text);
     while lines.len() > 1 && lines.last().is_some_and(|line| line.is_empty()) {
         lines.pop();
@@ -83,7 +83,7 @@ fn split_trimmed_trailing_empty_lines(text: &str) -> Vec<&str> {
     lines
 }
 
-fn clean_inline_text(text: &str) -> String {
+pub(crate) fn clean_inline_text(text: &str) -> String {
     strip_terminal_control(text)
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -155,7 +155,7 @@ mod terminal_control_tests {
     }
 
     #[test]
-    fn clean_inline_text_drops_control_noise() {
+    pub(crate) fn clean_inline_text_drops_control_noise() {
         assert_eq!(
             clean_inline_text("nex \x1b[?25lswitch now"),
             "nex switch now"
@@ -667,7 +667,7 @@ fn slim_tool_live_rows(width: u16, cells: &[String]) -> Vec<String> {
     rows
 }
 
-fn subtle_tool_row_bg(bg: Color) -> Color {
+pub(crate) fn subtle_tool_row_bg(bg: Color) -> Color {
     match bg {
         Color::Rgb(r, g, b) => Color::Rgb(
             r.saturating_add(3),
@@ -1942,244 +1942,6 @@ fn tool_title_line(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn render_assistant_text(
-    text: &str,
-    thinking: &str,
-    complete: bool,
-    meta: &SegmentMeta,
-    presentation: &SegmentPresentation,
-    area: Rect,
-    buf: &mut Buffer,
-    t: &dyn Theme,
-    mode: SegmentRenderMode,
-) {
-    if area.width < 3 || area.height == 0 {
-        return;
-    }
-
-    let bg = t.surface_bg();
-    let border_color = if complete {
-        t.success()
-    } else {
-        t.accent_muted()
-    };
-    let block = if matches!(mode, SegmentRenderMode::Slim) {
-        Block::default()
-            .padding(Padding::horizontal(0))
-            .style(Style::default().bg(bg))
-    } else {
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color).bg(bg))
-            .title_top(
-                top_right_timestamp(meta, t)
-                    .unwrap_or_else(Line::default)
-                    .right_aligned(),
-            )
-            .padding(Padding::horizontal(1))
-            .style(Style::default().bg(bg))
-    };
-    let inner = block.inner(area);
-    block.render(area, buf);
-
-    if inner.width == 0 || inner.height == 0 {
-        return;
-    }
-
-    let mut lines: Vec<Line<'_>> = Vec::new();
-
-    // Assistant identity line — identify the source, not the current phase.
-    // Slim mode deliberately omits this chrome so prose remains easy to select
-    // and copy like a normal terminal transcript.
-    if !matches!(mode, SegmentRenderMode::Slim) {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{} ", presentation.sigil),
-                Style::default()
-                    .fg(border_color)
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("omegon", Style::default().fg(t.border_dim()).bg(bg)),
-        ]));
-    }
-
-    // Meta tag line: model / provider / tier — dim secondary header.
-    // Hidden in slim mode to reduce visual noise.
-    if !matches!(mode, SegmentRenderMode::Slim) {
-        let meta_tag = build_meta_tag(meta);
-        if !meta_tag.is_empty() {
-            lines.push(Line::from(Span::styled(
-                meta_tag,
-                Style::default().fg(t.border_dim()).bg(bg),
-            )));
-        }
-    }
-
-    // Reasoning block — stream full reasoning live, collapse after completion.
-    if !thinking.is_empty() {
-        let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(thinking);
-        if matches!(mode, SegmentRenderMode::Slim) {
-            let row_bg = subtle_tool_row_bg(bg);
-            apply_rows_bg(inner, lines.len() as u16, 1, row_bg, buf);
-            let preview = think_lines
-                .iter()
-                .map(|line| clean_inline_text(line.trim()))
-                .find(|line| !line.is_empty())
-                .unwrap_or_else(|| "thinking".to_string());
-            let budget = inner.width.saturating_sub(24) as usize;
-            lines.push(Line::from(vec![
-                Span::styled("◌ ", Style::default().fg(t.border()).bg(row_bg)),
-                Span::styled(
-                    "reasoning ",
-                    Style::default()
-                        .fg(t.dim())
-                        .bg(row_bg)
-                        .add_modifier(Modifier::ITALIC),
-                ),
-                Span::styled(
-                    format!("({} lines)", think_lines.len()),
-                    Style::default().fg(t.border_dim()).bg(row_bg),
-                ),
-                Span::styled(" · ", Style::default().fg(t.border_dim()).bg(row_bg)),
-                Span::styled(
-                    crate::util::truncate(&preview, budget),
-                    Style::default()
-                        .fg(t.border())
-                        .bg(row_bg)
-                        .add_modifier(Modifier::ITALIC),
-                ),
-            ]));
-        } else {
-            let show = if complete {
-                think_lines.len().min(6)
-            } else {
-                think_lines.len()
-            };
-            lines.push(Line::from(vec![
-                Span::styled("◌ ", Style::default().fg(t.border()).bg(bg)),
-                Span::styled(
-                    "reasoning ",
-                    Style::default()
-                        .fg(t.dim())
-                        .bg(bg)
-                        .add_modifier(Modifier::ITALIC),
-                ),
-                Span::styled(
-                    format!("({} lines)", think_lines.len()),
-                    Style::default().fg(t.border_dim()).bg(bg),
-                ),
-            ]));
-            for line in think_lines.iter().take(show) {
-                lines.push(Line::from(Span::styled(
-                    format!("  {line}"),
-                    Style::default()
-                        .fg(t.border())
-                        .bg(bg)
-                        .add_modifier(Modifier::ITALIC),
-                )));
-            }
-            if complete && think_lines.len() > show {
-                lines.push(Line::from(Span::styled(
-                    format!("  ⋯ {} more", think_lines.len() - show),
-                    Style::default().fg(t.border_dim()).bg(bg),
-                )));
-            }
-            lines.push(Line::from(Span::styled(
-                "  ─ ─ ─",
-                Style::default().fg(t.border_dim()).bg(bg),
-            )));
-        }
-    }
-
-    if !text.is_empty() && !matches!(mode, SegmentRenderMode::Slim) {
-        lines.push(Line::from(vec![
-            Span::styled("◎ ", Style::default().fg(t.accent()).bg(bg)),
-            Span::styled(
-                "answer",
-                Style::default()
-                    .fg(t.accent_muted())
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-    }
-
-    // Assistant text with markdown structural highlighting.
-    //
-    // Pre-pass: materialize lines into a Vec so we can compute shared
-    // table column widths via `compute_table_widths` before rendering.
-    // The widths array is parallel to `text_lines` — entries are
-    // `Some(widths)` for lines belonging to a markdown table block,
-    // `None` otherwise. The rendering loop below looks up its row's
-    // shared widths so every row in a table block aligns with its
-    // neighbors instead of computing per-row widths in isolation
-    // (which produced the column-shred failure mode in
-    // codebase_search results and other table-bearing tool output).
-    let text_lines: Vec<&str> = split_trimmed_trailing_empty_lines(text);
-    let table_widths_per_line = compute_table_widths(&text_lines, area.width as usize);
-    let mut in_code_fence = false;
-    let mut table_state = TableState::None;
-    for (idx, line) in text_lines.iter().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("```") {
-            in_code_fence = !in_code_fence;
-            table_state = TableState::None;
-            lines.push(Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(t.dim()).bg(bg),
-            )));
-        } else if in_code_fence {
-            lines.push(Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(t.accent_muted()).bg(bg),
-            )));
-        } else if let Some(target_widths) = table_widths_per_line[idx].as_ref() {
-            // Pre-pass marked this as a table line — render with the
-            // shared widths from its block.
-            let is_header = matches!(table_state, TableState::None);
-            if is_table_separator(trimmed) || matches!(table_state, TableState::Header) {
-                table_state = TableState::Body;
-            } else {
-                table_state = TableState::Header;
-            }
-            lines.push(render_table_line(trimmed, is_header, target_widths, t));
-        } else {
-            table_state = TableState::None;
-            let line = super::widgets::highlight_line(line, t);
-            let spans: Vec<Span<'_>> = line
-                .spans
-                .into_iter()
-                .map(|mut s| {
-                    s.style = s.style.bg(bg);
-                    s
-                })
-                .collect();
-            lines.push(Line::from(spans));
-        }
-    }
-
-    if !complete && text.is_empty() && thinking.is_empty() {
-        lines.push(Line::from(Span::styled("…", t.style_dim().bg(bg))));
-    }
-
-    Paragraph::new(lines.clone())
-        .wrap(Wrap { trim: false })
-        .style(Style::default().bg(bg))
-        .render(inner, buf);
-    apply_rendered_links(
-        inner,
-        &lines,
-        buf,
-        Style::default()
-            .fg(t.accent_muted())
-            .bg(bg)
-            .add_modifier(Modifier::UNDERLINED),
-        inner.height,
-    );
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_tool_card(
     name: &str,
@@ -3015,7 +2777,7 @@ fn try_highlight<'a>(
 
 /// Table parsing state — tracks whether we're in header, separator, or body rows.
 #[derive(Clone, Copy, PartialEq)]
-enum TableState {
+pub(crate) enum TableState {
     None,
     Header,
     Body,
@@ -3112,7 +2874,7 @@ fn is_table_line(line: &str) -> bool {
 
 /// Detect table separator: `|---|---|` or `| --- | --- |` or `|---|---`
 /// (trailing pipe optional, same rationale as `is_table_line`).
-fn is_table_separator(line: &str) -> bool {
+pub(crate) fn is_table_separator(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.starts_with('|')
         && trimmed.len() > 2
@@ -3143,7 +2905,10 @@ fn is_table_separator(line: &str) -> bool {
 /// `Vec<usize>` (column widths) per table line; non-table lines map to
 /// `None`. Separator rows participate in column-count detection but
 /// not in width measurement (they're all dashes).
-fn compute_table_widths(lines: &[&str], available_width: usize) -> Vec<Option<Vec<usize>>> {
+pub(crate) fn compute_table_widths(
+    lines: &[&str],
+    available_width: usize,
+) -> Vec<Option<Vec<usize>>> {
     let mut result: Vec<Option<Vec<usize>>> = vec![None; lines.len()];
     let mut i = 0;
     while i < lines.len() {
@@ -3218,7 +2983,7 @@ fn compute_table_widths(lines: &[&str], available_width: usize) -> Vec<Option<Ve
 /// caller is responsible for ensuring `target_widths` reflects the
 /// max-per-column across all rows in the same table block — passing
 /// per-row-derived widths breaks alignment.
-fn render_table_line<'a>(
+pub(crate) fn render_table_line<'a>(
     line: &str,
     is_header: bool,
     target_widths: &[usize],
@@ -3455,6 +3220,7 @@ pub(crate) fn render_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::surfaces::conversation::SegmentEmphasis;
     use crate::tui::theme::Alpharius;
     use crate::tui::widgets;
 
@@ -6180,7 +5946,7 @@ After fence text.
     }
 
     #[test]
-    fn compute_table_widths_aligns_columns_across_rows() {
+    pub(crate) fn compute_table_widths_aligns_columns_across_rows() {
         // The headline failure mode this fix addresses: a header with
         // narrow cells (`File`/`Lines`/`Score`) followed by a body row
         // with very long content in the last column (Preview). The old
@@ -6233,7 +5999,7 @@ After fence text.
     }
 
     #[test]
-    fn compute_table_widths_returns_none_for_non_table_lines() {
+    pub(crate) fn compute_table_widths_returns_none_for_non_table_lines() {
         let lines = vec![
             "Some prose before a table",
             "| col1 | col2 |",
@@ -6252,7 +6018,7 @@ After fence text.
     }
 
     #[test]
-    fn compute_table_widths_handles_multiple_blocks() {
+    pub(crate) fn compute_table_widths_handles_multiple_blocks() {
         // Two separate table blocks with prose in between. Each block
         // should compute its own widths independently.
         let lines = vec![
@@ -6280,7 +6046,7 @@ After fence text.
     }
 
     #[test]
-    fn compute_table_widths_uses_display_width_for_ambiguous_and_wide_cells() {
+    pub(crate) fn compute_table_widths_uses_display_width_for_ambiguous_and_wide_cells() {
         let lines = vec![
             "| Tool | What it does |",
             "|------|---------------|",
@@ -6302,7 +6068,7 @@ After fence text.
     }
 
     #[test]
-    fn render_table_line_pads_to_display_width_not_char_count() {
+    pub(crate) fn render_table_line_pads_to_display_width_not_char_count() {
         let widths = vec![8, 12];
         let body = render_table_line("| Ω read | text + images |", false, &widths, &Alpharius);
         let text: String = body
@@ -6601,7 +6367,7 @@ After fence text.
     }
 
     #[test]
-    fn compute_table_widths_uses_markdown_display_width() {
+    pub(crate) fn compute_table_widths_uses_markdown_display_width() {
         // Table where header has plain text but body has markdown
         let lines = vec![
             "| Name | Description |",
