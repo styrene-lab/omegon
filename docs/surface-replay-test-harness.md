@@ -1,11 +1,10 @@
 ---
 id: surface-replay-test-harness
 title: "Surface replay and action test harness"
-status: exploring
+status: implemented
 parent: ui-surface-action-protocol
 tags: [testing, replay, surfaces]
-open_questions:
-  - "What is the first replay fixture format: pure Rust test builder, JSONL envelope fixture, or recorded session excerpt?"
+open_questions: []
 dependencies: []
 related: []
 ---
@@ -40,6 +39,8 @@ Sister project Orbytal currently has design docs but no Rust source/Cargo crate 
 
 **Rationale:** Commit 7229a668 replaced the temporary replay clock concept with `UiRevision` and `UiRevisionCounter`, making revisions deterministic causal ordering rather than time. The counter uses checked increment and converts to `u64` only at the envelope boundary.
 
-## Open Questions
+### Use a pure Rust replay fixture builder as the first fixture format
 
-- What is the first replay fixture format: pure Rust test builder, JSONL envelope fixture, or recorded session excerpt?
+**Status:** accepted
+
+**Rationale:** Commit 56a8fd72 added `ReplayFixture`, resolving the first fixture-format question in favor of an internal Rust builder before JSONL fixtures or recorded session excerpts. This keeps replay semantics testable without prematurely freezing a file format.
