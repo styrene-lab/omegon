@@ -1488,8 +1488,18 @@ impl Segment {
                     t,
                 );
             }
-            SystemNotification { text } => render_system(text, area, buf, t, mode),
-            LifecycleEvent { icon, text } => render_lifecycle(icon, text, area, buf, t),
+            SystemNotification { text } => super::segment_components::system::render(
+                super::segment_components::system::SystemRenderProps { text, mode },
+                area,
+                buf,
+                t,
+            ),
+            LifecycleEvent { icon, text } => super::segment_components::lifecycle::render(
+                super::segment_components::lifecycle::LifecycleRenderProps { icon, text },
+                area,
+                buf,
+                t,
+            ),
             Image { path, alt } => render_image_placeholder(path, alt, area, buf, t),
             TurnSeparator => render_separator(area, buf, t),
         }
@@ -3411,7 +3421,13 @@ fn strip_inline_markdown(text: &str) -> String {
     out
 }
 
-fn render_system(text: &str, area: Rect, buf: &mut Buffer, t: &dyn Theme, mode: SegmentRenderMode) {
+pub(crate) fn render_system(
+    text: &str,
+    area: Rect,
+    buf: &mut Buffer,
+    t: &dyn Theme,
+    mode: SegmentRenderMode,
+) {
     if area.width < 3 || area.height == 0 {
         return;
     }
@@ -3480,7 +3496,13 @@ fn render_system(text: &str, area: Rect, buf: &mut Buffer, t: &dyn Theme, mode: 
     );
 }
 
-fn render_lifecycle(icon: &str, text: &str, area: Rect, buf: &mut Buffer, t: &dyn Theme) {
+pub(crate) fn render_lifecycle(
+    icon: &str,
+    text: &str,
+    area: Rect,
+    buf: &mut Buffer,
+    t: &dyn Theme,
+) {
     if area.width < 4 || area.height == 0 {
         return;
     }
