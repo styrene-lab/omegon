@@ -4919,6 +4919,42 @@ fn active_tool_phase_beats_runtime_thinking_in_tui() {
 }
 
 #[test]
+fn selected_tool_segment_detail_pane_renders_full_tool_context() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        args: serde_json::json!({"command": "cargo test"}),
+    });
+    app.handle_agent_event(AgentEvent::ToolEnd {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        is_error: false,
+        result: omegon_traits::ToolResult {
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "test result details".into(),
+            }],
+            details: serde_json::Value::Null,
+        },
+    });
+    let idx = app
+        .conversation
+        .segments()
+        .iter()
+        .position(|seg| matches!(seg.content, SegmentContent::ToolCard { .. }))
+        .expect("tool card segment");
+    app.conversation.set_timeline_expanded_segment(Some(idx));
+
+    let rendered = render_app_to_string(&mut app, 140, 36);
+
+    assert!(rendered.contains("detail · segment"), "{rendered}");
+    assert!(rendered.contains("tool"), "{rendered}");
+    assert!(rendered.contains("bash"), "{rendered}");
+    assert!(rendered.contains("tool-1"), "{rendered}");
+    assert!(rendered.contains("test result details"), "{rendered}");
+}
+
+#[test]
 fn tool_end_aggregates_all_text_blocks() {
     let mut app = test_app();
     app.handle_agent_event(AgentEvent::ToolStart {
