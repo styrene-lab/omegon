@@ -13,7 +13,7 @@ use crate::surfaces::conversation::ToolCategory;
 
 use super::super::segments::{
     self, SegmentMeta, SegmentRenderMode, TokenUsage, apply_rendered_links, apply_rows_bg,
-    subtle_tool_row_bg,
+    subtle_tool_row_bg, summarize_tool_args,
 };
 use super::super::theme::Theme;
 
@@ -31,6 +31,79 @@ pub struct ToolCardRenderProps<'a> {
     pub mode: SegmentRenderMode,
     pub density: crate::settings::ToolDetail,
     pub pinned: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn append_tool_args_section(
+    lines: &mut Vec<Line<'_>>,
+    name: &str,
+    detail_args: Option<&str>,
+    detail_result: Option<&str>,
+    args_budget: usize,
+    complete: bool,
+    is_error: bool,
+    effective: crate::settings::ToolDetail,
+    bg: Color,
+    theme: &dyn Theme,
+) {
+    if let Some(summary) = summarize_tool_args(name, detail_args) {
+        lines.push(Line::from(vec![
+            Span::styled("▸ ", Style::default().fg(theme.accent_muted()).bg(bg)),
+            Span::styled(summary, Style::default().fg(theme.fg()).bg(bg)),
+        ]));
+    }
+
+    // In Lean mode, only the summary line above is shown for completed tools.
+    // Skip args and results entirely — Ctrl+O expands individual cards.
+    if matches!(effective, crate::settings::ToolDetail::Lean) && complete && !is_error {
+        if detail_result.is_some() || detail_args.is_some() {
+            lines.push(Line::from(Span::styled(
+                "  Ctrl+O to expand",
+                Style::default()
+                    .fg(theme.dim())
+                    .bg(bg)
+                    .add_modifier(Modifier::DIM),
+            )));
+        }
+        return;
+    }
+
+    if args_budget == 0 {
+        return;
+    }
+    let Some(args) = detail_args else {
+        return;
+    };
+    match name {
+        "bash" => {
+            for (i, line) in args.lines().take(args_budget).enumerate().skip(1) {
+                let prefix = if i == 0 { "$ " } else { "  " };
+                lines.push(Line::from(vec![
+                    Span::styled(prefix, Style::default().fg(theme.dim()).bg(bg)),
+                    Span::styled(line.to_string(), Style::default().fg(theme.fg()).bg(bg)),
+                ]));
+            }
+        }
+        "edit" | "change" | "read" | "write" | "view" => {
+            // Summary line already rendered above; body/result carries the useful payload.
+        }
+        _ => {
+            let display_args = if args.starts_with('{') || args.starts_with('[') {
+                serde_json::from_str::<serde_json::Value>(args)
+                    .ok()
+                    .and_then(|v| serde_json::to_string_pretty(&v).ok())
+                    .unwrap_or_else(|| args.to_string())
+            } else {
+                args.to_string()
+            };
+            for line in display_args.lines().take(args_budget) {
+                lines.push(Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(theme.dim()).bg(bg),
+                )));
+            }
+        }
+    }
 }
 
 pub(crate) fn tool_card_right_title_spans<'a>(
@@ -232,6 +305,32 @@ pub(crate) fn render_slim_tool_live_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn append_args_section_adds_lean_expand_hint() {
+        let mut lines = Vec::new();
+        append_tool_args_section(
+            &mut lines,
+            "bash",
+            Some("{\"cmd\":\"echo hi\"}"),
+            Some("ok"),
+            4,
+            true,
+            false,
+            crate::settings::ToolDetail::Lean,
+            Color::Reset,
+            &crate::tui::theme::Alpharius,
+        );
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(
+            rendered.contains("Ctrl+O to expand"),
+            "lean hint should render: {rendered}"
+        );
+    }
 
     #[test]
     fn right_title_spans_include_duration_tokens_and_timestamp() {

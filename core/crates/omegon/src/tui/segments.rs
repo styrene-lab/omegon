@@ -244,7 +244,7 @@ fn summarize_change_args(args: &str) -> Option<String> {
     Some(format!("{path} · {old_len}→{new_len} lines"))
 }
 
-fn summarize_tool_args(tool_name: &str, args: Option<&str>) -> Option<String> {
+pub(crate) fn summarize_tool_args(tool_name: &str, args: Option<&str>) -> Option<String> {
     let args = args?;
     let fallback = || Some(crate::util::truncate(&first_arg_line(args), 96));
 
@@ -1943,26 +1943,19 @@ pub(crate) fn render_tool_card(
     let result_budget = effective.result_budget();
     let tail_budget = effective.tail_budget();
 
-    if let Some(summary) = summarize_tool_args(name, detail_args) {
-        lines.push(Line::from(vec![
-            Span::styled("▸ ", Style::default().fg(t.accent_muted()).bg(bg)),
-            Span::styled(summary, Style::default().fg(t.fg()).bg(bg)),
-        ]));
-    }
-
-    // In Lean mode, only the summary line above is shown for completed tools.
-    // Skip args and results entirely — Ctrl+O expands individual cards.
+    super::segment_components::tool_card::append_tool_args_section(
+        &mut lines,
+        name,
+        detail_args,
+        detail_result,
+        args_budget,
+        complete,
+        is_error,
+        effective,
+        bg,
+        t,
+    );
     if matches!(effective, crate::settings::ToolDetail::Lean) && complete && !is_error {
-        // Show truncation hint
-        if detail_result.is_some() || detail_args.is_some() {
-            lines.push(Line::from(Span::styled(
-                "  Ctrl+O to expand",
-                Style::default()
-                    .fg(t.dim())
-                    .bg(bg)
-                    .add_modifier(Modifier::DIM),
-            )));
-        }
         let para = Paragraph::new(lines.clone())
             .wrap(Wrap { trim: false })
             .style(Style::default().bg(bg));
@@ -1979,46 +1972,6 @@ pub(crate) fn render_tool_card(
         );
         return;
     }
-
-    // ── Args section ────────────────────────────────────────────
-    if args_budget > 0
-        && let Some(args) = detail_args
-    {
-        match name {
-            "bash" => {
-                for (i, line) in args.lines().take(args_budget).enumerate().skip(1) {
-                    let prefix = if i == 0 { "$ " } else { "  " };
-                    lines.push(Line::from(vec![
-                        Span::styled(prefix, Style::default().fg(t.dim()).bg(bg)),
-                        Span::styled(line.to_string(), Style::default().fg(t.fg()).bg(bg)),
-                    ]));
-                }
-            }
-            "edit" | "change" => {
-                // Summary line already rendered above; don't dump raw JSON payloads.
-            }
-            "read" | "write" | "view" => {
-                // Summary line already rendered above; body/result carries the useful payload.
-            }
-            _ => {
-                // Pretty-print JSON args if applicable
-                let display_args = if args.starts_with('{') || args.starts_with('[') {
-                    serde_json::from_str::<serde_json::Value>(args)
-                        .ok()
-                        .and_then(|v| serde_json::to_string_pretty(&v).ok())
-                        .unwrap_or_else(|| args.to_string())
-                } else {
-                    args.to_string()
-                };
-                for line in display_args.lines().take(args_budget) {
-                    lines.push(Line::from(Span::styled(
-                        line.to_string(),
-                        Style::default().fg(t.dim()).bg(bg),
-                    )));
-                }
-            }
-        }
-    } // args_budget > 0
 
     // ── Live progress section (in-flight tools only) ────────────
     // While the tool is still running and we don't yet have a final
