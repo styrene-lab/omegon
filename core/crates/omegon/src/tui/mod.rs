@@ -12,6 +12,7 @@
 
 pub mod active_tool_stream;
 pub mod bootstrap;
+pub mod command_surfaces;
 pub mod conv_widget;
 pub mod conversation;
 pub mod conversation_render_projection;
@@ -68,6 +69,7 @@ use tokio_util::sync::CancellationToken;
 use omegon_traits::AgentEvent;
 
 use self::active_tool_stream::{ActiveToolStream, render_active_tool_stream_panel};
+use self::command_surfaces::{CommandPanel, CommandSeverity};
 use self::conversation::{ConversationView, Tab};
 use self::dashboard::DashboardState;
 use self::editor::Editor;
@@ -394,6 +396,8 @@ pub struct App {
     suppress_editor_input_until: Option<std::time::Instant>,
     /// Session start time for /stats.
     session_start: std::time::Instant,
+    /// Active command output panel for slash commands and extension UI output.
+    command_panel: Option<CommandPanel>,
     /// Active selector popup (model picker, think level, etc.)
     selector: Option<selector::Selector>,
     /// What the selector is for — determines what happens on confirm.
@@ -1541,6 +1545,7 @@ impl App {
             interrupt_pending: false,
             suppress_editor_input_until: None,
             session_start: std::time::Instant::now(),
+            command_panel: None,
             selector: None,
             selector_kind: None,
             at_picker: None,
@@ -1747,8 +1752,9 @@ impl App {
                 "Mouse interaction mode enabled — pane mouse interaction restored",
                 ratatui_toaster::ToastType::Info,
             );
-            self.conversation.push_system(
-                "🖱 Mouse interaction mode ON — mouse capture enabled. Pane clicks, wheel scroll, and segment targeting are active. Use /mouse off to return to terminal-native selection.",
+            self.show_toast(
+                "Mouse interaction mode enabled — use /mouse off for terminal-native selection",
+                ratatui_toaster::ToastType::Info,
             );
         }
     }
@@ -1789,8 +1795,10 @@ impl App {
         }
 
         if options.is_empty() {
-            self.conversation
-                .push_system("Model catalog is empty. Check /model list for available options.");
+            self.show_toast(
+                "Model catalog is empty — use /model list for available options",
+                ratatui_toaster::ToastType::Warning,
+            );
             return;
         }
 
@@ -1847,8 +1855,9 @@ impl App {
     fn open_persona_selector(&mut self) {
         let (personas, _) = crate::plugins::persona_loader::scan_available();
         if personas.is_empty() {
-            self.conversation.push_system(
-                "No personas installed. Install with: omegon plugin install <git-url>",
+            self.show_toast(
+                "No personas installed — install with omegon plugin install <git-url>",
+                ratatui_toaster::ToastType::Warning,
             );
             return;
         }
@@ -1873,8 +1882,10 @@ impl App {
     fn open_tone_selector(&mut self) {
         let (_, tones) = crate::plugins::persona_loader::scan_available();
         if tones.is_empty() {
-            self.conversation
-                .push_system("No tones installed. Install with: omegon plugin install <git-url>");
+            self.show_toast(
+                "No tones installed — install with omegon plugin install <git-url>",
+                ratatui_toaster::ToastType::Warning,
+            );
             return;
         }
 
@@ -3251,10 +3262,7 @@ impl App {
             attachments,
             metadata: PromptMetadata::default(),
         });
-        let queued = self.queued_prompts.len();
-        self.conversation.push_system(&format!(
-            "⏳ Queued [{queued}]: {preview}\n   It will run after the active turn ends. Press Esc/Ctrl+C to interrupt the active turn."
-        ));
+        tracing::debug!(queued = self.queued_prompts.len(), preview = %preview, "prompt queued");
     }
 
     async fn handle_ui_action(
@@ -3293,9 +3301,12 @@ impl App {
             UiAction::RunSlashCommand(action) => {
                 match self.handle_slash_command(&action.raw, command_tx) {
                     SlashResult::Display(response) => {
-                        self.history.push(action.raw);
+                        self.history.push(action.raw.clone());
                         self.history_idx = None;
-                        self.conversation.push_system(&response);
+                        self.open_command_panel(CommandPanel::from_slash(
+                            action.raw,
+                            response.clone(),
+                        ));
                         UiActionOutcome::accepted_message(response)
                     }
                     SlashResult::Handled => {
@@ -3550,14 +3561,7 @@ impl App {
 
         if self.agent_active {
             let should_interrupt = matches!(self.queue_mode, PromptQueueMode::InterruptAfterTurn);
-            let mode_label = match self.queue_mode {
-                PromptQueueMode::InterruptAfterTurn => "after-turn",
-                PromptQueueMode::UntilReady => "ready",
-                PromptQueueMode::Immediate => "now",
-            };
             self.queue_prompt(final_text.clone(), attachments.clone());
-            self.conversation
-                .push_system(&format!("Queue mode: {mode_label}"));
             if should_interrupt {
                 let _ = self.interrupt();
             }
@@ -3607,7 +3611,6 @@ impl App {
         let decorated = format!("🎙 {text}");
         if self.agent_active {
             self.queue_prompt(decorated.clone(), Vec::new());
-            self.conversation.push_system("Voice prompt queued");
             return;
         }
 
@@ -4453,6 +4456,11 @@ impl App {
             }
         }
 
+        // Render command panel above the main surfaces and below modals/action prompts.
+        if let Some(panel) = &self.command_panel {
+            command_surfaces::render_panel(area, frame.buffer_mut(), self.theme.as_ref(), panel);
+        }
+
         // Render modal overlay if active
         if let Some((widget_id, data, auto_dismiss_ms, spawn_time)) = &self.active_modal {
             // Check if modal should auto-dismiss
@@ -4819,6 +4827,20 @@ impl App {
                 ratatui_toaster::ToastType::Warning,
             );
         }
+    }
+
+    fn open_command_panel(&mut self, panel: CommandPanel) {
+        self.command_panel = Some(panel);
+    }
+
+    fn show_command_toast(&mut self, toast: command_surfaces::CommandToast) {
+        let toast_type = match toast.severity {
+            CommandSeverity::Info => ratatui_toaster::ToastType::Info,
+            CommandSeverity::Success => ratatui_toaster::ToastType::Success,
+            CommandSeverity::Warning => ratatui_toaster::ToastType::Warning,
+            CommandSeverity::Error => ratatui_toaster::ToastType::Error,
+        };
+        self.show_toast(&toast.message, toast_type);
     }
 
     fn show_toast(&mut self, message: &str, toast_type: ratatui_toaster::ToastType) {
@@ -5247,7 +5269,7 @@ impl App {
                         metadata: PromptMetadata::default(),
                     });
                     self.queue_mode = PromptQueueMode::UntilReady;
-                    self.conversation.push_system("Starting skill builder...");
+                    tracing::debug!("skill builder queued");
                     SlashResult::Handled
                 } else if let Some(command) = canonical_slash_command("skills", args) {
                     if let Some(request) =
@@ -5554,7 +5576,7 @@ impl App {
                         metadata: PromptMetadata::default(),
                     });
                     self.queue_mode = PromptQueueMode::UntilReady;
-                    self.conversation.push_system("Starting persona builder...");
+                    tracing::debug!("persona builder queued");
                     SlashResult::Handled
                 } else if args == "list" {
                     if let Some(command) = canonical_slash_command("persona", args)
@@ -7272,6 +7294,7 @@ impl App {
                 self.tool_calls = 0;
                 self.last_tool_name = None;
                 self.completed_tool_name = None;
+                self.command_panel = None;
                 self.active_modal = None;
                 self.active_action_prompt = None;
                 self.instrument_panel.reset();
@@ -7359,7 +7382,7 @@ impl App {
 pub struct TuiConfig {
     pub cwd: String,
     pub is_oauth: bool,
-    /// Present when a prior session was resumed; drives the welcome brief.
+    /// Present when a prior session was resumed; retained for runtime context.
     pub resume_info: Option<crate::setup::ResumeInfo>,
     /// Pre-populated initial state so the first frame isn't empty.
     pub initial: TuiInitialState,
@@ -8198,104 +8221,6 @@ pub async fn run_tui(
     app.dashboard.focused_node = config.initial.focused_node;
     app.dashboard.active_changes = config.initial.active_changes;
 
-    // Build a contextual welcome / resumption message
-    {
-        let s = app.settings();
-        let project = app
-            .footer_data
-            .cwd
-            .split('/')
-            .next_back()
-            .unwrap_or("project");
-        let facts = app.footer_data.total_facts;
-
-        let version = env!("CARGO_PKG_VERSION");
-        let sha = env!("OMEGON_GIT_SHA");
-
-        if let Some(ref ri) = config.resume_info {
-            // ── Resumed session: standard welcome + one-line brief ───────
-            let mut brief = if s.is_slim() {
-                format!("Ω OM {version} ({sha}) — {project}")
-            } else {
-                format!("Ω Omegon {version} ({sha}) — {project}")
-            };
-            if s.provider_connected {
-                let model_short = s.model_short();
-                let ctx = s.context_window / 1000;
-                brief.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
-            } else {
-                brief.push_str("\n  ⚠ No provider — use /auth login to connect");
-            }
-            if !s.is_slim() && facts > 0 {
-                brief.push_str(&format!("  ·  {facts} facts loaded"));
-            }
-            brief.push('\n');
-            if s.is_slim() {
-                brief.push_str("\n  Lean coding loop: inspect → edit → validate");
-                brief.push_str("\n  /ui full  reveal dashboard + instruments");
-                brief.push_str("\n  /unshackle  switch to omegon mode   /help  commands");
-                brief.push_str("\n  /model      switch provider          Ctrl+R  search history");
-                brief.push_str("\n  Ctrl+Up     recall previous prompt   /focus  reading mode");
-            } else {
-                brief.push_str("\n  /model  switch provider    /think  reasoning level");
-                brief.push_str("\n  /shackle  lean OM mode     /help   all commands");
-                brief.push_str("\n  Ctrl+R    search history   Ctrl+C  cancel/quit");
-            }
-            app.conversation.push_system(&brief);
-            // Orientation line: what the model was doing last
-            let snippet = if ri.last_prompt_snippet.is_empty() {
-                String::new()
-            } else {
-                format!(" · last: \"{}\"", ri.last_prompt_snippet)
-            };
-            app.conversation.push_system(&format!(
-                "↺ Resumed — {} turns{snippet}. History loaded, you have full prior context.",
-                ri.turns,
-            ));
-        } else {
-            // ── Fresh session: standard welcome ───────────────────────────
-            let mut welcome = if s.is_slim() {
-                format!("Ω OM {version} ({sha}) — {project}")
-            } else {
-                format!("Ω Omegon {version} ({sha}) — {project}")
-            };
-            if s.provider_connected {
-                let model_short = s.model_short();
-                let ctx = s.context_window / 1000;
-                welcome.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
-            } else {
-                welcome.push_str("\n  ⚠ No provider — use /auth login to connect");
-            }
-            if !s.is_slim() && facts > 0 {
-                welcome.push_str(&format!("  ·  {facts} facts loaded"));
-            }
-            welcome.push('\n');
-            if s.is_slim() {
-                welcome.push_str("\n  Lean coding loop: inspect → edit → validate");
-                welcome.push_str("\n  /ui full     reveal dashboard + instruments");
-                welcome.push_str("\n  /unshackle   switch to omegon mode   /help commands");
-                welcome.push_str("\n  Ctrl+Up      recall previous prompt  Ctrl+C cancel/quit");
-                welcome.push_str("\n  Ctrl+R       search history          /focus reading mode");
-            } else {
-                welcome.push_str("\n  /model    switch provider    /think    reasoning level");
-                welcome.push_str("\n  /shackle  lean OM mode       /context  context class");
-                welcome.push_str("\n  Ctrl+R    search history     Ctrl+C   cancel/quit");
-            }
-            app.conversation.push_system(&welcome);
-
-            // First-run hint: if no memory facts exist, this is likely a new user.
-            if facts == 0 {
-                app.conversation.push_system(
-                    if s.is_slim() {
-                        "💡 Lean mode is active. Start with the file or command you want to inspect. Use /ui full any time to reveal the richer harness surfaces."
-                    } else {
-                        "💡 First time here? Type /help tutorial for a guided tour, or just start typing."
-                    },
-                );
-            }
-        }
-    }
-
     // ── Splash screen with real systems check ─────────────────────
     if !config.no_splash {
         let size = terminal.size()?;
@@ -8608,6 +8533,55 @@ pub async fn run_tui(
                     }
                 }
                 Event::Key(key) => {
+                    if let Some(panel) = app.command_panel.as_mut() {
+                        match (key.code, key.modifiers) {
+                            (KeyCode::Esc, _) => {
+                                app.command_panel = None;
+                                continue;
+                            }
+                            (KeyCode::Up, _) => {
+                                panel.scroll_up(3);
+                                continue;
+                            }
+                            (KeyCode::Down, _) => {
+                                panel.scroll_down(3);
+                                continue;
+                            }
+                            (KeyCode::PageUp, _) => {
+                                panel.scroll_up(20);
+                                continue;
+                            }
+                            (KeyCode::PageDown, _) => {
+                                panel.scroll_down(20);
+                                continue;
+                            }
+                            (KeyCode::Home, _) => {
+                                panel.scroll_top();
+                                continue;
+                            }
+                            (KeyCode::End, _) => {
+                                panel.scroll_bottom();
+                                continue;
+                            }
+                            (KeyCode::Char('y'), KeyModifiers::CONTROL) if panel.copyable => {
+                                let text = panel.body.clone();
+                                if app.copy_text_to_clipboard(&text) {
+                                    app.show_toast(
+                                        "Copied command panel",
+                                        ratatui_toaster::ToastType::Success,
+                                    );
+                                } else {
+                                    app.show_toast(
+                                        "Clipboard unavailable — select panel text in your terminal or install pbcopy/wl-copy/xclip",
+                                        ratatui_toaster::ToastType::Warning,
+                                    );
+                                }
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+
                     // Global conversation controls must remain live while the
                     // agent/tool loop is active. Handle them before editor,
                     // selector, permission, or interrupt-debounce paths can
@@ -8705,7 +8679,7 @@ pub async fn run_tui(
                             }
                             KeyCode::Enter => {
                                 if let Some(msg) = app.confirm_selector(&command_tx) {
-                                    app.conversation.push_system(&msg);
+                                    app.show_toast(&msg, ratatui_toaster::ToastType::Info);
                                 }
                             }
                             KeyCode::Esc => {
@@ -9014,7 +8988,9 @@ pub async fn run_tui(
                         // ── Interrupt: Escape or Ctrl+C ─────────────────
                         (KeyCode::Esc, _) => {
                             // Dismiss modal/focus if active, otherwise interrupt agent
-                            if app.active_modal.is_some() {
+                            if app.command_panel.is_some() {
+                                app.command_panel = None;
+                            } else if app.active_modal.is_some() {
                                 app.active_modal = None;
                             } else if app.active_action_prompt.is_some() {
                                 app.active_action_prompt = None;
