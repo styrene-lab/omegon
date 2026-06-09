@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, W
 
 use crate::surfaces::conversation::ToolCategory;
 
+use super::super::conversation_render_projection::SegmentRenderContext;
 use super::super::segments::{
     self, EditDiffBlock, SegmentMeta, SegmentRenderMode, TableState, TokenUsage,
     apply_rendered_links, apply_rows_bg, compute_table_widths, is_table_line, is_table_separator,
@@ -578,7 +579,13 @@ pub(crate) fn tool_card_right_title_spans<'a>(
     spans
 }
 
-pub fn render(props: ToolCardRenderProps<'_>, area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
+pub fn render(
+    props: ToolCardRenderProps<'_>,
+    area: Rect,
+    buf: &mut Buffer,
+    ctx: &SegmentRenderContext<'_>,
+) {
+    let theme = ctx.theme;
     render_tool_card(
         props.name,
         props.detail_args,

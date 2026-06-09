@@ -7,15 +7,21 @@ use ratatui::style::Modifier;
 use ratatui::text::Span;
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
 
+use super::super::conversation_render_projection::SegmentRenderContext;
 use super::super::segments::{apply_rows_bg, file_url_for_path};
-use super::super::theme::Theme;
 
 pub struct ImageRenderProps<'a> {
     pub path: &'a Path,
     pub alt: &'a str,
 }
 
-pub fn render(props: ImageRenderProps<'_>, area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
+pub fn render(
+    props: ImageRenderProps<'_>,
+    area: Rect,
+    buf: &mut Buffer,
+    ctx: &SegmentRenderContext<'_>,
+) {
+    let theme = ctx.theme;
     if area.height == 0 {
         return;
     }
@@ -105,6 +111,8 @@ mod tests {
         let path = Path::new("/tmp/screenshot.png");
         let area = Rect::new(0, 0, 48, 4);
         let mut buf = Buffer::empty(area);
+        let ctx =
+            SegmentRenderContext::new(&Alpharius, crate::tui::segments::SegmentRenderMode::Full);
         render(
             ImageRenderProps {
                 path,
@@ -112,7 +120,7 @@ mod tests {
             },
             area,
             &mut buf,
-            &Alpharius,
+            &ctx,
         );
         let mut text = String::new();
         for y in 0..area.height {

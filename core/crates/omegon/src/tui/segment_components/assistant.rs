@@ -7,12 +7,12 @@ use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, W
 
 use crate::surfaces::conversation::SegmentPresentation;
 
+use super::super::conversation_render_projection::SegmentRenderContext;
 use super::super::segments::{
     SegmentMeta, SegmentRenderMode, TableState, apply_rendered_links, apply_rows_bg,
     build_meta_tag, clean_inline_text, compute_table_widths, is_table_separator, render_table_line,
     split_trimmed_trailing_empty_lines, subtle_tool_row_bg, top_right_timestamp,
 };
-use super::super::theme::Theme;
 
 pub struct AssistantRenderProps<'a> {
     pub text: &'a str,
@@ -23,7 +23,13 @@ pub struct AssistantRenderProps<'a> {
     pub mode: SegmentRenderMode,
 }
 
-pub fn render(props: AssistantRenderProps<'_>, area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
+pub fn render(
+    props: AssistantRenderProps<'_>,
+    area: Rect,
+    buf: &mut Buffer,
+    ctx: &SegmentRenderContext<'_>,
+) {
+    let theme = ctx.theme;
     if area.width < 3 || area.height == 0 {
         return;
     }
@@ -302,7 +308,7 @@ mod tests {
             },
             area,
             &mut buf,
-            &Alpharius,
+            &SegmentRenderContext::new(&Alpharius, crate::tui::segments::SegmentRenderMode::Full),
         );
         let mut text = String::new();
         for y in 0..area.height {

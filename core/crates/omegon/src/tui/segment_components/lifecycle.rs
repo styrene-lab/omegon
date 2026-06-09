@@ -4,14 +4,20 @@ use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
-use super::super::theme::Theme;
+use super::super::conversation_render_projection::SegmentRenderContext;
 
 pub struct LifecycleRenderProps<'a> {
     pub icon: &'a str,
     pub text: &'a str,
 }
 
-pub fn render(props: LifecycleRenderProps<'_>, area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
+pub fn render(
+    props: LifecycleRenderProps<'_>,
+    area: Rect,
+    buf: &mut Buffer,
+    ctx: &SegmentRenderContext<'_>,
+) {
+    let theme = ctx.theme;
     if area.width < 4 || area.height == 0 {
         return;
     }
@@ -52,7 +58,7 @@ mod tests {
             },
             area,
             &mut buf,
-            &Alpharius,
+            &SegmentRenderContext::new(&Alpharius, crate::tui::segments::SegmentRenderMode::Full),
         );
         let text: String = (0..area.width).map(|x| buf[(x, 0)].symbol()).collect();
         assert!(text.contains("⚡"), "icon should render: {text:?}");

@@ -4,9 +4,10 @@ use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
-use super::super::theme::Theme;
+use super::super::conversation_render_projection::SegmentRenderContext;
 
-pub fn render(area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
+pub fn render(area: Rect, buf: &mut Buffer, ctx: &SegmentRenderContext<'_>) {
+    let theme = ctx.theme;
     if area.height == 0 || area.width < 4 {
         return;
     }
@@ -30,7 +31,9 @@ mod tests {
     fn separator_renders_rule_when_wide_enough() {
         let area = Rect::new(0, 0, 8, 1);
         let mut buf = Buffer::empty(area);
-        render(area, &mut buf, &Alpharius);
+        let ctx =
+            SegmentRenderContext::new(&Alpharius, crate::tui::segments::SegmentRenderMode::Full);
+        render(area, &mut buf, &ctx);
         let text: String = (0..area.width).map(|x| buf[(x, 0)].symbol()).collect();
         assert!(
             text.contains("────"),
@@ -42,7 +45,9 @@ mod tests {
     fn separator_skips_too_narrow_area() {
         let area = Rect::new(0, 0, 3, 1);
         let mut buf = Buffer::empty(area);
-        render(area, &mut buf, &Alpharius);
+        let ctx =
+            SegmentRenderContext::new(&Alpharius, crate::tui::segments::SegmentRenderMode::Full);
+        render(area, &mut buf, &ctx);
         let text: String = (0..area.width).map(|x| buf[(x, 0)].symbol()).collect();
         assert_eq!(text, "   ");
     }

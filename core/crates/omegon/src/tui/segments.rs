@@ -1291,6 +1291,9 @@ impl Segment {
     ) {
         use SegmentContent::*;
         let presentation = self.presentation();
+        let render_ctx = super::conversation_render_projection::SegmentRenderContext::new(t, mode)
+            .with_density(density)
+            .with_pinned(pinned);
         match &self.content {
             UserPrompt { text } => super::segment_components::user_prompt::render(
                 super::segment_components::user_prompt::UserPromptRenderProps {
@@ -1301,7 +1304,7 @@ impl Segment {
                 },
                 area,
                 buf,
-                t,
+                &render_ctx,
             ),
             AssistantText {
                 text,
@@ -1319,7 +1322,7 @@ impl Segment {
                     },
                     area,
                     buf,
-                    t,
+                    &render_ctx,
                 );
             }
             ToolCard {
@@ -1351,28 +1354,34 @@ impl Segment {
                     },
                     area,
                     buf,
-                    t,
+                    &render_ctx,
                 );
             }
             SystemNotification { text } => super::segment_components::system::render(
                 super::segment_components::system::SystemRenderProps { text, mode },
                 area,
                 buf,
-                t,
+                &render_ctx,
             ),
             LifecycleEvent { icon, text } => super::segment_components::lifecycle::render(
                 super::segment_components::lifecycle::LifecycleRenderProps { icon, text },
                 area,
                 buf,
-                t,
+                &render_ctx,
             ),
             Image { path, alt } => super::segment_components::image::render(
                 super::segment_components::image::ImageRenderProps { path, alt },
                 area,
                 buf,
-                t,
+                &render_ctx,
             ),
-            TurnSeparator => super::segment_components::separator::render(area, buf, t),
+            TurnSeparator => super::segment_components::separator::render(
+                area,
+                buf,
+                &super::conversation_render_projection::SegmentRenderContext::new(t, mode)
+                    .with_density(density)
+                    .with_pinned(pinned),
+            ),
         }
     }
 

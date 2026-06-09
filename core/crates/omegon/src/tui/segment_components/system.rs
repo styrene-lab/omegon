@@ -5,15 +5,21 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, Wrap};
 
+use super::super::conversation_render_projection::SegmentRenderContext;
 use super::super::segments::{SegmentRenderMode, apply_rendered_links};
-use super::super::theme::Theme;
 
 pub struct SystemRenderProps<'a> {
     pub text: &'a str,
     pub mode: SegmentRenderMode,
 }
 
-pub fn render(props: SystemRenderProps<'_>, area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
+pub fn render(
+    props: SystemRenderProps<'_>,
+    area: Rect,
+    buf: &mut Buffer,
+    ctx: &SegmentRenderContext<'_>,
+) {
+    let theme = ctx.theme;
     if area.width < 3 || area.height == 0 {
         return;
     }
@@ -101,6 +107,7 @@ mod tests {
     fn system_renderer_includes_notice_text() {
         let area = Rect::new(0, 0, 40, 5);
         let mut buf = Buffer::empty(area);
+        let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Full);
         render(
             SystemRenderProps {
                 text: "notice",
@@ -108,7 +115,7 @@ mod tests {
             },
             area,
             &mut buf,
-            &Alpharius,
+            &ctx,
         );
         let mut rendered = String::new();
         for y in 0..area.height {
