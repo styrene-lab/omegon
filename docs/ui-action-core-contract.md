@@ -1,7 +1,7 @@
 ---
 id: ui-action-core-contract
 title: "Core UI action contract"
-status: implementing
+status: implemented
 parent: ui-surface-action-protocol
 tags: [surfaces, actions, api]
 open_questions: []

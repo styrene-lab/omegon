@@ -1101,7 +1101,7 @@
     {
       "id": "ui-surface-action-protocol-inventory",
       "title": "Inventory portable UI actions vs frontend-local state",
-      "state": "seed",
+      "state": "exploring",
       "parent": null,
       "tags": [],
       "priority": null,
@@ -1111,7 +1111,7 @@
       "overview": "",
       "bound_change": null,
       "created_at": "2026-06-09T14:33:41Z",
-      "updated_at": "2026-06-09T14:33:41Z"
+      "updated_at": "2026-06-09T15:04:13Z"
     },
     {
       "id": "ui-surface-envelope-runtime",
@@ -1131,7 +1131,7 @@
     {
       "id": "ui-action-core-contract",
       "title": "Core UI action contract",
-      "state": "implementing",
+      "state": "implemented",
       "parent": null,
       "tags": [],
       "priority": null,
@@ -1141,7 +1141,7 @@
       "overview": "",
       "bound_change": null,
       "created_at": "2026-06-09T14:33:42Z",
-      "updated_at": "2026-06-09T14:52:52Z"
+      "updated_at": "2026-06-09T15:04:27Z"
     },
     {
       "id": "ratatui-frontend-adapter-boundary",
@@ -2882,6 +2882,24 @@
       "entity_id": "ratatui-frontend-adapter-boundary",
       "from_state": "seed",
       "to_state": "exploring",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T15:04:13Z",
+      "entity_type": "node",
+      "entity_id": "ui-surface-action-protocol-inventory",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T15:04:27Z",
+      "entity_type": "node",
+      "entity_id": "ui-action-core-contract",
+      "from_state": "implementing",
+      "to_state": "implemented",
       "reason": null,
       "forced": false
     }

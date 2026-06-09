@@ -67,6 +67,24 @@ Implemented groundwork already separates semantic surfaces from Ratatui renderin
 
 **Rationale:** Outbound semantic state remains under surfaces. Inbound operator commands need a distinct home so the contract can grow toward action handling, outcomes, replay, and later external DTOs without confusing surface projections with frontend commands.
 
+### Validated bidirectional surface/action direction with internal action seam
+
+**Status:** accepted
+
+**Rationale:** Commit 4478a918 introduced the inbound UiAction/UiActionOutcome seam and routed initial Ratatui prompt, slash command, continuation, permission, and operator-wait paths through App::handle_ui_action while preserving behavior and passing cargo test -p omegon.
+
+### Keep Ratatui as the reference frontend for subsequent extraction
+
+**Status:** accepted
+
+**Rationale:** The first implementation proved an in-process adapter seam can be added without replacing or destabilizing Ratatui. Ratatui remains the production cockpit and the behavioral reference for future external frontend adapters.
+
+### Defer external wire envelopes until internal action semantics stabilize
+
+**Status:** accepted
+
+**Rationale:** The committed slice intentionally added Rust-native internal action types only. External ACP/Flynt/TS clients should consume versioned DTO/envelope adapters after the internal action vocabulary and replay expectations are clearer.
+
 ## Open Questions
 
 - [assumption] The next decoupling stage should define a bidirectional surface/action contract rather than only adding more one-way semantic projections.
