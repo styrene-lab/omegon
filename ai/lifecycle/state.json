@@ -1116,7 +1116,7 @@
     {
       "id": "ui-surface-envelope-runtime",
       "title": "Versioned surface envelope and runtime transport",
-      "state": "seed",
+      "state": "implemented",
       "parent": null,
       "tags": [],
       "priority": null,
@@ -1126,7 +1126,7 @@
       "overview": "",
       "bound_change": null,
       "created_at": "2026-06-09T14:33:41Z",
-      "updated_at": "2026-06-09T14:33:41Z"
+      "updated_at": "2026-06-09T15:26:50Z"
     },
     {
       "id": "ui-action-core-contract",
@@ -2898,6 +2898,51 @@
       "timestamp": "2026-06-09T15:04:27Z",
       "entity_type": "node",
       "entity_id": "ui-action-core-contract",
+      "from_state": "implementing",
+      "to_state": "implemented",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T15:26:25Z",
+      "entity_type": "node",
+      "entity_id": "ui-surface-envelope-runtime",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T15:26:35Z",
+      "entity_type": "node",
+      "entity_id": "ui-surface-envelope-runtime",
+      "from_state": "exploring",
+      "to_state": "resolved",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T15:26:35Z",
+      "entity_type": "node",
+      "entity_id": "ui-surface-envelope-runtime",
+      "from_state": "resolved",
+      "to_state": "decided",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T15:26:35Z",
+      "entity_type": "node",
+      "entity_id": "ui-surface-envelope-runtime",
+      "from_state": "decided",
+      "to_state": "implementing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T15:26:50Z",
+      "entity_type": "node",
+      "entity_id": "ui-surface-envelope-runtime",
       "from_state": "implementing",
       "to_state": "implemented",
       "reason": null,
