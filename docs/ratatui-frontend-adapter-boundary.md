@@ -1,7 +1,7 @@
 ---
 id: ratatui-frontend-adapter-boundary
 title: "Ratatui frontend adapter boundary"
-status: exploring
+status: decided
 parent: ui-surface-action-protocol
 tags: [tui, ratatui, adapter]
 open_questions: []

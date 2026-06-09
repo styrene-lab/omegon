@@ -1,7 +1,7 @@
 ---
 id: ui-surface-action-protocol-inventory
 title: "Inventory portable UI actions vs frontend-local state"
-status: exploring
+status: decided
 parent: ui-surface-action-protocol
 tags: [tui, actions, inventory]
 open_questions: []

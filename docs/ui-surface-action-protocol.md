@@ -1,7 +1,7 @@
 ---
 id: ui-surface-action-protocol
 title: "UI Surface Action Protocol — make Ratatui one frontend projection"
-status: exploring
+status: decided
 tags: [tui, architecture, surfaces, frontend, ratatui, acp, typescript, protocol]
 open_questions:
   - "[assumption] The next decoupling stage should define a bidirectional surface/action contract rather than only adding more one-way semantic projections."
@@ -84,6 +84,12 @@ Implemented groundwork already separates semantic surfaces from Ratatui renderin
 **Status:** accepted
 
 **Rationale:** The committed slice intentionally added Rust-native internal action types only. External ACP/Flynt/TS clients should consume versioned DTO/envelope adapters after the internal action vocabulary and replay expectations are clearer.
+
+### Current-phase UI surface action protocol is sufficient for native UI work
+
+**Status:** accepted
+
+**Rationale:** The implemented slices cover outbound semantic surfaces, inbound `UiAction`, internal envelopes, replay fixtures, Ratatui `/ui` controls, and conversation segment selection/detail affordances. External TS/Flynt transport remains a future adapter problem rather than a blocker for native Ratatui UI work.
 
 ## Open Questions
 
