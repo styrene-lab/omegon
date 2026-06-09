@@ -2,3 +2,4 @@
 
 pub mod assistant;
 pub mod tool_card;
+pub mod user_prompt;

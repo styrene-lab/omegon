@@ -1426,9 +1426,17 @@ impl Segment {
         use SegmentContent::*;
         let presentation = self.presentation();
         match &self.content {
-            UserPrompt { text } => {
-                render_user_prompt(text, &presentation, &self.meta, area, buf, t, mode)
-            }
+            UserPrompt { text } => super::segment_components::user_prompt::render(
+                super::segment_components::user_prompt::UserPromptRenderProps {
+                    text,
+                    presentation: &presentation,
+                    meta: &self.meta,
+                    mode,
+                },
+                area,
+                buf,
+                t,
+            ),
             AssistantText {
                 text,
                 thinking,
@@ -1773,7 +1781,7 @@ fn wrapped_rows(text: &str, width: u16) -> u16 {
         .max(1)
 }
 
-fn render_user_prompt(
+pub(crate) fn render_user_prompt(
     text: &str,
     presentation: &SegmentPresentation,
     meta: &SegmentMeta,
