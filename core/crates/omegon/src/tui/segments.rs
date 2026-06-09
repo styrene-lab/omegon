@@ -2003,119 +2003,20 @@ pub(crate) fn render_tool_card(
         None
     };
     if let Some(blocks) = diff_blocks {
-        if !lines.is_empty() {
-            let sep_color = if is_error { t.error() } else { t.border_dim() };
-            lines.push(Line::from(Span::styled(
-                "─".repeat(card_inner.width as usize),
-                Style::default().fg(sep_color).bg(bg),
-            )));
-            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-        }
-        let max_diff_lines = effective.diff_budget();
-        let mut emitted = 0usize;
-        let removed_style = Style::default().fg(t.error()).bg(bg);
-        let added_style = Style::default().fg(t.success()).bg(bg);
-        let header_style = Style::default()
-            .fg(t.accent_muted())
-            .bg(bg)
-            .add_modifier(Modifier::BOLD);
-        let summary_style = Style::default().fg(t.muted()).bg(bg);
-
-        // Per-block summary line: total +N -M across all diff blocks
-        // (one per file in the change tool's case). The summary is
-        // always the first line in the diff section so the operator
-        // gets a quick read at the top.
-        let total_added: usize = blocks.iter().map(|b| b.new_text.lines().count()).sum();
-        let total_removed: usize = blocks.iter().map(|b| b.old_text.lines().count()).sum();
-        lines.push(Line::from(vec![
-            Span::styled(format!("Δ {} edit(s) · ", blocks.len()), summary_style),
-            Span::styled(format!("+{total_added}"), added_style),
-            Span::styled(" / ", summary_style),
-            Span::styled(format!("-{total_removed}"), removed_style),
-            Span::styled(
-                if expanded {
-                    ""
-                } else {
-                    "  (expand for full diff)"
-                },
-                summary_style,
-            ),
-        ]));
-        result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-
-        // Per-block diff body. Each block is preceded by a `▸ {file}`
-        // header (only when there's more than one block) so the
-        // operator can tell which file each hunk belongs to.
-        //
-        // Each emitted line is filtered for control bytes via
-        // `sanitize_diff_line` — the agent's `oldText`/`newText` args
-        // shouldn't normally contain ESC bytes, but if they do, we
-        // don't want them ending up in cell symbols where the
-        // terminal would interpret them as escape sequences.
-        let sanitize_diff_line =
-            |s: &str| -> String { s.chars().filter(|c| !c.is_control()).collect() };
-        let multi_block = blocks.len() > 1;
-        'outer: for block in &blocks {
-            if multi_block {
-                if emitted >= max_diff_lines {
-                    break;
-                }
-                lines.push(Line::from(Span::styled(
-                    format!("▸ {}", sanitize_diff_line(&block.file)),
-                    header_style,
-                )));
-                result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-                emitted += 1;
-            }
-            for line in block.old_text.lines() {
-                if emitted >= max_diff_lines {
-                    break 'outer;
-                }
-                lines.push(Line::from(Span::styled(
-                    format!("- {}", sanitize_diff_line(line)),
-                    removed_style,
-                )));
-                result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-                emitted += 1;
-            }
-            for line in block.new_text.lines() {
-                if emitted >= max_diff_lines {
-                    break 'outer;
-                }
-                lines.push(Line::from(Span::styled(
-                    format!("+ {}", sanitize_diff_line(line)),
-                    added_style,
-                )));
-                result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-                emitted += 1;
-            }
-        }
-
-        // Truncation marker if we capped before showing the whole diff.
-        let total_diff_lines: usize = blocks
-            .iter()
-            .map(|b| {
-                let header = if multi_block { 1 } else { 0 };
-                header + b.old_text.lines().count() + b.new_text.lines().count()
-            })
-            .sum();
-        if total_diff_lines > emitted {
-            lines.push(Line::from(Span::styled(
-                format!("… {} more diff line(s)", total_diff_lines - emitted),
-                summary_style,
-            )));
-            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-        }
-
-        // If the tool actually erred, surface the error result text
-        // below the diff so the operator sees both intent and outcome.
-        if is_error && let Some(err_text) = detail_result {
-            lines.push(Line::from(Span::styled(
-                err_text.lines().next().unwrap_or(err_text).to_string(),
-                Style::default().fg(t.error()).bg(bg),
-            )));
-            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-        }
+        super::segment_components::tool_card::append_edit_diff_section(
+            &mut lines,
+            &mut result_row_fills,
+            &blocks,
+            super::segment_components::tool_card::EditDiffSectionProps {
+                is_error,
+                expanded,
+                detail_result,
+                diff_budget: effective.diff_budget(),
+                card_width: card_inner.width,
+                bg,
+                theme: t,
+            },
+        );
     } else if let Some(result) = detail_result {
         let pre_result_line_count = lines.len();
         if !lines.is_empty() {
@@ -2457,10 +2358,10 @@ pub(crate) enum TableState {
 /// (which it has via `detail_args`) and synthesizes a colored line-by-
 /// line diff in place of the boring "Successfully replaced text" result.
 #[derive(Debug, Clone)]
-struct EditDiffBlock {
-    file: String,
-    old_text: String,
-    new_text: String,
+pub(crate) struct EditDiffBlock {
+    pub(crate) file: String,
+    pub(crate) old_text: String,
+    pub(crate) new_text: String,
 }
 
 /// Parse `detail_args` JSON for an `edit` or `change` tool call and
@@ -2475,7 +2376,7 @@ struct EditDiffBlock {
 ///   → one `EditDiffBlock`
 /// - **change**: `{ "edits": [{ "file": "...", "oldText": "...",
 ///   "newText": "..." }, ...] }` → one block per edit, in order
-fn build_edit_diff_blocks(name: &str, args: &str) -> Option<Vec<EditDiffBlock>> {
+pub(crate) fn build_edit_diff_blocks(name: &str, args: &str) -> Option<Vec<EditDiffBlock>> {
     let parsed: serde_json::Value = serde_json::from_str(args).ok()?;
     match name {
         "edit" => {

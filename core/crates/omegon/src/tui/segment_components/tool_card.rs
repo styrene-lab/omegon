@@ -12,8 +12,8 @@ use ratatui::widgets::{Paragraph, Widget};
 use crate::surfaces::conversation::ToolCategory;
 
 use super::super::segments::{
-    self, SegmentMeta, SegmentRenderMode, TokenUsage, apply_rendered_links, apply_rows_bg,
-    strip_terminal_control, subtle_tool_row_bg, summarize_tool_args,
+    self, EditDiffBlock, SegmentMeta, SegmentRenderMode, TokenUsage, apply_rendered_links,
+    apply_rows_bg, strip_terminal_control, subtle_tool_row_bg, summarize_tool_args,
 };
 use super::super::theme::Theme;
 
@@ -140,6 +140,127 @@ pub(crate) fn append_tool_live_progress_section(
                 live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
             }
         }
+    }
+}
+
+pub(crate) struct EditDiffSectionProps<'a> {
+    pub is_error: bool,
+    pub expanded: bool,
+    pub detail_result: Option<&'a str>,
+    pub diff_budget: usize,
+    pub card_width: u16,
+    pub bg: Color,
+    pub theme: &'a dyn Theme,
+}
+
+pub(crate) fn append_edit_diff_section(
+    lines: &mut Vec<Line<'_>>,
+    result_row_fills: &mut Vec<(u16, Color)>,
+    blocks: &[EditDiffBlock],
+    props: EditDiffSectionProps<'_>,
+) {
+    if !lines.is_empty() {
+        let sep_color = if props.is_error {
+            props.theme.error()
+        } else {
+            props.theme.border_dim()
+        };
+        lines.push(Line::from(Span::styled(
+            "─".repeat(props.card_width as usize),
+            Style::default().fg(sep_color).bg(props.bg),
+        )));
+        result_row_fills.push((lines.len().saturating_sub(1) as u16, props.bg));
+    }
+    let max_diff_lines = props.diff_budget;
+    let mut emitted = 0usize;
+    let removed_style = Style::default().fg(props.theme.error()).bg(props.bg);
+    let added_style = Style::default().fg(props.theme.success()).bg(props.bg);
+    let header_style = Style::default()
+        .fg(props.theme.accent_muted())
+        .bg(props.bg)
+        .add_modifier(Modifier::BOLD);
+    let summary_style = Style::default().fg(props.theme.muted()).bg(props.bg);
+
+    let total_added: usize = blocks.iter().map(|b| b.new_text.lines().count()).sum();
+    let total_removed: usize = blocks.iter().map(|b| b.old_text.lines().count()).sum();
+    lines.push(Line::from(vec![
+        Span::styled(format!("Δ {} edit(s) · ", blocks.len()), summary_style),
+        Span::styled(format!("+{total_added}"), added_style),
+        Span::styled(" / ", summary_style),
+        Span::styled(format!("-{total_removed}"), removed_style),
+        Span::styled(
+            if props.expanded {
+                ""
+            } else {
+                "  (expand for full diff)"
+            },
+            summary_style,
+        ),
+    ]));
+    result_row_fills.push((lines.len().saturating_sub(1) as u16, props.bg));
+
+    let sanitize_diff_line =
+        |s: &str| -> String { s.chars().filter(|c| !c.is_control()).collect() };
+    let multi_block = blocks.len() > 1;
+    'outer: for block in blocks {
+        if multi_block {
+            if emitted >= max_diff_lines {
+                break;
+            }
+            lines.push(Line::from(Span::styled(
+                format!("▸ {}", sanitize_diff_line(&block.file)),
+                header_style,
+            )));
+            result_row_fills.push((lines.len().saturating_sub(1) as u16, props.bg));
+            emitted += 1;
+        }
+        for line in block.old_text.lines() {
+            if emitted >= max_diff_lines {
+                break 'outer;
+            }
+            lines.push(Line::from(Span::styled(
+                format!("- {}", sanitize_diff_line(line)),
+                removed_style,
+            )));
+            result_row_fills.push((lines.len().saturating_sub(1) as u16, props.bg));
+            emitted += 1;
+        }
+        for line in block.new_text.lines() {
+            if emitted >= max_diff_lines {
+                break 'outer;
+            }
+            lines.push(Line::from(Span::styled(
+                format!("+ {}", sanitize_diff_line(line)),
+                added_style,
+            )));
+            result_row_fills.push((lines.len().saturating_sub(1) as u16, props.bg));
+            emitted += 1;
+        }
+    }
+
+    let total_diff_lines: usize = blocks
+        .iter()
+        .map(|b| {
+            let header = if multi_block { 1 } else { 0 };
+            header + b.old_text.lines().count() + b.new_text.lines().count()
+        })
+        .sum();
+    if total_diff_lines > emitted {
+        lines.push(Line::from(Span::styled(
+            format!("… {} more diff line(s)", total_diff_lines - emitted),
+            summary_style,
+        )));
+        result_row_fills.push((lines.len().saturating_sub(1) as u16, props.bg));
+    }
+
+    if props.is_error
+        && let Some(err_text) = props.detail_result
+    {
+        lines.push(Line::from(Span::styled(
+            err_text.lines().next().unwrap_or(err_text).to_string(),
+            Style::default().fg(props.theme.error()).bg(props.bg),
+        )));
+        result_row_fills.push((lines.len().saturating_sub(1) as u16, props.bg));
     }
 }
 
@@ -500,6 +621,49 @@ mod tests {
             rendered.contains("14:32"),
             "timestamp should render: {rendered}"
         );
+    }
+
+    #[test]
+    fn edit_diff_section_renders_summary_and_changed_lines() {
+        let blocks = vec![EditDiffBlock {
+            file: "src/lib.rs".into(),
+            old_text: "old".into(),
+            new_text: "new".into(),
+        }];
+        let mut lines = Vec::new();
+        let mut fills = Vec::new();
+        append_edit_diff_section(
+            &mut lines,
+            &mut fills,
+            &blocks,
+            EditDiffSectionProps {
+                is_error: false,
+                expanded: false,
+                detail_result: None,
+                diff_budget: 8,
+                card_width: 40,
+                bg: Color::Reset,
+                theme: &crate::tui::theme::Alpharius,
+            },
+        );
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(
+            rendered.contains("Δ 1 edit(s)"),
+            "summary should render: {rendered}"
+        );
+        assert!(
+            rendered.contains("- old"),
+            "removed line should render: {rendered}"
+        );
+        assert!(
+            rendered.contains("+ new"),
+            "added line should render: {rendered}"
+        );
+        assert!(!fills.is_empty());
     }
 
     #[test]
