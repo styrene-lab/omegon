@@ -5,3 +5,4 @@
 //! wire DTO is introduced.
 
 pub mod actions;
+pub mod envelope;

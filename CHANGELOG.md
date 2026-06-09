@@ -70,6 +70,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Move assistant segment rendering into its dedicated component module.
 - Add an internal UI runtime action contract and route initial Ratatui prompt, slash command, permission, and operator-wait actions through the semantic action seam.
 - Route active-turn Escape/Ctrl+C cancellation through the semantic UI action seam.
+- Add internal versioned UI runtime envelopes for semantic surface/action replay boundaries.
 - Move system notification segment rendering into its dedicated component module.
 - Move user prompt segment rendering into its dedicated component module.
 - Document the TUI surface architecture boundaries across shared semantic surfaces, ACP adapters, layout projection, sub-surfaces, and segment components.
