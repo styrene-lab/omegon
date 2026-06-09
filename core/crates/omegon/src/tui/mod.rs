@@ -28,6 +28,7 @@ pub mod instruments;
 pub mod layout_projection;
 pub mod model_catalog;
 pub mod permission_lane;
+pub mod segment_components;
 pub mod segments;
 pub mod selector;
 pub mod slim_plan;

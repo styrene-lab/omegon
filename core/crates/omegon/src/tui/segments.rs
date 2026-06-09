@@ -1457,23 +1457,25 @@ impl Segment {
                 started_at,
                 ..
             } => {
-                render_tool_card(
-                    name,
-                    detail_args.as_deref(),
-                    detail_result.as_deref(),
-                    *is_error,
-                    *complete,
-                    *expanded,
-                    live_partial.as_deref(),
-                    *started_at,
-                    &self.meta,
-                    presentation.tool_category,
+                super::segment_components::tool_card::render(
+                    super::segment_components::tool_card::ToolCardRenderProps {
+                        name,
+                        detail_args: detail_args.as_deref(),
+                        detail_result: detail_result.as_deref(),
+                        is_error: *is_error,
+                        complete: *complete,
+                        expanded: *expanded,
+                        live_partial: live_partial.as_deref(),
+                        started_at: *started_at,
+                        meta: &self.meta,
+                        tool_category: presentation.tool_category,
+                        mode,
+                        density,
+                        pinned,
+                    },
                     area,
                     buf,
                     t,
-                    mode,
-                    density,
-                    pinned,
                 );
             }
             SystemNotification { text } => render_system(text, area, buf, t, mode),
@@ -2227,7 +2229,7 @@ fn render_assistant_text(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_tool_card(
+pub(crate) fn render_tool_card(
     name: &str,
     detail_args: Option<&str>,
     detail_result: Option<&str>,
