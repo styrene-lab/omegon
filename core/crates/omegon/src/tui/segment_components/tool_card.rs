@@ -12,10 +12,13 @@ use ratatui::widgets::{Paragraph, Widget};
 use crate::surfaces::conversation::ToolCategory;
 
 use super::super::segments::{
-    self, EditDiffBlock, SegmentMeta, SegmentRenderMode, TokenUsage, apply_rendered_links,
-    apply_rows_bg, strip_terminal_control, subtle_tool_row_bg, summarize_tool_args,
+    self, EditDiffBlock, SegmentMeta, SegmentRenderMode, TableState, TokenUsage,
+    apply_rendered_links, apply_rows_bg, compute_table_widths, is_table_line, is_table_separator,
+    render_table_line, strip_terminal_control, subtle_tool_row_bg, summarize_tool_args,
+    try_highlight,
 };
 use super::super::theme::Theme;
+use crate::tui::widgets;
 
 pub struct ToolCardRenderProps<'a> {
     pub name: &'a str,
@@ -139,6 +142,207 @@ pub(crate) fn append_tool_live_progress_section(
                 lines.push(Line::from(Span::styled(stripped, tail_style)));
                 live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
             }
+        }
+    }
+}
+
+pub(crate) struct GenericResultSectionProps<'a> {
+    pub name: &'a str,
+    pub detail_args: Option<&'a str>,
+    pub detail_result: Option<&'a str>,
+    pub is_error: bool,
+    pub expanded: bool,
+    pub result_budget: usize,
+    pub card_width: u16,
+    pub bg: Color,
+    pub theme: &'a dyn Theme,
+}
+
+pub(crate) fn append_generic_result_section(
+    lines: &mut Vec<Line<'_>>,
+    result_row_fills: &mut Vec<(u16, Color)>,
+    props: GenericResultSectionProps<'_>,
+) {
+    let name = props.name;
+    let detail_args = props.detail_args;
+    let detail_result = props.detail_result;
+    let is_error = props.is_error;
+    let expanded = props.expanded;
+    let result_budget = props.result_budget;
+    let card_width = props.card_width;
+    let bg = props.bg;
+    let t = props.theme;
+    if let Some(result) = detail_result {
+        let pre_result_line_count = lines.len();
+        if !lines.is_empty() {
+            // Separator line — matches card border color (red on error)
+            let sep_color = if is_error { t.error() } else { t.border_dim() };
+            let sep_bg = bg;
+            lines.push(Line::from(Span::styled(
+                "─".repeat(card_width as usize),
+                Style::default().fg(sep_color).bg(sep_bg),
+            )));
+            result_row_fills.push((pre_result_line_count as u16, sep_bg));
+        }
+
+        // Pretty-print JSON results — tool outputs often arrive as compact JSON
+        // with literal \n inside string values (e.g. commit messages).
+        let pretty_result: std::borrow::Cow<'_, str> =
+            if result.starts_with('{') || result.starts_with('[') {
+                match serde_json::from_str::<serde_json::Value>(result) {
+                    Ok(val) => std::borrow::Cow::Owned(
+                        serde_json::to_string_pretty(&val).unwrap_or_else(|_| result.to_string()),
+                    ),
+                    Err(_) => std::borrow::Cow::Borrowed(result),
+                }
+            } else {
+                std::borrow::Cow::Borrowed(result)
+            };
+        let result_lines: Vec<&str> = pretty_result.lines().collect();
+        let max_lines = result_budget;
+        let show = result_lines.len().min(max_lines);
+        let display_text = result_lines[..show].join("\n");
+
+        // Try syntax highlighting based on file extension from args
+        let highlighted = if !is_error {
+            try_highlight(&display_text, detail_args, name, t)
+        } else {
+            None
+        };
+
+        if let Some(highlighted_lines) = highlighted {
+            for line in highlighted_lines {
+                // Apply card bg to each span so result rows stay visually unified.
+                let spans: Vec<Span<'_>> = line
+                    .spans
+                    .into_iter()
+                    .map(|mut s| {
+                        s.style = s.style.bg(bg);
+                        s
+                    })
+                    .collect();
+                lines.push(Line::from(spans));
+                result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+            }
+        } else {
+            let result_style = if is_error {
+                Style::default().fg(t.error()).bg(bg)
+            } else {
+                Style::default().fg(t.muted()).bg(bg)
+            };
+
+            let mut table_state = TableState::None;
+            let visible_lines = &result_lines[..show];
+            let has_table_lines = visible_lines.iter().any(|line| is_table_line(line.trim()));
+
+            if !is_error && has_table_lines {
+                // Pre-pass to compute shared per-column widths across
+                // each table block — see `compute_table_widths` for the
+                // rationale (the column-shred bug in codebase_search
+                // results).
+                let table_widths_per_line =
+                    compute_table_widths(visible_lines, card_width as usize);
+                for (idx, line) in visible_lines.iter().copied().enumerate() {
+                    let trimmed = line.trim();
+                    if let Some(target_widths) = table_widths_per_line[idx].as_ref() {
+                        let is_header = matches!(table_state, TableState::None);
+                        if is_table_separator(trimmed) || matches!(table_state, TableState::Header)
+                        {
+                            table_state = TableState::Body;
+                        } else {
+                            table_state = TableState::Header;
+                        }
+                        let row_bg = bg;
+                        lines.push(render_table_line(trimmed, is_header, target_widths, t));
+                        result_row_fills.push((lines.len().saturating_sub(1) as u16, row_bg));
+                    } else {
+                        table_state = TableState::None;
+                        let rendered = if trimmed.is_empty() {
+                            Line::from(Span::styled(String::new(), Style::default().bg(bg)))
+                        } else {
+                            let mut line = widgets::highlight_line(line, t);
+                            for span in &mut line.spans {
+                                span.style = span.style.bg(bg);
+                                if span.style.fg.is_none() {
+                                    span.style = span.style.fg(t.muted());
+                                }
+                            }
+                            line
+                        };
+                        lines.push(rendered);
+                        result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                    }
+                }
+            } else {
+                // Try ANSI color parsing for tool output (cargo, git diff, etc.)
+                let joined = result_lines[..show].join("\n");
+                let has_ansi = joined.contains('\x1b');
+
+                if has_ansi {
+                    use ansi_to_tui::IntoText as _;
+                    if let Ok(text) = joined.into_text() {
+                        for line in text.lines {
+                            let spans: Vec<Span<'_>> = line
+                                .spans
+                                .into_iter()
+                                .map(|mut s| {
+                                    // Preserve ANSI foreground, apply card background
+                                    s.style = s.style.bg(bg);
+                                    // If no foreground was set by ANSI, use muted
+                                    if s.style.fg.is_none() {
+                                        s.style = s.style.fg(t.muted());
+                                    }
+                                    s
+                                })
+                                .collect();
+                            lines.push(Line::from(spans));
+                            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                        }
+                    } else {
+                        // ANSI parse failed — fall back to plain
+                        for line in &result_lines[..show] {
+                            lines.push(Line::from(Span::styled(line.to_string(), result_style)));
+                            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                        }
+                    }
+                } else {
+                    for line in &result_lines[..show] {
+                        let trimmed = line.trim();
+                        let rendered = if is_error {
+                            Line::from(Span::styled(line.to_string(), result_style))
+                        } else if trimmed.is_empty() {
+                            Line::from(Span::styled(String::new(), Style::default().bg(bg)))
+                        } else {
+                            let mut line = widgets::highlight_line(line, t);
+                            for span in &mut line.spans {
+                                span.style = span.style.bg(bg);
+                                if span.style.fg.is_none() {
+                                    span.style = span.style.fg(t.muted());
+                                }
+                            }
+                            line
+                        };
+                        lines.push(rendered);
+                        result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                    }
+                }
+            }
+        }
+
+        if result_lines.len() > show {
+            let hint = if expanded {
+                format!("  ── {} lines ── Tab to collapse", result_lines.len())
+            } else {
+                format!(
+                    "  ── {} more lines ── Ctrl+O to expand",
+                    result_lines.len() - show
+                )
+            };
+            lines.push(Line::from(Span::styled(
+                hint,
+                Style::default().fg(t.accent_muted()).bg(bg),
+            )));
+            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
         }
     }
 }
@@ -662,6 +866,37 @@ mod tests {
         assert!(
             rendered.contains("+ new"),
             "added line should render: {rendered}"
+        );
+        assert!(!fills.is_empty());
+    }
+
+    #[test]
+    fn generic_result_section_renders_plain_result() {
+        let mut lines = Vec::new();
+        let mut fills = Vec::new();
+        append_generic_result_section(
+            &mut lines,
+            &mut fills,
+            GenericResultSectionProps {
+                name: "bash",
+                detail_args: None,
+                detail_result: Some("hello"),
+                is_error: false,
+                expanded: false,
+                result_budget: 8,
+                card_width: 40,
+                bg: Color::Reset,
+                theme: &crate::tui::theme::Alpharius,
+            },
+        );
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(
+            rendered.contains("hello"),
+            "result should render: {rendered}"
         );
         assert!(!fills.is_empty());
     }
