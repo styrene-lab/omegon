@@ -72,6 +72,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Route active-turn Escape/Ctrl+C cancellation through the semantic UI action seam.
 - Add internal versioned UI runtime envelopes for semantic surface/action replay boundaries.
 - Add UI action outcome replay helpers for deterministic semantic action tests.
+- Add a monotonic UI revision counter for runtime/replay fixtures without introducing clock semantics.
 - Move system notification segment rendering into its dedicated component module.
 - Move user prompt segment rendering into its dedicated component module.
 - Document the TUI surface architecture boundaries across shared semantic surfaces, ACP adapters, layout projection, sub-surfaces, and segment components.

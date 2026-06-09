@@ -8,16 +8,18 @@ use super::actions::UiActionOutcome;
 use super::envelope::{
     UI_RUNTIME_ENVELOPE_VERSION, UiActionOutcomeEnvelope, UiActionOutcomeStatus,
 };
+use super::revision::UiRevision;
 
 /// Convert an internal action outcome into a versioned replay envelope.
 pub fn outcome_to_envelope(
     session_id: impl Into<String>,
     action_id: impl Into<String>,
-    revision_after: Option<u64>,
+    revision_after: Option<UiRevision>,
     outcome: UiActionOutcome,
 ) -> UiActionOutcomeEnvelope {
     let session_id = session_id.into();
     let action_id = action_id.into();
+    let revision_after = revision_after.map(Into::into);
     match outcome {
         UiActionOutcome::Accepted { message } => UiActionOutcomeEnvelope {
             protocol_version: UI_RUNTIME_ENVELOPE_VERSION,
@@ -67,7 +69,7 @@ mod tests {
         let envelope = outcome_to_envelope(
             "session-1",
             "action-1",
-            Some(12),
+            Some(UiRevision::new(12)),
             UiActionOutcome::accepted_message("submitted"),
         );
 
@@ -85,7 +87,7 @@ mod tests {
         let envelope = outcome_to_envelope(
             "session-1",
             "action-2",
-            Some(13),
+            Some(UiRevision::new(13)),
             UiActionOutcome::rejected("invalid action"),
         );
 
