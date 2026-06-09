@@ -1844,33 +1844,13 @@ pub(crate) fn render_tool_card(
     );
 
     // Right-aligned title: duration · ↑1.2k ↓340 · 14:32
-    let right_title_spans: Vec<Span<'_>> = {
-        let dim_style = Style::default().fg(t.dim()).add_modifier(Modifier::DIM);
-        let sep = Span::styled(" · ", dim_style);
-        let mut spans: Vec<Span<'_>> = Vec::new();
-        // Execution duration for completed tools
-        if complete && let Some(ms) = meta.duration_ms {
-            spans.push(Span::styled(format_duration_compact(ms), dim_style));
-        }
-        if let Some(tokens) = meta.actual_tokens {
-            if !spans.is_empty() {
-                spans.push(sep.clone());
-            }
-            spans.push(Span::styled(
-                tokens.format_compact(),
-                Style::default()
-                    .fg(t.accent_muted())
-                    .add_modifier(Modifier::DIM),
-            ));
-        }
-        if let Some(stamp) = timestamp.as_deref() {
-            if !spans.is_empty() {
-                spans.push(sep);
-            }
-            spans.push(Span::styled(stamp.to_string(), dim_style));
-        }
-        spans
-    };
+    let right_title_spans = super::segment_components::tool_card::tool_card_right_title_spans(
+        complete,
+        meta.duration_ms,
+        meta.actual_tokens,
+        timestamp.as_deref(),
+        t,
+    );
 
     if matches!(mode, SegmentRenderMode::Slim) && !complete && !expanded {
         let cells = slim_tool_summary_cells(

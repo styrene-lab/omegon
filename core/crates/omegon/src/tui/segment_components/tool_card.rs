@@ -12,7 +12,8 @@ use ratatui::widgets::{Paragraph, Widget};
 use crate::surfaces::conversation::ToolCategory;
 
 use super::super::segments::{
-    self, SegmentMeta, SegmentRenderMode, apply_rendered_links, apply_rows_bg, subtle_tool_row_bg,
+    self, SegmentMeta, SegmentRenderMode, TokenUsage, apply_rendered_links, apply_rows_bg,
+    subtle_tool_row_bg,
 };
 use super::super::theme::Theme;
 
@@ -30,6 +31,43 @@ pub struct ToolCardRenderProps<'a> {
     pub mode: SegmentRenderMode,
     pub density: crate::settings::ToolDetail,
     pub pinned: bool,
+}
+
+pub(crate) fn tool_card_right_title_spans<'a>(
+    complete: bool,
+    duration_ms: Option<u64>,
+    actual_tokens: Option<TokenUsage>,
+    timestamp: Option<&'a str>,
+    theme: &dyn Theme,
+) -> Vec<Span<'a>> {
+    let dim_style = Style::default().fg(theme.dim()).add_modifier(Modifier::DIM);
+    let sep = Span::styled(" · ", dim_style);
+    let mut spans: Vec<Span<'a>> = Vec::new();
+
+    if complete && let Some(ms) = duration_ms {
+        spans.push(Span::styled(
+            super::super::segments::format_duration_compact(ms),
+            dim_style,
+        ));
+    }
+    if let Some(tokens) = actual_tokens {
+        if !spans.is_empty() {
+            spans.push(sep.clone());
+        }
+        spans.push(Span::styled(
+            tokens.format_compact(),
+            Style::default()
+                .fg(theme.accent_muted())
+                .add_modifier(Modifier::DIM),
+        ));
+    }
+    if let Some(stamp) = timestamp {
+        if !spans.is_empty() {
+            spans.push(sep);
+        }
+        spans.push(Span::styled(stamp.to_string(), dim_style));
+    }
+    spans
 }
 
 pub fn render(props: ToolCardRenderProps<'_>, area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
@@ -194,6 +232,33 @@ pub(crate) fn render_slim_tool_live_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn right_title_spans_include_duration_tokens_and_timestamp() {
+        let spans = tool_card_right_title_spans(
+            true,
+            Some(1_250),
+            Some(TokenUsage {
+                input: 1_200,
+                output: 340,
+            }),
+            Some("14:32"),
+            &crate::tui::theme::Alpharius,
+        );
+        let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
+        assert!(
+            rendered.contains("1.2s"),
+            "duration should render: {rendered}"
+        );
+        assert!(
+            rendered.contains("↑1.2k ↓340"),
+            "tokens should render: {rendered}"
+        );
+        assert!(
+            rendered.contains("14:32"),
+            "timestamp should render: {rendered}"
+        );
+    }
 
     #[test]
     fn tool_card_props_preserve_render_inputs() {
