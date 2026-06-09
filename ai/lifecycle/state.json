@@ -1161,7 +1161,7 @@
     {
       "id": "surface-replay-test-harness",
       "title": "Surface replay and action test harness",
-      "state": "seed",
+      "state": "exploring",
       "parent": null,
       "tags": [],
       "priority": null,
@@ -1171,7 +1171,7 @@
       "overview": "",
       "bound_change": null,
       "created_at": "2026-06-09T14:33:42Z",
-      "updated_at": "2026-06-09T14:33:42Z"
+      "updated_at": "2026-06-09T15:37:13Z"
     }
   ],
   "changes": [
@@ -2945,6 +2945,15 @@
       "entity_id": "ui-surface-envelope-runtime",
       "from_state": "implementing",
       "to_state": "implemented",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T15:37:13Z",
+      "entity_type": "node",
+      "entity_id": "surface-replay-test-harness",
+      "from_state": "seed",
+      "to_state": "exploring",
       "reason": null,
       "forced": false
     }
