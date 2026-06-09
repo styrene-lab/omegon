@@ -26,6 +26,10 @@ pub enum UiAction {
     SetUiPreset(SetUiPresetAction),
     /// Set one high-level surface visible or hidden.
     SetSurfaceVisible(SetSurfaceVisibleAction),
+    /// Select a conversation segment by stable frontend-visible index.
+    SelectConversationSegment(SelectConversationSegmentAction),
+    /// Open/toggle a conversation segment detail affordance.
+    OpenConversationSegmentDetail(OpenConversationSegmentDetailAction),
 }
 
 /// Prompt submission intent independent of a concrete editor widget.
@@ -94,6 +98,27 @@ pub struct SetUiPresetAction {
 pub struct SetSurfaceVisibleAction {
     pub surface: UiSurfaceToggle,
     pub visible: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConversationSegmentRef {
+    pub index: usize,
+}
+
+impl ConversationSegmentRef {
+    pub const fn by_index(index: usize) -> Self {
+        Self { index }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectConversationSegmentAction {
+    pub segment: ConversationSegmentRef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenConversationSegmentDetailAction {
+    pub segment: ConversationSegmentRef,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

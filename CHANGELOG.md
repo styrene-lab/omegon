@@ -75,6 +75,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add a monotonic UI revision counter for runtime/replay fixtures without introducing clock semantics.
 - Add a pure Rust UI replay fixture builder that records action outcomes and advances revisions only for accepted actions.
 - Route UI preset and individual surface visibility changes through semantic UI actions.
+- Add semantic conversation segment selection and detail-open actions for portable conversation affordances.
 - Move system notification segment rendering into its dedicated component module.
 - Move user prompt segment rendering into its dedicated component module.
 - Document the TUI surface architecture boundaries across shared semantic surfaces, ACP adapters, layout projection, sub-surfaces, and segment components.

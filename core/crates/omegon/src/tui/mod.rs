@@ -84,8 +84,9 @@ use self::slim_plan::{
 };
 use crate::surfaces::layout::UiSurfaces;
 use crate::ui_runtime::actions::{
-    OperatorWaitAction, PermissionAction, PromptSource, SetSurfaceVisibleAction, SetUiPresetAction,
-    SlashCommandAction, SubmitPromptAction, UiAction, UiActionOutcome, UiSurfaceToggle,
+    OpenConversationSegmentDetailAction, OperatorWaitAction, PermissionAction, PromptSource,
+    SelectConversationSegmentAction, SetSurfaceVisibleAction, SetUiPresetAction, SlashCommandAction,
+    SubmitPromptAction, UiAction, UiActionOutcome, UiSurfaceToggle,
 };
 
 /// Get current process RSS in megabytes (platform-specific).
@@ -3308,7 +3309,41 @@ impl App {
             }
             UiAction::SetUiPreset(action) => self.handle_ui_preset_action(action),
             UiAction::SetSurfaceVisible(action) => self.handle_surface_visible_action(action),
+            UiAction::SelectConversationSegment(action) => {
+                self.handle_select_conversation_segment_action(action)
+            }
+            UiAction::OpenConversationSegmentDetail(action) => {
+                self.handle_open_conversation_segment_detail_action(action)
+            }
         }
+    }
+
+    fn handle_select_conversation_segment_action(
+        &mut self,
+        action: SelectConversationSegmentAction,
+    ) -> UiActionOutcome {
+        let idx = action.segment.index;
+        if idx >= self.conversation.segments().len() {
+            return UiActionOutcome::rejected(format!(
+                "conversation segment index out of range: {idx}"
+            ));
+        }
+        self.conversation.select_segment(idx);
+        UiActionOutcome::accepted_message(format!("conversation segment selected: {idx}"))
+    }
+
+    fn handle_open_conversation_segment_detail_action(
+        &mut self,
+        action: OpenConversationSegmentDetailAction,
+    ) -> UiActionOutcome {
+        let idx = action.segment.index;
+        if idx >= self.conversation.segments().len() {
+            return UiActionOutcome::rejected(format!(
+                "conversation segment index out of range: {idx}"
+            ));
+        }
+        self.conversation.toggle_timeline_expanded_segment(idx);
+        UiActionOutcome::accepted_message(format!("conversation segment detail toggled: {idx}"))
     }
 
     fn handle_ui_preset_action(&mut self, action: SetUiPresetAction) -> UiActionOutcome {

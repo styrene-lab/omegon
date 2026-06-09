@@ -341,6 +341,74 @@ async fn ui_action_set_surface_visible_updates_one_surface() {
 }
 
 #[tokio::test]
+async fn ui_action_select_conversation_segment_updates_selection() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.conversation.push_user("first");
+    app.conversation.push_user("second");
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::SelectConversationSegment(SelectConversationSegmentAction {
+                segment: ConversationSegmentRef::by_index(2),
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("conversation segment selected: 2")
+    );
+    assert_eq!(app.conversation.selected_segment, Some(2));
+}
+
+#[tokio::test]
+async fn ui_action_select_conversation_segment_rejects_invalid_index() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.conversation.push_user("only");
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::SelectConversationSegment(SelectConversationSegmentAction {
+                segment: ConversationSegmentRef::by_index(9),
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::rejected("conversation segment index out of range: 9")
+    );
+    assert_eq!(app.conversation.selected_segment, None);
+}
+
+#[tokio::test]
+async fn ui_action_open_conversation_segment_detail_toggles_expansion() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.conversation.push_user("expand me");
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::OpenConversationSegmentDetail(OpenConversationSegmentDetailAction {
+                segment: ConversationSegmentRef::by_index(0),
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("conversation segment detail toggled: 0")
+    );
+    assert_eq!(app.conversation.timeline_expanded_segment(), Some(0));
+    assert_eq!(app.conversation.selected_segment, Some(0));
+}
+
+#[tokio::test]
 async fn ui_action_submit_prompt_sends_local_tui_prompt() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
