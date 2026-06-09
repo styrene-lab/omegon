@@ -59,6 +59,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Move tool-card live progress section construction into the tool-card segment component.
 - Move tool-card edit diff section construction into the tool-card segment component.
 - Move tool-card generic result section construction into the tool-card segment component.
+- Move full tool-card segment rendering into the tool-card segment component.
 - Add an assistant segment component boundary for conversation segment rendering.
 - Add an operator prompt segment component boundary for conversation segment rendering.
 - Add system and lifecycle segment component boundaries for conversation segment rendering.

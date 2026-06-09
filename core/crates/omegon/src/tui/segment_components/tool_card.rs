@@ -7,7 +7,7 @@
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, Wrap};
 
 use crate::surfaces::conversation::ToolCategory;
 
@@ -579,7 +579,7 @@ pub(crate) fn tool_card_right_title_spans<'a>(
 }
 
 pub fn render(props: ToolCardRenderProps<'_>, area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
-    segments::render_tool_card(
+    render_tool_card(
         props.name,
         props.detail_args,
         props.detail_result,
@@ -597,6 +597,316 @@ pub fn render(props: ToolCardRenderProps<'_>, area: Rect, buf: &mut Buffer, them
         props.density,
         props.pinned,
     );
+}
+
+fn render_tool_card(
+    name: &str,
+    detail_args: Option<&str>,
+    detail_result: Option<&str>,
+    is_error: bool,
+    complete: bool,
+    expanded: bool,
+    live_partial: Option<&omegon_traits::PartialToolResult>,
+    started_at: Option<std::time::Instant>,
+    meta: &SegmentMeta,
+    tool_category: Option<ToolCategory>,
+    area: Rect,
+    buf: &mut Buffer,
+    t: &dyn Theme,
+    mode: SegmentRenderMode,
+    density: crate::settings::ToolDetail,
+    pinned: bool,
+) {
+    // `▶` U+25B6 is in the Unicode emoji set — replaced with `▷` U+25B7
+    // for the same reason as the instruments-panel pass. Both `✗` and
+    // `▸` are already safe.
+    let chrome = crate::tui::conversation_render_projection::tool_card_chrome(
+        name,
+        detail_args,
+        is_error,
+        complete,
+        tool_category,
+        t,
+    );
+    let display_name = chrome.display_name;
+    let status_icon = chrome.status_icon;
+    let status_color = chrome.status_color;
+    let border_color = chrome.border_color;
+    let bg = chrome.background;
+
+    let timestamp = segments::format_timestamp(meta.timestamp);
+    let title = segments::tool_title_line(
+        status_icon,
+        status_color,
+        &display_name,
+        area.width,
+        timestamp.as_deref(),
+        pinned,
+    );
+
+    // Right-aligned title: duration · ↑1.2k ↓340 · 14:32
+    let right_title_spans = tool_card_right_title_spans(
+        complete,
+        meta.duration_ms,
+        meta.actual_tokens,
+        timestamp.as_deref(),
+        t,
+    );
+
+    if matches!(mode, SegmentRenderMode::Slim) && !complete && !expanded {
+        let cells = segments::slim_tool_summary_cells(
+            name,
+            detail_args,
+            detail_result,
+            complete,
+            live_partial,
+            started_at,
+            meta.duration_ms,
+        );
+        let detail_rows = segments::slim_tool_live_rows(area.width, &cells);
+        render_slim_tool_live_rows(
+            area,
+            buf,
+            t,
+            bg,
+            status_icon,
+            status_color,
+            &display_name,
+            &detail_rows,
+            pinned,
+        );
+        return;
+    }
+
+    if matches!(mode, SegmentRenderMode::Slim) && complete && !expanded {
+        let cells = segments::slim_tool_summary_cells(
+            name,
+            detail_args,
+            detail_result,
+            complete,
+            live_partial,
+            started_at,
+            meta.duration_ms,
+        );
+        let detail_rows = vec![segments::slim_tool_collapsed_line(area.width, &cells)];
+        render_slim_tool_summary_rows(
+            area,
+            buf,
+            t,
+            bg,
+            status_icon,
+            status_color,
+            &display_name,
+            &detail_rows,
+            pinned,
+        );
+        return;
+    }
+
+    let card_block = if matches!(mode, SegmentRenderMode::Slim) {
+        // Slim: top border only, no side borders — maximizes terminal
+        // text selection width and avoids │ chars in copied text.
+        Block::default()
+            .borders(Borders::TOP)
+            .border_type(BorderType::Plain)
+            .border_style(Style::default().fg(border_color).bg(bg))
+            .title_top(title)
+            .title_top(Line::from(right_title_spans).right_aligned())
+            .padding(Padding::horizontal(0))
+            .style(Style::default().bg(bg))
+    } else {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color).bg(bg))
+            .title_top(title)
+            .title_top(Line::from(right_title_spans).right_aligned())
+            .padding(Padding::horizontal(1))
+            .style(Style::default().bg(bg))
+    };
+
+    let card_inner = card_block.inner(area);
+    card_block.render(area, buf);
+
+    if card_inner.height == 0 || card_inner.width == 0 {
+        return;
+    }
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+
+    // Effective density: expanded overrides to Verbose.
+    let effective = if expanded {
+        crate::settings::ToolDetail::Verbose
+    } else {
+        density
+    };
+    let args_budget = effective.args_budget();
+    let result_budget = effective.result_budget();
+    let tail_budget = effective.tail_budget();
+
+    append_tool_args_section(
+        &mut lines,
+        name,
+        detail_args,
+        detail_result,
+        args_budget,
+        complete,
+        is_error,
+        effective,
+        bg,
+        t,
+    );
+    if matches!(effective, crate::settings::ToolDetail::Lean) && complete && !is_error {
+        let para = Paragraph::new(lines.clone())
+            .wrap(Wrap { trim: false })
+            .style(Style::default().bg(bg));
+        para.render(card_inner, buf);
+        apply_rendered_links(
+            card_inner,
+            &lines,
+            buf,
+            Style::default()
+                .fg(t.accent_muted())
+                .bg(bg)
+                .add_modifier(Modifier::UNDERLINED),
+            card_inner.height,
+        );
+        return;
+    }
+
+    let mut live_row_fills: Vec<(u16, Color)> = Vec::new();
+    append_tool_live_progress_section(
+        &mut lines,
+        &mut live_row_fills,
+        live_partial,
+        started_at,
+        complete,
+        tail_budget,
+        card_inner.width,
+        bg,
+        t,
+    );
+
+    // ── Edit/change diff section ────────────────────────────────
+    // For mutating-file tools (`edit`, `change`), the standard result
+    // text is just "Successfully replaced text in {path}" — useless
+    // for an operator who wants to see what actually changed.
+    // Replace it with a colored line-by-line diff computed from the
+    // tool's args (`oldText` / `newText`), which the renderer already
+    // has access to via `detail_args`. The diff rendered here is the
+    // intent — what the agent ASKED for — not the post-validation
+    // result. On a successful edit they're equivalent; on a failed
+    // edit the validation error is rendered separately below.
+    let mut result_row_fills: Vec<(u16, Color)> = Vec::new();
+    let diff_blocks: Option<Vec<EditDiffBlock>> = if matches!(name, "edit" | "change") {
+        detail_args.and_then(|args| segments::build_edit_diff_blocks(name, args))
+    } else {
+        None
+    };
+    if let Some(blocks) = diff_blocks {
+        append_edit_diff_section(
+            &mut lines,
+            &mut result_row_fills,
+            &blocks,
+            EditDiffSectionProps {
+                is_error,
+                expanded,
+                detail_result,
+                diff_budget: effective.diff_budget(),
+                card_width: card_inner.width,
+                bg,
+                theme: t,
+            },
+        );
+    } else {
+        append_generic_result_section(
+            &mut lines,
+            &mut result_row_fills,
+            GenericResultSectionProps {
+                name,
+                detail_args,
+                detail_result,
+                is_error,
+                expanded,
+                result_budget,
+                card_width: card_inner.width,
+                bg,
+                theme: t,
+            },
+        );
+    }
+
+    Paragraph::new(lines.clone())
+        .wrap(Wrap { trim: false })
+        .render(card_inner, buf);
+
+    // Apply background fills for both the live (in-flight) section and
+    // the completed result section. Both share the same `bg` color in
+    // practice; keeping the two fill streams separate makes the
+    // intent obvious and lets future styling diverge them cheaply.
+    for (row, fill_bg) in live_row_fills {
+        apply_rows_bg(card_inner, row, 1, fill_bg, buf);
+    }
+    for (row, fill_bg) in result_row_fills {
+        apply_rows_bg(card_inner, row, 1, fill_bg, buf);
+    }
+    apply_rendered_links(
+        card_inner,
+        &lines,
+        buf,
+        Style::default()
+            .fg(t.accent_muted())
+            .bg(bg)
+            .add_modifier(Modifier::UNDERLINED),
+        card_inner.height,
+    );
+
+    // ── Post-render: OSC 8 hyperlinks for single-file tool paths ────────────
+    if matches!(name, "read" | "write" | "view")
+        && let Some(args) = detail_args
+    {
+        let file_path = args.lines().next().unwrap_or(args).trim().to_string();
+        if !file_path.is_empty() && card_inner.height > 0 {
+            let prefix = "▸ ";
+            let row_style = Style::default().bg(bg);
+            let link_style = Style::default()
+                .fg(t.accent_muted())
+                .bg(bg)
+                .add_modifier(Modifier::UNDERLINED);
+
+            for x in card_inner.left()..card_inner.right() {
+                if let Some(cell) = buf.cell_mut((x, card_inner.y)) {
+                    cell.set_symbol(" ");
+                    cell.set_style(row_style);
+                }
+            }
+
+            if card_inner.width >= prefix.len() as u16 {
+                if let Some(cell) = buf.cell_mut((card_inner.x, card_inner.y)) {
+                    cell.set_symbol("▸");
+                    cell.set_style(Style::default().fg(t.accent_muted()).bg(bg));
+                }
+                if let Some(cell) = buf.cell_mut((card_inner.x + 1, card_inner.y)) {
+                    cell.set_symbol(" ");
+                    cell.set_style(row_style);
+                }
+
+                let available = card_inner.width.saturating_sub(prefix.len() as u16);
+                if available > 0
+                    && let Some(url) = segments::file_url_for_path(&file_path)
+                {
+                    let link_area = Rect {
+                        x: card_inner.x + prefix.len() as u16,
+                        y: card_inner.y,
+                        width: available,
+                        height: 1,
+                    };
+                    let link = hyperrat::Link::new(file_path, url).style(link_style);
+                    link.render(link_area, buf);
+                }
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
