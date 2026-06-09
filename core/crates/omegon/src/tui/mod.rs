@@ -29,6 +29,7 @@ pub mod layout_projection;
 pub mod model_catalog;
 pub mod permission_lane;
 pub mod segment_components;
+pub mod segment_detail;
 pub mod segments;
 pub mod selector;
 pub mod slim_plan;
@@ -3795,6 +3796,11 @@ impl App {
             .as_ref()
             .map(|snapshot| slim_plan_snapshot_height(snapshot, area.width))
             .unwrap_or(0);
+        let segment_detail_index = self.conversation.timeline_expanded_segment();
+        let segment_detail_height = segment_detail::preferred_height(
+            segment_detail_index.and_then(|idx| self.conversation.segments().get(idx)),
+            area.height,
+        );
         let layout_plan = plan_tui_layout(TuiLayoutInputs {
             area,
             surfaces: self.ui_surfaces,
@@ -3805,6 +3811,7 @@ impl App {
             pending_permission: self.pending_permission.is_some(),
             active_tool_stream_height: raw_active_tool_stream_height,
             slim_plan_height: raw_slim_plan_height,
+            segment_detail_height,
         });
 
         let show_dashboard = layout_plan.show_dashboard;
@@ -3814,6 +3821,7 @@ impl App {
         let active_tool_stream_area = layout_plan.active_tool_stream_area;
         let permission_lane_area = layout_plan.permission_lane_area;
         let slim_plan_area = layout_plan.slim_plan_area;
+        let segment_detail_area = layout_plan.segment_detail_area;
         let editor_area = layout_plan.editor_area;
         let status_area = layout_plan.status_area;
         let footer_area = layout_plan.footer_area;
@@ -3911,6 +3919,19 @@ impl App {
             && slim_plan_area.height > 0
         {
             render_slim_plan_panel(slim_plan_area, frame, self.theme.as_ref(), snapshot);
+        }
+
+        if segment_detail_area.height > 0
+            && let Some(idx) = segment_detail_index
+            && let Some(segment) = self.conversation.segments().get(idx)
+        {
+            segment_detail::render(
+                segment_detail_area,
+                frame.buffer_mut(),
+                self.theme.as_ref(),
+                idx,
+                segment,
+            );
         }
 
         // ── Status line (slim mode only) ────────────────────────

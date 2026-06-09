@@ -19,6 +19,7 @@ pub struct TuiLayoutInputs {
     pub pending_permission: bool,
     pub active_tool_stream_height: u16,
     pub slim_plan_height: u16,
+    pub segment_detail_height: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub struct TuiLayoutPlan {
     pub active_tool_stream_area: Rect,
     pub permission_lane_area: Rect,
     pub slim_plan_area: Rect,
+    pub segment_detail_area: Rect,
     pub editor_area: Rect,
     pub status_area: Rect,
     pub footer_area: Rect,
@@ -38,6 +40,7 @@ pub struct TuiLayoutPlan {
     pub active_tool_stream_height: u16,
     pub permission_lane_height: u16,
     pub slim_plan_height: u16,
+    pub segment_detail_height: u16,
 }
 
 pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
@@ -73,6 +76,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         0
     };
     let mut slim_plan_height = if is_slim { inputs.slim_plan_height } else { 0 };
+    let mut segment_detail_height = inputs.segment_detail_height;
 
     if permission_lane_height > 0 {
         active_tool_stream_height = active_tool_stream_height.min(6);
@@ -83,11 +87,15 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         .editor_height
         .saturating_add(status_height)
         .saturating_add(footer_height)
-        .saturating_add(permission_lane_height);
+        .saturating_add(permission_lane_height)
+        .saturating_add(segment_detail_height);
     let bottom_budget = main_area
         .height
         .saturating_sub(fixed_without_conversation)
         .saturating_sub(3);
+    if segment_detail_height > bottom_budget {
+        segment_detail_height = bottom_budget;
+    }
     if active_tool_stream_height.saturating_add(slim_plan_height) > bottom_budget {
         let plan_budget =
             bottom_budget.saturating_sub(active_tool_stream_height.min(bottom_budget));
@@ -103,6 +111,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
             Constraint::Length(active_tool_stream_height),
             Constraint::Length(permission_lane_height),
             Constraint::Length(slim_plan_height),
+            Constraint::Length(segment_detail_height),
             Constraint::Length(inputs.editor_height),
             Constraint::Length(status_height),
             Constraint::Length(footer_height),
@@ -118,13 +127,15 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         active_tool_stream_area: chunks[1],
         permission_lane_area: chunks[2],
         slim_plan_area: chunks[3],
-        editor_area: chunks[4],
-        status_area: chunks[5],
-        footer_area: chunks[6],
+        segment_detail_area: chunks[4],
+        editor_area: chunks[5],
+        status_area: chunks[6],
+        footer_area: chunks[7],
         footer_height,
         active_tool_stream_height,
         permission_lane_height,
         slim_plan_height,
+        segment_detail_height,
     }
 }
 
@@ -144,6 +155,7 @@ mod tests {
             pending_permission: false,
             active_tool_stream_height: 0,
             slim_plan_height: 0,
+            segment_detail_height: 0,
         });
         assert!(!plan.show_dashboard);
         assert!(plan.is_slim);
@@ -163,6 +175,7 @@ mod tests {
             pending_permission: false,
             active_tool_stream_height: 0,
             slim_plan_height: 0,
+            segment_detail_height: 0,
         });
         assert!(plan.show_dashboard);
         assert!(!plan.is_slim);
@@ -187,10 +200,30 @@ mod tests {
             pending_permission: true,
             active_tool_stream_height: 20,
             slim_plan_height: 20,
+            segment_detail_height: 0,
         });
         assert!(plan.is_slim);
         assert_eq!(plan.permission_lane_height, 2);
         assert!(plan.active_tool_stream_height <= 6);
         assert!(plan.slim_plan_height <= 4);
+    }
+
+    #[test]
+    fn segment_detail_area_reserves_bottom_space() {
+        let plan = plan_tui_layout(TuiLayoutInputs {
+            area: Rect::new(0, 0, 100, 32),
+            surfaces: UiSurfaces::lean(),
+            focus_mode: false,
+            dashboard_has_content: false,
+            editor_height: 3,
+            footer_instruments_height: 4,
+            pending_permission: false,
+            active_tool_stream_height: 0,
+            slim_plan_height: 0,
+            segment_detail_height: 8,
+        });
+        assert_eq!(plan.segment_detail_height, 8);
+        assert_eq!(plan.segment_detail_area.height, 8);
+        assert!(plan.conversation_area.height >= 3);
     }
 }
