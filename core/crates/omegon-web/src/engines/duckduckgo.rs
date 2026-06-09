@@ -24,6 +24,7 @@ pub async fn search(
 
     if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
         || resp.status() == reqwest::StatusCode::FORBIDDEN
+        || resp.status() == reqwest::StatusCode::ACCEPTED
     {
         anyhow::bail!("rate limited by DuckDuckGo ({})", resp.status());
     }
@@ -81,7 +82,9 @@ fn parse_results(body: &str, max_results: usize) -> anyhow::Result<Vec<SearchRes
         PageClass::NoResults => anyhow::bail!("ddg: no results returned"),
         PageClass::BotOrChallenge => anyhow::bail!("bot detection by DuckDuckGo"),
         PageClass::ConsentOrRegion => anyhow::bail!("consent or region interstitial by DuckDuckGo"),
-        PageClass::UnexpectedShell => anyhow::bail!("ddg: unexpected HTML shell; no result markup found"),
+        PageClass::UnexpectedShell => {
+            anyhow::bail!("ddg: unexpected HTML shell; no result markup found")
+        }
     }
 
     let dom = Html::parse_document(body);

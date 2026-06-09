@@ -73,7 +73,7 @@ fn classify_error(engine: &str, err: anyhow::Error) -> SearchError {
             engine: engine.into(),
             detail: msg,
         }
-    } else if msg.contains("429") || msg.contains("rate limit") {
+    } else if msg.contains("429") || msg.contains("202") || msg.contains("rate limit") {
         SearchError::RateLimited {
             engine: engine.into(),
         }
