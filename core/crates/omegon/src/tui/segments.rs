@@ -1434,16 +1434,18 @@ impl Segment {
                 thinking,
                 complete,
             } => {
-                render_assistant_text(
-                    text,
-                    thinking,
-                    *complete,
-                    &self.meta,
-                    &presentation,
+                super::segment_components::assistant::render(
+                    super::segment_components::assistant::AssistantRenderProps {
+                        text,
+                        thinking,
+                        complete: *complete,
+                        meta: &self.meta,
+                        presentation: &presentation,
+                        mode,
+                    },
                     area,
                     buf,
                     t,
-                    mode,
                 );
             }
             ToolCard {
@@ -1990,7 +1992,7 @@ fn tool_title_line(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_assistant_text(
+pub(crate) fn render_assistant_text(
     text: &str,
     thinking: &str,
     complete: bool,

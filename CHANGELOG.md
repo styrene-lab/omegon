@@ -53,6 +53,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Extract focus-mode conversation line projection and rendering into a dedicated TUI sub-surface module.
 - Extract conversation tab bar rendering into a dedicated TUI sub-surface module.
 - Add a tool-card segment component boundary for conversation segment rendering.
+- Add an assistant segment component boundary for conversation segment rendering.
 
 ## [0.26.16] - 2026-06-07
 
