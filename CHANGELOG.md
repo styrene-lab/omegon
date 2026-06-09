@@ -59,6 +59,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add image and separator segment component boundaries for conversation segment rendering.
 - Move separator segment rendering into its dedicated component module.
 - Move lifecycle segment rendering into its dedicated component module.
+- Move image placeholder segment rendering into its dedicated component module.
 
 ## [0.26.16] - 2026-06-07
 

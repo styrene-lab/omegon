@@ -817,7 +817,13 @@ fn render_slim_tool_live_rows(
     );
 }
 
-fn apply_rows_bg(area: Rect, start_row: u16, row_count: u16, bg: Color, buf: &mut Buffer) {
+pub(crate) fn apply_rows_bg(
+    area: Rect,
+    start_row: u16,
+    row_count: u16,
+    bg: Color,
+    buf: &mut Buffer,
+) {
     let end_row = start_row.saturating_add(row_count).min(area.height);
     for row in start_row..end_row {
         let y = area.y + row;
@@ -940,7 +946,7 @@ fn apply_rendered_links(
     }
 }
 
-fn file_url_for_path(path: &str) -> Option<String> {
+pub(crate) fn file_url_for_path(path: &str) -> Option<String> {
     let trimmed = path.trim();
     if trimmed.is_empty() || trimmed.chars().any(char::is_control) {
         return None;
@@ -3521,81 +3527,6 @@ pub(crate) fn render_system(
 ///   lives — especially for clipboard-paste files like
 ///   `omegon-clipboard-78315-16.png` whose names are uninformative
 ///   without their parent directory.
-pub(crate) fn render_image_placeholder(
-    path: &std::path::Path,
-    alt: &str,
-    area: Rect,
-    buf: &mut Buffer,
-    t: &dyn Theme,
-) {
-    if area.height == 0 {
-        return;
-    }
-
-    // Title: full disk path (or alt text if the caller supplied one).
-    // The previous behavior used only the filename which left
-    // operators guessing about the parent directory.
-    let path_str = path.display().to_string();
-    let label = if alt.is_empty() || alt == "clipboard paste" {
-        format!(" ▦ {path_str} ")
-    } else {
-        format!(" ▦ {alt} — {path_str} ")
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
-        .border_style(Style::default().fg(t.accent()))
-        .title(Span::styled(
-            label,
-            Style::default()
-                .fg(t.accent_bright())
-                .add_modifier(Modifier::BOLD),
-        ))
-        .style(Style::default().bg(t.bg()));
-
-    // The block is the placeholder — the actual image is rendered on top
-    // of this area in a second pass by the ConversationWidget (ratatui-image).
-    // Repaint the full segment with the main background first so any old
-    // card chrome at the edges is replaced by a crisp high-contrast edge.
-    apply_rows_bg(area, 0, area.height, t.bg(), buf);
-    block.render(area, buf);
-
-    let line = Line::from(Span::styled(
-        path_str.clone(),
-        Style::default()
-            .fg(t.accent_muted())
-            .bg(t.bg())
-            .add_modifier(Modifier::UNDERLINED),
-    ));
-    if let Some(url) = file_url_for_path(&path_str) {
-        let caption_area = Rect {
-            x: area.x.saturating_add(1),
-            y: area.bottom().saturating_sub(1),
-            width: area.width.saturating_sub(2),
-            height: 1,
-        };
-        hyperrat::Link::new(path_str, url)
-            .style(
-                Style::default()
-                    .fg(t.accent_muted())
-                    .bg(t.bg())
-                    .add_modifier(Modifier::UNDERLINED),
-            )
-            .render(caption_area, buf);
-    } else if area.height > 1 {
-        Paragraph::new(line).render(
-            Rect {
-                x: area.x.saturating_add(1),
-                y: area.bottom().saturating_sub(1),
-                width: area.width.saturating_sub(2),
-                height: 1,
-            },
-            buf,
-        );
-    }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Tests
 // ═══════════════════════════════════════════════════════════════════════════
