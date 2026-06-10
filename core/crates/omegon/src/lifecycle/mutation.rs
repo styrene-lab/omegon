@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use omegon_opsx::{JsonFileStore, Lifecycle as OpsxLifecycle, NodeState};
 
 use super::context::LifecycleContextProvider;
-use super::design;
+use super::{design, spec, sync};
 use super::types::{DesignNode, FileScope, IssueType, NodeStatus};
 
 #[derive(Clone)]
@@ -98,6 +98,18 @@ pub struct SetDesignNodePriorityRequest {
 pub struct SetDesignNodeIssueTypeRequest {
     pub id: String,
     pub issue_type: IssueType,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplementDesignNodeRequest {
+    pub id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplementDesignNodeResult {
+    pub node_id: String,
+    pub openspec_change: String,
+    pub change_path: PathBuf,
 }
 
 impl LifecycleMutationService {
@@ -313,6 +325,56 @@ impl LifecycleMutationService {
         })?;
         self.provider.lock().unwrap().refresh();
         Ok(())
+    }
+
+
+    pub fn implement_design_node(
+        &self,
+        req: ImplementDesignNodeRequest,
+    ) -> anyhow::Result<ImplementDesignNodeResult> {
+        let mut node = self.get_node_clone(&req.id)?;
+        if !matches!(node.status, NodeStatus::Decided) {
+            anyhow::bail!(
+                "Node '{}' must be in 'decided' status to implement (current: {})",
+                req.id,
+                node.status.as_str()
+            );
+        }
+
+        {
+            let mut opsx = self.opsx.lock().unwrap();
+            if opsx.get_node(&req.id).is_none() {
+                bootstrap_node_to_opsx(&mut opsx, &node);
+            }
+            opsx.transition_node(&req.id, NodeState::Implementing)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+        }
+
+        let change_name = req.id.clone();
+        let title = node.title.clone();
+        let sections = design::read_node_sections(&node);
+        let intent = sections
+            .as_ref()
+            .map(|s| s.overview.clone())
+            .unwrap_or_else(|| format!("Implement {title}"));
+        let change = spec::propose_change(&self.repo_path, &change_name, &title, &intent)?;
+
+        design::update_node(&mut node, |n| {
+            n.openspec_change = Some(change_name.clone());
+            n.status = NodeStatus::Implementing;
+        })?;
+
+        {
+            let mut opsx = self.opsx.lock().unwrap();
+            let _ = sync::sync_change_by_name(&mut opsx, &self.repo_path, &change_name)?;
+        }
+
+        self.provider.lock().unwrap().refresh();
+        Ok(ImplementDesignNodeResult {
+            node_id: req.id,
+            openspec_change: change_name,
+            change_path: change.path,
+        })
     }
 
     fn get_node_clone(&self, id: &str) -> anyhow::Result<DesignNode> {
@@ -668,5 +730,39 @@ mod tests {
         let node = provider.lock().unwrap().get_node("node").cloned().unwrap();
         assert_eq!(node.priority, Some(3));
         assert_eq!(node.issue_type, Some(IssueType::Feature));
+    }
+
+    #[test]
+    fn implement_design_node_scaffolds_openspec_and_updates_node() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_path_buf();
+        let provider = Arc::new(Mutex::new(LifecycleContextProvider::new(&repo)));
+        let opsx = Arc::new(Mutex::new(
+            OpsxLifecycle::load(JsonFileStore::new(&repo)).unwrap(),
+        ));
+        let service = LifecycleMutationService::new(repo.clone(), Arc::clone(&provider), Arc::clone(&opsx));
+        service
+            .create_design_node(CreateDesignNodeRequest {
+                id: "impl-node".to_string(),
+                title: "Implement Node".to_string(),
+                parent: None,
+                status: Some("decided".to_string()),
+                tags: vec![],
+                overview: "Ship the thing".to_string(),
+            })
+            .unwrap();
+
+        let result = service
+            .implement_design_node(ImplementDesignNodeRequest {
+                id: "impl-node".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(result.openspec_change, "impl-node");
+        assert!(result.change_path.join("proposal.md").exists());
+        let node = provider.lock().unwrap().get_node("impl-node").cloned().unwrap();
+        assert_eq!(node.status, NodeStatus::Implementing);
+        assert_eq!(node.openspec_change.as_deref(), Some("impl-node"));
+        assert!(opsx.lock().unwrap().state().changes.iter().any(|c| c.name == "impl-node"));
     }
 }

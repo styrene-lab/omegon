@@ -19,7 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeImplNotesRequest, AddDesignNodeLinkRequest, AddDesignNodeResearchRequest, BranchDesignNodeQuestionRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeIssueTypeRequest, SetDesignNodePriorityRequest, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
+use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeImplNotesRequest, AddDesignNodeLinkRequest, AddDesignNodeResearchRequest, BranchDesignNodeQuestionRequest, CreateDesignNodeRequest, LifecycleMutationService, ImplementDesignNodeRequest, SetDesignNodeIssueTypeRequest, SetDesignNodePriorityRequest, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -354,13 +354,6 @@ impl LifecycleFeature {
     fn execute_design_tree_update(&self, args: &Value) -> anyhow::Result<ToolResult> {
         let action = args["action"].as_str().unwrap_or("");
         let node_id = args["node_id"].as_str();
-        let get_node_clone = |id: &str| -> anyhow::Result<DesignNode> {
-            let p = self.provider.lock().unwrap();
-            p.get_node(id)
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("Node '{id}' not found"))
-        };
-
         match action {
             "create" => {
                 let id = node_id.ok_or_else(|| anyhow::anyhow!("node_id required"))?;
@@ -656,44 +649,16 @@ impl LifecycleFeature {
 
             "implement" => {
                 let id = node_id.ok_or_else(|| anyhow::anyhow!("node_id required"))?;
-                let mut node = get_node_clone(id)?;
-                if !matches!(node.status, NodeStatus::Decided) {
-                    anyhow::bail!(
-                        "Node '{id}' must be in 'decided' status to implement (current: {})",
-                        node.status.as_str()
-                    );
-                }
-
-                // Validate transition via omegon-opsx FSM — this enforces milestone freeze
-                {
-                    let mut opsx = self.opsx.lock().unwrap();
-                    if opsx.get_node(id).is_none() {
-                        self.bootstrap_node_to_opsx(&mut opsx, &node);
-                    }
-                    opsx.transition_node(id, OpsxNodeState::Implementing)
-                        .map_err(|e| anyhow::anyhow!("{e}"))?;
-                }
-
-                // FSM approved — scaffold OpenSpec change
-                let change_name = id;
-                let title = node.title.clone();
-                let sections = design::read_node_sections(&node);
-                let intent = sections
-                    .as_ref()
-                    .map(|s| s.overview.clone())
-                    .unwrap_or_else(|| format!("Implement {title}"));
-
-                let change = spec::propose_change(&self.repo_path, change_name, &title, &intent)?;
-
-                // Update the node to reference the change
-                design::update_node(&mut node, |n| {
-                    n.openspec_change = Some(change_name.to_string());
-                    n.status = NodeStatus::Implementing;
-                })?;
-                self.provider.lock().unwrap().refresh();
+                let result = self.mutation_service.implement_design_node(
+                    ImplementDesignNodeRequest {
+                        id: id.to_string(),
+                    },
+                )?;
                 Ok(text_result(&format!(
-                    "Scaffolded OpenSpec change '{change_name}' at {}\nNode '{id}' → implementing",
-                    change.path.display()
+                    "Scaffolded OpenSpec change '{}' at {}\nNode '{}' → implementing",
+                    result.openspec_change,
+                    result.change_path.display(),
+                    result.node_id
                 )))
             }
 
