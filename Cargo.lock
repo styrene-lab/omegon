@@ -4991,6 +4991,7 @@ dependencies = [
  "omegon-codescan",
  "omegon-extension",
  "omegon-git",
+ "omegon-headroom",
  "omegon-memory",
  "omegon-opsx",
  "omegon-secrets",

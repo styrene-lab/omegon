@@ -146,6 +146,17 @@ impl InMemoryHeadroomStore {
         self.objects.is_empty()
     }
 
+    pub fn total_original_bytes(&self) -> usize {
+        self.objects
+            .values()
+            .map(|stored| stored.reference.bytes)
+            .sum()
+    }
+
+    pub fn objects(&self) -> impl Iterator<Item = &StoredOriginal> {
+        self.objects.values()
+    }
+
     fn store_original(&mut self, source: &str, kind: ContentKind, text: &str) -> HeadroomRef {
         let sha256 = sha256_hex(text.as_bytes());
         let id = format!("hr:{}", &sha256[..16]);

@@ -123,6 +123,13 @@ pub mod harness_settings {
     pub const HARNESS_SETTINGS: &str = "harness_settings";
 }
 
+/// Headroom compression tools — owned by `features::headroom`
+pub mod headroom {
+    pub const HEADROOM_COMPRESS: &str = "headroom_compress";
+    pub const HEADROOM_RETRIEVE: &str = "headroom_retrieve";
+    pub const HEADROOM_STATS: &str = "headroom_stats";
+}
+
 /// Context tools — owned by `features::context`
 pub mod context {
     pub const CONTEXT_STATUS: &str = "context_status";
@@ -169,7 +176,7 @@ pub mod mutation {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 67;
+pub const TOOL_COUNT: usize = 70;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -238,6 +245,10 @@ pub fn all_static_names() -> Vec<&'static str> {
         auth::AUTH_STATUS,
         // harness_settings (1)
         harness_settings::HARNESS_SETTINGS,
+        // headroom (3)
+        headroom::HEADROOM_COMPRESS,
+        headroom::HEADROOM_RETRIEVE,
+        headroom::HEADROOM_STATS,
         // context (4)
         context::CONTEXT_STATUS,
         context::CONTEXT_COMPACT,

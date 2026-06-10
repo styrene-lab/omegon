@@ -709,6 +709,9 @@ impl AgentSetup {
             bus.register(Box::new(features::harness_settings::HarnessSettings::new(
                 settings.clone(),
             )));
+            bus.register(Box::new(features::headroom::HeadroomFeature::new(
+                settings.clone(),
+            )));
         }
         bus.register(Box::new(features::auto_compact::AutoCompact::new()));
         bus.register(Box::new(features::terminal_title::TerminalTitle::new(

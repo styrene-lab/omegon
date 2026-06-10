@@ -28,6 +28,7 @@ pub mod clipboard;
 pub mod context;
 pub mod delegate;
 pub mod harness_settings;
+pub mod headroom;
 pub mod lifecycle;
 pub mod manage_tools;
 pub mod memory;
