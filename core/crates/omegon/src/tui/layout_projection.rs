@@ -45,17 +45,18 @@ pub struct TuiLayoutPlan {
     pub segment_detail_height: u16,
 }
 
-pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
-    let show_dashboard =
-        inputs.surfaces.dashboard && inputs.area.width >= 120 && inputs.dashboard_has_content;
-
-    let (main_area, dashboard_area) = if show_dashboard {
-        let h =
-            Layout::horizontal([Constraint::Min(60), Constraint::Length(36)]).split(inputs.area);
-        (h[0], Some(h[1]))
+fn project_dashboard_height(inputs: TuiLayoutInputs, show_dashboard: bool) -> u16 {
+    if show_dashboard && !inputs.focus_mode {
+        1
     } else {
-        (inputs.area, None)
-    };
+        0
+    }
+}
+
+pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
+    let show_dashboard = inputs.surfaces.dashboard && inputs.dashboard_has_content;
+    let main_area = inputs.area;
+    let dashboard_area = None;
 
     let footer_height = if inputs.focus_mode || !inputs.surfaces.footer {
         0
@@ -118,6 +119,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
             Constraint::Length(inputs.editor_height),
             Constraint::Length(inputs.editor_info_height),
             Constraint::Length(status_height),
+            Constraint::Length(project_dashboard_height(inputs, show_dashboard)),
             Constraint::Length(footer_height),
         ])
         .split(main_area);
@@ -135,7 +137,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         editor_area: chunks[5],
         editor_info_area: chunks[6],
         status_area: chunks[7],
-        footer_area: chunks[8],
+        footer_area: chunks[9],
         footer_height,
         active_tool_stream_height,
         permission_lane_height,
@@ -170,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn full_layout_shows_dashboard_when_wide_and_populated() {
+    fn full_layout_uses_thin_bottom_project_strip_when_populated() {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 140, 40),
             surfaces: UiSurfaces::full(),
@@ -186,9 +188,13 @@ mod tests {
         });
         assert!(plan.show_dashboard);
         assert!(!plan.is_slim);
-        assert_eq!(plan.dashboard_area.expect("dashboard").width, 36);
+        assert_eq!(plan.dashboard_area, None);
+        assert_eq!(plan.main_area, Rect::new(0, 0, 140, 40));
         assert_eq!(plan.footer_height, 4);
         assert_eq!(plan.status_area.height, 0);
+        assert_eq!(plan.footer_area.y, 36);
+        assert_eq!(plan.footer_area.height, 4);
+        assert_eq!(plan.conversation_area.y, 0);
     }
 
     #[test]

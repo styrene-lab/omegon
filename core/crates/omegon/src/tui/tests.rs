@@ -179,7 +179,7 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     let waiting = render_app_to_string(&mut app, 140, 18);
     assert!(
         waiting.contains("waiting: provider request")
-            || waiting.contains("transcript live · no pinned plan"),
+            || waiting.contains("transcript live · PgUp/PgDn scroll · Ctrl+Shift+Y copy answer"),
         "{waiting}"
     );
 
@@ -189,7 +189,7 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     let opening = render_app_to_string(&mut app, 140, 18);
     assert!(
         opening.contains("waiting: stream open")
-            || opening.contains("transcript live · no pinned plan"),
+            || opening.contains("transcript live · PgUp/PgDn scroll · Ctrl+Shift+Y copy answer"),
         "{opening}"
     );
 
@@ -199,7 +199,7 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     let responding = render_app_to_string(&mut app, 140, 18);
     assert!(
         responding.contains("streaming answer")
-            || responding.contains("transcript live · no pinned plan"),
+            || responding.contains("transcript live · PgUp/PgDn scroll · Ctrl+Shift+Y copy answer"),
         "{responding}"
     );
 
@@ -1778,6 +1778,109 @@ fn selected_tool_segment_copy_excludes_dashboard_content() {
 }
 
 #[test]
+fn commands_registry_lists_answer_copy_alias() {
+    let copy = App::COMMANDS
+        .iter()
+        .find(|(name, _, _)| *name == "copy")
+        .expect("/copy must be registered");
+
+    assert!(copy.1.contains("answer"), "{}", copy.1);
+    assert!(copy.2.contains(&"answer"), "{:?}", copy.2);
+}
+
+#[test]
+fn help_copy_documents_text_forward_contract() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/help copy", &tx);
+    let SlashResult::Display(text) = result else {
+        panic!("expected display");
+    };
+
+    assert!(text.contains("Ctrl+Shift+Y"), "{text}");
+    assert!(text.contains("/copy answer"), "{text}");
+    assert!(text.contains("PgUp/PgDn"), "{text}");
+}
+
+#[test]
+fn help_mouse_documents_passthrough_contract() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/help mouse", &tx);
+    let SlashResult::Display(text) = result else {
+        panic!("expected display");
+    };
+
+    assert!(text.contains("Mouse passthrough"), "{text}");
+    assert!(text.contains("terminal drag selects"), "{text}");
+    assert!(text.contains("Ctrl+Shift+T"), "{text}");
+}
+
+#[test]
+fn slash_copy_answer_is_registered_as_plaintext_latest_answer_alias() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.conversation.push_user("operator prompt");
+    app.conversation
+        .append_streaming("Run this:\n\n```bash\ncargo test\n```");
+    app.conversation.finalize_message();
+
+    assert!(matches!(
+        app.handle_slash_command("/copy answer", &tx),
+        SlashResult::Handled
+    ));
+    assert_eq!(
+        app.conversation
+            .latest_assistant_text_with_mode(SegmentExportMode::Plaintext)
+            .as_deref(),
+        Some("Run this:\n\ncargo test")
+    );
+}
+
+#[test]
+fn ctrl_shift_y_is_reserved_for_copy_latest_assistant_answer() {
+    let mut app = test_app();
+    app.conversation.push_user("operator prompt");
+    app.conversation.append_streaming("latest answer");
+    app.conversation.finalize_message();
+
+    assert_eq!(
+        app.conversation
+            .latest_assistant_text_with_mode(SegmentExportMode::Plaintext)
+            .as_deref(),
+        Some("latest answer")
+    );
+}
+
+#[test]
+fn normal_transcript_hint_advertises_scroll_and_answer_copy() {
+    let hint = super::slim_plan::slim_operator_hint(
+        false,
+        false,
+        false,
+        super::slim_plan::SlimPlanHintState::None,
+        &super::slim_plan::SlimPlanContext::from_dashboard(false, &[], None),
+    );
+
+    assert!(hint.contains("PgUp/PgDn scroll"), "{hint}");
+    assert!(hint.contains("Ctrl+Shift+Y copy answer"), "{hint}");
+}
+
+#[test]
+fn terminal_copy_hint_describes_mouse_passthrough_not_copy_mode() {
+    let hint = super::slim_plan::slim_operator_hint(
+        false,
+        false,
+        true,
+        super::slim_plan::SlimPlanHintState::None,
+        &super::slim_plan::SlimPlanContext::from_dashboard(false, &[], None),
+    );
+
+    assert!(hint.contains("mouse passthrough"), "{hint}");
+    assert!(!hint.contains("copy mode"), "{hint}");
+}
+
+#[test]
 fn ctrl_y_keeps_editor_yank_outside_conversation_focus() {
     let mut app = test_app();
     app.editor.set_text("prefix");
@@ -2183,6 +2286,25 @@ fn ui_command_switches_between_full_and_slim_presets() {
     if let SlashResult::Display(text) = result {
         assert!(text.contains("Unknown UI command"), "{text}");
     }
+}
+
+#[test]
+fn short_slash_confirmations_use_toast_surface() {
+    assert!(super::should_toast_slash_response("UI → full"));
+    assert!(super::should_toast_slash_response(
+        "Context Policy → Extended (400k)"
+    ));
+}
+
+#[test]
+fn verbose_or_error_slash_responses_still_use_panel_surface() {
+    assert!(!super::should_toast_slash_response(
+        "Usage: /ui <lean|full>"
+    ));
+    assert!(!super::should_toast_slash_response(
+        "Unknown UI command: standard"
+    ));
+    assert!(!super::should_toast_slash_response("one\ntwo"));
 }
 
 #[test]

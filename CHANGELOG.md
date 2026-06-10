@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Extract OpenSpec markdown-to-FSM synchronization into a named lifecycle sync module with structured sync reports and transition tests.
 - Extract OpenSpec archive transaction recovery from the lifecycle tool adapter into a lifecycle-domain archive module with direct recovery tests.
 - Add a Lifecycle/OpenSpec surface map documenting tool adapters, engine/FSM boundaries, correctness invariants, and low-risk extraction seams.
+- Add `/copy answer` and focused `/help copy`/`/help mouse` contract text for normal-mode answer copy, transcript scroll, and mouse passthrough.
 - Add affected-crate detection plus scoped `just affected`, `just test-changed`, `just check-changed`, and `just clippy-changed` recipes for faster local validation of changed Rust workspace slices.
 - Add `just test-profile` to statically summarize Rust test/coupling hotspots before choosing validation or extraction targets.
 - Add Python unit coverage for the affected-crate and test-profile developer tooling.
@@ -41,6 +42,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Replace the old dashboard tree renderer with a read-only one-line project lifecycle strip.
+- Make the full TUI dashboard a thin vertical project strip above the footer/tooling area instead of an entire-height right sidebar.
+- Clarify mouse passthrough versus app mouse interaction and advertise normal-mode answer copy/scroll hints.
 - Split `omegon-codescan` language-specific scanner logic into bounded modules, add Java/Kotlin/C# discovery, and attach extraction language/strategy/confidence metadata to code chunks.
 - Guard codescan's HEAD fast path against relevant dirty working-tree changes so local edits do not return stale cached chunks.
 - Rename context classes from Squad/Maniple/Clan/Legion to Compact/Standard/Extended/Massive while retaining legacy aliases for existing configs and commands.
@@ -119,6 +123,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Hide the conversation `Enter: details` affordance unless focus mode makes Enter open segment details.
+- Show short slash-command confirmations as non-blocking toasts instead of oversized command panels.
 - Treat DuckDuckGo HTTP 202 Accepted responses as rate limiting so DDG throttle pages do not fall through into parser diagnostics.
 - Classify DuckDuckGo zero-key search responses before parsing so no-result pages, bot/challenge pages, consent/region interstitials, and unexpected HTML shells produce actionable diagnostics instead of a generic parser failure.
 - Stop advertising Brotli in zero-key web-search requests so DuckDuckGo does not return `br`-encoded HTML that the current reqwest client cannot decode before parsing.

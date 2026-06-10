@@ -389,7 +389,7 @@ pub fn slim_operator_hint(
     } else if pending_operator_wait {
         "manual wait · Enter done · Esc cancel".to_string()
     } else if terminal_copy_mode {
-        "copy mode · select text · /mouse on exits".to_string()
+        "mouse passthrough · terminal drag selects · Ctrl+Shift+T restores app mouse".to_string()
     } else {
         match plan_state {
             SlimPlanHintState::Active { next_visible: true } => {
@@ -405,7 +405,9 @@ pub fn slim_operator_hint(
                 labels.join(" · ")
             }
             SlimPlanHintState::Complete => "plan complete · history available".to_string(),
-            SlimPlanHintState::None => "transcript live · no pinned plan".to_string(),
+            SlimPlanHintState::None => {
+                "transcript live · PgUp/PgDn scroll · Ctrl+Shift+Y copy answer".to_string()
+            }
         }
     }
 }

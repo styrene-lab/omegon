@@ -212,6 +212,7 @@ pub struct ConversationWidget<'a> {
     density: crate::settings::ToolDetail,
     pinned_segment: Option<usize>,
     selected_segment: Option<usize>,
+    detail_hint_enabled: bool,
 }
 
 impl<'a> ConversationWidget<'a> {
@@ -223,6 +224,7 @@ impl<'a> ConversationWidget<'a> {
             density: crate::settings::ToolDetail::Detailed,
             pinned_segment: None,
             selected_segment: None,
+            detail_hint_enabled: false,
         }
     }
 
@@ -243,6 +245,11 @@ impl<'a> ConversationWidget<'a> {
 
     pub fn with_selected_segment(mut self, selected_segment: Option<usize>) -> Self {
         self.selected_segment = selected_segment;
+        self
+    }
+
+    pub fn with_detail_hint_enabled(mut self, enabled: bool) -> Self {
+        self.detail_hint_enabled = enabled;
         self
     }
 }
@@ -401,7 +408,8 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
         if matches!(self.mode, SegmentRenderMode::Slim) && state.scroll_offset > 0 {
             render_detached_viewport_hint(area, buf, self.theme, state.scroll_offset);
         }
-        if let Some(selected) = self.selected_segment
+        if self.detail_hint_enabled
+            && let Some(selected) = self.selected_segment
             && self
                 .segments
                 .get(selected)
@@ -814,6 +822,7 @@ mod tests {
 
         ConversationWidget::new(&segments, &Alpharius)
             .with_selected_segment(Some(0))
+            .with_detail_hint_enabled(true)
             .render(area, &mut buf, &mut state);
 
         let rendered = buffer_text(&buf, area);

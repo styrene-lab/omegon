@@ -1,44 +1,6 @@
 ---
-source: crates/omegon/src/tui/snapshot_tests.rs
+source: core/crates/omegon/src/tui/snapshot_tests.rs
+assertion_line: 269
 expression: render_to_string(&terminal)
 ---
-│ Ω Dashboard
-│
-│ no active nodes
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
-│
+ Ω project profile Standard/High/Ar…

@@ -23,6 +23,55 @@ pub struct AssistantRenderProps<'a> {
     pub mode: SegmentRenderMode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssistantRenderPlan {
+    pub chrome: AssistantChrome,
+    pub reasoning: AssistantReasoning,
+    pub body: AssistantBody,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssistantChrome {
+    pub bordered: bool,
+    pub identity_line: bool,
+    pub meta_line: bool,
+    pub answer_label: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssistantReasoning {
+    Hidden,
+    SlimSummary,
+    Expanded { max_completed_lines: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssistantBody {
+    MarkdownTranscript,
+}
+
+pub fn plan(props: &AssistantRenderProps<'_>) -> AssistantRenderPlan {
+    let slim = matches!(props.mode, SegmentRenderMode::Slim);
+    AssistantRenderPlan {
+        chrome: AssistantChrome {
+            bordered: !slim,
+            identity_line: !slim,
+            meta_line: !slim && !build_meta_tag(props.meta).is_empty(),
+            answer_label: !slim && !props.text.is_empty(),
+        },
+        reasoning: if props.thinking.is_empty() {
+            AssistantReasoning::Hidden
+        } else if slim {
+            AssistantReasoning::SlimSummary
+        } else {
+            AssistantReasoning::Expanded {
+                max_completed_lines: 6,
+            }
+        },
+        body: AssistantBody::MarkdownTranscript,
+    }
+}
+
 pub fn render(
     props: AssistantRenderProps<'_>,
     area: Rect,
@@ -34,13 +83,14 @@ pub fn render(
         return;
     }
 
+    let render_plan = plan(&props);
     let bg = theme.surface_bg();
     let border_color = if props.complete {
         theme.success()
     } else {
         theme.accent_muted()
     };
-    let block = if matches!(props.mode, SegmentRenderMode::Slim) {
+    let block = if !render_plan.chrome.bordered {
         Block::default()
             .padding(Padding::horizontal(0))
             .style(Style::default().bg(bg))
@@ -69,7 +119,7 @@ pub fn render(
     // Assistant identity line — identify the source, not the current phase.
     // Slim props.mode deliberately omits this chrome so prose remains easy to select
     // and copy like a normal terminal transcript.
-    if !matches!(props.mode, SegmentRenderMode::Slim) {
+    if render_plan.chrome.identity_line {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} ", props.presentation.sigil),
@@ -84,20 +134,18 @@ pub fn render(
 
     // Meta tag line: props.model / provider / tier — dim secondary header.
     // Hidden in slim props.mode to reduce visual noise.
-    if !matches!(props.mode, SegmentRenderMode::Slim) {
-        let meta_tag = build_meta_tag(props.meta);
-        if !meta_tag.is_empty() {
-            lines.push(Line::from(Span::styled(
-                meta_tag,
-                Style::default().fg(theme.border_dim()).bg(bg),
-            )));
-        }
+    if render_plan.chrome.meta_line {
+        lines.push(Line::from(Span::styled(
+            build_meta_tag(props.meta),
+            Style::default().fg(theme.border_dim()).bg(bg),
+        )));
     }
 
     // Reasoning block — stream full reasoning live, collapse after completion.
-    if !props.thinking.is_empty() {
-        let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(props.thinking);
-        if matches!(props.mode, SegmentRenderMode::Slim) {
+    match render_plan.reasoning {
+        AssistantReasoning::Hidden => {}
+        AssistantReasoning::SlimSummary => {
+            let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(props.thinking);
             let row_bg = subtle_tool_row_bg(bg);
             apply_rows_bg(inner, lines.len() as u16, 1, row_bg, buf);
             let preview = think_lines
@@ -128,9 +176,13 @@ pub fn render(
                         .add_modifier(Modifier::ITALIC),
                 ),
             ]));
-        } else {
+        }
+        AssistantReasoning::Expanded {
+            max_completed_lines,
+        } => {
+            let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(props.thinking);
             let show = if props.complete {
-                think_lines.len().min(6)
+                think_lines.len().min(max_completed_lines)
             } else {
                 think_lines.len()
             };
@@ -170,7 +222,7 @@ pub fn render(
         }
     }
 
-    if !props.text.is_empty() && !matches!(props.mode, SegmentRenderMode::Slim) {
+    if render_plan.chrome.answer_label {
         lines.push(Line::from(vec![
             Span::styled("◎ ", Style::default().fg(theme.accent()).bg(bg)),
             Span::styled(

@@ -12,7 +12,7 @@
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Paragraph};
 
 use ratatui::widgets::Scrollbar;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
@@ -196,6 +196,101 @@ impl DashboardHandles {
 }
 
 /// Dashboard state — updated from lifecycle scanning.
+
+#[derive(Debug, Clone, PartialEq)]
+struct ProjectStripProjection {
+    parts: Vec<ProjectStripPart>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ProjectStripPart {
+    Session {
+        turns: u32,
+        tools: u32,
+        compactions: u32,
+    },
+    Context {
+        used_pct: f32,
+        window_k: usize,
+    },
+    Profile {
+        context: String,
+        thinking: String,
+        posture: String,
+    },
+    Git {
+        branch: String,
+    },
+    OpenSpec {
+        active: usize,
+        done: usize,
+        total: usize,
+    },
+    Cleave {
+        done: usize,
+        total: usize,
+    },
+    Attention {
+        label: String,
+        count: usize,
+    },
+    Focus {
+        id: String,
+    },
+}
+
+impl ProjectStripProjection {
+    fn content(&self) -> String {
+        if self.parts.is_empty() {
+            return "idle".to_string();
+        }
+        self.parts
+            .iter()
+            .map(ProjectStripPart::label)
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
+impl ProjectStripPart {
+    fn label(&self) -> String {
+        match self {
+            ProjectStripPart::Session {
+                turns,
+                tools,
+                compactions,
+            } => {
+                format!("session {turns}t/{tools} tools/{compactions} compact")
+            }
+            ProjectStripPart::Context { used_pct, window_k } => {
+                format!("context {used_pct:.0}%/{window_k}k")
+            }
+            ProjectStripPart::Profile {
+                context,
+                thinking,
+                posture,
+            } => {
+                format!("profile {context}/{thinking}/{posture}")
+            }
+            ProjectStripPart::Git { branch } => format!("git {branch}"),
+            ProjectStripPart::OpenSpec {
+                active,
+                done,
+                total,
+            } => {
+                if *total > 0 {
+                    format!("OpenSpec {active} active {done}/{total}")
+                } else {
+                    format!("OpenSpec {active} active")
+                }
+            }
+            ProjectStripPart::Cleave { done, total } => format!("cleave {done}/{total}"),
+            ProjectStripPart::Attention { label, count } => format!("attention {label}:{count}"),
+            ProjectStripPart::Focus { id } => format!("focus {id}"),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct DashboardState {
     pub focused_node: Option<FocusedNodeSummary>,
@@ -345,7 +440,7 @@ impl DashboardState {
     }
 
     pub fn render_themed(&mut self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
-        // Own the full dashboard strip every frame.
+        // Project status strip: a single-line, read-only lifecycle summary.
         let bg = t.bg();
         let fg = t.fg();
         let buf = frame.buffer_mut();
@@ -359,65 +454,91 @@ impl DashboardState {
             }
         }
 
-        let block = Block::default()
-            .borders(Borders::LEFT)
-            .border_type(ratatui::widgets::BorderType::Plain)
-            .border_style(Style::default().fg(if self.sidebar_active {
-                t.accent()
-            } else {
-                t.border_dim()
-            }))
-            .style(Style::default().bg(t.bg()));
-
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        if inner.width < 4 || inner.height < 4 {
+        if area.width == 0 || area.height == 0 {
             return;
         }
 
-        // ── Compute section heights ─────────────────────────────
-        let header_lines = self.build_header_lines(inner.width as usize, t);
-        let focus_lines = self.build_focus_lines(inner.width as usize, t);
+        let line = self.build_project_strip_line(area.width as usize, t);
+        let para = Paragraph::new(line).style(Style::default().bg(bg).fg(fg));
+        frame.render_widget(para, area);
+    }
 
-        let header_h = header_lines.len() as u16;
-        let focus_h = focus_lines.len() as u16;
-
-        // Tree gets all remaining space — OpenSpec changes are now shown
-        // inline on their bound tree nodes, not in a separate section.
-        let tree_h = inner.height.saturating_sub(header_h + focus_h).max(3);
-
-        let chunks = Layout::vertical([
-            Constraint::Length(header_h),
-            Constraint::Length(focus_h),
-            Constraint::Length(tree_h),
-        ])
-        .split(inner);
-
-        // ── Render header ───────────────────────────────────────
-        if header_h > 0 {
-            let para = Paragraph::new(header_lines).style(Style::default().bg(t.bg()).fg(t.fg()));
-            frame.render_widget(para, chunks[0]);
+    fn project_strip_projection(&self) -> ProjectStripProjection {
+        let mut parts = Vec::new();
+        if self.turns > 0 || self.tool_calls > 0 || self.compactions > 0 {
+            parts.push(ProjectStripPart::Session {
+                turns: self.turns,
+                tools: self.tool_calls,
+                compactions: self.compactions,
+            });
         }
-
-        // ── Render focused node ─────────────────────────────────
-        if focus_h > 0 {
-            let para = Paragraph::new(focus_lines).style(Style::default().bg(t.bg()).fg(t.fg()));
-            frame.render_widget(para, chunks[1]);
+        if self.context_window_k > 0 {
+            parts.push(ProjectStripPart::Context {
+                used_pct: self.context_used_pct,
+                window_k: self.context_window_k,
+            });
         }
-
-        // ── Render tree ─────────────────────────────────────────
-        if tree_h > 0 && !self.all_nodes.is_empty() {
-            self.render_tree(chunks[2], frame, t);
-        } else if tree_h > 0 {
-            // No nodes — show hint
-            let hint = Paragraph::new(Line::from(Span::styled(
-                " no active nodes",
-                Style::default().fg(t.dim()),
-            )))
-            .style(Style::default().bg(t.bg()));
-            frame.render_widget(hint, chunks[2]);
+        if let Some(harness) = &self.harness {
+            parts.push(ProjectStripPart::Profile {
+                context: harness.context_class.clone(),
+                thinking: harness.thinking_level.clone(),
+                posture: harness.posture.clone(),
+            });
+            if let Some(branch) = &harness.git_branch {
+                parts.push(ProjectStripPart::Git {
+                    branch: branch.clone(),
+                });
+            }
         }
+        if !self.active_changes.is_empty() {
+            parts.push(ProjectStripPart::OpenSpec {
+                active: self.active_changes.len(),
+                done: self.active_changes.iter().map(|c| c.done_tasks).sum(),
+                total: self.active_changes.iter().map(|c| c.total_tasks).sum(),
+            });
+        }
+        if let Some(cleave) = &self.cleave
+            && cleave.active
+        {
+            parts.push(ProjectStripPart::Cleave {
+                done: cleave.completed,
+                total: cleave.total_children,
+            });
+        }
+        if !self.degraded_nodes.is_empty() {
+            parts.push(ProjectStripPart::Attention {
+                label: "degraded".to_string(),
+                count: self.degraded_nodes.len(),
+            });
+        } else if self.status_counts.blocked > 0 {
+            parts.push(ProjectStripPart::Attention {
+                label: "blocked".to_string(),
+                count: self.status_counts.blocked,
+            });
+        }
+        if let Some(node) = &self.focused_node {
+            parts.push(ProjectStripPart::Focus {
+                id: node.id.clone(),
+            });
+        }
+        ProjectStripProjection { parts }
+    }
+
+    fn build_project_strip_line<'a>(&self, w: usize, t: &dyn Theme) -> Line<'a> {
+        let mut spans: Vec<Span<'a>> = Vec::new();
+        spans.push(Span::styled(
+            " Ω ",
+            Style::default().fg(t.accent()).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled("project", Style::default().fg(t.muted())));
+
+        let content = self.project_strip_projection().content();
+        let remaining = w.saturating_sub(11);
+        spans.push(Span::styled(
+            format!(" {}", widgets::truncate_str(&content, remaining, "…")),
+            Style::default().fg(t.fg()),
+        ));
+        Line::from(spans)
     }
 
     // ── Section builders ────────────────────────────────────────
@@ -993,7 +1114,7 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_with_focused_node() {
+    fn project_strip_with_focused_node() {
         let mut state = DashboardState::default();
         state.focused_node = Some(FocusedNodeSummary {
             id: "test-node".into(),
@@ -1018,7 +1139,7 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_with_focused_node_openspec() {
+    fn project_strip_with_focused_node_openspec() {
         let mut state = DashboardState::default();
         state.focused_node = Some(FocusedNodeSummary {
             id: "my-feat".into(),
@@ -1043,11 +1164,8 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_with_changes() {
-        // OpenSpec changes are now shown inline on their bound tree nodes,
-        // not in a separate sidebar section.  A change with no bound node
-        // produces no visible text — that is the correct new behaviour.
-        // A change bound to a node should render the stage icon on that node.
+    fn project_strip_with_changes() {
+        // OpenSpec changes are summarized in the project strip.
         let mut state = DashboardState::default();
         state.active_changes = vec![ChangeSummary {
             name: "my-change".into(),
@@ -1055,17 +1173,6 @@ mod tests {
             done_tasks: 3,
             total_tasks: 8,
         }];
-        // Add a node that references the change
-        state.all_nodes.push(NodeSummary {
-            id: "feat-node".into(),
-            title: "Feature node".into(),
-            status: NodeStatus::Exploring,
-            parent: None,
-            open_questions: 0,
-            openspec_change: Some("my-change".into()),
-            priority: None,
-            issue_type: None,
-        });
         let backend = TestBackend::new(36, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
@@ -1075,21 +1182,12 @@ mod tests {
             .unwrap();
 
         let text = buf_text(&terminal);
-        // The node id should appear, and 3/8 task progress should be inline
-        assert!(
-            text.contains("feat-node"),
-            "should render bound node: {text}"
-        );
-        assert!(
-            text.contains("3/8"),
-            "should render task progress inline: {text}"
-        );
+        assert!(text.contains("OpenSpec 1 active 3/8"), "{text}");
     }
 
     #[test]
     fn dashboard_with_cleave_state() {
-        // Cleave progress is stored in DashboardState but rendered in the
-        // instruments panel, not the sidebar. Verify it's populated.
+        // Cleave progress is summarized in the one-line project strip.
         let mut state = DashboardState::default();
         state.cleave = Some(CleaveProgress {
             active: true,
@@ -1116,8 +1214,15 @@ mod tests {
             total_tokens_in: 0,
             total_tokens_out: 0,
         });
-        assert!(state.cleave.as_ref().unwrap().active);
-        assert_eq!(state.cleave.as_ref().unwrap().total_children, 3);
+        let backend = TestBackend::new(80, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render_themed(frame.area(), frame, &super::super::theme::Alpharius);
+            })
+            .unwrap();
+        let text = buf_text(&terminal);
+        assert!(text.contains("cleave 1/3"), "{text}");
     }
 
     #[test]
@@ -1161,7 +1266,7 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_with_status_counts() {
+    fn project_strip_with_status_counts() {
         let mut state = DashboardState::default();
         state.status_counts = StatusCounts {
             total: 140,
@@ -1169,7 +1274,7 @@ mod tests {
             decided: 5,
             exploring: 5,
             implemented: 100,
-            blocked: 0,
+            blocked: 4,
             deferred: 3,
             open_questions: 24,
         };
@@ -1182,11 +1287,11 @@ mod tests {
             .unwrap();
 
         let text = buf_text(&terminal);
-        assert!(text.contains("140"), "should show total: {text}");
+        assert!(text.contains("attention blocked:4"), "{text}");
     }
 
     #[test]
-    fn dashboard_with_tree_nodes() {
+    fn project_strip_ignores_tree_nodes() {
         let mut state = DashboardState::default();
         state.status_counts.total = 10;
         state.all_nodes = vec![
@@ -1220,7 +1325,14 @@ mod tests {
             .unwrap();
 
         let text = buf_text(&terminal);
-        assert!(text.contains("rust-tui"), "should show tree node: {text}");
+        assert!(
+            !text.contains("rust-tui"),
+            "tree nodes should not render in strip: {text}"
+        );
+        assert!(
+            text.contains("idle"),
+            "strip should stay summary-only: {text}"
+        );
     }
 
     #[test]
@@ -1425,7 +1537,7 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_with_harness_status() {
+    fn project_strip_with_harness_status() {
         let mut state = DashboardState::default();
         state.harness = Some(crate::status::HarnessStatus {
             active_persona: Some(crate::status::PersonaSummary {
@@ -1505,13 +1617,8 @@ mod tests {
             })
             .unwrap();
 
-        // Harness info is no longer rendered in the sidebar (it's in the footer
-        // engine panel). Just verify the dashboard renders without panic.
         let text = buf_text(&terminal);
-        assert!(
-            text.contains("Dashboard"),
-            "should render dashboard title: {text}"
-        );
+        assert!(text.contains("profile Compact/Medium/Architect"), "{text}");
     }
 
     #[test]
@@ -1543,7 +1650,7 @@ mod tests {
     }
 
     #[test]
-    fn cleave_not_rendered_in_sidebar() {
+    fn project_strip_renders_cleave_progress() {
         // Cleave progress is shown in the instruments panel, not the sidebar.
         // The sidebar should never contain "cleave" regardless of state.
         let mut state = DashboardState::default();
@@ -1573,7 +1680,7 @@ mod tests {
             total_tokens_out: 0,
         });
 
-        let backend = TestBackend::new(50, 30);
+        let backend = TestBackend::new(80, 1);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
@@ -1582,10 +1689,7 @@ mod tests {
             .unwrap();
 
         let text = buf_text(&terminal);
-        assert!(
-            !text.contains("cleave"),
-            "cleave should not appear in sidebar: {text}"
-        );
+        assert!(text.contains("cleave 1/2"), "{text}");
     }
 
     #[test]
@@ -1656,7 +1760,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_tree_renders_hint() {
+    fn empty_project_strip_renders_idle() {
         let mut state = DashboardState::default();
         // No nodes at all
         let backend = TestBackend::new(36, 20);
@@ -1668,14 +1772,11 @@ mod tests {
             .unwrap();
 
         let text = buf_text(&terminal);
-        assert!(
-            text.contains("no active") || text.contains("Dashboard"),
-            "should show hint or title: {text}"
-        );
+        assert!(text.contains("Ω project idle"), "{text}");
     }
 
     #[test]
-    fn degraded_nodes_render_in_tree() {
+    fn project_strip_counts_degraded_nodes() {
         let mut state = DashboardState::default();
         state.status_counts.total = 5;
         state.all_nodes = vec![NodeSummary {
@@ -1704,18 +1805,19 @@ mod tests {
             .unwrap();
 
         let text = buf_text(&terminal);
+        assert!(text.contains("attention degraded:1"), "{text}");
         assert!(
-            text.contains("broken-node"),
-            "should render degraded node in tree: {text}"
+            !text.contains("broken-node"),
+            "degraded node details should not render: {text}"
         );
         assert!(
-            text.contains("good-node"),
-            "should still render valid nodes: {text}"
+            !text.contains("good-node"),
+            "tree nodes should not render: {text}"
         );
     }
 
     #[test]
-    fn degraded_count_in_header() {
+    fn project_strip_shows_degraded_attention() {
         let mut state = DashboardState::default();
         state.status_counts.total = 10;
         state.degraded_nodes = vec![
@@ -1742,10 +1844,6 @@ mod tests {
             .unwrap();
 
         let text = buf_text(&terminal);
-        // Should show ⚠2 in the header
-        assert!(
-            text.contains("⚠2") || text.contains("⚠ 2"),
-            "should show degraded count badge: {text}"
-        );
+        assert!(text.contains("attention degraded:2"), "{text}");
     }
 }

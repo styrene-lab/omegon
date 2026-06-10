@@ -45,6 +45,16 @@ pub mod widgets;
 
 #[cfg(test)]
 mod snapshot_tests;
+
+fn should_toast_slash_response(response: &str) -> bool {
+    let trimmed = response.trim();
+    !trimmed.is_empty()
+        && trimmed.lines().count() <= 1
+        && trimmed.chars().count() <= 120
+        && !trimmed.starts_with("Usage:")
+        && !trimmed.contains("Unknown")
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -1780,16 +1790,12 @@ impl App {
         }
         if enabled {
             self.show_toast(
-                "Terminal-native selection active — drag to select, then use your terminal's copy shortcut",
+                "Mouse passthrough — terminal selection owns drag; Ctrl+Shift+T restores app mouse",
                 ratatui_toaster::ToastType::Info,
             );
         } else {
             self.show_toast(
-                "Mouse interaction mode enabled — pane mouse interaction restored",
-                ratatui_toaster::ToastType::Info,
-            );
-            self.show_toast(
-                "Mouse interaction mode enabled — use /mouse off for terminal-native selection",
+                "App mouse restored — wheel/click panes; Ctrl+Shift+Y copies latest answer",
                 ratatui_toaster::ToastType::Info,
             );
         }
@@ -3339,10 +3345,7 @@ impl App {
                     SlashResult::Display(response) => {
                         self.history.push(action.raw.clone());
                         self.history_idx = None;
-                        self.open_command_panel(CommandPanel::from_slash(
-                            action.raw,
-                            response.clone(),
-                        ));
+                        self.show_slash_response(&action.raw, &response);
                         UiActionOutcome::accepted_message(response)
                     }
                     SlashResult::Handled => {
@@ -3867,7 +3870,6 @@ impl App {
         });
 
         let show_dashboard = layout_plan.show_dashboard;
-        let dash_area = layout_plan.dashboard_area.unwrap_or(Rect::ZERO);
         let main_area = layout_plan.main_area;
         let conversation_area = layout_plan.conversation_area;
         let active_tool_stream_area = layout_plan.active_tool_stream_area;
@@ -3877,6 +3879,16 @@ impl App {
         let editor_info_area = layout_plan.editor_info_area;
         let status_area = layout_plan.status_area;
         let footer_area = layout_plan.footer_area;
+        let dash_area = if show_dashboard {
+            Rect::new(
+                layout_plan.main_area.x,
+                footer_area.y.saturating_sub(1),
+                layout_plan.main_area.width,
+                1,
+            )
+        } else {
+            Rect::ZERO
+        };
 
         // Render tab bar + conversation/widget content
         let t = &self.theme;
@@ -3919,7 +3931,8 @@ impl App {
                 })
                 .with_density(density)
                 .with_pinned_segment(pinned_segment)
-                .with_selected_segment(selected_segment);
+                .with_selected_segment(selected_segment)
+                .with_detail_hint_enabled(self.focus_mode);
             frame.render_stateful_widget(conv_widget, content_area, conv_state);
         } else {
             // Render extension widget with schema-aware formatting
@@ -4039,7 +4052,7 @@ impl App {
             }
         }
 
-        // Dashboard panel (right side)
+        // Project dashboard strip (above footer/tooling/instruments)
         if show_dashboard && dash_area.width > 0 {
             self.dashboard_area = Some(dash_area);
             self.dashboard.render_themed(dash_area, frame, t.as_ref());
@@ -4884,6 +4897,14 @@ impl App {
         }
     }
 
+    fn show_slash_response(&mut self, command: &str, response: &str) {
+        if should_toast_slash_response(response) {
+            self.show_command_toast(CommandToast::new(response, CommandSeverity::Info));
+        } else {
+            self.open_command_panel(CommandPanel::from_slash(command, response));
+        }
+    }
+
     fn open_command_panel(&mut self, panel: CommandPanel) {
         self.command_panel = Some(panel);
     }
@@ -4921,8 +4942,8 @@ impl App {
         ("help", "show available commands", &[]),
         (
             "copy",
-            "copy selected segment, latest response, or session",
-            &["raw", "plain", "latest", "session"],
+            "copy selected segment, latest answer, or session",
+            &["raw", "plain", "answer", "latest", "session"],
         ),
         (
             "transcript",
@@ -5162,6 +5183,32 @@ impl App {
                 }
                 if args == "tutorial demo" {
                     return self.handle_tutorial("demo");
+                }
+                if args == "copy" {
+                    return SlashResult::Display(
+                        "Copy contract:
+  Ctrl+Shift+Y       copy latest answer as plaintext
+  /copy answer       copy latest answer as plaintext
+  /copy answer raw   copy latest answer with markdown
+  /copy plain        copy selected segment as plaintext
+  /copy session      copy full transcript
+
+Scroll transcript:
+  PgUp/PgDn          scroll transcript
+  Shift+Up/Down      fine scroll transcript"
+                            .into(),
+                    );
+                }
+                if args == "mouse" {
+                    return SlashResult::Display(
+                        "Mouse contract:
+  App mouse          wheel/click panes
+  Mouse passthrough  terminal drag selects text
+  Ctrl+Shift+T       toggle app mouse / mouse passthrough
+  /mouse on          restore app mouse
+  /mouse off         enable terminal-native drag selection"
+                            .into(),
+                    );
                 }
                 if args == "next" {
                     return self.handle_tutorial_next();
@@ -6228,12 +6275,13 @@ impl App {
                     self.copy_selected_conversation_segment_with_mode(SegmentExportMode::Raw);
                     SlashResult::Handled
                 }
-                "latest" | "response" | "assistant" => {
-                    self.copy_latest_assistant_response(SegmentExportMode::Raw);
+                "answer" | "answer plain" | "answer plaintext" | "latest plain"
+                | "latest plaintext" | "response plain" | "assistant plain" => {
+                    self.copy_latest_assistant_response(SegmentExportMode::Plaintext);
                     SlashResult::Handled
                 }
-                "latest plain" | "latest plaintext" | "response plain" | "assistant plain" => {
-                    self.copy_latest_assistant_response(SegmentExportMode::Plaintext);
+                "answer raw" | "latest" | "response" | "assistant" => {
+                    self.copy_latest_assistant_response(SegmentExportMode::Raw);
                     SlashResult::Handled
                 }
                 "plain" | "plaintext" => {
@@ -6245,7 +6293,7 @@ impl App {
                     SlashResult::Handled
                 }
                 _ => SlashResult::Display(
-                    "Usage: /copy [raw|plain|latest|latest plain|session]".into(),
+                    "Usage: /copy [raw|plain|answer|answer raw|latest|session]".into(),
                 ),
             },
 
@@ -9148,6 +9196,9 @@ pub async fn run_tui(
                         (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
                             app.editor.kill_to_end();
                         }
+                        (KeyCode::Char('Y'), KeyModifiers::CONTROL) => {
+                            app.copy_latest_assistant_response(SegmentExportMode::Plaintext);
+                        }
                         (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
                             if matches!(app.pane_focus, PaneFocus::Conversation) {
                                 app.copy_selected_conversation_segment();
@@ -9916,7 +9967,7 @@ mod slash_command_parsing_tests {
         );
         assert_eq!(
             slim_operator_hint(false, false, true, active, &context),
-            "copy mode · select text · /mouse on exits"
+            "mouse passthrough · terminal drag selects · Ctrl+Shift+T restores app mouse"
         );
         assert_eq!(
             slim_operator_hint(false, false, false, active, &context),
@@ -9940,7 +9991,7 @@ mod slash_command_parsing_tests {
         );
         assert_eq!(
             slim_operator_hint(false, false, false, SlimPlanHintState::None, &context),
-            "transcript live · no pinned plan"
+            "transcript live · PgUp/PgDn scroll · Ctrl+Shift+Y copy answer"
         );
     }
 
