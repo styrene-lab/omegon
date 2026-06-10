@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Add affected-crate detection plus scoped `just affected`, `just test-changed`, `just check-changed`, and `just clippy-changed` recipes for faster local validation of changed Rust workspace slices.
+
 ### Changed
 
 - TUI conversation rendering now marks the explicitly selected segment, shows queued prompt info below the operator editor, and shows an `Enter: details` hint only for selected segments with detail affordances.

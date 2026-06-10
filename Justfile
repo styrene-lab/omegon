@@ -37,6 +37,53 @@ test-crate crate:
 test-filter pattern:
     {{cargo}} test -p omegon '{{pattern}}'
 
+# Show Rust workspace crates affected by changed paths.
+affected *args:
+    python3 scripts/affected_crates.py {{args}}
+
+# Run tests only for Rust crates affected by changed paths.
+test-changed *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    crates="$(python3 scripts/affected_crates.py --format shell {{args}})"
+    if [ -z "$crates" ]; then
+        echo "No affected Rust crates; skipping cargo test."
+        exit 0
+    fi
+    for crate in $crates; do
+        echo "── cargo test -p $crate ──"
+        {{cargo}} test -p "$crate"
+    done
+
+# Type check only Rust crates affected by changed paths.
+check-changed *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    crates="$(python3 scripts/affected_crates.py --format shell {{args}})"
+    if [ -z "$crates" ]; then
+        echo "No affected Rust crates; skipping cargo check."
+        exit 0
+    fi
+    for crate in $crates; do
+        echo "── cargo check -p $crate ──"
+        {{cargo}} check -p "$crate"
+    done
+
+# Run clippy only for Rust crates affected by changed paths.
+clippy-changed *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    crates="$(python3 scripts/affected_crates.py --format shell {{args}})"
+    if [ -z "$crates" ]; then
+        echo "No affected Rust crates; skipping cargo clippy."
+        exit 0
+    fi
+    {{cargo}} fmt --all --check
+    for crate in $crates; do
+        echo "── cargo clippy -p $crate --all-targets ──"
+        {{cargo}} clippy -p "$crate" --all-targets -- -D warnings
+    done
+
 # Type check without building (fast feedback)
 check:
     {{cargo}} check --workspace
