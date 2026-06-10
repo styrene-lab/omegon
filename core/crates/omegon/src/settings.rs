@@ -378,6 +378,14 @@ pub struct Settings {
     #[serde(default = "default_terminal_tool")]
     pub terminal_tool: bool,
 
+    /// Experimental native context compression controls.
+    ///
+    /// Compression is opt-in while the headroom subsystem is benchmarked and
+    /// dogfooded. `enabled=false` means integration points must leave payloads
+    /// unmodified except for their existing truncation behavior.
+    #[serde(default)]
+    pub headroom: HeadroomRuntimeConfig,
+
     /// How long clipboard pastes are retained on disk before automatic
     /// deletion at session start, in hours. Default 24h. Set to 0 to
     /// disable automatic deletion entirely. The setting also feeds the
@@ -395,6 +403,114 @@ pub struct Settings {
 
 fn default_clipboard_retention_hours() -> u64 {
     24
+}
+
+/// Experimental native compression mode for context/tool-output surfaces.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HeadroomCompressionMode {
+    /// Compression integration points are inactive.
+    #[default]
+    Off,
+    /// Compression runs only when explicitly requested by a tool/operator action.
+    Manual,
+    /// Compression is allowed at enabled integration points using conservative policy.
+    On,
+}
+
+impl HeadroomCompressionMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" | "false" | "disabled" => Some(Self::Off),
+            "manual" | "explicit" | "requested" => Some(Self::Manual),
+            "on" | "true" | "enabled" | "auto" => Some(Self::On),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Manual => "manual",
+            Self::On => "on",
+        }
+    }
+}
+
+/// Opt-in feature flag surface for native headroom compression.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeadroomRuntimeConfig {
+    /// Master switch. Defaults to false until benchmark/dogfood evidence is strong enough.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Activation mode for integration points.
+    #[serde(default)]
+    pub mode: HeadroomCompressionMode,
+    /// Emit validation/savings metadata in tool result details when compression runs.
+    #[serde(default = "default_headroom_collect_metrics")]
+    pub collect_metrics: bool,
+    /// Preserve exact originals behind CCR retrieval handles.
+    #[serde(default = "default_headroom_reversible")]
+    pub reversible: bool,
+    /// Minimum payload size before automatic compression is allowed.
+    #[serde(default = "default_headroom_min_bytes")]
+    pub min_bytes: usize,
+    /// Target compressed payload size for conservative automatic compression.
+    #[serde(default = "default_headroom_target_bytes")]
+    pub target_bytes: usize,
+    /// Optional local semantic compression/evaluation model. None means deterministic only.
+    #[serde(default)]
+    pub local_model: Option<String>,
+}
+
+impl Default for HeadroomRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: HeadroomCompressionMode::Off,
+            collect_metrics: default_headroom_collect_metrics(),
+            reversible: default_headroom_reversible(),
+            min_bytes: default_headroom_min_bytes(),
+            target_bytes: default_headroom_target_bytes(),
+            local_model: None,
+        }
+    }
+}
+
+impl HeadroomRuntimeConfig {
+    pub fn effective_enabled(&self) -> bool {
+        self.enabled && !matches!(self.mode, HeadroomCompressionMode::Off)
+    }
+
+    pub fn summary(&self) -> String {
+        let model = self.local_model.as_deref().unwrap_or("deterministic");
+        format!(
+            "enabled={} mode={} reversible={} metrics={} min_bytes={} target_bytes={} model={}",
+            self.enabled,
+            self.mode.as_str(),
+            self.reversible,
+            self.collect_metrics,
+            self.min_bytes,
+            self.target_bytes,
+            model
+        )
+    }
+}
+
+fn default_headroom_collect_metrics() -> bool {
+    true
+}
+
+fn default_headroom_reversible() -> bool {
+    true
+}
+
+fn default_headroom_min_bytes() -> usize {
+    50 * 1024
+}
+
+fn default_headroom_target_bytes() -> usize {
+    16 * 1024
 }
 
 /// Tool card information density in the conversation view.
@@ -664,6 +780,7 @@ impl Default for Settings {
             mouse: true,
             sandbox: false,
             terminal_tool: true,
+            headroom: HeadroomRuntimeConfig::default(),
             clipboard_retention_hours: default_clipboard_retention_hours(),
             posture_disabled_tools: Vec::new(),
             posture_enabled_tools: Vec::new(),

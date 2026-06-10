@@ -31,6 +31,51 @@ Omegon 0.27 will implement a native Rust compression subsystem inspired by Headr
 
 Omegon integration should first target host-context/read and large tool result boundaries, where today's behavior is hard truncation. The desired behavior is a compact high-signal summary plus a retrieval handle for exact original content.
 
+## Experimental opt-in surface
+
+Native compression remains disabled by default while Omegon dogfoods the subsystem and collects benchmark evidence. Integration points must check the runtime feature gate before modifying prompt/tool payloads.
+
+Runtime settings carry the experimental surface:
+
+```rust
+pub struct HeadroomRuntimeConfig {
+    pub enabled: bool,
+    pub mode: HeadroomCompressionMode, // off | manual | on
+    pub collect_metrics: bool,
+    pub reversible: bool,
+    pub min_bytes: usize,
+    pub target_bytes: usize,
+    pub local_model: Option<String>,
+}
+```
+
+Defaults are conservative:
+
+- `enabled = false`
+- `mode = off`
+- `collect_metrics = true`
+- `reversible = true`
+- `min_bytes = 50 KiB`
+- `target_bytes = 16 KiB`
+- `local_model = None` (deterministic-only)
+
+The agent-facing control surface is `harness_settings` with `action = "set_headroom_compression"`:
+
+```json
+{"action":"set_headroom_compression","value":"manual"}
+{"action":"set_headroom_compression","value":"on","min_bytes":102400,"target_bytes":24576}
+{"action":"set_headroom_compression","value":"on","local_model":"qwen2.5-coder:7b"}
+{"action":"set_headroom_compression","value":"off"}
+```
+
+Mode semantics:
+
+- `off`: no automatic compression. Existing truncation behavior remains unchanged.
+- `manual`: compression may run only for explicit tool/operator actions. This is the dogfood default when an operator opts in.
+- `on`: enabled integration points may compress automatically using conservative policy.
+
+No mode may silently download, start, or require a local semantic model. If `local_model` is configured but unavailable, the deterministic compressor remains the fallback and validation metadata should report the fallback.
+
 ## Compression model strategy
 
 Omegon should treat "compression model" as a pluggable local capability, not as a required dependency for the native subsystem.

@@ -8,6 +8,7 @@
 //! - `get` — read current settings (model, thinking, context class, persona, etc.)
 //! - `set_context_class` — switch context window class (Squad/Maniple/Clan/Legion)
 //! - `compact` — request context compaction before next turn
+//! - `set_headroom_compression` — opt in/out of experimental native compression
 //! - `stats` — session telemetry (turns, tool calls, duration, context usage)
 //! - `memory_stats` — memory system stats (facts, episodes, edges)
 //! - `sessions` — list saved sessions
@@ -52,7 +53,8 @@ impl Feature for HarnessSettings {
             name: crate::tool_registry::harness_settings::HARNESS_SETTINGS.into(),
             label: "harness_settings".into(),
             description: "Read or modify harness settings. Actions: get (current state), \
-                set_context_class (Squad/Maniple/Clan/Legion), compact (trigger compaction), \
+                set_context_class (Squad/Maniple/Clan/Legion), set_headroom_compression \
+                (experimental opt-in native compression), compact (trigger compaction), \
                 stats (session telemetry), memory_stats (fact counts), sessions (saved sessions)."
                 .into(),
             parameters: json!({
@@ -60,12 +62,26 @@ impl Feature for HarnessSettings {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["get", "set_context_class", "compact", "stats", "memory_stats", "sessions"],
+                        "enum": ["get", "set_context_class", "set_headroom_compression", "compact", "stats", "memory_stats", "sessions"],
                         "description": "What to do"
                     },
                     "value": {
                         "type": "string",
-                        "description": "For set_context_class: Squad, Maniple, Clan, or Legion"
+                        "description": "For set_context_class: Squad, Maniple, Clan, or Legion. For set_headroom_compression: off, manual, or on."
+                    },
+                    "local_model": {
+                        "type": "string",
+                        "description": "Optional local semantic compression/evaluation model name. Omit for deterministic-only compression."
+                    },
+                    "min_bytes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional minimum payload size before compression is allowed."
+                    },
+                    "target_bytes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional target compressed payload size."
                     }
                 },
                 "required": ["action"]
@@ -96,7 +112,8 @@ impl Feature for HarnessSettings {
                      - **Context class**: {}\n\
                      - **Context window**: {} tokens\n\
                      - **Max turns**: {}\n\
-                     - **Tool display**: {}",
+                     - **Tool display**: {}\n\
+                     - **Headroom compression**: {}",
                     s.model,
                     s.thinking.icon(),
                     s.thinking.as_str(),
@@ -104,6 +121,7 @@ impl Feature for HarnessSettings {
                     s.context_window,
                     s.max_turns,
                     s.tool_detail.as_str(),
+                    s.headroom.summary(),
                 );
                 Ok(text_result(&out))
             }
@@ -129,6 +147,53 @@ impl Feature for HarnessSettings {
                         value
                     )))
                 }
+            }
+
+            "set_headroom_compression" => {
+                let value = args
+                    .get("value")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("manual");
+                let Some(mode) = crate::settings::HeadroomCompressionMode::parse(value) else {
+                    return Ok(error_result(&format!(
+                        "Unknown headroom compression mode: '{}'. Options: off, manual, on",
+                        value
+                    )));
+                };
+
+                let min_bytes = args
+                    .get("min_bytes")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+                let target_bytes = args
+                    .get("target_bytes")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+                let local_model = args
+                    .get("local_model")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string);
+
+                let mut s = self.settings.lock().unwrap();
+                s.headroom.mode = mode;
+                s.headroom.enabled = !matches!(mode, crate::settings::HeadroomCompressionMode::Off);
+                if let Some(min_bytes) = min_bytes {
+                    s.headroom.min_bytes = min_bytes;
+                }
+                if let Some(target_bytes) = target_bytes {
+                    s.headroom.target_bytes = target_bytes;
+                }
+                if local_model.is_some() {
+                    s.headroom.local_model = local_model;
+                }
+                let summary = s.headroom.summary();
+                drop(s);
+
+                Ok(text_result(&format!(
+                    "Experimental headroom compression → {summary}\n\nThis opt-in gate keeps compression disabled by default until dogfooding and benchmark evidence justify enabling it globally."
+                )))
             }
 
             "compact" => {
@@ -259,7 +324,7 @@ impl Feature for HarnessSettings {
             }
 
             other => Ok(error_result(&format!(
-                "Unknown action: '{}'. Options: get, set_context_class, compact, stats, memory_stats, sessions",
+                "Unknown action: '{}'. Options: get, set_context_class, set_headroom_compression, compact, stats, memory_stats, sessions",
                 other
             ))),
         }
