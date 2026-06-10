@@ -19,7 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::mutation::{CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest};
+use crate::lifecycle::mutation::{CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -472,11 +472,12 @@ impl LifecycleFeature {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("question required"))?;
 
-                let mut node = get_node_clone(id)?;
-                design::update_node(&mut node, |n| {
-                    n.open_questions.push(question.to_string());
-                })?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.add_design_node_question(
+                    UpdateDesignNodeQuestionRequest {
+                        id: id.to_string(),
+                        question: question.to_string(),
+                    },
+                )?;
                 Ok(text_result(&format!("Added question to '{id}'")))
             }
 
@@ -486,11 +487,12 @@ impl LifecycleFeature {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("question required"))?;
 
-                let mut node = get_node_clone(id)?;
-                design::update_node(&mut node, |n| {
-                    n.open_questions.retain(|q| q != question);
-                })?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.remove_design_node_question(
+                    UpdateDesignNodeQuestionRequest {
+                        id: id.to_string(),
+                        question: question.to_string(),
+                    },
+                )?;
                 Ok(text_result(&format!("Removed question from '{id}'")))
             }
 

@@ -46,6 +46,12 @@ pub struct SetDesignNodeStatusResult {
     pub status: NodeStatus,
 }
 
+#[derive(Debug, Clone)]
+pub struct UpdateDesignNodeQuestionRequest {
+    pub id: String,
+    pub question: String,
+}
+
 impl LifecycleMutationService {
     pub fn new(
         repo_path: PathBuf,
@@ -97,13 +103,7 @@ impl LifecycleMutationService {
         &self,
         req: SetDesignNodeStatusRequest,
     ) -> anyhow::Result<SetDesignNodeStatusResult> {
-        let mut node = self
-            .provider
-            .lock()
-            .unwrap()
-            .get_node(&req.id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Node '{}' not found", req.id))?;
+        let mut node = self.get_node_clone(&req.id)?;
         let node_title = node.title.clone();
         let opsx_target = NodeState::parse(req.status.as_str())
             .ok_or_else(|| anyhow::anyhow!("Invalid status for FSM: {}", req.status.as_str()))?;
@@ -138,6 +138,38 @@ impl LifecycleMutationService {
         })
     }
 
+    pub fn add_design_node_question(
+        &self,
+        req: UpdateDesignNodeQuestionRequest,
+    ) -> anyhow::Result<()> {
+        let mut node = self.get_node_clone(&req.id)?;
+        design::update_node(&mut node, |n| {
+            n.open_questions.push(req.question.clone());
+        })?;
+        self.provider.lock().unwrap().refresh();
+        Ok(())
+    }
+
+    pub fn remove_design_node_question(
+        &self,
+        req: UpdateDesignNodeQuestionRequest,
+    ) -> anyhow::Result<()> {
+        let mut node = self.get_node_clone(&req.id)?;
+        design::update_node(&mut node, |n| {
+            n.open_questions.retain(|q| q != &req.question);
+        })?;
+        self.provider.lock().unwrap().refresh();
+        Ok(())
+    }
+
+    fn get_node_clone(&self, id: &str) -> anyhow::Result<DesignNode> {
+        self.provider
+            .lock()
+            .unwrap()
+            .get_node(id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Node '{id}' not found"))
+    }
 }
 
 fn bootstrap_node_to_opsx(opsx: &mut OpsxLifecycle<JsonFileStore>, node: &DesignNode) {
@@ -216,5 +248,42 @@ mod tests {
         assert_eq!(result.node_title, "New Node");
         assert_eq!(provider.lock().unwrap().get_node("new-node").unwrap().status, NodeStatus::Exploring);
         assert_eq!(opsx.lock().unwrap().get_node("new-node").unwrap().state, NodeState::Exploring);
+    }
+
+    #[test]
+    fn question_mutations_update_markdown_and_refresh_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_path_buf();
+        let provider = Arc::new(Mutex::new(LifecycleContextProvider::new(&repo)));
+        let opsx = Arc::new(Mutex::new(
+            OpsxLifecycle::load(JsonFileStore::new(&repo)).unwrap(),
+        ));
+        let service = LifecycleMutationService::new(repo, Arc::clone(&provider), Arc::clone(&opsx));
+        service
+            .create_design_node(CreateDesignNodeRequest {
+                id: "new-node".to_string(),
+                title: "New Node".to_string(),
+                parent: None,
+                status: None,
+                tags: vec![],
+                overview: "overview".to_string(),
+            })
+            .unwrap();
+
+        service
+            .add_design_node_question(UpdateDesignNodeQuestionRequest {
+                id: "new-node".to_string(),
+                question: "What next?".to_string(),
+            })
+            .unwrap();
+        assert_eq!(provider.lock().unwrap().get_node("new-node").unwrap().open_questions, vec!["What next?"]);
+
+        service
+            .remove_design_node_question(UpdateDesignNodeQuestionRequest {
+                id: "new-node".to_string(),
+                question: "What next?".to_string(),
+            })
+            .unwrap();
+        assert!(provider.lock().unwrap().get_node("new-node").unwrap().open_questions.is_empty());
     }
 }

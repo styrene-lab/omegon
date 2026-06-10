@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Route design-tree question add/remove mutations through the lifecycle mutation service with direct service coverage.
 - Route design-tree status mutation through the lifecycle mutation service while keeping descendant checks, memory ingestion, and tool rendering adapter-side.
 - Introduce a lifecycle mutation service and route design-tree node creation through it while keeping tool JSON parsing/rendering adapter-side.
 - Extract design-tree ready/blocked/frontier query policy into a lifecycle query module with direct projection tests.
