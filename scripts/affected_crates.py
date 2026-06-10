@@ -108,11 +108,26 @@ def closure(names: set[str], reverse: dict[str, set[str]]) -> set[str]:
 
 
 def is_docs_only(paths: list[str]) -> bool:
+    """Return true only for low-risk documentation/content paths.
+
+    Be deliberately conservative. Directories such as `site/`, `ai/`, and
+    `skills/` can contain executable/configuration artifacts as well as prose;
+    only known content extensions should skip Rust validation.
+    """
     if not paths:
         return False
-    prefixes = ("docs/", "ai/", "openspec/", "site/", "skills/")
-    suffixes = (".md", ".txt", ".png", ".jpg", ".svg")
-    return all(path.startswith(prefixes) or path.endswith(suffixes) for path in paths)
+    doc_prefixes = ("docs/", "openspec/")
+    content_prefixes = ("ai/design/", "ai/memory/", "skills/")
+    content_suffixes = (".md", ".txt", ".png", ".jpg", ".jpeg", ".gif", ".svg")
+    for path in paths:
+        if path == "CHANGELOG.md":
+            continue
+        if path.startswith(doc_prefixes) and path.endswith(content_suffixes):
+            continue
+        if path.startswith(content_prefixes) and path.endswith(content_suffixes):
+            continue
+        return False
+    return True
 
 
 def affected(base: str | None) -> Affected:

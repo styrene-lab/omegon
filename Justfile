@@ -45,6 +45,10 @@ affected *args:
 test-profile *args:
     python3 scripts/test_profile.py {{args}}
 
+# Run Python unit tests for developer tooling scripts.
+test-dev-scripts:
+    python3 -m unittest scripts/test_affected_crates.py scripts/test_test_profile.py
+
 # Run tests only for Rust crates affected by changed paths.
 test-changed *args:
     #!/usr/bin/env bash

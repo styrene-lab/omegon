@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Add affected-crate detection plus scoped `just affected`, `just test-changed`, `just check-changed`, and `just clippy-changed` recipes for faster local validation of changed Rust workspace slices.
 - Add `just test-profile` to statically summarize Rust test/coupling hotspots before choosing validation or extraction targets.
+- Add Python unit coverage for the affected-crate and test-profile developer tooling.
 
 ### Changed
 

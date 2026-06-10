@@ -43,7 +43,7 @@ def profile_file(path: Path) -> FileProfile:
     )
 
 
-def profile_crate(crate_root: Path, large_threshold: int) -> CrateProfile:
+def profile_crate(crate_root: Path, large_threshold: int, per_crate_files: int) -> CrateProfile:
     src = crate_root / "src"
     profiles = [profile_file(path) for path in sorted(src.rglob("*.rs"))]
     large = tuple(
@@ -51,7 +51,7 @@ def profile_crate(crate_root: Path, large_threshold: int) -> CrateProfile:
             (profile for profile in profiles if profile.lines >= large_threshold or profile.tests > 0),
             key=lambda profile: (profile.lines, profile.tests),
             reverse=True,
-        )[:12]
+        )[:per_crate_files]
     )
     return CrateProfile(
         name=crate_root.name,
@@ -63,10 +63,10 @@ def profile_crate(crate_root: Path, large_threshold: int) -> CrateProfile:
     )
 
 
-def profiles(root: Path, large_threshold: int) -> list[CrateProfile]:
+def profiles(root: Path, large_threshold: int, per_crate_files: int) -> list[CrateProfile]:
     crates_root = root / "core" / "crates"
     return [
-        profile_crate(crate_root, large_threshold)
+        profile_crate(crate_root, large_threshold, per_crate_files)
         for crate_root in sorted(crates_root.iterdir())
         if (crate_root / "Cargo.toml").exists() and (crate_root / "src").exists()
     ]
@@ -98,10 +98,16 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument("--large-threshold", type=int, default=1000)
     parser.add_argument("--top-files", type=int, default=30)
+    parser.add_argument(
+        "--per-crate-files",
+        type=int,
+        default=30,
+        help="maximum file profiles retained per crate before global top-file ranking",
+    )
     args = parser.parse_args()
 
     root = Path.cwd()
-    items = profiles(root, args.large_threshold)
+    items = profiles(root, args.large_threshold, args.per_crate_files)
     if args.json:
         print(json.dumps([asdict(item) for item in items], indent=2))
     else:
