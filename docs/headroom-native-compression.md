@@ -123,9 +123,11 @@ Native compression effectiveness is measured by the `headroom-eval` binary in th
 ```bash
 cargo run -p omegon-headroom --bin headroom-eval -- --text
 cargo run -p omegon-headroom --bin headroom-eval -- --json
+just headroom-eval --text --save .tmp/headroom/baseline.json
+just headroom-eval --text --compare .tmp/headroom/baseline.json
 ```
 
-The evaluator runs canonical fixtures through the deterministic compressor and exits non-zero if any fixture violates its contract. The text output is intended for local dogfooding; JSON output is intended for CI snapshots and longitudinal benchmark comparison.
+The evaluator runs canonical fixtures through the deterministic compressor and exits non-zero if any fixture violates its contract. The text output is intended for local dogfooding; JSON output is intended for CI snapshots and longitudinal benchmark comparison. `--save` writes the current report as JSON; `--compare` fails if evaluated byte savings or estimated token savings drop below the saved baseline, or if required-fact restoration count increases.
 
 The first canonical suite covers:
 

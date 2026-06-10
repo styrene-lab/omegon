@@ -71,8 +71,8 @@ pub struct ValidationSuiteReport {
     pub total_evaluated_compressed_bytes: usize,
     pub estimated_tokens_before: usize,
     pub evaluated_estimated_tokens_after: usize,
-    pub token_counter: &'static str,
-    pub token_counter_kind: &'static str,
+    pub token_counter: String,
+    pub token_counter_kind: String,
     pub evaluated_token_savings_percent: u8,
     pub evaluated_savings_percent: u8,
 }
@@ -269,8 +269,8 @@ pub fn validate_suite(
         total_evaluated_compressed_bytes,
         estimated_tokens_before,
         evaluated_estimated_tokens_after,
-        token_counter: "bytes_div_4",
-        token_counter_kind: "approximate",
+        token_counter: "bytes_div_4".to_string(),
+        token_counter_kind: "approximate".to_string(),
         evaluated_token_savings_percent,
         evaluated_savings_percent,
     }

@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use omegon_headroom::HeadroomPolicy;
@@ -9,6 +11,8 @@ fn main() -> ExitCode {
     let mut format = OutputFormat::Text;
     let mut min_bytes = 1024;
     let mut target_bytes = 4096;
+    let mut save_path: Option<PathBuf> = None;
+    let mut compare_path: Option<PathBuf> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -41,6 +45,20 @@ fn main() -> ExitCode {
                     }
                 };
             }
+            "--save" => {
+                let Some(value) = args.next() else {
+                    eprintln!("missing value for --save");
+                    return ExitCode::from(2);
+                };
+                save_path = Some(PathBuf::from(value));
+            }
+            "--compare" => {
+                let Some(value) = args.next() else {
+                    eprintln!("missing value for --compare");
+                    return ExitCode::from(2);
+                };
+                compare_path = Some(PathBuf::from(value));
+            }
             "--help" | "-h" => {
                 print_help();
                 return ExitCode::SUCCESS;
@@ -62,17 +80,42 @@ fn main() -> ExitCode {
         },
     );
 
-    match format {
-        OutputFormat::Json => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&report).expect("report serializes")
-            );
-        }
-        OutputFormat::Text => print_text_report(&report),
+    if let Some(path) = save_path.as_ref()
+        && let Err(err) = save_report(path, &report)
+    {
+        eprintln!("failed to save report to {}: {err}", path.display());
+        return ExitCode::from(2);
     }
 
-    if report.passed {
+    let comparison = match compare_path.as_ref() {
+        Some(path) => match compare_report(path, &report) {
+            Ok(comparison) => Some(comparison),
+            Err(err) => {
+                eprintln!("failed to compare against {}: {err}", path.display());
+                return ExitCode::from(2);
+            }
+        },
+        None => None,
+    };
+
+    match format {
+        OutputFormat::Json => {
+            let output = serde_json::json!({
+                "report": report,
+                "comparison": comparison,
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output).expect("report serializes")
+            );
+        }
+        OutputFormat::Text => print_text_report(&report, comparison.as_ref()),
+    }
+
+    let comparison_passed = comparison
+        .as_ref()
+        .is_none_or(|comparison| comparison.passed);
+    if report.passed && comparison_passed {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
@@ -85,16 +128,97 @@ enum OutputFormat {
     Json,
 }
 
+#[derive(Debug, serde::Serialize)]
+struct ComparisonReport {
+    passed: bool,
+    baseline_path: String,
+    baseline_passed: bool,
+    current_passed: bool,
+    baseline_evaluated_savings_percent: u8,
+    current_evaluated_savings_percent: u8,
+    baseline_evaluated_token_savings_percent: u8,
+    current_evaluated_token_savings_percent: u8,
+    baseline_restored_fact_count: usize,
+    current_restored_fact_count: usize,
+    regressions: Vec<String>,
+}
+
 fn print_help() {
     println!(
-        "headroom-eval [--text|--json] [--min-bytes N] [--target-bytes N]\n\n\
+        "headroom-eval [--text|--json] [--min-bytes N] [--target-bytes N] [--save PATH] [--compare PATH]\n\n\
          Runs native headroom evaluation fixtures. Exits non-zero if evaluated savings,\n\
          fact retention, or expected compression behavior regress. JSON output is intended\n\
-         for CI snapshots and longitudinal benchmark comparison."
+         for CI snapshots and longitudinal benchmark comparison. --save writes the current\n\
+         report as JSON; --compare checks the current report against a saved baseline."
     );
 }
 
-fn print_text_report(report: &ValidationSuiteReport) {
+fn save_report(path: &PathBuf, report: &ValidationSuiteReport) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(report)?;
+    fs::write(path, format!("{json}\n"))?;
+    Ok(())
+}
+
+fn compare_report(
+    path: &PathBuf,
+    current: &ValidationSuiteReport,
+) -> anyhow::Result<ComparisonReport> {
+    let baseline_text = fs::read_to_string(path)?;
+    let baseline: ValidationSuiteReport = serde_json::from_str(&baseline_text)?;
+    let mut regressions = Vec::new();
+
+    if !current.passed {
+        regressions.push("current report failed validation".to_string());
+    }
+    if current.evaluated_savings_percent < baseline.evaluated_savings_percent {
+        regressions.push(format!(
+            "evaluated byte savings dropped from {}% to {}%",
+            baseline.evaluated_savings_percent, current.evaluated_savings_percent
+        ));
+    }
+    if current.evaluated_token_savings_percent < baseline.evaluated_token_savings_percent {
+        regressions.push(format!(
+            "evaluated token savings dropped from {}% to {}%",
+            baseline.evaluated_token_savings_percent, current.evaluated_token_savings_percent
+        ));
+    }
+    let baseline_restored = total_restored_facts(&baseline);
+    let current_restored = total_restored_facts(current);
+    if current_restored > baseline_restored {
+        regressions.push(format!(
+            "restored fact count increased from {baseline_restored} to {current_restored}"
+        ));
+    }
+
+    Ok(ComparisonReport {
+        passed: regressions.is_empty(),
+        baseline_path: path.display().to_string(),
+        baseline_passed: baseline.passed,
+        current_passed: current.passed,
+        baseline_evaluated_savings_percent: baseline.evaluated_savings_percent,
+        current_evaluated_savings_percent: current.evaluated_savings_percent,
+        baseline_evaluated_token_savings_percent: baseline.evaluated_token_savings_percent,
+        current_evaluated_token_savings_percent: current.evaluated_token_savings_percent,
+        baseline_restored_fact_count: baseline_restored,
+        current_restored_fact_count: current_restored,
+        regressions,
+    })
+}
+
+fn total_restored_facts(report: &ValidationSuiteReport) -> usize {
+    report
+        .fixtures
+        .iter()
+        .map(|fixture| fixture.restored_fact_count)
+        .sum()
+}
+
+fn print_text_report(report: &ValidationSuiteReport, comparison: Option<&ComparisonReport>) {
     println!(
         "Headroom evaluation: {}",
         if report.passed { "PASS" } else { "FAIL" }
@@ -114,6 +238,16 @@ fn print_text_report(report: &ValidationSuiteReport) {
         report.evaluated_estimated_tokens_after,
         report.evaluated_token_savings_percent
     );
+    if let Some(comparison) = comparison {
+        println!(
+            "comparison: {} against {}",
+            if comparison.passed { "PASS" } else { "FAIL" },
+            comparison.baseline_path
+        );
+        for regression in &comparison.regressions {
+            println!("  regression: {regression}");
+        }
+    }
     println!();
 
     for class in &report.classes {
