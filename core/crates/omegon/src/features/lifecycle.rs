@@ -19,7 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::mutation::{CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
+use crate::lifecycle::mutation::{AddDesignNodeResearchRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -505,10 +505,13 @@ impl LifecycleFeature {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("content required"))?;
 
-                let node = get_node_clone(id)?;
-                let node = &node;
-                design::add_research(node, heading, content)?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.add_design_node_research(
+                    AddDesignNodeResearchRequest {
+                        id: id.to_string(),
+                        heading: heading.to_string(),
+                        content: content.to_string(),
+                    },
+                )?;
                 Ok(text_result(&format!(
                     "Added research '{heading}' to '{id}'"
                 )))
