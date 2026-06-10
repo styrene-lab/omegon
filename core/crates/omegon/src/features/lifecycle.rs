@@ -19,7 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeImplNotesRequest, AddDesignNodeLinkRequest, AddDesignNodeResearchRequest, BranchDesignNodeQuestionRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
+use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeImplNotesRequest, AddDesignNodeLinkRequest, AddDesignNodeResearchRequest, BranchDesignNodeQuestionRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeIssueTypeRequest, SetDesignNodePriorityRequest, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -714,11 +714,12 @@ impl LifecycleFeature {
                     anyhow::bail!("Priority must be 1-5, got {priority}");
                 }
 
-                let mut node = get_node_clone(id)?;
-                design::update_node(&mut node, |n| {
-                    n.priority = Some(priority as u8);
-                })?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.set_design_node_priority(
+                    SetDesignNodePriorityRequest {
+                        id: id.to_string(),
+                        priority: priority as u8,
+                    },
+                )?;
                 Ok(text_result(&format!("Set '{id}' priority to {priority}")))
             }
 
@@ -730,11 +731,12 @@ impl LifecycleFeature {
                 let issue_type = IssueType::parse(type_str)
                     .ok_or_else(|| anyhow::anyhow!("Invalid issue_type: {type_str}"))?;
 
-                let mut node = get_node_clone(id)?;
-                design::update_node(&mut node, |n| {
-                    n.issue_type = Some(issue_type);
-                })?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.set_design_node_issue_type(
+                    SetDesignNodeIssueTypeRequest {
+                        id: id.to_string(),
+                        issue_type,
+                    },
+                )?;
                 Ok(text_result(&format!("Set '{id}' issue_type to {type_str}")))
             }
 

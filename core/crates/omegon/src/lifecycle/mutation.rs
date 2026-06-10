@@ -11,7 +11,7 @@ use omegon_opsx::{JsonFileStore, Lifecycle as OpsxLifecycle, NodeState};
 
 use super::context::LifecycleContextProvider;
 use super::design;
-use super::types::{DesignNode, FileScope, NodeStatus};
+use super::types::{DesignNode, FileScope, IssueType, NodeStatus};
 
 #[derive(Clone)]
 pub struct LifecycleMutationService {
@@ -86,6 +86,18 @@ pub struct BranchDesignNodeQuestionRequest {
     pub question: String,
     pub child_id: String,
     pub child_title: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SetDesignNodePriorityRequest {
+    pub id: String,
+    pub priority: u8,
+}
+
+#[derive(Debug, Clone)]
+pub struct SetDesignNodeIssueTypeRequest {
+    pub id: String,
+    pub issue_type: IssueType,
 }
 
 impl LifecycleMutationService {
@@ -277,6 +289,30 @@ impl LifecycleMutationService {
         })?;
         self.provider.lock().unwrap().refresh();
         Ok(child)
+    }
+
+    pub fn set_design_node_priority(
+        &self,
+        req: SetDesignNodePriorityRequest,
+    ) -> anyhow::Result<()> {
+        let mut node = self.get_node_clone(&req.id)?;
+        design::update_node(&mut node, |n| {
+            n.priority = Some(req.priority);
+        })?;
+        self.provider.lock().unwrap().refresh();
+        Ok(())
+    }
+
+    pub fn set_design_node_issue_type(
+        &self,
+        req: SetDesignNodeIssueTypeRequest,
+    ) -> anyhow::Result<()> {
+        let mut node = self.get_node_clone(&req.id)?;
+        design::update_node(&mut node, |n| {
+            n.issue_type = Some(req.issue_type);
+        })?;
+        self.provider.lock().unwrap().refresh();
+        Ok(())
     }
 
     fn get_node_clone(&self, id: &str) -> anyhow::Result<DesignNode> {
@@ -594,5 +630,43 @@ mod tests {
         let provider = provider.lock().unwrap();
         assert!(provider.get_node("parent").unwrap().open_questions.is_empty());
         assert_eq!(provider.get_node("child").unwrap().parent.as_deref(), Some("parent"));
+    }
+
+    #[test]
+    fn metadata_mutations_update_frontmatter() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_path_buf();
+        let provider = Arc::new(Mutex::new(LifecycleContextProvider::new(&repo)));
+        let opsx = Arc::new(Mutex::new(
+            OpsxLifecycle::load(JsonFileStore::new(&repo)).unwrap(),
+        ));
+        let service = LifecycleMutationService::new(repo, Arc::clone(&provider), Arc::clone(&opsx));
+        service
+            .create_design_node(CreateDesignNodeRequest {
+                id: "node".to_string(),
+                title: "Node".to_string(),
+                parent: None,
+                status: None,
+                tags: vec![],
+                overview: "overview".to_string(),
+            })
+            .unwrap();
+
+        service
+            .set_design_node_priority(SetDesignNodePriorityRequest {
+                id: "node".to_string(),
+                priority: 3,
+            })
+            .unwrap();
+        service
+            .set_design_node_issue_type(SetDesignNodeIssueTypeRequest {
+                id: "node".to_string(),
+                issue_type: IssueType::Feature,
+            })
+            .unwrap();
+
+        let node = provider.lock().unwrap().get_node("node").cloned().unwrap();
+        assert_eq!(node.priority, Some(3));
+        assert_eq!(node.issue_type, Some(IssueType::Feature));
     }
 }
