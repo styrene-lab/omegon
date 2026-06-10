@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Add a design node planning the future lifecycle `implement` service extraction pass.
 - Route design-tree archive mutation through the lifecycle mutation service while keeping descendant checks and timestamp policy adapter-side.
 - Route design-tree priority and issue-type metadata mutations through the lifecycle mutation service.
 - Route design-tree branch mutation through the lifecycle mutation service as one parent/child operation.
