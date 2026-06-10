@@ -8703,8 +8703,10 @@ pub async fn run_tui(
                             KeyCode::Enter => {
                                 if let Some((label, value)) = app.editor.take_secret() {
                                     if value.is_empty() {
-                                        app.conversation
-                                            .push_system("Cancelled — no value entered.");
+                                        app.show_command_toast(CommandToast::new(
+                                            "Cancelled — no value entered",
+                                            CommandSeverity::Warning,
+                                        ));
                                     } else {
                                         // Store in secrets engine
                                         let _ = command_tx
@@ -8739,7 +8741,10 @@ pub async fn run_tui(
                             }
                             KeyCode::Esc => {
                                 app.editor.cancel_secret();
-                                app.conversation.push_system("Secret input cancelled.");
+                                app.show_command_toast(CommandToast::new(
+                                    "Secret input cancelled",
+                                    CommandSeverity::Info,
+                                ));
                             }
                             _ => {}
                         }
@@ -9003,11 +9008,15 @@ pub async fn run_tui(
                                     .handle_ui_action(UiAction::CancelActiveTurn, &command_tx)
                                     .await;
                                 if matches!(outcome, UiActionOutcome::Accepted { .. }) {
-                                    app.conversation.push_system(
-                                        "⎋ Interrupt requested — waiting for turn to stop",
-                                    );
+                                    app.show_command_toast(CommandToast::new(
+                                        "Interrupt requested — waiting for turn to stop",
+                                        CommandSeverity::Warning,
+                                    ));
                                 } else {
-                                    app.conversation.push_system("⎋ Interrupt requested");
+                                    app.show_command_toast(CommandToast::new(
+                                        "Interrupt requested",
+                                        CommandSeverity::Warning,
+                                    ));
                                 }
                             }
                         }
@@ -9017,12 +9026,15 @@ pub async fn run_tui(
                                     .handle_ui_action(UiAction::CancelActiveTurn, &command_tx)
                                     .await;
                                 if matches!(outcome, UiActionOutcome::Accepted { .. }) {
-                                    app.conversation.push_system(
-                                        "⎋ Interrupt requested (Ctrl+C) — waiting for turn to stop",
-                                    );
+                                    app.show_command_toast(CommandToast::new(
+                                        "Interrupt requested (Ctrl+C) — waiting for turn to stop",
+                                        CommandSeverity::Warning,
+                                    ));
                                 } else {
-                                    app.conversation
-                                        .push_system("⎋ Interrupt requested (Ctrl+C)");
+                                    app.show_command_toast(CommandToast::new(
+                                        "Interrupt requested (Ctrl+C)",
+                                        CommandSeverity::Warning,
+                                    ));
                                 }
                             } else if !app.editor.is_empty() {
                                 // Clear the line first (like a real terminal)
@@ -9037,11 +9049,17 @@ pub async fn run_tui(
                                         let _ = command_tx.send(TuiCommand::Quit).await;
                                     } else {
                                         app.last_ctrl_c = Some(now);
-                                        app.conversation.push_system("Press Ctrl+C again to quit");
+                                        app.show_command_toast(CommandToast::new(
+                                            "Press Ctrl+C again to quit",
+                                            CommandSeverity::Info,
+                                        ));
                                     }
                                 } else {
                                     app.last_ctrl_c = Some(now);
-                                    app.conversation.push_system("Press Ctrl+C again to quit");
+                                    app.show_command_toast(CommandToast::new(
+                                        "Press Ctrl+C again to quit",
+                                        CommandSeverity::Info,
+                                    ));
                                 }
                             }
                         }
