@@ -79,26 +79,30 @@ Both commands refuse to run with uncommitted changes. Both commands create the t
 **Status:** decided
 **Rationale:** The root cause of version drift is that version bump and tag creation are separate manual steps. Making them atomic — one command does both — eliminates the gap. The push remains manual because not every RC should be published to GitHub releases. Build and test are included so the tag is never created on broken code.
 
-### Decision: migrate release hardening to `release/X.Y` branches
+### Decision: keep `main` as trunk and use `release/X.Y` only for stabilization
 
-**Status:** migrating
-**Rationale:** Stable release candidates need a single authority that can harden without making `main` carry two meanings: active development and release stabilization. The target model is:
+**Status:** decided
+**Rationale:** Operator-facing channels should stay simple: `nightly` follows `main`, `stable` follows the latest stable semver tag, and exact `vX.Y.Z` tags remain available for pins. Release branches are internal hardening branches, not automatic install channels. They exist to stabilize or patch a version line without exposing operators to another channel choice.
 
-1. Open the release line on `main` by bumping the workspace to `X.Y.Z-rc.1`, adding the `CHANGELOG.md` section for `X.Y.Z`, and recording the milestone.
-2. Run `just branch-release` to create/push `release/X.Y` from that commit and switch the working copy to it. The branch name must match the stable version behind the RC, for example `release/0.22` for `0.22.0-rc.1`.
-3. Land release-hardening fixes on `release/X.Y`; CI must run tests and site builds there, but publishing/deployment side effects remain gated to `main` or tag/release events.
-4. Cut RC tags from `release/X.Y` as `vX.Y.Z-rc.N`.
-5. Continuously run `just merge-release-forward` from `release/X.Y` after hardening commits. The helper merges into `main`, preserves `main`'s version-state files, pushes `main`, and switches back to the release branch.
-6. Promote by stripping `-rc.N`, committing `chore(release): X.Y.Z`, tagging `vX.Y.Z`, and publishing that tag from `release/X.Y`.
-7. Merge the stable release commit back to `main` with `just merge-release-forward`, then open the next development line on `main` if it is not already open.
+The target model is:
+
+1. Normal feature, refactor, and product work lands on `main`; `main` is the source for nightly builds.
+2. When a version needs hardening, run `just branch-release` from `main` to create/push `release/X.Y` and switch the working copy to it.
+3. Land only release-hardening work on `release/X.Y`: bug fixes, tests, release docs, packaging fixes, and validation tooling needed for that release. Broad features/refactors stay on `main` unless explicitly approved as release blockers.
+4. Continuously run `just merge-release-forward` after release-branch hardening commits. The helper merges into `main`, preserves `main`'s version-state files, pushes `main`, and switches back to the release branch.
+5. Tag stable releases from `release/X.Y` as `vX.Y.Z` after the release branch is green.
+6. After every stable or patch tag, run `just merge-release-forward` again before considering the release operationally complete.
+7. Delete or retire old release branches once their patch window closes.
 
 Channel ownership:
 
-- `release/X.Y` owns stable and RC tags (`vX.Y.Z`, `vX.Y.Z-rc.N`).
-- `main` owns nightly tags (`vX.Y.0-nightly.YYYYMMDD`).
-- Release hardening fixes flow forward from `release/X.Y` to `main`; `main` version metadata must not be pulled backward by release branch merges.
+- `main` owns nightly tags and is the trunk for ongoing development.
+- `release/X.Y` owns stable tags for that X.Y line while it is active, but it is not an operator-selectable automatic channel.
+- `stable` resolves to the latest stable semver tag.
+- `nightly` resolves to `main`.
+- Release hardening fixes flow forward from `release/X.Y` to `main`; normal development does not flow backward into release branches unless deliberately backported.
 
-This migration must not leave two release paths. Until the branch-based commands are fully authoritative, the mainline flow remains supported for the active release line.
+Invariant: a release tag is not complete until the tagged release branch state has been merged forward to `main` and `main` is green. This prevents `nightly` from falling behind stable fixes while keeping the operator-facing channel set limited to `stable`, `nightly`, and explicit tags.
 
 ## Open Questions
 

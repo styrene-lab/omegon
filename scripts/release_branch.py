@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """Branch-based release helpers for Omegon.
 
-The release branch model has one authority split:
+The public channel model is intentionally small:
 
-- release/X.Y owns stable tags for the X.Y line.
-- main owns nightly tags and the next development line.
+- stable resolves to the latest stable semver tag.
+- nightly resolves to main.
+- explicit vX.Y.Z tags remain available for pins.
+
+Release branches are internal stabilization/patch branches only. The authority
+split is:
+
+- main is trunk, owns nightly tags, and receives normal development.
+- release/X.Y owns stable tags for that X.Y line while it is active.
 
 These helpers keep branch creation and forward merges mechanical so release
-hardening does not accidentally pull old version metadata back into main.
+hardening fixes flow back to trunk without pulling release-branch version state
+backward into main.
 """
 
 from __future__ import annotations

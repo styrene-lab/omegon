@@ -413,12 +413,14 @@ run *args:
 # ─── Release ─────────────────────────────────────────────────
 
 # Create and push the release/X.Y branch for the current stable line, then switch
-# the working copy to it. This is the branch-based release hardening entrypoint.
+# the working copy to it. Release branches are internal stabilization/patch
+# branches only; normal feature/refactor work stays on main.
 branch-release:
     python3 scripts/release_branch.py branch-release
 
 # Merge the current release/X.Y branch forward into main while preserving
-# main's version-state files, then switch back to the release branch.
+# main's version-state files, then switch back to the release branch. Run after
+# every release-branch hardening commit and again after tagging a stable patch.
 merge-release-forward branch='':
     #!/usr/bin/env bash
     set -euo pipefail
