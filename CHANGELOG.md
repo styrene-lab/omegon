@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Route design-tree archive mutation through the lifecycle mutation service while keeping descendant checks and timestamp policy adapter-side.
 - Route design-tree priority and issue-type metadata mutations through the lifecycle mutation service.
 - Route design-tree branch mutation through the lifecycle mutation service as one parent/child operation.
 - Route design-tree implementation-notes mutation through the lifecycle mutation service with markdown coverage.

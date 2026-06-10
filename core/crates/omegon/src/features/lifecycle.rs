@@ -396,23 +396,15 @@ impl LifecycleFeature {
                     anyhow::bail!("cannot archive '{id}' while non-archived descendants remain");
                 }
 
-                let mut opsx = self.opsx.lock().unwrap();
-                if opsx.get_node(id).is_none() {
-                    let node = get_node_clone(id)?;
-                    self.bootstrap_node_to_opsx(&mut opsx, &node);
-                }
-                opsx.transition_node(id, OpsxNodeState::Archived)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
-                drop(opsx);
-
-                let mut node = get_node_clone(id)?;
-                design::update_node(&mut node, |n| {
-                    n.status = NodeStatus::Archived;
-                    n.archive_reason = args["archive_reason"].as_str().map(str::to_string);
-                    n.superseded_by = args["superseded_by"].as_str().map(str::to_string);
-                    n.archived_at = Some(Self::archive_timestamp());
-                })?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.set_design_node_status(
+                    SetDesignNodeStatusRequest {
+                        id: id.to_string(),
+                        status: NodeStatus::Archived,
+                        archive_reason: args["archive_reason"].as_str().map(str::to_string),
+                        superseded_by: args["superseded_by"].as_str().map(str::to_string),
+                        archived_at: Some(Self::archive_timestamp()),
+                    },
+                )?;
                 Ok(text_result(&format!("Archived '{id}'")))
             }
 
