@@ -20,7 +20,7 @@ use omegon_traits::{
 
 use crate::lifecycle::context::LifecycleContextProvider;
 use crate::lifecycle::read_model::LifecycleReadHandle;
-use crate::lifecycle::{archive, design, doctor, spec, sync, types::*};
+use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
 use omegon_opsx::{
     ChangeState as OpsxChangeState, JsonFileStore, Lifecycle as OpsxLifecycle,
@@ -61,16 +61,12 @@ impl LifecycleFeature {
             .collect()
     }
 
-    fn is_archived(node: &DesignNode) -> bool {
-        matches!(node.status, NodeStatus::Archived)
-    }
-
     fn has_non_archived_descendants(
         nodes: &std::collections::HashMap<String, DesignNode>,
         node_id: &str,
     ) -> bool {
         for child in design::get_children(nodes, node_id) {
-            if !Self::is_archived(child) || Self::has_non_archived_descendants(nodes, &child.id) {
+            if !query::is_archived(child) || Self::has_non_archived_descendants(nodes, &child.id) {
                 return true;
             }
         }
@@ -157,7 +153,7 @@ impl LifecycleFeature {
                 let nodes = p.all_nodes();
                 let list: Vec<Value> = nodes
                     .values()
-                    .filter(|n| !Self::is_archived(n))
+                    .filter(|n| !query::is_archived(n))
                     .map(|n| {
                         let children_count = design::get_children(nodes, &n.id).len();
                         json!({
@@ -261,16 +257,13 @@ impl LifecycleFeature {
             }
 
             "frontier" => {
-                let nodes = p.all_nodes();
-                let frontier: Vec<Value> = nodes
-                    .values()
-                    .filter(|n| !Self::is_archived(n))
-                    .filter(|n| !n.open_questions.is_empty())
+                let frontier: Vec<Value> = query::frontier(p.all_nodes())
+                    .into_iter()
                     .map(|n| {
                         json!({
                             "id": n.id,
                             "title": n.title,
-                            "status": n.status.as_str(),
+                            "status": n.status,
                             "open_questions": n.open_questions,
                         })
                     })
@@ -280,15 +273,13 @@ impl LifecycleFeature {
 
             "children" => {
                 let id = node_id.ok_or_else(|| anyhow::anyhow!("node_id required"))?;
-                let children = design::get_children(p.all_nodes(), id);
-                let list: Vec<Value> = children
-                    .iter()
-                    .filter(|c| !Self::is_archived(c))
+                let list: Vec<Value> = query::children(p.all_nodes(), id)
+                    .into_iter()
                     .map(|c| {
                         json!({
                             "id": c.id,
                             "title": c.title,
-                            "status": c.status.as_str(),
+                            "status": c.status,
                         })
                     })
                     .collect();
@@ -300,16 +291,13 @@ impl LifecycleFeature {
                 let node = p
                     .get_node(id)
                     .ok_or_else(|| anyhow::anyhow!("Node '{id}' not found"))?;
-                let deps: Vec<Value> = node
-                    .dependencies
-                    .iter()
-                    .filter_map(|dep_id| {
-                        p.get_node(dep_id).map(|d| {
-                            json!({
-                                "id": d.id,
-                                "title": d.title,
-                                "status": d.status.as_str(),
-                            })
+                let deps: Vec<Value> = query::dependencies(p.all_nodes(), node)
+                    .into_iter()
+                    .map(|d| {
+                        json!({
+                            "id": d.id,
+                            "title": d.title,
+                            "status": d.status,
                         })
                     })
                     .collect();
@@ -317,18 +305,8 @@ impl LifecycleFeature {
             }
 
             "ready" => {
-                let nodes = p.all_nodes();
-                let ready: Vec<Value> = nodes
-                    .values()
-                    .filter(|n| !Self::is_archived(n))
-                    .filter(|n| matches!(n.status, NodeStatus::Decided))
-                    .filter(|n| {
-                        n.dependencies.iter().all(|dep_id| {
-                            nodes
-                                .get(dep_id)
-                                .is_some_and(|d| matches!(d.status, NodeStatus::Implemented))
-                        })
-                    })
+                let ready: Vec<Value> = query::ready(p.all_nodes())
+                    .into_iter()
                     .map(|n| {
                         json!({
                             "id": n.id,
@@ -341,33 +319,14 @@ impl LifecycleFeature {
             }
 
             "blocked" => {
-                let nodes = p.all_nodes();
-                let blocked: Vec<Value> = nodes
-                    .values()
-                    .filter(|n| {
-                        matches!(n.status, NodeStatus::Blocked)
-                            || n.dependencies.iter().any(|dep_id| {
-                                nodes
-                                    .get(dep_id)
-                                    .is_none_or(|d| !matches!(d.status, NodeStatus::Implemented))
-                            })
-                    })
+                let blocked: Vec<Value> = query::blocked(p.all_nodes())
+                    .into_iter()
                     .map(|n| {
-                        let blockers: Vec<String> = n
-                            .dependencies
-                            .iter()
-                            .filter(|dep_id| {
-                                nodes
-                                    .get(*dep_id)
-                                    .is_none_or(|d| !matches!(d.status, NodeStatus::Implemented))
-                            })
-                            .cloned()
-                            .collect();
                         json!({
                             "id": n.id,
                             "title": n.title,
-                            "status": n.status.as_str(),
-                            "blocked_by": blockers,
+                            "status": n.status,
+                            "blocked_by": n.blocked_by,
                         })
                     })
                     .collect();

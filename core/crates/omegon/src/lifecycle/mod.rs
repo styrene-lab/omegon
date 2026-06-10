@@ -13,6 +13,7 @@ pub mod codex_export;
 pub mod context;
 pub mod design;
 pub mod doctor;
+pub mod query;
 pub mod read_model;
 pub mod spec;
 pub mod sync;
