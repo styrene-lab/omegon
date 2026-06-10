@@ -26,6 +26,7 @@ pub mod inmemory;
 #[cfg(feature = "agent")]
 pub mod provider;
 pub mod renderer;
+pub mod service;
 pub mod sqlite;
 pub mod types;
 pub mod util;
@@ -44,6 +45,7 @@ pub use inmemory::InMemoryBackend;
 #[cfg(feature = "agent")]
 pub use provider::MemoryProvider;
 pub use renderer::MarkdownRenderer;
+pub use service::{MemoryMindService, expand_edges};
 pub use sqlite::SqliteBackend;
 /// Re-exports all types from the `types` module for convenience.
 /// If you encounter name collisions with other crates (e.g. `Section`,
