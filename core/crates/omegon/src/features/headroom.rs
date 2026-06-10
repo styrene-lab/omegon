@@ -339,6 +339,20 @@ mod tests {
     }
 
     #[test]
+    fn exposes_three_tools() {
+        let feature = feature_with_headroom(HeadroomCompressionMode::Manual);
+        let tools = feature.tools();
+        let names = tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&crate::tool_registry::headroom::HEADROOM_COMPRESS));
+        assert!(names.contains(&crate::tool_registry::headroom::HEADROOM_RETRIEVE));
+        assert!(names.contains(&crate::tool_registry::headroom::HEADROOM_STATS));
+    }
+
+    #[test]
     fn rejects_compress_when_gate_off_without_force() {
         let feature = feature_with_headroom(HeadroomCompressionMode::Off);
         let result = feature.compress(json!({"text": "hello"})).unwrap();

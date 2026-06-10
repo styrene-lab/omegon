@@ -76,6 +76,46 @@ Mode semantics:
 
 No mode may silently download, start, or require a local semantic model. If `local_model` is configured but unavailable, the deterministic compressor remains the fallback and validation metadata should report the fallback.
 
+## Manual dogfood tools
+
+Phase 2A exposes a manual, session-scoped CCR tool surface. This exists to dogfood compression and retrieval before automatic context/read integration.
+
+1. Opt in to manual mode:
+
+```json
+{"action":"set_headroom_compression","value":"manual"}
+```
+
+2. Compress a payload:
+
+```json
+{
+  "text": "...large log/json/doc...",
+  "source": "cargo-test-output",
+  "kind_hint": "log"
+}
+```
+
+3. Retrieve exact original content from the returned `original_ref.id`:
+
+```json
+{"id":"hr:<sha256-prefix>"}
+```
+
+4. Inspect session store state:
+
+```json
+{}
+```
+
+Tool names:
+
+- `headroom_compress`
+- `headroom_retrieve`
+- `headroom_stats`
+
+`headroom_compress` refuses by default while the experimental runtime gate is off. Passing `force=true` is allowed for explicit one-shot debugging, but it must not be treated as enabling automatic compression. `headroom_retrieve` supports `max_bytes` for bounded retrieval, but the stored original remains exact in the session CCR store.
+
 ## Evaluation workflow
 
 Native compression effectiveness is measured by the `headroom-eval` binary in the `omegon-headroom` crate:
