@@ -125,9 +125,30 @@ cargo run -p omegon-headroom --bin headroom-eval -- --text
 cargo run -p omegon-headroom --bin headroom-eval -- --json
 just headroom-eval --text --save .tmp/headroom/baseline.json
 just headroom-eval --text --compare .tmp/headroom/baseline.json
+just headroom-eval --text --fixtures .tmp/headroom/fixtures
 ```
 
-The evaluator runs canonical fixtures through the deterministic compressor and exits non-zero if any fixture violates its contract. The text output is intended for local dogfooding; JSON output is intended for CI snapshots and longitudinal benchmark comparison. `--save` writes the current report as JSON; `--compare` fails if evaluated byte savings or estimated token savings drop below the saved baseline, or if required-fact restoration count increases.
+The evaluator runs canonical fixtures through the deterministic compressor and exits non-zero if any fixture violates its contract. The text output is intended for local dogfooding; JSON output is intended for CI snapshots and longitudinal benchmark comparison. `--save` writes the current report as JSON; `--compare` fails if evaluated byte savings or estimated token savings drop below the saved baseline, or if required-fact restoration count increases. `--fixtures DIR` appends non-recursive `*.json` fixtures from an ignored dogfood directory; invalid fixtures fail loudly and paths are sorted for deterministic report order.
+
+Dogfood fixture shape:
+
+```json
+{
+  "name": "real-cargo-log-2026-06-10",
+  "class": "dogfood",
+  "kind_hint": "log",
+  "input": "full text here",
+  "required_facts": [
+    "error[E0425]",
+    "src/features/headroom.rs",
+    "cargo check failed"
+  ],
+  "min_savings_percent": 70,
+  "expected_compressed": true
+}
+```
+
+`class` is optional and defaults to `dogfood`; `min_savings_percent` defaults to `50`. Keep dogfood fixtures in ignored local paths such as `.tmp/headroom/fixtures` until they are redacted and intentionally promoted to committed regression fixtures.
 
 The first canonical suite covers:
 

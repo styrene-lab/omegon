@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,18 @@ pub enum FixtureClass {
     Adversarial,
     Dogfood,
     Regression,
+}
+
+impl FixtureClass {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "canonical_smoke" | "canonical" | "smoke" => Some(Self::CanonicalSmoke),
+            "adversarial" => Some(Self::Adversarial),
+            "dogfood" => Some(Self::Dogfood),
+            "regression" => Some(Self::Regression),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -338,6 +351,83 @@ pub fn canonical_validation_fixtures() -> Vec<ValidationFixture> {
         json_schema_signal_fixture(),
         threshold_plaintext_fixture(),
     ]
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct FileValidationFixture {
+    name: String,
+    #[serde(default)]
+    class: Option<FixtureClass>,
+    #[serde(default)]
+    kind_hint: Option<ContentKind>,
+    input: String,
+    #[serde(default)]
+    required_facts: Vec<String>,
+    #[serde(default = "default_file_min_savings_percent")]
+    min_savings_percent: u8,
+    #[serde(default)]
+    expected_compressed: Option<bool>,
+}
+
+fn default_file_min_savings_percent() -> u8 {
+    50
+}
+
+impl From<FileValidationFixture> for ValidationFixture {
+    fn from(value: FileValidationFixture) -> Self {
+        Self {
+            name: value.name,
+            class: value.class.unwrap_or(FixtureClass::Dogfood),
+            kind_hint: value.kind_hint,
+            input: value.input,
+            required_facts: value.required_facts,
+            min_savings_percent: value.min_savings_percent,
+            expected_compressed: value.expected_compressed,
+        }
+    }
+}
+
+pub fn load_fixture_dir(path: &Path) -> anyhow::Result<Vec<ValidationFixture>> {
+    let mut entries = std::fs::read_dir(path)?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort();
+
+    let mut fixtures = Vec::new();
+    for path in entries {
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        fixtures.push(load_fixture_file(&path)?);
+    }
+    Ok(fixtures)
+}
+
+pub fn load_fixture_file(path: &Path) -> anyhow::Result<ValidationFixture> {
+    let text = std::fs::read_to_string(path)?;
+    let mut fixture: ValidationFixture =
+        serde_json::from_str::<FileValidationFixture>(&text)?.into();
+    if fixture.name.trim().is_empty() {
+        fixture.name = fixture_name_from_path(path);
+    }
+    Ok(fixture)
+}
+
+fn fixture_name_from_path(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("dogfood-fixture")
+        .to_string()
+}
+
+pub fn append_fixture_dirs(
+    mut fixtures: Vec<ValidationFixture>,
+    dirs: &[PathBuf],
+) -> anyhow::Result<Vec<ValidationFixture>> {
+    for dir in dirs {
+        fixtures.extend(load_fixture_dir(dir)?);
+    }
+    Ok(fixtures)
 }
 
 fn json_error_fixture() -> ValidationFixture {

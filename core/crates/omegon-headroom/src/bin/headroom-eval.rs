@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use omegon_headroom::HeadroomPolicy;
 use omegon_headroom::validation::{
-    ValidationSuiteReport, canonical_validation_fixtures, validate_suite,
+    ValidationSuiteReport, append_fixture_dirs, canonical_validation_fixtures, validate_suite,
 };
 
 fn main() -> ExitCode {
@@ -13,6 +13,7 @@ fn main() -> ExitCode {
     let mut target_bytes = 4096;
     let mut save_path: Option<PathBuf> = None;
     let mut compare_path: Option<PathBuf> = None;
+    let mut fixture_dirs: Vec<PathBuf> = Vec::new();
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -45,6 +46,13 @@ fn main() -> ExitCode {
                     }
                 };
             }
+            "--fixtures" => {
+                let Some(value) = args.next() else {
+                    eprintln!("missing value for --fixtures");
+                    return ExitCode::from(2);
+                };
+                fixture_dirs.push(PathBuf::from(value));
+            }
             "--save" => {
                 let Some(value) = args.next() else {
                     eprintln!("missing value for --save");
@@ -71,8 +79,16 @@ fn main() -> ExitCode {
         }
     }
 
+    let fixtures = match append_fixture_dirs(canonical_validation_fixtures(), &fixture_dirs) {
+        Ok(fixtures) => fixtures,
+        Err(err) => {
+            eprintln!("failed to load fixture directory: {err}");
+            return ExitCode::from(2);
+        }
+    };
+
     let report = validate_suite(
-        &canonical_validation_fixtures(),
+        &fixtures,
         HeadroomPolicy {
             min_bytes,
             target_bytes,
@@ -145,11 +161,12 @@ struct ComparisonReport {
 
 fn print_help() {
     println!(
-        "headroom-eval [--text|--json] [--min-bytes N] [--target-bytes N] [--save PATH] [--compare PATH]\n\n\
+        "headroom-eval [--text|--json] [--min-bytes N] [--target-bytes N] [--fixtures DIR] [--save PATH] [--compare PATH]\n\n\
          Runs native headroom evaluation fixtures. Exits non-zero if evaluated savings,\n\
          fact retention, or expected compression behavior regress. JSON output is intended\n\
-         for CI snapshots and longitudinal benchmark comparison. --save writes the current\n\
-         report as JSON; --compare checks the current report against a saved baseline."
+         for CI snapshots and longitudinal benchmark comparison. --fixtures loads additional\n\
+         dogfood/regression JSON fixtures from a directory. --save writes the current report as\n\
+         JSON; --compare checks the current report against a saved baseline."
     );
 }
 
