@@ -8810,7 +8810,10 @@ pub async fn run_tui(
                                         // overlay borrow is released before touching app
                                         if let Some(prompt) = auto_prompt {
                                             if !app.agent_active {
-                                                app.conversation.push_system("▸ tutorial step");
+                                                app.show_command_toast(CommandToast::new(
+                                                    "Tutorial step started",
+                                                    CommandSeverity::Info,
+                                                ));
                                                 app.agent_active = true;
                                                 if let Ok(mut ss) =
                                                     app.dashboard_handles.session.lock()
@@ -8846,7 +8849,10 @@ pub async fn run_tui(
                                             let prompt = prompt.to_string();
                                             overlay.mark_auto_prompt_sent();
                                             if !app.agent_active {
-                                                app.conversation.push_system("▸ tutorial step");
+                                                app.show_command_toast(CommandToast::new(
+                                                    "Tutorial step started",
+                                                    CommandSeverity::Info,
+                                                ));
                                                 app.agent_active = true;
                                                 if let Ok(mut ss) =
                                                     app.dashboard_handles.session.lock()
