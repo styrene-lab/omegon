@@ -4,9 +4,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CompressionInput, ContentKind, HeadroomPolicy, InMemoryHeadroomStore};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FixtureClass {
+    CanonicalSmoke,
+    Adversarial,
+    Dogfood,
+    Regression,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidationFixture {
     pub name: String,
+    pub class: FixtureClass,
     pub kind_hint: Option<ContentKind>,
     pub input: String,
     pub required_facts: Vec<String>,
@@ -17,32 +27,65 @@ pub struct ValidationFixture {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FixtureValidationReport {
     pub name: String,
+    pub class: FixtureClass,
     pub content_kind: ContentKind,
     pub compressed: bool,
     pub original_bytes: usize,
-    pub compressed_bytes: usize,
+    pub raw_compressed_bytes: usize,
+    pub evaluated_compressed_bytes: usize,
     pub estimated_tokens_before: usize,
-    pub estimated_tokens_after: usize,
-    pub savings_percent: u8,
-    pub latency_micros: u128,
-    pub missing_facts: Vec<String>,
+    pub raw_estimated_tokens_after: usize,
+    pub evaluated_estimated_tokens_after: usize,
+    pub raw_token_savings_percent: u8,
+    pub evaluated_token_savings_percent: u8,
+    pub raw_savings_percent: u8,
+    pub evaluated_savings_percent: u8,
+    pub compress_latency_micros: u128,
+    pub raw_missing_facts: Vec<String>,
+    pub evaluated_missing_facts: Vec<String>,
+    pub restored_fact_count: usize,
+    pub restored_fact_bytes: usize,
     pub passed: bool,
     pub failure_reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ValidationSuiteReport {
-    pub fixtures: Vec<FixtureValidationReport>,
+pub struct ClassValidationSummary {
+    pub class: FixtureClass,
+    pub fixtures: usize,
     pub passed: bool,
     pub total_original_bytes: usize,
-    pub total_compressed_bytes: usize,
+    pub total_evaluated_compressed_bytes: usize,
     pub estimated_tokens_before: usize,
-    pub estimated_tokens_after: usize,
-    pub savings_percent: u8,
+    pub evaluated_estimated_tokens_after: usize,
+    pub evaluated_savings_percent: u8,
+    pub evaluated_token_savings_percent: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValidationSuiteReport {
+    pub fixtures: Vec<FixtureValidationReport>,
+    pub classes: Vec<ClassValidationSummary>,
+    pub passed: bool,
+    pub total_original_bytes: usize,
+    pub total_evaluated_compressed_bytes: usize,
+    pub estimated_tokens_before: usize,
+    pub evaluated_estimated_tokens_after: usize,
+    pub token_counter: &'static str,
+    pub token_counter_kind: &'static str,
+    pub evaluated_token_savings_percent: u8,
+    pub evaluated_savings_percent: u8,
 }
 
 pub fn estimated_tokens(text: &str) -> usize {
     text.len().div_ceil(4)
+}
+
+fn percent_saved(before: usize, after: usize) -> u8 {
+    if before == 0 {
+        return 0;
+    }
+    (((before.saturating_sub(after)) * 100) / before).min(100) as u8
 }
 
 pub fn validate_fixture(
@@ -57,34 +100,48 @@ pub fn validate_fixture(
         text: fixture.input.clone(),
         policy,
     });
-    let mut validation_text = output.text.clone();
-    if output.compressed
-        && let Some(stored) = output
+    let compress_latency_micros = started.elapsed().as_micros();
+
+    let raw_text = output.text.clone();
+    let raw_missing_facts = missing_facts(&raw_text, &fixture.required_facts);
+    let restoration = if output.compressed {
+        output
             .original_ref
             .as_ref()
             .and_then(|reference| store.retrieve(&reference.id).ok())
-    {
-        validation_text =
-            preserve_required_facts(validation_text, &stored.text, &fixture.required_facts);
-    }
-    let latency_micros = started.elapsed().as_micros();
+            .map(|stored| {
+                restore_required_facts(raw_text.clone(), &stored.text, &fixture.required_facts)
+            })
+            .unwrap_or_else(|| RestoredText::unchanged(raw_text.clone()))
+    } else {
+        RestoredText::unchanged(raw_text.clone())
+    };
+    let evaluated_text = restoration.text;
+    let evaluated_missing_facts = missing_facts(&evaluated_text, &fixture.required_facts);
 
-    let missing_facts = fixture
-        .required_facts
-        .iter()
-        .filter(|fact| !validation_text.contains(fact.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
+    let estimated_tokens_before = estimated_tokens(&fixture.input);
+    let raw_estimated_tokens_after = estimated_tokens(&raw_text);
+    let evaluated_estimated_tokens_after = estimated_tokens(&evaluated_text);
+    let raw_savings_percent = percent_saved(output.stats.original_bytes, raw_text.len());
+    let evaluated_savings_percent =
+        percent_saved(output.stats.original_bytes, evaluated_text.len());
+    let raw_token_savings_percent =
+        percent_saved(estimated_tokens_before, raw_estimated_tokens_after);
+    let evaluated_token_savings_percent =
+        percent_saved(estimated_tokens_before, evaluated_estimated_tokens_after);
 
     let mut failure_reasons = Vec::new();
-    if output.stats.savings_percent < fixture.min_savings_percent {
+    if evaluated_savings_percent < fixture.min_savings_percent {
         failure_reasons.push(format!(
-            "savings {}% below required {}%",
-            output.stats.savings_percent, fixture.min_savings_percent
+            "evaluated savings {}% below required {}%",
+            evaluated_savings_percent, fixture.min_savings_percent
         ));
     }
-    if !missing_facts.is_empty() {
-        failure_reasons.push(format!("missing {} required facts", missing_facts.len()));
+    if !evaluated_missing_facts.is_empty() {
+        failure_reasons.push(format!(
+            "missing {} required facts after restoration",
+            evaluated_missing_facts.len()
+        ));
     }
     if let Some(expected) = fixture.expected_compressed
         && output.compressed != expected
@@ -97,25 +154,58 @@ pub fn validate_fixture(
 
     FixtureValidationReport {
         name: fixture.name.clone(),
+        class: fixture.class,
         content_kind: output.content_kind,
         compressed: output.compressed,
         original_bytes: output.stats.original_bytes,
-        compressed_bytes: validation_text.len(),
-        estimated_tokens_before: estimated_tokens(&fixture.input),
-        estimated_tokens_after: estimated_tokens(&validation_text),
-        savings_percent: output.stats.savings_percent,
-        latency_micros,
-        missing_facts,
+        raw_compressed_bytes: raw_text.len(),
+        evaluated_compressed_bytes: evaluated_text.len(),
+        estimated_tokens_before,
+        raw_estimated_tokens_after,
+        evaluated_estimated_tokens_after,
+        raw_token_savings_percent,
+        evaluated_token_savings_percent,
+        raw_savings_percent,
+        evaluated_savings_percent,
+        compress_latency_micros,
+        raw_missing_facts,
+        evaluated_missing_facts,
+        restored_fact_count: restoration.restored_fact_count,
+        restored_fact_bytes: restoration.restored_fact_bytes,
         passed: failure_reasons.is_empty(),
         failure_reasons,
     }
 }
 
-fn preserve_required_facts(
+fn missing_facts(text: &str, required_facts: &[String]) -> Vec<String> {
+    required_facts
+        .iter()
+        .filter(|fact| !text.contains(fact.as_str()))
+        .cloned()
+        .collect()
+}
+
+struct RestoredText {
+    text: String,
+    restored_fact_count: usize,
+    restored_fact_bytes: usize,
+}
+
+impl RestoredText {
+    fn unchanged(text: String) -> Self {
+        Self {
+            text,
+            restored_fact_count: 0,
+            restored_fact_bytes: 0,
+        }
+    }
+}
+
+fn restore_required_facts(
     mut compressed: String,
     original: &str,
     required_facts: &[String],
-) -> String {
+) -> RestoredText {
     let mut restored = Vec::new();
     for fact in required_facts {
         if compressed.contains(fact) {
@@ -125,14 +215,21 @@ fn preserve_required_facts(
             restored.push(line.to_owned());
         }
     }
+    let restored_fact_count = restored.len();
+    let mut restored_fact_bytes = 0;
     if !restored.is_empty() {
         compressed.push_str("\nrequired_fact_context:\n");
         for line in restored {
+            restored_fact_bytes += line.len();
             compressed.push_str(&line);
             compressed.push('\n');
         }
     }
-    compressed
+    RestoredText {
+        text: compressed,
+        restored_fact_count,
+        restored_fact_bytes,
+    }
 }
 
 pub fn validate_suite(
@@ -146,31 +243,90 @@ pub fn validate_suite(
         .collect::<Vec<_>>();
 
     let total_original_bytes: usize = reports.iter().map(|report| report.original_bytes).sum();
-    let total_compressed_bytes: usize = reports.iter().map(|report| report.compressed_bytes).sum();
+    let total_evaluated_compressed_bytes: usize = reports
+        .iter()
+        .map(|report| report.evaluated_compressed_bytes)
+        .sum();
     let estimated_tokens_before: usize = reports
         .iter()
         .map(|report| report.estimated_tokens_before)
         .sum();
-    let estimated_tokens_after: usize = reports
+    let evaluated_estimated_tokens_after: usize = reports
         .iter()
-        .map(|report| report.estimated_tokens_after)
+        .map(|report| report.evaluated_estimated_tokens_after)
         .sum();
-    let saved = total_original_bytes.saturating_sub(total_compressed_bytes);
-    let savings_percent = if total_original_bytes == 0 {
-        0
-    } else {
-        ((saved * 100) / total_original_bytes).min(100) as u8
-    };
+    let classes = class_summaries(&reports);
+    let evaluated_savings_percent =
+        percent_saved(total_original_bytes, total_evaluated_compressed_bytes);
+    let evaluated_token_savings_percent =
+        percent_saved(estimated_tokens_before, evaluated_estimated_tokens_after);
 
     ValidationSuiteReport {
         passed: reports.iter().all(|report| report.passed),
         fixtures: reports,
+        classes,
         total_original_bytes,
-        total_compressed_bytes,
+        total_evaluated_compressed_bytes,
         estimated_tokens_before,
-        estimated_tokens_after,
-        savings_percent,
+        evaluated_estimated_tokens_after,
+        token_counter: "bytes_div_4",
+        token_counter_kind: "approximate",
+        evaluated_token_savings_percent,
+        evaluated_savings_percent,
     }
+}
+
+fn class_summaries(reports: &[FixtureValidationReport]) -> Vec<ClassValidationSummary> {
+    [
+        FixtureClass::CanonicalSmoke,
+        FixtureClass::Adversarial,
+        FixtureClass::Dogfood,
+        FixtureClass::Regression,
+    ]
+    .into_iter()
+    .filter_map(|class| {
+        let class_reports = reports
+            .iter()
+            .filter(|report| report.class == class)
+            .collect::<Vec<_>>();
+        if class_reports.is_empty() {
+            return None;
+        }
+        let total_original_bytes = class_reports
+            .iter()
+            .map(|report| report.original_bytes)
+            .sum();
+        let total_evaluated_compressed_bytes = class_reports
+            .iter()
+            .map(|report| report.evaluated_compressed_bytes)
+            .sum();
+        let estimated_tokens_before = class_reports
+            .iter()
+            .map(|report| report.estimated_tokens_before)
+            .sum();
+        let evaluated_estimated_tokens_after = class_reports
+            .iter()
+            .map(|report| report.evaluated_estimated_tokens_after)
+            .sum();
+        Some(ClassValidationSummary {
+            class,
+            fixtures: class_reports.len(),
+            passed: class_reports.iter().all(|report| report.passed),
+            total_original_bytes,
+            total_evaluated_compressed_bytes,
+            estimated_tokens_before,
+            evaluated_estimated_tokens_after,
+            evaluated_savings_percent: percent_saved(
+                total_original_bytes,
+                total_evaluated_compressed_bytes,
+            ),
+            evaluated_token_savings_percent: percent_saved(
+                estimated_tokens_before,
+                evaluated_estimated_tokens_after,
+            ),
+        })
+    })
+    .collect()
 }
 
 pub fn canonical_validation_fixtures() -> Vec<ValidationFixture> {
@@ -179,6 +335,8 @@ pub fn canonical_validation_fixtures() -> Vec<ValidationFixture> {
         cargo_failure_fixture(),
         compact_grep_passthrough_fixture(),
         rust_source_passthrough_fixture(),
+        json_schema_signal_fixture(),
+        threshold_plaintext_fixture(),
     ]
 }
 
@@ -207,6 +365,7 @@ fn json_error_fixture() -> ValidationFixture {
 
     ValidationFixture {
         name: "json-critical-error".into(),
+        class: FixtureClass::CanonicalSmoke,
         kind_hint: Some(ContentKind::Json),
         input: serde_json::to_string(&rows).expect("fixture json serializes"),
         required_facts: vec![
@@ -242,6 +401,7 @@ fn cargo_failure_fixture() -> ValidationFixture {
 
     ValidationFixture {
         name: "cargo-failure-log".into(),
+        class: FixtureClass::CanonicalSmoke,
         kind_hint: Some(ContentKind::Log),
         input: lines.join("\n"),
         required_facts: vec![
@@ -262,6 +422,7 @@ fn compact_grep_passthrough_fixture() -> ValidationFixture {
         .join("\n");
     ValidationFixture {
         name: "compact-grep-passthrough".into(),
+        class: FixtureClass::CanonicalSmoke,
         kind_hint: Some(ContentKind::PlainText),
         input,
         required_facts: vec!["src/module_7.rs:17:fn target_7() {}".into()],
@@ -286,11 +447,77 @@ impl Compressor {
     .to_string();
     ValidationFixture {
         name: "fresh-rust-source-passthrough".into(),
+        class: FixtureClass::CanonicalSmoke,
         kind_hint: Some(ContentKind::Code),
         input,
         required_facts: vec!["pub fn compress".into()],
         min_savings_percent: 0,
         expected_compressed: Some(false),
+    }
+}
+
+fn json_schema_signal_fixture() -> ValidationFixture {
+    let rows = (0..160)
+        .map(|i| {
+            if i == 123 {
+                serde_json::json!({
+                    "id": i,
+                    "status": "blocked",
+                    "severity": "critical",
+                    "risk": "data_loss",
+                    "exit_code": 101,
+                    "owner": "storage-controller"
+                })
+            } else {
+                serde_json::json!({
+                    "id": i,
+                    "status": "ok",
+                    "severity": "info",
+                    "risk": "none",
+                    "exit_code": 0,
+                    "owner": "storage-controller"
+                })
+            }
+        })
+        .collect::<Vec<_>>();
+    ValidationFixture {
+        name: "json-schema-signal-critical-row".into(),
+        class: FixtureClass::Adversarial,
+        kind_hint: Some(ContentKind::Json),
+        input: serde_json::to_string(&rows).expect("fixture json serializes"),
+        required_facts: vec![
+            "blocked".into(),
+            "critical".into(),
+            "data_loss".into(),
+            "exit_code".into(),
+            "101".into(),
+        ],
+        min_savings_percent: 70,
+        expected_compressed: Some(true),
+    }
+}
+
+fn threshold_plaintext_fixture() -> ValidationFixture {
+    let mut lines = Vec::new();
+    for i in 0..180 {
+        lines.push(format!(
+            "routine context line {i}: repeated low signal payload"
+        ));
+    }
+    lines.push("DECISION: keep compression default-off until dogfood benchmarks pass".into());
+    for i in 180..360 {
+        lines.push(format!(
+            "routine context line {i}: repeated low signal payload"
+        ));
+    }
+    ValidationFixture {
+        name: "threshold-plaintext-required-decision".into(),
+        class: FixtureClass::Adversarial,
+        kind_hint: Some(ContentKind::PlainText),
+        input: lines.join("\n"),
+        required_facts: vec!["keep compression default-off".into()],
+        min_savings_percent: 60,
+        expected_compressed: Some(true),
     }
 }
 
@@ -325,6 +552,7 @@ mod tests {
         let mut store = InMemoryHeadroomStore::default();
         let fixture = ValidationFixture {
             name: "missing-fact".into(),
+            class: FixtureClass::Regression,
             kind_hint: Some(ContentKind::Log),
             input: (0..200)
                 .map(|i| format!("info line {i}"))
@@ -343,6 +571,6 @@ mod tests {
             },
         );
         assert!(!report.passed);
-        assert_eq!(report.missing_facts, vec!["DOES_NOT_EXIST"]);
+        assert_eq!(report.evaluated_missing_facts, vec!["DOES_NOT_EXIST"]);
     }
 }

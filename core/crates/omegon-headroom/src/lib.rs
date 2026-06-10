@@ -235,6 +235,14 @@ fn compress_json(text: &str, policy: HeadroomPolicy, reference: Option<&Headroom
                 out.push_str(&compact_json_line(item));
                 out.push('\n');
             }
+            let signal_items = json_signal_items(&items, policy.signal_lines);
+            if !signal_items.is_empty() {
+                out.push_str("\nsignal_items:\n");
+                for item in signal_items {
+                    out.push_str(&compact_json_line(item));
+                    out.push('\n');
+                }
+            }
             if items.len() > policy.excerpt_lines.min(5) {
                 out.push_str("\nsample_last:\n");
                 let mut tail = items.iter().rev().take(3).collect::<Vec<_>>();
@@ -345,6 +353,10 @@ fn is_signal_line(line: &str) -> bool {
         || lower.contains("fatal")
         || lower.contains("failed")
         || lower.contains("failure")
+        || lower.contains("timeout")
+        || lower.contains("decision")
+        || lower.contains("blocked")
+        || lower.contains("critical")
         || lower.contains("todo")
         || lower.contains("fixme")
         || line.starts_with('+')
@@ -382,6 +394,88 @@ fn common_object_keys(items: &[serde_json::Value]) -> Option<Vec<String>> {
         return None;
     }
     Some(keys.into_keys().collect())
+}
+
+fn json_signal_items(items: &[serde_json::Value], limit: usize) -> Vec<&serde_json::Value> {
+    const SCAN_LIMIT: usize = 10_000;
+    items
+        .iter()
+        .take(SCAN_LIMIT)
+        .filter(|item| json_value_has_signal(item))
+        .take(limit)
+        .collect()
+}
+
+fn json_value_has_signal(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => map.iter().any(|(key, value)| {
+            is_json_signal_key(key)
+                || json_value_has_signal_for_key(key, value)
+                || json_value_has_signal(value)
+        }),
+        serde_json::Value::Array(items) => items.iter().any(json_value_has_signal),
+        serde_json::Value::String(value) => is_signal_line(value) || is_json_signal_value(value),
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) | serde_json::Value::Null => {
+            false
+        }
+    }
+}
+
+fn json_value_has_signal_for_key(key: &str, value: &serde_json::Value) -> bool {
+    let key = key.to_ascii_lowercase();
+    match value {
+        serde_json::Value::String(value) => {
+            matches!(
+                key.as_str(),
+                "status" | "severity" | "risk" | "priority" | "state" | "result"
+            ) && is_json_signal_value(value)
+        }
+        serde_json::Value::Number(value) => {
+            matches!(
+                key.as_str(),
+                "exit_code" | "error_code" | "failures" | "failed"
+            ) && value.as_i64().is_some_and(|n| n != 0)
+        }
+        serde_json::Value::Bool(value) => {
+            matches!(
+                key.as_str(),
+                "failed" | "stale" | "dirty" | "changed" | "blocked" | "critical"
+            ) && *value
+        }
+        _ => false,
+    }
+}
+
+fn is_json_signal_key(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "error"
+            | "errors"
+            | "warning"
+            | "warnings"
+            | "panic"
+            | "fatal"
+            | "failure"
+            | "failures"
+            | "failed"
+    )
+}
+
+fn is_json_signal_value(value: &str) -> bool {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "blocked"
+            | "critical"
+            | "high"
+            | "fatal"
+            | "failed"
+            | "failure"
+            | "error"
+            | "warning"
+            | "warn"
+            | "panic"
+            | "data_loss"
+    ) || is_signal_line(value)
 }
 
 fn compact_json_line(value: &serde_json::Value) -> String {

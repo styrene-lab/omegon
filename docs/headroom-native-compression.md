@@ -76,6 +76,47 @@ Mode semantics:
 
 No mode may silently download, start, or require a local semantic model. If `local_model` is configured but unavailable, the deterministic compressor remains the fallback and validation metadata should report the fallback.
 
+## Evaluation workflow
+
+Native compression effectiveness is measured by the `headroom-eval` binary in the `omegon-headroom` crate:
+
+```bash
+cargo run -p omegon-headroom --bin headroom-eval -- --text
+cargo run -p omegon-headroom --bin headroom-eval -- --json
+```
+
+The evaluator runs canonical fixtures through the deterministic compressor and exits non-zero if any fixture violates its contract. The text output is intended for local dogfooding; JSON output is intended for CI snapshots and longitudinal benchmark comparison.
+
+The first canonical suite covers:
+
+- JSON arrays with sparse critical rows
+- long Cargo-style failure logs
+- compact grep-style output that must pass through unchanged
+- small Rust source snippets that must pass through unchanged
+
+Current baseline from the suite:
+
+```text
+Headroom evaluation: PASS
+fixtures: 6
+evaluated bytes: 59428 -> 6435 (89% saved)
+estimated tokens (bytes_div_4/approximate): 14859 -> 1611 (89% saved)
+```
+
+The report distinguishes raw compressor output from evaluated output after protected required-fact restoration. Pass/fail savings thresholds are evaluated against the final text that would enter context, not against raw compressor stats. Reports also include fixture classes, raw missing facts, restored fact counts/bytes, and the token counter identity so benchmark consumers do not mistake `bytes_div_4` estimates for provider-tokenizer measurements.
+
+This baseline is intentionally small. It proves the harness and catches obvious regressions; it is not sufficient evidence to enable compression by default. Enabling by default requires dogfood fixtures from real Omegon sessions and stable savings/fact-retention results across tool outputs, build logs, source reads, and markdown/design surfaces.
+
+## Validation and Token-Savings Claims
+
+Omegon does not claim compression effectiveness by inspection. Every compressor is validated against canonical fixtures. A fixture defines input text, content kind, required facts, expected compression behavior, and a minimum savings threshold.
+
+The validator records original/compressed bytes, estimated original/compressed tokens, byte savings percentage, token savings percentage, latency, required-fact retention, and pass/fail reasons.
+
+The default token counter is deterministic and dependency-free: `ceil(bytes / 4)`. Provider/model-specific tokenizers may be added later as optional counters, but they are not required for CI.
+
+Local semantic models are optional evaluators. They may score semantic adequacy or produce model-authored summaries, but deterministic fact-retention and CCR retrieval remain the correctness gate.
+
 ## Compression model strategy
 
 Omegon should treat "compression model" as a pluggable local capability, not as a required dependency for the native subsystem.
