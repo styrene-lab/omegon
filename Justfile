@@ -104,6 +104,10 @@ lint:
 
 # ─── Benchmarks ─────────────────────────────────────────────
 
+# Run native headroom compression evaluation fixtures.
+headroom-eval *args:
+    {{cargo}} run -p omegon-headroom --bin headroom-eval -- {{args}}
+
 # Run a quick token-efficiency benchmark. Writes per-turn snapshots to .tmp/bench/.
 # Usage: just bench "read Cargo.toml and summarize the dependencies"
 bench prompt:
