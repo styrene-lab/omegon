@@ -8558,6 +8558,51 @@ pub async fn run_tui(
                     }
                 }
                 Event::Key(key) => {
+                    // Blocking responder-backed prompts own input before passive panels,
+                    // scrollback controls, selectors, or editor actions.
+                    if app.pending_operator_wait.is_some() {
+                        let response = match key.code {
+                            KeyCode::Enter
+                            | KeyCode::Char(' ')
+                            | KeyCode::Char('d')
+                            | KeyCode::Char('D') => {
+                                Some(omegon_traits::OperatorWaitResponse::Completed)
+                            }
+                            KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Esc => {
+                                Some(omegon_traits::OperatorWaitResponse::Cancelled)
+                            }
+                            _ => None,
+                        };
+                        if let Some(response) = response {
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::RespondToOperatorWait(OperatorWaitAction {
+                                        request_id: None,
+                                        response,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
+                        }
+                        continue;
+                    }
+
+                    if app.pending_permission.is_some() {
+                        let response = permission_response_for_key(key.code, key.modifiers);
+                        if let Some(response) = response {
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::RespondToPermission(PermissionAction {
+                                        request_id: None,
+                                        response,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
+                        }
+                        continue;
+                    }
+
                     if let Some(panel) = app.command_panel.as_mut() {
                         match (key.code, key.modifiers) {
                             (KeyCode::Esc, _) => {
@@ -8638,55 +8683,6 @@ pub async fn run_tui(
 
                     if app.should_discard_key_after_interrupt(&key) {
                         continue;
-                    }
-
-                    // ── Manual-action prompt intercepts completion keys ─
-                    if app.pending_operator_wait.is_some() {
-                        let response = match key.code {
-                            KeyCode::Enter
-                            | KeyCode::Char(' ')
-                            | KeyCode::Char('d')
-                            | KeyCode::Char('D') => {
-                                Some(omegon_traits::OperatorWaitResponse::Completed)
-                            }
-                            KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Esc => {
-                                Some(omegon_traits::OperatorWaitResponse::Cancelled)
-                            }
-                            _ => None,
-                        };
-                        if let Some(response) = response {
-                            let _ = app
-                                .handle_ui_action(
-                                    UiAction::RespondToOperatorWait(OperatorWaitAction {
-                                        request_id: None,
-                                        response,
-                                    }),
-                                    &command_tx,
-                                )
-                                .await;
-                            continue;
-                        }
-                    }
-
-                    // ── Permission prompt shortcuts are active while a permission is
-                    // actually pending. Lane visibility is a render detail; do not let
-                    // it decide whether the operator can unblock a waiting tool.
-                    // Lowercase 'a' intentionally remains normal editor input;
-                    // persistent grants require Shift+A / uppercase A.
-                    if app.pending_permission.is_some() {
-                        let response = permission_response_for_key(key.code, key.modifiers);
-                        if let Some(response) = response {
-                            let _ = app
-                                .handle_ui_action(
-                                    UiAction::RespondToPermission(PermissionAction {
-                                        request_id: None,
-                                        response,
-                                    }),
-                                    &command_tx,
-                                )
-                                .await;
-                            continue;
-                        }
                     }
 
                     // ── Selector popup intercepts all keys when open ────
