@@ -80,6 +80,14 @@ pub struct AddDesignNodeImplNotesRequest {
     pub constraints: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BranchDesignNodeQuestionRequest {
+    pub parent_id: String,
+    pub question: String,
+    pub child_id: String,
+    pub child_title: String,
+}
+
 impl LifecycleMutationService {
     pub fn new(
         repo_path: PathBuf,
@@ -246,6 +254,29 @@ impl LifecycleMutationService {
         design::add_impl_notes(&node, &req.file_scope, &req.constraints)?;
         self.provider.lock().unwrap().refresh();
         Ok(())
+    }
+
+    pub fn branch_design_node_question(
+        &self,
+        req: BranchDesignNodeQuestionRequest,
+    ) -> anyhow::Result<DesignNode> {
+        let docs_dir = self.repo_path.join("docs");
+        let child = design::create_node(
+            &docs_dir,
+            &req.child_id,
+            &req.child_title,
+            Some(&req.parent_id),
+            None,
+            &[],
+            "",
+        )?;
+
+        let mut parent_node = self.get_node_clone(&req.parent_id)?;
+        design::update_node(&mut parent_node, |n| {
+            n.open_questions.retain(|q| q != &req.question);
+        })?;
+        self.provider.lock().unwrap().refresh();
+        Ok(child)
     }
 
     fn get_node_clone(&self, id: &str) -> anyhow::Result<DesignNode> {
@@ -522,5 +553,46 @@ mod tests {
         assert_eq!(sections.impl_file_scope.len(), 1);
         assert_eq!(sections.impl_file_scope[0].path, "src/lib.rs");
         assert_eq!(sections.impl_constraints, vec!["Keep behavior stable"]);
+    }
+
+    #[test]
+    fn branch_design_node_creates_child_and_removes_question() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_path_buf();
+        let provider = Arc::new(Mutex::new(LifecycleContextProvider::new(&repo)));
+        let opsx = Arc::new(Mutex::new(
+            OpsxLifecycle::load(JsonFileStore::new(&repo)).unwrap(),
+        ));
+        let service = LifecycleMutationService::new(repo, Arc::clone(&provider), Arc::clone(&opsx));
+        service
+            .create_design_node(CreateDesignNodeRequest {
+                id: "parent".to_string(),
+                title: "Parent".to_string(),
+                parent: None,
+                status: None,
+                tags: vec![],
+                overview: "overview".to_string(),
+            })
+            .unwrap();
+        service
+            .add_design_node_question(UpdateDesignNodeQuestionRequest {
+                id: "parent".to_string(),
+                question: "Which path?".to_string(),
+            })
+            .unwrap();
+
+        let child = service
+            .branch_design_node_question(BranchDesignNodeQuestionRequest {
+                parent_id: "parent".to_string(),
+                question: "Which path?".to_string(),
+                child_id: "child".to_string(),
+                child_title: "Child".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(child.parent.as_deref(), Some("parent"));
+        let provider = provider.lock().unwrap();
+        assert!(provider.get_node("parent").unwrap().open_questions.is_empty());
+        assert_eq!(provider.get_node("child").unwrap().parent.as_deref(), Some("parent"));
     }
 }

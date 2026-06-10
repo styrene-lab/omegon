@@ -19,7 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeImplNotesRequest, AddDesignNodeLinkRequest, AddDesignNodeResearchRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
+use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeImplNotesRequest, AddDesignNodeLinkRequest, AddDesignNodeResearchRequest, BranchDesignNodeQuestionRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -354,8 +354,6 @@ impl LifecycleFeature {
     fn execute_design_tree_update(&self, args: &Value) -> anyhow::Result<ToolResult> {
         let action = args["action"].as_str().unwrap_or("");
         let node_id = args["node_id"].as_str();
-        let docs_dir = self.repo_path.join("docs");
-        // Helper macro-like pattern: read node data, drop borrow, then mutate
         let get_node_clone = |id: &str| -> anyhow::Result<DesignNode> {
             let p = self.provider.lock().unwrap();
             p.get_node(id)
@@ -634,15 +632,14 @@ impl LifecycleFeature {
                     .ok_or_else(|| anyhow::anyhow!("child_id required"))?;
                 let child_title = args["child_title"].as_str().unwrap_or(question);
 
-                // Create child node
-                design::create_node(&docs_dir, child_id, child_title, Some(id), None, &[], "")?;
-
-                // Remove question from parent
-                let mut parent_node = get_node_clone(id)?;
-                design::update_node(&mut parent_node, |n| {
-                    n.open_questions.retain(|q| q != question);
-                })?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.branch_design_node_question(
+                    BranchDesignNodeQuestionRequest {
+                        parent_id: id.to_string(),
+                        question: question.to_string(),
+                        child_id: child_id.to_string(),
+                        child_title: child_title.to_string(),
+                    },
+                )?;
                 Ok(text_result(&format!(
                     "Branched '{child_id}' from '{id}', removed question"
                 )))

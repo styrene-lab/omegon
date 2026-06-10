@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Route design-tree branch mutation through the lifecycle mutation service as one parent/child operation.
 - Route design-tree implementation-notes mutation through the lifecycle mutation service with markdown coverage.
 - Route design-tree dependency and related-link mutations through the lifecycle mutation service with idempotency coverage.
 - Route design-tree decision mutation through the lifecycle mutation service while keeping memory auto-ingest adapter-side.
