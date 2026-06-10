@@ -7,6 +7,8 @@ pub mod knowledge;
 
 pub use bm25::{BM25Index, SearchChunk, SearchScope};
 pub use cache::ScanCache;
-pub use code::{CodeChunk, CodeScanner};
+pub use code::{
+    CodeChunk, CodeScanner, ExtractionConfidence, ExtractionStrategy, is_supported_code_extension,
+};
 pub use indexer::{IndexStats, Indexer};
 pub use knowledge::{KnowledgeChunk, KnowledgeDirs, KnowledgeScanner};

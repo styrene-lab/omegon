@@ -212,6 +212,9 @@ mod tests {
             item_kind: "fn".into(),
             text: text.into(),
             parent_scope: None,
+            language: "rust".into(),
+            strategy: crate::code::ExtractionStrategy::TreeSitter,
+            confidence: crate::code::ExtractionConfidence::Extracted,
         }
     }
     fn mk_knowledge(heading: &str, text: &str) -> KnowledgeChunk {
