@@ -161,6 +161,10 @@ Local semantic models are optional evaluators. They may score semantic adequacy 
 
 The first production compressor pass includes protected-anchor extraction for plain text, markdown, logs, and diffs before excerpt trimming. Protected anchors include signal words, decision lines, task checkboxes, path:line references, hash-like tokens, nonzero exit/status codes, and test-count summaries. This reduces dependence on evaluator-only required-fact restoration and is a prerequisite for enabling automatic compression beyond dogfood mode.
 
+In `mode=on`, the built-in `read` tool is the first automatic integration point. `read` keeps its normal file-boundary checks, UTF-8/binary handling, offset/limit selection, and existing truncation behavior, then routes the final text through the shared headroom helper. If the final text exceeds `min_bytes`, the compressed response stores the exact read output in the session CCR store and emits a retrieval handle that `headroom_retrieve` can resolve.
+
+`manual` mode intentionally does not change `read`. It only enables explicit `headroom_compress` dogfooding.
+
 ## Compression model strategy
 
 Omegon should treat "compression model" as a pluggable local capability, not as a required dependency for the native subsystem.

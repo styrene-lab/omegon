@@ -9,6 +9,7 @@ pub mod change;
 pub mod chronos;
 pub mod codebase_search;
 pub mod edit;
+pub mod headroom_support;
 pub mod local_inference;
 pub mod native_cmd;
 pub mod nex_substrate;
@@ -581,6 +582,8 @@ fn expand_tilde(path_str: &str) -> PathBuf {
     PathBuf::from(path_str)
 }
 
+use crate::tools::headroom_support::SharedHeadroomStore;
+
 // ── Core tool provider ──────────────────────────────────────────────────
 
 /// Core tool provider — registers the primitive tools.
@@ -592,6 +595,8 @@ pub struct CoreTools {
     /// Workspace boundary enforcer — shared with other tool providers.
     boundary: WorkspaceBoundary,
     terminal_tool_enabled: bool,
+    headroom_settings: Option<crate::settings::SharedSettings>,
+    headroom_store: Option<SharedHeadroomStore>,
     nex_delegations: Vec<crate::nex::substrate::NexSubstrateDelegation>,
 }
 
@@ -603,6 +608,8 @@ impl CoreTools {
             repo_model: None,
             boundary,
             terminal_tool_enabled: true,
+            headroom_settings: None,
+            headroom_store: None,
             nex_delegations: Vec::new(),
         }
     }
@@ -618,6 +625,8 @@ impl CoreTools {
             repo_model: Some(repo_model),
             boundary,
             terminal_tool_enabled: true,
+            headroom_settings: None,
+            headroom_store: None,
             nex_delegations: Vec::new(),
         }
     }
@@ -625,8 +634,34 @@ impl CoreTools {
     /// Attach shared settings for trusted directory resolution.
     pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
         self.terminal_tool_enabled = settings.lock().map(|s| s.terminal_tool).unwrap_or(true);
+        self.headroom_settings = Some(settings.clone());
         self.boundary = self.boundary.with_settings(settings);
         self
+    }
+
+    pub fn with_headroom_store(mut self, store: SharedHeadroomStore) -> Self {
+        self.headroom_store = Some(store);
+        self
+    }
+
+    fn maybe_compress_read_result(&self, mut result: ToolResult, source: &str) -> ToolResult {
+        let Some(ContentBlock::Text { text }) = result.content.first().cloned() else {
+            return result;
+        };
+        let compressed = crate::tools::headroom_support::maybe_compress_tool_text(
+            self.headroom_settings.as_ref(),
+            self.headroom_store.as_ref(),
+            source,
+            None,
+            text,
+        );
+        if let Some(details) = compressed.details {
+            result.details["headroom"] = details;
+        }
+        if let Some(ContentBlock::Text { text }) = result.content.first_mut() {
+            *text = compressed.text;
+        }
+        result
     }
 
     /// Attach read-only Nex delegations discovered from extension metadata.
@@ -1149,7 +1184,12 @@ impl ToolProvider for CoreTools {
                 let path = self.resolve_path(path_str)?;
                 let offset = args["offset"].as_u64().map(|n| n as usize);
                 let limit = args["limit"].as_u64().map(|n| n as usize);
-                read::execute(&path, offset, limit).await
+                let result = if path.exists() {
+                    read::execute(&path, offset, limit).await
+                } else {
+                    anyhow::bail!("File not found: {}", path.display());
+                }?;
+                Ok(self.maybe_compress_read_result(result, path_str))
             }
             reg::WRITE => {
                 let path_str = args["path"]
@@ -1709,6 +1749,86 @@ open_questions:
             .expect("design task");
         assert_eq!(task.intent, crate::conversation::TaskIntent::Design);
         assert_eq!(task.label, "What evidence is needed?");
+    }
+
+    #[tokio::test]
+    async fn read_compression_respects_headroom_mode_and_shared_store() {
+        let project = tempfile::tempdir().unwrap();
+        let file = project.path().join("large.log");
+        let text = (0..500)
+            .map(|i| {
+                if i == 250 {
+                    "ERROR failed to open database at src/db.rs:42".to_string()
+                } else {
+                    format!("routine log line {i}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&file, &text).unwrap();
+
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+        {
+            let mut settings = settings.lock().unwrap();
+            settings.headroom.mode = crate::settings::HeadroomCompressionMode::Manual;
+            settings.headroom.enabled = true;
+            settings.headroom.min_bytes = 1;
+            settings.headroom.target_bytes = 1024;
+        }
+        let store = crate::tools::headroom_support::new_shared_store();
+        let tools = CoreTools::new(project.path().to_path_buf())
+            .with_settings(settings.clone())
+            .with_headroom_store(store.clone());
+
+        let manual_result = tools
+            .execute(
+                reg::READ,
+                "test",
+                serde_json::json!({ "path": "large.log" }),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(manual_result.details.get("headroom").is_none());
+        assert_eq!(store.lock().unwrap().len(), 0);
+
+        {
+            let mut settings = settings.lock().unwrap();
+            settings.headroom.mode = crate::settings::HeadroomCompressionMode::On;
+        }
+        let compressed_result = tools
+            .execute(
+                reg::READ,
+                "test",
+                serde_json::json!({ "path": "large.log" }),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let ContentBlock::Text { text: compressed } = &compressed_result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(compressed.contains("headroom: compressed"));
+        assert!(compressed.contains("ERROR failed to open database"));
+        let reference_id = compressed_result.details["headroom"]["original_ref"]["id"]
+            .as_str()
+            .expect("headroom reference id");
+        assert!(reference_id.starts_with("hr:"));
+        let retrieved = store
+            .lock()
+            .unwrap()
+            .retrieve(reference_id)
+            .unwrap()
+            .text
+            .clone();
+        assert_eq!(retrieved, manual_result_text(&manual_result));
+    }
+
+    fn manual_result_text(result: &ToolResult) -> String {
+        match &result.content[0] {
+            ContentBlock::Text { text } => text.clone(),
+            _ => panic!("expected text result"),
+        }
     }
 
     #[test]

@@ -1,9 +1,5 @@
-use std::sync::Mutex;
-
 use async_trait::async_trait;
-use omegon_headroom::{
-    CompressionInput, ContentKind, HeadroomPolicy, HeadroomRef, InMemoryHeadroomStore,
-};
+use omegon_headroom::{CompressionInput, ContentKind, HeadroomPolicy, HeadroomRef};
 use omegon_traits::{ContentBlock, Feature, ToolDefinition, ToolResult};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -12,15 +8,15 @@ use crate::settings::SharedSettings;
 
 pub struct HeadroomFeature {
     settings: SharedSettings,
-    store: Mutex<InMemoryHeadroomStore>,
+    store: crate::tools::headroom_support::SharedHeadroomStore,
 }
 
 impl HeadroomFeature {
-    pub fn new(settings: SharedSettings) -> Self {
-        Self {
-            settings,
-            store: Mutex::new(InMemoryHeadroomStore::default()),
-        }
+    pub fn new(
+        settings: SharedSettings,
+        store: crate::tools::headroom_support::SharedHeadroomStore,
+    ) -> Self {
+        Self { settings, store }
     }
 }
 
@@ -328,7 +324,10 @@ mod tests {
             target_bytes: 1024,
             ..HeadroomRuntimeConfig::default()
         };
-        HeadroomFeature::new(Arc::new(StdMutex::new(settings)))
+        HeadroomFeature::new(
+            Arc::new(StdMutex::new(settings)),
+            crate::tools::headroom_support::new_shared_store(),
+        )
     }
 
     fn result_text(result: &ToolResult) -> &str {

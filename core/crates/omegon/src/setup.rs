@@ -705,12 +705,21 @@ impl AgentSetup {
             persona_registry,
         )));
 
+        let shared_headroom_store = settings
+            .as_ref()
+            .map(|_| crate::tools::headroom_support::new_shared_store());
+
         if let Some(ref settings) = settings {
+            let headroom_store = shared_headroom_store
+                .as_ref()
+                .expect("headroom store exists when settings exist")
+                .clone();
             bus.register(Box::new(features::harness_settings::HarnessSettings::new(
                 settings.clone(),
             )));
             bus.register(Box::new(features::headroom::HeadroomFeature::new(
                 settings.clone(),
+                headroom_store,
             )));
         }
         bus.register(Box::new(features::auto_compact::AutoCompact::new()));
@@ -791,6 +800,11 @@ impl AgentSetup {
         };
         let core_tools = if let Some(ref s) = settings {
             core_tools.with_settings(s.clone())
+        } else {
+            core_tools
+        };
+        let core_tools = if let Some(store) = shared_headroom_store.clone() {
+            core_tools.with_headroom_store(store)
         } else {
             core_tools
         };
