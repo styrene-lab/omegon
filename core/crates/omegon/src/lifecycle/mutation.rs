@@ -11,7 +11,7 @@ use omegon_opsx::{JsonFileStore, Lifecycle as OpsxLifecycle, NodeState};
 
 use super::context::LifecycleContextProvider;
 use super::design;
-use super::types::{DesignNode, NodeStatus};
+use super::types::{DesignNode, FileScope, NodeStatus};
 
 #[derive(Clone)]
 pub struct LifecycleMutationService {
@@ -71,6 +71,13 @@ pub struct AddDesignNodeDecisionRequest {
 pub struct AddDesignNodeLinkRequest {
     pub id: String,
     pub target_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AddDesignNodeImplNotesRequest {
+    pub id: String,
+    pub file_scope: Vec<FileScope>,
+    pub constraints: Vec<String>,
 }
 
 impl LifecycleMutationService {
@@ -227,6 +234,16 @@ impl LifecycleMutationService {
                 n.related.push(req.target_id.clone());
             }
         })?;
+        self.provider.lock().unwrap().refresh();
+        Ok(())
+    }
+
+    pub fn add_design_node_impl_notes(
+        &self,
+        req: AddDesignNodeImplNotesRequest,
+    ) -> anyhow::Result<()> {
+        let node = self.get_node_clone(&req.id)?;
+        design::add_impl_notes(&node, &req.file_scope, &req.constraints)?;
         self.provider.lock().unwrap().refresh();
         Ok(())
     }
@@ -466,5 +483,44 @@ mod tests {
         let node = provider.lock().unwrap().get_node("new-node").cloned().unwrap();
         assert_eq!(node.dependencies, vec!["dep"]);
         assert_eq!(node.related, vec!["rel"]);
+    }
+
+    #[test]
+    fn add_impl_notes_updates_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_path_buf();
+        let provider = Arc::new(Mutex::new(LifecycleContextProvider::new(&repo)));
+        let opsx = Arc::new(Mutex::new(
+            OpsxLifecycle::load(JsonFileStore::new(&repo)).unwrap(),
+        ));
+        let service = LifecycleMutationService::new(repo, Arc::clone(&provider), Arc::clone(&opsx));
+        service
+            .create_design_node(CreateDesignNodeRequest {
+                id: "new-node".to_string(),
+                title: "New Node".to_string(),
+                parent: None,
+                status: None,
+                tags: vec![],
+                overview: "overview".to_string(),
+            })
+            .unwrap();
+
+        service
+            .add_design_node_impl_notes(AddDesignNodeImplNotesRequest {
+                id: "new-node".to_string(),
+                file_scope: vec![FileScope {
+                    path: "src/lib.rs".to_string(),
+                    description: "Update logic".to_string(),
+                    action: Some("modified".to_string()),
+                }],
+                constraints: vec!["Keep behavior stable".to_string()],
+            })
+            .unwrap();
+
+        let node = provider.lock().unwrap().get_node("new-node").cloned().unwrap();
+        let sections = design::read_node_sections(&node).unwrap();
+        assert_eq!(sections.impl_file_scope.len(), 1);
+        assert_eq!(sections.impl_file_scope[0].path, "src/lib.rs");
+        assert_eq!(sections.impl_constraints, vec!["Keep behavior stable"]);
     }
 }

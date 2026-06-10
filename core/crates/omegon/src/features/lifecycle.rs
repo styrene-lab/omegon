@@ -19,7 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeLinkRequest, AddDesignNodeResearchRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
+use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeImplNotesRequest, AddDesignNodeLinkRequest, AddDesignNodeResearchRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -585,9 +585,6 @@ impl LifecycleFeature {
 
             "add_impl_notes" => {
                 let id = node_id.ok_or_else(|| anyhow::anyhow!("node_id required"))?;
-                let node = get_node_clone(id)?;
-                let node = &node;
-
                 let file_scope: Vec<FileScope> = args["file_scope"]
                     .as_array()
                     .map(|arr| {
@@ -615,8 +612,13 @@ impl LifecycleFeature {
                     })
                     .unwrap_or_default();
 
-                design::add_impl_notes(node, &file_scope, &constraints)?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.add_design_node_impl_notes(
+                    AddDesignNodeImplNotesRequest {
+                        id: id.to_string(),
+                        file_scope,
+                        constraints,
+                    },
+                )?;
                 Ok(text_result(&format!(
                     "Added implementation notes to '{id}'"
                 )))
