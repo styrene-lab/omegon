@@ -19,7 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeResearchRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
+use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeLinkRequest, AddDesignNodeResearchRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -557,13 +557,12 @@ impl LifecycleFeature {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("target_id required"))?;
 
-                let mut node = get_node_clone(id)?;
-                design::update_node(&mut node, |n| {
-                    if !n.dependencies.contains(&target.to_string()) {
-                        n.dependencies.push(target.to_string());
-                    }
-                })?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.add_design_node_dependency(
+                    AddDesignNodeLinkRequest {
+                        id: id.to_string(),
+                        target_id: target.to_string(),
+                    },
+                )?;
                 Ok(text_result(&format!(
                     "Added dependency '{id}' → '{target}'"
                 )))
@@ -575,13 +574,12 @@ impl LifecycleFeature {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("target_id required"))?;
 
-                let mut node = get_node_clone(id)?;
-                design::update_node(&mut node, |n| {
-                    if !n.related.contains(&target.to_string()) {
-                        n.related.push(target.to_string());
-                    }
-                })?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.add_design_node_related(
+                    AddDesignNodeLinkRequest {
+                        id: id.to_string(),
+                        target_id: target.to_string(),
+                    },
+                )?;
                 Ok(text_result(&format!("Added related '{id}' ↔ '{target}'")))
             }
 

@@ -67,6 +67,12 @@ pub struct AddDesignNodeDecisionRequest {
     pub rationale: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct AddDesignNodeLinkRequest {
+    pub id: String,
+    pub target_id: String,
+}
+
 impl LifecycleMutationService {
     pub fn new(
         repo_path: PathBuf,
@@ -193,6 +199,34 @@ impl LifecycleMutationService {
     ) -> anyhow::Result<()> {
         let node = self.get_node_clone(&req.id)?;
         design::add_decision(&node, &req.title, &req.status, &req.rationale)?;
+        self.provider.lock().unwrap().refresh();
+        Ok(())
+    }
+
+    pub fn add_design_node_dependency(
+        &self,
+        req: AddDesignNodeLinkRequest,
+    ) -> anyhow::Result<()> {
+        let mut node = self.get_node_clone(&req.id)?;
+        design::update_node(&mut node, |n| {
+            if !n.dependencies.contains(&req.target_id) {
+                n.dependencies.push(req.target_id.clone());
+            }
+        })?;
+        self.provider.lock().unwrap().refresh();
+        Ok(())
+    }
+
+    pub fn add_design_node_related(
+        &self,
+        req: AddDesignNodeLinkRequest,
+    ) -> anyhow::Result<()> {
+        let mut node = self.get_node_clone(&req.id)?;
+        design::update_node(&mut node, |n| {
+            if !n.related.contains(&req.target_id) {
+                n.related.push(req.target_id.clone());
+            }
+        })?;
         self.provider.lock().unwrap().refresh();
         Ok(())
     }
@@ -392,5 +426,45 @@ mod tests {
         assert_eq!(sections.decisions[0].title, "Choose Path");
         assert_eq!(sections.decisions[0].status, "decided");
         assert_eq!(sections.decisions[0].rationale, "Evidence supports it.");
+    }
+
+    #[test]
+    fn link_mutations_are_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_path_buf();
+        let provider = Arc::new(Mutex::new(LifecycleContextProvider::new(&repo)));
+        let opsx = Arc::new(Mutex::new(
+            OpsxLifecycle::load(JsonFileStore::new(&repo)).unwrap(),
+        ));
+        let service = LifecycleMutationService::new(repo, Arc::clone(&provider), Arc::clone(&opsx));
+        service
+            .create_design_node(CreateDesignNodeRequest {
+                id: "new-node".to_string(),
+                title: "New Node".to_string(),
+                parent: None,
+                status: None,
+                tags: vec![],
+                overview: "overview".to_string(),
+            })
+            .unwrap();
+
+        for _ in 0..2 {
+            service
+                .add_design_node_dependency(AddDesignNodeLinkRequest {
+                    id: "new-node".to_string(),
+                    target_id: "dep".to_string(),
+                })
+                .unwrap();
+            service
+                .add_design_node_related(AddDesignNodeLinkRequest {
+                    id: "new-node".to_string(),
+                    target_id: "rel".to_string(),
+                })
+                .unwrap();
+        }
+
+        let node = provider.lock().unwrap().get_node("new-node").cloned().unwrap();
+        assert_eq!(node.dependencies, vec!["dep"]);
+        assert_eq!(node.related, vec!["rel"]);
     }
 }
