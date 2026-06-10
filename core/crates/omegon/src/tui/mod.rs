@@ -69,7 +69,7 @@ use tokio_util::sync::CancellationToken;
 use omegon_traits::AgentEvent;
 
 use self::active_tool_stream::{ActiveToolStream, render_active_tool_stream_panel};
-use self::command_surfaces::{CommandPanel, CommandSeverity};
+use self::command_surfaces::{CommandPanel, CommandSeverity, CommandToast};
 use self::conversation::{ConversationView, Tab};
 use self::dashboard::DashboardState;
 use self::editor::Editor;
@@ -1795,10 +1795,10 @@ impl App {
         }
 
         if options.is_empty() {
-            self.show_toast(
+            self.show_command_toast(CommandToast::new(
                 "Model catalog is empty — use /model list for available options",
-                ratatui_toaster::ToastType::Warning,
-            );
+                CommandSeverity::Warning,
+            ));
             return;
         }
 
@@ -8946,8 +8946,10 @@ pub async fn run_tui(
                             // handling, add a TuiCommand::WidgetAction
                             // variant that routes through the bus to the
                             // owning ExtensionFeature's rpc_call.
-                            app.conversation
-                                .push_system(&format!("✓ {}: {}", widget_id, action));
+                            app.show_command_toast(CommandToast::new(
+                                format!("{}: {}", widget_id, action),
+                                CommandSeverity::Success,
+                            ));
                             app.active_action_prompt = None;
                             continue;
                         }

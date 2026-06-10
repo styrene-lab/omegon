@@ -116,12 +116,29 @@ mod tests {
         panel.scroll_top();
         assert_eq!(panel.scroll, 0);
     }
+
+    #[test]
+    fn toast_constructor_sets_message_and_severity() {
+        let toast = super::CommandToast::new("saved", super::CommandSeverity::Success);
+
+        assert_eq!(toast.message, "saved");
+        assert_eq!(toast.severity, super::CommandSeverity::Success);
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct CommandToast {
     pub message: String,
     pub severity: CommandSeverity,
+}
+
+impl CommandToast {
+    pub fn new(message: impl Into<String>, severity: CommandSeverity) -> Self {
+        Self {
+            message: message.into(),
+            severity,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
