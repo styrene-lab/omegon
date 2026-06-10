@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 
 use omegon_memory::{
     ContextRenderer, CreateEdge, DecayProfileName, EmbeddingService, FactFilter, MarkdownRenderer,
-    MemoryBackend, ScoredFact, Section, StoreAction, StoreEpisode, StoreFact,
+    MemoryBackend, MemoryMindService, Section, StoreAction, StoreEpisode, StoreFact,
 };
 
 /// Memory feature that provides all memory_* tools and context injection.
@@ -102,54 +102,6 @@ impl MemoryFeature {
     /// Get the current mind identifier.
     pub fn mind(&self) -> &str {
         &self.mind
-    }
-
-    /// 1-hop edge expansion: for each seed fact, fetch edges, load neighbor
-    /// facts, score as `parent_score × edge.confidence × 0.5`, merge and
-    /// re-sort. Facts already in the seed set are skipped.
-    async fn expand_edges(&self, results: Vec<ScoredFact>, limit: usize) -> Vec<ScoredFact> {
-        use std::collections::HashSet;
-        let mut seen: HashSet<String> = results.iter().map(|sf| sf.fact.id.clone()).collect();
-        let mut expanded = results.clone();
-
-        for sf in &results {
-            let edges = match self.backend.get_edges(&self.mind, &sf.fact.id).await {
-                Ok(edges) => edges,
-                Err(e) => {
-                    tracing::debug!(fact_id = %sf.fact.id, error = %e, "edge lookup failed");
-                    continue;
-                }
-            };
-
-            for edge in edges {
-                let neighbor_id = if edge.source_id == sf.fact.id {
-                    &edge.target_id
-                } else {
-                    &edge.source_id
-                };
-
-                if !seen.insert(neighbor_id.clone()) {
-                    continue;
-                }
-
-                if let Ok(Some(neighbor)) = self.backend.get_fact(neighbor_id).await {
-                    let derived_score = sf.score * edge.confidence * 0.5;
-                    expanded.push(ScoredFact {
-                        similarity: derived_score,
-                        score: derived_score,
-                        fact: neighbor,
-                    });
-                }
-            }
-        }
-
-        expanded.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        expanded.truncate(limit);
-        expanded
     }
 }
 
@@ -585,7 +537,9 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 };
 
                 // 1-hop edge expansion
-                results = self.expand_edges(results, fetch_k).await;
+                results = MemoryMindService::new(self.backend.clone(), self.mind.clone())
+                    .expand_edges(results, fetch_k)
+                    .await;
 
                 // Final truncation
                 results.truncate(k);
