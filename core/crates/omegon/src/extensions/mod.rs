@@ -924,11 +924,10 @@ async fn handshake(
         }
         Err(_) => {
             // Older extensions may not implement `initialize` at all. The
-            // optional probe must not strand startup, and because no response
-            // arrived for the probe id, reset discovery to id=1 so legacy test
-            // fixtures and simple SDK examples that return fixed ids still
-            // complete the required get_tools handshake.
-            handles.next_id = 1;
+            // optional probe must not strand startup. Keep the request counter
+            // advanced: a late initialize response may still arrive on stdout,
+            // and reusing its id for get_tools would let stale metadata satisfy
+            // the discovery request.
             tracing::debug!(extension = name, "extension initialize metadata timed out");
             None
         }
@@ -1478,16 +1477,19 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let marker = temp.path().join("first-call-done");
         let script = temp.path().join("flaky-extension.sh");
-        let script_body = format!(
-            r#"#!/bin/sh
-marker={marker:?}
+        let script_body = r#"#!/bin/sh
+marker=__MARKER__
 while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
+    *initialize*)
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+      ;;
     *get_tools*)
-      printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":[{{"name":"echo","label":"Echo","description":"Echo","parameters":{{"type":"object","properties":{{}}}}}}]}}'
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":[{\"name\":\"echo\",\"label\":\"Echo\",\"description\":\"Echo\",\"parameters\":{\"type\":\"object\",\"properties\":{}}}]}"
       ;;
     *execute_tool*)
-      printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"ok":true}}}}'
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"ok\":true}}"
       if [ ! -f "$marker" ]; then
         touch "$marker"
         exit 0
@@ -1495,9 +1497,8 @@ while IFS= read -r line; do
       ;;
   esac
 done
-"#,
-            marker = marker.display().to_string()
-        );
+"#
+        .replace("__MARKER__", &marker.display().to_string());
         std::fs::write(&script, script_body).unwrap();
         let mut perms = std::fs::metadata(&script).unwrap().permissions();
         perms.set_mode(0o755);
@@ -1600,16 +1601,20 @@ binary = "flaky-extension.sh"
             &script,
             r#"#!/bin/sh
 while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
+    *initialize*)
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+      ;;
     *get_tools*)
       printf '%s\n' '{"jsonrpc":"2.0","method":"voice/transcription","params":{"text":"synthetic validation","duration_s":0.2}}'
-      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":[{"name":"voice_status","description":"Voice status","inputSchema":{"type":"object","properties":{}}}]}'
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":[{\"name\":\"voice_status\",\"description\":\"Voice status\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}]}"
       ;;
     *bootstrap_config*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"acknowledged":true}}'
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"acknowledged\":true}}"
       ;;
     *execute_tool*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"ok"}]}}'
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}"
       ;;
   esac
 done
@@ -1670,10 +1675,14 @@ voice = true
             &script,
             r#"#!/bin/sh
 while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
+    *initialize*)
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+      ;;
     *get_tools*)
       printf '%s\n' '{"jsonrpc":"2.0","method":"voice/transcription","params":{"text":"summarize the current project","utterance_id":"test-u1","duration_s":1.2}}'
-      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":[{"name":"voice_status","description":"Voice status","inputSchema":{"type":"object","properties":{}}}]}'
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":[{\"name\":\"voice_status\",\"description\":\"Voice status\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}]}"
       ;;
   esac
 done
@@ -1748,10 +1757,14 @@ voice = true
             &script,
             r#"#!/bin/sh
 while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
+    *initialize*)
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+      ;;
     *get_tools*)
       printf '%s\n' '{"jsonrpc":"2.0","method":"voice/transcription","params":{"text":"should not inject"}}'
-      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":[{"name":"status","description":"Status","inputSchema":{"type":"object","properties":{}}}]}'
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":[{\"name\":\"status\",\"description\":\"Status\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}]}"
       ;;
   esac
 done
