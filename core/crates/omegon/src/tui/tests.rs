@@ -500,6 +500,10 @@ async fn ui_action_permission_response_unblocks_pending_permission() {
     ))));
     app.pending_permission_context = Some(("write".into(), "src/lib.rs".into()));
     app.permission_lane_visible = true;
+    app.command_prompt = Some(super::command_surfaces::CommandPrompt::new(
+        "Permission required",
+        "Allow write?",
+    ));
 
     let outcome = app
         .handle_ui_action(
@@ -521,6 +525,7 @@ async fn ui_action_permission_response_unblocks_pending_permission() {
     );
     assert!(app.pending_permission.is_none());
     assert!(app.pending_permission_context.is_none());
+    assert!(app.command_prompt.is_none());
     assert!(!app.permission_lane_visible);
 }
 
@@ -531,6 +536,10 @@ async fn ui_action_operator_wait_response_unblocks_pending_wait() {
     let (wait_tx, wait_rx) = std::sync::mpsc::channel();
     app.pending_operator_wait = Some(std::sync::Arc::new(std::sync::Mutex::new(Some(wait_tx))));
     app.pending_operator_wait_context = Some("deploy smoke test".into());
+    app.command_prompt = Some(super::command_surfaces::CommandPrompt::new(
+        "Manual action required",
+        "deploy smoke test",
+    ));
 
     let outcome = app
         .handle_ui_action(
@@ -552,6 +561,7 @@ async fn ui_action_operator_wait_response_unblocks_pending_wait() {
     );
     assert!(app.pending_operator_wait.is_none());
     assert!(app.pending_operator_wait_context.is_none());
+    assert!(app.command_prompt.is_none());
 }
 
 #[test]
