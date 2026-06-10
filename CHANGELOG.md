@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Add a native `omegon-headroom` crate with deterministic content routing, structured compression summaries, and in-memory CCR retrieval primitives for future context/tool-output compression.
+- Document the native headroom compression design, including deterministic fallback, optional local model providers, and Ollama semantic-compression coupling.
 - Add affected-crate detection plus scoped `just affected`, `just test-changed`, `just check-changed`, and `just clippy-changed` recipes for faster local validation of changed Rust workspace slices.
 - Add `just test-profile` to statically summarize Rust test/coupling hotspots before choosing validation or extraction targets.
 - Add Python unit coverage for the affected-crate and test-profile developer tooling.

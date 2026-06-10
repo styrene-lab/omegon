@@ -5102,6 +5102,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "omegon-headroom"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "omegon-memory"
 version = "0.27.0"
 dependencies = [
