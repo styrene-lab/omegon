@@ -7,6 +7,7 @@
 //! Phase 1a (current): read-only parsing + context injection.
 //! Phase 1b: full mutation tools when Rust becomes the interactive parent.
 
+pub mod archive;
 pub mod capture;
 pub mod codex_export;
 pub mod context;

@@ -7,11 +7,10 @@
 //! - Context injection: focused design node + active openspec changes
 //! - Event handling: refresh on TurnEnd
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use omegon_traits::{
@@ -21,47 +20,12 @@ use omegon_traits::{
 
 use crate::lifecycle::context::LifecycleContextProvider;
 use crate::lifecycle::read_model::LifecycleReadHandle;
-use crate::lifecycle::{design, doctor, spec, types::*};
+use crate::lifecycle::{archive, design, doctor, spec, types::*};
 
 use omegon_opsx::{
     ChangeState as OpsxChangeState, JsonFileStore, Lifecycle as OpsxLifecycle,
-    NodeState as OpsxNodeState, OpsxError,
+    NodeState as OpsxNodeState,
 };
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OpenSpecArchiveTransaction {
-    version: u32,
-    op: String,
-    change: String,
-    from_state: String,
-    to_state: String,
-    change_dir: String,
-    archive_dir: String,
-    phase: String,
-}
-
-impl OpenSpecArchiveTransaction {
-    fn new(repo_path: &Path, change: &str, from_state: OpsxChangeState) -> Self {
-        Self {
-            version: 1,
-            op: "openspec_archive".to_string(),
-            change: change.to_string(),
-            from_state: from_state.as_str().to_string(),
-            to_state: OpsxChangeState::Archived.as_str().to_string(),
-            change_dir: repo_path
-                .join("openspec/changes")
-                .join(change)
-                .to_string_lossy()
-                .to_string(),
-            archive_dir: repo_path
-                .join("openspec/archive")
-                .join(change)
-                .to_string_lossy()
-                .to_string(),
-            phase: "intent_written".to_string(),
-        }
-    }
-}
 
 /// The lifecycle Feature — wraps the LifecycleContextProvider and adds
 /// tools + commands for design-tree and openspec operations.
@@ -86,100 +50,6 @@ pub struct LifecycleFeature {
 }
 
 impl LifecycleFeature {
-    fn archive_tx_dir(repo_path: &Path) -> PathBuf {
-        repo_path.join("ai/lifecycle/transactions")
-    }
-
-    fn archive_tx_path(repo_path: &Path, change: &str) -> PathBuf {
-        Self::archive_tx_dir(repo_path).join(format!("openspec-archive-{change}.json"))
-    }
-
-    fn write_archive_tx(repo_path: &Path, tx: &OpenSpecArchiveTransaction) -> anyhow::Result<()> {
-        let path = Self::archive_tx_path(repo_path, &tx.change);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let json = serde_json::to_string_pretty(tx)?;
-        std::fs::write(&path, json)?;
-        if let Ok(file) = std::fs::OpenOptions::new().read(true).open(&path) {
-            let _ = file.sync_all();
-        }
-        Ok(())
-    }
-
-    fn remove_archive_tx(repo_path: &Path, change: &str) -> anyhow::Result<()> {
-        let path = Self::archive_tx_path(repo_path, change);
-        if path.exists() {
-            std::fs::remove_file(path)?;
-        }
-        Ok(())
-    }
-
-    fn recover_archive_transactions(&self) -> anyhow::Result<Vec<String>> {
-        let tx_dir = Self::archive_tx_dir(&self.repo_path);
-        let entries = match std::fs::read_dir(&tx_dir) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(err) => return Err(err.into()),
-        };
-
-        let mut recovered = Vec::new();
-        for entry in entries {
-            let path = entry?.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
-            let content = std::fs::read_to_string(&path)?;
-            let tx: OpenSpecArchiveTransaction = serde_json::from_str(&content)?;
-            if tx.op != "openspec_archive" {
-                continue;
-            }
-            let change_dir = PathBuf::from(&tx.change_dir);
-            let archive_dir = PathBuf::from(&tx.archive_dir);
-            let change_exists = change_dir.exists();
-            let archive_exists = archive_dir.exists();
-
-            match (change_exists, archive_exists) {
-                (true, false) => {
-                    std::fs::remove_file(&path)?;
-                    recovered.push(format!(
-                        "removed stale archive transaction for '{}'",
-                        tx.change
-                    ));
-                }
-                (false, true) => {
-                    {
-                        let mut opsx = self.opsx.lock().unwrap();
-                        if Self::opsx_change_state(&opsx, &tx.change)
-                            != Some(OpsxChangeState::Archived)
-                        {
-                            opsx.force_transition_change(
-                                &tx.change,
-                                OpsxChangeState::Archived,
-                                "recovering interrupted OpenSpec archive transaction",
-                            )?;
-                        }
-                    }
-                    std::fs::remove_file(&path)?;
-                    recovered.push(format!("completed interrupted archive for '{}'", tx.change));
-                }
-                (true, true) => anyhow::bail!(
-                    "archive transaction conflict for '{}': both {} and {} exist",
-                    tx.change,
-                    change_dir.display(),
-                    archive_dir.display()
-                ),
-                (false, false) => anyhow::bail!(
-                    "archive transaction conflict for '{}': neither {} nor {} exists",
-                    tx.change,
-                    change_dir.display(),
-                    archive_dir.display()
-                ),
-            }
-        }
-        Ok(recovered)
-    }
-
     fn opsx_change_states(&self) -> std::collections::HashMap<String, String> {
         self.opsx
             .lock()
@@ -277,10 +147,6 @@ impl LifecycleFeature {
             .ok_or_else(|| anyhow::anyhow!("Change '{name}' not found"))?;
         Self::sync_opsx_change_from_info(opsx, &change)?;
         Ok(change)
-    }
-
-    fn opsx_store_error(context: &str, err: std::io::Error) -> OpsxError {
-        OpsxError::StoreError(format!("{context}: {err}"))
     }
 
     fn is_archived(node: &DesignNode) -> bool {
@@ -1024,7 +890,7 @@ impl LifecycleFeature {
             .map(|values| values.iter().filter_map(|v| v.as_str()).collect());
         let node_filter = args["node_id"].as_str();
 
-        let recovered = self.recover_archive_transactions()?;
+        let recovered = archive::recover_archive_transactions(&self.repo_path, &self.opsx)?;
 
         let mut findings = doctor::audit_repo(&self.repo_path);
         let changes = spec::list_changes(&self.repo_path);
@@ -1354,7 +1220,7 @@ impl LifecycleFeature {
                 let name = args["change_name"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("change_name required"))?;
-                self.recover_archive_transactions()?;
+                archive::recover_archive_transactions(&self.repo_path, &self.opsx)?;
                 let change_dir = self.repo_path.join("openspec/changes").join(name);
                 if !change_dir.exists() {
                     anyhow::bail!("Change '{name}' does not exist");
@@ -1371,79 +1237,24 @@ impl LifecycleFeature {
                             "Change '{name}' must be verifying before archive; register specs, tasks, test files, and completed tasks first"
                         );
                     }
-                    let change_dir_for_archive = change_dir.clone();
-                    let archive_dir_for_archive = archive_dir.clone();
-                    let archive_parent = self.repo_path.join("openspec/archive");
-                    let tx_repo_for_archive = self.repo_path.clone();
                     let tx_from_state =
                         Self::opsx_change_state(&opsx, name).unwrap_or(OpsxChangeState::Verifying);
-                    let tx_name_for_archive = name.to_string();
-                    let tx_repo_for_rollback = self.repo_path.clone();
-                    let tx_name_for_rollback = name.to_string();
-                    let change_dir_for_rollback = change_dir.clone();
-                    let archive_dir_for_rollback = archive_dir.clone();
+                    let archive_repo = self.repo_path.clone();
+                    let archive_name = name.to_string();
+                    let rollback_repo = self.repo_path.clone();
+                    let rollback_name = name.to_string();
                     opsx.archive_change_with(
                         name,
                         move || {
-                            let mut tx = OpenSpecArchiveTransaction::new(
-                                &tx_repo_for_archive,
-                                &tx_name_for_archive,
+                            archive::archive_content_with_tx(
+                                &archive_repo,
+                                &archive_name,
                                 tx_from_state,
-                            );
-                            Self::write_archive_tx(&tx_repo_for_archive, &tx).map_err(|err| {
-                                OpsxError::StoreError(format!("write archive transaction: {err}"))
-                            })?;
-                            std::fs::create_dir_all(&archive_parent).map_err(|err| {
-                                Self::opsx_store_error(
-                                    &format!("mkdir {}", archive_parent.display()),
-                                    err,
-                                )
-                            })?;
-                            std::fs::rename(&change_dir_for_archive, &archive_dir_for_archive)
-                                .map_err(|err| {
-                                    Self::opsx_store_error(
-                                        &format!(
-                                            "archive {} to {}",
-                                            change_dir_for_archive.display(),
-                                            archive_dir_for_archive.display()
-                                        ),
-                                        err,
-                                    )
-                                })?;
-                            tx.phase = "content_moved".to_string();
-                            Self::write_archive_tx(&tx_repo_for_archive, &tx).map_err(|err| {
-                                OpsxError::StoreError(format!("write archive transaction: {err}"))
-                            })
+                            )
                         },
-                        move || {
-                            if archive_dir_for_rollback.exists()
-                                && !change_dir_for_rollback.exists()
-                            {
-                                std::fs::rename(
-                                    &archive_dir_for_rollback,
-                                    &change_dir_for_rollback,
-                                )
-                                .map_err(|err| {
-                                    Self::opsx_store_error(
-                                        &format!(
-                                            "rollback archive {} to {}",
-                                            archive_dir_for_rollback.display(),
-                                            change_dir_for_rollback.display()
-                                        ),
-                                        err,
-                                    )
-                                })?;
-                            }
-                            Self::remove_archive_tx(&tx_repo_for_rollback, &tx_name_for_rollback)
-                                .map_err(|err| {
-                                OpsxError::StoreError(format!(
-                                    "remove archive transaction after rollback: {err}"
-                                ))
-                            })?;
-                            Ok(())
-                        },
+                        move || archive::rollback_archive_content(&rollback_repo, &rollback_name),
                     )?;
-                    Self::remove_archive_tx(&self.repo_path, name)?;
+                    archive::remove_archive_tx(&self.repo_path, name)?;
                 }
                 self.provider.lock().unwrap().refresh();
                 Ok(text_result(&format!("Archived change '{name}'")))
@@ -2309,8 +2120,8 @@ mod tests {
         );
     }
 
-    fn write_archive_tx_for_test(repo: &Path, change: &str, phase: &str) {
-        let tx = OpenSpecArchiveTransaction {
+    fn write_archive_tx_for_test(repo: &std::path::Path, change: &str, phase: &str) {
+        let tx = archive::OpenSpecArchiveTransaction {
             version: 1,
             op: "openspec_archive".to_string(),
             change: change.to_string(),
@@ -2328,7 +2139,7 @@ mod tests {
                 .to_string(),
             phase: phase.to_string(),
         };
-        LifecycleFeature::write_archive_tx(repo, &tx).unwrap();
+        archive::write_archive_tx(repo, &tx).unwrap();
     }
 
     #[test]
@@ -2340,11 +2151,11 @@ mod tests {
         write_archive_tx_for_test(&repo, "pending-archive", "intent_written");
 
         let feature = LifecycleFeature::new(&repo);
-        let recovered = feature.recover_archive_transactions().unwrap();
+        let recovered = archive::recover_archive_transactions(&repo, &feature.opsx).unwrap();
 
         assert!(recovered[0].contains("removed stale"));
         assert!(change_dir.exists());
-        assert!(!LifecycleFeature::archive_tx_path(&repo, "pending-archive").exists());
+        assert!(!archive::archive_tx_path(&repo, "pending-archive").exists());
     }
 
     #[test]
@@ -2363,10 +2174,10 @@ mod tests {
             .create_change("crash-window", "Crash Window", None)
             .unwrap();
 
-        let recovered = feature.recover_archive_transactions().unwrap();
+        let recovered = archive::recover_archive_transactions(&repo, &feature.opsx).unwrap();
 
         assert!(recovered[0].contains("completed interrupted archive"));
-        assert!(!LifecycleFeature::archive_tx_path(&repo, "crash-window").exists());
+        assert!(!archive::archive_tx_path(&repo, "crash-window").exists());
         assert_eq!(
             LifecycleFeature::opsx_change_state(&feature.opsx.lock().unwrap(), "crash-window"),
             Some(OpsxChangeState::Archived)
@@ -2423,10 +2234,10 @@ mod tests {
             .unwrap();
         let audit_len_before = feature.opsx.lock().unwrap().state().audit_log.len();
 
-        let recovered = feature.recover_archive_transactions().unwrap();
+        let recovered = archive::recover_archive_transactions(&repo, &feature.opsx).unwrap();
 
         assert!(recovered[0].contains("completed interrupted archive"));
-        assert!(!LifecycleFeature::archive_tx_path(&repo, "state-saved").exists());
+        assert!(!archive::archive_tx_path(&repo, "state-saved").exists());
         assert_eq!(
             feature.opsx.lock().unwrap().state().audit_log.len(),
             audit_len_before
@@ -2441,8 +2252,7 @@ mod tests {
         write_archive_tx_for_test(&repo, "conflict", "content_moved");
 
         let feature = LifecycleFeature::new(&repo);
-        let err = feature
-            .recover_archive_transactions()
+        let err = archive::recover_archive_transactions(&repo, &feature.opsx)
             .unwrap_err()
             .to_string();
 
@@ -2455,8 +2265,7 @@ mod tests {
         write_archive_tx_for_test(&repo, "missing", "content_moved");
 
         let feature = LifecycleFeature::new(&repo);
-        let err = feature
-            .recover_archive_transactions()
+        let err = archive::recover_archive_transactions(&repo, &feature.opsx)
             .unwrap_err()
             .to_string();
 
