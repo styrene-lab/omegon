@@ -15,6 +15,7 @@ pub mod design;
 pub mod doctor;
 pub mod read_model;
 pub mod spec;
+pub mod sync;
 pub mod types;
 // pub mod decompose; // TODO: decomposition engine (assess, fork, harvest, merge)
 // pub mod store;     // TODO: lifecycle.db sqlite schema + queries

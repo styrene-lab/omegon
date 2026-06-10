@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Extract OpenSpec markdown-to-FSM synchronization into a named lifecycle sync module with structured sync reports and transition tests.
 - Extract OpenSpec archive transaction recovery from the lifecycle tool adapter into a lifecycle-domain archive module with direct recovery tests.
 - Add a Lifecycle/OpenSpec surface map documenting tool adapters, engine/FSM boundaries, correctness invariants, and low-risk extraction seams.
 - Add affected-crate detection plus scoped `just affected`, `just test-changed`, `just check-changed`, and `just clippy-changed` recipes for faster local validation of changed Rust workspace slices.

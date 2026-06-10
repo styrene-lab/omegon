@@ -20,7 +20,7 @@ use omegon_traits::{
 
 use crate::lifecycle::context::LifecycleContextProvider;
 use crate::lifecycle::read_model::LifecycleReadHandle;
-use crate::lifecycle::{archive, design, doctor, spec, types::*};
+use crate::lifecycle::{archive, design, doctor, spec, sync, types::*};
 
 use omegon_opsx::{
     ChangeState as OpsxChangeState, JsonFileStore, Lifecycle as OpsxLifecycle,
@@ -59,94 +59,6 @@ impl LifecycleFeature {
             .iter()
             .map(|c| (c.name.clone(), c.state.as_str().to_string()))
             .collect()
-    }
-
-    fn ensure_opsx_change(
-        opsx: &mut OpsxLifecycle<JsonFileStore>,
-        name: &str,
-        title: &str,
-    ) -> anyhow::Result<()> {
-        if !opsx.state().changes.iter().any(|c| c.name == name) {
-            opsx.create_change(name, title, None)?;
-        }
-        Ok(())
-    }
-
-    fn sync_opsx_change_from_info(
-        opsx: &mut OpsxLifecycle<JsonFileStore>,
-        change: &ChangeInfo,
-    ) -> anyhow::Result<()> {
-        Self::ensure_opsx_change(opsx, &change.name, &change.name)?;
-        for spec in &change.specs {
-            opsx.add_spec(&change.name, &spec.domain)?;
-        }
-        opsx.update_change_progress(&change.name, change.total_tasks, change.done_tasks)?;
-
-        let state = opsx
-            .state()
-            .changes
-            .iter()
-            .find(|c| c.name == change.name)
-            .map(|c| c.state);
-
-        if state == Some(OpsxChangeState::Proposed) && !change.specs.is_empty() {
-            opsx.transition_change(&change.name, OpsxChangeState::Specced)?;
-        }
-
-        let state = opsx
-            .state()
-            .changes
-            .iter()
-            .find(|c| c.name == change.name)
-            .map(|c| c.state);
-
-        if state == Some(OpsxChangeState::Specced) && change.total_tasks > 0 {
-            opsx.transition_change(&change.name, OpsxChangeState::Planned)?;
-        }
-
-        Ok(())
-    }
-
-    fn sync_opsx_changes_from_info(&self, changes: &[ChangeInfo]) -> anyhow::Result<()> {
-        let mut opsx = self.opsx.lock().unwrap();
-        for change in changes {
-            Self::sync_opsx_change_from_info(&mut opsx, change)?;
-        }
-        Ok(())
-    }
-
-    fn opsx_change_state(
-        opsx: &OpsxLifecycle<JsonFileStore>,
-        name: &str,
-    ) -> Option<OpsxChangeState> {
-        opsx.state()
-            .changes
-            .iter()
-            .find(|c| c.name == name)
-            .map(|c| c.state)
-    }
-
-    fn transition_opsx_change_if(
-        opsx: &mut OpsxLifecycle<JsonFileStore>,
-        name: &str,
-        from: OpsxChangeState,
-        to: OpsxChangeState,
-    ) -> anyhow::Result<()> {
-        if Self::opsx_change_state(opsx, name) == Some(from) {
-            opsx.transition_change(name, to)?;
-        }
-        Ok(())
-    }
-
-    fn sync_opsx_change_by_name(
-        opsx: &mut OpsxLifecycle<JsonFileStore>,
-        repo_path: &std::path::Path,
-        name: &str,
-    ) -> anyhow::Result<ChangeInfo> {
-        let change = spec::get_change(repo_path, name)
-            .ok_or_else(|| anyhow::anyhow!("Change '{name}' not found"))?;
-        Self::sync_opsx_change_from_info(opsx, &change)?;
-        Ok(change)
     }
 
     fn is_archived(node: &DesignNode) -> bool {
@@ -1080,7 +992,7 @@ impl LifecycleFeature {
                 let path = spec::add_spec(&self.repo_path, name, domain, content)?;
                 {
                     let mut opsx = self.opsx.lock().unwrap();
-                    Self::sync_opsx_change_by_name(&mut opsx, &self.repo_path, name)?;
+                    sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?.0;
                 }
                 self.provider.lock().unwrap().refresh();
                 Ok(text_result(&format!(
@@ -1095,7 +1007,7 @@ impl LifecycleFeature {
                     .ok_or_else(|| anyhow::anyhow!("change_name required"))?;
 
                 let mut opsx = self.opsx.lock().unwrap();
-                let change = Self::sync_opsx_change_by_name(&mut opsx, &self.repo_path, name)?;
+                let change = sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?.0;
                 if args.get("total_tasks").is_some() || args.get("done_tasks").is_some() {
                     anyhow::bail!(
                         "register_tasks reads task counts from tasks.md; update OpenSpec tasks first"
@@ -1107,7 +1019,7 @@ impl LifecycleFeature {
                     anyhow::bail!("done_tasks cannot exceed total_tasks");
                 }
                 opsx.update_change_progress(name, total_tasks, done_tasks)?;
-                Self::transition_opsx_change_if(
+                sync::transition_change_if(
                     &mut opsx,
                     name,
                     OpsxChangeState::Specced,
@@ -1115,7 +1027,7 @@ impl LifecycleFeature {
                 )?;
                 if total_tasks > 0
                     && done_tasks >= total_tasks
-                    && Self::opsx_change_state(&opsx, name) == Some(OpsxChangeState::Implementing)
+                    && sync::change_state(&opsx, name) == Some(OpsxChangeState::Implementing)
                 {
                     opsx.transition_change(name, OpsxChangeState::Verifying)?;
                 }
@@ -1146,7 +1058,7 @@ impl LifecycleFeature {
                     spec::set_task_checkbox_status(&self.repo_path, name, group, task_id, status)?;
                 {
                     let mut opsx = self.opsx.lock().unwrap();
-                    let change = Self::sync_opsx_change_by_name(&mut opsx, &self.repo_path, name)?;
+                    let change = sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?.0;
                     opsx.update_change_progress(name, change.total_tasks, change.done_tasks)?;
                 }
                 self.provider.lock().unwrap().refresh();
@@ -1186,8 +1098,8 @@ impl LifecycleFeature {
                 }
 
                 let mut opsx = self.opsx.lock().unwrap();
-                Self::sync_opsx_change_by_name(&mut opsx, &self.repo_path, name)?;
-                let state = Self::opsx_change_state(&opsx, name);
+                sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?.0;
+                let state = sync::change_state(&opsx, name);
                 if !matches!(
                     state,
                     Some(
@@ -1198,14 +1110,14 @@ impl LifecycleFeature {
                 ) {
                     anyhow::bail!("Change '{name}' must be planned before registering test files");
                 }
-                Self::transition_opsx_change_if(
+                sync::transition_change_if(
                     &mut opsx,
                     name,
                     OpsxChangeState::Planned,
                     OpsxChangeState::Testing,
                 )?;
                 opsx.add_test_file(name, path)?;
-                Self::transition_opsx_change_if(
+                sync::transition_change_if(
                     &mut opsx,
                     name,
                     OpsxChangeState::Testing,
@@ -1231,14 +1143,14 @@ impl LifecycleFeature {
                 }
                 {
                     let mut opsx = self.opsx.lock().unwrap();
-                    Self::sync_opsx_change_by_name(&mut opsx, &self.repo_path, name)?;
-                    if Self::opsx_change_state(&opsx, name) != Some(OpsxChangeState::Verifying) {
+                    sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?.0;
+                    if sync::change_state(&opsx, name) != Some(OpsxChangeState::Verifying) {
                         anyhow::bail!(
                             "Change '{name}' must be verifying before archive; register specs, tasks, test files, and completed tasks first"
                         );
                     }
                     let tx_from_state =
-                        Self::opsx_change_state(&opsx, name).unwrap_or(OpsxChangeState::Verifying);
+                        sync::change_state(&opsx, name).unwrap_or(OpsxChangeState::Verifying);
                     let archive_repo = self.repo_path.clone();
                     let archive_name = name.to_string();
                     let rollback_repo = self.repo_path.clone();
@@ -2179,7 +2091,7 @@ mod tests {
         assert!(recovered[0].contains("completed interrupted archive"));
         assert!(!archive::archive_tx_path(&repo, "crash-window").exists());
         assert_eq!(
-            LifecycleFeature::opsx_change_state(&feature.opsx.lock().unwrap(), "crash-window"),
+            sync::change_state(&feature.opsx.lock().unwrap(), "crash-window"),
             Some(OpsxChangeState::Archived)
         );
     }
