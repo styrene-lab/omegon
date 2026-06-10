@@ -680,8 +680,8 @@ impl FooterData {
         };
 
         let ctx_class_color = match self.actual_context_class {
-            ContextClass::Legion => t.accent(),
-            ContextClass::Clan => t.fg(),
+            ContextClass::Massive => t.accent(),
+            ContextClass::Extended => t.fg(),
             _ => t.dim(),
         };
         let context_badge = if self.context_class != self.actual_context_class {
@@ -1584,16 +1584,21 @@ mod tests {
     #[test]
     fn context_text_compacts_class_percent_and_window() {
         assert_eq!(
-            format_context_text(ContextClass::Maniple, ContextClass::Maniple, 68.0, 272_000),
-            "Maniple 68% / ¤272k"
+            format_context_text(
+                ContextClass::Standard,
+                ContextClass::Standard,
+                68.0,
+                272_000
+            ),
+            "Standard 68% / ¤272k"
         );
         assert_eq!(
-            format_context_text(ContextClass::Clan, ContextClass::Clan, 42.0, 0),
-            "Clan 42%"
+            format_context_text(ContextClass::Extended, ContextClass::Extended, 42.0, 0),
+            "Extended 42%"
         );
         assert_eq!(
-            format_context_text(ContextClass::Legion, ContextClass::Squad, 68.0, 131_072),
-            "Legion→Squad 68% / ¤131k"
+            format_context_text(ContextClass::Massive, ContextClass::Compact, 68.0, 131_072),
+            "Massive→Compact 68% / ¤131k"
         );
     }
 
@@ -1624,7 +1629,7 @@ mod tests {
             model_provider: "openai".into(),
             context_percent: 68.0,
             context_window: 272_000,
-            context_class: ContextClass::Maniple,
+            context_class: ContextClass::Standard,
             session_input_tokens: 12_000,
             session_output_tokens: 3_000,
             turn: 7,
@@ -1658,8 +1663,8 @@ mod tests {
             model_provider: "openai".into(),
             context_percent: 68.0,
             context_window: 131_072,
-            context_class: ContextClass::Legion,
-            actual_context_class: ContextClass::Squad,
+            context_class: ContextClass::Massive,
+            actual_context_class: ContextClass::Compact,
             session_input_tokens: 12_000,
             session_output_tokens: 3_000,
             turn: 7,
@@ -1670,7 +1675,7 @@ mod tests {
             ..Default::default()
         };
         let text = render_left_panel_text(&data, 64, 10);
-        assert!(text.contains("Legion→Squad"), "got {text}");
+        assert!(text.contains("Massive→Compact"), "got {text}");
     }
 
     #[test]
@@ -1680,7 +1685,7 @@ mod tests {
             model_provider: "openai".into(),
             context_percent: 68.0,
             context_window: 272_000,
-            context_class: ContextClass::Maniple,
+            context_class: ContextClass::Standard,
             session_input_tokens: 12_000,
             session_output_tokens: 3_000,
             turn: 7,
@@ -1707,7 +1712,7 @@ mod tests {
             text.contains("Victory · High") || text.contains("victory · high"),
             "got {text}"
         );
-        assert!(text.contains("Maniple→Squad 68% / ¤272k"), "got {text}");
+        assert!(text.contains("Standard→Compact 68% / ¤272k"), "got {text}");
     }
 
     #[test]
@@ -1917,7 +1922,7 @@ mod tests {
             model_provider: "Anthropic".into(),
             context_percent: 72.0,
             context_window: 272_000,
-            context_class: ContextClass::Maniple,
+            context_class: ContextClass::Standard,
             total_facts: 1800,
             injected_facts: 95,
             working_memory: 5,

@@ -1440,7 +1440,7 @@ async fn handle_client_command(
                                 omegon_traits::ControlOutputResponse {
                                     accepted: false,
                                     output: Some(format!(
-                                        "invalid context class: {class_str}. Use: squad, maniple, clan, legion"
+                                        "invalid context class: {class_str}. Use: compact, standard, extended, massive"
                                     )),
                                 },
                             ))
@@ -2884,7 +2884,7 @@ mod tests {
             AgentEvent::ContextUpdated {
                 tokens: 1000,
                 context_window: 200_000,
-                context_class: "Squad".into(),
+                context_class: "Compact".into(),
                 thinking_level: "Low".into(),
             },
             AgentEvent::ContextCompaction(omegon_traits::ContextCompactionEvent {

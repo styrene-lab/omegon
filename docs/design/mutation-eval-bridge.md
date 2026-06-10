@@ -291,7 +291,7 @@ Add to learned skill TOML frontmatter:
 model = "anthropic:claude-sonnet-4-6"
 capability_tier = "victory"
 thinking_level = "medium"
-context_class = "maniple"
+context_class = "standard"
 omegon_version = "0.16.1"
 tests_component = ["tools"]      # derived from owning_crate mapping
 ```

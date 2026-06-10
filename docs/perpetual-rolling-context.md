@@ -513,7 +513,7 @@ The harness already probes at startup and knows:
 - Which providers are authenticated (OAuth vs API key)
 - Subscription type implied by auth method (OAuth → Pro/Max/Plus, API key → pay-per-token)
 - Active model and its context window (from `/v1/models` probe or static lookup)
-- Context class (Squad/Maniple/Clan/Legion)
+- Context class (Compact/Standard/Extended/Massive)
 
 From this we can derive **cost posture** — whether the operator is paying per token or on a subscription:
 
@@ -559,12 +559,12 @@ The existing ContextClass maps cleanly to selector aggressiveness:
 
 | Class | Budget | Mandatory window | Compaction | Cost posture |
 |-------|--------|-----------------|------------|-------------|
-| Squad (128k) | 80k conversation | 3 turns | Aggressive | Economical |
-| Maniple (272k) | 180k conversation | 5 turns | Cost-optimal | Standard |
-| Clan (440k) | 320k conversation | 8 turns | Lazy | Generous |
-| Legion (1M+) | 750k conversation | 15 turns | Never | Unlimited |
+| Compact (128k) | 80k conversation | 3 turns | Aggressive | Economical |
+| Standard (272k) | 180k conversation | 5 turns | Cost-optimal | Standard |
+| Extended (440k) | 320k conversation | 8 turns | Lazy | Generous |
+| Massive (1M+) | 750k conversation | 15 turns | Never | Unlimited |
 
-Legion on a subscription provider (OAuth Anthropic, Codex) is effectively "send everything" — the entire buffer fits, no selection needed, no compaction needed. The simplest and best experience.
+Massive on a subscription provider (OAuth Anthropic, Codex) is effectively "send everything" — the entire buffer fits, no selection needed, no compaction needed. The simplest and best experience.
 
 ### Token budget audit — actual per-request overhead
 
@@ -584,10 +584,10 @@ TOTAL:                                    ~24,449 tokens/request
 Context class impact:
 | Class | Window | Overhead % | Available for conversation |
 |-------|--------|-----------|--------------------------|
-| Squad 128k | 131,072 | 19% | ~106k |
-| Maniple 272k | 278,528 | 9% | ~254k |
-| Clan 440k | 409,600 | 6% | ~385k |
-| Legion 1M | 1,048,576 | 2% | ~1,024k |
+| Compact 128k | 131,072 | 19% | ~106k |
+| Standard 272k | 278,528 | 9% | ~254k |
+| Extended 440k | 409,600 | 6% | ~385k |
+| Massive 1M | 1,048,576 | 2% | ~1,024k |
 
 Top token consumers (active tools):
 1. `memory_*` (11 tools): ~1,700 tokens — 7% of overhead
@@ -597,7 +597,7 @@ Top token consumers (active tools):
 5. `serve`: ~240 tokens — background process management
 6. `cleave_*` (3 tools): ~562 tokens
 
-The big number: **on a Squad (128k) context, 19% of the window is consumed before any conversation happens.** On subscription plans where we WANT to be generous with context, this is fine. On pay-per-token, 24k tokens × 50 turns = 1.2M tokens of repeated tool definitions.
+The big number: **on a Compact (128k) context, 19% of the window is consumed before any conversation happens.** On subscription plans where we WANT to be generous with context, this is fine. On pay-per-token, 24k tokens × 50 turns = 1.2M tokens of repeated tool definitions.
 
 ### Reducing internal token usage — four strategies
 
@@ -948,7 +948,7 @@ This means the selector's budget is based on REAL limits, not a guess table. Whe
 
 The system prompt always lists ALL tool names (cheap — just a comma-separated list). Full schemas are sent only for tiers 1-2. Tier 3 tools show as `"[name] — available via manage_tools enable"` in the tool list.
 
-On a Squad context, this drops active tool tokens from ~6,650 to ~3,000 during a typical implementing phase — saving ~3,650 tokens per request. Over 50 turns, that's 182k input tokens saved.
+On a Compact context, this drops active tool tokens from ~6,650 to ~3,000 during a typical implementing phase — saving ~3,650 tokens per request. Over 50 turns, that's 182k input tokens saved.
 
 The projector handles this naturally: it receives a filtered tool list from the selector. The selector already has phase and signal data. No new abstraction needed — just a `fn select_tools(all_tools, phase, recent_tools) -> Vec<ToolDefinition>` alongside `fn select(buffer, budget, signals) -> Vec<usize>`.
 
@@ -970,7 +970,7 @@ context_budget = "auto"          # or explicit: 200000
 # Margin: auto = 90% for subscription/free, 75% for pay-per-token
 budget_margin = "auto"           # or explicit: 0.85
 
-# Recent turns always included: auto = 5 for standard, 3 for tight, 15 for legion
+# Recent turns always included: auto = 5 for standard, 3 for tight, 15 for massive
 mandatory_turns = "auto"         # or explicit: 8
 
 # Compaction: auto = cost-optimal for pay-per-token, lazy for subscription

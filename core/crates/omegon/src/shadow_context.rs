@@ -520,7 +520,7 @@ mod tests {
     fn policy() -> SelectorPolicy {
         SelectorPolicy {
             model_window: 10_000,
-            requested_class: ContextClass::Legion,
+            requested_class: ContextClass::Massive,
             reply_reserve: 1_000,
             tool_schema_reserve: 500,
         }

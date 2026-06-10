@@ -1,15 +1,16 @@
 ---
-source: crates/omegon/src/tui/snapshot_tests.rs
+source: core/crates/omegon/src/tui/snapshot_tests.rs
+assertion_line: 670
 expression: render_to_string(&terminal)
 ---
 
        ╭ Context Class ────────╮
-       │● Squad (128k)         │
+       │● Compact (128k)       │
        │  Standard sessions    │
-       │  Maniple (272k)       │
+       │  Standard (272k)      │
        │  Extended analysis    │
-       │  Clan (400k)          │
+       │  Extended (400k)      │
        │  Large codebase       │
-       │  Legion (1M+)         │
+       │  Massive (1M+)        │
        │  Massive context      │
        ╰───────────────────────╯

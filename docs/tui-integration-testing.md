@@ -87,12 +87,12 @@ fn context_selector_changes_settings() {
     app.open_context_selector();
     assert!(app.selector.is_some());
     
-    // Simulate arrow down + Enter (select Maniple)
+    // Simulate arrow down + Enter (select Standard)
     app.selector_move_down();
     let result = app.confirm_selector();
     
     let s = app.settings().lock().unwrap();
-    assert_eq!(s.context_class, ContextClass::Maniple);
+    assert_eq!(s.context_class, ContextClass::Standard);
 }
 ```
 
@@ -120,7 +120,7 @@ fn full_startup_renders_splash_then_editor() {
     harness.assert_contains("Omegon");
     
     // Check footer is rendered
-    harness.assert_row_contains(39, "Squad");
+    harness.assert_row_contains(39, "Compact");
     
     // Type a command
     harness.send_keys("/status\n");

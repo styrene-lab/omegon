@@ -1876,10 +1876,10 @@ impl App {
                 value: class.short().to_string(),
                 label: class.label().to_string(),
                 description: match class {
-                    crate::settings::ContextClass::Squad => "Standard sessions".into(),
-                    crate::settings::ContextClass::Maniple => "Extended analysis".into(),
-                    crate::settings::ContextClass::Clan => "Large codebase".into(),
-                    crate::settings::ContextClass::Legion => "Massive context".into(),
+                    crate::settings::ContextClass::Compact => "Standard sessions".into(),
+                    crate::settings::ContextClass::Standard => "Extended analysis".into(),
+                    crate::settings::ContextClass::Extended => "Large codebase".into(),
+                    crate::settings::ContextClass::Massive => "Massive context".into(),
                 },
                 active: *class == current,
             })
@@ -3075,7 +3075,7 @@ impl App {
                 .arg("--tutorial")
                 .arg("--no-splash")
                 .arg("--context-class")
-                .arg("squad")
+                .arg("compact")
                 .current_dir(&tutorial_dir)
                 .exec();
             SlashResult::Display(format!("Failed to launch tutorial: {err}"))
@@ -3086,7 +3086,7 @@ impl App {
                 .arg("--tutorial")
                 .arg("--no-splash")
                 .arg("--context-class")
-                .arg("squad")
+                .arg("compact")
                 .current_dir(&tutorial_dir)
                 .spawn();
             self.should_quit = true;
@@ -4970,8 +4970,8 @@ impl App {
             "context",
             "context lifecycle and budget management",
             &[
-                "status", "compact", "reset", "clear", "request", "squad", "maniple", "clan",
-                "legion",
+                "status", "compact", "reset", "clear", "request", "compact", "standard",
+                "extended", "massive",
             ],
         ),
         (
@@ -5801,7 +5801,7 @@ impl App {
                             SlashResult::Display(format!(
                                 "Unknown context option: {sub}.\n\
                                  Use: /context [status|compact|compress|reset|clear|<class>]\n\
-                                 Classes: squad, maniple, clan, legion"
+                                 Classes: compact, standard, extended, massive"
                             ))
                         }
                     }

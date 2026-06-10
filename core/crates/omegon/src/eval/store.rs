@@ -480,7 +480,7 @@ mod tests {
                 domain: "coding".into(),
                 model: "anthropic:claude-sonnet-4-6".into(),
                 thinking_level: "medium".into(),
-                context_class: "squad".into(),
+                context_class: "compact".into(),
                 max_turns: 50,
                 omegon_version: "0.15.24".into(),
                 ..Default::default()

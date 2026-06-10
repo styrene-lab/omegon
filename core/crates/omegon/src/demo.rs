@@ -43,7 +43,7 @@ pub fn launch_bundled_demo() -> Result<(), String> {
     {
         use std::os::unix::process::CommandExt;
         let err = Command::new(&exe)
-            .args(["--no-splash", "--context-class", "squad", "--tutorial"])
+            .args(["--no-splash", "--context-class", "compact", "--tutorial"])
             .current_dir(&dir)
             .exec();
         Err(format!("exec failed: {err}"))
@@ -52,7 +52,7 @@ pub fn launch_bundled_demo() -> Result<(), String> {
     #[cfg(not(unix))]
     {
         Command::new(&exe)
-            .args(["--no-splash", "--context-class", "squad", "--tutorial"])
+            .args(["--no-splash", "--context-class", "compact", "--tutorial"])
             .current_dir(&dir)
             .spawn()
             .map_err(|e| format!("spawn: {e}"))?;

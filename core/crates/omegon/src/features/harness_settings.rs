@@ -6,7 +6,7 @@
 //!
 //! Actions:
 //! - `get` — read current settings (model, thinking, context class, persona, etc.)
-//! - `set_context_class` — switch context window class (Squad/Maniple/Clan/Legion)
+//! - `set_context_class` — switch context window class (Compact/Standard/Extended/Massive)
 //! - `compact` — request context compaction before next turn
 //! - `stats` — session telemetry (turns, tool calls, duration, context usage)
 //! - `memory_stats` — memory system stats (facts, episodes, edges)
@@ -52,7 +52,7 @@ impl Feature for HarnessSettings {
             name: crate::tool_registry::harness_settings::HARNESS_SETTINGS.into(),
             label: "harness_settings".into(),
             description: "Read or modify harness settings. Actions: get (current state), \
-                set_context_class (Squad/Maniple/Clan/Legion), compact (trigger compaction), \
+                set_context_class (Compact/Standard/Extended/Massive), compact (trigger compaction), \
                 stats (session telemetry), memory_stats (fact counts), sessions (saved sessions)."
                 .into(),
             parameters: json!({
@@ -65,7 +65,7 @@ impl Feature for HarnessSettings {
                     },
                     "value": {
                         "type": "string",
-                        "description": "For set_context_class: Squad, Maniple, Clan, or Legion"
+                        "description": "For set_context_class: Compact, Standard, Extended, or Massive"
                     }
                 },
                 "required": ["action"]
@@ -125,7 +125,7 @@ impl Feature for HarnessSettings {
                     )))
                 } else {
                     Ok(error_result(&format!(
-                        "Unknown context class: '{}'. Options: Squad (128k), Maniple (272k), Clan (400k), Legion (1M+)",
+                        "Unknown context class: '{}'. Options: Compact (128k), Standard (272k), Extended (400k), Massive (1M+)",
                         value
                     )))
                 }
@@ -343,16 +343,16 @@ mod tests {
             .execute(
                 "harness_settings",
                 "c1",
-                json!({"action": "set_context_class", "value": "Clan"}),
+                json!({"action": "set_context_class", "value": "Extended"}),
                 cancel,
             )
             .await
             .unwrap();
         let text = result_text(&result);
-        assert!(text.contains("Clan"), "should confirm: {text}");
+        assert!(text.contains("Extended"), "should confirm: {text}");
 
         let s = settings.lock().unwrap();
-        assert_eq!(s.effective_requested_class().short(), "Clan");
+        assert_eq!(s.effective_requested_class().short(), "Extended");
     }
 
     #[tokio::test]

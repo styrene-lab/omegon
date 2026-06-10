@@ -115,7 +115,7 @@ fn build_component_matrix(agent_id: &str) -> ComponentMatrix {
         if let Some(ref s) = m.settings {
             matrix.model = s.model.clone().unwrap_or_default();
             matrix.thinking_level = s.thinking_level.clone().unwrap_or_else(|| "medium".into());
-            matrix.context_class = s.context_class.clone().unwrap_or_else(|| "squad".into());
+            matrix.context_class = s.context_class.clone().unwrap_or_else(|| "compact".into());
             matrix.max_turns = s.max_turns.unwrap_or(50);
         }
 

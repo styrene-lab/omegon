@@ -42,7 +42,7 @@ Merge the current 4-card footer into a denser, more meaningful layout:
 
 **Actual content at startup**:
 - context: `█░░░░░░░ 0% / 1.0M` (~20 chars) — wastes 48 chars
-- model: `☁ claude-opus-4-6 · Legion` + `● subscription` (~45 chars) — wastes 23 chars  
+- model: `☁ claude-opus-4-6 · Massive` + `● subscription` (~45 chars) — wastes 23 chars
 - memory: `⌗ 2565` (~7 chars) — wastes 61 chars
 - system: `⌂ ~/workspace/ai/omegon` (~25 chars) — wastes 43 chars
 
@@ -66,7 +66,7 @@ Drop the bordered cards entirely. Use a 3-row dense status area with no borders 
 
 ```
  ▸ opus-4-6 · victory · ◎ low │ ████░░░░ 12% / 1.0M · T·3 · ⚙ 7  │ main ±3 · ~/workspace/ai/omegon
- ● anthropic · Legion · native │ ⌗ 2565 · inj 25 · wm 4 · ~3.7k   │ MCP 2(14t) · 🔓 3 · ↻ 0
+ ● anthropic · Massive · native │ ⌗ 2565 · inj 25 · wm 4 · ~3.7k   │ MCP 2(14t) · 🔓 3 · ↻ 0
                                 │ ⬡ project · ⬡ working · ⬡ episodes│
 ```
 

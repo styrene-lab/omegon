@@ -171,7 +171,7 @@ mod tests {
             metrics: MetricsSnapshot {
                 tokens_used: 45000,
                 context_window: 200000,
-                context_class: "clan".into(),
+                context_class: "extended".into(),
                 thinking_level: "medium".into(),
             },
         };
@@ -184,7 +184,7 @@ mod tests {
             parsed.intent.current_task.as_deref(),
             Some("implement auth")
         );
-        assert_eq!(parsed.metrics.context_class, "clan");
+        assert_eq!(parsed.metrics.context_class, "extended");
     }
 
     #[test]

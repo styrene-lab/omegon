@@ -10,7 +10,7 @@
 //!
 //! - **Capability tier**: local / retribution / victory / gloriana
 //! - **Thinking level**: off / minimal / low / medium / high
-//! - **Context class**: Squad (128k) / Maniple (272k) / Clan (400k) / Legion (1M+)
+//! - **Context class**: Compact (128k) / Standard (272k) / Extended (400k) / Massive (1M+)
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -67,28 +67,28 @@ impl PosturePreset {
         match self {
             Self::Explorator => ResourceEnvelope {
                 thinking: ThinkingLevel::Minimal,
-                requested_context_class: ContextClass::Squad,
-                effective_context_cap_tokens: Some(ContextClass::Squad.nominal_tokens()),
+                requested_context_class: ContextClass::Compact,
+                effective_context_cap_tokens: Some(ContextClass::Compact.nominal_tokens()),
                 compact_reply_reserve: true,
                 compact_tool_schema_reserve: true,
             },
             Self::Fabricator => ResourceEnvelope {
                 thinking: ThinkingLevel::Low,
-                requested_context_class: ContextClass::Maniple,
+                requested_context_class: ContextClass::Standard,
                 effective_context_cap_tokens: None,
                 compact_reply_reserve: false,
                 compact_tool_schema_reserve: false,
             },
             Self::Architect => ResourceEnvelope {
                 thinking: ThinkingLevel::Medium,
-                requested_context_class: ContextClass::Clan,
+                requested_context_class: ContextClass::Extended,
                 effective_context_cap_tokens: None,
                 compact_reply_reserve: false,
                 compact_tool_schema_reserve: false,
             },
             Self::Devastator => ResourceEnvelope {
                 thinking: ThinkingLevel::High,
-                requested_context_class: ContextClass::Legion,
+                requested_context_class: ContextClass::Massive,
                 effective_context_cap_tokens: None,
                 compact_reply_reserve: false,
                 compact_tool_schema_reserve: false,
@@ -505,21 +505,25 @@ impl ToolDetail {
 pub enum ContextClass {
     /// 128k tokens. Compact context for lightweight tasks.
     #[default]
-    Squad,
+    #[serde(alias = "Squad")]
+    Compact,
     /// 272k tokens. Standard working context.
-    Maniple,
+    #[serde(alias = "Maniple")]
+    Standard,
     /// 400k tokens. Extended context for large codebases.
-    Clan,
-    /// 1M+ tokens. Full context for massive sessions.
-    Legion,
+    #[serde(alias = "Clan")]
+    Extended,
+    /// 1M+ tokens. Massive context for very large sessions.
+    #[serde(alias = "Legion")]
+    Massive,
 }
 
 /// Token ceiling thresholds — a model with ceiling ≤ threshold belongs to that class.
 const CONTEXT_CLASS_THRESHOLDS: &[(ContextClass, usize)] = &[
-    (ContextClass::Squad, 131_072),   // 128k
-    (ContextClass::Maniple, 278_528), // ~272k
-    (ContextClass::Clan, 450_560),    // ~440k (covers 400k models)
-                                      // Legion: everything above
+    (ContextClass::Compact, 131_072),  // 128k
+    (ContextClass::Standard, 278_528), // ~272k
+    (ContextClass::Extended, 450_560), // ~440k (covers 400k models)
+                                       // Massive: everything above
 ];
 
 impl ContextClass {
@@ -530,46 +534,46 @@ impl ContextClass {
                 return class;
             }
         }
-        Self::Legion
+        Self::Massive
     }
 
     /// Nominal token count for this class.
     pub fn nominal_tokens(self) -> usize {
         match self {
-            Self::Squad => 131_072,
-            Self::Maniple => 278_528,
-            Self::Clan => 409_600,
-            Self::Legion => 1_048_576,
+            Self::Compact => 131_072,
+            Self::Standard => 278_528,
+            Self::Extended => 409_600,
+            Self::Massive => 1_048_576,
         }
     }
 
     /// Operator-facing display label.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Squad => "Squad (128k)",
-            Self::Maniple => "Maniple (272k)",
-            Self::Clan => "Clan (400k)",
-            Self::Legion => "Legion (1M)",
+            Self::Compact => "Compact (128k)",
+            Self::Standard => "Standard (272k)",
+            Self::Extended => "Extended (400k)",
+            Self::Massive => "Massive (1M+)",
         }
     }
 
     /// Short name for dashboard badges.
     pub fn short(self) -> &'static str {
         match self {
-            Self::Squad => "Squad",
-            Self::Maniple => "Maniple",
-            Self::Clan => "Clan",
-            Self::Legion => "Legion",
+            Self::Compact => "Compact",
+            Self::Standard => "Standard",
+            Self::Extended => "Extended",
+            Self::Massive => "Massive",
         }
     }
 
     /// Ordinal for comparison and delta calculation.
     pub fn ordinal(self) -> u8 {
         match self {
-            Self::Squad => 0,
-            Self::Maniple => 1,
-            Self::Clan => 2,
-            Self::Legion => 3,
+            Self::Compact => 0,
+            Self::Standard => 1,
+            Self::Extended => 2,
+            Self::Massive => 3,
         }
     }
 
@@ -580,15 +584,15 @@ impl ContextClass {
 
     /// All classes in ascending order.
     pub fn all() -> &'static [Self] {
-        &[Self::Squad, Self::Maniple, Self::Clan, Self::Legion]
+        &[Self::Compact, Self::Standard, Self::Extended, Self::Massive]
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "squad" | "128k" => Some(Self::Squad),
-            "maniple" | "272k" => Some(Self::Maniple),
-            "clan" | "400k" => Some(Self::Clan),
-            "legion" | "1m" => Some(Self::Legion),
+            "compact" | "squad" | "128k" => Some(Self::Compact),
+            "standard" | "maniple" | "272k" => Some(Self::Standard),
+            "extended" | "clan" | "400k" => Some(Self::Extended),
+            "massive" | "legion" | "1m" => Some(Self::Massive),
             _ => None,
         }
     }
@@ -623,9 +627,19 @@ pub struct SelectorPolicy {
 }
 
 impl SelectorPolicy {
+    /// Effective window used for local context assembly.
+    ///
+    /// `model_window` is the upstream/provider capacity. `requested_class` is
+    /// the operator's desired working-set breadth. A smaller requested class
+    /// intentionally constrains local assembly even when the model can accept
+    /// more tokens; a larger requested class cannot exceed provider capacity.
+    pub fn assembly_window(&self) -> usize {
+        self.model_window.min(self.requested_class.nominal_tokens())
+    }
+
     /// Actual token budget available for context assembly this turn.
     pub fn assembly_budget(&self) -> usize {
-        self.model_window
+        self.assembly_window()
             .saturating_sub(self.reply_reserve)
             .saturating_sub(self.tool_schema_reserve)
     }
@@ -973,12 +987,18 @@ fn infer_context_window(model: &str) -> usize {
         ("anthropic", model)
     };
 
-    // Try route matrix lookup
+    // Exact registry entries are the primary static provider constraint.
+    let qualified = format!("{provider}:{model_id}");
+    if let Some(entry) = crate::model_registry::ModelRegistry::global().model_info(&qualified) {
+        return entry.context_input;
+    }
+
+    // Route patterns cover versioned aliases and dynamically discovered models.
     if let Some(ceiling) = lookup_context_ceiling(provider, model_id) {
         return ceiling;
     }
 
-    // Fallback heuristics for models not in the matrix
+    // Fallback heuristics for models not in the registry or route matrix.
     let name = model_id;
     if name.contains("opus") || name.contains("sonnet") {
         return 200_000;
@@ -1000,7 +1020,7 @@ fn infer_context_window(model: &str) -> usize {
         return 32_768;
     }
 
-    131_072 // fail-closed: default to Squad for unknown cloud providers
+    131_072 // fail-closed: default to Compact for unknown cloud providers
 }
 
 /// Thread-safe shared settings handle.
@@ -1477,7 +1497,7 @@ fn global_profile_path() -> Option<std::path::PathBuf> {
 ///   description = "Code review — read everything, suggest, don't edit"
 ///   base = "architect"
 ///   thinking = "high"
-///   context_class = "clan"
+///   context_class = "extended"
 ///   slim = false
 /// }
 ///
@@ -1507,7 +1527,7 @@ pub struct PostureDef {
     pub base: String,
     /// Thinking level override (off/minimal/low/medium/high).
     pub thinking: Option<String>,
-    /// Context class override (squad/maniple/clan/legion).
+    /// Context class override (compact/standard/extended/massive). Legacy aliases compact/standard/extended/massive are accepted.
     pub context_class: Option<String>,
     /// Whether to enable slim mode.
     pub slim: Option<bool>,
@@ -1735,7 +1755,7 @@ mod tests {
         assert_eq!(s.resource_envelope().thinking, ThinkingLevel::Medium);
         assert_eq!(
             s.resource_envelope().requested_context_class,
-            ContextClass::Clan
+            ContextClass::Extended
         );
     }
 
@@ -1743,25 +1763,25 @@ mod tests {
     fn posture_preset_resource_defaults_are_stable() {
         let explorator = PosturePreset::Explorator.default_resource_envelope();
         assert_eq!(explorator.thinking, ThinkingLevel::Minimal);
-        assert_eq!(explorator.requested_context_class, ContextClass::Squad);
+        assert_eq!(explorator.requested_context_class, ContextClass::Compact);
         assert_eq!(
             explorator.effective_context_cap_tokens,
-            Some(ContextClass::Squad.nominal_tokens())
+            Some(ContextClass::Compact.nominal_tokens())
         );
         assert!(explorator.compact_reply_reserve);
         assert!(explorator.compact_tool_schema_reserve);
 
         let fabricator = PosturePreset::Fabricator.default_resource_envelope();
         assert_eq!(fabricator.thinking, ThinkingLevel::Low);
-        assert_eq!(fabricator.requested_context_class, ContextClass::Maniple);
+        assert_eq!(fabricator.requested_context_class, ContextClass::Standard);
 
         let architect = PosturePreset::Architect.default_resource_envelope();
         assert_eq!(architect.thinking, ThinkingLevel::Medium);
-        assert_eq!(architect.requested_context_class, ContextClass::Clan);
+        assert_eq!(architect.requested_context_class, ContextClass::Extended);
 
         let devastator = PosturePreset::Devastator.default_resource_envelope();
         assert_eq!(devastator.thinking, ThinkingLevel::High);
-        assert_eq!(devastator.requested_context_class, ContextClass::Legion);
+        assert_eq!(devastator.requested_context_class, ContextClass::Massive);
     }
 
     #[test]
@@ -1777,7 +1797,7 @@ mod tests {
         assert_eq!(profile.resources.thinking, ThinkingLevel::Low);
         assert_eq!(
             profile.resources.requested_context_class,
-            ContextClass::Maniple
+            ContextClass::Standard
         );
         assert_eq!(profile.identity, RuntimeIdentity::local_interactive());
         assert_eq!(
@@ -1787,7 +1807,7 @@ mod tests {
         assert_eq!(profile.persona, PersonaState::default());
         assert_eq!(
             profile.summary(),
-            "local-operator / Fabricator / low / Maniple / operator@local"
+            "local-operator / Fabricator / low / Standard / operator@local"
         );
     }
 
@@ -1832,7 +1852,7 @@ mod tests {
         );
         assert_eq!(
             profile.summary(),
-            "dev.styrene.omegon.systems-engineer / Architect / medium / Clan / operator@local"
+            "dev.styrene.omegon.systems-engineer / Architect / medium / Extended / operator@local"
         );
     }
 
@@ -1843,7 +1863,7 @@ mod tests {
             .with_identity(RuntimeIdentity::local_control_plane());
         assert_eq!(
             profile.summary(),
-            "daemon-supervisor / Architect / medium / Clan / operator@local"
+            "daemon-supervisor / Architect / medium / Extended / operator@local"
         );
     }
 
@@ -1857,7 +1877,7 @@ mod tests {
         );
         assert!(!s.is_slim());
         assert_eq!(s.thinking, ThinkingLevel::Low);
-        assert_eq!(s.requested_context_class, Some(ContextClass::Maniple));
+        assert_eq!(s.requested_context_class, Some(ContextClass::Standard));
 
         s.set_posture(PosturePreset::Devastator);
         assert_eq!(
@@ -1865,7 +1885,7 @@ mod tests {
             BehavioralPosture::fixed(PosturePreset::Devastator)
         );
         assert_eq!(s.thinking, ThinkingLevel::High);
-        assert_eq!(s.requested_context_class, Some(ContextClass::Legion));
+        assert_eq!(s.requested_context_class, Some(ContextClass::Massive));
     }
 
     #[test]
@@ -1874,10 +1894,10 @@ mod tests {
         s.set_posture(PosturePreset::Explorator);
         assert!(s.is_slim());
         assert_eq!(s.thinking, ThinkingLevel::Minimal);
-        assert_eq!(s.requested_context_class, Some(ContextClass::Squad));
+        assert_eq!(s.requested_context_class, Some(ContextClass::Compact));
         let policy = s.selector_policy();
-        assert_eq!(policy.requested_class, ContextClass::Squad);
-        assert_eq!(policy.model_window, ContextClass::Squad.nominal_tokens());
+        assert_eq!(policy.requested_class, ContextClass::Compact);
+        assert_eq!(policy.model_window, ContextClass::Compact.nominal_tokens());
         assert!(policy.reply_reserve < 8_192);
         assert!(policy.tool_schema_reserve < 4_096);
     }
@@ -1887,7 +1907,7 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.thinking, ThinkingLevel::Medium);
         assert_eq!(s.context_window, 200_000);
-        assert_eq!(s.context_class, ContextClass::Maniple);
+        assert_eq!(s.context_class, ContextClass::Standard);
     }
 
     #[test]
@@ -1970,7 +1990,7 @@ mod tests {
             infer_context_window("anthropic:claude-sonnet-4-6"),
             1_000_000
         );
-        assert_eq!(infer_context_window("openai:gpt-5.4"), 272_000);
+        assert_eq!(infer_context_window("openai:gpt-5.4"), 1_000_000);
         assert_eq!(infer_context_window("anthropic:claude-haiku-4-5"), 200_000);
     }
 
@@ -1984,7 +2004,7 @@ mod tests {
             lookup_context_ceiling("anthropic", "claude-sonnet-4-6-20260401"),
             Some(1_000_000)
         );
-        assert_eq!(lookup_context_ceiling("openai", "gpt-5.4"), Some(272_000));
+        assert_eq!(lookup_context_ceiling("openai", "gpt-5.4"), Some(1_000_000));
         assert_eq!(
             lookup_context_ceiling("openai", "gpt-5.4-mini"),
             Some(400_000)
@@ -1994,37 +2014,45 @@ mod tests {
     }
 
     #[test]
+    fn infer_context_window_uses_exact_registry_entries_before_fallbacks() {
+        assert_eq!(infer_context_window("openrouter:qwen/qwen-qwq-32b"), 32_768);
+        assert_eq!(
+            infer_context_window("openrouter:qwen/qwen-2.5-72b-instruct"),
+            131_072
+        );
+    }
+    #[test]
     fn context_window_fallback_heuristic() {
-        // Unknown models fall back to Squad (fail-closed)
+        // Unknown models fall back to Compact (fail-closed)
         assert_eq!(infer_context_window("mystery:unknown-model"), 131_072);
     }
 
     #[test]
     fn context_class_from_tokens() {
-        assert_eq!(ContextClass::from_tokens(100_000), ContextClass::Squad);
-        assert_eq!(ContextClass::from_tokens(131_072), ContextClass::Squad);
-        assert_eq!(ContextClass::from_tokens(131_073), ContextClass::Maniple);
-        assert_eq!(ContextClass::from_tokens(200_000), ContextClass::Maniple);
-        assert_eq!(ContextClass::from_tokens(278_528), ContextClass::Maniple);
-        assert_eq!(ContextClass::from_tokens(278_529), ContextClass::Clan);
-        assert_eq!(ContextClass::from_tokens(400_000), ContextClass::Clan);
-        assert_eq!(ContextClass::from_tokens(450_560), ContextClass::Clan);
-        assert_eq!(ContextClass::from_tokens(450_561), ContextClass::Legion);
-        assert_eq!(ContextClass::from_tokens(1_000_000), ContextClass::Legion);
+        assert_eq!(ContextClass::from_tokens(100_000), ContextClass::Compact);
+        assert_eq!(ContextClass::from_tokens(131_072), ContextClass::Compact);
+        assert_eq!(ContextClass::from_tokens(131_073), ContextClass::Standard);
+        assert_eq!(ContextClass::from_tokens(200_000), ContextClass::Standard);
+        assert_eq!(ContextClass::from_tokens(278_528), ContextClass::Standard);
+        assert_eq!(ContextClass::from_tokens(278_529), ContextClass::Extended);
+        assert_eq!(ContextClass::from_tokens(400_000), ContextClass::Extended);
+        assert_eq!(ContextClass::from_tokens(450_560), ContextClass::Extended);
+        assert_eq!(ContextClass::from_tokens(450_561), ContextClass::Massive);
+        assert_eq!(ContextClass::from_tokens(1_000_000), ContextClass::Massive);
     }
 
     #[test]
     fn context_class_ordering() {
-        assert!(ContextClass::Squad < ContextClass::Maniple);
-        assert!(ContextClass::Maniple < ContextClass::Clan);
-        assert!(ContextClass::Clan < ContextClass::Legion);
+        assert!(ContextClass::Compact < ContextClass::Standard);
+        assert!(ContextClass::Standard < ContextClass::Extended);
+        assert!(ContextClass::Extended < ContextClass::Massive);
     }
 
     #[test]
     fn context_class_delta() {
-        assert_eq!(ContextClass::Legion.delta(ContextClass::Squad), 3);
-        assert_eq!(ContextClass::Squad.delta(ContextClass::Legion), -3);
-        assert_eq!(ContextClass::Clan.delta(ContextClass::Clan), 0);
+        assert_eq!(ContextClass::Massive.delta(ContextClass::Compact), 3);
+        assert_eq!(ContextClass::Compact.delta(ContextClass::Massive), -3);
+        assert_eq!(ContextClass::Extended.delta(ContextClass::Extended), 0);
     }
 
     #[test]
@@ -2038,10 +2066,10 @@ mod tests {
     #[test]
     fn settings_new_derives_context_class() {
         let s = Settings::new("anthropic:claude-opus-4-7");
-        assert_eq!(s.context_class, ContextClass::Legion);
+        assert_eq!(s.context_class, ContextClass::Massive);
 
         let s = Settings::new("openai:gpt-5.4");
-        assert_eq!(s.context_class, ContextClass::Maniple);
+        assert_eq!(s.context_class, ContextClass::Massive);
     }
 
     #[test]
@@ -2293,19 +2321,19 @@ mod tests {
 
         s.set_posture(PosturePreset::Explorator);
         assert_eq!(s.thinking, ThinkingLevel::Minimal);
-        assert_eq!(s.requested_context_class, Some(ContextClass::Squad));
+        assert_eq!(s.requested_context_class, Some(ContextClass::Compact));
 
         s.set_posture(PosturePreset::Fabricator);
         assert_eq!(s.thinking, ThinkingLevel::Low);
-        assert_eq!(s.requested_context_class, Some(ContextClass::Maniple));
+        assert_eq!(s.requested_context_class, Some(ContextClass::Standard));
 
         s.set_posture(PosturePreset::Architect);
         assert_eq!(s.thinking, ThinkingLevel::Medium);
-        assert_eq!(s.requested_context_class, Some(ContextClass::Clan));
+        assert_eq!(s.requested_context_class, Some(ContextClass::Extended));
 
         s.set_posture(PosturePreset::Devastator);
         assert_eq!(s.thinking, ThinkingLevel::High);
-        assert_eq!(s.requested_context_class, Some(ContextClass::Legion));
+        assert_eq!(s.requested_context_class, Some(ContextClass::Massive));
     }
 
     #[test]
@@ -2315,12 +2343,12 @@ mod tests {
         s.set_posture(PosturePreset::Explorator);
         let env = s.resource_envelope();
         assert_eq!(env.thinking, ThinkingLevel::Minimal);
-        assert_eq!(env.requested_context_class, ContextClass::Squad);
+        assert_eq!(env.requested_context_class, ContextClass::Compact);
 
         s.set_posture(PosturePreset::Devastator);
         let env = s.resource_envelope();
         assert_eq!(env.thinking, ThinkingLevel::High);
-        assert_eq!(env.requested_context_class, ContextClass::Legion);
+        assert_eq!(env.requested_context_class, ContextClass::Massive);
     }
 
     #[test]
@@ -2330,8 +2358,40 @@ mod tests {
         let policy = s.selector_policy();
         assert_eq!(
             policy.requested_class,
-            ContextClass::Squad,
-            "Explorator should use Squad context class in selector policy"
+            ContextClass::Compact,
+            "Explorator should use Compact context class in selector policy"
         );
+    }
+
+    #[test]
+    fn selector_policy_constrains_assembly_to_requested_lower_class() {
+        let mut s = Settings::new("anthropic:claude-sonnet-4-6");
+        assert_eq!(s.context_class, ContextClass::Standard);
+        s.set_requested_context_class(ContextClass::Compact);
+
+        let policy = s.selector_policy();
+
+        assert_eq!(policy.model_window, 200_000);
+        assert_eq!(policy.requested_class, ContextClass::Compact);
+        assert_eq!(
+            policy.assembly_window(),
+            ContextClass::Compact.nominal_tokens()
+        );
+        assert!(policy.assembly_budget() < 200_000);
+        assert!(!policy.has_class_mismatch());
+    }
+
+    #[test]
+    fn selector_policy_caps_requested_higher_class_at_model_capacity() {
+        let mut s = Settings::new("anthropic:claude-haiku-4-5");
+        assert_eq!(s.context_class, ContextClass::Standard);
+        s.set_requested_context_class(ContextClass::Massive);
+
+        let policy = s.selector_policy();
+
+        assert_eq!(policy.model_window, 200_000);
+        assert_eq!(policy.requested_class, ContextClass::Massive);
+        assert_eq!(policy.assembly_window(), 200_000);
+        assert!(policy.has_class_mismatch());
     }
 }

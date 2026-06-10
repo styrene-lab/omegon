@@ -96,6 +96,95 @@ impl Default for LoopConfig {
 
 use crate::behavior::{self, BehavioralTier, ControllerState};
 
+const AUTO_PRESSURE_COMPACTION_KEEP_RECENT_TURNS: u32 = 4;
+
+enum CompactionPayloadSelection {
+    DecayWindow {
+        payload: String,
+        evict_count: usize,
+    },
+    PressureFallback {
+        payload: String,
+        evict_count: usize,
+        keep_recent_turns: u32,
+    },
+}
+
+impl CompactionPayloadSelection {
+    fn payload(&self) -> &str {
+        match self {
+            Self::DecayWindow { payload, .. } | Self::PressureFallback { payload, .. } => payload,
+        }
+    }
+
+    fn evict_count(&self) -> usize {
+        match self {
+            Self::DecayWindow { evict_count, .. } | Self::PressureFallback { evict_count, .. } => {
+                *evict_count
+            }
+        }
+    }
+
+    fn apply(self, conversation: &mut ConversationState, summary: String) {
+        match self {
+            Self::DecayWindow { .. } => conversation.apply_compaction(summary),
+            Self::PressureFallback {
+                keep_recent_turns, ..
+            } => conversation.apply_compaction_keeping_recent(summary, keep_recent_turns),
+        }
+    }
+
+    fn reason(&self) -> Option<String> {
+        match self {
+            Self::DecayWindow { .. } => None,
+            Self::PressureFallback {
+                keep_recent_turns, ..
+            } => Some(format!(
+                "no decay-window payload; compacting under token pressure with keep_recent_turns={keep_recent_turns}"
+            )),
+        }
+    }
+}
+
+fn pressure_compaction_payload(
+    conversation: &ConversationState,
+) -> Option<CompactionPayloadSelection> {
+    if let Some((payload, evict_count)) = conversation.build_compaction_payload() {
+        return Some(CompactionPayloadSelection::DecayWindow {
+            payload,
+            evict_count,
+        });
+    }
+    conversation
+        .build_compaction_payload_keeping_recent(AUTO_PRESSURE_COMPACTION_KEEP_RECENT_TURNS)
+        .map(
+            |(payload, evict_count)| CompactionPayloadSelection::PressureFallback {
+                payload,
+                evict_count,
+                keep_recent_turns: AUTO_PRESSURE_COMPACTION_KEEP_RECENT_TURNS,
+            },
+        )
+}
+
+fn loop_context_windows(
+    config: &LoopConfig,
+) -> (usize, usize, Option<crate::settings::SelectorPolicy>) {
+    if let Some(settings) = config
+        .settings
+        .as_ref()
+        .and_then(|s| s.lock().ok().map(|g| g.clone()))
+    {
+        let policy = settings.selector_policy();
+        (
+            settings.context_window,
+            policy.assembly_window(),
+            Some(policy),
+        )
+    } else {
+        (200_000, 200_000, None)
+    }
+}
+
 fn default_context_composition(context_window: usize) -> ContextComposition {
     ContextComposition {
         free_tokens: context_window,
@@ -295,17 +384,10 @@ pub async fn run(
             bus.tool_definitions_lazy(true, turn, &session_used_tools)
         };
         let tool_catalog = ToolCapabilityCatalog::from_tool_defs(&tool_defs);
-        let context_window = config
-            .settings
-            .as_ref()
-            .and_then(|s| s.lock().ok().map(|g| g.context_window))
-            .unwrap_or(200_000);
-        if let Some(settings) = config
-            .settings
-            .as_ref()
-            .and_then(|s| s.lock().ok().map(|g| g.clone()))
-        {
-            context.set_selector_policy(settings.selector_policy());
+        let (_provider_context_window, context_window, selector_policy) =
+            loop_context_windows(config);
+        if let Some(policy) = selector_policy {
+            context.set_selector_policy(policy);
         } else {
             context.set_context_window(context_window);
         }
@@ -436,11 +518,14 @@ pub async fn run(
             } else {
                 omegon_traits::ContextCompactionTrigger::AutoTier2
             };
-            if let Some((payload, evict_count)) = conversation.build_compaction_payload() {
+            if let Some(selection) = pressure_compaction_payload(conversation) {
+                let evict_count = selection.evict_count();
+                let fallback_reason = selection.reason();
                 tracing::info!(
                     estimated_tokens = before_tokens,
                     evict_count,
                     forced = forced_compact,
+                    fallback = fallback_reason.as_deref(),
                     "Context compaction requested"
                 );
                 emit_context_compaction_event(
@@ -452,13 +537,13 @@ pub async fn run(
                         None,
                         Some(evict_count),
                         None,
-                        None,
+                        fallback_reason.clone(),
                     ),
                 );
-                match compact_via_llm(bridge, &payload, &base_stream_options).await {
+                match compact_via_llm(bridge, selection.payload(), &base_stream_options).await {
                     Ok(summary) => {
                         let summary_chars = summary.chars().count();
-                        conversation.apply_compaction(summary);
+                        selection.apply(conversation, summary);
                         emit_context_compaction_event(
                             events,
                             context_compaction_event(
@@ -1386,7 +1471,9 @@ pub async fn run(
                 omegon_traits::BusRequest::RequestCompaction => {
                     tracing::info!("Bus: tier 2 compaction requested by feature");
                     let before_tokens = conversation.estimate_tokens() as u64;
-                    if let Some((payload, evict_count)) = conversation.build_compaction_payload() {
+                    if let Some(selection) = pressure_compaction_payload(conversation) {
+                        let evict_count = selection.evict_count();
+                        let fallback_reason = selection.reason();
                         emit_context_compaction_event(
                             events,
                             context_compaction_event(
@@ -1396,13 +1483,15 @@ pub async fn run(
                                 None,
                                 Some(evict_count),
                                 None,
-                                None,
+                                fallback_reason.clone(),
                             ),
                         );
-                        match compact_via_llm(bridge, &payload, &base_stream_options).await {
+                        match compact_via_llm(bridge, selection.payload(), &base_stream_options)
+                            .await
+                        {
                             Ok(summary) => {
                                 let summary_chars = summary.chars().count();
-                                conversation.apply_compaction(summary);
+                                selection.apply(conversation, summary);
                                 emit_context_compaction_event(
                                     events,
                                     context_compaction_event(
@@ -1432,6 +1521,7 @@ pub async fn run(
                                     ),
                                 );
                                 tracing::warn!(error = %message, "auto-compaction failed");
+                                bus.emit(&omegon_traits::BusEvent::Compacted);
                             }
                         }
                     } else {
@@ -1453,6 +1543,7 @@ pub async fn run(
                         tracing::debug!(
                             "auto-compaction requested but nothing was eligible to compact"
                         );
+                        bus.emit(&omegon_traits::BusEvent::Compacted);
                     }
                 }
                 omegon_traits::BusRequest::RefreshHarnessStatus => {
@@ -6459,5 +6550,62 @@ This is the right first slice."#;
         let notice =
             provider_stop_notice("anthropic", "max_tokens").expect("max_tokens should warn");
         assert!(notice.contains("output limit"), "{notice}");
+    }
+
+    #[test]
+    fn pressure_compaction_payload_falls_back_before_decay_window() {
+        let mut conversation = ConversationState::new();
+        conversation.push_user("turn zero context".into());
+        conversation.intent.stats.turns = 1;
+        conversation.push_user("turn one context".into());
+        conversation.intent.stats.turns = 6;
+        conversation.push_user("recent context".into());
+
+        let selection = pressure_compaction_payload(&conversation).expect("pressure payload");
+
+        assert_eq!(selection.evict_count(), 2);
+        assert!(selection.payload().contains("turn zero context"));
+        assert!(selection.payload().contains("turn one context"));
+        assert!(!selection.payload().contains("recent context"));
+        assert!(selection.reason().is_some());
+    }
+
+    #[test]
+    fn pressure_compaction_payload_prefers_decay_window_when_available() {
+        let mut conversation = ConversationState::new();
+        conversation.push_user("very old context".into());
+        conversation.intent.stats.turns = 99;
+        conversation.push_user("recent context".into());
+
+        let selection = pressure_compaction_payload(&conversation).expect("pressure payload");
+
+        assert_eq!(selection.evict_count(), 1);
+        assert!(selection.payload().contains("very old context"));
+        assert!(selection.reason().is_none());
+    }
+
+    #[test]
+    fn loop_context_windows_uses_effective_requested_assembly_window() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+        {
+            let mut guard = settings.lock().unwrap();
+            guard.set_requested_context_class(crate::settings::ContextClass::Compact);
+        }
+        let config = LoopConfig {
+            settings: Some(settings),
+            ..LoopConfig::default()
+        };
+
+        let (provider_window, effective_window, policy) = loop_context_windows(&config);
+
+        assert!(provider_window > effective_window);
+        assert_eq!(
+            effective_window,
+            crate::settings::ContextClass::Compact.nominal_tokens()
+        );
+        assert_eq!(
+            policy.expect("selector policy").requested_class,
+            crate::settings::ContextClass::Compact
+        );
     }
 }

@@ -1705,6 +1705,8 @@ pub async fn context_status_response(
     }
 }
 
+const MANUAL_COMPACTION_KEEP_RECENT_TURNS: u32 = 2;
+
 pub async fn context_compact_response(
     runtime_state: &mut InteractiveAgentState,
     agent: &mut InteractiveAgentHost,
@@ -1723,7 +1725,10 @@ pub async fn context_compact_response(
         }
     };
     let before_tokens = runtime_state.conversation.estimate_tokens() as u64;
-    if let Some((payload, evict_count)) = runtime_state.conversation.build_compaction_payload() {
+    if let Some((payload, evict_count)) = runtime_state
+        .conversation
+        .build_compaction_payload_keeping_recent(MANUAL_COMPACTION_KEEP_RECENT_TURNS)
+    {
         let _ = events_tx.send(AgentEvent::ContextCompaction(
             omegon_traits::ContextCompactionEvent {
                 trigger: omegon_traits::ContextCompactionTrigger::Manual,
@@ -1739,7 +1744,9 @@ pub async fn context_compact_response(
         {
             Ok(summary) => {
                 let summary_chars = summary.chars().count();
-                runtime_state.conversation.apply_compaction(summary);
+                runtime_state
+                    .conversation
+                    .apply_compaction_keeping_recent(summary, MANUAL_COMPACTION_KEEP_RECENT_TURNS);
                 let est = runtime_state.conversation.estimate_tokens();
                 let settings = shared_settings.lock().unwrap();
                 if let Ok(mut metrics) = agent.context_metrics.lock() {
@@ -1800,7 +1807,7 @@ pub async fn context_compact_response(
         SlashCommandResponse {
             accepted: true,
             output: Some(
-                "Nothing to compress yet — compaction only summarizes older turns after the decay window.".to_string(),
+                "Nothing to compress yet — manual compaction keeps the last two turns and summarizes older turns.".to_string(),
             ),
         }
     }
@@ -1824,7 +1831,7 @@ pub async fn context_clear_response(
     agent.resume_info = None;
     let context_window = if let Ok(mut metrics) = agent.context_metrics.lock() {
         let context_window = metrics.context_window;
-        metrics.update(0, context_window, "Squad", "off");
+        metrics.update(0, context_window, "Compact", "off");
         context_window
     } else {
         200_000
@@ -1832,7 +1839,7 @@ pub async fn context_clear_response(
     let _ = events_tx.send(AgentEvent::ContextUpdated {
         tokens: 0,
         context_window: context_window as u64,
-        context_class: "Squad".to_string(),
+        context_class: "Compact".to_string(),
         thinking_level: "off".to_string(),
     });
     let _ = events_tx.send(AgentEvent::SessionReset);

@@ -22,7 +22,7 @@ related = ["model-degradation", "effort-tiers", "rust-provider-fallback", "codex
 
 ## Overview
 
-Concrete implementation plan for context-aware routing in Pi/Omegon: define named context classes (Squad/Maniple/Clan/Legion), routing state schema with active capacity + required minimum floor, downgrade safeguards (compatible/compact/degrading/ineligible classification), model compatibility selection starting from authenticated providers, and Argo-based upstream metadata refresh workflows.
+Concrete implementation plan for context-aware routing in Pi/Omegon: define named context classes (Compact/Standard/Extended/Massive), routing state schema with active capacity + required minimum floor, downgrade safeguards (compatible/compact/degrading/ineligible classification), model compatibility selection starting from authenticated providers, and Argo-based upstream metadata refresh workflows.
 
 ## Research
 
@@ -50,7 +50,7 @@ Provider context metadata changes over time and sometimes regresses or diverges 
 **Status:** decided
 **Rationale:** Safe routing requires distinguishing the capacity of the currently selected model from the minimum capacity the current session can safely tolerate. The state model tracks: activeContextWindow/activeContextClass, requiredMinContextWindow/requiredMinContextClass, optional pinned floor, observed usage/headroom, and downgrade safety arm/override status.
 
-### Decision: Final operator taxonomy: context classes are Squad / Maniple / Clan / Legion; thinking levels are Servitor / Functionary / Adept / Magos / Archmagos / Omnissiah
+### Decision: Final operator taxonomy: context classes are Compact / Standard / Extended / Massive; thinking levels are Servitor / Functionary / Adept / Magos / Archmagos / Omnissiah
 
 **Status:** decided
 **Rationale:** Context names express formation scale and memory span (Iron Hands / Mechanicum blend). Thinking levels express cognitive sophistication (Mechanicum cognition ladder). This keeps context, thinking, and capability tier as three clearly distinct semantic axes.
@@ -63,7 +63,7 @@ Provider context metadata changes over time and sometimes regresses or diverges 
 ### Decision: Downgrade policy: auto-reroute when compatible, auto-compact in safe bounds, otherwise require operator confirmation
 
 **Status:** decided
-**Rationale:** Prefer compatible reroute, then safe compaction, then operator-confirmed degradation. Unsafe context downshifts must never happen silently. Large multi-class drops (e.g. Legion to Squad) always require explicit operator confirmation.
+**Rationale:** Prefer compatible reroute, then safe compaction, then operator-confirmed degradation. Unsafe context downshifts must never happen silently. Large multi-class drops (e.g. Massive to Compact) always require explicit operator confirmation.
 
 ### Decision: Routing selection starts from authenticated providers with opinionated default preference and operator override
 
@@ -93,7 +93,7 @@ Provider context metadata changes over time and sometimes regresses or diverges 
 
 ### File Scope
 
-- `omegon-pi/extensions/lib/context-class.ts` (new) — Context class enum (Squad/Maniple/Clan/Legion), token thresholds, classification function
+- `omegon-pi/extensions/lib/context-class.ts` (new) — Context class enum (Compact/Standard/Extended/Massive), token thresholds, classification function
 - `omegon-pi/extensions/lib/route-matrix.ts` (new) — Route envelope type, reviewed local matrix, downgrade classification (compatible/compact/degrading/ineligible)
 - `omegon-pi/extensions/lib/routing-state.ts` (new) — Routing session state: active capacity, required floor, pinned floor, headroom, override status
 - `omegon-pi/extensions/lib/downgrade-policy.ts` (new) — Downgrade evaluation: auto-reroute, safe-compact, operator-confirm logic
@@ -109,7 +109,7 @@ Provider context metadata changes over time and sometimes regresses or diverges 
 - Reviewed local route matrix stores per-route context ceiling, mapped class, provider/transport identity, and breakpoint zones
 - Downgrade evaluation compares against session's required minimum context floor, not current prompt size
 - Automatic compaction allowed only when policy judges semantic loss acceptable and no pinned floor is crossed
-- Large multi-class drops (e.g. Legion→Squad) always require explicit operator confirmation
+- Large multi-class drops (e.g. Massive→Compact) always require explicit operator confirmation
 - Route selection begins by filtering to authenticated providers/routes
 - Anthropic preferred by default when multiple routes satisfy all hard constraints
 - Provider preference must be user-visible, dismissible, and reversible

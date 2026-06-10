@@ -41,10 +41,10 @@ pub struct HarnessStatus {
     pub container_runtime: Option<ContainerRuntimeStatus>,
 
     // ── Context routing (three-axis model) ───────────────────
-    pub context_class: String,   // "Squad" / "Maniple" / "Clan" / "Legion"
-    pub thinking_level: String,  // "Off" / "Minimal" / "Low" / "Medium" / "High"
+    pub context_class: String, // "Compact" / "Standard" / "Extended" / "Massive"
+    pub thinking_level: String, // "Off" / "Minimal" / "Low" / "Medium" / "High"
     pub capability_tier: String, // "retribution" / "victory" / "gloriana"
-    pub posture: String,         // "Explorator" / "Fabricator" / "Architect" / "Devastator"
+    pub posture: String,       // "Explorator" / "Fabricator" / "Architect" / "Devastator"
     pub operating_profile: String,
     pub principal_id: String,
     pub identity_issuer: String,
@@ -284,7 +284,7 @@ const PROVIDER_RUNTIME_DEGRADED_THRESHOLD: usize = 3;
 
 impl HarnessStatus {
     /// One-line footer summary for TUI.
-    /// Example: "⚙ SysEng │ ♪ Concise │ 🔓 3 secrets │ MCP:2 │ Squad │ Medium"
+    /// Example: "⚙ SysEng │ ♪ Concise │ 🔓 3 secrets │ MCP:2 │ Compact │ Medium"
     pub fn footer_summary(&self) -> String {
         let mut parts = Vec::new();
 
@@ -815,11 +815,11 @@ impl Default for HarnessStatus {
             web_auth_source: None,
             inference_backends: vec![],
             container_runtime: None,
-            context_class: "Squad".into(),
+            context_class: "Compact".into(),
             thinking_level: "Medium".into(),
             capability_tier: "victory".into(),
             posture: "Architect".into(),
-            operating_profile: "anonymous / Architect / Medium / Clan".into(),
+            operating_profile: "anonymous / Architect / Medium / Extended".into(),
             principal_id: "local-operator".into(),
             identity_issuer: "local-session".into(),
             session_kind: "interactive".into(),
@@ -876,7 +876,7 @@ mod tests {
         assert!(status.mcp_servers.is_empty());
         assert!(status.web_auth_mode.is_none());
         assert!(status.web_auth_source.is_none());
-        assert_eq!(status.context_class, "Squad");
+        assert_eq!(status.context_class, "Compact");
         assert!(!status.memory_available);
         assert!(!status.cleave_available);
         assert!(status.memory_warning.is_none());
@@ -888,7 +888,7 @@ mod tests {
         status.memory_available = true;
         status.cleave_available = true;
         let summary = status.footer_summary();
-        assert!(summary.contains("Squad"));
+        assert!(summary.contains("Compact"));
         // footer_summary stays terse; availability lives in slash-stats and harness JSON
         assert!(!summary.contains("Memory"));
         assert!(!summary.contains("Cleave"));
@@ -919,7 +919,7 @@ mod tests {
     fn footer_summary_minimal() {
         let status = HarnessStatus::default();
         let footer = status.footer_summary();
-        assert!(footer.contains("Squad"));
+        assert!(footer.contains("Compact"));
         assert!(footer.contains("Medium"));
     }
 
@@ -1016,13 +1016,13 @@ mod tests {
     #[test]
     fn assemble_runs_without_panic() {
         let status = HarnessStatus::assemble();
-        assert_eq!(status.context_class, "Squad");
+        assert_eq!(status.context_class, "Compact");
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn assemble_runs_inside_tokio_runtime() {
         let status = HarnessStatus::assemble();
-        assert_eq!(status.context_class, "Squad");
+        assert_eq!(status.context_class, "Compact");
     }
 
     #[test]

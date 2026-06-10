@@ -53,7 +53,7 @@ The engine panel currently shows 6 lines of text. Here's what each value IS and 
 ```
 ┌─ engine ──────────────────────────┐
 │                                    │
-│  claude-opus-4-6           Legion  │  ← MODEL: bright, bold. Class: right-aligned
+│  claude-opus-4-6           Massive  │  ← MODEL: bright, bold. Class: right-aligned
 │  ☁ Anthropic · ● subscription      │  ← provider + auth: muted supporting info
 │                                    │
 │  ▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱  12%     │  ← CONTEXT BAR: visual gauge, not just text
@@ -96,7 +96,7 @@ Block (▰▱) is best — distinct filled/empty glyphs, not too heavy, works at
 **Tier 1 — What am I talking to? (Identity)**
 - Model name (claude-opus-4-6) — which brain is behind this session
 - Provider source (☁ cloud / ⚡ local) — where the compute is running
-- Context class (Legion/Clan/Squad/Scout/Battalion) — how much context the model can see
+- Context class (Massive/Extended/Compact/Scout/Battalion) — how much context the model can see
 
 These answer: "What is the engine?"
 

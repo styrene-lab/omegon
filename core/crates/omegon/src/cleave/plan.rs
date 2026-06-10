@@ -150,7 +150,7 @@ mod tests {
                     "scope": ["a.rs"],
                     "runtime": {
                         "thinkingLevel": "high",
-                        "contextClass": "legion",
+                        "contextClass": "massive",
                         "enabledTools": ["read", "bash"],
                         "disabledTools": ["web_search"],
                         "skills": ["rust", "security"],
@@ -164,7 +164,7 @@ mod tests {
         let plan = CleavePlan::from_json(json).unwrap();
         let runtime = plan.children[0].runtime.as_ref().unwrap();
         assert_eq!(runtime.thinking_level.as_deref(), Some("high"));
-        assert_eq!(runtime.context_class.as_deref(), Some("legion"));
+        assert_eq!(runtime.context_class.as_deref(), Some("massive"));
         assert_eq!(runtime.enabled_tools, vec!["read", "bash"]);
         assert_eq!(runtime.disabled_tools, vec!["web_search"]);
         assert_eq!(runtime.skills, vec!["rust", "security"]);

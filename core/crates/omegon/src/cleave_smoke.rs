@@ -101,7 +101,7 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
             runtime_profile: Some(crate::cleave::CleaveChildRuntimeProfile {
                 model: Some("anthropic:claude-sonnet-4-6".into()),
                 thinking_level: Some("high".into()),
-                context_class: Some("legion".into()),
+                context_class: Some("massive".into()),
                 disabled_tools: vec!["bash".into()],
                 skills: vec!["security".into()],
                 enabled_extensions: vec!["alpha".into()],
@@ -399,7 +399,7 @@ fn assert_runtime_profile_report(report: &serde_json::Value) -> anyhow::Result<(
     if report["thinking_level"] != "high" {
         anyhow::bail!("thinking level not applied: {report}");
     }
-    if report["context_class"] != "legion" && report["context_class"] != "Legion" {
+    if report["context_class"] != "massive" && report["context_class"] != "Massive" {
         anyhow::bail!("context class not applied: {report}");
     }
     if report["model"] != "claude-sonnet-4-6" {

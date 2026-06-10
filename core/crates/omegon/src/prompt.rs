@@ -995,10 +995,10 @@ mod tests {
 
         // Budget impact on different context classes
         for (class, window) in [
-            ("Squad 128k", 131_072usize),
-            ("Maniple 272k", 278_528usize),
-            ("Clan 440k", 409_600usize),
-            ("Legion 1M", 1_048_576usize),
+            ("Compact 128k", 131_072usize),
+            ("Standard 272k", 278_528usize),
+            ("Extended 440k", 409_600usize),
+            ("Massive 1M", 1_048_576usize),
         ] {
             let overhead = prompt_tokens + total_active + 16_384; // + max_output_tokens
             let available = window.saturating_sub(overhead);

@@ -326,7 +326,7 @@ impl DelegateWorkerProfile {
         persona: Option<&str>,
     ) -> ChildAgentRuntimeProfile {
         let mut runtime = ChildAgentRuntimeProfile {
-            context_class: Some("squad".to_string()),
+            context_class: Some("compact".to_string()),
             thinking_level: Some(thinking_level.unwrap_or("low").to_string()),
             slim: true, // Workers are narrow-scope — always use compact schemas + lazy injection
             disabled_tools: vec![
@@ -588,7 +588,7 @@ fn format_delegate_child_failure(
         "  thinking: {}\n",
         runtime.thinking_level.as_deref().unwrap_or("minimal")
     ));
-    out.push_str("  context_class: squad\n");
+    out.push_str("  context_class: compact\n");
     out.push_str(&format!(
         "  scope: {}\n",
         runtime
@@ -1939,7 +1939,7 @@ mod tests {
         let profile = DelegateWorkerProfile::parse(None);
         assert_eq!(profile, DelegateWorkerProfile::Scout);
         let runtime = profile.runtime_profile(None, None, None);
-        assert_eq!(runtime.context_class.as_deref(), Some("squad"));
+        assert_eq!(runtime.context_class.as_deref(), Some("compact"));
         assert_eq!(runtime.thinking_level.as_deref(), Some("low"));
         assert_eq!(profile.max_turns(), 4);
         assert_eq!(

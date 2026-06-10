@@ -84,8 +84,8 @@ class SettingsConfig {
   /// Thinking level: off, minimal, low, medium, high.
   thinking_level: ("off"|"minimal"|"low"|"medium"|"high")?
 
-  /// Context class: squad, maniple, clan, legion.
-  context_class: ("squad"|"maniple"|"clan"|"legion")?
+  /// Context class: compact, standard, extended, massive. Legacy aliases squad, maniple, clan, legion are accepted by Omegon.
+  context_class: ("compact"|"standard"|"extended"|"massive"|"squad"|"maniple"|"clan"|"legion")?
 
   /// Maximum turns per agent loop invocation.
   max_turns: Int(this > 0)?
@@ -96,7 +96,7 @@ class PhaseConfig {
   model: String?
   max_turns: Int(this > 0)?
   thinking_level: ("off"|"minimal"|"low"|"medium"|"high")?
-  context_class: ("squad"|"maniple"|"clan"|"legion")?
+  context_class: ("compact"|"standard"|"extended"|"massive"|"squad"|"maniple"|"clan"|"legion")?
   persona: String?
 }
 

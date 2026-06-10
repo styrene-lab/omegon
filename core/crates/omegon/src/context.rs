@@ -62,7 +62,7 @@ impl ContextManager {
             context_window: 200_000, // Default for Anthropic models
             shadow: ShadowContext::new(crate::settings::SelectorPolicy {
                 model_window: 200_000,
-                requested_class: crate::settings::ContextClass::Maniple,
+                requested_class: crate::settings::ContextClass::Standard,
                 reply_reserve: 8_192,
                 tool_schema_reserve: 4_096,
             }),

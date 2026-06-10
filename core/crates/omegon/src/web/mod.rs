@@ -129,7 +129,7 @@ fn project_web_instance(
             active_delegate_count: h.active_delegates.len(),
         })
         .unwrap_or(IpcHarnessSnapshot {
-            context_class: "Squad".into(),
+            context_class: "Compact".into(),
             thinking_level: "Medium".into(),
             capability_tier: "victory".into(),
             runtime_profile: "primary-interactive".into(),
@@ -1052,7 +1052,7 @@ mod tests {
                             runtime: Some(crate::features::cleave::ChildRuntimeSummary {
                                 model: Some("anthropic:claude-sonnet-4-6".into()),
                                 thinking_level: Some("high".into()),
-                                context_class: Some("legion".into()),
+                                context_class: Some("massive".into()),
                                 enabled_tools: vec!["read".into()],
                                 disabled_tools: vec!["bash".into()],
                                 skills: vec!["security".into()],
@@ -1136,7 +1136,7 @@ mod tests {
         );
         assert_eq!(child.model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
         assert_eq!(child.thinking_level.as_deref(), Some("high"));
-        assert_eq!(child.context_class.as_deref(), Some("legion"));
+        assert_eq!(child.context_class.as_deref(), Some("massive"));
         assert_eq!(child.disabled_tools, vec!["bash"]);
         assert_eq!(child.enabled_extensions, vec!["alpha"]);
         assert_eq!(child.preloaded_files, vec!["docs/runtime-preload.md"]);

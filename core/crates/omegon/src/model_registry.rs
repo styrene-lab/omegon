@@ -361,7 +361,7 @@ mod tests {
             Some(1_000_000)
         );
         assert_eq!(reg.context_ceiling("openai", "gpt-5.5"), Some(1_000_000));
-        assert_eq!(reg.context_ceiling("openai", "gpt-5.4"), Some(272_000));
+        assert_eq!(reg.context_ceiling("openai", "gpt-5.4"), Some(1_000_000));
         assert_eq!(reg.context_ceiling("openai", "gpt-5.4-mini"), Some(400_000));
     }
 
@@ -376,6 +376,40 @@ mod tests {
         assert_eq!(reg.infer_tier("openai", "gpt-5-mini"), Some("retribution"));
     }
 
+    #[test]
+    fn exact_model_entries_agree_with_matching_routes() {
+        let reg = ModelRegistry::global();
+        for model in reg.all_models() {
+            if let Some(route_ceiling) = reg.context_ceiling(&model.provider, &model.id) {
+                assert_eq!(
+                    route_ceiling, model.context_input,
+                    "route/model context mismatch for {}:{}",
+                    model.provider, model.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn defaults_and_tier_models_have_context_constraints() {
+        let reg = ModelRegistry::global();
+        for (provider, model_id) in &reg.defaults {
+            let info = reg.model_info_or_infer(provider, model_id);
+            assert!(
+                info.context_input > 0,
+                "default model lacks context constraint: {provider}:{model_id}"
+            );
+        }
+        for (tier, providers) in &reg.tiers {
+            for (provider, model_id) in providers {
+                let info = reg.model_info_or_infer(provider, model_id);
+                assert!(
+                    info.context_input > 0,
+                    "tier model lacks context constraint: {tier} {provider}:{model_id}"
+                );
+            }
+        }
+    }
     #[test]
     fn infer_unknown_model_applies_name_patterns() {
         let reg = ModelRegistry::global();

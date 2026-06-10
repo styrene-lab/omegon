@@ -789,12 +789,12 @@ fn context_updated_tracks_requested_policy_separately_from_actual_model_class() 
     app.handle_agent_event(AgentEvent::ContextUpdated {
         tokens: 144_000,
         context_window: 131_072,
-        context_class: "Legion".into(),
+        context_class: "Massive".into(),
         thinking_level: "high".into(),
     });
 
-    assert_eq!(app.footer_data.context_class, ContextClass::Legion);
-    assert_eq!(app.footer_data.actual_context_class, ContextClass::Squad);
+    assert_eq!(app.footer_data.context_class, ContextClass::Massive);
+    assert_eq!(app.footer_data.actual_context_class, ContextClass::Compact);
     assert!(app.footer_data.context_percent > 99.0);
 }
 
@@ -805,7 +805,7 @@ fn turn_end_does_not_overwrite_footer_context_with_last_request_input_tokens() {
     app.handle_agent_event(AgentEvent::ContextUpdated {
         tokens: 144_000,
         context_window: 272_000,
-        context_class: "Maniple".into(),
+        context_class: "Standard".into(),
         thinking_level: "high".into(),
     });
     let before = app.footer_data.context_percent;
@@ -2868,15 +2868,15 @@ fn context_selector_confirm_enqueues_set_context_class() {
     let index = selector
         .options
         .iter()
-        .position(|o| o.value == "Clan")
-        .expect("Clan option present");
+        .position(|o| o.value == "Extended")
+        .expect("Extended option present");
     selector.cursor = index;
 
     let message = app
         .confirm_selector(&tx)
         .expect("selector confirmation should return message");
     assert!(
-        message.contains("Context policy → Clan"),
+        message.contains("Context policy → Extended"),
         "unexpected message: {message}"
     );
 
@@ -2884,7 +2884,7 @@ fn context_selector_confirm_enqueues_set_context_class() {
         TuiCommand::ExecuteControl {
             request: crate::control_runtime::ControlRequest::SetContextClass { class },
             ..
-        } => assert_eq!(class, crate::settings::ContextClass::Clan),
+        } => assert_eq!(class, crate::settings::ContextClass::Extended),
         other => panic!("expected set-context-class control request, got: {other:?}"),
     }
 }
@@ -3411,7 +3411,7 @@ fn harness_status_changed_updates_footer() {
     let mut app = test_app();
 
     let status = crate::status::HarnessStatus {
-        context_class: "Clan".into(),
+        context_class: "Extended".into(),
         thinking_level: "High".into(),
         active_persona: Some(crate::status::PersonaSummary {
             id: "test".into(),
@@ -3448,7 +3448,7 @@ fn harness_status_changed_updates_footer() {
             .name,
         "Test Persona"
     );
-    assert_eq!(app.footer_data.harness.context_class, "Clan");
+    assert_eq!(app.footer_data.harness.context_class, "Extended");
     assert_eq!(app.footer_data.total_facts, 18);
     assert_eq!(app.footer_data.working_memory, 4);
     app.instrument_panel.update_mind_facts(
@@ -4387,7 +4387,7 @@ fn auspex_attach_payload_carries_startup_and_instance_metadata() {
                 queued_events: 0,
                 transport_warnings: vec![],
                 runtime_dir: None,
-                context_class: Some("Squad".into()),
+                context_class: Some("Compact".into()),
                 thinking_level: Some("Medium".into()),
                 capability_tier: Some("victory".into()),
             },
@@ -4933,7 +4933,7 @@ fn thinking_chunk_marks_runtime_phase_as_thinking() {
     app.handle_agent_event(AgentEvent::ContextUpdated {
         tokens: 80_000,
         context_window: 200_000,
-        context_class: "Squad".into(),
+        context_class: "Compact".into(),
         thinking_level: "high".into(),
     });
     app.handle_agent_event(AgentEvent::ThinkingChunk {
@@ -4954,7 +4954,7 @@ fn active_tool_phase_beats_runtime_thinking_in_tui() {
     app.handle_agent_event(AgentEvent::ContextUpdated {
         tokens: 80_000,
         context_window: 200_000,
-        context_class: "Squad".into(),
+        context_class: "Compact".into(),
         thinking_level: "high".into(),
     });
     app.handle_agent_event(AgentEvent::ThinkingChunk {

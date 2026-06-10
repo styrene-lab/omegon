@@ -375,7 +375,7 @@ fn workspace_id_from_cwd(cwd: &str) -> String {
 fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
     let Some(ref h_lock) = handles.harness else {
         return IpcHarnessSnapshot {
-            context_class: "Squad".into(),
+            context_class: "Compact".into(),
             thinking_level: "Medium".into(),
             capability_tier: "victory".into(),
             runtime_profile: "primary-interactive".into(),
@@ -410,7 +410,7 @@ fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
     };
     let Ok(h) = h_lock.lock() else {
         return IpcHarnessSnapshot {
-            context_class: "Squad".into(),
+            context_class: "Compact".into(),
             thinking_level: "Medium".into(),
             capability_tier: "victory".into(),
             runtime_profile: "primary-interactive".into(),
@@ -529,7 +529,7 @@ mod tests {
     fn build_state_snapshot_includes_instance_descriptor() {
         let handles = DashboardHandles {
             harness: Some(Arc::new(Mutex::new(crate::status::HarnessStatus {
-                context_class: "Squad".into(),
+                context_class: "Compact".into(),
                 thinking_level: "high".into(),
                 capability_tier: "victory".into(),
                 runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,

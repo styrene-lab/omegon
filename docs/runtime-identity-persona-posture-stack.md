@@ -166,7 +166,7 @@ It is a behavior layer.
 ### Current subordinate axes
 - model tier (`local`, `retribution`, `victory`, `gloriana`)
 - thinking level (`off`, `minimal`, `low`, `medium`, `high`)
-- context class (`Squad`, `Maniple`, `Clan`, `Legion`)
+- context class (`Compact`, `Standard`, `Extended`, `Massive`)
 
 ### Responsibilities
 This layer should own the concrete execution envelope:
@@ -264,7 +264,7 @@ OperatingProfile {
     resources: {
         model_tier: Victory or Retribution,
         thinking_level: Minimal,
-        context_class: Squad,
+        context_class: Compact,
     },
     ..
 }
@@ -280,7 +280,7 @@ OperatingProfile {
     resources: {
         model_tier: Victory or Gloriana,
         thinking_level: Medium or High,
-        context_class: Maniple / Clan / Legion,
+        context_class: Standard / Extended / Massive,
     },
     ..
 }
@@ -326,7 +326,7 @@ This stack suggests a layered UX.
 
 A concise operator-facing summary might read:
 
-> Current operating profile: `systems-engineer / Fabricator / Victory / Low / Maniple`
+> Current operating profile: `systems-engineer / Fabricator / Victory / Low / Standard`
 
 A deeper diagnostic view could additionally include:
 - principal identity
@@ -421,7 +421,7 @@ But those adaptive shifts must still respect authorization ceilings.
 ### Subordinate resource axes
 - model tier: `local`, `retribution`, `victory`, `gloriana`
 - thinking level: `off`, `minimal`, `low`, `medium`, `high`
-- context class: `Squad`, `Maniple`, `Clan`, `Legion`
+- context class: `Compact`, `Standard`, `Extended`, `Massive`
 
 ### Constraint
 Do **not** imply one-to-one ordinal correspondence between these ladders.
@@ -429,7 +429,7 @@ Do **not** imply one-to-one ordinal correspondence between these ladders.
 For example:
 - `Explorator` is not “the same rung” as `Retribution`
 - `Architect` is not “the same rung” as `Gloriana`
-- `Devastator` is not “the same rung” as `Legion`
+- `Devastator` is not “the same rung” as `Massive`
 
 A posture preset may *tend* to nudge subordinate controls in a certain direction, but it does not collapse them into the same ladder.
 

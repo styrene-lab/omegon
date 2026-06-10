@@ -30,14 +30,14 @@ settings.rs has two layers: (1) `Settings` — runtime-mutable, session-scoped, 
 
 ### Changes needed for context class integration
 
-1. Add `ContextClass` enum (Squad/Maniple/Clan/Legion) to settings.rs with serde, ordinal, display, and classification from token count. 2. Replace `ContextMode` (binary) with `ContextClass` — the class subsumes the mode (Legion implies extended context capability). Keep ContextMode for backward compat but derive it from ContextClass. 3. Add `ThinkingLevel::Minimal` variant to match TS parity — currently 4 levels, TS has 5. 4. Add display labels: thinking levels → Servitor/Functionary/Adept/Magos/Archmagos. 5. Add to Profile: `provider_order`, `avoid_providers`, `context_floor_pin`, `downgrade_overrides` (vec of accepted downgrades). 6. Replace `infer_context_window` with route matrix lookup — load data/route-matrix.json or embed at compile time. 7. Add `context_class` field to Settings (derived from context_window). 8. Add `provider_preference` field to Settings for runtime ordering. 9. Update FooterData to include context_class for dashboard display. 10. Update TUI footer rendering to show context class badge.
+1. Add `ContextClass` enum (Compact/Standard/Extended/Massive) to settings.rs with serde, ordinal, display, and classification from token count. 2. Replace `ContextMode` (binary) with `ContextClass` — the class subsumes the mode (Massive implies extended context capability). Keep ContextMode for backward compat but derive it from ContextClass. 3. Add `ThinkingLevel::Minimal` variant to match TS parity — currently 4 levels, TS has 5. 4. Add display labels: thinking levels → Servitor/Functionary/Adept/Magos/Archmagos. 5. Add to Profile: `provider_order`, `avoid_providers`, `context_floor_pin`, `downgrade_overrides` (vec of accepted downgrades). 6. Replace `infer_context_window` with route matrix lookup — load data/route-matrix.json or embed at compile time. 7. Add `context_class` field to Settings (derived from context_window). 8. Add `provider_preference` field to Settings for runtime ordering. 9. Update FooterData to include context_class for dashboard display. 10. Update TUI footer rendering to show context class badge.
 
 ## Decisions
 
 ### Decision: ContextClass replaces ContextMode as the primary context abstraction; ContextMode becomes a derived property
 
 **Status:** decided
-**Rationale:** ContextMode (Standard/Extended) is a legacy Anthropic-specific toggle. ContextClass (Squad/Maniple/Clan/Legion) subsumes it — Legion implies extended capability, Squad/Maniple imply standard. The Anthropic beta header derivation moves to a method on ContextClass. ContextMode is kept as a deprecated alias for backward compatibility with existing profile.json files.
+**Rationale:** ContextMode (Standard/Extended) is a legacy Anthropic-specific toggle. ContextClass (Compact/Standard/Extended/Massive) subsumes it — Massive implies extended capability, Compact/Standard imply standard. The Anthropic beta header derivation moves to a method on ContextClass. ContextMode is kept as a deprecated alias for backward compatibility with existing profile.json files.
 
 ### Decision: Route matrix embedded at compile time via include_str!, not loaded from disk at runtime
 
@@ -64,7 +64,7 @@ settings.rs has two layers: (1) `Settings` — runtime-mutable, session-scoped, 
 
 ### Constraints
 
-- ContextClass must mirror the TS enum exactly: Squad (128k), Maniple (272k), Clan (400k), Legion (1M+)
+- ContextClass must mirror the TS enum exactly: Compact (128k), Standard (272k), Extended (400k), Massive (1M+)
 - ThinkingLevel must add Minimal to match TS parity (5 levels)
 - Profile fields are additive and optional — old profiles deserialize cleanly
 - Route matrix is compile-time embedded from the same JSON the TS side loads from disk

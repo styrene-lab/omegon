@@ -725,6 +725,7 @@ impl AgentSetup {
             features::context::ContextProvider::new_with_sources(
                 context_metrics.clone(),
                 command_tx.clone(),
+                settings.clone(),
                 Some(lifecycle_handle.provider()),
                 context_memory_backend.clone(),
                 context_memory_mind.clone(),

@@ -83,10 +83,10 @@ This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
   status
   compact
   clear
-  squad
-  maniple
-  clan
-  legion
+  compact
+  standard
+  extended
+  massive
 
 /plan
   status

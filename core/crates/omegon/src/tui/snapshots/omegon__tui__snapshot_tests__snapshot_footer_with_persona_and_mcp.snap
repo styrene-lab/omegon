@@ -1,10 +1,10 @@
 ---
-source: crates/omegon/src/tui/snapshot_tests.rs
-assertion_line: 340
+source: core/crates/omegon/src/tui/snapshot_tests.rs
+assertion_line: 373
 expression: render_to_string(&terminal)
 ---
 ╭ context ───────────────────╮╭ model ─────────────────────╮╭ memory ────────────────────╮╭ system ────────────────────╮
-│ ▐██████████░░░░▌ 72% / 272 ││ ☁ Anthropic/Claude · Manip ││ ⌗ 1800 · inj 95 · wm 5     ││ ⌂                          │
+│ ▐██████████░░░░▌ 72% / 272 ││ ☁ Anthropic/Claude · Stand ││ ⌗ 1800 · inj 95 · wm 5     ││ ⌂                          │
 │                            ││ claude-sonnet-4-6 · ○ api  ││                            ││ MCP 2(8t) · 🔓  7 · ⚙ 23    │
 │                            ││                            ││                            ││                            │
 ╰────────────────────────────╯╰────────────────────────────╯╰────────────────────────────╯╰────────────────────────────╯

@@ -103,7 +103,7 @@ The `/bootstrap` (or `/init`) flow should probe and expose the full inference st
     ○ Burn-LM     not available        (alpha, feature-gated)
 
   Routing:
-    Context class: Maniple (272k)
+    Context class: Standard (272k)
     Thinking:      Medium (Magos)
     Tier:          Victory
     Local offload: embeddings → Candle, compaction → Ollama qwen3:30b

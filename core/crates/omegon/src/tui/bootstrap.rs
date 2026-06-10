@@ -290,7 +290,7 @@ mod tests {
             activated_skills: vec!["rust".into()],
             disabled_tools: vec![],
         });
-        status.context_class = "Maniple".into();
+        status.context_class = "Standard".into();
         status.thinking_level = "High".into();
         status.memory.total_facts = 1200;
         status.memory.active_facts = 900;
@@ -307,7 +307,7 @@ mod tests {
             "should show current persona"
         );
         assert!(
-            output.contains("Maniple"),
+            output.contains("Standard"),
             "should show current context class"
         );
         assert!(

@@ -187,7 +187,7 @@ max_turns = 30
 persona = "systems-engineer"
 model = "claude-sonnet-4-6"
 max_turns = 60
-context_class = "clan"
+context_class = "extended"
 
 [phases.verifying]
 persona = "security-auditor"
@@ -217,7 +217,7 @@ thinking_level = "high"
 
         let implementing = template.phases.implementing.as_ref().unwrap();
         assert_eq!(implementing.persona.as_deref(), Some("systems-engineer"));
-        assert_eq!(implementing.context_class.as_deref(), Some("clan"));
+        assert_eq!(implementing.context_class.as_deref(), Some("extended"));
 
         let verifying = template.phases.verifying.as_ref().unwrap();
         assert_eq!(verifying.thinking_level.as_deref(), Some("high"));

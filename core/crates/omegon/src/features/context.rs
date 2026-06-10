@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::lifecycle::context::LifecycleContextProvider;
 use crate::lifecycle::design;
 use crate::lifecycle::types::ChangeStage;
+use crate::settings::{Settings, SharedSettings};
 use crate::shadow_context::{ContextKind, EntryBody, ShadowContext, ShadowEntry};
 use crate::tui::TuiCommand;
 
@@ -102,6 +103,7 @@ pub fn new_shared_command_tx() -> SharedCommandTx {
 pub struct ContextProvider {
     command_tx: SharedCommandTx,
     metrics: Arc<Mutex<SharedContextMetrics>>,
+    settings: Option<SharedSettings>,
     lifecycle: Option<Arc<Mutex<LifecycleContextProvider>>>,
     memory_backend: Option<Arc<dyn MemoryBackend>>,
     memory_mind: Option<String>,
@@ -114,11 +116,71 @@ struct PackReport {
     details: Value,
 }
 
+#[derive(Debug, Clone)]
+struct ContextRuntimeState {
+    tokens_used: usize,
+    context_window: usize,
+    usage_percent: u32,
+    context_class: String,
+    thinking_level: String,
+    requested_class: String,
+    actual_class: String,
+    assembly_budget: usize,
+    class_mismatch: bool,
+}
+
+impl ContextRuntimeState {
+    fn from_metrics_and_settings(
+        metrics: &SharedContextMetrics,
+        settings: Option<&Settings>,
+    ) -> Self {
+        let mut state = Self {
+            tokens_used: metrics.tokens_used,
+            context_window: metrics.context_window,
+            usage_percent: metrics.usage_percent(),
+            context_class: metrics.context_class.clone(),
+            thinking_level: metrics.thinking_level.clone(),
+            requested_class: metrics.context_class.clone(),
+            actual_class: metrics.context_class.clone(),
+            assembly_budget: metrics.context_window,
+            class_mismatch: false,
+        };
+
+        if let Some(settings) = settings {
+            let policy = settings.selector_policy();
+            let actual_class = policy.actual_class();
+            state.context_window = policy.model_window;
+            state.usage_percent = if policy.model_window > 0 {
+                ((state.tokens_used as f64 / policy.model_window as f64) * 100.0).min(100.0) as u32
+            } else {
+                0
+            };
+            state.context_class = actual_class.label().to_string();
+            state.thinking_level = settings.thinking.as_str().to_string();
+            state.requested_class = policy.requested_class.label().to_string();
+            state.actual_class = actual_class.label().to_string();
+            state.assembly_budget = policy.assembly_budget();
+            state.class_mismatch = policy.has_class_mismatch();
+        }
+
+        state
+    }
+
+    fn thinking_display(&self) -> String {
+        let mut chars = self.thinking_level.chars();
+        match chars.next() {
+            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            None => String::new(),
+        }
+    }
+}
+
 impl ContextProvider {
     pub fn new(metrics: Arc<Mutex<SharedContextMetrics>>, command_tx: SharedCommandTx) -> Self {
         Self {
             command_tx,
             metrics,
+            settings: None,
             lifecycle: None,
             memory_backend: None,
             memory_mind: None,
@@ -129,6 +191,7 @@ impl ContextProvider {
     pub fn new_with_sources(
         metrics: Arc<Mutex<SharedContextMetrics>>,
         command_tx: SharedCommandTx,
+        settings: Option<SharedSettings>,
         lifecycle: Option<Arc<Mutex<LifecycleContextProvider>>>,
         memory_backend: Option<Arc<dyn MemoryBackend>>,
         memory_mind: Option<String>,
@@ -137,11 +200,21 @@ impl ContextProvider {
         Self {
             command_tx,
             metrics,
+            settings,
             lifecycle,
             memory_backend,
             memory_mind,
             repo_path,
         }
+    }
+
+    fn runtime_state(&self) -> ContextRuntimeState {
+        let metrics = self.metrics.lock().unwrap().clone();
+        let settings = self
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.lock().ok().map(|settings| settings.clone()));
+        ContextRuntimeState::from_metrics_and_settings(&metrics, settings.as_ref())
     }
 
     fn request_max_items(req: &Value) -> usize {
@@ -155,7 +228,7 @@ impl ContextProvider {
     fn pack_shadow() -> ShadowContext {
         ShadowContext::new(crate::settings::SelectorPolicy {
             model_window: 4_096,
-            requested_class: crate::settings::ContextClass::Squad,
+            requested_class: crate::settings::ContextClass::Compact,
             reply_reserve: 512,
             tool_schema_reserve: 256,
         })
@@ -593,33 +666,35 @@ impl Feature for ContextProvider {
                     &self.command_tx,
                     TuiCommand::ContextStatus { respond_to: None },
                 );
-                let metrics = self.metrics.lock().unwrap();
-                let pct = metrics.usage_percent();
-                let thinking = {
-                    let raw = metrics.thinking_level.as_str();
-                    let mut chars = raw.chars();
-                    match chars.next() {
-                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                        None => String::new(),
-                    }
-                };
+                let runtime = self.runtime_state();
+                let thinking = runtime.thinking_display();
                 let result_text = format!(
-                    "Context: {}/{} tokens ({}%)\nClass: {}\nThinking Level: {}",
-                    metrics.tokens_used,
-                    metrics.context_window,
-                    pct,
-                    metrics.context_class,
+                    "Context: {}/{} tokens ({}%)
+Class: {}
+Requested Class: {}
+Assembly Budget: {} tokens
+Thinking Level: {}",
+                    runtime.tokens_used,
+                    runtime.context_window,
+                    runtime.usage_percent,
+                    runtime.context_class,
+                    runtime.requested_class,
+                    runtime.assembly_budget,
                     thinking
                 );
 
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: result_text }],
                     details: json!({
-                        "tokens_used": metrics.tokens_used,
-                        "context_window": metrics.context_window,
-                        "usage_percent": pct,
-                        "class": metrics.context_class,
-                        "thinking": metrics.thinking_level,
+                        "tokens_used": runtime.tokens_used,
+                        "context_window": runtime.context_window,
+                        "usage_percent": runtime.usage_percent,
+                        "class": runtime.context_class,
+                        "requested_class": runtime.requested_class,
+                        "actual_class": runtime.actual_class,
+                        "assembly_budget": runtime.assembly_budget,
+                        "class_mismatch": runtime.class_mismatch,
+                        "thinking": runtime.thinking_level,
                         "dispatched": dispatched,
                     }),
                 })
@@ -636,10 +711,7 @@ impl Feature for ContextProvider {
 
                 tracing::debug!(request_count = requests.len(), raw = ?_args, "request_context: received requests");
 
-                let metrics = {
-                    let metrics = self.metrics.lock().unwrap();
-                    metrics.clone()
-                };
+                let runtime = self.runtime_state();
                 let mut sections = Vec::new();
                 let mut pack_details = Vec::new();
                 let mut supported = 0usize;
@@ -657,11 +729,11 @@ impl Feature for ContextProvider {
                             supported += 1;
                             let pack_text = format!(
                                 "### Session State\n- Why selected: session orientation request for `{query}`\n- Reason: {reason}\n- Current context: {}/{} tokens ({}%)\n- Policy: {}\n- Thinking: {}",
-                                metrics.tokens_used,
-                                metrics.context_window,
-                                metrics.usage_percent(),
-                                metrics.context_class,
-                                metrics.thinking_level
+                                runtime.tokens_used,
+                                runtime.context_window,
+                                runtime.usage_percent,
+                                runtime.context_class,
+                                runtime.thinking_level
                             );
                             sections.push(pack_text.clone());
                             pack_details.push(json!({
@@ -683,11 +755,11 @@ impl Feature for ContextProvider {
                             supported += 1;
                             let pack_text = format!(
                                 "### Recent Runtime\n- Why selected: recent runtime evidence request for `{query}`\n- Reason: {reason}\n- Current runtime snapshot: context {}/{} tokens ({}%), policy {}, thinking {}",
-                                metrics.tokens_used,
-                                metrics.context_window,
-                                metrics.usage_percent(),
-                                metrics.context_class,
-                                metrics.thinking_level
+                                runtime.tokens_used,
+                                runtime.context_window,
+                                runtime.usage_percent,
+                                runtime.context_class,
+                                runtime.thinking_level
                             );
                             sections.push(pack_text.clone());
                             pack_details.push(json!({
@@ -785,10 +857,10 @@ impl Feature for ContextProvider {
                     details: json!({
                         "supported": supported,
                         "unsupported": unsupported,
-                        "context_window": metrics.context_window,
-                        "tokens_used": metrics.tokens_used,
-                        "thinking": metrics.thinking_level,
-                        "class": metrics.context_class,
+                        "context_window": runtime.context_window,
+                        "tokens_used": runtime.tokens_used,
+                        "thinking": runtime.thinking_level,
+                        "class": runtime.context_class,
                         "packs": pack_details,
                     }),
                 })
@@ -859,7 +931,7 @@ mod tests {
         let metrics = SharedContextMetrics::new();
         {
             let mut m = metrics.lock().unwrap();
-            m.update(96_433, 272_000, "Maniple (272k)", "medium");
+            m.update(96_433, 272_000, "Standard (272k)", "medium");
         }
         let command_tx = new_shared_command_tx();
         let provider = ContextProvider::new(metrics, command_tx);
@@ -880,7 +952,7 @@ mod tests {
                     "unexpected text: {text}"
                 );
                 assert!(
-                    text.contains("Class: Maniple (272k)"),
+                    text.contains("Class: Standard (272k)"),
                     "unexpected text: {text}"
                 );
                 assert!(
@@ -1031,7 +1103,7 @@ mod tests {
         let metrics = SharedContextMetrics::new();
         {
             let mut m = metrics.lock().unwrap();
-            m.update(96_433, 272_000, "Maniple (272k)", "medium");
+            m.update(96_433, 272_000, "Standard (272k)", "medium");
         }
         let provider = ContextProvider::new(metrics, new_shared_command_tx());
         let result = provider
@@ -1092,6 +1164,7 @@ mod tests {
         let provider = ContextProvider::new_with_sources(
             SharedContextMetrics::new(),
             new_shared_command_tx(),
+            None,
             Some(Arc::new(Mutex::new(lifecycle))),
             None,
             None,
@@ -1147,6 +1220,7 @@ mod tests {
         let provider = ContextProvider::new_with_sources(
             SharedContextMetrics::new(),
             new_shared_command_tx(),
+            None,
             None,
             Some(backend),
             Some("test".into()),
@@ -1232,6 +1306,7 @@ mod tests {
         let provider = ContextProvider::new_with_sources(
             SharedContextMetrics::new(),
             new_shared_command_tx(),
+            None,
             Some(Arc::new(Mutex::new(lifecycle))),
             None,
             None,
@@ -1287,6 +1362,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some(tmp.path().to_path_buf()),
         );
         let result = provider
@@ -1336,6 +1412,7 @@ mod tests {
         let provider = ContextProvider::new_with_sources(
             SharedContextMetrics::new(),
             new_shared_command_tx(),
+            None,
             None,
             None,
             None,
@@ -1393,6 +1470,7 @@ mod tests {
         let provider = ContextProvider::new_with_sources(
             SharedContextMetrics::new(),
             new_shared_command_tx(),
+            None,
             None,
             None,
             None,

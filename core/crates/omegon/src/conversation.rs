@@ -565,15 +565,30 @@ impl ConversationState {
     /// Build the text for an LLM compaction request — the messages that would
     /// be evicted, formatted for summarization.
     pub fn build_compaction_payload(&self) -> Option<(String, usize)> {
+        self.build_compaction_payload_keeping_recent(self.decay_window as u32)
+    }
+
+    /// Build a compaction payload while keeping the requested number of recent
+    /// turns intact. Manual compaction uses a tighter keep window so the
+    /// operator command can do useful work before automatic decay would fire.
+    pub fn build_compaction_payload_keeping_recent(
+        &self,
+        keep_recent_turns: u32,
+    ) -> Option<(String, usize)> {
         let current_turn = self.intent.stats.turns;
-        // Find messages older than the decay window — these are the ones
-        // that are already decayed and should be compacted into a summary.
         let evictable: Vec<&AgentMessage> = self
             .canonical
             .iter()
-            .filter(|m| current_turn.saturating_sub(m.turn()) > self.decay_window as u32)
+            .filter(|m| current_turn.saturating_sub(m.turn()) > keep_recent_turns)
             .collect();
 
+        self.compaction_payload_from_messages(&evictable)
+    }
+
+    fn compaction_payload_from_messages(
+        &self,
+        evictable: &[&AgentMessage],
+    ) -> Option<(String, usize)> {
         if evictable.is_empty() {
             return None;
         }
@@ -586,8 +601,8 @@ impl ConversationState {
         payload.push_str("- Key constraints discovered\n");
         payload.push_str("Be concise but preserve actionable context.\n\n---\n\n");
 
-        for msg in &evictable {
-            match msg {
+        for msg in evictable {
+            match *msg {
                 AgentMessage::User { text, turn, .. } => {
                     payload.push_str(&format!("[Turn {turn}] User: {text}\n\n"));
                 }
@@ -666,16 +681,21 @@ impl ConversationState {
     }
 
     pub fn apply_compaction(&mut self, summary: String) {
+        self.apply_compaction_keeping_recent(summary, self.decay_window as u32);
+    }
+
+    pub fn apply_compaction_keeping_recent(&mut self, summary: String, keep_recent_turns: u32) {
         let current_turn = self.intent.stats.turns;
-        // Remove all messages older than the decay window
+        // Remove all messages outside the retained recent turn window.
         self.canonical
-            .retain(|m| current_turn.saturating_sub(m.turn()) <= self.decay_window as u32);
+            .retain(|m| current_turn.saturating_sub(m.turn()) <= keep_recent_turns);
         self.compaction_summary = Some(summary);
         self.intent.stats.compactions += 1;
         self.invalidate_token_cache();
         tracing::info!(
             compactions = self.intent.stats.compactions,
             remaining_messages = self.canonical.len(),
+            keep_recent_turns,
             "Compaction applied"
         );
     }

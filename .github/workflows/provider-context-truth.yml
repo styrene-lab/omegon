@@ -1,0 +1,29 @@
+name: Provider Context Truth
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Quick daily drift sentinel for provider-published context windows.
+    - cron: '27 10 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  provider-context-truth:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check provider context docs against registry
+        run: |
+          mkdir -p .tmp/provider-context-truth
+          python3 scripts/provider_context_truth.py --json \
+            | tee .tmp/provider-context-truth/report.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-context-truth
+          path: .tmp/provider-context-truth/report.json

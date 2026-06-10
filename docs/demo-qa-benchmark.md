@@ -43,7 +43,7 @@ Each benchmark run produces a JSON file. Runs are comparable when they share the
   
   "config": {
     "model": "claude-opus-4-6",
-    "context_class": "Legion",
+    "context_class": "Massive",
     "thinking_level": "high",
     "persona": "alpharius",
     "tool_count": 31,
@@ -109,9 +109,9 @@ The Omegon harness has ~8 independently configurable dimensions. Most operators 
 - Hypothesis: high thinking produces measurably deeper analysis but at 3-5x cost. Is the quality difference worth the cost? At what complexity threshold does thinking level stop mattering?
 
 **Context class impact:**
-- Run all 9 phases at Squad (200k) vs Legion (1M)
+- Run all 9 phases at Compact (128k) vs Massive (1M)
 - Measure: compaction count, turns before compaction, context % at each phase boundary
-- Hypothesis: Legion delays compaction but costs more per turn. Is there a session length where Squad actually outperforms because compaction resets context more efficiently?
+- Hypothesis: Massive delays compaction but costs more per turn. Is there a session length where Compact actually outperforms because compaction resets context more efficiently?
 
 **Persona impact:**
 - Run Phase 3 (code generation) and Phase 4 (analysis) with/without a code-focused persona
@@ -176,13 +176,13 @@ Run the demo against every release candidate. Each phase produces a pass/fail + 
 ### 2. Capability Matrix Testing
 Run the same demo across permutations of:
 - **Model**: opus-4-6 / sonnet-4-6 / haiku / local (qwen3:32b)
-- **Context class**: Squad / Maniple / Clan / Legion
+- **Context class**: Compact / Standard / Extended / Massive
 - **Thinking level**: off / low / medium / high
 - **Persona**: none / active persona
 - **Tool profile**: full (49) / default (31) / minimal
 - **Memory**: cold start / warm (pre-loaded facts)
 
-Each permutation produces a results artifact. Compare: does adding a persona help code generation? Does Legion context class change tool call patterns? Does high thinking actually improve architectural analysis?
+Each permutation produces a results artifact. Compare: does adding a persona help code generation? Does Massive context class change tool call patterns? Does high thinking actually improve architectural analysis?
 
 ### 3. Emergent Property Detection
 The demo exercises the harness in a controlled sequence. By running it many times with slight variations, we can detect:

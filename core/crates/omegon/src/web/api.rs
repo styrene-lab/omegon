@@ -551,7 +551,7 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                 context_class: harness
                     .as_ref()
                     .map(|h| h.context_class.clone())
-                    .unwrap_or_else(|| "Squad".into()),
+                    .unwrap_or_else(|| "Compact".into()),
                 thinking_level: harness
                     .as_ref()
                     .map(|h| h.thinking_level.clone())
@@ -918,7 +918,7 @@ mod tests {
         let runtime = crate::features::cleave::ChildRuntimeSummary {
             model: Some("anthropic:claude-sonnet-4-6".into()),
             thinking_level: Some("high".into()),
-            context_class: Some("legion".into()),
+            context_class: Some("massive".into()),
             enabled_tools: vec!["read".into()],
             disabled_tools: vec!["bash".into()],
             skills: vec!["security".into()],
@@ -965,7 +965,7 @@ mod tests {
             runtime.model.as_deref(),
             Some("anthropic:claude-sonnet-4-6")
         );
-        assert_eq!(runtime.context_class.as_deref(), Some("legion"));
+        assert_eq!(runtime.context_class.as_deref(), Some("massive"));
         assert_eq!(runtime.disabled_tools, vec!["bash"]);
         assert_eq!(runtime.enabled_extensions, vec!["alpha"]);
         assert_eq!(runtime.preloaded_files, vec!["docs/runtime-preload.md"]);

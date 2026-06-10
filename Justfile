@@ -49,6 +49,10 @@ test-profile *args:
 test-dev-scripts:
     python3 -m unittest scripts/test_affected_crates.py scripts/test_test_profile.py
 
+# Check provider-published model context docs against the local registry.
+provider-context-truth *args:
+    python3 scripts/provider_context_truth.py {{args}}
+
 # Run tests only for Rust crates affected by changed paths.
 test-changed *args:
     #!/usr/bin/env bash

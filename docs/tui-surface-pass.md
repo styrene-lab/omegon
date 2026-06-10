@@ -40,7 +40,7 @@ The Rust core has grown significantly — persona system, MCP transport (5 modes
 
 2. **Tone selector overlay** — Same pattern as persona selector. Shows tones with name, intensity config, exemplar count.
 
-3. **Context class selector overlay** — /context opens picker showing Squad/Maniple/Clan/Legion with token counts and descriptions. Currently a text toggle between 200k/1M.
+3. **Context class selector overlay** — /context opens picker showing Compact/Standard/Extended/Massive with token counts and descriptions. Currently a text toggle between 200k/1M.
 
 4. **Dashboard: harness status section** — New section below cleave progress showing:
    - Active persona + tone (if any)
@@ -96,7 +96,7 @@ The Rust core has grown significantly — persona system, MCP transport (5 modes
 ### File Scope
 
 - `core/crates/omegon/src/tui/dashboard.rs` (modified) — Add harness status section (persona/tone, providers, MCP, secrets, inference, container). Make cleave section conditional (hide when idle). Vertical stack: design tree → openspec → cleave (if active) → harness status.
-- `core/crates/omegon/src/tui/selector.rs` (modified) — Add SelectorKind::ContextClass with 4 options (Squad/Maniple/Clan/Legion + token counts + descriptions)
+- `core/crates/omegon/src/tui/selector.rs` (modified) — Add SelectorKind::ContextClass with 4 options (Compact/Standard/Extended/Massive + token counts + descriptions)
 - `core/crates/omegon/src/tui/mod.rs` (modified) — /context opens context class selector overlay. Toast notifications on HarnessStatusChanged state transitions (persona switch, MCP connect/disconnect, auth expiry, compaction). Dashboard refresh on HarnessStatusChanged.
 - `core/crates/omegon/src/tui/footer.rs` (modified) — Compaction flash indicator (brief accent color pulse on system card when compaction fires)
 - `core/crates/omegon/src/status.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes

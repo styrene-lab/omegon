@@ -58,7 +58,7 @@ Omegon instances are workload-polymorphic: the same binary and manifest format r
 | B1 | Turn limit | `--max-turns N` hard ceiling | `done` | — | Exists and works |
 | B2 | Wall-clock timeout | `--timeout <seconds>` kills the agent loop | `done` | C1 | Implemented via tokio timeout + CancellationToken, exit code 3 |
 | B3 | Token budget | `--token-budget <N>` caps total input+output tokens | `partial` | C1 | Tracked and logged; enforcement (stopping the loop) not yet wired |
-| B4 | Context class | `--context-class squad\|maniple\|clan\|legion` | `done` | — | Exists |
+| B4 | Context class | `--context-class compact\|standard\|extended\|massive` | `done` | — | Exists |
 
 ### Credential Management
 

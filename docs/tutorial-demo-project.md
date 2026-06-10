@@ -154,7 +154,7 @@ Steps 9-10: Power tools, finale with "your project now has design docs, memory, 
 ### Decision: Tutorial cleave uses retribution tier with a cost warning upfront
 
 **Status:** decided
-**Rationale:** A 3-branch cleave on gloriana could cost $2-5 in tokens — unacceptable for an onboarding flow the operator might run multiple times. Retribution tier is the cheapest cloud option and still demonstrates the full cleave lifecycle. The tutorial overlay shows an upfront notice: 'This demo will use ~$0.30 of API credits for the cleave demonstration. Press Tab to continue or Esc to skip.' If local inference is available, prefer that. The --context-class squad flag already constrains context size.
+**Rationale:** A 3-branch cleave on gloriana could cost $2-5 in tokens — unacceptable for an onboarding flow the operator might run multiple times. Retribution tier is the cheapest cloud option and still demonstrates the full cleave lifecycle. The tutorial overlay shows an upfront notice: 'This demo will use ~$0.30 of API credits for the cleave demonstration. Press Tab to continue or Esc to skip.' If local inference is available, prefer that. The --context-class compact flag already constrains context size.
 
 ### Decision: Overlay steps reworked into 4 acts (10 steps) with new AutoPrompt trigger
 
@@ -164,7 +164,7 @@ Steps 9-10: Power tools, finale with "your project now has design docs, memory, 
 ### Decision: Two tutorial modes: /tutorial (hands-on) and /tutorial demo (scripted)
 
 **Status:** decided
-**Rationale:** /tutorial with no args runs hands-on mode in the current project — always. This is the right default: operators are in their project, they want to understand Omegon in that context. Acts 2-3 adapt to the project (reads code, bootstraps memory, creates first design node, introduces OpenSpec without executing a cleave). Total cost ~$0.05, no network, no exec() disruption. /tutorial demo runs the scripted demo mode: clones styrene-lab/omegon-demo into /tmp/omegon-tutorial/, exec()s omegon inside it with --no-splash --context-class squad. This is the full showpiece: pre-seeded design tree, live cleave, verification. The Welcome step of the overlay shows which mode is active. No auto-detection — the operator chooses by which command they type. The launch_tutorial_project() function already exists and is already correct — it just needs to be wired up to /tutorial demo.
+**Rationale:** /tutorial with no args runs hands-on mode in the current project — always. This is the right default: operators are in their project, they want to understand Omegon in that context. Acts 2-3 adapt to the project (reads code, bootstraps memory, creates first design node, introduces OpenSpec without executing a cleave). Total cost ~$0.05, no network, no exec() disruption. /tutorial demo runs the scripted demo mode: clones styrene-lab/omegon-demo into /tmp/omegon-tutorial/, exec()s omegon inside it with --no-splash --context-class compact. This is the full showpiece: pre-seeded design tree, live cleave, verification. The Welcome step of the overlay shows which mode is active. No auto-detection — the operator chooses by which command they type. The launch_tutorial_project() function already exists and is already correct — it just needs to be wired up to /tutorial demo.
 
 ## Open Questions
 

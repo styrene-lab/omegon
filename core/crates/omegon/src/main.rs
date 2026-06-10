@@ -225,7 +225,7 @@ struct Cli {
     #[arg(long)]
     initial_prompt_file: Option<PathBuf>,
 
-    /// Override context class (squad/maniple/clan/legion).
+    /// Override context class (compact/standard/extended/massive).
     #[arg(long)]
     context_class: Option<String>,
 
@@ -3920,10 +3920,12 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     if let Some(ref class_str) = cli.context_class
         && let Ok(mut s) = shared_settings.lock() {
             match class_str.to_lowercase().as_str() {
-                "squad" => s.set_requested_context_class(settings::ContextClass::Squad),
-                "maniple" => s.set_requested_context_class(settings::ContextClass::Maniple),
-                "clan" => s.set_requested_context_class(settings::ContextClass::Clan),
-                "legion" => s.set_requested_context_class(settings::ContextClass::Legion),
+                "compact" | "squad" => s.set_requested_context_class(settings::ContextClass::Compact),
+                "standard" | "maniple" => {
+                    s.set_requested_context_class(settings::ContextClass::Standard)
+                }
+                "extended" | "clan" => s.set_requested_context_class(settings::ContextClass::Extended),
+                "massive" | "legion" => s.set_requested_context_class(settings::ContextClass::Massive),
                 _ => tracing::warn!("Unknown context class: {class_str}"),
             }
             tracing::info!(class = %class_str, "requested context class policy applied");
@@ -9660,7 +9662,7 @@ mod tests {
         assert_eq!(s.thinking, crate::settings::ThinkingLevel::Minimal);
         assert_eq!(
             s.requested_context_class,
-            Some(crate::settings::ContextClass::Squad)
+            Some(crate::settings::ContextClass::Compact)
         );
     }
 

@@ -30,7 +30,7 @@ pub struct ComponentMatrix {
     pub persona: Option<String>,
     /// Thinking level: off, minimal, low, medium, high.
     pub thinking_level: String,
-    /// Context class: squad, maniple, clan, legion.
+    /// Context class: compact, standard, extended, massive.
     pub context_class: String,
     /// Installed extensions with versions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -313,7 +313,7 @@ mod tests {
             domain: "coding".into(),
             model: "anthropic:claude-sonnet-4-6".into(),
             thinking_level: "medium".into(),
-            context_class: "squad".into(),
+            context_class: "compact".into(),
             max_turns: 50,
             omegon_version: "0.15.24".into(),
             ..Default::default()

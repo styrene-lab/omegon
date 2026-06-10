@@ -58,7 +58,7 @@ Canonical parent: `/context`
 | `/context status` | Inspect context usage, class, model, thinking level | `/context` when no args opens selector in TUI | Status should mention reset/compact/request actions |
 | `/context compact` | Summarize older turns to reduce context pressure | `/context compress` | Pure context-budget operation |
 | `/context request <kind> <query>` | Request mediated context pack | none | Agent/operator shared concept |
-| `/context class <squad|maniple|clan|legion>` | Set context class | current direct `/context squad` etc. | Current direct forms can remain supported aliases |
+| `/context class <compact|standard|extended|massive>` | Set context class | current direct `/context compact` etc. | Current direct forms can remain supported aliases |
 | `/context reset` | Save current session and start fresh context/session | `/context clear`, `/new` | Preferred long-term name. If not introduced immediately, `/context clear` temporarily acts as canonical. |
 
 Decision: `/new` is not canonical. It is a high-frequency alias for `/context reset` (or `/context clear` during transition).
