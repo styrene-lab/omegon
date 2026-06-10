@@ -78,9 +78,7 @@ use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
 use self::layout_projection::{TuiLayoutInputs, plan_tui_layout};
-use self::permission_lane::{
-    format_permission_prompt, permission_response_for_key, render_permission_lane,
-};
+use self::permission_lane::{format_permission_prompt, permission_response_for_key};
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode};
 use self::slim_plan::{
     PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, render_slim_plan_panel,
@@ -465,8 +463,6 @@ pub struct App {
     >,
     /// Human-readable context for the pending permission prompt.
     pending_permission_context: Option<(String, String)>,
-    /// True when the pinned permission lane was visibly rendered on the last draw.
-    permission_lane_visible: bool,
     /// Pending manual-action wait prompt — waiting for operator confirmation.
     pending_operator_wait: Option<
         std::sync::Arc<
@@ -1584,7 +1580,6 @@ impl App {
             tutorial_overlay: None,
             pending_permission: None,
             pending_permission_context: None,
-            permission_lane_visible: false,
             pending_operator_wait: None,
             pending_operator_wait_context: None,
             update_rx: None,
@@ -3405,7 +3400,6 @@ impl App {
             return UiActionOutcome::noop("no pending permission request");
         }
         let context = self.pending_permission_context.take();
-        self.permission_lane_visible = false;
         self.command_prompt = None;
         if let Some(respond) = self.pending_permission.take()
             && let Ok(mut slot) = respond.lock()
@@ -3828,7 +3822,7 @@ impl App {
             dashboard_has_content,
             editor_height,
             footer_instruments_height: self.instrument_panel.preferred_height(),
-            pending_permission: self.pending_permission.is_some(),
+            pending_permission: false,
             active_tool_stream_height: raw_active_tool_stream_height,
             slim_plan_height: raw_slim_plan_height,
             segment_detail_height,
@@ -3839,7 +3833,6 @@ impl App {
         let main_area = layout_plan.main_area;
         let conversation_area = layout_plan.conversation_area;
         let active_tool_stream_area = layout_plan.active_tool_stream_area;
-        let permission_lane_area = layout_plan.permission_lane_area;
         let slim_plan_area = layout_plan.slim_plan_area;
         let segment_detail_area = layout_plan.segment_detail_area;
         let editor_area = layout_plan.editor_area;
@@ -3918,21 +3911,6 @@ impl App {
                 self.theme.as_ref(),
                 stream,
             );
-        }
-
-        self.permission_lane_visible = false;
-        if let Some((tool_name, target)) = self.pending_permission_context.as_ref()
-            && self.pending_permission.is_some()
-            && permission_lane_area.height > 0
-        {
-            render_permission_lane(
-                permission_lane_area,
-                frame,
-                self.theme.as_ref(),
-                tool_name,
-                target,
-            );
-            self.permission_lane_visible = true;
         }
 
         if let Some(snapshot) = slim_plan_snapshot.as_ref()
