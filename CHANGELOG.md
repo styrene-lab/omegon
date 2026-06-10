@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Route design-tree decision mutation through the lifecycle mutation service while keeping memory auto-ingest adapter-side.
 - Route design-tree research mutation through the lifecycle mutation service with direct markdown coverage.
 - Route design-tree question add/remove mutations through the lifecycle mutation service with direct service coverage.
 - Route design-tree status mutation through the lifecycle mutation service while keeping descendant checks, memory ingestion, and tool rendering adapter-side.

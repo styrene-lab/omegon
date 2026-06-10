@@ -19,7 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::mutation::{AddDesignNodeResearchRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
+use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeResearchRequest, CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -525,10 +525,14 @@ impl LifecycleFeature {
                 let status = args["decision_status"].as_str().unwrap_or("exploring");
                 let rationale = args["rationale"].as_str().unwrap_or("");
 
-                let node = get_node_clone(id)?;
-                let node = &node;
-                design::add_decision(node, title, status, rationale)?;
-                self.provider.lock().unwrap().refresh();
+                self.mutation_service.add_design_node_decision(
+                    AddDesignNodeDecisionRequest {
+                        id: id.to_string(),
+                        title: title.to_string(),
+                        status: status.to_string(),
+                        rationale: rationale.to_string(),
+                    },
+                )?;
 
                 // Auto-ingest decisions to memory
                 let content = if rationale.is_empty() {

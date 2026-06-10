@@ -59,6 +59,14 @@ pub struct AddDesignNodeResearchRequest {
     pub content: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct AddDesignNodeDecisionRequest {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub rationale: String,
+}
+
 impl LifecycleMutationService {
     pub fn new(
         repo_path: PathBuf,
@@ -175,6 +183,16 @@ impl LifecycleMutationService {
     ) -> anyhow::Result<()> {
         let node = self.get_node_clone(&req.id)?;
         design::add_research(&node, &req.heading, &req.content)?;
+        self.provider.lock().unwrap().refresh();
+        Ok(())
+    }
+
+    pub fn add_design_node_decision(
+        &self,
+        req: AddDesignNodeDecisionRequest,
+    ) -> anyhow::Result<()> {
+        let node = self.get_node_clone(&req.id)?;
+        design::add_decision(&node, &req.title, &req.status, &req.rationale)?;
         self.provider.lock().unwrap().refresh();
         Ok(())
     }
@@ -337,5 +355,42 @@ mod tests {
         assert_eq!(sections.research.len(), 1);
         assert_eq!(sections.research[0].heading, "Finding");
         assert_eq!(sections.research[0].content, "Evidence.");
+    }
+
+    #[test]
+    fn add_decision_updates_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_path_buf();
+        let provider = Arc::new(Mutex::new(LifecycleContextProvider::new(&repo)));
+        let opsx = Arc::new(Mutex::new(
+            OpsxLifecycle::load(JsonFileStore::new(&repo)).unwrap(),
+        ));
+        let service = LifecycleMutationService::new(repo, Arc::clone(&provider), Arc::clone(&opsx));
+        service
+            .create_design_node(CreateDesignNodeRequest {
+                id: "new-node".to_string(),
+                title: "New Node".to_string(),
+                parent: None,
+                status: None,
+                tags: vec![],
+                overview: "overview".to_string(),
+            })
+            .unwrap();
+
+        service
+            .add_design_node_decision(AddDesignNodeDecisionRequest {
+                id: "new-node".to_string(),
+                title: "Choose Path".to_string(),
+                status: "decided".to_string(),
+                rationale: "Evidence supports it.".to_string(),
+            })
+            .unwrap();
+
+        let node = provider.lock().unwrap().get_node("new-node").cloned().unwrap();
+        let sections = design::read_node_sections(&node).unwrap();
+        assert_eq!(sections.decisions.len(), 1);
+        assert_eq!(sections.decisions[0].title, "Choose Path");
+        assert_eq!(sections.decisions[0].status, "decided");
+        assert_eq!(sections.decisions[0].rationale, "Evidence supports it.");
     }
 }
