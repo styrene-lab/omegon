@@ -33,7 +33,10 @@ impl ScanCache {
                  item_kind TEXT NOT NULL,
                  text TEXT NOT NULL,
                  content_hash TEXT NOT NULL,
-                 parent_scope TEXT
+                 parent_scope TEXT,
+                 language TEXT NOT NULL DEFAULT '',
+                 strategy TEXT NOT NULL DEFAULT 'regex',
+                 confidence TEXT NOT NULL DEFAULT 'inferred'
              );
              CREATE INDEX IF NOT EXISTS idx_code_path ON code_chunks(path);
              CREATE TABLE IF NOT EXISTS knowledge_chunks (
@@ -53,7 +56,30 @@ impl ScanCache {
              );",
         )
         .context("failed to initialize codescan.db schema")?;
-        Ok(Self { conn })
+        let cache = Self { conn };
+        cache.ensure_code_chunk_metadata_columns()?;
+        Ok(cache)
+    }
+
+    fn ensure_code_chunk_metadata_columns(&self) -> Result<()> {
+        let mut stmt = self.conn.prepare("PRAGMA table_info(code_chunks)")?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|row| row.ok())
+            .collect::<std::collections::HashSet<_>>();
+        for (column, definition) in [
+            ("language", "TEXT NOT NULL DEFAULT ''"),
+            ("strategy", "TEXT NOT NULL DEFAULT 'regex'"),
+            ("confidence", "TEXT NOT NULL DEFAULT 'inferred'"),
+        ] {
+            if !columns.contains(column) {
+                self.conn.execute(
+                    &format!("ALTER TABLE code_chunks ADD COLUMN {column} {definition}"),
+                    [],
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// Return a (path → content_hash) map for ALL indexed files.
@@ -114,9 +140,21 @@ impl ScanCache {
             .execute("DELETE FROM code_chunks WHERE path = ?1", params![path_str])?;
         for chunk in chunks {
             self.conn.execute(
-                "INSERT INTO code_chunks (path, start_line, end_line, item_name, item_kind, text, content_hash, parent_scope)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![path_str, chunk.start_line, chunk.end_line, chunk.item_name, chunk.item_kind, chunk.text, hash, chunk.parent_scope],
+                "INSERT INTO code_chunks (path, start_line, end_line, item_name, item_kind, text, content_hash, parent_scope, language, strategy, confidence)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    path_str,
+                    chunk.start_line,
+                    chunk.end_line,
+                    chunk.item_name,
+                    chunk.item_kind,
+                    chunk.text,
+                    hash,
+                    chunk.parent_scope,
+                    chunk.language,
+                    chunk.strategy.as_str(),
+                    chunk.confidence.as_str(),
+                ],
             )?;
         }
         Ok(())
@@ -168,7 +206,7 @@ impl ScanCache {
 
     pub fn all_code_chunks(&self) -> Result<Vec<CodeChunk>> {
         let mut stmt = self.conn.prepare(
-            "SELECT path, start_line, end_line, item_name, item_kind, text, parent_scope FROM code_chunks",
+            "SELECT path, start_line, end_line, item_name, item_kind, text, parent_scope, language, strategy, confidence FROM code_chunks",
         )?;
         let chunks = stmt
             .query_map([], |row| {
@@ -180,6 +218,9 @@ impl ScanCache {
                     item_kind: row.get(4)?,
                     text: row.get(5)?,
                     parent_scope: row.get(6)?,
+                    language: row.get(7)?,
+                    strategy: crate::code::ExtractionStrategy::parse(&row.get::<_, String>(8)?),
+                    confidence: crate::code::ExtractionConfidence::parse(&row.get::<_, String>(9)?),
                 })
             })?
             .filter_map(|r| r.ok())
@@ -268,11 +309,61 @@ mod tests {
             item_kind: "fn".into(),
             text: "fn foo() {}".into(),
             parent_scope: None,
+            language: "rust".into(),
+            strategy: crate::code::ExtractionStrategy::TreeSitter,
+            confidence: crate::code::ExtractionConfidence::Extracted,
         };
         cache.upsert_code_chunks(path, "h1", &[chunk]).unwrap();
         let loaded = cache.all_code_chunks().unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].item_name, "foo");
+        assert_eq!(loaded[0].language, "rust");
+        assert_eq!(
+            loaded[0].strategy,
+            crate::code::ExtractionStrategy::TreeSitter
+        );
+        assert_eq!(
+            loaded[0].confidence,
+            crate::code::ExtractionConfidence::Extracted
+        );
+    }
+
+    #[test]
+    fn open_migrates_legacy_code_chunk_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("legacy.db");
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE code_chunks (
+                    id INTEGER PRIMARY KEY,
+                    path TEXT NOT NULL,
+                    start_line INTEGER NOT NULL,
+                    end_line INTEGER NOT NULL,
+                    item_name TEXT NOT NULL,
+                    item_kind TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    parent_scope TEXT
+                );",
+            )
+            .unwrap();
+        }
+
+        let cache = ScanCache::open(&db_path).unwrap();
+        let columns = {
+            let mut stmt = cache
+                .conn
+                .prepare("PRAGMA table_info(code_chunks)")
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+        };
+        assert!(columns.contains(&"language".to_string()));
+        assert!(columns.contains(&"strategy".to_string()));
+        assert!(columns.contains(&"confidence".to_string()));
     }
 
     #[test]
@@ -307,6 +398,9 @@ mod tests {
             item_kind: "fn".into(),
             text: "fn a(){}".into(),
             parent_scope: None,
+            language: "rust".into(),
+            strategy: crate::code::ExtractionStrategy::TreeSitter,
+            confidence: crate::code::ExtractionConfidence::Extracted,
         };
         cache
             .upsert_code_chunks(&path_a, "hash_a", &[chunk])
@@ -332,6 +426,9 @@ mod tests {
             item_kind: "fn".into(),
             text: "".into(),
             parent_scope: None,
+            language: "rust".into(),
+            strategy: crate::code::ExtractionStrategy::TreeSitter,
+            confidence: crate::code::ExtractionConfidence::Extracted,
         };
         cache
             .upsert_code_chunks(Path::new("x.rs"), "abc123", &[chunk])
@@ -366,6 +463,9 @@ mod tests {
                     item_kind: "fn".into(),
                     text: "fn keep() {}".into(),
                     parent_scope: None,
+                    language: "rust".into(),
+                    strategy: crate::code::ExtractionStrategy::TreeSitter,
+                    confidence: crate::code::ExtractionConfidence::Extracted,
                 }],
             )
             .unwrap();
@@ -381,6 +481,9 @@ mod tests {
                     item_kind: "fn".into(),
                     text: "fn stale() {}".into(),
                     parent_scope: None,
+                    language: "rust".into(),
+                    strategy: crate::code::ExtractionStrategy::TreeSitter,
+                    confidence: crate::code::ExtractionConfidence::Extracted,
                 }],
             )
             .unwrap();

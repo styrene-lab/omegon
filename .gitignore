@@ -49,10 +49,15 @@ ai/benchmarks/archive/
 test-project/
 dist/
 
-# Codescan index cache (content-hashed, rebuilt automatically)
+# Codescan / Codebase Mind operational caches (rebuilt automatically)
 .omegon/codescan.db
 .omegon/codescan.db-shm
 .omegon/codescan.db-wal
+.omegon/codebase-mind/*.db
+.omegon/codebase-mind/*.db-shm
+.omegon/codebase-mind/*.db-wal
+.omegon/codebase-mind/runtime.json
+.omegon/codebase-mind/locks/
 *.snap.new
 .omegon/agent-journal.md
 .omegon/profile.json
@@ -70,6 +75,7 @@ target/
 .codex/
 *.jsonl
 !.pi/memory/facts.jsonl
+!ai/codebase/*.jsonl
 !catalog/*/mind/facts.jsonl
 # Omegon evidence map derived indexes/cache
 .omegon/evidence/indexes/
