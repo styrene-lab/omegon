@@ -19,7 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::mutation::{CreateDesignNodeRequest, LifecycleMutationService};
+use crate::lifecycle::mutation::{CreateDesignNodeRequest, LifecycleMutationService, SetDesignNodeStatusRequest};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -435,41 +435,25 @@ impl LifecycleFeature {
                     }
                 }
 
-                // Validate transition via omegon-opsx FSM
-                let opsx_target = OpsxNodeState::parse(status_str)
-                    .ok_or_else(|| anyhow::anyhow!("Invalid status for FSM: {status_str}"))?;
+                let result = self.mutation_service.set_design_node_status(
+                    SetDesignNodeStatusRequest {
+                        id: id.to_string(),
+                        status,
+                        archive_reason: args["archive_reason"].as_str().map(str::to_string),
+                        superseded_by: args["superseded_by"].as_str().map(str::to_string),
+                        archived_at: if matches!(status, NodeStatus::Archived) {
+                            Some(Self::archive_timestamp())
+                        } else {
+                            None
+                        },
+                    },
+                )?;
 
-                let mut opsx = self.opsx.lock().unwrap();
-                // Ensure the node exists in omegon-opsx (lazy sync from markdown)
-                if opsx.get_node(id).is_none() {
-                    let node = get_node_clone(id)?;
-                    self.bootstrap_node_to_opsx(&mut opsx, &node);
-                }
-                opsx.transition_node(id, opsx_target)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
-                drop(opsx);
-
-                // FSM approved — now write the markdown
-                let mut node = get_node_clone(id)?;
-                let node_title = node.title.clone();
-                design::update_node(&mut node, |n| {
-                    n.status = status;
-                    if matches!(status, NodeStatus::Archived) {
-                        n.archive_reason = args["archive_reason"].as_str().map(str::to_string);
-                        n.superseded_by = args["superseded_by"].as_str().map(str::to_string);
-                        n.archived_at = Some(Self::archive_timestamp());
-                    } else {
-                        n.archive_reason = None;
-                        n.superseded_by = None;
-                        n.archived_at = None;
-                    }
-                })?;
-                self.provider.lock().unwrap().refresh();
-
-                // Auto-ingest to memory when node reaches a terminal milestone
                 if matches!(status_str, "resolved" | "decided" | "implementing") {
-                    let content =
-                        format!("Design node '{id}' ({node_title}) status → {status_str}");
+                    let content = format!(
+                        "Design node '{id}' ({}) status → {status_str}",
+                        result.node_title
+                    );
                     if let Ok(mut q) = self.pending_memory.lock() {
                         q.push(BusRequest::AutoStoreFact {
                             section: "Decisions".into(),
