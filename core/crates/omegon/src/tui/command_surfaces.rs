@@ -124,6 +124,19 @@ mod tests {
         assert_eq!(toast.message, "saved");
         assert_eq!(toast.severity, super::CommandSeverity::Success);
     }
+
+    #[test]
+    fn prompt_builder_sets_actions_and_severity() {
+        let prompt = super::CommandPrompt::new("Permission", "Allow read?")
+            .with_actions(vec![super::CommandPromptAction::new("y", "allow")])
+            .with_severity(super::CommandSeverity::Error);
+
+        assert_eq!(prompt.title, "Permission");
+        assert_eq!(prompt.body, "Allow read?");
+        assert_eq!(prompt.actions[0].key, "y");
+        assert_eq!(prompt.actions[0].label, "allow");
+        assert_eq!(prompt.severity, super::CommandSeverity::Error);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -142,9 +155,76 @@ impl CommandToast {
 }
 
 #[derive(Debug, Clone)]
+pub struct CommandPromptAction {
+    pub key: String,
+    pub label: String,
+}
+
+impl CommandPromptAction {
+    pub fn new(key: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandPrompt {
+    pub title: String,
+    pub body: String,
+    pub actions: Vec<CommandPromptAction>,
+    pub severity: CommandSeverity,
+}
+
+impl CommandPrompt {
+    pub fn new(title: impl Into<String>, body: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            body: body.into(),
+            actions: Vec::new(),
+            severity: CommandSeverity::Warning,
+        }
+    }
+
+    pub fn with_actions(mut self, actions: Vec<CommandPromptAction>) -> Self {
+        self.actions = actions;
+        self
+    }
+
+    pub fn with_severity(mut self, severity: CommandSeverity) -> Self {
+        self.severity = severity;
+        self
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct CommandModal {
     pub title: String,
     pub body: String,
+}
+
+pub fn render_prompt(area: Rect, buf: &mut Buffer, theme: &dyn Theme, prompt: &CommandPrompt) {
+    let actions = prompt
+        .actions
+        .iter()
+        .map(|action| format!("[{}] {}", action.key, action.label))
+        .collect::<Vec<_>>()
+        .join("   ");
+    let body = if actions.is_empty() {
+        prompt.body.clone()
+    } else {
+        format!("{}\n\n{}", prompt.body, actions)
+    };
+    let panel = CommandPanel {
+        title: prompt.title.clone(),
+        body,
+        source: None,
+        severity: prompt.severity,
+        copyable: false,
+        scroll: 0,
+    };
+    render_panel(area, buf, theme, &panel);
 }
 
 pub fn render_panel(area: Rect, buf: &mut Buffer, theme: &dyn Theme, panel: &CommandPanel) {

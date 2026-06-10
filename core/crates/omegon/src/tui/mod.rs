@@ -69,7 +69,9 @@ use tokio_util::sync::CancellationToken;
 use omegon_traits::AgentEvent;
 
 use self::active_tool_stream::{ActiveToolStream, render_active_tool_stream_panel};
-use self::command_surfaces::{CommandPanel, CommandSeverity, CommandToast};
+use self::command_surfaces::{
+    CommandPanel, CommandPrompt, CommandPromptAction, CommandSeverity, CommandToast,
+};
 use self::conversation::{ConversationView, Tab};
 use self::dashboard::DashboardState;
 use self::editor::Editor;
@@ -398,6 +400,8 @@ pub struct App {
     session_start: std::time::Instant,
     /// Active command output panel for slash commands and extension UI output.
     command_panel: Option<CommandPanel>,
+    /// Active blocking command prompt for responder-backed operator decisions.
+    command_prompt: Option<CommandPrompt>,
     /// Active selector popup (model picker, think level, etc.)
     selector: Option<selector::Selector>,
     /// What the selector is for — determines what happens on confirm.
@@ -1546,6 +1550,7 @@ impl App {
             suppress_editor_input_until: None,
             session_start: std::time::Instant::now(),
             command_panel: None,
+            command_prompt: None,
             selector: None,
             selector_kind: None,
             at_picker: None,
@@ -3401,6 +3406,7 @@ impl App {
         }
         let context = self.pending_permission_context.take();
         self.permission_lane_visible = false;
+        self.command_prompt = None;
         if let Some(respond) = self.pending_permission.take()
             && let Ok(mut slot) = respond.lock()
             && let Some(tx) = slot.take()
@@ -3428,6 +3434,7 @@ impl App {
             return UiActionOutcome::noop("no pending operator wait request");
         }
         let context = self.pending_operator_wait_context.take();
+        self.command_prompt = None;
         if let Some(respond) = self.pending_operator_wait.take()
             && let Ok(mut slot) = respond.lock()
             && let Some(tx) = slot.take()
@@ -4456,9 +4463,14 @@ impl App {
             }
         }
 
-        // Render command panel above the main surfaces and below modals/action prompts.
+        // Render command panel above the main surfaces and below blocking prompts/modals.
         if let Some(panel) = &self.command_panel {
             command_surfaces::render_panel(area, frame.buffer_mut(), self.theme.as_ref(), panel);
+        }
+
+        // Render responder-backed blocking prompts above passive command panels.
+        if let Some(prompt) = &self.command_prompt {
+            command_surfaces::render_prompt(area, frame.buffer_mut(), self.theme.as_ref(), prompt);
         }
 
         // Render modal overlay if active
@@ -7008,9 +7020,14 @@ impl App {
             } => {
                 self.slim_turn_state = SlimTurnState::Finished("blocked");
                 // Show a blocking permission prompt in the TUI.
-                // Render inline as a system notification with key hints.
                 let prompt_text = format_permission_prompt(&tool_name, &path);
-                self.conversation.push_system(&prompt_text);
+                self.command_prompt = Some(
+                    CommandPrompt::new("Permission required", prompt_text.clone()).with_actions(vec![
+                        CommandPromptAction::new("y", "allow once"),
+                        CommandPromptAction::new("A", "always allow"),
+                        CommandPromptAction::new("n", "deny"),
+                    ]),
+                );
 
                 // Store the responder — the next key event (y/a/n) will
                 // resolve it. See handle_permission_key below.
@@ -7027,7 +7044,13 @@ impl App {
                 let prompt_text = format!(
                     "Manual action required\n   {prompt}\n   [Enter/Space/d] done   [c/Esc] cancel   safety timeout: {timeout_secs}s"
                 );
-                self.conversation.push_system(&prompt_text);
+                self.command_prompt = Some(
+                    CommandPrompt::new("Manual action required", prompt_text.clone()).with_actions(vec![
+                        CommandPromptAction::new("Enter", "done"),
+                        CommandPromptAction::new("Space/d", "done"),
+                        CommandPromptAction::new("c/Esc", "cancel"),
+                    ]),
+                );
                 if let Ok(mut slot) = acknowledge.lock()
                     && let Some(tx) = slot.take()
                 {
@@ -7047,6 +7070,7 @@ impl App {
                 {
                     self.pending_operator_wait = None;
                     self.pending_operator_wait_context = None;
+                    self.command_prompt = None;
                 }
 
                 let text_blocks: Vec<&str> = result
@@ -7295,6 +7319,7 @@ impl App {
                 self.last_tool_name = None;
                 self.completed_tool_name = None;
                 self.command_panel = None;
+                self.command_prompt = None;
                 self.active_modal = None;
                 self.active_action_prompt = None;
                 self.instrument_panel.reset();
