@@ -41,6 +41,10 @@ test-filter pattern:
 affected *args:
     python3 scripts/affected_crates.py {{args}}
 
+# Summarize Rust test/coupling hotspots without running tests.
+test-profile *args:
+    python3 scripts/test_profile.py {{args}}
+
 # Run tests only for Rust crates affected by changed paths.
 test-changed *args:
     #!/usr/bin/env bash
