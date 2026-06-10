@@ -269,6 +269,7 @@ fn compress_signal_text(
     reference: Option<&HeadroomRef>,
 ) -> String {
     let mut out = header(kind, text, reference);
+    push_protected_anchors(&mut out, text, policy.signal_lines);
     push_excerpt(&mut out, "first", text.lines().take(policy.excerpt_lines));
     let signals = text
         .lines()
@@ -318,6 +319,7 @@ fn compress_plain(
     reference: Option<&HeadroomRef>,
 ) -> String {
     let mut out = header(kind, text, reference);
+    push_protected_anchors(&mut out, text, policy.signal_lines);
     let headings = text
         .lines()
         .filter(|line| line.trim_start().starts_with('#'))
@@ -335,6 +337,73 @@ fn compress_plain(
     tail.reverse();
     push_excerpt(&mut out, "last", tail.into_iter());
     trim_to_target(out, policy.target_bytes)
+}
+
+fn push_protected_anchors(out: &mut String, text: &str, limit: usize) {
+    let anchors = protected_anchor_lines(text, limit);
+    if !anchors.is_empty() {
+        push_excerpt(out, "protected_anchors", anchors.into_iter());
+    }
+}
+
+fn protected_anchor_lines(text: &str, limit: usize) -> Vec<&str> {
+    let mut anchors = Vec::new();
+    for line in text.lines() {
+        if anchors.len() >= limit {
+            break;
+        }
+        if is_protected_anchor_line(line) && !anchors.contains(&line) {
+            anchors.push(line);
+        }
+    }
+    anchors
+}
+
+fn is_protected_anchor_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    is_signal_line(trimmed)
+        || is_task_checkbox_line(trimmed)
+        || has_path_with_line_number(trimmed)
+        || has_hash_like_token(trimmed)
+        || has_nonzero_exit_code(trimmed)
+        || has_test_count_summary(trimmed)
+}
+
+fn is_task_checkbox_line(trimmed: &str) -> bool {
+    trimmed.starts_with("- [ ]") || trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]")
+}
+
+fn has_path_with_line_number(line: &str) -> bool {
+    line.split_whitespace().any(|token| {
+        let token = token.trim_matches(|c: char| matches!(c, ',' | ')' | '(' | '[' | ']'));
+        token.contains('/')
+            && token.contains(':')
+            && token
+                .rsplit_once(':')
+                .is_some_and(|(_, suffix)| suffix.chars().all(|c| c.is_ascii_digit()))
+    })
+}
+
+fn has_hash_like_token(line: &str) -> bool {
+    line.split(|c: char| !c.is_ascii_hexdigit())
+        .any(|token| token.len() >= 12 && token.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+fn has_nonzero_exit_code(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    ["exit code", "exit_code", "status code", "status_code"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+        && lower
+            .split(|c: char| !c.is_ascii_digit())
+            .filter_map(|part| part.parse::<u64>().ok())
+            .any(|value| value != 0)
+}
+
+fn has_test_count_summary(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("passed")
+        && (lower.contains("failed") || lower.contains("failure") || lower.contains("ignored"))
 }
 
 fn push_excerpt<'a>(out: &mut String, label: &str, lines: impl Iterator<Item = &'a str>) {
@@ -359,6 +428,8 @@ fn is_signal_line(line: &str) -> bool {
         || lower.contains("critical")
         || lower.contains("todo")
         || lower.contains("fixme")
+        || lower.contains("exit code")
+        || lower.contains("exit_code")
         || line.starts_with('+')
         || line.starts_with('-')
 }
@@ -591,6 +662,45 @@ mod tests {
         });
         assert!(output.text.contains("ERROR failed to open database"));
         assert!(output.text.contains("retrieve: headroom_retrieve id=hr:"));
+    }
+
+    #[test]
+    fn protected_anchors_are_emitted_for_plain_text() {
+        let mut store = InMemoryHeadroomStore::default();
+        let mut lines = (0..200)
+            .map(|i| format!("routine line {i}"))
+            .collect::<Vec<_>>();
+        lines.insert(
+            100,
+            "DECISION: keep compression default-off until dogfood benchmarks pass".into(),
+        );
+        let output = store.compress(CompressionInput {
+            kind_hint: Some(ContentKind::PlainText),
+            source: "plain".into(),
+            text: lines.join("\n"),
+            policy: policy(),
+        });
+        assert!(output.compressed);
+        assert!(output.text.contains("protected_anchors:"));
+        assert!(output.text.contains("keep compression default-off"));
+    }
+
+    #[test]
+    fn protected_anchors_capture_paths_and_exit_codes() {
+        let mut store = InMemoryHeadroomStore::default();
+        let mut lines = (0..200)
+            .map(|i| format!("info line {i}"))
+            .collect::<Vec<_>>();
+        lines.insert(80, "src/main.rs:42: failed assertion".into());
+        lines.insert(81, "process exited with exit code 101".into());
+        let output = store.compress(CompressionInput {
+            kind_hint: Some(ContentKind::Log),
+            source: "log".into(),
+            text: lines.join("\n"),
+            policy: policy(),
+        });
+        assert!(output.text.contains("src/main.rs:42"));
+        assert!(output.text.contains("exit code 101"));
     }
 
     #[test]

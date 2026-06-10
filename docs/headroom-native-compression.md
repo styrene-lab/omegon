@@ -105,6 +105,8 @@ estimated tokens (bytes_div_4/approximate): 14859 -> 1611 (89% saved)
 
 The report distinguishes raw compressor output from evaluated output after protected required-fact restoration. Pass/fail savings thresholds are evaluated against the final text that would enter context, not against raw compressor stats. Reports also include fixture classes, raw missing facts, restored fact counts/bytes, and the token counter identity so benchmark consumers do not mistake `bytes_div_4` estimates for provider-tokenizer measurements.
 
+Protected anchors are expected to be preserved by compressors where possible. Any remaining restored facts in the evaluation report are treated as design pressure on the relevant compressor, not as proof that production automatic compression is safe.
+
 This baseline is intentionally small. It proves the harness and catches obvious regressions; it is not sufficient evidence to enable compression by default. Enabling by default requires dogfood fixtures from real Omegon sessions and stable savings/fact-retention results across tool outputs, build logs, source reads, and markdown/design surfaces.
 
 ## Validation and Token-Savings Claims
@@ -116,6 +118,8 @@ The validator records original/compressed bytes, estimated original/compressed t
 The default token counter is deterministic and dependency-free: `ceil(bytes / 4)`. Provider/model-specific tokenizers may be added later as optional counters, but they are not required for CI.
 
 Local semantic models are optional evaluators. They may score semantic adequacy or produce model-authored summaries, but deterministic fact-retention and CCR retrieval remain the correctness gate.
+
+The first production compressor pass includes protected-anchor extraction for plain text, markdown, logs, and diffs before excerpt trimming. Protected anchors include signal words, decision lines, task checkboxes, path:line references, hash-like tokens, nonzero exit/status codes, and test-count summaries. This reduces dependence on evaluator-only required-fact restoration and is a prerequisite for enabling automatic compression beyond dogfood mode.
 
 ## Compression model strategy
 
