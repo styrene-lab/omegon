@@ -10,8 +10,6 @@ use ratatui::prelude::*;
 use super::conversation_render_projection::{
     SegmentMeasure, SegmentRender, SegmentRenderContext, SegmentRenderMetadata,
 };
-#[cfg(test)]
-use super::segments::SegmentContent;
 use super::segments::{Segment, SegmentRenderMode};
 use super::theme::Theme;
 
@@ -213,6 +211,7 @@ pub struct ConversationWidget<'a> {
     mode: SegmentRenderMode,
     density: crate::settings::ToolDetail,
     pinned_segment: Option<usize>,
+    selected_segment: Option<usize>,
 }
 
 impl<'a> ConversationWidget<'a> {
@@ -223,6 +222,7 @@ impl<'a> ConversationWidget<'a> {
             mode: SegmentRenderMode::Full,
             density: crate::settings::ToolDetail::Detailed,
             pinned_segment: None,
+            selected_segment: None,
         }
     }
 
@@ -238,6 +238,11 @@ impl<'a> ConversationWidget<'a> {
 
     pub fn with_pinned_segment(mut self, pinned_segment: Option<usize>) -> Self {
         self.pinned_segment = pinned_segment;
+        self
+    }
+
+    pub fn with_selected_segment(mut self, selected_segment: Option<usize>) -> Self {
+        self.selected_segment = selected_segment;
         self
     }
 }
@@ -327,8 +332,17 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                 };
                 let render_ctx = SegmentRenderContext::new(self.theme, self.mode)
                     .with_density(self.density)
-                    .with_pinned(self.pinned_segment == Some(i));
+                    .with_pinned(self.pinned_segment == Some(i))
+                    .with_selected(self.selected_segment == Some(i));
                 segment.render_in_context(seg_area, buf, &render_ctx);
+                if self.selected_segment == Some(i) {
+                    render_selected_segment_chrome(
+                        seg_area,
+                        buf,
+                        self.theme,
+                        segment.capabilities().detail_openable,
+                    );
+                }
             } else {
                 // Segment starts ABOVE the viewport — partially visible.
                 // Render into a temp buffer at full size, then copy the
@@ -354,8 +368,17 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                 }
                 let render_ctx = SegmentRenderContext::new(self.theme, self.mode)
                     .with_density(self.density)
-                    .with_pinned(self.pinned_segment == Some(i));
+                    .with_pinned(self.pinned_segment == Some(i))
+                    .with_selected(self.selected_segment == Some(i));
                 segment.render_in_context(temp_area, &mut temp_buf, &render_ctx);
+                if self.selected_segment == Some(i) {
+                    render_selected_segment_chrome(
+                        temp_area,
+                        &mut temp_buf,
+                        self.theme,
+                        segment.capabilities().detail_openable,
+                    );
+                }
 
                 // Copy the visible portion from temp_buf to main buf
                 for row in 0..visible_rows {
@@ -377,6 +400,62 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
 
         if matches!(self.mode, SegmentRenderMode::Slim) && state.scroll_offset > 0 {
             render_detached_viewport_hint(area, buf, self.theme, state.scroll_offset);
+        }
+        if let Some(selected) = self.selected_segment
+            && self
+                .segments
+                .get(selected)
+                .is_some_and(|segment| segment.capabilities().detail_openable)
+        {
+            render_detail_affordance_hint(area, buf, self.theme);
+        }
+    }
+}
+
+fn render_detail_affordance_hint(area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let label = " Enter: details ";
+    let label_width = label.chars().count() as u16;
+    if label_width > area.width {
+        return;
+    }
+
+    let x = area.right().saturating_sub(label_width);
+    let y = area.bottom().saturating_sub(1);
+    let style = Style::default()
+        .fg(theme.accent_bright())
+        .bg(theme.surface_bg())
+        .add_modifier(Modifier::BOLD);
+    for (idx, ch) in label.chars().enumerate() {
+        if let Some(cell) = buf.cell_mut((x + idx as u16, y)) {
+            cell.set_char(ch);
+            cell.set_style(style);
+        }
+    }
+}
+
+fn render_selected_segment_chrome(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: &dyn Theme,
+    detail_openable: bool,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let marker = if detail_openable { '◆' } else { '│' };
+    let style = Style::default()
+        .fg(theme.accent_bright())
+        .bg(theme.surface_bg())
+        .add_modifier(Modifier::BOLD);
+    for y in area.top()..area.bottom() {
+        if let Some(cell) = buf.cell_mut((area.x, y)) {
+            cell.set_char(marker);
+            cell.set_style(style);
         }
     }
 }
@@ -419,7 +498,21 @@ fn render_detached_viewport_hint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::conversation_render_projection::SegmentRenderContext;
+    use crate::tui::segments::{Segment, SegmentContent};
     use crate::tui::theme::Alpharius;
+    use ratatui::{buffer::Buffer, layout::Rect};
+
+    fn buffer_text(buf: &Buffer, area: Rect) -> String {
+        let mut text = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                text.push_str(buf[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
 
     #[test]
     fn empty_segments_renders_nothing() {
@@ -705,16 +798,51 @@ mod tests {
             .with_mode(SegmentRenderMode::Slim)
             .render(area, &mut buf, &mut state);
 
-        let mut text = String::new();
-        for y in 0..area.height {
-            for x in 0..area.width {
-                text.push_str(buf[(x, y)].symbol());
-            }
-            text.push('\n');
-        }
+        let text = buffer_text(&buf, area);
         assert!(
             text.contains("more below · End to tail"),
             "detached slim viewport should not look like truncated content: {text}"
+        );
+    }
+
+    #[test]
+    fn selected_detail_openable_segment_shows_detail_hint_and_marker() {
+        let segments = vec![Segment::user_prompt("inspect me")];
+        let area = Rect::new(0, 0, 60, 6);
+        let mut buf = Buffer::empty(area);
+        let mut state = ConvState::new();
+
+        ConversationWidget::new(&segments, &Alpharius)
+            .with_selected_segment(Some(0))
+            .render(area, &mut buf, &mut state);
+
+        let rendered = buffer_text(&buf, area);
+        assert!(
+            rendered.contains("Enter: details"),
+            "selected detail-openable segment should advertise the detail action: {rendered}"
+        );
+        assert!(
+            rendered.lines().any(|line| line.starts_with('◆')),
+            "detail-openable selection should use the openable marker: {rendered}"
+        );
+    }
+
+    #[test]
+    fn selected_non_openable_segment_marks_focus_without_detail_hint() {
+        let segments = vec![Segment::separator()];
+        let area = Rect::new(0, 0, 60, 6);
+        let mut buf = Buffer::empty(area);
+        let mut state = ConvState::new();
+
+        ConversationWidget::new(&segments, &Alpharius)
+            .with_selected_segment(Some(0))
+            .render(area, &mut buf, &mut state);
+
+        let rendered = buffer_text(&buf, area);
+        assert!(!rendered.contains("Enter: details"), "{rendered}");
+        assert!(
+            rendered.lines().any(|line| line.starts_with('│')),
+            "selected non-openable segment should still show focus: {rendered}"
         );
     }
 

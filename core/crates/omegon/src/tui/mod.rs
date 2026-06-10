@@ -1398,6 +1398,42 @@ fn editor_height_for(editor: &Editor, main_area: Rect) -> u16 {
     (editor_rows + 2).clamp(3, max_editor) // +2 for border
 }
 
+fn render_editor_info_line(
+    area: Rect,
+    frame: &mut Frame<'_>,
+    theme: &dyn crate::tui::theme::Theme,
+    queued_count: usize,
+    queued: Option<&QueuedPrompt>,
+    queue_mode: PromptQueueMode,
+) {
+    if area.height == 0 || queued_count == 0 {
+        return;
+    }
+
+    let mode = match queue_mode {
+        PromptQueueMode::InterruptAfterTurn => "interrupt after turn",
+        PromptQueueMode::UntilReady => "ready",
+        PromptQueueMode::Immediate => "immediate",
+    };
+    let preview = queued
+        .map(|queued| App::queue_prompt_preview(&queued.text, &queued.attachments))
+        .unwrap_or_default();
+    let line = Line::from(vec![
+        Span::styled(" Queued ", theme.style_dim()),
+        Span::styled(
+            format!("[{queued_count}]"),
+            Style::default()
+                .fg(theme.accent_bright())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("  Queue mode: {mode}"), theme.style_muted()),
+        Span::styled("  ", theme.style_dim()),
+        Span::styled(preview, theme.style_accent()),
+    ]);
+    let widget = Paragraph::new(line).style(Style::default().bg(theme.surface_bg()));
+    frame.render_widget(widget, area);
+}
+
 impl App {
     fn current_persona_state(&self) -> crate::settings::PersonaState {
         let persona_id = self
@@ -3790,6 +3826,7 @@ impl App {
             || !self.dashboard.active_changes.is_empty()
             || self.dashboard.cleave.as_ref().is_some_and(|c| c.active);
         let editor_height = editor_height_for(&self.editor, area);
+        let editor_info_height = u16::from(!self.queued_prompts.is_empty());
         let slim_plan_snapshot = if self.ui_surfaces.is_compact() && !self.focus_mode {
             slim_pinned_plan_snapshot(
                 self.slim_plan_snapshot.as_ref(),
@@ -3821,6 +3858,7 @@ impl App {
             focus_mode: self.focus_mode,
             dashboard_has_content,
             editor_height,
+            editor_info_height,
             footer_instruments_height: self.instrument_panel.preferred_height(),
             pending_permission: false,
             active_tool_stream_height: raw_active_tool_stream_height,
@@ -3836,6 +3874,7 @@ impl App {
         let slim_plan_area = layout_plan.slim_plan_area;
         let segment_detail_area = layout_plan.segment_detail_area;
         let editor_area = layout_plan.editor_area;
+        let editor_info_area = layout_plan.editor_info_area;
         let status_area = layout_plan.status_area;
         let footer_area = layout_plan.footer_area;
 
@@ -3870,6 +3909,7 @@ impl App {
             // Render conversation widget (can mutate conv_state via frame.render_stateful_widget)
             let density = self.settings().tool_detail;
             let pinned_segment = self.conversation.timeline_expanded_segment();
+            let selected_segment = self.conversation.selected_segment_index();
             let (segments, conv_state) = self.conversation.segments_and_state();
             let conv_widget = conv_widget::ConversationWidget::new(segments, t.as_ref())
                 .with_mode(if self.ui_surfaces.is_compact() {
@@ -3878,7 +3918,8 @@ impl App {
                     SegmentRenderMode::Full
                 })
                 .with_density(density)
-                .with_pinned_segment(pinned_segment);
+                .with_pinned_segment(pinned_segment)
+                .with_selected_segment(selected_segment);
             frame.render_stateful_widget(conv_widget, content_area, conv_state);
         } else {
             // Render extension widget with schema-aware formatting
@@ -4206,6 +4247,14 @@ impl App {
                 .block(editor_block)
                 .wrap(ratatui::widgets::Wrap { trim: false });
             frame.render_widget(editor_widget, editor_area);
+            render_editor_info_line(
+                editor_info_area,
+                frame,
+                t.as_ref(),
+                self.queued_prompts.len(),
+                self.queued_prompts.front(),
+                self.queue_mode,
+            );
         } else if let editor::EditorMode::ReverseSearch {
             ref query,
             ref match_idx,
@@ -4227,6 +4276,14 @@ impl App {
                 .block(editor_block)
                 .wrap(ratatui::widgets::Wrap { trim: false });
             frame.render_widget(editor_widget, editor_area);
+            render_editor_info_line(
+                editor_info_area,
+                frame,
+                t.as_ref(),
+                self.queued_prompts.len(),
+                self.queued_prompts.front(),
+                self.queue_mode,
+            );
         } else {
             let hint_text = if self.agent_active {
                 String::new()
@@ -4314,6 +4371,14 @@ impl App {
                 .style(Style::default().bg(t.surface_bg()))
                 .block(editor_block); // no .wrap() — pre-split above
             frame.render_widget(editor_widget, editor_rect);
+            render_editor_info_line(
+                editor_info_area,
+                frame,
+                t.as_ref(),
+                self.queued_prompts.len(),
+                self.queued_prompts.front(),
+                self.queue_mode,
+            );
             if !self.editor_input_suppressed_now() {
                 let (cx, cy) = self.editor.cursor_screen_position(editor_rect);
                 frame.set_cursor_position(ratatui::layout::Position { x: cx, y: cy });
@@ -7000,11 +7065,13 @@ impl App {
                 // Show a blocking permission prompt in the TUI.
                 let prompt_text = format_permission_prompt(&tool_name, &path);
                 self.command_prompt = Some(
-                    CommandPrompt::new("Permission required", prompt_text.clone()).with_actions(vec![
-                        CommandPromptAction::new("y", "allow once"),
-                        CommandPromptAction::new("A", "always allow"),
-                        CommandPromptAction::new("n", "deny"),
-                    ]),
+                    CommandPrompt::new("Permission required", prompt_text.clone()).with_actions(
+                        vec![
+                            CommandPromptAction::new("y", "allow once"),
+                            CommandPromptAction::new("A", "always allow"),
+                            CommandPromptAction::new("n", "deny"),
+                        ],
+                    ),
                 );
 
                 // Store the responder — the next key event (y/a/n) will
@@ -7023,11 +7090,13 @@ impl App {
                     "Manual action required\n   {prompt}\n   [Enter/Space/d] done   [c/Esc] cancel   safety timeout: {timeout_secs}s"
                 );
                 self.command_prompt = Some(
-                    CommandPrompt::new("Manual action required", prompt_text.clone()).with_actions(vec![
-                        CommandPromptAction::new("Enter", "done"),
-                        CommandPromptAction::new("Space/d", "done"),
-                        CommandPromptAction::new("c/Esc", "cancel"),
-                    ]),
+                    CommandPrompt::new("Manual action required", prompt_text.clone()).with_actions(
+                        vec![
+                            CommandPromptAction::new("Enter", "done"),
+                            CommandPromptAction::new("Space/d", "done"),
+                            CommandPromptAction::new("c/Esc", "cancel"),
+                        ],
+                    ),
                 );
                 if let Ok(mut slot) = acknowledge.lock()
                     && let Some(tx) = slot.take()

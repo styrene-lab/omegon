@@ -1024,6 +1024,10 @@ impl ConversationView {
         self.selected_segment = None;
     }
 
+    pub fn selected_segment_index(&self) -> Option<usize> {
+        self.selected_segment
+    }
+
     pub fn selected_or_focused_segment(&self) -> Option<usize> {
         self.selected_segment
             .or_else(|| self.last_selectable_segment())

@@ -15,6 +15,7 @@ pub struct TuiLayoutInputs {
     pub focus_mode: bool,
     pub dashboard_has_content: bool,
     pub editor_height: u16,
+    pub editor_info_height: u16,
     pub footer_instruments_height: u16,
     pub pending_permission: bool,
     pub active_tool_stream_height: u16,
@@ -34,6 +35,7 @@ pub struct TuiLayoutPlan {
     pub slim_plan_area: Rect,
     pub segment_detail_area: Rect,
     pub editor_area: Rect,
+    pub editor_info_area: Rect,
     pub status_area: Rect,
     pub footer_area: Rect,
     pub footer_height: u16,
@@ -85,6 +87,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
 
     let fixed_without_conversation = inputs
         .editor_height
+        .saturating_add(inputs.editor_info_height)
         .saturating_add(status_height)
         .saturating_add(footer_height)
         .saturating_add(permission_lane_height)
@@ -113,6 +116,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
             Constraint::Length(slim_plan_height),
             Constraint::Length(segment_detail_height),
             Constraint::Length(inputs.editor_height),
+            Constraint::Length(inputs.editor_info_height),
             Constraint::Length(status_height),
             Constraint::Length(footer_height),
         ])
@@ -129,8 +133,9 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         slim_plan_area: chunks[3],
         segment_detail_area: chunks[4],
         editor_area: chunks[5],
-        status_area: chunks[6],
-        footer_area: chunks[7],
+        editor_info_area: chunks[6],
+        status_area: chunks[7],
+        footer_area: chunks[8],
         footer_height,
         active_tool_stream_height,
         permission_lane_height,
@@ -151,6 +156,7 @@ mod tests {
             focus_mode: false,
             dashboard_has_content: true,
             editor_height: 3,
+            editor_info_height: 0,
             footer_instruments_height: 4,
             pending_permission: false,
             active_tool_stream_height: 0,
@@ -171,6 +177,7 @@ mod tests {
             focus_mode: false,
             dashboard_has_content: true,
             editor_height: 3,
+            editor_info_height: 0,
             footer_instruments_height: 4,
             pending_permission: false,
             active_tool_stream_height: 0,
@@ -196,6 +203,7 @@ mod tests {
             focus_mode: false,
             dashboard_has_content: false,
             editor_height: 3,
+            editor_info_height: 0,
             footer_instruments_height: 4,
             pending_permission: true,
             active_tool_stream_height: 20,
@@ -216,6 +224,7 @@ mod tests {
             focus_mode: false,
             dashboard_has_content: false,
             editor_height: 3,
+            editor_info_height: 0,
             footer_instruments_height: 4,
             pending_permission: false,
             active_tool_stream_height: 0,

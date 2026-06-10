@@ -155,6 +155,7 @@ pub struct SegmentRenderContext<'a> {
     pub mode: SegmentRenderMode,
     pub density: crate::settings::ToolDetail,
     pub pinned: bool,
+    pub selected: bool,
 }
 
 impl<'a> SegmentRenderContext<'a> {
@@ -164,6 +165,7 @@ impl<'a> SegmentRenderContext<'a> {
             mode,
             density: crate::settings::ToolDetail::Detailed,
             pinned: false,
+            selected: false,
         }
     }
 
@@ -174,6 +176,11 @@ impl<'a> SegmentRenderContext<'a> {
 
     pub fn with_pinned(mut self, pinned: bool) -> Self {
         self.pinned = pinned;
+        self
+    }
+
+    pub fn with_selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
         self
     }
 }
