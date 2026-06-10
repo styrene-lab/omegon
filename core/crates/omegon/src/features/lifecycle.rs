@@ -19,6 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
+use crate::lifecycle::mutation::{CreateDesignNodeRequest, LifecycleMutationService};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -45,6 +46,9 @@ pub struct LifecycleFeature {
     /// Memory facts queued from execute() to be returned from on_event(TurnEnd).
     /// execute() takes &self so can't return BusRequests directly — this bridges the gap.
     pending_memory: Mutex<Vec<BusRequest>>,
+    /// Lifecycle-domain mutation service. Tool adapters keep JSON parsing and
+    /// response rendering; the service owns store coordination.
+    mutation_service: LifecycleMutationService,
     /// Optional Codex vault path — exports design tree on session end.
     codex_vault_path: Option<PathBuf>,
 }
@@ -83,18 +87,26 @@ impl LifecycleFeature {
     }
 
     pub fn new(repo_path: &std::path::Path) -> Self {
-        let provider = LifecycleContextProvider::new(repo_path);
+        let provider = Arc::new(Mutex::new(LifecycleContextProvider::new(repo_path)));
         let store = JsonFileStore::new(repo_path);
         let opsx = OpsxLifecycle::load(store).unwrap_or_else(|e| {
             tracing::warn!("omegon-opsx load failed, starting fresh: {e}");
             OpsxLifecycle::load(JsonFileStore::new(repo_path)).unwrap()
         });
+        let opsx = Arc::new(Mutex::new(opsx));
+        let repo_path = repo_path.to_path_buf();
+        let mutation_service = LifecycleMutationService::new(
+            repo_path.clone(),
+            Arc::clone(&provider),
+            Arc::clone(&opsx),
+        );
         Self {
-            provider: Arc::new(Mutex::new(provider)),
-            repo_path: repo_path.to_path_buf(),
+            provider,
+            repo_path,
             turn_counter: 0,
-            opsx: Arc::new(Mutex::new(opsx)),
+            opsx,
             pending_memory: Mutex::new(vec![]),
+            mutation_service,
             codex_vault_path: None,
         }
     }
@@ -357,8 +369,6 @@ impl LifecycleFeature {
                 let title = args["title"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("title required"))?;
-                let parent = args["parent"].as_str();
-                let status = args["status"].as_str();
                 let tags: Vec<String> = args["tags"]
                     .as_array()
                     .map(|a| {
@@ -367,27 +377,14 @@ impl LifecycleFeature {
                             .collect()
                     })
                     .unwrap_or_default();
-                let overview = args["overview"].as_str().unwrap_or("");
-
-                // Register in omegon-opsx FSM (parent validation is advisory here
-                // since markdown parent references aren't enforced by omegon-opsx yet)
-                {
-                    let mut opsx = self.opsx.lock().unwrap();
-                    // Don't require parent to exist in omegon-opsx — lazy sync
-                    let _ = opsx.create_node(id, title, None);
-                    // If a non-seed status was requested, transition to it
-                    if let Some(status_str) = status
-                        && let Some(target) = OpsxNodeState::parse(status_str)
-                        && target != OpsxNodeState::Seed
-                    {
-                        // Use force_transition for bootstrap — the node was just created
-                        let _ = opsx.force_transition_node(id, target, "initial status on create");
-                    }
-                }
-
-                let node =
-                    design::create_node(&docs_dir, id, title, parent, status, &tags, overview)?;
-                self.provider.lock().unwrap().refresh();
+                let node = self.mutation_service.create_design_node(CreateDesignNodeRequest {
+                    id: id.to_string(),
+                    title: title.to_string(),
+                    parent: args["parent"].as_str().map(str::to_string),
+                    status: args["status"].as_str().map(str::to_string),
+                    tags,
+                    overview: args["overview"].as_str().unwrap_or("").to_string(),
+                })?;
                 Ok(text_result(&format!(
                     "Created design node '{id}' at {}",
                     node.file_path.display()

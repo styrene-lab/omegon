@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Introduce a lifecycle mutation service and route design-tree node creation through it while keeping tool JSON parsing/rendering adapter-side.
 - Extract design-tree ready/blocked/frontier query policy into a lifecycle query module with direct projection tests.
 - Extract OpenSpec markdown-to-FSM synchronization into a named lifecycle sync module with structured sync reports and transition tests.
 - Extract OpenSpec archive transaction recovery from the lifecycle tool adapter into a lifecycle-domain archive module with direct recovery tests.
