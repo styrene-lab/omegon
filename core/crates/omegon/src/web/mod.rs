@@ -362,6 +362,14 @@ pub async fn start_server_with_options(
 
     let app = Router::new()
         .route(
+            "/api/assistant-runs/{run_id}",
+            axum::routing::get(api::get_assistant_run),
+        )
+        .route(
+            "/api/assistant-runs",
+            axum::routing::get(api::get_assistant_runs),
+        )
+        .route(
             "/api/capabilities/assistants/{id}/readiness",
             axum::routing::get(api::get_capability_assistant_readiness),
         )

@@ -20,6 +20,7 @@ pub enum BackendDomain {
     Tasks,
     ExternalTasks,
     Capabilities,
+    AssistantRuns,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -329,6 +330,42 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         BackendDomain::Tasks,
         "Task event projection."
     ),
+    BackendEndpoint {
+        id: "_assistant_runs/list",
+        version: 1,
+        domain: BackendDomain::AssistantRuns,
+        mutability: BackendMutability::Read,
+        permission: BackendPermission::Read,
+        transports: &[
+            BackendTransport::AcpExt {
+                method: "_assistant_runs/list",
+            },
+            BackendTransport::Http {
+                method: "GET",
+                path: "/api/assistant-runs",
+            },
+        ],
+        side_effects: &[],
+        description: "Runtime-only assistant run list projection with secret-safe summaries.",
+    },
+    BackendEndpoint {
+        id: "_assistant_runs/show",
+        version: 1,
+        domain: BackendDomain::AssistantRuns,
+        mutability: BackendMutability::Read,
+        permission: BackendPermission::Read,
+        transports: &[
+            BackendTransport::AcpExt {
+                method: "_assistant_runs/show",
+            },
+            BackendTransport::Http {
+                method: "GET",
+                path: "/api/assistant-runs/{run_id}",
+            },
+        ],
+        side_effects: &[],
+        description: "Runtime-only assistant run detail projection with secret-safe summaries.",
+    },
     BackendEndpoint {
         id: "_capabilities/assistant_readiness",
         version: 1,

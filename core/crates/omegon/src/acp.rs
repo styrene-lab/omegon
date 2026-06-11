@@ -2318,6 +2318,23 @@ impl OmegonAcpAgent {
                 &self.session_task_bindings.borrow(),
             )),
 
+            "assistant_runs/list" | "_assistant_runs/list" => {
+                let store = crate::capabilities::runs::AssistantRunStore::empty();
+                Ok(serde_json::json!({ "runs": store.list() }))
+            }
+            "assistant_runs/show" | "_assistant_runs/show" => {
+                let run_id = params
+                    .get("run_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let store = crate::capabilities::runs::AssistantRunStore::empty();
+                match store.get(run_id) {
+                    Some(run) => Ok(serde_json::json!({ "run": run })),
+                    None => Ok(serde_json::json!({ "error": "assistant_run_not_found" })),
+                }
+            }
+
             "runtime/capabilities" => Ok(serde_json::json!({
                 "surfaces": crate::backend::acp_capability_surfaces_json(),
                 "features": {
@@ -4798,6 +4815,31 @@ auto_disabled = true
         assert_eq!(item["kind"], "env");
         assert_eq!(item["payload"], "OMEGON_TEST_BRAVE_KEY");
         assert!(!response.to_string().contains("brave-test-key"));
+    }
+
+    #[tokio::test]
+    async fn assistant_runs_list_reports_empty_runtime_projection() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response =
+            handle_acp_request_result(agent, "_assistant_runs/list", &serde_json::json!({}))
+                .await
+                .unwrap();
+
+        assert!(response["runs"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn assistant_runs_show_reports_missing_runtime_run() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_assistant_runs/show",
+            &serde_json::json!({ "run_id": "missing" }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["error"], "assistant_run_not_found");
     }
 
     #[tokio::test]

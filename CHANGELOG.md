@@ -54,6 +54,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Slim the TUI engine footer into a compact model/status sidecar so the dashboard lifecycle strip owns posture/session/context details and the inference strip owns token/context/memory telemetry.
 - Add a read-only capability inventory substrate and ACP `_capabilities/inventory` surface for installed extensions, Armory assets, and catalog agents to support future console/TUI capability views.
 - Register provider retry/failure and turn-cancelled ACP telemetry surfaces in the backend endpoint registry so clients can discover issue #128 notification contracts.
+- Add runtime-only assistant run DTOs plus read-only HTTP and ACP list/detail surfaces that currently expose empty secret-safe projections.
 - Add targeted single-assistant readiness surfaces for refreshing one assistant card over HTTP or ACP without fetching the full capability inventory.
 - Add dedicated HTTP and ACP assistant-list surfaces for compact launch-readiness cards without fetching the full capability inventory.
 - Add a compact assistant-list projection to capability inventory so console clients can render assistant cards without traversing full profile and graph internals.

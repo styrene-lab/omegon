@@ -162,6 +162,29 @@ pub struct EventAccepted {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct AssistantRunsListResponse {
+    pub runs: Vec<crate::capabilities::runs::AssistantRunSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AssistantRunShowResponse {
+    pub run: crate::capabilities::runs::AssistantRunSummary,
+}
+
+pub async fn get_assistant_runs() -> Result<Json<AssistantRunsListResponse>, StatusCode> {
+    let store = crate::capabilities::runs::AssistantRunStore::empty();
+    Ok(Json(AssistantRunsListResponse { runs: store.list() }))
+}
+
+pub async fn get_assistant_run(
+    axum::extract::Path(run_id): axum::extract::Path<String>,
+) -> Result<Json<AssistantRunShowResponse>, StatusCode> {
+    let store = crate::capabilities::runs::AssistantRunStore::empty();
+    let run = store.get(&run_id).ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(AssistantRunShowResponse { run }))
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CapabilityAssistantsResponse {
     pub assistants: Vec<crate::capabilities::profiles::AssistantListItem>,
 }
@@ -827,6 +850,20 @@ required = ["MISSING_REQUIRED_TOKEN"]
             Some(value) => unsafe { std::env::set_var(key, value) },
             None => unsafe { std::env::remove_var(key) },
         }
+    }
+
+    #[tokio::test]
+    async fn assistant_runs_endpoint_returns_empty_runtime_projection() {
+        let response = get_assistant_runs().await.unwrap().0;
+        assert!(response.runs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn assistant_run_endpoint_404s_missing_runtime_run() {
+        let err = get_assistant_run(axum::extract::Path("missing".into()))
+            .await
+            .unwrap_err();
+        assert_eq!(err, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
