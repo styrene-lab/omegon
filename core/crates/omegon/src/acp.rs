@@ -2299,6 +2299,7 @@ impl OmegonAcpAgent {
             "runtime/capabilities" => Ok(serde_json::json!({
                 "surfaces": crate::backend::acp_capability_surfaces_json(),
                 "features": {
+                    "capabilities_inventory": true,
                     "packages": true,
                     "extensions": true,
                     "host_actions": true,
@@ -2327,6 +2328,18 @@ impl OmegonAcpAgent {
                     "acp": ["1"]
                 }
             })),
+
+            "capabilities/inventory" => {
+                let home = crate::paths::omegon_home()?;
+                let roots = crate::capabilities::inventory::CapabilityInventoryRoots {
+                    extensions_dir: &home.join("extensions"),
+                    armory_root: &home.join("armory"),
+                    catalog_dir: &home.join("catalog"),
+                };
+                Ok(serde_json::to_value(
+                    crate::capabilities::inventory::build_capability_inventory_snapshot(roots)?,
+                )?)
+            }
 
             "extensions/list" => {
                 let mut extensions = Vec::new();

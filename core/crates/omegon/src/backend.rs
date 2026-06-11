@@ -216,6 +216,11 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         "Active provider/auth/model readiness."
     ),
     acp_read_endpoint!(
+        "_capabilities/inventory",
+        BackendDomain::Runtime,
+        "Assistant, extension, and Armory capability inventory."
+    ),
+    acp_read_endpoint!(
         "_provider/retry",
         BackendDomain::Provider,
         "Provider retry telemetry notification."

@@ -32,6 +32,7 @@ mod behavior;
 mod bootstrap;
 mod bridge;
 pub mod bus;
+mod capabilities;
 mod cleave;
 mod cleave_smoke;
 mod clipboard;
