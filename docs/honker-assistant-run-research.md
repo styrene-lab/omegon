@@ -87,11 +87,33 @@ The product boundary is messaging and scheduling, not workflow orchestration or 
 
 ## Rust packaging
 
-Important finding: the Rust binding does **not** require loading a runtime `.so` / `.dylib` extension.
+Important finding: the current Rust binding docs say it does **not** require loading a runtime `.so` / `.dylib` extension.
 
-The Rust language guide says the Rust binding registers Honker functions directly through `honker-core`. Dynamic SQLite extension loading is mainly relevant to raw SQLite and non-Rust bindings.
+The Rust language guide says the Rust binding registers Honker functions directly through `honker-core`. The docs.rs crate page for `honker 0.3.4` says the crate opens its own connection, registers every `honker_*` SQL function via `honker_core::attach_honker_functions`, bootstraps the schema, and needs no `.dylib` at runtime. Dynamic SQLite extension loading is mainly relevant to raw SQLite and non-Rust bindings.
+
+There is documentation drift: the crates.io-rendered README still shows an older `Database::open("app.db", "./libhonker_ext.dylib")` shape and says the SQLite extension must be available at runtime. Treat the Rust language guide and docs.rs API docs as more authoritative for `0.3.4`, but verify with a minimal compile/run smoke before adoption.
 
 Implication for Omegon: the largest packaging concern is reduced for the Rust-native path, though dependency/build compatibility still needs direct validation before adoption.
+
+## Dependency compatibility and maturity
+
+`honker 0.3.4` depends on:
+
+- `honker-core ^0.2.4`
+- `parking_lot ^0.12`
+- `rusqlite ^0.39`
+- `serde ^1`
+- `serde_json ^1`
+- `thiserror ^2`
+
+The `rusqlite ^0.39` dependency is the main workspace compatibility item to test because Omegon already uses `rusqlite` in multiple crates and some paths rely on bundled SQLite. Multiple `rusqlite` versions can coexist at the Rust dependency level, but SQLite linkage and feature unification still need a real workspace build smoke.
+
+Maturity signal is promising but early:
+
+- `honker 0.3.4` has six published versions since 2026-04-20.
+- docs.rs reports about 48% documentation coverage for `0.3.4`.
+- crates.io download counts are low/new.
+- upstream claims cross-platform CI for Rust core/extension and watcher backend proofs, but adoption should still be gated by local Omegon CI/build validation.
 
 ## Queue behavior
 
