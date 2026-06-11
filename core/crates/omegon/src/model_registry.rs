@@ -303,7 +303,7 @@ mod tests {
         let reg = ModelRegistry::global();
         assert_eq!(reg.default_model("openai"), Some("gpt-5.5"));
         assert_eq!(reg.default_model("openai-codex"), Some("gpt-5.5"));
-        assert_eq!(reg.default_model("anthropic"), Some("claude-sonnet-4-6"));
+        assert_eq!(reg.default_model("anthropic"), Some("claude-fable-5"));
         assert_eq!(reg.default_model("nonexistent"), None);
     }
 
@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(reg.tier_model("gloriana", "openai"), Some("gpt-5.5"));
         assert_eq!(
             reg.tier_model("gloriana", "anthropic"),
-            Some("claude-opus-4-6")
+            Some("claude-fable-5")
         );
         assert_eq!(
             reg.tier_model("retribution", "anthropic"),

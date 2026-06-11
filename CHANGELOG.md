@@ -16,6 +16,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Changed
+
+- Add a local `just upstream-provider-check` gate for cheap provider drift checks without waiting for CI.
+- Add a lightweight Anthropic model drift checker that compares public Claude API model IDs against the registry.
+- Add Claude Fable 5 and limited-access Claude Mythos 5 to the Anthropic registry, make Fable the highest-tier Anthropic default, and update Claude Code OAuth UA to 2.1.173.
+- Derive Anthropic adaptive-thinking support from model registry metadata with a family fallback for unreleased Fable/Mythos/Sonnet/Opus model IDs.
+- Recommend Anthropic OAuth relogin on repeated stalled-stream exhaustion when the active credential source is OAuth-only.
+
 ### Fixed
 
 - Include lifecycle-derived workstreams in Plan Dock update payloads from both `/plan` commands and tool-result plan mutations so active plans can be shown alongside paused/waiting/blocked lifecycle work.

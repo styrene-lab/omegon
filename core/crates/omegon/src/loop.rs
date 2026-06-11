@@ -1967,7 +1967,12 @@ async fn stream_with_retry(
                 kind = kind_label,
                 "{reason}: {err_msg}"
             );
-            let advice = exhaustion_advice(transient_kind, rate_limit_exhausted, stall_exhausted);
+            let advice = exhaustion_advice(
+                &provider,
+                transient_kind,
+                rate_limit_exhausted,
+                stall_exhausted,
+            );
             let _ = events.send(AgentEvent::ProviderFailure {
                 provider: provider.clone(),
                 model: model.clone(),
@@ -2043,11 +2048,18 @@ async fn stream_with_retry(
 }
 
 fn exhaustion_advice(
+    provider: &str,
     transient_kind: Option<TransientFailureKind>,
     rate_limit_exhausted: bool,
     stall_exhausted: bool,
 ) -> &'static str {
     if stall_exhausted {
+        if provider == "anthropic"
+            && crate::providers::anthropic_credential_mode()
+                == crate::providers::AnthropicCredentialMode::OAuthOnly
+        {
+            return "Anthropic OAuth streams are repeatedly stalling. Retry /auth login anthropic to refresh the Claude session, or switch provider with /model.";
+        }
         return "The provider's stream is unresponsive. Retry later or switch provider with /model.";
     }
     if rate_limit_exhausted || matches!(transient_kind, Some(TransientFailureKind::RateLimited)) {
@@ -6525,28 +6537,53 @@ This is the right first slice."#;
     #[test]
     fn exhaustion_advice_distinguishes_provider_outage_from_rate_limit() {
         assert!(
-            exhaustion_advice(Some(TransientFailureKind::Upstream5xx), false, false)
-                .contains("provider-side outage or capacity problem")
+            exhaustion_advice(
+                "openai",
+                Some(TransientFailureKind::Upstream5xx),
+                false,
+                false
+            )
+            .contains("provider-side outage or capacity problem")
         );
         assert!(
-            exhaustion_advice(Some(TransientFailureKind::ProviderOverloaded), false, false)
-                .contains("provider-side outage or capacity problem")
+            exhaustion_advice(
+                "openai",
+                Some(TransientFailureKind::ProviderOverloaded),
+                false,
+                false
+            )
+            .contains("provider-side outage or capacity problem")
         );
         assert!(
-            exhaustion_advice(Some(TransientFailureKind::RateLimited), true, false)
-                .contains("rate-limiting the session")
+            exhaustion_advice(
+                "openai",
+                Some(TransientFailureKind::RateLimited),
+                true,
+                false
+            )
+            .contains("rate-limiting the session")
         );
     }
 
     #[test]
     fn exhaustion_advice_distinguishes_unstable_network_and_stalled_stream() {
         assert!(
-            exhaustion_advice(Some(TransientFailureKind::NetworkReset), false, false)
-                .contains("provider or network path is unstable")
+            exhaustion_advice(
+                "openai",
+                Some(TransientFailureKind::NetworkReset),
+                false,
+                false
+            )
+            .contains("provider or network path is unstable")
         );
         assert!(
-            exhaustion_advice(Some(TransientFailureKind::StalledStream), false, true)
-                .contains("stream is unresponsive")
+            exhaustion_advice(
+                "openai",
+                Some(TransientFailureKind::StalledStream),
+                false,
+                true
+            )
+            .contains("stream is unresponsive")
         );
     }
 
