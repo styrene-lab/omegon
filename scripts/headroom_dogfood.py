@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate ignored headroom dogfood fixtures from real local commands.
+"""Generate ignored headroom dogfood fixtures from real local commands and files.
 
 The script intentionally uses only Python stdlib and writes under .tmp/ so the
 fixtures can be inspected locally without becoming source artifacts.
@@ -30,6 +30,16 @@ class CommandFixture:
     max_output_bytes: int = 500_000
 
 
+@dataclass(frozen=True)
+class FileFixture:
+    name: str
+    kind_hint: str
+    path: str
+    min_savings_percent: int
+    expected_compressed: bool | None
+    max_output_bytes: int = 500_000
+
+
 COMMANDS = [
     CommandFixture(
         name="headroom-tests",
@@ -50,6 +60,30 @@ COMMANDS = [
         kind_hint="diff",
         command=["git", "show", "--stat", "--patch", "HEAD~5..HEAD"],
         min_savings_percent=60,
+        expected_compressed=True,
+    ),
+]
+
+FILES = [
+    FileFixture(
+        name="native-headroom-design-doc",
+        kind_hint="markdown",
+        path="docs/headroom-native-compression.md",
+        min_savings_percent=40,
+        expected_compressed=True,
+    ),
+    FileFixture(
+        name="evaluator-suite-design-doc",
+        kind_hint="markdown",
+        path="docs/design/omegon-evaluator-suite-target.md",
+        min_savings_percent=35,
+        expected_compressed=True,
+    ),
+    FileFixture(
+        name="headroom-source",
+        kind_hint="code",
+        path="core/crates/omegon-headroom/src/lib.rs",
+        min_savings_percent=50,
         expected_compressed=True,
     ),
 ]
@@ -83,6 +117,15 @@ RUST_TEST_RE = re.compile(r"^test\s+[\w:]+\s+\.\.\.\s+(?:ok|FAILED|ignored|measu
 RUST_FN_RE = re.compile(r"^[+\- ]*\s*(?:pub\s+)?fn\s+[A-Za-z0-9_]+\s*\(")
 CLI_FLAG_RE = re.compile(r"--[A-Za-z0-9][A-Za-z0-9-]*")
 HASH_RE = re.compile(r"\b[0-9a-f]{8,64}\b")
+MARKDOWN_HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$")
+
+
+def clipped_text(text: str, max_output_bytes: int) -> str:
+    if len(text.encode("utf-8")) <= max_output_bytes:
+        return text
+    encoded = text.encode("utf-8")[:max_output_bytes]
+    output = encoded.decode("utf-8", errors="ignore")
+    return output + f"\n[headroom-dogfood: output clipped to {max_output_bytes} bytes]\n"
 
 
 def run_command(spec: CommandFixture) -> tuple[str, int]:
@@ -94,12 +137,12 @@ def run_command(spec: CommandFixture) -> tuple[str, int]:
         stderr=subprocess.STDOUT,
         timeout=300,
     )
-    output = result.stdout
-    if len(output.encode("utf-8")) > spec.max_output_bytes:
-        encoded = output.encode("utf-8")[: spec.max_output_bytes]
-        output = encoded.decode("utf-8", errors="ignore")
-        output += f"\n[headroom-dogfood: output clipped to {spec.max_output_bytes} bytes]\n"
-    return output, result.returncode
+    return clipped_text(result.stdout, spec.max_output_bytes), result.returncode
+
+
+def read_file(spec: FileFixture) -> tuple[str, int]:
+    path = ROOT / spec.path
+    return clipped_text(path.read_text(encoding="utf-8"), spec.max_output_bytes), 0
 
 
 def extract_required_facts(text: str, limit: int = 24) -> list[str]:
@@ -129,6 +172,14 @@ def extract_required_facts(text: str, limit: int = 24) -> list[str]:
             add(line)
         elif any(word in lower for word in ("panic", "error", "failed", "failure")):
             add(line)
+
+    # Markdown headings are stable facts for document-shape fixtures.
+    for line in lines:
+        match = MARKDOWN_HEADING_RE.match(line.strip())
+        if match:
+            heading = match.group(1).strip()
+            if any(token in heading.lower() for token in ("headroom", "evaluation", "compression", "provider", "dogfood", "ccr")):
+                add(heading)
 
     # Preserve headroom-specific declarations/tool/CLI evidence without turning
     # arbitrary diff context into required facts.
@@ -162,21 +213,29 @@ def extract_required_facts(text: str, limit: int = 24) -> list[str]:
     return facts[:limit]
 
 
-def write_fixture(spec: CommandFixture, text: str, returncode: int) -> Path:
-    sample_path = SAMPLES / f"{spec.name}.txt"
-    fixture_path = FIXTURES / f"{spec.name}.json"
+def write_fixture(
+    name: str,
+    kind_hint: str,
+    text: str,
+    returncode: int,
+    source_metadata: dict[str, object],
+    min_savings_percent: int,
+    expected_compressed: bool | None,
+) -> Path:
+    sample_path = SAMPLES / f"{name}.txt"
+    fixture_path = FIXTURES / f"{name}.json"
     sample_path.write_text(text, encoding="utf-8")
     facts = extract_required_facts(text)
     fixture = {
-        "name": spec.name,
+        "name": name,
         "class": "dogfood",
-        "kind_hint": spec.kind_hint,
+        "kind_hint": kind_hint,
         "input": text,
         "required_facts": facts,
-        "min_savings_percent": spec.min_savings_percent,
-        "expected_compressed": spec.expected_compressed,
+        "min_savings_percent": min_savings_percent,
+        "expected_compressed": expected_compressed,
         "metadata": {
-            "command": spec.command,
+            **source_metadata,
             "returncode": returncode,
             "sample_path": str(sample_path.relative_to(ROOT)),
             "required_fact_count": len(facts),
@@ -200,7 +259,34 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - CLI should report all command setup failures.
             failures.append(f"{spec.name}: {exc}")
             continue
-        path = write_fixture(spec, text, returncode)
+        path = write_fixture(
+            spec.name,
+            spec.kind_hint,
+            text,
+            returncode,
+            {"command": spec.command},
+            spec.min_savings_percent,
+            spec.expected_compressed,
+        )
+        written.append(path)
+        print(f"wrote {path.relative_to(ROOT)}", file=sys.stderr)
+
+    for spec in FILES:
+        print(f"reading {spec.path}", file=sys.stderr)
+        try:
+            text, returncode = read_file(spec)
+        except Exception as exc:  # noqa: BLE001 - CLI should report all file setup failures.
+            failures.append(f"{spec.name}: {exc}")
+            continue
+        path = write_fixture(
+            spec.name,
+            spec.kind_hint,
+            text,
+            returncode,
+            {"file": spec.path},
+            spec.min_savings_percent,
+            spec.expected_compressed,
+        )
         written.append(path)
         print(f"wrote {path.relative_to(ROOT)}", file=sys.stderr)
 

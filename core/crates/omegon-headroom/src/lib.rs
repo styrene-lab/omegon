@@ -444,6 +444,7 @@ fn compress_signal_text(
 
 fn compress_code(text: &str, policy: HeadroomPolicy, reference: Option<&HeadroomRef>) -> String {
     let mut out = header(ContentKind::Code, text, reference);
+    let mut budget = SectionBudget::new(policy.target_bytes, out.len());
     let signatures = text
         .lines()
         .filter(|line| {
@@ -461,8 +462,14 @@ fn compress_code(text: &str, policy: HeadroomPolicy, reference: Option<&Headroom
         })
         .take(policy.signal_lines)
         .collect::<Vec<_>>();
-    push_excerpt(&mut out, "signatures", signatures.into_iter());
-    trim_to_target(out, policy.target_bytes)
+    push_budgeted_section(&mut out, "signatures", signatures.into_iter(), &mut budget);
+    push_budgeted_section(
+        &mut out,
+        "code_signal_anchors",
+        code_signal_anchor_lines(text, policy.signal_lines).into_iter(),
+        &mut budget,
+    );
+    out
 }
 
 fn compress_plain(
@@ -473,6 +480,17 @@ fn compress_plain(
 ) -> String {
     let mut out = header(kind, text, reference);
     let mut budget = SectionBudget::new(policy.target_bytes, out.len());
+    let heading_anchors = if matches!(kind, ContentKind::Markdown | ContentKind::Diff) {
+        markdown_heading_anchor_lines(text, policy.signal_lines)
+    } else {
+        Vec::new()
+    };
+    push_budgeted_section(
+        &mut out,
+        "heading_anchors",
+        heading_anchors.iter().copied(),
+        &mut budget,
+    );
     push_budgeted_section(
         &mut out,
         "protected_anchors",
@@ -563,6 +581,83 @@ fn push_budgeted_section<'a>(
     if emitted == 0 {
         out.push_str("[headroom: section omitted by budget]\n");
     }
+}
+
+fn code_signal_anchor_lines(text: &str, limit: usize) -> Vec<&str> {
+    let mut anchors = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if !(has_quoted_signal_token(trimmed) || has_code_signal_token(trimmed)) {
+            continue;
+        }
+        if anchors.contains(&line) {
+            continue;
+        }
+        anchors.push(line);
+        if anchors.len() >= limit {
+            break;
+        }
+    }
+    anchors
+}
+
+fn has_code_signal_token(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    [
+        "json_parse: failed",
+        "error_code",
+        "exit_code",
+        "failures",
+        "failed",
+        "blocked",
+        "critical",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn markdown_heading_anchor_lines(text: &str, limit: usize) -> Vec<&str> {
+    let mut anchors = Vec::new();
+    for line in text.lines() {
+        let trimmed = line
+            .trim_start()
+            .trim_start_matches('+')
+            .trim_start_matches('-')
+            .trim_start();
+        let Some(heading) = trimmed.strip_prefix('#') else {
+            continue;
+        };
+        let heading = heading.trim_start_matches('#').trim_start();
+        if !is_relevant_markdown_heading(heading) {
+            continue;
+        }
+        if anchors.contains(&line) {
+            continue;
+        }
+        anchors.push(line);
+        if anchors.len() >= limit {
+            break;
+        }
+    }
+    anchors
+}
+
+fn is_relevant_markdown_heading(heading: &str) -> bool {
+    let lower = heading.to_ascii_lowercase();
+    [
+        "headroom",
+        "evaluation",
+        "compression",
+        "provider",
+        "dogfood",
+        "ccr",
+        "policy",
+        "kompressor",
+        "manual",
+        "overflow",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn protected_anchor_lines(text: &str, limit: usize) -> Vec<&str> {
