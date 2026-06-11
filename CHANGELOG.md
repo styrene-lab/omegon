@@ -58,6 +58,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add cleave and delegate execution-evaluation tests with injected child binaries, including timeout and cancellation coverage.
 - Add richer cleave/delegate status visibility for subagent progress, including child activity, task progress, and runtime state.
 - Add headless ACP lifecycle read surfaces for lifecycle snapshots and design-node list/get/ready/blocked/frontier projections.
+- Add an Omegon Console backend design node planning daemon APIs, ACP-over-WebSocket sessions, and future Dioxus UI integration.
+- Add an ACP expansion design node mapping lifecycle, OpenSpec, conversation, dashboard, instrument, UI-control, context, and memory projection surfaces for external clients.
 - Route design-tree implement scaffolding through the lifecycle mutation service while preserving existing OpenSpec proposal behavior.
 - Add a design node planning the future lifecycle `implement` service extraction pass.
 - Route design-tree archive mutation through the lifecycle mutation service while keeping descendant checks and timestamp policy adapter-side.
