@@ -128,18 +128,15 @@ impl ToolProvider for SecretToolsProvider {
                 }
             }
             crate::tool_registry::secrets::SECRET_LIST => {
-                let entries = self.secrets.list_recipe_diagnostics();
+                let entries = self.secrets.list_recipe_descriptors();
                 let text = if entries.is_empty() {
                     "No harness-managed secrets configured.".to_string()
                 } else {
-                    let mut out = String::from("Harness-managed secrets:\n");
+                    let mut out = String::from(
+                        "Harness-managed secrets (metadata only; values not resolved):\n",
+                    );
                     for entry in &entries {
-                        out.push_str(&format!(
-                            "- {}: {} [{}]\n",
-                            entry.name,
-                            entry.recipe,
-                            entry.status.as_str()
-                        ));
+                        out.push_str(&format!("- {}: {}\n", entry.name, entry.recipe));
                     }
                     out.trim_end().to_string()
                 };
@@ -149,7 +146,9 @@ impl ToolProvider for SecretToolsProvider {
                         json!({
                             "name": entry.name,
                             "recipe": entry.recipe,
-                            "status": entry.status.as_str(),
+                            "kind": entry.kind,
+                            "payload": entry.payload,
+                            "status": "not_checked",
                         })
                     }).collect::<Vec<_>>()
                 });
@@ -179,8 +178,18 @@ impl ToolProvider for SecretToolsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
+
+    static SUPPRESS_HOST_KEYRING: Once = Once::new();
 
     fn provider() -> SecretToolsProvider {
+        SUPPRESS_HOST_KEYRING.call_once(|| {
+            // Tests in this crate compile omegon-secrets as a normal dependency,
+            // so its #[cfg(test)] in-memory keyring backend is not active. Force
+            // runtime suppression before constructing SecretsManager so validation
+            // never prompts the operator's real macOS Keychain.
+            unsafe { std::env::set_var("OMEGON_NO_KEYRING", "1") };
+        });
         let dir = tempfile::tempdir().unwrap();
         let secrets = Arc::new(omegon_secrets::SecretsManager::new(dir.path()).unwrap());
         SecretToolsProvider::new(secrets)
@@ -261,7 +270,8 @@ mod tests {
             .await
             .unwrap();
         let text = listed.content[0].as_text().unwrap();
-        assert!(text.contains("BRAVE_API_KEY: keyring:BRAVE_API_KEY [resolves]"));
+        assert!(text.contains("BRAVE_API_KEY: keyring:BRAVE_API_KEY"));
+        assert!(!text.contains("[resolves]"));
     }
 
     #[tokio::test]

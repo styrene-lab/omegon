@@ -934,13 +934,35 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
                 creds = new_creds;
             }
             Err(e) => {
-                if oauth_refresh_failure_is_fatal(auth_key) {
+                if let Some(adopted) = read_external_credentials(auth_key)
+                    && (adopted.cred_type != "oauth" || !adopted.is_expired())
+                {
+                    tracing::warn!(
+                        provider = auth_key,
+                        "Token refresh failed: {e} — adopting fresh external credential"
+                    );
+                    let persist_result = if auth_key == "openai-codex" {
+                        let account_id = read_external_credential_extra(auth_key, "accountId");
+                        write_credentials_with_extra(auth_key, &adopted, account_id.as_deref())
+                    } else {
+                        write_credentials(auth_key, &adopted)
+                    };
+                    if let Err(write_error) = persist_result {
+                        tracing::warn!(
+                            provider = auth_key,
+                            error = %auth_write_failure_operator_message(&write_error),
+                            "adopted provider credential could not be persisted"
+                        );
+                    }
+                    creds = adopted;
+                } else if oauth_refresh_failure_is_fatal(auth_key) {
                     tracing::warn!(
                         "Token refresh failed: {e} — refusing to use expired {auth_key} credential"
                     );
                     return None;
+                } else {
+                    tracing::warn!("Token refresh failed: {e} — using expired token");
                 }
-                tracing::warn!("Token refresh failed: {e} — using expired token");
             }
         }
     }
@@ -1649,6 +1671,13 @@ pub fn extract_jwt_claim(token: &str, claim_path: &str, field: &str) -> Option<S
     };
     let decoded = base64_decode(&padded)?;
     let json: Value = serde_json::from_slice(&decoded).ok()?;
+    if claim_path.is_empty() {
+        return json.get(field)?.as_str().map(String::from).or_else(|| {
+            json.get(field)
+                .and_then(|value| value.as_u64())
+                .map(|value| value.to_string())
+        });
+    }
     json.get(claim_path)?.get(field)?.as_str().map(String::from)
 }
 
@@ -2308,6 +2337,15 @@ mod tests {
         assert_eq!(
             codex_cli_last_refresh_secs(&json!(1_778_466_862)),
             Some(1_778_466_862)
+        );
+    }
+
+    #[test]
+    fn extract_jwt_claim_reads_top_level_numeric_claims() {
+        let token = "eyJhbGciOiJub25lIn0.eyJleHAiOjEyMzQ1fQ.";
+        assert_eq!(
+            extract_jwt_claim(token, "", "exp").as_deref(),
+            Some("12345")
         );
     }
 

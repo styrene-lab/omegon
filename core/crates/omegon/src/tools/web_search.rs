@@ -390,7 +390,7 @@ impl WebSearchProvider {
         }
 
         anyhow::bail!(
-            "all search providers failed. {}\nTip: configure BRAVE_API_KEY, TAVILY_API_KEY, or SERPER_API_KEY for reliable search.",
+            "all search providers failed. {}\nTip: configure BRAVE_API_KEY, TAVILY_API_KEY, SERPER_API_KEY, or FIRECRAWL_API_KEY for reliable search.",
             errors.join("; ")
         )
     }

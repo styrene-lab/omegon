@@ -128,6 +128,14 @@ fn resolve_api_key_from_sources(
     env_values: &[(&str, Option<String>)],
     persisted: Option<crate::auth::OAuthCredentials>,
 ) -> Option<(String, bool)> {
+    resolve_api_key_from_sources_with_external(env_values, persisted, None)
+}
+
+fn resolve_api_key_from_sources_with_external(
+    env_values: &[(&str, Option<String>)],
+    persisted: Option<crate::auth::OAuthCredentials>,
+    external: Option<crate::auth::OAuthCredentials>,
+) -> Option<(String, bool)> {
     for (key, value) in env_values.iter().filter(|(key, _)| !key.contains("OAUTH")) {
         if let Some(val) = value
             && !val.is_empty()
@@ -146,7 +154,16 @@ fn resolve_api_key_from_sources(
         }
     }
 
-    match persisted {
+    if let Some(creds) = persisted {
+        if creds.cred_type != "oauth" {
+            return Some((creds.access, false));
+        }
+        if !creds.is_expired() {
+            return Some((creds.access, true));
+        }
+    }
+
+    match external {
         Some(creds) if creds.cred_type == "oauth" && !creds.is_expired() => {
             Some((creds.access, true))
         }
@@ -167,6 +184,8 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
         .copied()
         .map(|key| (key, std::env::var(key).ok().filter(|v| !v.is_empty())))
         .collect();
+
+    let external = crate::auth::read_external_credentials(auth_key);
 
     // auth.json — using canonical key
     let persisted = match crate::auth::read_credentials(auth_key) {
@@ -193,18 +212,16 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
             Some(creds)
         }
         None => {
-            // Fallback: adopt Claude Code credentials from ~/.claude.json
-            if let Some(cc) = crate::auth::read_external_credentials(auth_key) {
+            if external.is_some() {
                 tracing::info!(provider, "Adopted credentials from external tool");
-                Some(cc)
             } else {
                 tracing::debug!(provider, auth_key, "no credentials in auth.json");
-                None
             }
+            None
         }
     };
 
-    resolve_api_key_from_sources(&env_values, persisted)
+    resolve_api_key_from_sources_with_external(&env_values, persisted, external)
 }
 
 /// Resolve API key from env vars or auth.json (legacy, no refresh).
@@ -277,7 +294,12 @@ pub fn infer_provider_id(model_spec: &str) -> String {
     if lower.starts_with("claude") || matches!(lower.as_str(), "haiku" | "sonnet" | "opus") {
         return "anthropic".to_string();
     }
-    if lower.starts_with("gpt-") || matches!(lower.as_str(), "o1" | "o3" | "o4") {
+    if lower.starts_with("gpt-")
+        || matches!(lower.as_str(), "o1" | "o3" | "o4")
+        || lower.starts_with("o1-")
+        || lower.starts_with("o3-")
+        || lower.starts_with("o4-")
+    {
         return "openai".to_string();
     }
     if lower.starts_with("codex") {
@@ -352,6 +374,8 @@ fn is_openai_family_model(model_spec: &str) -> bool {
         || model_id == "o1"
         || model_id == "o3"
         || model_id == "o4"
+        || model_id.starts_with("o1-")
+        || model_id.starts_with("o3-")
         || model_id.starts_with("o4-")
 }
 
@@ -1844,18 +1868,31 @@ impl CodexClient {
         // Codex auth is recognized across restarts without depending on the
         // legacy CHATGPT_OAUTH_TOKEN check.
         let (token, is_oauth) = crate::providers::resolve_api_key_sync("openai-codex")?;
-        if !is_oauth || !token.starts_with("eyJ") {
+        if !is_oauth {
+            tracing::warn!("CodexClient: resolved credential is not OAuth");
+            return None;
+        }
+        if !token.starts_with("eyJ") {
+            tracing::warn!("CodexClient: resolved OAuth token is not JWT-shaped");
             return None;
         }
 
-        let account_id =
-            crate::auth::read_credential_extra("openai-codex", "accountId").or_else(|| {
-                crate::auth::extract_jwt_claim(
-                    &token,
-                    "https://api.openai.com/auth",
-                    "chatgpt_account_id",
-                )
-            })?;
+        let stored_account_id = crate::auth::read_credential_extra("openai-codex", "accountId");
+        let jwt_account_id = crate::auth::extract_jwt_claim(
+            &token,
+            "https://api.openai.com/auth",
+            "chatgpt_account_id",
+        );
+        let account_id = stored_account_id.or(jwt_account_id);
+        if account_id.is_none() {
+            tracing::warn!(
+                auth_path = ?crate::auth::auth_json_path(),
+                has_stored_credentials = crate::auth::read_credentials("openai-codex").is_some(),
+                "CodexClient: OAuth token available but accountId is missing from auth.json and JWT"
+            );
+            return None;
+        }
+        let account_id = account_id?;
 
         tracing::debug!("CodexClient: resolved via canonical provider lookup");
         Some(Self::new(token, account_id))
@@ -1866,7 +1903,12 @@ impl CodexClient {
             return Some(client);
         }
         let (token, is_oauth) = crate::auth::resolve_with_refresh("openai-codex").await?;
-        if !is_oauth || !token.starts_with("eyJ") {
+        if !is_oauth {
+            tracing::warn!("CodexClient: refreshed credential is not OAuth");
+            return None;
+        }
+        if !token.starts_with("eyJ") {
+            tracing::warn!("CodexClient: refreshed OAuth token is not JWT-shaped");
             return None;
         }
         let account_id =
@@ -1876,8 +1918,16 @@ impl CodexClient {
                     "https://api.openai.com/auth",
                     "chatgpt_account_id",
                 )
-            })?;
-        Some(Self::new(token, account_id))
+            });
+        if account_id.is_none() {
+            tracing::warn!(
+                auth_path = ?crate::auth::auth_json_path(),
+                has_stored_credentials = crate::auth::read_credentials("openai-codex").is_some(),
+                "CodexClient: refreshed OAuth token available but accountId is missing from auth.json and JWT"
+            );
+            return None;
+        }
+        Some(Self::new(token, account_id?))
     }
 
     fn build_input(messages: &[LlmMessage]) -> Vec<Value> {
@@ -3501,6 +3551,7 @@ mod tests {
         assert_eq!(infer_provider_id("claude-opus-4-6"), "anthropic");
         assert_eq!(infer_provider_id("gpt-5.4"), "openai");
         assert_eq!(infer_provider_id("gpt-5.4-mini"), "openai");
+        assert_eq!(infer_provider_id("o3-mini"), "openai");
     }
 
     #[test]
@@ -4029,6 +4080,27 @@ mod tests {
     }
 
     #[test]
+    fn resolve_api_key_from_sources_uses_fresh_external_after_expired_persisted_oauth() {
+        let persisted = crate::auth::OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "expired-persisted-oauth".into(),
+            refresh: "refresh".into(),
+            expires: 0,
+        };
+        let external = crate::auth::OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "fresh-external-oauth".into(),
+            refresh: "refresh".into(),
+            expires: u64::MAX,
+        };
+
+        let resolved =
+            resolve_api_key_from_sources_with_external(&[], Some(persisted), Some(external));
+
+        assert_eq!(resolved, Some(("fresh-external-oauth".into(), true)));
+    }
+
+    #[test]
     fn oauth_auth_header_uses_bearer() {
         // OAuth requests must use Authorization: Bearer, not x-api-key
         let is_oauth = true;
@@ -4433,6 +4505,9 @@ mod tests {
     fn openai_family_fallback_prioritizes_codex_for_gpt_models() {
         let order = fallback_order_for_model("openai:gpt-5.4");
         assert_eq!(order, vec!["openai", "openai-codex"]);
+
+        let o_series_order = fallback_order_for_model("openai:o3-mini");
+        assert_eq!(o_series_order, vec!["openai", "openai-codex"]);
 
         let codex_order = fallback_order_for_model("openai-codex:gpt-5.4");
         assert_eq!(codex_order, vec!["openai-codex", "openai"]);

@@ -123,6 +123,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Re-adopt fresh external OpenAI/Codex OAuth credentials when stored credentials are expired, so rebuild/relaunch does not force an unnecessary login.
+- Decode top-level numeric JWT claims for Codex CLI credential adoption and log non-secret Codex bridge-construction failure diagnostics.
+- Treat dashed OpenAI o-series model IDs as OpenAI-family for Codex fallback routing and log startup selected/resolved provider routes.
+- Make the agent `secret_list` tool metadata-only so listing configured secret recipes does not resolve Keychain, Vault, file, or command recipes mid-session.
+- Suppress host Keychain access in secret tool tests so validation does not trigger operator approval prompts on macOS.
+- Repair orphaned well-known keyring secrets at startup, include Firecrawl in web-search secret handling and guidance, and treat duplicate keychain items as metadata-repair opportunities.
 - Hide the conversation `Enter: details` affordance unless focus mode makes Enter open segment details.
 - Show short slash-command confirmations as non-blocking toasts instead of oversized command panels.
 - Treat DuckDuckGo HTTP 202 Accepted responses as rate limiting so DDG throttle pages do not fall through into parser diagnostics.

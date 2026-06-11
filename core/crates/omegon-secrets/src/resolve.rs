@@ -28,6 +28,7 @@ pub const STATIC_SECRET_ENVS: &[&str] = &[
     "BRAVE_API_KEY",
     "TAVILY_API_KEY",
     "SERPER_API_KEY",
+    "FIRECRAWL_API_KEY",
     "GITHUB_TOKEN",
     "GITLAB_TOKEN",
     "GH_TOKEN",
@@ -66,6 +67,7 @@ pub const WELL_KNOWN_SECRET_ENVS: &[&str] = &[
     "BRAVE_API_KEY",
     "TAVILY_API_KEY",
     "SERPER_API_KEY",
+    "FIRECRAWL_API_KEY",
     "GITHUB_TOKEN",
     "GITLAB_TOKEN",
     "GH_TOKEN",
@@ -390,6 +392,16 @@ pub async fn resolve_vault_secret(
             None
         }
     }
+}
+
+/// Read an existing secret value from Omegon's canonical keyring service.
+///
+/// This is used to repair recipe metadata after upgrades where the OS
+/// keychain item survived but `secrets.json` did not.
+pub fn load_from_keyring(name: &str) -> anyhow::Result<Option<SecretString>> {
+    keyring_get(KEYRING_SERVICE, name)
+        .map(|value| value.map(SecretString::from))
+        .map_err(|e| anyhow::anyhow!("keyring read failed for {name}: {e}"))
 }
 
 /// Store or replace a secret value in the cross-platform keyring.

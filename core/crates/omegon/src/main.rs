@@ -3785,8 +3785,22 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let resolved_cli_model = providers::resolve_execution_model_spec(&requested_start_model)
         .await
         .unwrap_or_else(|| requested_start_model.clone());
+    let requested_provider = providers::infer_provider_id(&requested_start_model);
+    let resolved_provider = providers::infer_provider_id(&resolved_cli_model);
     if resolved_cli_model != requested_start_model {
-        tracing::info!(requested = %requested_start_model, resolved = %resolved_cli_model, "resolved startup model to executable provider without changing selected model");
+        tracing::info!(
+            requested = %requested_start_model,
+            requested_provider = %requested_provider,
+            resolved = %resolved_cli_model,
+            resolved_provider = %resolved_provider,
+            "resolved startup model to executable provider without changing selected model"
+        );
+    } else {
+        tracing::info!(
+            selected = %requested_start_model,
+            selected_provider = %requested_provider,
+            "startup model provider route selected"
+        );
     }
 
     let resolved_bridge = providers::auto_detect_bridge(&resolved_cli_model).await;
@@ -3801,7 +3815,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     } else {
         tracing::warn!(
             selected = %startup_decision.selected_model,
+            selected_provider = %providers::infer_provider_id(&startup_decision.selected_model),
             bridge_model = %startup_decision.bridge_model,
+            bridge_provider = %providers::infer_provider_id(&startup_decision.bridge_model),
             "no LLM provider available for selected interactive model"
         );
         eprintln!(
