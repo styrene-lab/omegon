@@ -330,6 +330,24 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         "Task event projection."
     ),
     BackendEndpoint {
+        id: "_capabilities/assistant_readiness",
+        version: 1,
+        domain: BackendDomain::Capabilities,
+        mutability: BackendMutability::Read,
+        permission: BackendPermission::Read,
+        transports: &[
+            BackendTransport::AcpExt {
+                method: "_capabilities/assistant_readiness",
+            },
+            BackendTransport::Http {
+                method: "GET",
+                path: "/api/capabilities/assistants/{id}/readiness",
+            },
+        ],
+        side_effects: &[],
+        description: "Single-assistant launch-readiness projection for targeted refreshes.",
+    },
+    BackendEndpoint {
         id: "_capabilities/assistants",
         version: 1,
         domain: BackendDomain::Capabilities,

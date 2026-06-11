@@ -166,6 +166,24 @@ pub struct CapabilityAssistantsResponse {
     pub assistants: Vec<crate::capabilities::profiles::AssistantListItem>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AssistantReadinessResponse {
+    pub assistant: crate::capabilities::profiles::AssistantListItem,
+}
+
+pub async fn get_capability_assistant_readiness(
+    State(state): State<WebState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<AssistantReadinessResponse>, StatusCode> {
+    let snapshot = capability_inventory_snapshot(state)?;
+    let assistant = snapshot
+        .assistant_list
+        .into_iter()
+        .find(|assistant| assistant.id == id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(AssistantReadinessResponse { assistant }))
+}
+
 pub async fn get_capability_assistants(
     State(state): State<WebState>,
 ) -> Result<Json<CapabilityAssistantsResponse>, StatusCode> {
@@ -785,6 +803,32 @@ mod tests {
         }
     }
 
+    fn write_blocked_agent(home: &std::path::Path) {
+        let agent_dir = home.join("catalog").join("blocked-agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(
+            agent_dir.join("agent.toml"),
+            r#"[agent]
+id = "blocked-agent"
+name = "Blocked Agent"
+version = "0.1.0"
+description = "Requires a missing secret"
+domain = "security"
+
+[secrets]
+required = ["MISSING_REQUIRED_TOKEN"]
+"#,
+        )
+        .unwrap();
+    }
+
+    fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+
     #[tokio::test]
     async fn capabilities_endpoint_reports_blocked_assistant_launch_readiness() {
         let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
@@ -838,22 +882,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
     async fn capability_assistants_endpoint_returns_compact_blocked_readiness() {
         let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
-        let agent_dir = home.path().join("catalog").join("blocked-agent");
-        std::fs::create_dir_all(&agent_dir).unwrap();
-        std::fs::write(
-            agent_dir.join("agent.toml"),
-            r#"[agent]
-id = "blocked-agent"
-name = "Blocked Agent"
-version = "0.1.0"
-description = "Requires a missing secret"
-domain = "security"
-
-[secrets]
-required = ["MISSING_REQUIRED_TOKEN"]
-"#,
-        )
-        .unwrap();
+        write_blocked_agent(home.path());
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
 
@@ -862,10 +891,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
             .unwrap()
             .0;
 
-        match previous_home {
-            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
-            None => unsafe { std::env::remove_var("OMEGON_HOME") },
-        }
+        restore_env("OMEGON_HOME", previous_home);
 
         let assistant = response
             .assistants
@@ -878,6 +904,49 @@ required = ["MISSING_REQUIRED_TOKEN"]
         );
         assert_eq!(assistant.required_secret_count, 1);
         assert_eq!(assistant.blocker_count, 1);
+    }
+
+    #[tokio::test]
+    async fn capability_assistant_readiness_endpoint_returns_single_assistant() {
+        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        write_blocked_agent(home.path());
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = get_capability_assistant_readiness(
+            axum::extract::State(test_state()),
+            axum::extract::Path("blocked-agent".to_string()),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        restore_env("OMEGON_HOME", previous_home);
+
+        assert_eq!(response.assistant.id, "blocked-agent");
+        assert_eq!(
+            response.assistant.launch_readiness.status,
+            crate::capabilities::profiles::AssistantLaunchStatus::Blocked
+        );
+    }
+
+    #[tokio::test]
+    async fn capability_assistant_readiness_endpoint_404s_missing_assistant() {
+        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = get_capability_assistant_readiness(
+            axum::extract::State(test_state()),
+            axum::extract::Path("missing".to_string()),
+        )
+        .await;
+
+        restore_env("OMEGON_HOME", previous_home);
+
+        assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
     }
 
     #[tokio::test]
