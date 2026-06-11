@@ -10,6 +10,10 @@ use serde_json::{Value, json};
 use std::env;
 use tokio_util::sync::CancellationToken;
 
+const DEFAULT_WEB_SEARCH_RESULTS: usize = 5;
+const DEFAULT_DEEP_WEB_SEARCH_RESULTS: usize = 10;
+const MAX_WEB_SEARCH_RESULTS_PER_PROVIDER: usize = 20;
+
 /// Web search tool provider.
 pub struct WebSearchProvider {
     client: reqwest::Client,
@@ -671,10 +675,15 @@ impl ToolProvider for WebSearchProvider {
             .and_then(|v| v.as_str())
             .unwrap_or("general")
             .to_string();
-        let max_results = args
-            .get("max_results")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(if mode == "deep" { 10 } else { 5 }) as usize;
+        let requested_max_results =
+            args.get("max_results")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(if mode == "deep" {
+                    DEFAULT_DEEP_WEB_SEARCH_RESULTS as u64
+                } else {
+                    DEFAULT_WEB_SEARCH_RESULTS as u64
+                }) as usize;
+        let max_results = requested_max_results.clamp(1, MAX_WEB_SEARCH_RESULTS_PER_PROVIDER);
         let requested_provider = args
             .get("provider")
             .and_then(|v| v.as_str())
@@ -801,7 +810,13 @@ impl ToolProvider for WebSearchProvider {
                 content: vec![ContentBlock::Text {
                     text: format!("{header}{body}"),
                 }],
-                details: json!({}),
+                details: json!({
+                    "requested_max_results": requested_max_results,
+                    "max_results": max_results,
+                    "truncated_by_limit": requested_max_results > max_results,
+                    "providers": providers_used,
+                    "result_count": results.len(),
+                }),
             })
         }
     }

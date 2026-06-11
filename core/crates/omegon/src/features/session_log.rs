@@ -21,6 +21,9 @@ use omegon_traits::{
     ContextInjection, ContextSignals, Feature, ToolDefinition, ToolResult,
 };
 
+const DEFAULT_SESSION_LOG_COUNT: usize = 5;
+const MAX_SESSION_LOG_COUNT: usize = 25;
+
 pub struct SessionLog {
     log_path: PathBuf,
     cwd: PathBuf,
@@ -804,17 +807,26 @@ impl Feature for SessionLog {
         }
 
         let action = args["action"].as_str().unwrap_or("read");
-        let count = args["count"].as_u64().unwrap_or(5) as usize;
+        let requested_count = args["count"]
+            .as_u64()
+            .unwrap_or(DEFAULT_SESSION_LOG_COUNT as u64) as usize;
+        let count = requested_count.clamp(1, MAX_SESSION_LOG_COUNT);
         match action {
             "read" | "recent" => {
-                let (text, details) = self.read_entries_text(count)?;
+                let (text, mut details) = self.read_entries_text(count)?;
+                details["requested_count"] = json!(requested_count);
+                details["count"] = json!(count);
+                details["truncated_by_limit"] = json!(requested_count > count);
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text }],
                     details,
                 })
             }
             "usage" => {
-                let (text, details) = self.usage_report_text(count)?;
+                let (text, mut details) = self.usage_report_text(count)?;
+                details["requested_count"] = json!(requested_count);
+                details["count"] = json!(count);
+                details["truncated_by_limit"] = json!(requested_count > count);
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text }],
                     details,

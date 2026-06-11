@@ -22,6 +22,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add `just headroom-fixture` for creating ignored dogfood fixture JSON files from local UTF-8 samples.
 - Add manual native headroom tools (`headroom_compress`, `headroom_retrieve`, `headroom_stats`) for opt-in CCR dogfooding before automatic context integration.
 - Add experimental `read` integration for native headroom compression in opt-in `mode=on`, sharing CCR retrieval storage with `headroom_retrieve`.
+- Add runtime caps and effective-window metadata for web search, memory recall/episodes, and session-log result windows.
 - Add the experimental `headroom` runtime settings surface and `harness_settings` opt-in action for dogfooding native compression before it becomes a default behavior.
 - Document the native headroom compression design, including deterministic fallback, optional local model providers, and Ollama semantic-compression coupling.
 - Add affected-crate detection plus scoped `just affected`, `just test-changed`, `just check-changed`, and `just clippy-changed` recipes for faster local validation of changed Rust workspace slices.

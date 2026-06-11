@@ -29,6 +29,12 @@ use omegon_memory::{
     MemoryBackend, ScoredFact, Section, StoreAction, StoreEpisode, StoreFact,
 };
 
+const DEFAULT_MEMORY_RECALL_RESULTS: usize = 10;
+const MAX_MEMORY_RECALL_RESULTS: usize = 25;
+const MAX_MEMORY_RECALL_FETCH_RESULTS: usize = 50;
+const DEFAULT_MEMORY_EPISODES: usize = 5;
+const MAX_MEMORY_EPISODES: usize = 10;
+
 /// Memory feature that provides all memory_* tools and context injection.
 pub struct MemoryFeature {
     /// Memory backend for storage operations
@@ -541,8 +547,12 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             }
             crate::tool_registry::memory::MEMORY_RECALL => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
-                let k = args["k"].as_u64().unwrap_or(10) as usize;
-                let fetch_k = k * 2; // over-fetch for RRF merge headroom
+                let requested_k = args["k"]
+                    .as_u64()
+                    .unwrap_or(DEFAULT_MEMORY_RECALL_RESULTS as u64)
+                    as usize;
+                let k = requested_k.clamp(1, MAX_MEMORY_RECALL_RESULTS);
+                let fetch_k = k.saturating_mul(2).min(MAX_MEMORY_RECALL_FETCH_RESULTS); // over-fetch for RRF merge headroom
 
                 // FTS search — always available
                 let fts_results = self
@@ -595,7 +605,13 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content: vec![ContentBlock::Text {
                             text: "No matching facts found.".into(),
                         }],
-                        details: Value::Null,
+                        details: serde_json::json!({
+                            "requested_k": requested_k,
+                            "k": k,
+                            "fetch_k": fetch_k,
+                            "truncated_by_limit": requested_k > k,
+                            "count": 0,
+                        }),
                     });
                 }
 
@@ -621,7 +637,13 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     content: vec![ContentBlock::Text {
                         text: lines.join("\n"),
                     }],
-                    details: serde_json::json!({ "count": results.len() }),
+                    details: serde_json::json!({
+                        "count": results.len(),
+                        "requested_k": requested_k,
+                        "k": k,
+                        "fetch_k": fetch_k,
+                        "truncated_by_limit": requested_k > k,
+                    }),
                 })
             }
             crate::tool_registry::memory::MEMORY_QUERY => {
@@ -800,7 +822,9 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             }
             crate::tool_registry::memory::MEMORY_EPISODES => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
-                let k = args["k"].as_u64().unwrap_or(5) as usize;
+                let requested_k =
+                    args["k"].as_u64().unwrap_or(DEFAULT_MEMORY_EPISODES as u64) as usize;
+                let k = requested_k.clamp(1, MAX_MEMORY_EPISODES);
                 let episodes = self
                     .backend
                     .search_episodes(&self.mind, &query, k)
@@ -811,7 +835,12 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content: vec![ContentBlock::Text {
                             text: "No matching episodes found.".into(),
                         }],
-                        details: Value::Null,
+                        details: serde_json::json!({
+                            "requested_k": requested_k,
+                            "k": k,
+                            "truncated_by_limit": requested_k > k,
+                            "count": 0,
+                        }),
                     });
                 }
                 let mut lines = Vec::new();
@@ -824,7 +853,12 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     content: vec![ContentBlock::Text {
                         text: lines.join("\n"),
                     }],
-                    details: Value::Null,
+                    details: serde_json::json!({
+                        "count": episodes.len(),
+                        "requested_k": requested_k,
+                        "k": k,
+                        "truncated_by_limit": requested_k > k,
+                    }),
                 })
             }
             crate::tool_registry::memory::MEMORY_COMPACT => {
