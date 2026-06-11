@@ -769,6 +769,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn capabilities_endpoint_reports_blocked_assistant_launch_readiness() {
+        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let agent_dir = home.path().join("catalog").join("blocked-agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(
+            agent_dir.join("agent.toml"),
+            r#"[agent]
+id = "blocked-agent"
+name = "Blocked Agent"
+version = "0.1.0"
+description = "Requires a missing secret"
+domain = "security"
+
+[secrets]
+required = ["MISSING_REQUIRED_TOKEN"]
+"#,
+        )
+        .unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = get_capabilities(axum::extract::State(test_state()))
+            .await
+            .unwrap()
+            .0;
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let profile = response
+            .assistant_profiles
+            .iter()
+            .find(|profile| profile.id == "blocked-agent")
+            .expect("blocked assistant profile");
+        assert_eq!(
+            profile.launch_readiness.status,
+            crate::capabilities::profiles::AssistantLaunchStatus::Blocked
+        );
+        assert!(profile.launch_readiness.blockers.iter().any(|blocker| {
+            blocker.kind
+                == crate::capabilities::profiles::AssistantLaunchBlockerKind::RequiredSecretMissing
+                && blocker.id == "MISSING_REQUIRED_TOKEN"
+        }));
+    }
+
+    #[tokio::test]
     async fn capabilities_endpoint_reports_secret_metadata_without_values() {
         let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();

@@ -4681,6 +4681,57 @@ auto_disabled = true
     }
 
     #[tokio::test]
+    async fn capabilities_inventory_reports_blocked_assistant_launch_readiness() {
+        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let agent_dir = home.path().join("catalog").join("blocked-agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(
+            agent_dir.join("agent.toml"),
+            r#"[agent]
+id = "blocked-agent"
+name = "Blocked Agent"
+version = "0.1.0"
+description = "Requires a missing secret"
+domain = "security"
+
+[secrets]
+required = ["MISSING_REQUIRED_TOKEN"]
+"#,
+        )
+        .unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response =
+            handle_acp_request_result(agent, "_capabilities/inventory", &serde_json::json!({}))
+                .await
+                .unwrap();
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let profile = response["assistant_profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|profile| profile["id"] == "blocked-agent")
+            .expect("blocked assistant profile");
+        assert_eq!(profile["launch_readiness"]["status"], "blocked");
+        assert!(
+            profile["launch_readiness"]["blockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|blocker| blocker["kind"] == "required_secret_missing"
+                    && blocker["id"] == "MISSING_REQUIRED_TOKEN")
+        );
+    }
+
+    #[tokio::test]
     async fn capabilities_inventory_reports_secret_metadata_without_values() {
         let _guard = ACP_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
