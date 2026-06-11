@@ -854,7 +854,10 @@ pub async fn spawn_from_manifest(
 
 /// Build a `Command` with a clean environment — only safe non-secret vars inherited.
 /// Secrets are delivered via `bootstrap_secrets` RPC, never via env.
-fn clean_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
+fn clean_command(
+    program: impl AsRef<std::ffi::OsStr>,
+    manifest: &ExtensionManifest,
+) -> Result<tokio::process::Command> {
     let mut cmd = tokio::process::Command::new(program);
     cmd.env_clear();
     for var in SAFE_INHERIT_ENVS {
@@ -862,7 +865,42 @@ fn clean_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Comman
             cmd.env(var, val);
         }
     }
-    cmd
+    for (name, value) in resolved_runtime_env(manifest)? {
+        cmd.env(name, value);
+    }
+    Ok(cmd)
+}
+
+fn resolved_runtime_env(manifest: &ExtensionManifest) -> Result<Vec<(String, String)>> {
+    let mut env = Vec::new();
+    for (name, value) in manifest.runtime.env() {
+        validate_runtime_env_name(name)?;
+        env.push((name.clone(), value.clone()));
+    }
+    for name in manifest.runtime.env_passthrough() {
+        validate_runtime_env_name(name)?;
+        if let Ok(value) = std::env::var(name) {
+            env.push((name.clone(), value));
+        }
+    }
+    Ok(env)
+}
+
+fn validate_runtime_env_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_uppercase() || ch.is_ascii_digit())
+        || name.contains("SECRET")
+        || name.contains("TOKEN")
+        || name.contains("PASSWORD")
+        || name.contains("KEY")
+    {
+        return Err(anyhow!(
+            "runtime env var '{name}' is not allowed; manifest runtime.env is for non-secret uppercase names only"
+        ));
+    }
+    Ok(())
 }
 
 async fn spawn_process_handles(
@@ -872,8 +910,8 @@ async fn spawn_process_handles(
     let mut child = match &manifest.runtime {
         RuntimeConfig::Native { .. } => {
             let binary = manifest.native_binary_path(ext_dir)?;
-            clean_command(&binary)
-                .arg("--rpc")
+            let mut cmd = clean_command(&binary, manifest)?;
+            cmd.arg("--rpc")
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::inherit())
@@ -881,8 +919,12 @@ async fn spawn_process_handles(
         }
         RuntimeConfig::Oci { .. } => {
             let image = manifest.oci_image()?;
-            clean_command("podman")
-                .args(["run", "--rm", "-i", &image])
+            let mut cmd = clean_command("podman", manifest)?;
+            cmd.args(["run", "--rm", "-i"]);
+            for (name, value) in resolved_runtime_env(manifest)? {
+                cmd.args(["--env", &format!("{name}={value}")]);
+            }
+            cmd.arg(&image)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::inherit())
@@ -960,7 +1002,31 @@ async fn handshake(
         )
     })?;
 
-    // 3. Deliver secrets over pipe — never via env var
+    // 3. Deliver typed config defaults, manifest runtime config, and persisted operator values.
+    // Values are delivered over RPC after process start so extension config
+    // stays in the same channel as secrets and never depends on inherited env.
+    let config = resolved_config(manifest, ext_dir)?;
+    if !config.is_empty() {
+        match handles
+            .rpc_call_with_notifications(
+                "bootstrap_config",
+                Value::Object(config),
+                notification_sink,
+            )
+            .await
+        {
+            Ok(_) => tracing::debug!(extension = name, "bootstrap_config delivered"),
+            Err(e) => {
+                tracing::warn!(
+                    extension = name,
+                    error = %e,
+                    "bootstrap_config delivery failed"
+                );
+            }
+        }
+    }
+
+    // 4. Deliver secrets over pipe — never via env var
     if !resolved_secrets.is_empty() {
         let secrets_map: serde_json::Map<String, Value> = resolved_secrets
             .iter()
@@ -990,30 +1056,6 @@ async fn handshake(
                      Secrets delivery is required for extensions that declare secrets.",
                     name,
                 ));
-            }
-        }
-    }
-
-    // 4. Deliver typed config defaults + persisted operator values.
-    // Values are delivered over RPC after process start so extension config
-    // stays in the same channel as secrets and never depends on inherited env.
-    let config = resolved_config(manifest, ext_dir)?;
-    if !config.is_empty() {
-        match handles
-            .rpc_call_with_notifications(
-                "bootstrap_config",
-                Value::Object(config),
-                notification_sink,
-            )
-            .await
-        {
-            Ok(_) => tracing::debug!(extension = name, "bootstrap_config delivered"),
-            Err(e) => {
-                tracing::warn!(
-                    extension = name,
-                    error = %e,
-                    "bootstrap_config delivery failed"
-                );
             }
         }
     }
@@ -1108,6 +1150,10 @@ fn resolved_config(
     ext_dir: &Path,
 ) -> Result<serde_json::Map<String, Value>> {
     let mut config = serde_json::Map::new();
+    for (name, value) in manifest.runtime.config() {
+        config.insert(name.clone(), value.clone());
+    }
+
     let stored = config_store::read_config(ext_dir)?;
 
     for (name, field) in &manifest.config {
@@ -1897,6 +1943,9 @@ binary = "voice-extension.sh"
             },
             runtime: RuntimeConfig::Native {
                 binary: "test-extension".to_string(),
+                env: HashMap::new(),
+                env_passthrough: Vec::new(),
+                config: HashMap::new(),
             },
             startup: manifest::StartupConfig::default(),
             widgets: HashMap::new(),

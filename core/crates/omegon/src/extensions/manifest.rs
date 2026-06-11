@@ -31,6 +31,8 @@
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Top-level manifest structure.
@@ -84,12 +86,55 @@ pub enum RuntimeConfig {
     Native {
         /// Path to binary relative to manifest directory (e.g., "target/release/scribe-rpc")
         binary: String,
+        /// Non-secret environment variables to set after the launcher clears inherited env.
+        #[serde(default)]
+        env: HashMap<String, String>,
+        /// Non-secret environment variable names allowed to pass through from the parent.
+        #[serde(default)]
+        env_passthrough: Vec<String>,
+        /// Non-secret runtime config delivered via bootstrap_config before secrets.
+        #[serde(default)]
+        config: HashMap<String, Value>,
     },
     #[serde(rename = "oci")]
     Oci {
         /// OCI image to run (e.g., "python-analyzer:latest")
         image: String,
+        /// Non-secret environment variables to pass into the container runtime.
+        #[serde(default)]
+        env: HashMap<String, String>,
+        /// Non-secret environment variable names allowed to pass through from the parent.
+        #[serde(default)]
+        env_passthrough: Vec<String>,
+        /// Non-secret runtime config delivered via bootstrap_config before secrets.
+        #[serde(default)]
+        config: HashMap<String, Value>,
     },
+}
+
+impl RuntimeConfig {
+    pub fn env(&self) -> &HashMap<String, String> {
+        match self {
+            RuntimeConfig::Native { env, .. } | RuntimeConfig::Oci { env, .. } => env,
+        }
+    }
+
+    pub fn env_passthrough(&self) -> &[String] {
+        match self {
+            RuntimeConfig::Native {
+                env_passthrough, ..
+            }
+            | RuntimeConfig::Oci {
+                env_passthrough, ..
+            } => env_passthrough,
+        }
+    }
+
+    pub fn config(&self) -> &HashMap<String, Value> {
+        match self {
+            RuntimeConfig::Native { config, .. } | RuntimeConfig::Oci { config, .. } => config,
+        }
+    }
 }
 
 /// Startup configuration.
@@ -227,7 +272,7 @@ impl ExtensionManifest {
     /// Resolve the binary path for native extensions.
     pub fn native_binary_path(&self, base_dir: &Path) -> Result<std::path::PathBuf> {
         match &self.runtime {
-            RuntimeConfig::Native { binary } => {
+            RuntimeConfig::Native { binary, .. } => {
                 let resolved = base_dir.join(binary);
                 if resolved.exists() {
                     Ok(resolved)
@@ -246,7 +291,7 @@ impl ExtensionManifest {
     /// Get OCI image name for container extensions.
     pub fn oci_image(&self) -> Result<String> {
         match &self.runtime {
-            RuntimeConfig::Oci { image } => Ok(image.clone()),
+            RuntimeConfig::Oci { image, .. } => Ok(image.clone()),
             RuntimeConfig::Native { .. } => Err(anyhow!("expected OCI runtime, got native")),
         }
     }
