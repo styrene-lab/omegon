@@ -77,6 +77,7 @@ pub struct CleaveResult {
     pub duration_secs: f64,
 }
 
+#[derive(Debug)]
 pub enum MergeOutcome {
     Success,
     NoChanges,
@@ -680,14 +681,28 @@ pub async fn run_cleave(
                 });
             }
             Ok(worktree::MergeResult::NoChanges) => {
-                tracing::info!(child = %child.label, "child completed without repo changes");
-                let _ = worktree::delete_branch(repo_path, branch);
-                merge_results.push((child.label.clone(), MergeOutcome::NoChanges));
-                config.progress_sink.emit(&ProgressEvent::MergeResult {
-                    child: child.label.clone(),
-                    success: true,
-                    detail: Some("no changes".to_string()),
-                });
+                if is_salvage {
+                    tracing::info!(child = %child.label, "failed child had no salvaged repo changes");
+                    let _ = worktree::delete_branch(repo_path, branch);
+                    merge_results.push((
+                        child.label.clone(),
+                        MergeOutcome::Skipped("failed child produced no salvaged changes".into()),
+                    ));
+                    config.progress_sink.emit(&ProgressEvent::MergeResult {
+                        child: child.label.clone(),
+                        success: false,
+                        detail: Some("failed child produced no salvaged changes".to_string()),
+                    });
+                } else {
+                    tracing::info!(child = %child.label, "child completed without repo changes");
+                    let _ = worktree::delete_branch(repo_path, branch);
+                    merge_results.push((child.label.clone(), MergeOutcome::NoChanges));
+                    config.progress_sink.emit(&ProgressEvent::MergeResult {
+                        child: child.label.clone(),
+                        success: true,
+                        detail: Some("no changes".to_string()),
+                    });
+                }
             }
             Ok(worktree::MergeResult::Conflict(detail)) => {
                 tracing::warn!(child = %child.label, "merge conflict");
@@ -1652,3 +1667,292 @@ fn nanoid(len: usize) -> String {
     }
     result
 }
+
+fn write_fake_child(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+        path
+    }
+
+    fn init_git_repo(dir: &Path) {
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir)
+            .output()
+            .expect("git init should run");
+        std::fs::write(dir.join("README.md"), "# cleave execution eval\n").unwrap();
+        let add = std::process::Command::new("git")
+            .args(["add", "README.md"])
+            .current_dir(dir)
+            .output()
+            .expect("git add should run");
+        assert!(add.status.success(), "git add failed: {}", String::from_utf8_lossy(&add.stderr));
+        let commit = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Omegon Test",
+                "-c",
+                "user.email=omegon-test@example.invalid",
+                "commit",
+                "-m",
+                "initial",
+            ])
+            .current_dir(dir)
+            .output()
+            .expect("git commit should run");
+        assert!(
+            commit.status.success(),
+            "git commit failed: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+    }
+
+    fn one_child_plan() -> crate::cleave::plan::CleavePlan {
+        crate::cleave::plan::CleavePlan {
+            children: vec![crate::cleave::plan::ChildPlan {
+                label: "alpha".into(),
+                description: "Run fake child".into(),
+                scope: vec!["README.md".into()],
+                depends_on: vec![],
+                model: Some("test:model".into()),
+                runtime: None,
+            }],
+            rationale: "execution eval".into(),
+            default_model: Some("test:model".into()),
+        }
+    }
+
+    fn test_config(
+        fake_child: PathBuf,
+        events: std::sync::Arc<std::sync::Mutex<Vec<crate::cleave::progress::ProgressEvent>>>,
+    ) -> CleaveConfig {
+        CleaveConfig {
+            agent_binary: fake_child,
+            bridge_path: PathBuf::new(),
+            node: String::new(),
+            model: "test:model".into(),
+            max_parallel: 1,
+            timeout_secs: 30,
+            idle_timeout_secs: 10,
+            max_turns: 3,
+            inventory: None,
+            inherited_env: vec![],
+            injected_env: vec![],
+            child_runtime: crate::cleave::CleaveChildRuntimeProfile::default(),
+            progress_sink: crate::cleave::progress::callback_progress_sink(move |event| {
+                events.lock().unwrap().push(event.clone());
+            }),
+            workflow: None,
+            sandbox: false,
+        }
+    }
+
+
+
+    fn progress_from_events(
+        events: &[crate::cleave::progress::ProgressEvent],
+    ) -> crate::features::cleave::CleaveProgress {
+        let shared = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::features::cleave::CleaveProgress::default(),
+        ));
+        for event in events {
+            crate::features::cleave::apply_progress_event(&shared, event);
+        }
+        shared.lock().unwrap().clone()
+    }
+
+    #[tokio::test]
+    async fn run_cleave_executes_injected_child_successfully() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let workspace = tempfile::tempdir().unwrap();
+        let fake_child = write_fake_child(
+            repo.path(),
+            "fake-cleave-success.sh",
+            "#!/bin/sh\necho cleave-child-ok\n",
+        );
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let config = test_config(fake_child, std::sync::Arc::clone(&events));
+
+        let result = run_cleave(
+            &one_child_plan(),
+            "prove cleave child execution",
+            repo.path(),
+            workspace.path(),
+            &config,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.state.children.len(), 1);
+        let child = &result.state.children[0];
+        assert_eq!(
+            child.status,
+            crate::cleave::state::ChildStatus::Completed,
+            "child failed unexpectedly: {:?}",
+            child.error
+        );
+        assert!(child.stdout.as_deref().unwrap_or_default().contains("cleave-child-ok"));
+        assert!(workspace.path().join("state.json").exists());
+        assert!(workspace.path().join("0-task.md").exists());
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(event, crate::cleave::progress::ProgressEvent::ChildSpawned { child, .. } if child == "alpha")));
+        assert!(events.iter().any(|event| matches!(event, crate::cleave::progress::ProgressEvent::ChildStatus { child, status: crate::cleave::progress::ChildProgressStatus::Completed, .. } if child == "alpha")));
+        assert!(result.merge_results.iter().any(|(label, outcome)| {
+            label == "alpha" && matches!(outcome, MergeOutcome::NoChanges | MergeOutcome::Success)
+        }));
+    }
+
+
+
+    #[tokio::test]
+    async fn run_cleave_times_out_and_kills_silent_child() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let workspace = tempfile::tempdir().unwrap();
+        let fake_child = write_fake_child(
+            repo.path(),
+            "fake-cleave-silent-timeout.sh",
+            "#!/bin/sh\nexec sleep 10\n",
+        );
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut config = test_config(fake_child, std::sync::Arc::clone(&events));
+        config.timeout_secs = 1;
+        config.idle_timeout_secs = 30;
+
+        let result = run_cleave(
+            &one_child_plan(),
+            "prove cleave child wall timeout",
+            repo.path(),
+            workspace.path(),
+            &config,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.state.children.len(), 1);
+        let child = &result.state.children[0];
+        assert_eq!(child.status, crate::cleave::state::ChildStatus::Failed);
+        assert!(
+            child
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Wall-clock timeout"),
+            "unexpected child error: {:?}",
+            child.error
+        );
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(event, crate::cleave::progress::ProgressEvent::ChildStatus { child, status: crate::cleave::progress::ChildProgressStatus::Failed, error: Some(error), .. } if child == "alpha" && error.contains("Wall-clock timeout"))));
+        let progress = progress_from_events(&events);
+        assert!(!progress.active, "timeout should clear active progress");
+        assert_eq!(progress.failed, 1);
+        let child_progress = progress.children.iter().find(|c| c.label == "alpha").unwrap();
+        assert_eq!(child_progress.status, "failed");
+        assert_eq!(child_progress.pid, None);
+        assert_eq!(child_progress.supervision_mode, None);
+    }
+
+    #[tokio::test]
+    async fn run_cleave_cancellation_kills_running_child() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let workspace = tempfile::tempdir().unwrap();
+        let fake_child = write_fake_child(
+            repo.path(),
+            "fake-cleave-cancel.sh",
+            "#!/bin/sh\nexec sleep 10\n",
+        );
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let config = test_config(fake_child, std::sync::Arc::clone(&events));
+        let cancel = CancellationToken::new();
+        let cancel_clone = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            cancel_clone.cancel();
+        });
+
+        let result = run_cleave(
+            &one_child_plan(),
+            "prove cleave child cancellation",
+            repo.path(),
+            workspace.path(),
+            &config,
+            cancel,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.state.children.len(), 1);
+        let child = &result.state.children[0];
+        assert_eq!(child.status, crate::cleave::state::ChildStatus::Failed);
+        assert!(
+            child.error.as_deref().unwrap_or_default().contains("Cancelled"),
+            "unexpected child error: {:?}",
+            child.error
+        );
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(event, crate::cleave::progress::ProgressEvent::ChildStatus { child, status: crate::cleave::progress::ChildProgressStatus::Failed, error: Some(error), .. } if child == "alpha" && error.contains("Cancelled"))));
+        let progress = progress_from_events(&events);
+        assert!(!progress.active, "cancellation should clear active progress");
+        assert_eq!(progress.failed, 1);
+        let child_progress = progress.children.iter().find(|c| c.label == "alpha").unwrap();
+        assert_eq!(child_progress.status, "failed");
+        assert_eq!(child_progress.pid, None);
+        assert_eq!(child_progress.supervision_mode, None);
+    }
+
+    #[tokio::test]
+    async fn run_cleave_records_injected_child_failure() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let workspace = tempfile::tempdir().unwrap();
+        let fake_child = write_fake_child(
+            repo.path(),
+            "fake-cleave-fail.sh",
+            "#!/bin/sh\necho cleave child failed >&2\nexit 9\n",
+        );
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let config = test_config(fake_child, std::sync::Arc::clone(&events));
+
+        let result = run_cleave(
+            &one_child_plan(),
+            "prove cleave child failure reporting",
+            repo.path(),
+            workspace.path(),
+            &config,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.state.children.len(), 1);
+        let child = &result.state.children[0];
+        assert_eq!(child.status, crate::cleave::state::ChildStatus::Failed);
+        assert!(child.error.as_deref().unwrap_or_default().contains("cleave child failed"));
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(event, crate::cleave::progress::ProgressEvent::ChildSpawned { child, .. } if child == "alpha")));
+        assert!(events.iter().any(|event| matches!(event, crate::cleave::progress::ProgressEvent::ChildStatus { child, status: crate::cleave::progress::ChildProgressStatus::Failed, .. } if child == "alpha")));
+        assert!(
+            result.merge_results.is_empty()
+                || result
+                    .merge_results
+                    .iter()
+                    .any(|(label, outcome)| label == "alpha" && matches!(outcome, MergeOutcome::Skipped(_))),
+            "failed children should not be merged: {:?}",
+            result.merge_results
+        );
+    }

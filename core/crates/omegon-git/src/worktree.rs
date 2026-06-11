@@ -150,14 +150,24 @@ pub fn create(repo_path: &Path, worktree_path: &Path, branch: &str) -> Result<Wo
         let _ = std::fs::remove_dir_all(worktree_path);
     }
 
-    // Create the worktree with a new branch from HEAD.
-    // git2's worktree() creates both the branch and the worktree atomically.
+    // Create the branch from HEAD before adding the worktree. libgit2's
+    // worktree add expects `reference` to name an existing ref; unlike
+    // `git worktree add -b`, it does not create the branch for us.
     let head = repo.head().context("failed to read HEAD")?;
-    let head_ref = head.resolve().context("failed to resolve HEAD")?;
+    let head_commit = head
+        .peel_to_commit()
+        .context("failed to resolve HEAD commit")?;
+    repo.branch(branch, &head_commit, true)
+        .with_context(|| format!("failed to create branch {branch}"))?;
+    let branch_ref = repo
+        .find_branch(branch, git2::BranchType::Local)
+        .with_context(|| format!("failed to find created branch {branch}"))?
+        .into_reference();
     let mut opts = git2::WorktreeAddOptions::new();
-    opts.reference(Some(&head_ref));
+    opts.reference(Some(&branch_ref));
 
-    repo.worktree(branch, worktree_path, Some(&opts))
+    let worktree_name = branch.replace('/', "-");
+    repo.worktree(&worktree_name, worktree_path, Some(&opts))
         .with_context(|| format!("failed to create worktree at {}", worktree_path.display()))?;
 
     Ok(WorktreeInfo {

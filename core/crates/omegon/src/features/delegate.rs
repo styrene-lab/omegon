@@ -399,6 +399,9 @@ pub struct DelegateRunner {
     cwd: PathBuf,
     result_store: Arc<DelegateResultStore>,
     sandbox: bool,
+    child_agent_binary: Option<PathBuf>,
+    wall_timeout_secs: u64,
+    idle_timeout_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -643,7 +646,23 @@ impl DelegateRunner {
             cwd,
             result_store,
             sandbox,
+            child_agent_binary: None,
+            wall_timeout_secs: 300,
+            idle_timeout_secs: 120,
         }
+    }
+
+    #[cfg(test)]
+    fn with_child_agent_binary(mut self, child_agent_binary: PathBuf) -> Self {
+        self.child_agent_binary = Some(child_agent_binary);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_timeouts(mut self, wall_timeout_secs: u64, idle_timeout_secs: u64) -> Self {
+        self.wall_timeout_secs = wall_timeout_secs;
+        self.idle_timeout_secs = idle_timeout_secs;
+        self
     }
 
     fn spawn_sandboxed(
@@ -756,7 +775,11 @@ If blocked, say the blocker plainly.\n",
             }
         };
         let child_config = ChildAgentSpawnConfig {
-            agent_binary: std::env::current_exe()
+            agent_binary: self
+                .child_agent_binary
+                .clone()
+                .map(Ok)
+                .unwrap_or_else(std::env::current_exe)
                 .context("delegate runner could not locate current executable")?,
             model: model.clone(),
             max_turns: runtime.worker_profile.max_turns(),
@@ -790,15 +813,15 @@ If blocked, say the blocker plainly.\n",
         let store = self.result_store.clone();
         let tid = task_id.to_string();
 
-        let wall_timeout = tokio::time::Duration::from_secs(300); // 5 min
-        let idle_timeout = tokio::time::Duration::from_secs(120); // 2 min
+        let wall_timeout = tokio::time::Duration::from_secs(self.wall_timeout_secs);
+        let idle_timeout = tokio::time::Duration::from_secs(self.idle_timeout_secs);
         let mut last_activity = std::time::Instant::now();
         let mut last_activity_event = std::time::Instant::now() - std::time::Duration::from_secs(2); // ensure first event fires
 
         let io_result: Result<(), anyhow::Error> = tokio::select! {
             _ = tokio::time::sleep(wall_timeout) => {
                 tracing::warn!(task_id, "delegate wall-clock timeout");
-                Err(anyhow::anyhow!("Delegate wall-clock timeout after 300s"))
+                Err(anyhow::anyhow!("Delegate wall-clock timeout after {}s", self.wall_timeout_secs))
             }
             result = async {
                 loop {
@@ -846,7 +869,7 @@ If blocked, say the blocker plainly.\n",
                         }
                         Err(_) => {
                             tracing::warn!(task_id, idle_secs = last_activity.elapsed().as_secs(), "delegate idle timeout");
-                            return Err(anyhow::anyhow!("Delegate idle timeout — no output for 120s"));
+                            return Err(anyhow::anyhow!("Delegate idle timeout — no output for {}s", self.idle_timeout_secs));
                         }
                     }
                 }
@@ -1609,40 +1632,75 @@ impl Feature for DelegateFeature {
             }
 
             crate::tool_registry::delegate::DELEGATE_STATUS => {
-                let tasks = self.result_store.list_all_tasks();
+                let snapshot = self.result_store.progress_snapshot();
                 let mut status_text = String::from(
-                    "# Delegate Tasks\n\n| Task ID | Agent | Status | Description |\n|---------|-------|--------|-------------|\n",
+                    "# Delegate Tasks
+
+| Task ID | Agent | Status | Last Tool | Turn | Tasks | Description |
+|---------|-------|--------|-----------|------|-------|-------------|
+",
                 );
 
-                for task in tasks {
-                    let agent = task.agent_name.as_deref().unwrap_or("default");
-                    let status = match task.status {
-                        DelegateTaskStatus::Running => "🔄 Running".to_string(),
-                        DelegateTaskStatus::Completed { success: true } => {
-                            "✅ Completed".to_string()
-                        }
-                        DelegateTaskStatus::Completed { success: false } => "❌ Failed".to_string(),
-                        DelegateTaskStatus::Failed { .. } => "❌ Error".to_string(),
+                for child in &snapshot.children {
+                    let task = self.result_store.get_task(&child.task_id);
+                    let agent = task
+                        .as_ref()
+                        .and_then(|t| t.agent_name.as_deref())
+                        .unwrap_or("default");
+                    let description = task
+                        .as_ref()
+                        .map(|t| {
+                            if t.task_description.len() > 50 {
+                                crate::util::truncate(&t.task_description, 50)
+                            } else {
+                                t.task_description.clone()
+                            }
+                        })
+                        .unwrap_or_else(|| child.label.clone());
+                    let status = match child.status.as_str() {
+                        "running" => "🔄 Running",
+                        "completed" => "✅ Completed",
+                        "failed" => "❌ Failed",
+                        other => other,
                     };
-                    let description = if task.task_description.len() > 50 {
-                        crate::util::truncate(&task.task_description, 50)
-                    } else {
-                        task.task_description.clone()
-                    };
-
+                    let last_tool = child.last_tool.as_deref().unwrap_or("-");
+                    let last_turn = child
+                        .last_turn
+                        .map(|turn| turn.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    let task_progress = format!("{}/{}", child.tasks_done, child.tasks.len());
                     status_text.push_str(&format!(
-                        "| {} | {} | {} | {} |\n",
-                        task.task_id, agent, status, description
+                        "| {} | {} | {} | {} | {} | {} | {} |
+",
+                        child.task_id, agent, status, last_tool, last_turn, task_progress, description
                     ));
                 }
 
-                if self.result_store.list_all_tasks().is_empty() {
-                    status_text.push_str("\nNo delegate tasks found.\n");
+                if snapshot.children.is_empty() {
+                    status_text.push_str("
+No delegate tasks found.
+");
                 }
 
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: status_text }],
-                    details: json!({ "task_count": self.result_store.list_all_tasks().len() }),
+                    details: json!({
+                        "active": snapshot.active,
+                        "running": snapshot.running,
+                        "completed": snapshot.completed,
+                        "failed": snapshot.failed,
+                        "task_count": snapshot.children.len(),
+                        "children": snapshot.children.iter().map(|child| json!({
+                            "task_id": child.task_id,
+                            "label": child.label,
+                            "status": child.status,
+                            "last_tool": child.last_tool,
+                            "last_turn": child.last_turn,
+                            "result_summary": child.result_summary,
+                            "tasks_done": child.tasks_done,
+                            "tasks_total": child.tasks.len(),
+                        })).collect::<Vec<_>>(),
+                    }),
                 })
             }
 
@@ -2279,4 +2337,278 @@ This agent runs in write mode and can modify files.
             );
         }
     }
+
+    #[test]
+    fn progress_snapshot_exposes_running_completed_and_failed_delegate_state() {
+        let store = DelegateResultStore::new();
+        let now = SystemTime::now();
+        store.store_task(DelegateTask {
+            task_id: "delegate_1".into(),
+            agent_name: Some("scout".into()),
+            task_description: "- [ ] Inspect files\n- [ ] Report findings".into(),
+            status: DelegateTaskStatus::Running,
+            result: None,
+            started_at: now,
+            completed_at: None,
+            last_tool: None,
+            last_turn: None,
+            tasks: crate::cleave::progress::extract_task_items("- [ ] Inspect files\n- [ ] Report findings"),
+        });
+        store.update_task_live_state("delegate_1", Some("read".into()), Some(2));
+        store.store_task(DelegateTask {
+            task_id: "delegate_2".into(),
+            agent_name: Some("verify".into()),
+            task_description: "Run checks".into(),
+            status: DelegateTaskStatus::Completed { success: true },
+            result: Some("Validation passed with a long enough result summary to truncate".into()),
+            started_at: now,
+            completed_at: Some(now),
+            last_tool: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+        store.store_task(DelegateTask {
+            task_id: "delegate_3".into(),
+            agent_name: Some("patch".into()),
+            task_description: "Patch bug".into(),
+            status: DelegateTaskStatus::Failed { error: "child exited".into() },
+            result: None,
+            started_at: now,
+            completed_at: Some(now),
+            last_tool: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+
+        let snapshot = store.progress_snapshot();
+
+        assert!(snapshot.active);
+        assert_eq!(snapshot.running, 1);
+        assert_eq!(snapshot.completed, 1);
+        assert_eq!(snapshot.failed, 1);
+        assert_eq!(snapshot.children.len(), 3);
+        let running = snapshot.children.iter().find(|c| c.task_id == "delegate_1").unwrap();
+        assert_eq!(running.status, "running");
+        assert_eq!(running.last_tool.as_deref(), Some("read"));
+        assert_eq!(running.last_turn, Some(2));
+        assert_eq!(running.tasks_done, 1);
+        let completed = snapshot.children.iter().find(|c| c.task_id == "delegate_2").unwrap();
+        assert_eq!(completed.status, "completed");
+        assert!(completed.result_summary.as_ref().unwrap().starts_with("Validation passed"));
+        assert!(completed.result_summary.as_ref().unwrap().len() < "Validation passed with a long enough result summary to truncate".len());
+        let failed = snapshot.children.iter().find(|c| c.task_id == "delegate_3").unwrap();
+        assert_eq!(failed.status, "failed");
+    }
+
+
+    fn write_fake_child(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+        path
+    }
+
+    #[tokio::test]
+    async fn delegate_runner_executes_injected_child_successfully() {
+        let temp_dir = TempDir::new().unwrap();
+        let child = write_fake_child(
+            temp_dir.path(),
+            "fake-child-success.sh",
+            "#!/bin/sh\necho delegate-child-ok\n",
+        );
+        let store = Arc::new(DelegateResultStore::new());
+        let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
+            .with_child_agent_binary(child);
+
+        let result = runner
+            .run_delegate_child(
+                "delegate_success",
+                "Do the thing",
+                &DelegateRuntimeRequest {
+                    scope: None,
+                    model: Some("test:model".into()),
+                    thinking_level: None,
+                    worker_profile: DelegateWorkerProfile::Scout,
+                },
+                None,
+                Some("test:model".into()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, "delegate-child-ok");
+    }
+
+    #[tokio::test]
+    async fn delegate_runner_surfaces_injected_child_failure_context() {
+        let temp_dir = TempDir::new().unwrap();
+        let child = write_fake_child(
+            temp_dir.path(),
+            "fake-child-fail.sh",
+            "#!/bin/sh\necho child stderr line >&2\nexit 7\n",
+        );
+        let store = Arc::new(DelegateResultStore::new());
+        let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
+            .with_child_agent_binary(child);
+
+        let err = runner
+            .run_delegate_child(
+                "delegate_fail",
+                "Do the thing",
+                &DelegateRuntimeRequest {
+                    scope: None,
+                    model: Some("test:model".into()),
+                    thinking_level: None,
+                    worker_profile: DelegateWorkerProfile::Scout,
+                },
+                None,
+                Some("test:model".into()),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("exit_code: 7"), "{err}");
+        assert!(err.contains("child stderr line"), "{err}");
+        assert!(err.contains("test:model"), "{err}");
+    }
+
+
+    #[tokio::test]
+    async fn delegate_runner_times_out_and_kills_silent_child() {
+        let temp_dir = TempDir::new().unwrap();
+        let child = write_fake_child(
+            temp_dir.path(),
+            "fake-child-timeout.sh",
+            "#!/bin/sh\nexec sleep 10\n",
+        );
+        let store = Arc::new(DelegateResultStore::new());
+        let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
+            .with_child_agent_binary(child)
+            .with_timeouts(1, 30);
+        store.store_task(DelegateTask {
+            task_id: "delegate_timeout".to_string(),
+            task_description: "Do the thing".to_string(),
+            agent_name: Some("timeout-worker".to_string()),
+            status: DelegateTaskStatus::Running,
+            result: None,
+            started_at: SystemTime::now(),
+            completed_at: None,
+            last_tool: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+
+        let err = runner
+            .run_delegate_child(
+                "delegate_timeout",
+                "Do the thing",
+                &DelegateRuntimeRequest {
+                    scope: None,
+                    model: Some("test:model".into()),
+                    thinking_level: None,
+                    worker_profile: DelegateWorkerProfile::Scout,
+                },
+                None,
+                Some("test:model".into()),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("Delegate wall-clock timeout after 1s"), "{err}");
+        store.update_task_status(
+            "delegate_timeout",
+            DelegateTaskStatus::Failed { error: err.clone() },
+            Some(err),
+        );
+        let progress = store.progress_snapshot();
+        assert!(!progress.active, "timeout should clear active delegate progress");
+        assert_eq!(progress.running, 0);
+        assert_eq!(progress.failed, 1);
+        let child = progress
+            .children
+            .iter()
+            .find(|child| child.task_id == "delegate_timeout")
+            .unwrap();
+        assert_eq!(child.status, "failed");
+        assert!(child.result_summary.as_deref().unwrap_or_default().contains("Delegate wall-clock timeout"));
+    }
+
+
+    #[tokio::test]
+    async fn delegate_runner_idle_timeout_kills_quiet_child_after_initial_activity() {
+        let temp_dir = TempDir::new().unwrap();
+        let child = write_fake_child(
+            temp_dir.path(),
+            "fake-child-idle-timeout.sh",
+            "#!/bin/sh
+echo initial activity >&2
+exec sleep 10
+",
+        );
+        let store = Arc::new(DelegateResultStore::new());
+        let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
+            .with_child_agent_binary(child)
+            .with_timeouts(30, 1);
+        store.store_task(DelegateTask {
+            task_id: "delegate_idle_timeout".to_string(),
+            task_description: "Do the quiet thing".to_string(),
+            agent_name: Some("idle-worker".to_string()),
+            status: DelegateTaskStatus::Running,
+            result: None,
+            started_at: SystemTime::now(),
+            completed_at: None,
+            last_tool: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+
+        let err = runner
+            .run_delegate_child(
+                "delegate_idle_timeout",
+                "Do the quiet thing",
+                &DelegateRuntimeRequest {
+                    scope: None,
+                    model: Some("test:model".into()),
+                    thinking_level: None,
+                    worker_profile: DelegateWorkerProfile::Scout,
+                },
+                None,
+                Some("test:model".into()),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("Delegate idle timeout"), "{err}");
+        assert!(err.contains("no output for 1s"), "{err}");
+        store.update_task_status(
+            "delegate_idle_timeout",
+            DelegateTaskStatus::Failed { error: err.clone() },
+            Some(err),
+        );
+        let progress = store.progress_snapshot();
+        assert!(!progress.active, "idle timeout should clear active delegate progress");
+        assert_eq!(progress.running, 0);
+        assert_eq!(progress.failed, 1);
+        let child = progress
+            .children
+            .iter()
+            .find(|child| child.task_id == "delegate_idle_timeout")
+            .unwrap();
+        assert_eq!(child.status, "failed");
+        assert!(child
+            .result_summary
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Delegate idle timeout"));
+    }
+
 }

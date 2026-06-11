@@ -31,6 +31,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add a read-only capability inventory substrate and ACP `_capabilities/inventory` surface for installed extensions, Armory assets, and catalog agents to support future console/TUI capability views.
 - Register provider retry/failure and turn-cancelled ACP telemetry surfaces in the backend endpoint registry so clients can discover issue #128 notification contracts.
 - Add a metadata-only backend endpoint registry for ACP/runtime/lifecycle/provider/extension/secret/package/plan/task surfaces, including planned HTTP aliases for lifecycle projections.
+- Add cleave and delegate execution-evaluation tests with injected child binaries, including timeout and cancellation coverage.
+- Add richer cleave/delegate status visibility for subagent progress, including child activity, task progress, and runtime state.
 - Add headless ACP lifecycle read surfaces for lifecycle snapshots and design-node list/get/ready/blocked/frontier projections.
 - Route design-tree implement scaffolding through the lifecycle mutation service while preserving existing OpenSpec proposal behavior.
 - Add a design node planning the future lifecycle `implement` service extraction pass.
@@ -53,6 +55,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add `just test-profile` to statically summarize Rust test/coupling hotspots before choosing validation or extraction targets.
 - Add Python unit coverage for the affected-crate and test-profile developer tooling.
 - Add a Codebase Mind design node defining durable structural repository memory, freshness, and projection policy.
+
+### Fixed
+
+- Create cleave git worktree branches explicitly before adding libgit2 worktrees, and report failed children with no salvaged changes as skipped instead of successful no-op merges.
 
 ### Changed
 
