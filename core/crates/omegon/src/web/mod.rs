@@ -349,7 +349,10 @@ pub async fn start_server_with_options(
     let app_state_handles = state.handles.clone();
 
     let app = Router::new()
-        .route("/api/capabilities", axum::routing::get(api::get_capabilities))
+        .route(
+            "/api/capabilities",
+            axum::routing::get(api::get_capabilities),
+        )
         .route("/api/state", axum::routing::get(api::get_state))
         .route("/api/startup", axum::routing::get(api::get_startup))
         .route("/api/healthz", axum::routing::get(api::get_health))

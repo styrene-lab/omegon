@@ -116,12 +116,14 @@ fn agent_bundle_summary(resolved: ResolvedManifest) -> AgentBundleSummary {
         .collect();
     extensions.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let settings = manifest.settings.unwrap_or(crate::agent_manifest::SettingsConfig {
-        model: None,
-        thinking_level: None,
-        context_class: None,
-        max_turns: None,
-    });
+    let settings = manifest
+        .settings
+        .unwrap_or(crate::agent_manifest::SettingsConfig {
+            model: None,
+            thinking_level: None,
+            context_class: None,
+            max_turns: None,
+        });
 
     let workflow = manifest.workflow.map(|workflow| {
         let mut phases: Vec<_> = workflow
@@ -144,10 +146,12 @@ fn agent_bundle_summary(resolved: ResolvedManifest) -> AgentBundleSummary {
         }
     });
 
-    let secrets = manifest.secrets.unwrap_or(crate::agent_manifest::SecretsConfig {
-        required: None,
-        optional: None,
-    });
+    let secrets = manifest
+        .secrets
+        .unwrap_or(crate::agent_manifest::SecretsConfig {
+            required: None,
+            optional: None,
+        });
 
     let mut triggers: Vec<_> = manifest
         .triggers
@@ -173,8 +177,12 @@ fn agent_bundle_summary(resolved: ResolvedManifest) -> AgentBundleSummary {
             badge: persona.and_then(|p| p.badge.clone()),
             has_directive: resolved.persona_directive.is_some(),
             has_mind_facts: resolved.mind_facts_content.is_some(),
-            activated_skills: persona.and_then(|p| p.activated_skills.clone()).unwrap_or_default(),
-            disabled_tools: persona.and_then(|p| p.disabled_tools.clone()).unwrap_or_default(),
+            activated_skills: persona
+                .and_then(|p| p.activated_skills.clone())
+                .unwrap_or_default(),
+            disabled_tools: persona
+                .and_then(|p| p.disabled_tools.clone())
+                .unwrap_or_default(),
         },
         extensions,
         settings: AgentSettingsSummary {
@@ -209,7 +217,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let bundle_dir = temp.path().join("styrene.coding-agent");
         std::fs::create_dir_all(bundle_dir.join("mind")).unwrap();
-        std::fs::write(bundle_dir.join("PERSONA.md"), "You are a test coding agent.").unwrap();
+        std::fs::write(
+            bundle_dir.join("PERSONA.md"),
+            "You are a test coding agent.",
+        )
+        .unwrap();
         std::fs::write(bundle_dir.join("mind/facts.jsonl"), "{\"fact\":\"test\"}\n").unwrap();
         std::fs::write(
             bundle_dir.join("agent.toml"),
@@ -268,7 +280,10 @@ template = "Review the project status and summarize blockers for the operator."
         assert!(summary.persona.has_mind_facts);
         assert_eq!(summary.extensions[0].name, "vox");
         assert_eq!(summary.settings.context_class.as_deref(), Some("squad"));
-        assert_eq!(summary.workflow.as_ref().unwrap().phases[0].name, "exploring");
+        assert_eq!(
+            summary.workflow.as_ref().unwrap().phases[0].name,
+            "exploring"
+        );
         assert_eq!(summary.secrets.required, vec!["ANTHROPIC_API_KEY"]);
         assert_eq!(summary.triggers[0].name, "daily-review");
     }

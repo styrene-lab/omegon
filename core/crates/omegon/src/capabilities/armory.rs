@@ -122,7 +122,9 @@ pub fn list_armory_profiles_from_root(
     Ok(profiles)
 }
 
-pub fn armory_profile_summary_from_file(profile_path: &Path) -> anyhow::Result<ArmoryProfileSummary> {
+pub fn armory_profile_summary_from_file(
+    profile_path: &Path,
+) -> anyhow::Result<ArmoryProfileSummary> {
     let content = std::fs::read_to_string(profile_path)?;
     let doc: ProfileDocument = toml::from_str(&content).map_err(|err| {
         anyhow::anyhow!(
@@ -228,8 +230,14 @@ activate = "manual"
         assert_eq!(profiles.len(), 1);
         let profile = &profiles[0];
         assert_eq!(profile.slug, "rust-shop");
-        assert_eq!(profile.defaults.persona.as_deref(), Some("systems-engineer"));
-        assert_eq!(profile.export.default_format.as_deref(), Some("generic-markdown"));
+        assert_eq!(
+            profile.defaults.persona.as_deref(),
+            Some("systems-engineer")
+        );
+        assert_eq!(
+            profile.export.default_format.as_deref(),
+            Some("generic-markdown")
+        );
         assert_eq!(profile.dependencies.len(), 2);
         assert!(profile.dependencies.iter().any(|dep| {
             dep.kind == "skill" && dep.id == "rust" && dep.required && dep.activate == "always"

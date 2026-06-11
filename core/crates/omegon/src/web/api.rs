@@ -162,7 +162,8 @@ pub struct EventAccepted {
 }
 
 /// GET /api/capabilities — assistant capability inventory snapshot.
-pub async fn get_capabilities() -> Result<Json<crate::capabilities::inventory::CapabilityInventorySnapshot>, StatusCode> {
+pub async fn get_capabilities()
+-> Result<Json<crate::capabilities::inventory::CapabilityInventorySnapshot>, StatusCode> {
     let home = crate::paths::omegon_home().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let cwd = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let roots = crate::capabilities::inventory::CapabilityInventoryRoots {
@@ -178,10 +179,9 @@ pub async fn get_capabilities() -> Result<Json<crate::capabilities::inventory::C
     if snapshot.armory_profiles.is_empty() {
         let project_armory = cwd.join("../omegon-armory");
         if project_armory.join("profiles").exists() {
-            snapshot.armory_profiles = crate::capabilities::armory::list_armory_profiles_from_root(
-                &project_armory,
-            )
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            snapshot.armory_profiles =
+                crate::capabilities::armory::list_armory_profiles_from_root(&project_armory)
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         }
     }
 

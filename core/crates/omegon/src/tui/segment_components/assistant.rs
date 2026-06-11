@@ -416,7 +416,7 @@ mod tests {
     fn assistant_plan_full_uses_chrome_and_expanded_reasoning() {
         let meta = SegmentMeta {
             model_id: Some("model".into()),
-            ..SegmentMeta::default()
+            ..Default::default()
         };
         let presentation = SegmentPresentation {
             role: SegmentRole::Assistant,
