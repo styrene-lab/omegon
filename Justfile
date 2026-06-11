@@ -112,6 +112,10 @@ headroom-eval *args:
 headroom-fixture name kind input_file:
     python3 scripts/headroom_fixture.py "{{name}}" "{{kind}}" "{{input_file}}"
 
+# Generate ignored dogfood fixtures from real local commands.
+headroom-dogfood:
+    python3 scripts/headroom_dogfood.py
+
 # Run a quick token-efficiency benchmark. Writes per-turn snapshots to .tmp/bench/.
 # Usage: just bench "read Cargo.toml and summarize the dependencies"
 bench prompt:
