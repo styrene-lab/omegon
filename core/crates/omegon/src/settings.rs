@@ -2366,12 +2366,15 @@ mod tests {
     #[test]
     fn selector_policy_constrains_assembly_to_requested_lower_class() {
         let mut s = Settings::new("anthropic:claude-sonnet-4-6");
-        assert_eq!(s.context_class, ContextClass::Standard);
+        assert_eq!(s.context_window, 1_000_000);
+        assert_eq!(s.context_class, ContextClass::Massive);
+
         s.set_requested_context_class(ContextClass::Compact);
 
         let policy = s.selector_policy();
 
-        assert_eq!(policy.model_window, 200_000);
+        assert_eq!(policy.model_window, 1_000_000);
+        assert_eq!(policy.actual_class(), ContextClass::Massive);
         assert_eq!(policy.requested_class, ContextClass::Compact);
         assert_eq!(
             policy.assembly_window(),
