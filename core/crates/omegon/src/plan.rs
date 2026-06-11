@@ -20,6 +20,17 @@ impl PlanStatus {
             Self::Stale => "stale",
         }
     }
+
+    pub fn workstream_label(&self) -> Option<&'static str> {
+        match self {
+            Self::Active => Some("active"),
+            Self::Backgrounded | Self::Detached => Some("paused"),
+            Self::Blocked => Some("blocked"),
+            Self::Completed => Some("complete"),
+            Self::Stale => Some("waiting"),
+            Self::Archived => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -959,6 +970,27 @@ impl crate::conversation::IntentDocument {
             .visible_plan_registry_entry()
             .map(|entry| entry.status.label())
             .unwrap_or("detached");
+        let visible_plan_id = self
+            .visible_plan
+            .as_ref()
+            .map(|plan| plan.plan_id.as_str())
+            .unwrap_or("session:current");
+        let workstreams: Vec<serde_json::Value> = self
+            .plan_registry()
+            .entries
+            .into_iter()
+            .filter(|entry| entry.plan_id != visible_plan_id)
+            .filter_map(|entry| {
+                let status = entry.status.workstream_label()?;
+                Some(serde_json::json!({
+                    "id": entry.plan_id,
+                    "title": entry.title,
+                    "status": status,
+                    "completed": entry.progress.completed,
+                    "total": entry.progress.total,
+                }))
+            })
+            .collect();
 
         serde_json::json!({
             "mode": self.plan_mode.label(),
@@ -967,11 +999,7 @@ impl crate::conversation::IntentDocument {
             "total": self.work_plan.len(),
             "items": items,
             "status": plan_status,
-            "plan_id": self
-                .visible_plan
-                .as_ref()
-                .map(|plan| plan.plan_id.as_str())
-                .unwrap_or("session:current"),
+            "plan_id": visible_plan_id,
             "scope": self
                 .visible_plan
                 .as_ref()
@@ -982,6 +1010,7 @@ impl crate::conversation::IntentDocument {
                 .as_ref()
                 .map(|plan| plan.source.label())
                 .unwrap_or("session"),
+            "workstreams": workstreams,
         })
     }
 }

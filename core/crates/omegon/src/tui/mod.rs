@@ -429,7 +429,7 @@ pub struct App {
     /// Slim-mode status line — persistent telemetry bar.
     status_line: statusline::StatusLine,
     /// Structured session plan snapshot for the active Plan Dock panel.
-    plan_dock_snapshot: Option<PlanDisplaySnapshot>,
+    plan_dock_state: PlanDockState,
     active_tool_stream: Option<ActiveToolStream>,
     /// Explicit Slim turn state rendered in the status line.
     slim_turn_state: SlimTurnState,
@@ -1604,7 +1604,7 @@ impl App {
                 crate::prompt::load_lex_imperialis(),
             )),
             status_line: statusline::StatusLine::default(),
-            plan_dock_snapshot: None,
+            plan_dock_state: PlanDockState::default(),
             completed_plan_history_available: false,
             active_tool_stream: None,
             slim_turn_state: SlimTurnState::Ready,
@@ -3866,13 +3866,13 @@ impl App {
             || self.dashboard.cleave.as_ref().is_some_and(|c| c.active);
         let editor_height = editor_height_for(&self.editor, area);
         let editor_info_height = u16::from(!self.queued_prompts.is_empty());
-        let plan_dock_state = PlanDockState {
-            active: if self.ui_surfaces.is_compact() && !self.focus_mode {
-                active_plan_dock_snapshot(self.plan_dock_snapshot.as_ref(), None)
-            } else {
-                None
-            },
-            workstreams: Vec::new(),
+        let plan_dock_state = if self.ui_surfaces.is_compact() && !self.focus_mode {
+            PlanDockState {
+                active: active_plan_dock_snapshot(self.plan_dock_state.active.as_ref(), None),
+                workstreams: self.plan_dock_state.workstreams.clone(),
+            }
+        } else {
+            PlanDockState::default()
         };
         let raw_active_tool_stream_height = if self.ui_surfaces.is_compact() && !self.focus_mode {
             self.active_tool_stream
@@ -6924,7 +6924,7 @@ Scroll transcript:
                     // If no completion PlanUpdated arrives before the assistant turn
                     // finishes, clear it rather than leaving stale "plan active" chrome
                     // held under a "turn done" status line.
-                    self.plan_dock_snapshot = None;
+                    self.plan_dock_state.active = None;
                 }
                 // Update status line with behavioral signals
                 self.status_line.phase = te.dominant_phase;
@@ -7378,12 +7378,13 @@ Scroll transcript:
                 }
             }
             AgentEvent::PlanUpdated { snapshot_json } => {
-                let snapshot = PlanDisplaySnapshot::from_json(snapshot_json);
-                self.completed_plan_history_available = snapshot
+                let dock_state = PlanDockState::from_plan_update_json(snapshot_json);
+                self.completed_plan_history_available = dock_state
+                    .active
                     .as_ref()
                     .is_some_and(|snapshot| snapshot.is_complete())
                     || self.completed_plan_history_available;
-                if let Some(snapshot) = snapshot.as_ref()
+                if let Some(snapshot) = dock_state.active.as_ref()
                     && snapshot.is_complete()
                 {
                     let latest_is_complete = self
@@ -7396,14 +7397,17 @@ Scroll transcript:
                             .push_system(&snapshot.system_notification_text("Plan progress"));
                     }
                     self.conversation.snap_to_bottom();
-                    self.plan_dock_snapshot = None;
+                    self.plan_dock_state = PlanDockState {
+                        active: None,
+                        workstreams: dock_state.workstreams,
+                    };
                 } else {
-                    self.plan_dock_snapshot = snapshot;
+                    self.plan_dock_state = dock_state;
                 }
             }
             AgentEvent::SessionReset => {
                 self.conversation = ConversationView::new();
-                self.plan_dock_snapshot = None;
+                self.plan_dock_state.active = None;
                 self.completed_plan_history_available = false;
                 self.active_tool_stream = None;
                 self.turn = 0;

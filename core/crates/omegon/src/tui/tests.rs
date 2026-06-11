@@ -1347,7 +1347,7 @@ fn completed_plan_update_enables_done_view_hint_without_pinning() {
     });
 
     assert!(app.completed_plan_history_available);
-    assert!(app.plan_dock_snapshot.is_none());
+    assert!(app.plan_dock_state.active.is_none());
     let text = render_app_to_string(&mut app, 120, 18);
     assert!(text.contains("plan complete · history available"), "{text}");
     assert!(
@@ -1361,7 +1361,7 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
     let mut app = test_app();
     app.conversation.conv_state.scroll_offset = 46;
     app.conversation.conv_state.user_scrolled = true;
-    app.plan_dock_snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
+    app.plan_dock_state.active = PlanDisplaySnapshot::from_json(serde_json::json!({
         "mode": "executing",
         "completed": 1,
         "total": 2,
@@ -1385,7 +1385,7 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
 
     assert_eq!(app.conversation.conv_state.scroll_offset, 0);
     assert!(!app.conversation.conv_state.user_scrolled);
-    assert!(app.plan_dock_snapshot.is_none());
+    assert!(app.plan_dock_state.active.is_none());
     assert!(
         app.conversation
             .latest_plan_progress()
@@ -1415,7 +1415,7 @@ fn assistant_completed_turn_clears_stale_live_plan_lane() {
             ]
         }),
     });
-    assert!(app.plan_dock_snapshot.is_some());
+    assert!(app.plan_dock_state.active.is_some());
 
     app.handle_agent_event(AgentEvent::TurnEnd(Box::new(
         omegon_traits::AgentEventTurnEnd {
@@ -1443,7 +1443,7 @@ fn assistant_completed_turn_clears_stale_live_plan_lane() {
         },
     )));
 
-    assert!(app.plan_dock_snapshot.is_none());
+    assert!(app.plan_dock_state.active.is_none());
     let text = render_app_to_string(&mut app, 140, 18);
     assert!(!text.contains("plan active"), "{text}");
     assert!(!text.contains("Harden set_recipe"), "{text}");

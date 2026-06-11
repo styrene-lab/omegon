@@ -54,6 +54,58 @@ pub enum WorkstreamStatus {
     Complete,
 }
 
+
+impl WorkstreamStatus {
+    pub fn from_label(value: &str) -> Self {
+        match value {
+            "active" => Self::Active,
+            "paused" | "backgrounded" | "detached" => Self::Paused,
+            "pending" | "pending_approval" | "review_required" => Self::PendingApproval,
+            "blocked" => Self::Blocked,
+            "complete" | "completed" => Self::Complete,
+            _ => Self::Waiting,
+        }
+    }
+}
+
+impl WorkstreamSummary {
+    pub fn from_json(value: &serde_json::Value) -> Option<Self> {
+        let id = value.get("id")?.as_str()?.trim().to_string();
+        if id.is_empty() {
+            return None;
+        }
+        let title = value
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&id)
+            .to_string();
+        let status = value
+            .get("status")
+            .and_then(|v| v.as_str())
+            .map(WorkstreamStatus::from_label)
+            .unwrap_or(WorkstreamStatus::Waiting);
+        let completed = value.get("completed").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let total = value.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        Some(Self { id, title, status, completed, total })
+    }
+}
+
+impl PlanDockState {
+    pub fn from_plan_update_json(value: serde_json::Value) -> Self {
+        let workstreams = value
+            .get("workstreams")
+            .and_then(|v| v.as_array())
+            .map(|items| items.iter().filter_map(WorkstreamSummary::from_json).collect())
+            .unwrap_or_default();
+        Self {
+            active: PlanDisplaySnapshot::from_json(value),
+            workstreams,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanDisplaySnapshot {
     pub mode: String,
