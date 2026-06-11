@@ -4681,6 +4681,60 @@ auto_disabled = true
     }
 
     #[tokio::test]
+    async fn capabilities_inventory_reports_secret_metadata_without_values() {
+        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let ext_dir = home.path().join("extensions").join("secure-ext");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        std::fs::write(
+            ext_dir.join("manifest.toml"),
+            r#"[extension]
+name = "secure-ext"
+version = "0.1.0"
+description = "Secure extension"
+
+[runtime]
+type = "native"
+binary = "bin/secure-ext"
+
+[secrets]
+required = ["BRAVE_API_KEY"]
+"#,
+        )
+        .unwrap();
+        let secrets =
+            std::sync::Arc::new(omegon_secrets::SecretsManager::new(home.path()).unwrap());
+        secrets
+            .set_recipe("BRAVE_API_KEY", "env:OMEGON_TEST_BRAVE_KEY")
+            .unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        agent.set_secrets_for_test(secrets);
+        let response =
+            handle_acp_request_result(agent, "_capabilities/inventory", &serde_json::json!({}))
+                .await
+                .unwrap();
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let readiness = response["secret_readiness"]["secrets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|secret| secret["name"] == "BRAVE_API_KEY")
+            .expect("BRAVE_API_KEY readiness");
+        assert_eq!(readiness["status"], "configured");
+        assert_eq!(readiness["recipe_kind"], "env");
+        assert!(!response.to_string().contains("brave-test-key"));
+        assert!(!response.to_string().contains("OMEGON_TEST_BRAVE_KEY"));
+    }
+
+    #[tokio::test]
     async fn underscore_extension_method_routes_to_ext_method() {
         let agent = Rc::new(OmegonAcpAgent::new("test-model"));
         let response = handle_acp_request_result(
