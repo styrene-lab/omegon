@@ -224,6 +224,18 @@ The default 0.27 model is deterministic and rule-based:
 
 This gives Omegon a reliable baseline that works everywhere the Rust binary runs. It also prevents context compression from becoming a startup/install blocker.
 
+The default 0.27 compression provider is explicit and machine-visible:
+
+```json
+{
+  "id": "native_deterministic",
+  "kind": "deterministic",
+  "version": "<omegon-headroom crate version>"
+}
+```
+
+This provider is built into the Omegon binary through the `omegon-headroom` crate. It has no model artifact lifecycle: no separate loading, vendoring, downloading, or updating is required. The provider metadata appears in compression outputs, manual tool details, automatic helper details, and evaluation reports so future Kompressor/Ollama providers have a stable reporting contract.
+
 Future learned compression can be added as an optional provider behind the same trait boundary:
 
 ```rust

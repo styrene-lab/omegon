@@ -113,6 +113,7 @@ pub fn maybe_compress_tool_text(
             "compressed": output.compressed,
             "content_kind": output.content_kind,
             "stats": output.stats,
+            "provider": output.provider,
             "original_ref": output.original_ref,
             "mode": headroom.mode.as_str(),
             "reversible": headroom.reversible,

@@ -65,12 +65,28 @@ pub struct CompressionStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompressionProviderInfo {
+    pub id: String,
+    pub kind: String,
+    pub version: String,
+}
+
+pub fn native_deterministic_provider() -> CompressionProviderInfo {
+    CompressionProviderInfo {
+        id: "native_deterministic".into(),
+        kind: "deterministic".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompressionOutput {
     pub text: String,
     pub content_kind: ContentKind,
     pub original_ref: Option<HeadroomRef>,
     pub stats: CompressionStats,
     pub compressed: bool,
+    pub provider: CompressionProviderInfo,
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +173,8 @@ impl InMemoryHeadroomStore {
         let kind = input.kind_hint.unwrap_or_else(|| detect_kind(&input.text));
         let original_bytes = input.text.len();
 
+        let provider = native_deterministic_provider();
+
         if !input.policy.enabled || original_bytes < input.policy.min_bytes {
             return CompressionOutput {
                 text: input.text,
@@ -169,6 +187,7 @@ impl InMemoryHeadroomStore {
                     savings_percent: 0,
                 },
                 compressed: false,
+                provider: provider.clone(),
             };
         }
 
@@ -190,6 +209,7 @@ impl InMemoryHeadroomStore {
                     savings_percent: 0,
                 },
                 compressed: false,
+                provider: provider.clone(),
             };
         }
         if let Some(reference) = reference.as_ref() {
@@ -213,6 +233,7 @@ impl InMemoryHeadroomStore {
                 savings_percent,
             },
             compressed: true,
+            provider,
         }
     }
 
@@ -606,13 +627,13 @@ fn anchor_score(line: &str) -> u8 {
         return 80;
     }
     if has_quoted_signal_token(trimmed) {
-        return 92;
+        return 106;
     }
     if has_headroom_token(trimmed) {
         return 85;
     }
     if is_rust_function_declaration_anchor(trimmed) {
-        return 82;
+        return if lower.contains("headroom") { 108 } else { 82 };
     }
     if has_nonzero_exit_code(trimmed) {
         return 70;
@@ -691,9 +712,9 @@ fn has_cli_flag_token(line: &str) -> bool {
 
 fn has_quoted_signal_token(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
+    let normalized = lower.replace("\\\\\\\"", "\"").replace("\\\"", "\"");
     [
         "\"test result:\"",
-        "\\\"test result:\\\"",
         "'test result:'",
         "\"error\"",
         "'error'",
@@ -705,7 +726,7 @@ fn has_quoted_signal_token(line: &str) -> bool {
         "'warning'",
     ]
     .iter()
-    .any(|needle| lower.contains(needle))
+    .any(|needle| lower.contains(needle) || normalized.contains(needle))
 }
 
 fn has_headroom_token(line: &str) -> bool {
@@ -784,8 +805,6 @@ fn is_signal_line(line: &str) -> bool {
         || lower.contains("fixme")
         || lower.contains("exit code")
         || lower.contains("exit_code")
-        || line.starts_with('+')
-        || line.starts_with('-')
 }
 
 fn looks_like_code(text: &str) -> bool {
@@ -1171,6 +1190,14 @@ mod tests {
         assert_eq!(first.original_ref, second.original_ref);
         assert_eq!(store.len(), 1);
         assert_eq!(store.evicted_count(), 0);
+    }
+
+    #[test]
+    fn native_provider_identity_is_stable() {
+        let provider = native_deterministic_provider();
+        assert_eq!(provider.id, "native_deterministic");
+        assert_eq!(provider.kind, "deterministic");
+        assert_eq!(provider.version, env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

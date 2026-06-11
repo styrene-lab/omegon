@@ -144,9 +144,9 @@ def extract_required_facts(text: str, limit: int = 24) -> list[str]:
             if any(token in name.lower() for token in ("headroom", "compress", "anchor", "fixture", "read")):
                 add(name)
             continue
-        if any(token in lower for token in ("headroom_", "headroom-", "omegon-headroom", "headroom:")):
-            add(line)
         if "test(headroom):" in lower or "feat(headroom):" in lower or "fix(headroom):" in lower:
+            add(line)
+        if any(token in lower for token in ("headroom_compress", "headroom_retrieve", "headroom_stats", "headroom-eval", "headroom-fixture")):
             add(line)
 
     # Pull stable path:line and CLI/hash fragments even if the full line is noisy.

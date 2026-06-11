@@ -3,7 +3,10 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{CompressionInput, ContentKind, HeadroomPolicy, InMemoryHeadroomStore};
+use crate::{
+    CompressionInput, CompressionProviderInfo, ContentKind, HeadroomPolicy, InMemoryHeadroomStore,
+    native_deterministic_provider,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -79,6 +82,7 @@ pub struct ClassValidationSummary {
 pub struct ValidationSuiteReport {
     pub fixtures: Vec<FixtureValidationReport>,
     pub classes: Vec<ClassValidationSummary>,
+    pub compression_provider: CompressionProviderInfo,
     pub passed: bool,
     pub total_original_bytes: usize,
     pub total_evaluated_compressed_bytes: usize,
@@ -318,6 +322,7 @@ pub fn validate_suite_with_counter(
         passed: reports.iter().all(|report| report.passed),
         fixtures: reports,
         classes,
+        compression_provider: native_deterministic_provider(),
         total_original_bytes,
         total_evaluated_compressed_bytes,
         estimated_tokens_before,
@@ -666,6 +671,7 @@ mod tests {
     #[test]
     fn canonical_fixtures_validate_savings_and_fact_retention() {
         let report = validate_suite(&canonical_validation_fixtures(), validation_policy());
+        assert_eq!(report.compression_provider.id, "native_deterministic");
         assert!(
             report.passed,
             "validation suite failed: {:#?}",

@@ -170,6 +170,7 @@ impl HeadroomFeature {
                     "compressed": output.compressed,
                     "content_kind": output.content_kind,
                     "stats": output.stats,
+                    "provider": output.provider,
                     "original_ref": ref_details,
                     "settings": {
                         "mode": settings.mode.as_str(),
@@ -387,6 +388,10 @@ mod tests {
             .as_str()
             .expect("reference id")
             .to_owned();
+        assert_eq!(
+            result.details["headroom"]["provider"]["id"].as_str(),
+            Some("native_deterministic")
+        );
         let retrieved = feature.retrieve(json!({"id": reference_id})).unwrap();
         assert!(result_text(&retrieved).contains("line 199"));
     }
