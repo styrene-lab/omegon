@@ -195,10 +195,14 @@ impl AgentSetup {
             && let Ok(guard) = settings.lock()
         {
             let provider = crate::providers::infer_provider_id(&guard.model);
-            // Add only the FIRST env var per provider (highest priority auth method).
-            // e.g., for Anthropic: ANTHROPIC_OAUTH_TOKEN preferred over ANTHROPIC_API_KEY.
-            // This avoids multiple keychain prompts for alternatives we won't use.
-            if let Some(env_var) = crate::auth::provider_env_vars(&provider).first() {
+            // Add only the FIRST env var per provider (highest priority auth method),
+            // but only when the shared auth store cannot already satisfy the active
+            // route. This avoids an extra macOS Keychain prompt on every ad-hoc
+            // rebuilt binary when auth.json already has valid OAuth for the model
+            // (for example, gpt-* routes backed by openai-codex OAuth).
+            if !crate::auth::provider_connected_for_model(&guard.model)
+                && let Some(env_var) = crate::auth::provider_env_vars(&provider).first()
+            {
                 preflight.insert((*env_var).to_string());
             }
         }
@@ -1394,12 +1398,10 @@ fn collect_extension_secret_requirements(cwd: &Path) -> Vec<String> {
                 );
                 names.push(name);
             }
-            // Optional secrets are preflighted too — extension degrades gracefully if absent,
-            // but we still want the keyring prompt to happen at the startup boundary,
-            // not mid-session.
-            for name in manifest.secrets.optional {
-                names.push(name);
-            }
+            // Required extension secrets are preflighted because the extension
+            // cannot start correctly without them. Optional secrets are resolved
+            // lazily during extension spawn/use; eagerly resolving them forces
+            // avoidable macOS Keychain prompts after each ad-hoc rebuilt binary.
         }
     }
     names
@@ -1621,12 +1623,7 @@ async fn discover_and_register_extensions(
         let resolved_secrets: Vec<(String, String)> = {
             if let Ok(manifest) = crate::extensions::ExtensionManifest::from_extension_dir(&path) {
                 let mut pairs = Vec::new();
-                for name in manifest
-                    .secrets
-                    .required
-                    .iter()
-                    .chain(manifest.secrets.optional.iter())
-                {
+                for name in &manifest.secrets.required {
                     if let Some(v) = secrets.resolve_async(name).await {
                         pairs.push((name.clone(), v));
                     }

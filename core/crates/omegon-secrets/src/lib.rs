@@ -156,9 +156,10 @@ impl SecretsManager {
             vault_client: Arc::new(Mutex::new(None)),
         };
 
-        // Repair well-known keyring entries that survived an upgrade without
-        // their recipe metadata, then pre-resolve known secrets into the redaction set.
-        mgr.repair_well_known_keyring_recipes();
+        // Pre-resolve non-keyring secrets into the redaction set. Keyring-backed
+        // secrets are intentionally lazy: probing Keychain during normal startup
+        // causes one macOS authorization dialog per stored item after every
+        // ad-hoc rebuilt binary.
         mgr.refresh_redaction_set();
 
         Ok(mgr)
@@ -727,52 +728,55 @@ impl SecretsManager {
         Ok(())
     }
 
-    fn repair_well_known_keyring_recipes(&self) {
-        let mut repaired = Vec::new();
-        for name in resolve::STATIC_SECRET_ENVS {
-            let has_recipe = self.recipes.read().unwrap().get(name).is_some();
-            if has_recipe {
-                continue;
-            }
-            let Ok(Some(secret)) = load_from_keyring(name) else {
-                continue;
-            };
-            if self
-                .recipes
-                .write()
-                .unwrap()
-                .set_string((*name).to_string(), format!("keyring:{name}"))
-                .is_ok()
-            {
-                self.redaction_set
-                    .write()
-                    .unwrap()
-                    .insert((*name).to_string(), secret.clone());
-                self.session_cache
-                    .write()
-                    .unwrap()
-                    .insert((*name).to_string(), secret);
-                let use_case = match *name {
-                    "BRAVE_API_KEY" | "TAVILY_API_KEY" | "SERPER_API_KEY" | "FIRECRAWL_API_KEY" => {
-                        SecretUse::WebSearch
-                    }
-                    _ => SecretUse::Other,
-                };
-                self.session_meta.write().unwrap().insert(
-                    (*name).to_string(),
-                    CachedSecretMeta {
-                        source: "keyring-repaired",
-                        warmed: true,
-                        required_at_startup: false,
-                        used_by: HashSet::from([use_case]),
-                    },
-                );
-                repaired.push(*name);
-            }
+    /// Repair a named well-known keyring entry after a failed write or explicit
+    /// secret mutation. This is deliberately not run as a startup scan: on
+    /// macOS, each attempted Keychain read can produce its own authorization
+    /// dialog for ad-hoc rebuilt binaries.
+    fn repair_well_known_keyring_recipe(&self, name: &str) -> bool {
+        if !resolve::STATIC_SECRET_ENVS.contains(&name) {
+            return false;
         }
-        if !repaired.is_empty() {
-            tracing::info!(names = ?repaired, "repaired orphaned well-known keyring secrets");
+        let has_recipe = self.recipes.read().unwrap().get(name).is_some();
+        if has_recipe {
+            return false;
         }
+        let Ok(Some(secret)) = load_from_keyring(name) else {
+            return false;
+        };
+        if self
+            .recipes
+            .write()
+            .unwrap()
+            .set_string(name.to_string(), format!("keyring:{name}"))
+            .is_err()
+        {
+            return false;
+        }
+        self.redaction_set
+            .write()
+            .unwrap()
+            .insert(name.to_string(), secret.clone());
+        self.session_cache
+            .write()
+            .unwrap()
+            .insert(name.to_string(), secret);
+        let use_case = match name {
+            "BRAVE_API_KEY" | "TAVILY_API_KEY" | "SERPER_API_KEY" | "FIRECRAWL_API_KEY" => {
+                SecretUse::WebSearch
+            }
+            _ => SecretUse::Other,
+        };
+        self.session_meta.write().unwrap().insert(
+            name.to_string(),
+            CachedSecretMeta {
+                source: "keyring-repaired",
+                warmed: true,
+                required_at_startup: false,
+                used_by: HashSet::from([use_case]),
+            },
+        );
+        tracing::info!(name = name, "repaired orphaned well-known keyring secret");
+        true
     }
 
     /// Store a raw value in the OS keyring and create a keyring: recipe for it.
@@ -794,6 +798,7 @@ impl SecretsManager {
                 None => return Err(write_error),
             },
         };
+        self.repair_well_known_keyring_recipe(name);
         self.recipes
             .write()
             .unwrap()
@@ -1012,12 +1017,15 @@ mod tests {
     }
 
     #[test]
-    fn new_repairs_orphaned_firecrawl_keyring_secret() {
+    fn explicit_repair_restores_orphaned_firecrawl_keyring_secret() {
         let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         store_in_keyring("FIRECRAWL_API_KEY", "firecrawl-value").unwrap();
 
         let mgr = SecretsManager::new(dir.path()).unwrap();
+        assert!(mgr.resolve("FIRECRAWL_API_KEY").is_none());
+
+        assert!(mgr.repair_well_known_keyring_recipe("FIRECRAWL_API_KEY"));
 
         assert_eq!(
             mgr.resolve("FIRECRAWL_API_KEY").as_deref(),

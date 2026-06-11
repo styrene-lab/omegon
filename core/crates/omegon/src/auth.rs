@@ -340,22 +340,38 @@ pub fn provider_session_status(provider: &ProviderCredential) -> ProviderSession
         .iter()
         .any(|v| std::env::var(v).is_ok_and(|s| !s.trim().is_empty()));
     let creds = read_credentials(provider.auth_key);
-    provider_session_status_from_sources(env_present, creds.as_ref())
+    let status = provider_session_status_from_sources(env_present, creds.as_ref());
+    if status == ProviderSessionStatus::Configured {
+        return status;
+    }
+
+    // Keep status checks aligned with bridge resolution without resurrecting the
+    // old broad Keychain scan. This reads only provider-specific external OAuth
+    // files such as ~/.codex/auth.json; it does not query keyring secrets.
+    // A fresh external credential should also override an expired auth.json
+    // credential, matching resolve_with_refresh adoption behavior.
+    let external = read_external_credentials(provider.auth_key);
+    let external_status = provider_session_status_from_sources(false, external.as_ref());
+    if external_status == ProviderSessionStatus::Configured {
+        return external_status;
+    }
+
+    status
 }
 
 pub fn provider_connected_for_model(model_spec: &str) -> bool {
-    let Some(provider) = provider_for_model(model_spec) else {
-        return false;
-    };
-
-    provider_session_status(provider) == ProviderSessionStatus::Configured
+    provider_candidates_for_model(model_spec)
+        .into_iter()
+        .any(|provider| provider_session_status(provider) == ProviderSessionStatus::Configured)
 }
 
 pub fn provider_oauth_for_model(model_spec: &str) -> bool {
-    let Some(provider) = provider_for_model(model_spec) else {
-        return false;
-    };
+    provider_candidates_for_model(model_spec)
+        .into_iter()
+        .any(provider_has_oauth_credentials)
+}
 
+fn provider_has_oauth_credentials(provider: &ProviderCredential) -> bool {
     if provider
         .env_vars
         .iter()
@@ -367,6 +383,46 @@ pub fn provider_oauth_for_model(model_spec: &str) -> bool {
     read_credentials(provider.auth_key)
         .or_else(|| read_external_credentials(provider.auth_key))
         .is_some_and(|creds| creds.cred_type == "oauth")
+}
+
+fn provider_candidates_for_model(model_spec: &str) -> Vec<&'static ProviderCredential> {
+    let Some(provider) = provider_for_model(model_spec) else {
+        return Vec::new();
+    };
+    let mut providers = vec![provider];
+
+    if provider.id == "openai" && openai_family_model(model_spec) {
+        if let Some(codex) = provider_by_id("openai-codex") {
+            providers.push(codex);
+        }
+    } else if provider.id == "openai-codex" && openai_family_model(model_spec) {
+        if let Some(openai) = provider_by_id("openai") {
+            providers.push(openai);
+        }
+    }
+
+    providers
+}
+
+fn openai_family_model(model_spec: &str) -> bool {
+    let model_id = model_id_for_auth_model(model_spec).to_ascii_lowercase();
+    model_id.starts_with("gpt-")
+        || model_id == "o1"
+        || model_id == "o3"
+        || model_id == "o4"
+        || model_id.starts_with("o1-")
+        || model_id.starts_with("o3-")
+        || model_id.starts_with("o4-")
+}
+
+fn model_id_for_auth_model(model_spec: &str) -> &str {
+    let trimmed = model_spec.trim();
+    if let Some((head, tail)) = trimmed.split_once(':')
+        && (provider_by_id(head).is_some() || head == "local")
+    {
+        return tail;
+    }
+    trimmed
 }
 
 fn provider_for_model(model_spec: &str) -> Option<&'static ProviderCredential> {
@@ -2027,6 +2083,47 @@ mod tests {
         }
     }
 
+    fn with_auth_json_path_and_home_env<T>(
+        auth_path: Option<&Path>,
+        home: &Path,
+        f: impl FnOnce() -> T + std::panic::UnwindSafe,
+    ) -> T {
+        let _guard = AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let original_auth = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+        let original_home = std::env::var("HOME").ok();
+        unsafe {
+            match auth_path {
+                Some(path) => std::env::set_var("OMEGON_AUTH_JSON_PATH", path),
+                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+            }
+            std::env::set_var("HOME", home);
+        }
+        let result = std::panic::catch_unwind(f);
+        unsafe {
+            match original_auth {
+                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
+                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+            }
+            match original_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        match result {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    fn unsigned_codex_jwt_with_exp(exp_seconds: u64) -> String {
+        use base64::Engine as _;
+        let payload = serde_json::json!({ "exp": exp_seconds }).to_string();
+        format!(
+            "e30.{}.sig",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload)
+        )
+    }
+
     #[test]
     fn pkce_generation() {
         let (verifier, challenge) = generate_pkce();
@@ -2554,6 +2651,93 @@ mod tests {
             provider_session_status_from_sources(false, None),
             ProviderSessionStatus::Missing
         );
+    }
+
+    #[test]
+    fn fresh_external_codex_oauth_overrides_expired_auth_json_for_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth_path = dir.path().join("auth.json");
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        let fresh_external_access = unsigned_codex_jwt_with_exp(u64::MAX / 1000);
+        std::fs::write(
+            home.join(".codex/auth.json"),
+            serde_json::json!({
+                "tokens": {
+                    "access_token": fresh_external_access,
+                    "refresh_token": "fresh-external-refresh",
+                    "account_id": "external-account"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        with_auth_json_path_and_home_env(Some(&auth_path), &home, || {
+            write_credentials_with_extra(
+                "openai-codex",
+                &OAuthCredentials {
+                    cred_type: "oauth".into(),
+                    access: "expired-auth-json-token".into(),
+                    refresh: "expired-auth-json-refresh".into(),
+                    expires: 0,
+                },
+                Some("expired-account"),
+            )
+            .unwrap();
+
+            let codex = provider_by_id("openai-codex").unwrap();
+            assert_eq!(
+                provider_session_status(codex),
+                ProviderSessionStatus::Configured
+            );
+            assert!(provider_connected_for_model("gpt-5.5"));
+        });
+    }
+
+    #[test]
+    fn openai_family_models_can_use_codex_oauth_for_connection_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("auth.json");
+        with_auth_json_path_env(Some(&override_path), || {
+            write_credentials_with_extra(
+                "openai-codex",
+                &OAuthCredentials {
+                    cred_type: "oauth".into(),
+                    access: "codex-oauth-token".into(),
+                    refresh: "codex-refresh-token".into(),
+                    expires: u64::MAX,
+                },
+                Some("account-id"),
+            )
+            .unwrap();
+
+            assert!(provider_connected_for_model("gpt-5.5"));
+            assert!(provider_connected_for_model("openai:gpt-5.5"));
+            assert!(provider_oauth_for_model("gpt-5.5"));
+            assert!(provider_oauth_for_model("openai:gpt-5.5"));
+        });
+    }
+
+    #[test]
+    fn codex_prefixed_openai_family_models_can_fall_back_to_openai_api_key_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("auth.json");
+        with_auth_json_path_env(Some(&override_path), || {
+            write_credentials(
+                "openai",
+                &OAuthCredentials {
+                    cred_type: "api-key".into(),
+                    access: "openai-api-key".into(),
+                    refresh: String::new(),
+                    expires: u64::MAX,
+                },
+            )
+            .unwrap();
+
+            assert!(provider_connected_for_model("openai-codex:gpt-5.5"));
+            assert!(!provider_oauth_for_model("openai-codex:gpt-5.5"));
+        });
     }
 
     #[test]
