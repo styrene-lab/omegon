@@ -54,6 +54,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Slim the TUI engine footer into a compact model/status sidecar so the dashboard lifecycle strip owns posture/session/context details and the inference strip owns token/context/memory telemetry.
 - Add a read-only capability inventory substrate and ACP `_capabilities/inventory` surface for installed extensions, Armory assets, and catalog agents to support future console/TUI capability views.
 - Register provider retry/failure and turn-cancelled ACP telemetry surfaces in the backend endpoint registry so clients can discover issue #128 notification contracts.
+- Register the capability inventory in the backend endpoint registry with ACP and HTTP transports so runtime capability advertisements include the assistant readiness surface.
 - Add HTTP and ACP regression coverage proving capability inventory exposes blocked assistant launch readiness at the external API boundary.
 - Add regression coverage for assistant launch readiness status transitions across ready, blocked, degraded, missing optional, and deferred-secret states.
 - Add explicit assistant launch-readiness status, blockers, and warnings so console clients do not need to infer safe/degraded/blocked state from secret and capability counters.

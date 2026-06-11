@@ -19,6 +19,7 @@ pub enum BackendDomain {
     Plans,
     Tasks,
     ExternalTasks,
+    Capabilities,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -328,6 +329,24 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         BackendDomain::Tasks,
         "Task event projection."
     ),
+    BackendEndpoint {
+        id: "_capabilities/inventory",
+        version: 1,
+        domain: BackendDomain::Capabilities,
+        mutability: BackendMutability::Read,
+        permission: BackendPermission::Read,
+        transports: &[
+            BackendTransport::AcpExt {
+                method: "_capabilities/inventory",
+            },
+            BackendTransport::Http {
+                method: "GET",
+                path: "/api/capabilities",
+            },
+        ],
+        side_effects: &[],
+        description: "Assistant capability inventory, graph, profiles, and metadata-only secret readiness.",
+    },
     acp_write_endpoint!(
         "_external_tasks/import",
         BackendDomain::ExternalTasks,
@@ -377,6 +396,18 @@ pub fn acp_capability_surfaces_json() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_contains_capability_inventory_http_alias() {
+        let inventory = find_by_acp_method("_capabilities/inventory").unwrap();
+        assert_eq!(inventory.domain, BackendDomain::Capabilities);
+        assert_eq!(inventory.mutability, BackendMutability::Read);
+        assert!(inventory.side_effects.is_empty());
+        assert!(inventory.transports.contains(&BackendTransport::Http {
+            method: "GET",
+            path: "/api/capabilities",
+        }));
+    }
 
     #[test]
     fn acp_registry_contains_lifecycle_http_aliases() {
