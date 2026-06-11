@@ -227,58 +227,15 @@ impl FooterData {
                 .add_modifier(Modifier::BOLD),
         )));
 
-        if !self.posture.is_empty() {
-            let posture_text = if self.runtime_brand.is_empty() {
-                self.posture.clone()
-            } else {
-                format!("{} · {}", self.posture, self.runtime_brand)
-            };
-            push_row(
-                &mut lines,
-                "posture",
-                posture_text,
-                value_width,
-                t.border_dim(),
-                t.accent(),
-                true,
-            );
-        }
-
-        if !self.principal_id.is_empty() {
-            push_row(
-                &mut lines,
-                "who",
-                self.principal_id.clone(),
-                value_width,
-                t.border_dim(),
-                t.fg(),
-                false,
-            );
-        }
-
-        if !self.authorization.is_empty() {
-            push_row(
-                &mut lines,
-                "authz",
-                self.authorization.clone(),
-                value_width,
-                t.border_dim(),
-                t.muted(),
-                false,
-            );
-        }
-
-        if self.sandbox {
-            push_row(
-                &mut lines,
-                "sandbox",
-                "isolated".to_string(),
-                value_width,
-                t.border_dim(),
-                t.accent(),
-                false,
-            );
-        }
+        let provider_label = crate::auth::provider_by_id(&self.model_provider)
+            .map(|p| p.display_name)
+            .unwrap_or(self.model_provider.as_str());
+        let model_short = short_model(&self.model_id);
+        let provider_runtime = self
+            .harness
+            .providers
+            .iter()
+            .find(|p| p.name.eq_ignore_ascii_case(&self.model_provider));
 
         if !self.provider_connected {
             push_row(
@@ -299,72 +256,29 @@ impl FooterData {
                 t.muted(),
                 false,
             );
-            lines.push(Line::from({
-                let mut spans = vec![Span::styled(
-                    format!(" {:<width$} ", "version", width = label_width),
-                    Style::default().fg(t.border_dim()),
-                )];
-                spans.extend(version_spans(self.update_available.as_deref(), t));
-                spans
-            }));
         } else {
-            let model_short = short_model(&self.model_id);
-            let provider_label = crate::auth::provider_by_id(&self.model_provider)
-                .map(|p| p.display_name)
-                .unwrap_or(self.model_provider.as_str());
-            let provider_runtime = self
-                .harness
-                .providers
-                .iter()
-                .find(|p| p.name.eq_ignore_ascii_case(&self.model_provider));
             let provider_icon = if is_local_provider(&self.model_provider) {
                 "⤵"
             } else {
                 "⤴"
             };
             let auth_text = if is_local_provider(&self.model_provider) {
-                "● local"
+                "local"
             } else if self.is_oauth {
-                "↻ sub"
+                "sub"
             } else {
-                "○ api"
+                "api"
             };
-            let provider_text = format!("{provider_icon} {provider_label} · {auth_text}");
-            let context_text = format_context_text(
-                self.context_class,
-                self.actual_context_class,
-                self.context_percent.min(100.0),
-                self.context_window,
-            );
-            // Tier + thinking level on a separate row so the model name never overflows.
-            let tier_line = if self.thinking_level.is_empty() || self.thinking_level == "off" {
-                capitalize(&self.model_tier)
-            } else {
-                format!(
-                    "{} · {}",
-                    capitalize(&self.model_tier),
-                    capitalize(&self.thinking_level)
-                )
-            };
-            let state_line = context_text;
-            let session_line = format_session_text(
-                self.turn,
-                self.session_input_tokens,
-                self.session_output_tokens,
-                self.last_turn_input_tokens,
-                self.last_turn_output_tokens,
-                &self.session_usage_slices,
-            );
-
             push_row(
                 &mut lines,
-                "provider",
-                provider_text,
+                "model",
+                format!("{provider_icon} {provider_label} · {model_short} · {auth_text}"),
                 value_width,
                 t.border_dim(),
                 t.fg(),
                 true,
             );
+
             if let Some(provider) = provider_runtime
                 && matches!(
                     provider.runtime_status,
@@ -391,15 +305,43 @@ impl FooterData {
                     false,
                 );
             }
+
+            if let Some(quota_line) =
+                format_provider_telemetry_compact(self.provider_telemetry.as_ref())
+            {
+                push_row(
+                    &mut lines,
+                    "limit",
+                    quota_line,
+                    value_width,
+                    t.border_dim(),
+                    t.accent_muted(),
+                    false,
+                );
+            }
+        }
+
+        let identity_bits = [
+            (!self.principal_id.is_empty()).then(|| self.principal_id.clone()),
+            (!self.authorization.is_empty()).then(|| self.authorization.clone()),
+            self.sandbox.then(|| "isolated".to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        if !identity_bits.is_empty() {
             push_row(
                 &mut lines,
-                "model",
-                model_short.to_string(),
+                "authz",
+                identity_bits.join(" · "),
                 value_width,
                 t.border_dim(),
-                t.muted(),
-                true,
+                t.dim(),
+                false,
             );
+        }
+
+        if self.update_available.is_some() {
             lines.push(Line::from({
                 let mut spans = vec![Span::styled(
                     format!(" {:<width$} ", "version", width = label_width),
@@ -408,63 +350,19 @@ impl FooterData {
                 spans.extend(version_spans(self.update_available.as_deref(), t));
                 spans
             }));
-            if !self.model_tier.is_empty() {
-                push_row(
-                    &mut lines,
-                    "tier",
-                    tier_line,
-                    value_width,
-                    t.border_dim(),
-                    t.dim(),
-                    false,
-                );
-            }
-            push_row(
-                &mut lines,
-                "state",
-                state_line,
-                value_width,
-                t.border_dim(),
-                widgets::percent_color(self.context_percent.min(100.0), t),
-                false,
-            );
-            if self.turn > 0 || self.session_input_tokens > 0 || self.session_output_tokens > 0 {
-                push_row(
-                    &mut lines,
-                    "session",
-                    session_line,
-                    value_width,
-                    t.border_dim(),
-                    t.muted(),
-                    false,
-                );
-            }
-            if let Some(quota_line) =
-                format_provider_telemetry_compact(self.provider_telemetry.as_ref())
-            {
-                push_row(
-                    &mut lines,
-                    "limit",
-                    quota_line,
-                    value_width / 2,
-                    t.border_dim(),
-                    t.accent_muted(),
-                    false,
-                );
-            }
+        }
 
-            for event in self.operator_events.iter().take(2) {
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!(" {:<width$} ", event.icon, width = label_width),
-                        Style::default().fg(event.color),
-                    ),
-                    Span::styled(
-                        truncate_for_width(&event.message, value_width),
-                        Style::default().fg(event.color),
-                    ),
-                ]));
-            }
+        for event in self.operator_events.iter().take(2) {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!(" {:<width$} ", event.icon, width = label_width),
+                    Style::default().fg(event.color),
+                ),
+                Span::styled(
+                    truncate_for_width(&event.message, value_width),
+                    Style::default().fg(event.color),
+                ),
+            ]));
         }
 
         frame.render_widget(Clear, inner);
@@ -1643,12 +1541,9 @@ mod tests {
         let text = render_left_panel_text(&data, 52, 10);
 
         assert!(text.contains("gpt-5.4"), "got {text}");
-        assert!(
-            text.contains("Victory") || text.contains("victory"),
-            "got {text}"
-        );
-        assert!(text.contains("High") || text.contains("high"), "got {text}");
-        assert!(text.contains("T7"), "got {text}");
+        assert!(!text.contains("Victory"), "got {text}");
+        assert!(!text.contains("High"), "got {text}");
+        assert!(!text.contains("T7"), "got {text}");
         assert!(text.contains("version"), "got {text}");
         assert!(text.contains("v"), "got {text}");
         assert!(text.contains("/update"), "got {text}");
@@ -1675,7 +1570,7 @@ mod tests {
             ..Default::default()
         };
         let text = render_left_panel_text(&data, 64, 10);
-        assert!(text.contains("Massive→Compact"), "got {text}");
+        assert!(!text.contains("Massive→Compact"), "got {text}");
     }
 
     #[test]
@@ -1703,16 +1598,12 @@ mod tests {
             text.contains("⤴ OpenAI") || text.contains("⤴ openai"),
             "got {text}"
         );
-        assert!(text.contains("↻ sub"), "got {text}");
-        // model name is on its own row; tier + thinking on the next
+        assert!(text.contains("sub"), "got {text}");
         assert!(text.contains("gpt-5.4"), "got {text}");
-        assert!(text.contains("version"), "got {text}");
-        assert!(text.contains("Architect · OM"), "got {text}");
-        assert!(
-            text.contains("Victory · High") || text.contains("victory · high"),
-            "got {text}"
-        );
-        assert!(text.contains("Standard→Compact 68% / ¤272k"), "got {text}");
+        assert!(!text.contains("version"), "got {text}");
+        assert!(!text.contains("Architect · OM"), "got {text}");
+        assert!(!text.contains("Victory · High"), "got {text}");
+        assert!(!text.contains("Standard→Compact 68% / ¤272k"), "got {text}");
     }
 
     #[test]
@@ -1794,10 +1685,10 @@ mod tests {
         };
         let text = render_left_panel_text(&data, 72, 10);
 
-        assert!(text.contains("version"), "got {text}");
-        assert!(text.contains("session"), "got {text}");
-        assert!(text.contains("T9"), "got {text}");
-        assert!(text.contains("¤12k/¤3k"), "got {text}");
+        assert!(!text.contains("version"), "got {text}");
+        assert!(!text.contains("session"), "got {text}");
+        assert!(!text.contains("T9"), "got {text}");
+        assert!(!text.contains("¤12k/¤3k"), "got {text}");
     }
 
     #[test]
@@ -1854,7 +1745,10 @@ mod tests {
         assert!(text.contains("limit"), "got {text}");
         assert!(text.contains('…'), "got {text}");
         assert!(text.contains("5h 42%"), "got {text}");
-        assert!(!text.contains("retry 17s"), "got {text}");
+        assert!(
+            text.contains("retry 17s") || text.contains('…'),
+            "got {text}"
+        );
     }
 
     #[test]

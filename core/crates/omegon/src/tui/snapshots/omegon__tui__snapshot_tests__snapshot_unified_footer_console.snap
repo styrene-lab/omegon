@@ -1,15 +1,15 @@
 ---
 source: core/crates/omegon/src/tui/snapshot_tests.rs
-assertion_line: 503
+assertion_line: 504
 expression: normalized
 ---
   engine                              ┌ inference ───────────────────────────────┐┌ tools ─────────────────────────────┐
-  provider ⤵ Ollama (Local) · ● local │==================++******#%^·············││▸ ▢ recall       220ms≋≋≋≋≋≋≋≋≋≋≋≋≋≋│
-  model   qwen3                       │%%###%%%%%%###%%%%%%###%%%%%%###%%%%%%###%││✗ ⌖ search       8.1s ≋≋≋≋≋≋≋≋≋≋≋≋≋ │
-  version v<current>                  │= conv + sys * mem # defs % hist ^ think  ││  > sh           1.2s ≋≋≋≋≋≋≋≋≋≋≋≋≋ │
-  tier    Victory · High              │↑ 800  ↓ 120  ⊙ 0%   ✦ 0  ◎ 0 recalled    ││                                    │
-  state   Standard→Compact 68% / ¤26… │├─ project ⌗2440  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠒⠒⠤⢄││                                    │
-  session T8                          │├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
+  model   ⤵ Ollama (Local) · qwen3 ·… │==================++******#%^·············││▸ ▢ recall       220ms≋≋≋≋≋≋≋≋≋≋≋≋≋≋│
+                                      │%%###%%%%%%###%%%%%%###%%%%%%###%%%%%%###%││✗ ⌖ search       8.1s ≋≋≋≋≋≋≋≋≋≋≋≋≋ │
+                                      │= conv + sys * mem # defs % hist ^ think  ││  > sh           1.2s ≋≋≋≋≋≋≋≋≋≋≋≋≋ │
+                                      │↑ 800  ↓ 120  ⊙ 0%   ✦ 0  ◎ 0 recalled    ││                                    │
+                                      │├─ project ⌗2440  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠒⠒⠤⢄││                                    │
+                                      │├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
                                       │└─ episodes ⌗45  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
                                       │                                          ││                                    │
                                       │                                          ││                                    │
