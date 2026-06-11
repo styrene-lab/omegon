@@ -400,6 +400,8 @@ pub struct DelegateRunner {
     result_store: Arc<DelegateResultStore>,
     sandbox: bool,
     child_agent_binary: Option<PathBuf>,
+    wall_timeout_secs: u64,
+    idle_timeout_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -645,12 +647,21 @@ impl DelegateRunner {
             result_store,
             sandbox,
             child_agent_binary: None,
+            wall_timeout_secs: 300,
+            idle_timeout_secs: 120,
         }
     }
 
     #[cfg(test)]
     fn with_child_agent_binary(mut self, child_agent_binary: PathBuf) -> Self {
         self.child_agent_binary = Some(child_agent_binary);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_timeouts(mut self, wall_timeout_secs: u64, idle_timeout_secs: u64) -> Self {
+        self.wall_timeout_secs = wall_timeout_secs;
+        self.idle_timeout_secs = idle_timeout_secs;
         self
     }
 
@@ -802,15 +813,15 @@ If blocked, say the blocker plainly.\n",
         let store = self.result_store.clone();
         let tid = task_id.to_string();
 
-        let wall_timeout = tokio::time::Duration::from_secs(300); // 5 min
-        let idle_timeout = tokio::time::Duration::from_secs(120); // 2 min
+        let wall_timeout = tokio::time::Duration::from_secs(self.wall_timeout_secs);
+        let idle_timeout = tokio::time::Duration::from_secs(self.idle_timeout_secs);
         let mut last_activity = std::time::Instant::now();
         let mut last_activity_event = std::time::Instant::now() - std::time::Duration::from_secs(2); // ensure first event fires
 
         let io_result: Result<(), anyhow::Error> = tokio::select! {
             _ = tokio::time::sleep(wall_timeout) => {
                 tracing::warn!(task_id, "delegate wall-clock timeout");
-                Err(anyhow::anyhow!("Delegate wall-clock timeout after 300s"))
+                Err(anyhow::anyhow!("Delegate wall-clock timeout after {}s", self.wall_timeout_secs))
             }
             result = async {
                 loop {
@@ -858,7 +869,7 @@ If blocked, say the blocker plainly.\n",
                         }
                         Err(_) => {
                             tracing::warn!(task_id, idle_secs = last_activity.elapsed().as_secs(), "delegate idle timeout");
-                            return Err(anyhow::anyhow!("Delegate idle timeout — no output for 120s"));
+                            return Err(anyhow::anyhow!("Delegate idle timeout — no output for {}s", self.idle_timeout_secs));
                         }
                     }
                 }
@@ -2466,6 +2477,40 @@ This agent runs in write mode and can modify files.
         assert!(err.contains("exit_code: 7"), "{err}");
         assert!(err.contains("child stderr line"), "{err}");
         assert!(err.contains("test:model"), "{err}");
+    }
+
+
+    #[tokio::test]
+    async fn delegate_runner_times_out_and_kills_silent_child() {
+        let temp_dir = TempDir::new().unwrap();
+        let child = write_fake_child(
+            temp_dir.path(),
+            "fake-child-timeout.sh",
+            "#!/bin/sh\nexec sleep 10\n",
+        );
+        let store = Arc::new(DelegateResultStore::new());
+        let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
+            .with_child_agent_binary(child)
+            .with_timeouts(1, 30);
+
+        let err = runner
+            .run_delegate_child(
+                "delegate_timeout",
+                "Do the thing",
+                &DelegateRuntimeRequest {
+                    scope: None,
+                    model: Some("test:model".into()),
+                    thinking_level: None,
+                    worker_profile: DelegateWorkerProfile::Scout,
+                },
+                None,
+                Some("test:model".into()),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("Delegate wall-clock timeout after 1s"), "{err}");
     }
 
 }

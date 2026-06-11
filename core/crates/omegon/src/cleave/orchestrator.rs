@@ -1798,6 +1798,94 @@ fn write_fake_child(dir: &Path, name: &str, body: &str) -> PathBuf {
         }));
     }
 
+
+
+    #[tokio::test]
+    async fn run_cleave_times_out_and_kills_silent_child() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let workspace = tempfile::tempdir().unwrap();
+        let fake_child = write_fake_child(
+            repo.path(),
+            "fake-cleave-silent-timeout.sh",
+            "#!/bin/sh\nexec sleep 10\n",
+        );
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut config = test_config(fake_child, std::sync::Arc::clone(&events));
+        config.timeout_secs = 1;
+        config.idle_timeout_secs = 30;
+
+        let result = run_cleave(
+            &one_child_plan(),
+            "prove cleave child wall timeout",
+            repo.path(),
+            workspace.path(),
+            &config,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.state.children.len(), 1);
+        let child = &result.state.children[0];
+        assert_eq!(child.status, crate::cleave::state::ChildStatus::Failed);
+        assert!(
+            child
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Wall-clock timeout"),
+            "unexpected child error: {:?}",
+            child.error
+        );
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(event, crate::cleave::progress::ProgressEvent::ChildStatus { child, status: crate::cleave::progress::ChildProgressStatus::Failed, error: Some(error), .. } if child == "alpha" && error.contains("Wall-clock timeout"))));
+    }
+
+    #[tokio::test]
+    async fn run_cleave_cancellation_kills_running_child() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let workspace = tempfile::tempdir().unwrap();
+        let fake_child = write_fake_child(
+            repo.path(),
+            "fake-cleave-cancel.sh",
+            "#!/bin/sh\nexec sleep 10\n",
+        );
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let config = test_config(fake_child, std::sync::Arc::clone(&events));
+        let cancel = CancellationToken::new();
+        let cancel_clone = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            cancel_clone.cancel();
+        });
+
+        let result = run_cleave(
+            &one_child_plan(),
+            "prove cleave child cancellation",
+            repo.path(),
+            workspace.path(),
+            &config,
+            cancel,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.state.children.len(), 1);
+        let child = &result.state.children[0];
+        assert_eq!(child.status, crate::cleave::state::ChildStatus::Failed);
+        assert!(
+            child.error.as_deref().unwrap_or_default().contains("Cancelled"),
+            "unexpected child error: {:?}",
+            child.error
+        );
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(event, crate::cleave::progress::ProgressEvent::ChildStatus { child, status: crate::cleave::progress::ChildProgressStatus::Failed, error: Some(error), .. } if child == "alpha" && error.contains("Cancelled"))));
+    }
+
     #[tokio::test]
     async fn run_cleave_records_injected_child_failure() {
         let repo = tempfile::tempdir().unwrap();
