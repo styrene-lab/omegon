@@ -25,9 +25,14 @@ dirty-report:
 
 # ─── Rust ────────────────────────────────────────────
 
-# Run all Rust tests
+# Run all Rust tests (CI/full-release gate; use test-changed/test-filter for focused local edits)
 test-rust:
     {{cargo}} test --workspace
+
+# Commit-time Rust validation for changed crates. This is the default local gate for
+# focused commits; CI/release hardening still uses test-rust for the full workspace.
+test-commit *args:
+    just test-changed {{args}}
 
 # Run tests for a specific crate
 test-crate crate:

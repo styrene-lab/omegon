@@ -374,7 +374,7 @@ fn snapshot_footer_with_persona_and_mcp() {
 }
 
 #[test]
-fn snapshot_unified_footer_console() {
+fn snapshot_engine_fallback_and_instrument_panels() {
     let mut footer = FooterData {
         model_id: "ollama:qwen3".into(),
         model_provider: "ollama".into(),
@@ -484,19 +484,19 @@ fn snapshot_unified_footer_console() {
     terminal
         .draw(|f| {
             let cols = ratatui::layout::Layout::horizontal([
-                ratatui::layout::Constraint::Percentage(32),
-                ratatui::layout::Constraint::Percentage(36),
-                ratatui::layout::Constraint::Percentage(32),
+                ratatui::layout::Constraint::Percentage(50),
+                ratatui::layout::Constraint::Length(1),
+                ratatui::layout::Constraint::Percentage(50),
             ])
             .split(f.area());
-            footer.render_left_panel(cols[0], f, &Alpharius);
-            panel.render_inference_panel(cols[1], f, &Alpharius);
+            panel.render_inference_panel(cols[0], f, &Alpharius);
             panel.render_tools_panel(cols[2], f, &Alpharius);
         })
         .unwrap();
     let rendered = render_to_string(&terminal);
-    assert!(rendered.contains("engine"), "{rendered}");
-    assert!(rendered.contains("model"), "{rendered}");
+    assert!(rendered.contains("inference"), "{rendered}");
+    assert!(rendered.contains("tools"), "{rendered}");
+    assert!(!rendered.contains("engine"), "{rendered}");
     assert!(!rendered.contains("provider"), "{rendered}");
     assert!(!rendered.contains("state"), "{rendered}");
     assert!(!rendered.contains("session T8"), "{rendered}");

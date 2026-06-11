@@ -1347,7 +1347,7 @@ fn completed_plan_update_enables_done_view_hint_without_pinning() {
     });
 
     assert!(app.completed_plan_history_available);
-    assert!(app.slim_plan_snapshot.is_none());
+    assert!(app.plan_dock_snapshot.is_none());
     let text = render_app_to_string(&mut app, 120, 18);
     assert!(text.contains("plan complete · history available"), "{text}");
     assert!(
@@ -1361,7 +1361,7 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
     let mut app = test_app();
     app.conversation.conv_state.scroll_offset = 46;
     app.conversation.conv_state.user_scrolled = true;
-    app.slim_plan_snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
+    app.plan_dock_snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
         "mode": "executing",
         "completed": 1,
         "total": 2,
@@ -1385,7 +1385,7 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
 
     assert_eq!(app.conversation.conv_state.scroll_offset, 0);
     assert!(!app.conversation.conv_state.user_scrolled);
-    assert!(app.slim_plan_snapshot.is_none());
+    assert!(app.plan_dock_snapshot.is_none());
     assert!(
         app.conversation
             .latest_plan_progress()
@@ -1415,7 +1415,7 @@ fn assistant_completed_turn_clears_stale_live_plan_lane() {
             ]
         }),
     });
-    assert!(app.slim_plan_snapshot.is_some());
+    assert!(app.plan_dock_snapshot.is_some());
 
     app.handle_agent_event(AgentEvent::TurnEnd(Box::new(
         omegon_traits::AgentEventTurnEnd {
@@ -1443,7 +1443,7 @@ fn assistant_completed_turn_clears_stale_live_plan_lane() {
         },
     )));
 
-    assert!(app.slim_plan_snapshot.is_none());
+    assert!(app.plan_dock_snapshot.is_none());
     let text = render_app_to_string(&mut app, 140, 18);
     assert!(!text.contains("plan active"), "{text}");
     assert!(!text.contains("Harden set_recipe"), "{text}");
@@ -3619,7 +3619,7 @@ fn harness_status_changed_detects_persona_transition() {
 }
 
 #[test]
-fn footer_instrument_layout_reserves_gutters_between_engine_inference_and_tools() {
+fn footer_instrument_layout_renders_only_inference_and_tools_panels() {
     let mut app = test_app();
     app.ui_surfaces.footer = true;
     app.ui_surfaces.instruments = true;
@@ -3667,11 +3667,11 @@ fn footer_instrument_layout_reserves_gutters_between_engine_inference_and_tools(
         "expected tools panel: {rendered}"
     );
 
-    let footer_lines: Vec<&str> = rendered.lines().rev().take(6).collect();
-    let gutter_present = footer_lines.iter().any(|line| line.contains("│ │"));
+    assert!(rendered.contains("┌ inference"), "missing inference panel: {rendered}");
+    assert!(rendered.contains("┌ tools"), "missing tools panel: {rendered}");
     assert!(
-        gutter_present,
-        "footer should preserve visible gutter columns between panels: {rendered}"
+        !rendered.contains("┌ engine"),
+        "engine telemetry belongs in the slim status sidecar, not the instrument footer: {rendered}"
     );
 }
 

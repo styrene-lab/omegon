@@ -925,9 +925,10 @@ pub fn import_discovered_provider_credentials() -> usize {
 
     for provider in PROVIDERS {
         let existing = read_credentials(provider.auth_key);
-        if existing.as_ref().is_some_and(|creds| {
-            creds.cred_type != "oauth" || !creds.is_expired()
-        }) {
+        if existing
+            .as_ref()
+            .is_some_and(|creds| creds.cred_type != "oauth" || !creds.is_expired())
+        {
             continue;
         }
 

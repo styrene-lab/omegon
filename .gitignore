@@ -80,3 +80,14 @@ target/
 # Omegon evidence map derived indexes/cache
 .omegon/evidence/indexes/
 .omegon/evidence/cache/
+
+# Flynt local/generated state
+.flynt/local/
+.flynt/runtime/
+.omegon/
+ai/
+drawings/*.svg
+.DS_Store
+*.tmp
+*.swp
+*~

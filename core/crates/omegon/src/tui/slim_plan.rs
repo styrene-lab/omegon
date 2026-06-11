@@ -1,4 +1,4 @@
-//! Slim plan snapshot surface rendering and hint policy.
+//! Plan dock snapshot surface rendering and hint policy.
 
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
@@ -7,13 +7,50 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 use super::{dashboard, theme};
 
-pub fn slim_plan_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 {
+pub fn plan_dock_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 {
     if width == 0 || snapshot.items.is_empty() {
         return 0;
     }
     let item_count = snapshot.items.len() as u16;
     // Rule/header + compact task rows, capped so the plan never crowds out the transcript.
     (1 + item_count.min(6)).clamp(2, 8)
+}
+
+pub fn plan_dock_preferred_height(state: &PlanDockState, width: u16) -> u16 {
+    if width == 0 {
+        return 0;
+    }
+    if let Some(active) = state.active.as_ref() {
+        plan_dock_snapshot_height(active, width)
+    } else if !state.background.is_empty() {
+        1
+    } else {
+        0
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlanDockState {
+    pub active: Option<PlanDisplaySnapshot>,
+    pub background: Vec<PlanSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanSummary {
+    pub id: String,
+    pub title: String,
+    pub status: PlanLifecycleStatus,
+    pub completed: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanLifecycleStatus {
+    Active,
+    Background,
+    Waiting,
+    Blocked,
+    Complete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +92,28 @@ pub enum SlimTurnState {
     Responding,
     Tool(String),
     Finished(&'static str),
+}
+
+impl PlanLifecycleStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Background => "background",
+            Self::Waiting => "waiting",
+            Self::Blocked => "blocked",
+            Self::Complete => "complete",
+        }
+    }
+}
+
+impl PlanSummary {
+    fn progress(&self) -> String {
+        if self.total > 0 {
+            format!("{}/{}", self.completed, self.total)
+        } else {
+            "—".to_string()
+        }
+    }
 }
 
 impl SlimTurnState {
@@ -262,11 +321,11 @@ impl PlanDisplaySnapshot {
     }
 }
 
-pub fn slim_pinned_plan_snapshot(
+pub fn active_plan_dock_snapshot(
     live_snapshot: Option<&PlanDisplaySnapshot>,
     _legacy_plan_text: Option<&str>,
 ) -> Option<PlanDisplaySnapshot> {
-    // Only the live PlanUpdated projection may pin the Slim plan lane. Legacy
+    // Only the live PlanUpdated projection may drive the Plan Dock. Legacy
     // transcript text is durable history, not active state; falling back to it
     // resurrects old unfinished plans after branch/session/task changes.
     live_snapshot
@@ -274,7 +333,7 @@ pub fn slim_pinned_plan_snapshot(
         .cloned()
 }
 
-pub fn slim_plan_rows(
+pub fn plan_dock_rows(
     snapshot: &PlanDisplaySnapshot,
     width: u16,
     height: u16,
@@ -337,7 +396,7 @@ pub enum SlimPlanHintState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlimPlanContext {
-    pub pinned: bool,
+    pub active: bool,
     pub tracked: bool,
     pub openspec_changes: usize,
     pub focused_design: bool,
@@ -345,13 +404,13 @@ pub struct SlimPlanContext {
 
 impl SlimPlanContext {
     pub fn from_dashboard(
-        pinned: bool,
+        active: bool,
         active_changes: &[dashboard::ChangeSummary],
         focused_node: Option<&dashboard::FocusedNodeSummary>,
     ) -> Self {
         Self {
-            pinned,
-            tracked: pinned || !active_changes.is_empty() || focused_node.is_some(),
+            active,
+            tracked: active || !active_changes.is_empty() || focused_node.is_some(),
             openspec_changes: active_changes.len(),
             focused_design: focused_node.is_some(),
         }
@@ -359,7 +418,7 @@ impl SlimPlanContext {
 
     pub fn labels(&self) -> Vec<String> {
         let mut labels = Vec::new();
-        labels.push(if self.pinned { "pinned" } else { "unpinned" }.to_string());
+        labels.push(if self.active { "active plan" } else { "no active plan" }.to_string());
         if self.tracked {
             labels.push("tracked".to_string());
         }
@@ -412,19 +471,37 @@ pub fn slim_operator_hint(
     }
 }
 
-pub fn render_slim_plan_panel(
+pub fn render_plan_dock_panel(
     area: Rect,
     frame: &mut Frame,
     t: &dyn theme::Theme,
-    snapshot: &PlanDisplaySnapshot,
+    state: &PlanDockState,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
     let bg = t.surface_bg();
+    if let Some(snapshot) = state.active.as_ref() {
+        render_active_plan_dock_panel(area, frame, t, snapshot, state.background.len());
+    } else {
+        render_background_plan_summary(area, frame, t, state.background.as_slice(), bg);
+    }
+}
+
+fn render_active_plan_dock_panel(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    snapshot: &PlanDisplaySnapshot,
+    background_count: usize,
+) {
+    let bg = t.surface_bg();
     let mut lines: Vec<Line<'_>> = Vec::new();
-    let summary = snapshot.summary();
+    let mut summary = snapshot.summary();
+    if background_count > 0 {
+        summary.push_str(&format!(" · background×{background_count}"));
+    }
     let rule_width = area.width.saturating_sub(summary.len() as u16 + 4) as usize;
     lines.push(Line::from(vec![
         Span::styled("─ ", Style::default().fg(t.border_dim()).bg(bg)),
@@ -441,7 +518,7 @@ pub fn render_slim_plan_panel(
         ),
     ]));
 
-    for row in slim_plan_rows(snapshot, area.width, area.height) {
+    for row in plan_dock_rows(snapshot, area.width, area.height) {
         let style = row
             .status
             .map(|status| status.style(t, bg))
@@ -453,4 +530,31 @@ pub fn render_slim_plan_panel(
         .style(Style::default().bg(bg))
         .wrap(Wrap { trim: false })
         .render(area, frame.buffer_mut());
+}
+
+fn render_background_plan_summary(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    background: &[PlanSummary],
+    bg: ratatui::style::Color,
+) {
+    if background.is_empty() {
+        return;
+    }
+    let mut text = format!(" background plans×{}", background.len());
+    if let Some(first) = background.first() {
+        text.push_str(&format!(
+            " · {} {} {}",
+            first.status.label(),
+            first.progress(),
+            first.title
+        ));
+    }
+    Paragraph::new(Line::from(Span::styled(
+        crate::util::truncate(&text, area.width as usize),
+        Style::default().fg(t.accent_muted()).bg(bg),
+    )))
+    .style(Style::default().bg(bg))
+    .render(area, frame.buffer_mut());
 }

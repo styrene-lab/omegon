@@ -22,6 +22,14 @@ pub struct StatusLine {
     pub context_percent: f32,
     pub turn: u32,
     pub model_short: String,
+    pub model_provider: String,
+    pub model_tier: String,
+    pub thinking_level: String,
+    pub posture: String,
+    pub runtime_brand: String,
+    pub principal_id: String,
+    pub authorization: String,
+    pub provider_connected: bool,
     pub session_input_tokens: u64,
     pub session_output_tokens: u64,
     pub cwd_basename: String,
@@ -43,6 +51,14 @@ impl StatusLine {
         self.context_percent = projection.context.percent;
         self.turn = projection.session.turn;
         self.model_short = projection.engine.model_short;
+        self.model_provider = projection.engine.model_provider;
+        self.model_tier = projection.engine.model_tier;
+        self.thinking_level = projection.engine.thinking_level;
+        self.posture = projection.engine.posture;
+        self.runtime_brand = projection.engine.runtime_brand;
+        self.principal_id = projection.engine.principal_id;
+        self.authorization = projection.engine.authorization;
+        self.provider_connected = projection.engine.provider_connected;
         self.session_input_tokens = projection.session.session_input_tokens;
         self.session_output_tokens = projection.session.session_output_tokens;
         self.cwd_basename = projection.workspace.cwd_basename;
@@ -50,7 +66,24 @@ impl StatusLine {
         self.persona = projection.workspace.persona;
     }
 
+    pub fn preferred_height(width: u16) -> u16 {
+        if width < 20 { 0 } else { 2 }
+    }
+
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        let height = Self::preferred_height(area.width).min(area.height);
+        if height == 0 {
+            return;
+        }
+        let lifecycle_area = Rect::new(area.x, area.y, area.width, 1);
+        self.render_lifecycle_row(lifecycle_area, frame, t);
+        if height > 1 {
+            let engine_area = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);
+            self.render_engine_row(engine_area, frame, t);
+        }
+    }
+
+    fn render_lifecycle_row(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let w = area.width as usize;
         if w < 20 {
             return;
@@ -229,6 +262,66 @@ impl StatusLine {
             area,
         );
     }
+
+    fn render_engine_row(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        let w = area.width as usize;
+        if w < 20 {
+            return;
+        }
+
+        let sep = Span::styled(" · ", Style::default().fg(t.dim()));
+        let connection = if self.provider_connected {
+            "online"
+        } else {
+            "offline"
+        };
+        let mut spans: Vec<Span<'static>> = vec![
+            Span::styled(" engine ", Style::default().fg(t.accent())),
+            Span::styled(self.runtime_brand.clone(), Style::default().fg(t.muted())),
+        ];
+
+        let mut used: usize = spans.iter().map(|s| s.width()).sum();
+        for (field, style) in [
+            (
+                format!("posture {}", self.posture),
+                Style::default().fg(t.muted()),
+            ),
+            (
+                format!("provider {} {connection}", self.model_provider),
+                Style::default().fg(t.dim()),
+            ),
+            (
+                format!("who {}", self.principal_id),
+                Style::default().fg(t.dim()),
+            ),
+            (
+                format!("authz {}", self.authorization),
+                Style::default().fg(t.dim()),
+            ),
+            (
+                format!("tier {}", self.model_tier),
+                Style::default().fg(t.dim()),
+            ),
+            (
+                format!("think {}", self.thinking_level),
+                Style::default().fg(t.dim()),
+            ),
+        ] {
+            let span = Span::styled(field, style);
+            let cost = sep.width() + span.width();
+            if used + cost < w {
+                spans.push(sep.clone());
+                spans.push(span);
+                used += cost;
+            }
+        }
+
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(t.surface_bg())),
+            area,
+        );
+    }
 }
 
 fn fmt_tokens(count: u64) -> String {
@@ -314,6 +407,13 @@ mod tests {
         assert!(sl.viewport_hint.is_none());
         assert!(sl.turn_state.is_none());
         assert!(sl.operator_hint.is_none());
+    }
+
+    #[test]
+    fn preferred_height_matches_render_contract() {
+        assert_eq!(StatusLine::preferred_height(0), 0);
+        assert_eq!(StatusLine::preferred_height(19), 0);
+        assert_eq!(StatusLine::preferred_height(20), 2);
     }
 
     #[test]

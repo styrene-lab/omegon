@@ -18,6 +18,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Add `just test-commit` as the focused changed-crate validation gate for local commits while keeping `just test-rust` as the full CI/release workspace gate.
+- Keep slim TUI instrument footers to inference and tools only; engine telemetry now stays solely in the slim status sidecar row instead of duplicating as a footer block.
+- Render the slim TUI engine sidecar as its own status row below the lifecycle row so lifecycle and engine telemetry no longer compete for one line.
 - Import discovered external provider credentials into Omegon auth storage once at startup so OpenAI/Codex OAuth survives rebuilt binary relinks and subsequent session hydration uses internal auth.json.
 
 ## [0.27.0] - 2026-06-11
@@ -1587,7 +1590,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Interactive tutorial overlay** — 4-act, 10-step onboarding guide compiled into the binary. Four acts: Cockpit (passive UI tour), Agent Works (AutoPrompt — watch the agent read the project and explore a design node), Lifecycle (live cleave demonstration), Ready (wrap-up and power tools). Triggered by `/tutorial` or shown automatically on first run.
   - `Trigger::AutoPrompt` — new trigger type that sends a prompt to the agent automatically on Tab press, then advances the overlay when the agent's turn completes. Operator watches real work happen while the overlay narrates.
   - `Highlight::Dashboard` — positions overlay in the center of the conversation area when demonstrating the sidebar, leaving the design tree fully visible.
-  - Large overlay during AutoPrompt steps covers conversation chaos while the agent works; footer instruments remain visible for telemetry.
+  - Large overlay during AutoPrompt steps covers conversation chaos while the agent works; instrument footer remains visible for telemetry.
   - Tab advances, Shift+Tab / BackTab goes back, Esc dismisses. All other keys swallowed while tutorial is active.
   - Auto-dismissed permanently via `.omegon/tutorial_completed` marker.
 

@@ -16,10 +16,11 @@ pub struct TuiLayoutInputs {
     pub dashboard_has_content: bool,
     pub editor_height: u16,
     pub editor_info_height: u16,
-    pub footer_instruments_height: u16,
+    pub instrument_footer_height: u16,
+    pub status_height: u16,
     pub pending_permission: bool,
     pub active_tool_stream_height: u16,
-    pub slim_plan_height: u16,
+    pub plan_dock_height: u16,
     pub segment_detail_height: u16,
 }
 
@@ -32,7 +33,7 @@ pub struct TuiLayoutPlan {
     pub conversation_area: Rect,
     pub active_tool_stream_area: Rect,
     pub permission_lane_area: Rect,
-    pub slim_plan_area: Rect,
+    pub plan_dock_area: Rect,
     pub segment_detail_area: Rect,
     pub editor_area: Rect,
     pub editor_info_area: Rect,
@@ -41,7 +42,7 @@ pub struct TuiLayoutPlan {
     pub footer_height: u16,
     pub active_tool_stream_height: u16,
     pub permission_lane_height: u16,
-    pub slim_plan_height: u16,
+    pub plan_dock_height: u16,
     pub segment_detail_height: u16,
 }
 
@@ -61,13 +62,13 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     let footer_height = if inputs.focus_mode || !inputs.surfaces.footer {
         0
     } else if inputs.surfaces.instruments {
-        inputs.footer_instruments_height
+        inputs.instrument_footer_height
     } else {
         1
     };
 
     let is_slim = inputs.surfaces.is_compact() && !inputs.focus_mode;
-    let status_height = if is_slim { 1u16 } else { 0 };
+    let status_height = if is_slim { inputs.status_height } else { 0 };
     let permission_lane_height = if is_slim && inputs.pending_permission {
         2
     } else {
@@ -78,12 +79,12 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     } else {
         0
     };
-    let mut slim_plan_height = if is_slim { inputs.slim_plan_height } else { 0 };
+    let mut plan_dock_height = if is_slim { inputs.plan_dock_height } else { 0 };
     let mut segment_detail_height = inputs.segment_detail_height;
 
     if permission_lane_height > 0 {
         active_tool_stream_height = active_tool_stream_height.min(6);
-        slim_plan_height = slim_plan_height.min(4);
+        plan_dock_height = plan_dock_height.min(4);
     }
 
     let fixed_without_conversation = inputs
@@ -100,11 +101,11 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     if segment_detail_height > bottom_budget {
         segment_detail_height = bottom_budget;
     }
-    if active_tool_stream_height.saturating_add(slim_plan_height) > bottom_budget {
+    if active_tool_stream_height.saturating_add(plan_dock_height) > bottom_budget {
         let plan_budget =
             bottom_budget.saturating_sub(active_tool_stream_height.min(bottom_budget));
-        slim_plan_height = slim_plan_height.min(plan_budget);
-        let stream_budget = bottom_budget.saturating_sub(slim_plan_height);
+        plan_dock_height = plan_dock_height.min(plan_budget);
+        let stream_budget = bottom_budget.saturating_sub(plan_dock_height);
         active_tool_stream_height = active_tool_stream_height.min(stream_budget);
     }
 
@@ -114,7 +115,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
             Constraint::Min(3),
             Constraint::Length(active_tool_stream_height),
             Constraint::Length(permission_lane_height),
-            Constraint::Length(slim_plan_height),
+            Constraint::Length(plan_dock_height),
             Constraint::Length(segment_detail_height),
             Constraint::Length(inputs.editor_height),
             Constraint::Length(inputs.editor_info_height),
@@ -132,7 +133,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         conversation_area: chunks[0],
         active_tool_stream_area: chunks[1],
         permission_lane_area: chunks[2],
-        slim_plan_area: chunks[3],
+        plan_dock_area: chunks[3],
         segment_detail_area: chunks[4],
         editor_area: chunks[5],
         editor_info_area: chunks[6],
@@ -141,7 +142,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         footer_height,
         active_tool_stream_height,
         permission_lane_height,
-        slim_plan_height,
+        plan_dock_height,
         segment_detail_height,
     }
 }
@@ -159,16 +160,17 @@ mod tests {
             dashboard_has_content: true,
             editor_height: 3,
             editor_info_height: 0,
-            footer_instruments_height: 4,
+            instrument_footer_height: 4,
+            status_height: 2,
             pending_permission: false,
             active_tool_stream_height: 0,
-            slim_plan_height: 0,
+            plan_dock_height: 0,
             segment_detail_height: 0,
         });
         assert!(!plan.show_dashboard);
         assert!(plan.is_slim);
         assert_eq!(plan.footer_height, 0);
-        assert_eq!(plan.status_area.height, 1);
+        assert_eq!(plan.status_area.height, 2);
     }
 
     #[test]
@@ -180,10 +182,11 @@ mod tests {
             dashboard_has_content: true,
             editor_height: 3,
             editor_info_height: 0,
-            footer_instruments_height: 4,
+            instrument_footer_height: 4,
+            status_height: 2,
             pending_permission: false,
             active_tool_stream_height: 0,
-            slim_plan_height: 0,
+            plan_dock_height: 0,
             segment_detail_height: 0,
         });
         assert!(plan.show_dashboard);
@@ -210,16 +213,17 @@ mod tests {
             dashboard_has_content: false,
             editor_height: 3,
             editor_info_height: 0,
-            footer_instruments_height: 4,
+            instrument_footer_height: 4,
+            status_height: 2,
             pending_permission: true,
             active_tool_stream_height: 20,
-            slim_plan_height: 20,
+            plan_dock_height: 20,
             segment_detail_height: 0,
         });
         assert!(plan.is_slim);
         assert_eq!(plan.permission_lane_height, 2);
         assert!(plan.active_tool_stream_height <= 6);
-        assert!(plan.slim_plan_height <= 4);
+        assert!(plan.plan_dock_height <= 4);
     }
 
     #[test]
@@ -231,10 +235,11 @@ mod tests {
             dashboard_has_content: false,
             editor_height: 3,
             editor_info_height: 0,
-            footer_instruments_height: 4,
+            instrument_footer_height: 4,
+            status_height: 2,
             pending_permission: false,
             active_tool_stream_height: 0,
-            slim_plan_height: 0,
+            plan_dock_height: 0,
             segment_detail_height: 8,
         });
         assert_eq!(plan.segment_detail_height, 8);

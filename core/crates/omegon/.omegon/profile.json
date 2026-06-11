@@ -5,8 +5,5 @@
   },
   "thinkingLevel": "medium",
   "maxTurns": 50,
-  "updateChannel": "stable",
-  "autoUpdate": false,
-  "toolDetail": "lean",
   "mouse": false
 }

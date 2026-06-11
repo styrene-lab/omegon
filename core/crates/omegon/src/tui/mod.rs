@@ -91,9 +91,9 @@ use self::layout_projection::{TuiLayoutInputs, plan_tui_layout};
 use self::permission_lane::{format_permission_prompt, permission_response_for_key};
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode};
 use self::slim_plan::{
-    PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, render_slim_plan_panel,
-    slim_completed_plan_hint_available, slim_operator_hint, slim_pinned_plan_snapshot,
-    slim_plan_snapshot_height, upstream_retry_hint,
+    PlanDisplaySnapshot, PlanDockState, SlimPlanContext, SlimPlanHintState, SlimTurnState,
+    active_plan_dock_snapshot, plan_dock_preferred_height, render_plan_dock_panel,
+    slim_completed_plan_hint_available, slim_operator_hint, upstream_retry_hint,
 };
 use crate::surfaces::layout::UiSurfaces;
 use crate::ui_runtime::actions::{
@@ -428,8 +428,8 @@ pub struct App {
     plugin_registry: Option<crate::plugins::registry::PluginRegistry>,
     /// Slim-mode status line — persistent telemetry bar.
     status_line: statusline::StatusLine,
-    /// Structured session plan snapshot for the pinned Slim plan panel.
-    slim_plan_snapshot: Option<PlanDisplaySnapshot>,
+    /// Structured session plan snapshot for the active Plan Dock panel.
+    plan_dock_snapshot: Option<PlanDisplaySnapshot>,
     active_tool_stream: Option<ActiveToolStream>,
     /// Explicit Slim turn state rendered in the status line.
     slim_turn_state: SlimTurnState,
@@ -1604,7 +1604,7 @@ impl App {
                 crate::prompt::load_lex_imperialis(),
             )),
             status_line: statusline::StatusLine::default(),
-            slim_plan_snapshot: None,
+            plan_dock_snapshot: None,
             completed_plan_history_available: false,
             active_tool_stream: None,
             slim_turn_state: SlimTurnState::Ready,
@@ -3729,6 +3729,42 @@ impl App {
         false
     }
 
+    /// Render the bottom footer surface and return the instrument-owned area
+    /// that the later cleanup pass must not repaint.
+    ///
+    /// In compact mode, engine telemetry is rendered by `StatusLine` above this
+    /// footer. When instruments are visible, this footer owns only live
+    /// instrumentation panels: inference and tools. When instruments are hidden,
+    /// it falls back to the compact engine panel so non-instrument layouts still
+    /// expose provider/model state.
+    fn render_bottom_footer(&self, area: Rect, frame: &mut Frame, t: &dyn theme::Theme) -> Rect {
+        if self.focus_mode || !self.ui_surfaces.footer {
+            return Rect::ZERO;
+        }
+
+        if !self.ui_surfaces.instruments {
+            self.footer_data.render_engine_fallback_panel(area, frame, t);
+            return area;
+        }
+
+        let footer_cols = Layout::horizontal([
+            Constraint::Percentage(50),
+            Constraint::Length(1),
+            Constraint::Percentage(50),
+        ])
+        .split(area);
+
+        self.instrument_panel
+            .render_inference_panel(footer_cols[0], frame, t);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(t.footer_bg())),
+            footer_cols[1],
+        );
+        self.instrument_panel
+            .render_tools_panel(footer_cols[2], frame, t);
+        footer_cols[0].union(footer_cols[2])
+    }
+
     fn draw(&mut self, frame: &mut Frame) {
         self.refresh_at_picker();
         let area = frame.area();
@@ -3830,13 +3866,13 @@ impl App {
             || self.dashboard.cleave.as_ref().is_some_and(|c| c.active);
         let editor_height = editor_height_for(&self.editor, area);
         let editor_info_height = u16::from(!self.queued_prompts.is_empty());
-        let slim_plan_snapshot = if self.ui_surfaces.is_compact() && !self.focus_mode {
-            slim_pinned_plan_snapshot(
-                self.slim_plan_snapshot.as_ref(),
-                self.conversation.latest_plan_progress(),
-            )
-        } else {
-            None
+        let plan_dock_state = PlanDockState {
+            active: if self.ui_surfaces.is_compact() && !self.focus_mode {
+                active_plan_dock_snapshot(self.plan_dock_snapshot.as_ref(), None)
+            } else {
+                None
+            },
+            background: Vec::new(),
         };
         let raw_active_tool_stream_height = if self.ui_surfaces.is_compact() && !self.focus_mode {
             self.active_tool_stream
@@ -3846,10 +3882,7 @@ impl App {
         } else {
             0
         };
-        let raw_slim_plan_height = slim_plan_snapshot
-            .as_ref()
-            .map(|snapshot| slim_plan_snapshot_height(snapshot, area.width))
-            .unwrap_or(0);
+        let raw_plan_dock_height = plan_dock_preferred_height(&plan_dock_state, area.width);
         let segment_detail_index = self.conversation.timeline_expanded_segment();
         let segment_detail_height = segment_detail::preferred_height(
             segment_detail_index.and_then(|idx| self.conversation.segments().get(idx)),
@@ -3862,10 +3895,11 @@ impl App {
             dashboard_has_content,
             editor_height,
             editor_info_height,
-            footer_instruments_height: self.instrument_panel.preferred_height(),
+            instrument_footer_height: self.instrument_panel.preferred_height(),
+            status_height: statusline::StatusLine::preferred_height(area.width),
             pending_permission: false,
             active_tool_stream_height: raw_active_tool_stream_height,
-            slim_plan_height: raw_slim_plan_height,
+            plan_dock_height: raw_plan_dock_height,
             segment_detail_height,
         });
 
@@ -3873,7 +3907,7 @@ impl App {
         let main_area = layout_plan.main_area;
         let conversation_area = layout_plan.conversation_area;
         let active_tool_stream_area = layout_plan.active_tool_stream_area;
-        let slim_plan_area = layout_plan.slim_plan_area;
+        let plan_dock_area = layout_plan.plan_dock_area;
         let segment_detail_area = layout_plan.segment_detail_area;
         let editor_area = layout_plan.editor_area;
         let editor_info_area = layout_plan.editor_info_area;
@@ -3967,10 +4001,8 @@ impl App {
             );
         }
 
-        if let Some(snapshot) = slim_plan_snapshot.as_ref()
-            && slim_plan_area.height > 0
-        {
-            render_slim_plan_panel(slim_plan_area, frame, self.theme.as_ref(), snapshot);
+        if plan_dock_state.active.is_some() && plan_dock_area.height > 0 {
+            render_plan_dock_panel(plan_dock_area, frame, self.theme.as_ref(), &plan_dock_state);
         }
 
         if segment_detail_area.height > 0
@@ -3986,6 +4018,38 @@ impl App {
             );
         }
 
+        // ── Sync footer data from settings (every frame) ────
+        {
+            let s = self.settings();
+            self.footer_data.model_id = s.model.clone();
+            self.footer_data.model_provider = s.provider().to_string();
+            self.footer_data.context_class = s.effective_requested_class();
+            self.footer_data.actual_context_class = s.context_class;
+            self.footer_data.context_window = s.context_window;
+            self.footer_data.thinking_level = s.thinking.as_str().to_string();
+            self.footer_data.posture = s.posture.effective.display_name().to_string();
+            self.footer_data.runtime_brand = if self.ui_surfaces.is_compact() {
+                "OM".to_string()
+            } else {
+                "Omegon".to_string()
+            };
+            self.footer_data.principal_id = s
+                .operating_profile()
+                .identity
+                .summary_principal()
+                .to_string();
+            self.footer_data.authorization = s.operating_profile().authorization.summary();
+            self.footer_data.provider_connected = s.provider_connected;
+            self.footer_data.sandbox = s.sandbox;
+            self.footer_data.is_oauth = s.provider_is_oauth;
+        }
+        {
+            self.footer_data.model_tier = self.footer_data.harness.capability_tier.clone();
+        }
+        self.footer_data.turn = self.turn;
+        self.footer_data.tool_calls = self.tool_calls;
+        self.footer_data.compactions = self.dashboard.compactions;
+
         // ── Status line (slim mode only) ────────────────────────
         if status_area.height > 0 {
             self.status_line.sync_from_footer(&self.footer_data);
@@ -3998,9 +4062,10 @@ impl App {
                 None
             };
             self.status_line.turn_state = Some(self.slim_turn_state.label());
-            let plan_state = slim_plan_snapshot
+            let plan_state = plan_dock_state
+                .active
                 .as_ref()
-                .map(|snapshot| snapshot.hint_state(slim_plan_area.height))
+                .map(|snapshot| snapshot.hint_state(plan_dock_area.height))
                 .unwrap_or_else(|| {
                     if slim_completed_plan_hint_available(self.completed_plan_history_available) {
                         SlimPlanHintState::Complete
@@ -4009,7 +4074,7 @@ impl App {
                     }
                 });
             let plan_context = SlimPlanContext::from_dashboard(
-                slim_plan_snapshot.is_some(),
+                plan_dock_state.active.is_some(),
                 &self.dashboard.active_changes,
                 self.dashboard.focused_node.as_ref(),
             );
@@ -4059,38 +4124,6 @@ impl App {
         } else {
             self.dashboard_area = None;
         }
-
-        // ── Sync footer data from settings (every frame) ────
-        {
-            let s = self.settings();
-            self.footer_data.model_id = s.model.clone();
-            self.footer_data.model_provider = s.provider().to_string();
-            self.footer_data.context_class = s.effective_requested_class();
-            self.footer_data.actual_context_class = s.context_class;
-            self.footer_data.context_window = s.context_window;
-            self.footer_data.thinking_level = s.thinking.as_str().to_string();
-            self.footer_data.posture = s.posture.effective.display_name().to_string();
-            self.footer_data.runtime_brand = if self.ui_surfaces.is_compact() {
-                "OM".to_string()
-            } else {
-                "Omegon".to_string()
-            };
-            self.footer_data.principal_id = s
-                .operating_profile()
-                .identity
-                .summary_principal()
-                .to_string();
-            self.footer_data.authorization = s.operating_profile().authorization.summary();
-            self.footer_data.provider_connected = s.provider_connected;
-            self.footer_data.sandbox = s.sandbox;
-            self.footer_data.is_oauth = s.provider_is_oauth;
-        }
-        {
-            self.footer_data.model_tier = self.footer_data.harness.capability_tier.clone();
-        }
-        self.footer_data.turn = self.turn;
-        self.footer_data.tool_calls = self.tool_calls;
-        self.footer_data.compactions = self.dashboard.compactions;
 
         // ── CIC Instrument Panel telemetry update ────
         {
@@ -4180,43 +4213,7 @@ impl App {
             }
         }
 
-        // ── Unified footer console: engine | inference | tools ──────
-        // Store instrument areas for cleanup pass to skip.
-        let inst_area = if !self.focus_mode && self.ui_surfaces.footer {
-            let _footer_area_inner = footer_area;
-            if self.ui_surfaces.instruments {
-                let footer_cols = Layout::horizontal([
-                    Constraint::Percentage(32),
-                    Constraint::Length(1),
-                    Constraint::Percentage(35),
-                    Constraint::Length(1),
-                    Constraint::Percentage(32),
-                ])
-                .split(footer_area);
-
-                self.footer_data
-                    .render_left_panel(footer_cols[0], frame, t.as_ref());
-                frame.render_widget(
-                    Block::default().style(Style::default().bg(t.footer_bg())),
-                    footer_cols[1],
-                );
-                self.instrument_panel
-                    .render_inference_panel(footer_cols[2], frame, t.as_ref());
-                frame.render_widget(
-                    Block::default().style(Style::default().bg(t.footer_bg())),
-                    footer_cols[3],
-                );
-                self.instrument_panel
-                    .render_tools_panel(footer_cols[4], frame, t.as_ref());
-                footer_cols[2].union(footer_cols[4])
-            } else {
-                self.footer_data
-                    .render_left_panel(footer_area, frame, t.as_ref());
-                footer_area
-            }
-        } else {
-            Rect::ZERO
-        };
+        let inst_area = self.render_bottom_footer(footer_area, frame, t.as_ref());
 
         // Apply theme to textarea each frame (in case theme changed)
         self.editor.apply_theme(t.as_ref());
@@ -6926,8 +6923,8 @@ Scroll transcript:
                     // A live slim plan lane is turn-scoped UI, not durable history.
                     // If no completion PlanUpdated arrives before the assistant turn
                     // finishes, clear it rather than leaving stale "plan active" chrome
-                    // pinned under a "turn done" status line.
-                    self.slim_plan_snapshot = None;
+                    // held under a "turn done" status line.
+                    self.plan_dock_snapshot = None;
                 }
                 // Update status line with behavioral signals
                 self.status_line.phase = te.dominant_phase;
@@ -7318,7 +7315,7 @@ Scroll transcript:
                 }
                 self.conversation.finalize_message();
                 // Keep completed turns anchored at the live tail. The old long-response
-                // pinning heuristic rewound compact sessions to the start of the final
+                // active-plan heuristic rewound compact sessions to the start of the final
                 // assistant segment, which made every completed GPT-5.5 turn land tens
                 // of lines above the composer and forced a manual End/scroll recovery.
                 self.effects.stop_spinner_glow();
@@ -7399,14 +7396,14 @@ Scroll transcript:
                             .push_system(&snapshot.system_notification_text("Plan progress"));
                     }
                     self.conversation.snap_to_bottom();
-                    self.slim_plan_snapshot = None;
+                    self.plan_dock_snapshot = None;
                 } else {
-                    self.slim_plan_snapshot = snapshot;
+                    self.plan_dock_snapshot = snapshot;
                 }
             }
             AgentEvent::SessionReset => {
                 self.conversation = ConversationView::new();
-                self.slim_plan_snapshot = None;
+                self.plan_dock_snapshot = None;
                 self.completed_plan_history_available = false;
                 self.active_tool_stream = None;
                 self.turn = 0;
@@ -9661,13 +9658,62 @@ mod slash_command_parsing_tests {
     use super::slim_plan::{
         PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus, SlimPlanContext,
         SlimPlanHintState, slim_completed_plan_hint_available, slim_operator_hint,
-        slim_pinned_plan_snapshot, slim_plan_rows,
+        active_plan_dock_snapshot, plan_dock_rows,
     };
     use crate::lifecycle::types::NodeStatus;
     use crossterm::event::{KeyCode, KeyModifiers};
     use tokio::sync::mpsc;
 
     // ── Profile ───────────────────────────────────────────
+
+    #[test]
+    fn plan_dock_background_only_uses_compact_height() {
+        use super::slim_plan::{PlanDockState, PlanLifecycleStatus, PlanSummary, plan_dock_preferred_height};
+
+        let empty = PlanDockState::default();
+        assert_eq!(plan_dock_preferred_height(&empty, 100), 0);
+
+        let state = PlanDockState {
+            active: None,
+            background: vec![PlanSummary {
+                id: "release".into(),
+                title: "release hardening".into(),
+                status: PlanLifecycleStatus::Background,
+                completed: 2,
+                total: 5,
+            }],
+        };
+        assert_eq!(plan_dock_preferred_height(&state, 100), 1);
+    }
+
+    #[test]
+    fn plan_dock_background_only_renders_summary_without_task_rows() {
+        use super::slim_plan::{PlanDockState, PlanLifecycleStatus, PlanSummary, render_plan_dock_panel};
+
+        let state = PlanDockState {
+            active: None,
+            background: vec![PlanSummary {
+                id: "release".into(),
+                title: "release hardening".into(),
+                status: PlanLifecycleStatus::Waiting,
+                completed: 2,
+                total: 5,
+            }],
+        };
+        let backend = ratatui::backend::TestBackend::new(80, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_plan_dock_panel(frame.area(), frame, &super::theme::Alpharius, &state))
+            .unwrap();
+        let mut text = String::new();
+        for x in 0..80 {
+            text.push_str(terminal.backend().buffer()[(x, 0)].symbol());
+        }
+
+        assert!(text.contains("background plans×1"), "{text}");
+        assert!(text.contains("waiting 2/5"), "{text}");
+        assert!(text.contains("release hardening"), "{text}");
+    }
 
     #[test]
     fn slim_plan_contract_renders_structured_snapshot() {
@@ -9684,7 +9730,7 @@ mod slash_command_parsing_tests {
         }))
         .unwrap();
         assert_eq!(snapshot.summary(), "plan 2/4 · executing");
-        let rows = slim_plan_rows(&snapshot, 80, 5);
+        let rows = plan_dock_rows(&snapshot, 80, 5);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
             vec![
@@ -9709,7 +9755,7 @@ mod slash_command_parsing_tests {
             })).collect::<Vec<_>>()
         }))
         .unwrap();
-        let rows = slim_plan_rows(&snapshot, 40, 4);
+        let rows = plan_dock_rows(&snapshot, 40, 4);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
             vec!["1. done    Step 0", "2. todo    Step 1", "+5 more"]
@@ -9823,27 +9869,27 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn completed_legacy_plan_does_not_pin_in_slim() {
-        let pinned = slim_pinned_plan_snapshot(
+    fn completed_legacy_plan_does_not_activate_plan_dock() {
+        let active = active_plan_dock_snapshot(
             None,
             Some("Plan progress\nPlan mode: complete\nProgress: 2/2\n\n1. ● A\n2. ● B"),
         );
 
-        assert!(pinned.is_none());
+        assert!(active.is_none());
     }
 
     #[test]
-    fn legacy_plan_history_does_not_pin_in_slim() {
-        let pinned = slim_pinned_plan_snapshot(
+    fn legacy_plan_history_does_not_activate_plan_dock() {
+        let active = active_plan_dock_snapshot(
             None,
             Some("Plan progress\nPlan mode: executing\nProgress: 1/2\n\n1. ● Old\n2. ◐ Stale"),
         );
 
-        assert!(pinned.is_none());
+        assert!(active.is_none());
     }
 
     #[test]
-    fn live_active_plan_still_pins_in_slim() {
+    fn live_active_plan_still_activates_plan_dock() {
         let live = PlanDisplaySnapshot {
             mode: "executing".to_string(),
             completed: 1,
@@ -9859,14 +9905,14 @@ mod slash_command_parsing_tests {
                 },
             ],
         };
-        let pinned = slim_pinned_plan_snapshot(Some(&live), None).unwrap();
+        let active = active_plan_dock_snapshot(Some(&live), None).unwrap();
 
-        assert_eq!(pinned.summary(), "plan 1/2 · executing");
-        assert!(!pinned.is_complete());
+        assert_eq!(active.summary(), "plan 1/2 · executing");
+        assert!(!active.is_complete());
     }
 
     #[test]
-    fn completed_live_plan_snapshot_does_not_pin_in_slim() {
+    fn completed_live_plan_snapshot_does_not_activate_plan_dock() {
         let completed = PlanDisplaySnapshot {
             mode: "complete".to_string(),
             completed: 1,
@@ -9877,7 +9923,7 @@ mod slash_command_parsing_tests {
             }],
         };
 
-        assert!(slim_pinned_plan_snapshot(Some(&completed), None).is_none());
+        assert!(active_plan_dock_snapshot(Some(&completed), None).is_none());
     }
 
     #[test]
@@ -9952,7 +9998,7 @@ mod slash_command_parsing_tests {
     fn slim_operator_hint_prioritizes_blocking_prompts() {
         let active = SlimPlanHintState::Active { next_visible: true };
         let context = SlimPlanContext {
-            pinned: true,
+            active: true,
             tracked: true,
             openspec_changes: 2,
             focused_design: true,
@@ -9971,7 +10017,7 @@ mod slash_command_parsing_tests {
         );
         assert_eq!(
             slim_operator_hint(false, false, false, active, &context),
-            "plan active · pinned · tracked · OpenSpec×2 · design-linked"
+            "plan active · active plan · tracked · OpenSpec×2 · design-linked"
         );
         assert_eq!(
             slim_operator_hint(
@@ -9983,7 +10029,7 @@ mod slash_command_parsing_tests {
                 },
                 &context
             ),
-            "plan active · next below · pinned · tracked · OpenSpec×2 · design-linked"
+            "plan active · next below · active plan · tracked · OpenSpec×2 · design-linked"
         );
         assert_eq!(
             slim_operator_hint(false, false, false, SlimPlanHintState::Complete, &context),
@@ -9996,7 +10042,7 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn slim_plan_context_labels_pin_tracking_and_lifecycle_links() {
+    fn slim_plan_context_labels_active_tracking_and_lifecycle_links() {
         let changes = vec![dashboard::ChangeSummary {
             name: "rollup".into(),
             stage: "implementing".into(),
@@ -10017,11 +10063,11 @@ mod slash_command_parsing_tests {
         let context = SlimPlanContext::from_dashboard(true, &changes, Some(&focused));
         assert_eq!(
             context.labels(),
-            vec!["pinned", "tracked", "OpenSpec×1", "design-linked"]
+            vec!["active plan", "tracked", "OpenSpec×1", "design-linked"]
         );
 
         let context = SlimPlanContext::from_dashboard(false, &[], None);
-        assert_eq!(context.labels(), vec!["unpinned"]);
+        assert_eq!(context.labels(), vec!["no active plan"]);
     }
 
     #[test]

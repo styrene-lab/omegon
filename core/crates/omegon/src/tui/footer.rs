@@ -151,9 +151,9 @@ impl FooterData {
         self.render_system_card(cols[3], frame, t);
     }
 
-    /// Render the left panel for the split-panel layout (engine + memory).
-    /// This replaces the 4-card layout when instruments are visible on the right.
-    pub fn render_left_panel(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+    /// Render the compact engine fallback panel used when instrument panels are hidden.
+    /// In slim mode with instruments visible, engine telemetry lives in the status sidecar row.
+    pub fn render_engine_fallback_panel(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let bg = t.footer_bg();
         frame.render_widget(Clear, area);
         let bg_block = Block::default().style(Style::default().bg(bg));
@@ -180,7 +180,7 @@ impl FooterData {
             return;
         }
 
-        // Engine only — memory is visualized in the inference panel
+        // Engine fallback only; memory is visualized in the inference panel when instruments are visible.
         self.render_engine_section(area, frame, t);
     }
 
@@ -227,10 +227,6 @@ impl FooterData {
                 .add_modifier(Modifier::BOLD),
         )));
 
-        let provider_label = crate::auth::provider_by_id(&self.model_provider)
-            .map(|p| p.display_name)
-            .unwrap_or(self.model_provider.as_str());
-        let model_short = short_model(&self.model_id);
         let provider_runtime = self
             .harness
             .providers
@@ -256,87 +252,43 @@ impl FooterData {
                 t.muted(),
                 false,
             );
-        } else {
-            let provider_icon = if is_local_provider(&self.model_provider) {
-                "⤵"
-            } else {
-                "⤴"
-            };
-            let auth_text = if is_local_provider(&self.model_provider) {
-                "local"
-            } else if self.is_oauth {
-                "sub"
-            } else {
-                "api"
-            };
+        } else if let Some(provider) = provider_runtime
+            && matches!(
+                provider.runtime_status,
+                Some(crate::status::ProviderRuntimeStatus::Degraded)
+            )
+        {
+            let failures = provider.recent_failure_count.unwrap_or(0);
+            let kind = provider
+                .last_failure_kind
+                .as_deref()
+                .unwrap_or("transient upstream failures");
+            let status_suffix = provider
+                .last_failure_at
+                .as_deref()
+                .and_then(format_failure_age)
+                .unwrap_or_else(|| "last recently".to_string());
             push_row(
                 &mut lines,
-                "model",
-                format!("{provider_icon} {provider_label} · {model_short} · {auth_text}"),
+                "status",
+                format!("≈ degraded · {failures}× {kind} · {status_suffix}"),
                 value_width,
                 t.border_dim(),
-                t.fg(),
-                true,
+                t.warning(),
+                false,
             );
-
-            if let Some(provider) = provider_runtime
-                && matches!(
-                    provider.runtime_status,
-                    Some(crate::status::ProviderRuntimeStatus::Degraded)
-                )
-            {
-                let failures = provider.recent_failure_count.unwrap_or(0);
-                let kind = provider
-                    .last_failure_kind
-                    .as_deref()
-                    .unwrap_or("transient upstream failures");
-                let status_suffix = provider
-                    .last_failure_at
-                    .as_deref()
-                    .and_then(format_failure_age)
-                    .unwrap_or_else(|| "last recently".to_string());
-                push_row(
-                    &mut lines,
-                    "status",
-                    format!("≈ degraded · {failures}× {kind} · {status_suffix}"),
-                    value_width,
-                    t.border_dim(),
-                    t.warning(),
-                    false,
-                );
-            }
-
-            if let Some(quota_line) =
-                format_provider_telemetry_compact(self.provider_telemetry.as_ref())
-            {
-                push_row(
-                    &mut lines,
-                    "limit",
-                    quota_line,
-                    value_width,
-                    t.border_dim(),
-                    t.accent_muted(),
-                    false,
-                );
-            }
         }
 
-        let identity_bits = [
-            (!self.principal_id.is_empty()).then(|| self.principal_id.clone()),
-            (!self.authorization.is_empty()).then(|| self.authorization.clone()),
-            self.sandbox.then(|| "isolated".to_string()),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-        if !identity_bits.is_empty() {
+        if let Some(quota_line) =
+            format_provider_telemetry_compact(self.provider_telemetry.as_ref())
+        {
             push_row(
                 &mut lines,
-                "authz",
-                identity_bits.join(" · "),
+                "limit",
+                quota_line,
                 value_width,
                 t.border_dim(),
-                t.dim(),
+                t.accent_muted(),
                 false,
             );
         }
@@ -363,6 +315,13 @@ impl FooterData {
                     Style::default().fg(event.color),
                 ),
             ]));
+        }
+
+        if lines.len() == 1 {
+            lines.push(Line::from(Span::styled(
+                " nominal",
+                Style::default().fg(t.dim()),
+            )));
         }
 
         frame.render_widget(Clear, inner);
@@ -1267,7 +1226,7 @@ mod tests {
                         }
                     }
                 }
-                data.render_left_panel(area, frame, &super::super::theme::Alpharius);
+                data.render_engine_fallback_panel(area, frame, &super::super::theme::Alpharius);
             })
             .unwrap();
 
@@ -1500,12 +1459,12 @@ mod tests {
         );
     }
 
-    fn render_left_panel_text(data: &FooterData, width: u16, height: u16) -> String {
+    fn render_engine_fallback_panel_text(data: &FooterData, width: u16, height: u16) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
-                data.render_left_panel(frame.area(), frame, &super::super::theme::Alpharius);
+                data.render_engine_fallback_panel(frame.area(), frame, &super::super::theme::Alpharius);
             })
             .unwrap();
 
@@ -1518,37 +1477,6 @@ mod tests {
         (0..a.height)
             .flat_map(|y| (0..a.width).map(move |x| buf[(x, y)].symbol().to_string()))
             .collect()
-    }
-
-    #[test]
-    fn left_panel_keeps_version_visible_without_showing_path_noise() {
-        let data = FooterData {
-            model_id: "openai:gpt-5.4".into(),
-            model_provider: "openai".into(),
-            context_percent: 68.0,
-            context_window: 272_000,
-            context_class: ContextClass::Standard,
-            session_input_tokens: 12_000,
-            session_output_tokens: 3_000,
-            turn: 7,
-            cwd: "/Users/test/workspace/black-meridian/omegon/core/crates/omegon".into(),
-            thinking_level: "high".into(),
-            model_tier: "victory".into(),
-            provider_connected: true,
-            update_available: Some("9.9.9".into()),
-            ..Default::default()
-        };
-        let text = render_left_panel_text(&data, 52, 10);
-
-        assert!(text.contains("gpt-5.4"), "got {text}");
-        assert!(!text.contains("Victory"), "got {text}");
-        assert!(!text.contains("High"), "got {text}");
-        assert!(!text.contains("T7"), "got {text}");
-        assert!(text.contains("version"), "got {text}");
-        assert!(text.contains("v"), "got {text}");
-        assert!(text.contains("/update"), "got {text}");
-        assert!(!text.contains("9.9.9"), "got {text}");
-        assert!(!text.contains("/Users/test/workspace"), "got {text}");
     }
 
     #[test]
@@ -1569,41 +1497,8 @@ mod tests {
             is_oauth: true,
             ..Default::default()
         };
-        let text = render_left_panel_text(&data, 64, 10);
+        let text = render_engine_fallback_panel_text(&data, 64, 10);
         assert!(!text.contains("Massive→Compact"), "got {text}");
-    }
-
-    #[test]
-    fn left_panel_uses_new_engine_provider_and_token_symbols() {
-        let data = FooterData {
-            model_id: "openai:gpt-5.4".into(),
-            model_provider: "openai".into(),
-            context_percent: 68.0,
-            context_window: 272_000,
-            context_class: ContextClass::Standard,
-            session_input_tokens: 12_000,
-            session_output_tokens: 3_000,
-            turn: 7,
-            thinking_level: "high".into(),
-            posture: "Architect".into(),
-            runtime_brand: "OM".into(),
-            model_tier: "victory".into(),
-            provider_connected: true,
-            is_oauth: true,
-            ..Default::default()
-        };
-        let text = render_left_panel_text(&data, 64, 10);
-
-        assert!(
-            text.contains("⤴ OpenAI") || text.contains("⤴ openai"),
-            "got {text}"
-        );
-        assert!(text.contains("sub"), "got {text}");
-        assert!(text.contains("gpt-5.4"), "got {text}");
-        assert!(!text.contains("version"), "got {text}");
-        assert!(!text.contains("Architect · OM"), "got {text}");
-        assert!(!text.contains("Victory · High"), "got {text}");
-        assert!(!text.contains("Standard→Compact 68% / ¤272k"), "got {text}");
     }
 
     #[test]
@@ -1629,7 +1524,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let text = render_left_panel_text(&data, 72, 8);
+        let text = render_engine_fallback_panel_text(&data, 72, 8);
 
         assert!(
             text.contains("6× stalled stream · last 2m ago"),
@@ -1660,7 +1555,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let text = render_left_panel_text(&data, 96, 10);
+        let text = render_engine_fallback_panel_text(&data, 96, 10);
 
         assert!(text.contains("limit"), "got {text}");
         assert!(!text.contains("bucket GPT-5.3-Codex-Spark"), "got {text}");
@@ -1683,7 +1578,7 @@ mod tests {
             session_output_tokens: 3_000,
             ..Default::default()
         };
-        let text = render_left_panel_text(&data, 72, 10);
+        let text = render_engine_fallback_panel_text(&data, 72, 10);
 
         assert!(!text.contains("version"), "got {text}");
         assert!(!text.contains("session"), "got {text}");
@@ -1714,41 +1609,12 @@ mod tests {
             }),
             ..Default::default()
         };
-        let text = render_left_panel_text(&data, 44, 10);
+        let text = render_engine_fallback_panel_text(&data, 44, 10);
 
         assert!(text.contains("limit"), "got {text}");
         assert!(text.contains('…'), "got {text}");
         assert!(!text.contains("weekly 4d"), "got {text}");
         assert!(!text.contains("credits metered"), "got {text}");
-    }
-
-    #[test]
-    fn left_panel_truncates_anthropic_limit_row_aggressively() {
-        let data = FooterData {
-            model_id: "anthropic:claude-sonnet-4-6".into(),
-            model_provider: "anthropic".into(),
-            provider_connected: true,
-            thinking_level: "high".into(),
-            model_tier: "victory".into(),
-            provider_telemetry: Some(omegon_traits::ProviderTelemetrySnapshot {
-                provider: "anthropic".into(),
-                source: "response_headers".into(),
-                unified_5h_utilization_pct: Some(42.0),
-                unified_7d_utilization_pct: Some(64.0),
-                retry_after_secs: Some(17),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let text = render_left_panel_text(&data, 44, 10);
-
-        assert!(text.contains("limit"), "got {text}");
-        assert!(text.contains('…'), "got {text}");
-        assert!(text.contains("5h 42%"), "got {text}");
-        assert!(
-            text.contains("retry 17s") || text.contains('…'),
-            "got {text}"
-        );
     }
 
     #[test]
@@ -1790,12 +1656,12 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                verbose.render_left_panel(frame.area(), frame, &super::super::theme::Alpharius)
+                verbose.render_engine_fallback_panel(frame.area(), frame, &super::super::theme::Alpharius)
             })
             .unwrap();
         terminal
             .draw(|frame| {
-                compact.render_left_panel(frame.area(), frame, &super::super::theme::Alpharius)
+                compact.render_engine_fallback_panel(frame.area(), frame, &super::super::theme::Alpharius)
             })
             .unwrap();
 
