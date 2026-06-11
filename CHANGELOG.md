@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Add `just source-clean` and source-vs-agent-state dirty classification so live `.omegon/` telemetry no longer blocks source-plane cleanliness checks.
+
 ## [0.27.0] - 2026-06-11
 
 ### Added

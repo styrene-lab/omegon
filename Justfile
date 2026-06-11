@@ -23,6 +23,10 @@ bootstrap *args:
 dirty-report:
     python3 scripts/dirty_report.py
 
+# Gate on source-plane cleanliness while allowing live agent telemetry/state.
+source-clean:
+    python3 scripts/dirty_report.py --source-clean
+
 # ─── Rust ────────────────────────────────────────────
 
 # Run all Rust tests
@@ -47,7 +51,7 @@ test-profile *args:
 
 # Run Python unit tests for developer tooling scripts.
 test-dev-scripts:
-    python3 -m unittest scripts/test_affected_crates.py scripts/test_test_profile.py
+    python3 -m unittest scripts/test_affected_crates.py scripts/test_test_profile.py scripts/test_dirty_report.py
 
 # Check provider-published model context docs against the local registry.
 provider-context-truth *args:
