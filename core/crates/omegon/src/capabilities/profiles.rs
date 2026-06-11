@@ -23,9 +23,51 @@ pub struct AssistantProfileSummary {
     pub optional_secrets: Vec<String>,
     pub triggers: Vec<String>,
     pub trust: CapabilityTrustSummary,
+    pub launch_readiness: AssistantLaunchReadiness,
     pub secret_readiness: AssistantSecretReadinessSummary,
     pub capability_node_ids: Vec<String>,
     pub missing_required_node_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssistantLaunchReadiness {
+    pub status: AssistantLaunchStatus,
+    pub blockers: Vec<AssistantLaunchBlocker>,
+    pub warnings: Vec<AssistantLaunchWarning>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantLaunchStatus {
+    Ready,
+    Degraded,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssistantLaunchBlocker {
+    pub kind: AssistantLaunchBlockerKind,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantLaunchBlockerKind {
+    RequiredSecretMissing,
+    RequiredCapabilityMissing,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssistantLaunchWarning {
+    pub kind: AssistantLaunchWarningKind,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantLaunchWarningKind {
+    OptionalSecretMissing,
+    SecretDeferred,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -61,7 +103,7 @@ fn resolve_assistant_profile(
 ) -> AssistantProfileSummary {
     let root_id = format!("agent:{}", agent.id);
     let capability_node_ids = reachable_node_ids(&root_id, graph);
-    let missing_required_node_ids = capability_node_ids
+    let missing_required_node_ids: Vec<String> = capability_node_ids
         .iter()
         .filter(|id| {
             graph
@@ -71,6 +113,8 @@ fn resolve_assistant_profile(
         })
         .cloned()
         .collect();
+
+    let secret_summary = summarize_agent_secret_readiness(agent, secret_readiness);
 
     AssistantProfileSummary {
         id: agent.id.clone(),
@@ -98,9 +142,59 @@ fn resolve_assistant_profile(
             .map(|trigger| trigger.name.clone())
             .collect(),
         trust: merge_trust(&capability_node_ids, graph),
-        secret_readiness: summarize_agent_secret_readiness(agent, secret_readiness),
+        launch_readiness: summarize_launch_readiness(&secret_summary, &missing_required_node_ids),
+        secret_readiness: secret_summary,
         capability_node_ids,
         missing_required_node_ids,
+    }
+}
+
+fn summarize_launch_readiness(
+    secrets: &AssistantSecretReadinessSummary,
+    missing_required_node_ids: &[String],
+) -> AssistantLaunchReadiness {
+    let mut blockers: Vec<_> = secrets
+        .missing_required
+        .iter()
+        .map(|id| AssistantLaunchBlocker {
+            kind: AssistantLaunchBlockerKind::RequiredSecretMissing,
+            id: id.clone(),
+        })
+        .collect();
+    blockers.extend(
+        missing_required_node_ids
+            .iter()
+            .map(|id| AssistantLaunchBlocker {
+                kind: AssistantLaunchBlockerKind::RequiredCapabilityMissing,
+                id: id.clone(),
+            }),
+    );
+
+    let mut warnings: Vec<_> = secrets
+        .missing_optional
+        .iter()
+        .map(|id| AssistantLaunchWarning {
+            kind: AssistantLaunchWarningKind::OptionalSecretMissing,
+            id: id.clone(),
+        })
+        .collect();
+    warnings.extend(secrets.deferred.iter().map(|id| AssistantLaunchWarning {
+        kind: AssistantLaunchWarningKind::SecretDeferred,
+        id: id.clone(),
+    }));
+
+    let status = if !blockers.is_empty() {
+        AssistantLaunchStatus::Blocked
+    } else if !warnings.is_empty() {
+        AssistantLaunchStatus::Degraded
+    } else {
+        AssistantLaunchStatus::Ready
+    };
+
+    AssistantLaunchReadiness {
+        status,
+        blockers,
+        warnings,
     }
 }
 
@@ -297,6 +391,11 @@ mod tests {
         assert!(profiles[0].trust.secret_bound);
         assert_eq!(profiles[0].secret_readiness.required_total, 1);
         assert_eq!(profiles[0].secret_readiness.required_ready, 1);
+        assert_eq!(
+            profiles[0].launch_readiness.status,
+            AssistantLaunchStatus::Ready
+        );
+        assert!(profiles[0].launch_readiness.blockers.is_empty());
         assert!(profiles[0].secret_readiness.missing_required.is_empty());
         assert!(!profiles[0].trust.read_only);
         assert!(
