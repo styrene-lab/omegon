@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Import discovered external provider credentials into Omegon auth storage once at startup so OpenAI/Codex OAuth survives rebuilt binary relinks and subsequent session hydration uses internal auth.json.
+
 ## [0.27.0] - 2026-06-11
 
 ### Added

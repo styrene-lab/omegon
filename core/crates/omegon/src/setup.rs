@@ -239,6 +239,7 @@ impl AgentSetup {
         // Async preflight resolves ALL recipe types including vault:.
         // Replaces the sync preflight_session_cache() which silently skips vault recipes.
         secrets.preflight_session_cache_async(preflight).await;
+        crate::auth::import_discovered_provider_credentials();
         let mut session_secret_env = secrets.session_env();
         let pre_hydrated_env_len = session_secret_env.len();
         hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);

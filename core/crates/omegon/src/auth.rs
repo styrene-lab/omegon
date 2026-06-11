@@ -917,6 +917,53 @@ pub fn clear_provider_auth_env(provider: &str) {
     }
 }
 
+/// Import usable credentials discovered in supported external tools into
+/// Omegon's auth store. This is a bootstrap path only: normal provider
+/// hydration should continue to read Omegon-owned auth.json after import.
+pub fn import_discovered_provider_credentials() -> usize {
+    let mut imported = 0;
+
+    for provider in PROVIDERS {
+        let existing = read_credentials(provider.auth_key);
+        if existing.as_ref().is_some_and(|creds| {
+            creds.cred_type != "oauth" || !creds.is_expired()
+        }) {
+            continue;
+        }
+
+        let Some(discovered) = read_external_credentials(provider.auth_key) else {
+            continue;
+        };
+        if discovered.cred_type == "oauth" && discovered.is_expired() {
+            continue;
+        }
+
+        let persist_result = if provider.auth_key == "openai-codex" {
+            let account_id = read_external_credential_extra(provider.auth_key, "accountId");
+            write_credentials_with_extra(provider.auth_key, &discovered, account_id.as_deref())
+        } else {
+            write_credentials(provider.auth_key, &discovered)
+        };
+
+        match persist_result {
+            Ok(()) => {
+                imported += 1;
+                tracing::info!(
+                    provider = provider.id,
+                    "imported discovered provider credentials into auth.json"
+                );
+            }
+            Err(e) => tracing::warn!(
+                provider = provider.id,
+                error = %auth_write_failure_operator_message(&e),
+                "discovered provider credential could not be imported"
+            ),
+        }
+    }
+
+    imported
+}
+
 /// Resolve API key with automatic token refresh.
 /// Returns (api_key, is_oauth_token).
 pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
@@ -2477,6 +2524,88 @@ mod tests {
                     .expect("refreshed credentials")
                     .refresh,
                 "new-refresh-token"
+            );
+        });
+    }
+
+    #[test]
+    fn import_discovered_credentials_persists_codex_account_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth_path = dir.path().join("auth.json");
+        let home = dir.path().join("home");
+        let codex_dir = home.join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let expires_at_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 3600;
+        let access = unsigned_codex_jwt_with_exp(expires_at_secs);
+        std::fs::write(
+            codex_dir.join("auth.json"),
+            serde_json::json!({
+                "tokens": {
+                    "access_token": access,
+                    "refresh_token": "codex-refresh-token",
+                    "account_id": "acct_imported"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        with_auth_json_path_and_home_env(Some(&auth_path), &home, || {
+            assert_eq!(import_discovered_provider_credentials(), 1);
+            let imported = read_credentials("openai-codex").expect("imported codex credentials");
+            assert_eq!(imported.refresh, "codex-refresh-token");
+            assert_eq!(imported.access, access);
+            assert_eq!(
+                read_credential_extra("openai-codex", "accountId").as_deref(),
+                Some("acct_imported")
+            );
+        });
+    }
+
+    #[test]
+    fn import_discovered_credentials_keeps_fresh_internal_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth_path = dir.path().join("auth.json");
+        let home = dir.path().join("home");
+        let codex_dir = home.join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let expires_at_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 3600;
+        std::fs::write(
+            codex_dir.join("auth.json"),
+            serde_json::json!({
+                "tokens": {
+                    "access_token": unsigned_codex_jwt_with_exp(expires_at_secs),
+                    "refresh_token": "external-refresh-token",
+                    "account_id": "acct_external"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let internal = OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "internal-access-token".into(),
+            refresh: "internal-refresh-token".into(),
+            expires: 9_999_999_999_999,
+        };
+
+        with_auth_json_path_and_home_env(Some(&auth_path), &home, || {
+            write_credentials_with_extra("openai-codex", &internal, Some("acct_internal"))
+                .expect("write internal codex auth");
+            assert_eq!(import_discovered_provider_credentials(), 0);
+            let persisted = read_credentials("openai-codex").expect("persisted credentials");
+            assert_eq!(persisted.access, "internal-access-token");
+            assert_eq!(
+                read_credential_extra("openai-codex", "accountId").as_deref(),
+                Some("acct_internal")
             );
         });
     }
