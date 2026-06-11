@@ -4004,6 +4004,9 @@ mod extension_metadata_tests {
 
         assert_eq!(response["surfaces"]["_runtime/status"]["version"], 1);
         assert_eq!(response["surfaces"]["_provider/status"]["version"], 1);
+        assert_eq!(response["surfaces"]["_provider/retry"]["version"], 1);
+        assert_eq!(response["surfaces"]["_provider/failure"]["version"], 1);
+        assert_eq!(response["surfaces"]["_turn/cancelled"]["version"], 1);
         assert_eq!(response["surfaces"]["_lifecycle/snapshot"]["version"], 1);
         assert_eq!(response["surfaces"]["_lifecycle/design/list"]["version"], 1);
         assert_eq!(response["surfaces"]["_lifecycle/design/get"]["version"], 1);

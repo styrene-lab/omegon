@@ -216,6 +216,21 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         "Active provider/auth/model readiness."
     ),
     acp_read_endpoint!(
+        "_provider/retry",
+        BackendDomain::Provider,
+        "Provider retry telemetry notification."
+    ),
+    acp_read_endpoint!(
+        "_provider/failure",
+        BackendDomain::Provider,
+        "Provider terminal-failure telemetry notification."
+    ),
+    acp_read_endpoint!(
+        "_turn/cancelled",
+        BackendDomain::Runtime,
+        "Turn cancellation terminal telemetry notification."
+    ),
+    acp_read_endpoint!(
         "_extensions/list",
         BackendDomain::Extensions,
         "Installed and loaded extension inventory."
@@ -392,10 +407,23 @@ mod tests {
     }
 
     #[test]
+    fn provider_telemetry_surfaces_are_registered_as_read_only_notifications() {
+        for method in ["_provider/retry", "_provider/failure", "_turn/cancelled"] {
+            let endpoint = find_by_acp_method(method).unwrap();
+            assert_eq!(endpoint.mutability, BackendMutability::Read);
+            assert_eq!(endpoint.permission, BackendPermission::Read);
+            assert!(endpoint.side_effects.is_empty());
+        }
+    }
+
+    #[test]
     fn capability_json_is_generated_from_acp_registry() {
         let surfaces = acp_capability_surfaces_json();
         assert_eq!(surfaces["_runtime/status"]["version"], 1);
         assert_eq!(surfaces["_lifecycle/design/frontier"]["version"], 1);
+        assert_eq!(surfaces["_provider/retry"]["version"], 1);
+        assert_eq!(surfaces["_provider/failure"]["version"], 1);
+        assert_eq!(surfaces["_turn/cancelled"]["version"], 1);
         assert_eq!(surfaces["_external_tasks/import"]["version"], 1);
     }
 }

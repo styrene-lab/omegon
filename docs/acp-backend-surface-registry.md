@@ -20,7 +20,7 @@ This node tracks the 0.27.0 foundation work to introduce a metadata-only backend
 
 ## Outcome
 
-Implemented in commit `937db59 feat(acp): add backend surface registry`.
+Implemented in commit `937db59 feat(acp): add backend surface registry`, then extended with issue #128 telemetry discovery for `_provider/retry`, `_provider/failure`, and `_turn/cancelled`.
 
 ### Files
 
@@ -63,6 +63,7 @@ Rationale: Lifecycle read projections are the first ACP surfaces likely to be re
 - Add richer `_runtime/capabilities` metadata for clients that want domains, permissions, mutability, transports, and side-effect labels.
 - Wire HTTP lifecycle read routes from the same registry once the HTTP/control adapter is ready.
 - Add registry coverage tests that compare implemented ACP request handlers with registered ACP extension methods.
+- Promote additional issue #128 turn-control contracts into the registry if the ACP protocol grows beyond `_provider/retry`, `_provider/failure`, and `_turn/cancelled`.
 
 ## Open Questions
 
