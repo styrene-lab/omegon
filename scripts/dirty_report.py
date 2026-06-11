@@ -45,6 +45,10 @@ class Entry:
     plane: str
     note: str
 
+    @property
+    def staged(self) -> bool:
+        return self.status[0] not in {" ", "?"}
+
 
 def run_git(args: list[str]) -> str:
     result = subprocess.run(
@@ -168,6 +172,7 @@ def build_report(entries: list[Entry]) -> dict[str, object]:
         "clean": not entries,
         "source_clean": not sources,
         "agent_state_dirty": bool(agent_state),
+        "staged_agent_state_count": sum(1 for entry in agent_state if entry.staged),
         "source_count": len(sources),
         "agent_state_count": len(agent_state),
         "entries": [asdict(entry) for entry in entries],
@@ -212,6 +217,12 @@ def print_human_report(entries: list[Entry]) -> None:
         warnings.append("for Rust source dirt, check whether unrelated files are rustfmt-only drift.")
     if "release-memory" not in cats and ({"rust-source", "tooling", "cargo"} & cats):
         warnings.append("behavior/tooling changes may require CHANGELOG.md under [Unreleased].")
+    staged_agent_state = [entry for entry in agent_state if entry.staged]
+    if staged_agent_state:
+        warnings.append(
+            "agent-state is staged; unstage it before source commits: "
+            + ", ".join(entry.path for entry in staged_agent_state)
+        )
     if agent_state and sources:
         warnings.append("agent-state is dirty alongside source; use explicit-path commits.")
 
@@ -248,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     elif args.source_clean:
-        if report["source_clean"]:
+        if report["source_clean"] and report["staged_agent_state_count"] == 0:
             if report["agent_state_dirty"]:
                 print("Source tree clean; agent state dirty.")
             else:
@@ -258,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print_human_report(entries)
 
-    if args.source_clean and not report["source_clean"]:
+    if args.source_clean and (not report["source_clean"] or report["staged_agent_state_count"]):
         return 1
     return 0
 

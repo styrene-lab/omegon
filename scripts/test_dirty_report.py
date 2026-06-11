@@ -76,6 +76,20 @@ class DirtyReportTests(unittest.TestCase):
         self.assertFalse(report["source_clean"])
         self.assertTrue(report["agent_state_dirty"])
 
+    def test_source_clean_fails_for_staged_agent_state(self) -> None:
+        entries = [
+            dr.Entry(
+                status="M ",
+                path=".omegon/audit-log.jsonl",
+                category="agent-state",
+                plane="agent-state",
+                note="live",
+            )
+        ]
+        report = dr.build_report(entries)
+        self.assertTrue(report["source_clean"])
+        self.assertEqual(report["staged_agent_state_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
