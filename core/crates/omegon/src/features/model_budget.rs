@@ -330,10 +330,9 @@ mod tests {
 
     #[test]
     fn tier_resolve_anthropic() {
-        assert!(
-            ModelTier::Gloriana
-                .resolve_model("anthropic", "")
-                .contains("opus")
+        assert_eq!(
+            ModelTier::Gloriana.resolve_model("anthropic", ""),
+            "claude-fable-5"
         );
         assert!(
             ModelTier::Victory
@@ -375,9 +374,10 @@ mod tests {
         let budget = ModelBudget::new(settings.clone());
         let msg = budget.switch_tier(ModelTier::Gloriana, "test");
         assert!(msg.contains("gloriana"), "should mention tier: {msg}");
-        assert!(
-            settings.lock().unwrap().model.contains("opus"),
-            "should switch to opus"
+        assert_eq!(
+            settings.lock().unwrap().model,
+            "anthropic:claude-fable-5",
+            "should switch to highest-tier Anthropic model"
         );
     }
 
@@ -399,9 +399,9 @@ mod tests {
         let model = ModelTier::Victory.resolve_model("anthropic", "claude-sonnet-4-6");
         assert_eq!(model, "claude-sonnet-4-6", "should preserve exact version");
 
-        // If on a different tier, should switch to default
+        // If on a different tier, should switch to highest-tier default.
         let model = ModelTier::Gloriana.resolve_model("anthropic", "claude-sonnet-4-6");
-        assert!(model.contains("opus"), "should switch to opus: {model}");
+        assert_eq!(model, "claude-fable-5");
     }
 
     #[test]

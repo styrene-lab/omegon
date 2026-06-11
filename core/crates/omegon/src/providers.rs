@@ -18,7 +18,7 @@ use crate::bridge::{LlmBridge, LlmEvent, LlmMessage, StreamOptions};
 /// Claude Code CLI version for OAuth user-agent header.
 /// Must match what Anthropic expects for subscription recognition.
 /// Update when upstream Claude Code advances.
-const CLAUDE_CODE_UA: &str = "claude-cli/2.1.154";
+const CLAUDE_CODE_UA: &str = "claude-cli/2.1.173";
 use omegon_traits::ToolDefinition;
 
 /// Anthropic credential mode — records what credential source is active.
@@ -70,7 +70,7 @@ pub fn anthropic_credential_mode() -> AnthropicCredentialMode {
 pub fn automation_safe_model() -> Option<String> {
     // 1. Anthropic (OAuth or API key)
     if resolve_api_key_sync("anthropic").is_some() {
-        return Some("anthropic:claude-sonnet-4-6".to_string());
+        return default_model_for_provider("anthropic");
     }
     // 2. OpenAI Codex (OAuth)
     if resolve_api_key_sync("openai-codex").is_some() {
@@ -2548,16 +2548,18 @@ fn anthropic_manual_budget_tokens(reasoning: Option<&str>) -> Option<u32> {
 }
 
 fn anthropic_supports_adaptive_thinking(model: &str) -> bool {
-    let model = model.to_ascii_lowercase();
-    // Sonnet 4.6+ and Opus 4.6+ support adaptive thinking
-    model.contains("claude-sonnet-4-6")
-        || model.contains("claude-sonnet-4-7")
-        || model.contains("claude-sonnet-4-8")
-        || model.contains("claude-sonnet-4-9")
-        || model.contains("claude-opus-4-6")
-        || model.contains("claude-opus-4-7")
-        || model.contains("claude-opus-4-8")
-        || model.contains("claude-opus-4-9")
+    let model_id = model_id_from_spec(model);
+    let qualified_id = format!("anthropic:{model_id}");
+    if let Some(info) = crate::model_registry::ModelRegistry::global().model_info(&qualified_id) {
+        return info.supports_reasoning;
+    }
+
+    let model = model_id.to_ascii_lowercase();
+    // Fallback for prerelease Anthropic families before the registry is updated.
+    model.contains("claude-sonnet-4-")
+        || model.contains("claude-opus-4-")
+        || model.contains("claude-fable-")
+        || model.contains("claude-mythos-")
 }
 
 fn anthropic_should_use_adaptive_thinking(model: &str, reasoning: &str) -> bool {
@@ -3368,6 +3370,23 @@ impl LlmBridge for AntigravityClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anthropic_adaptive_thinking_uses_registry_metadata_and_family_fallback() {
+        assert!(anthropic_supports_adaptive_thinking(
+            "anthropic:claude-fable-5"
+        ));
+        assert!(anthropic_supports_adaptive_thinking("claude-mythos-5"));
+        assert!(anthropic_supports_adaptive_thinking(
+            "anthropic:claude-sonnet-4-6"
+        ));
+        assert!(anthropic_supports_adaptive_thinking("claude-opus-4-8"));
+        assert!(anthropic_supports_adaptive_thinking("claude-fable-6"));
+        assert!(anthropic_supports_adaptive_thinking("claude-sonnet-4-99"));
+        assert!(!anthropic_supports_adaptive_thinking(
+            "claude-haiku-4-5-20251001"
+        ));
+    }
 
     #[test]
     fn parse_rate_limit_snapshot_extracts_anthropic_utilization_headers() {

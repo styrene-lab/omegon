@@ -53,6 +53,12 @@ test-dev-scripts:
 provider-context-truth *args:
     python3 scripts/provider_context_truth.py {{args}}
 
+# Check local provider drift and cheap upstream sources (no credentials required).
+upstream-provider-check:
+    python3 scripts/check_model_registry.py
+    python3 scripts/check_upstream_versions.py
+    python3 scripts/check_anthropic_models.py
+
 # Run tests only for Rust crates affected by changed paths.
 test-changed *args:
     #!/usr/bin/env bash
