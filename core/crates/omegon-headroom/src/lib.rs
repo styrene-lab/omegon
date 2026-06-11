@@ -486,6 +486,7 @@ fn is_protected_anchor_line(line: &str) -> bool {
         || is_rust_function_declaration_anchor(trimmed)
         || has_cli_flag_token(trimmed)
         || has_headroom_token(trimmed)
+        || has_quoted_signal_token(trimmed)
 }
 
 fn anchor_score(line: &str) -> u8 {
@@ -511,6 +512,9 @@ fn anchor_score(line: &str) -> u8 {
     }
     if has_path_with_line_number(trimmed) {
         return 80;
+    }
+    if has_quoted_signal_token(trimmed) {
+        return 92;
     }
     if has_headroom_token(trimmed) {
         return 85;
@@ -593,6 +597,24 @@ fn has_cli_flag_token(line: &str) -> bool {
     })
 }
 
+fn has_quoted_signal_token(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    [
+        "\"test result:\"",
+        "'test result:'",
+        "\"error\"",
+        "'error'",
+        "\"failed\"",
+        "'failed'",
+        "\"panic\"",
+        "'panic'",
+        "\"warning\"",
+        "'warning'",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
 fn has_headroom_token(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
     [
@@ -603,6 +625,10 @@ fn has_headroom_token(line: &str) -> bool {
         "headroom-eval",
         "headroom-fixture",
         "omegon-headroom",
+        "test(headroom):",
+        "fix(headroom):",
+        "feat(headroom):",
+        "chore(headroom):",
     ]
     .iter()
     .any(|needle| lower.contains(needle))

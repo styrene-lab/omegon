@@ -240,6 +240,36 @@ The selection policy should be:
 
 Optional local models must be packaged as Omegon capabilities, not implicit runtime downloads. A future ONNX/Kompress-style backend may live behind a feature flag such as `headroom-ml`, but the base `omegon-headroom` crate must remain dependency-light and deterministic.
 
+### Future milestone: Kompressor provider
+
+Kompressor integration is a target milestone after the compression engine has a stable pluggable-provider boundary. It is **not** part of the required 0.27 path and must not be introduced as an implicit dependency.
+
+Milestone entry criteria:
+
+- `CompressionModel`/provider selection is represented as a concrete internal trait with deterministic fallback.
+- The validator can compare providers on the same fixtures and report provider identity, latency, savings, and restored-fact budget.
+- CCR storage has bounded session memory policy and exact-original retrieval remains provider-independent.
+- Dogfood passes with the deterministic provider using `--max-restored-facts 0` on the standard generated fixture set.
+- Operator configuration can explicitly request a provider without changing default behavior.
+
+Kompressor provider requirements:
+
+- packaged as an optional capability/provider, not vendored into the default binary path unless its runtime/artifact footprint is accepted later by design decision
+- no silent downloads or model startup; installation/update is operator-approved and versioned
+- artifact/version metadata includes provider name, model/runtime version, and integrity hash where applicable
+- protected anchors are extracted deterministically before Kompressor sees compressible body regions
+- Kompressor output is rejected if it grows output, drops protected anchors, exceeds latency/budget limits, or fails to include/retain the CCR retrieval handle
+- deterministic native compression remains the fallback for missing, unhealthy, slow, or rejected Kompressor runs
+
+Target validation command for the milestone:
+
+```bash
+just headroom-dogfood
+just headroom-eval --text --fixtures .tmp/headroom/fixtures --max-restored-facts 0 --provider kompressor
+```
+
+The exact `--provider` flag and provider packaging are future work; this command documents the desired evaluator contract rather than current CLI behavior.
+
 ## Compression policy
 
 The first policy is conservative:

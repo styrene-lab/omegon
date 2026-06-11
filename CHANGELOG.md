@@ -26,7 +26,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Prioritize protected-anchor retention in native headroom compression so dogfood-critical test names, CLI flags, and headroom retrieval/tool tokens survive raw compression without evaluator repair.
 - Add runtime caps and effective-window metadata for web search, memory recall/episodes, and session-log result windows.
 - Add the experimental `headroom` runtime settings surface and `harness_settings` opt-in action for dogfooding native compression before it becomes a default behavior.
-- Document the native headroom compression design, including deterministic fallback, optional local model providers, and Ollama semantic-compression coupling.
+- Document Kompressor as a future optional compression-provider milestone behind the planned pluggable engine boundary, with deterministic fallback and dogfood validation requirements.
 - Add affected-crate detection plus scoped `just affected`, `just test-changed`, `just check-changed`, and `just clippy-changed` recipes for faster local validation of changed Rust workspace slices.
 - Add `just test-profile` to statically summarize Rust test/coupling hotspots before choosing validation or extraction targets.
 - Add Python unit coverage for the affected-crate and test-profile developer tooling.
