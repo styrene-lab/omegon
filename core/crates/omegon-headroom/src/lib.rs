@@ -483,6 +483,7 @@ fn is_protected_anchor_line(line: &str) -> bool {
         || has_nonzero_exit_code(trimmed)
         || has_test_count_summary(trimmed)
         || is_rust_test_result_line(trimmed)
+        || is_rust_function_declaration_anchor(trimmed)
         || has_cli_flag_token(trimmed)
         || has_headroom_token(trimmed)
 }
@@ -514,6 +515,9 @@ fn anchor_score(line: &str) -> u8 {
     if has_headroom_token(trimmed) {
         return 85;
     }
+    if is_rust_function_declaration_anchor(trimmed) {
+        return 82;
+    }
     if has_nonzero_exit_code(trimmed) {
         return 70;
     }
@@ -541,6 +545,39 @@ fn is_rust_test_result_line(trimmed: &str) -> bool {
             || trimmed.ends_with(" FAILED")
             || trimmed.ends_with(" ignored")
             || trimmed.ends_with(" measured"))
+}
+
+fn is_rust_function_declaration_anchor(trimmed: &str) -> bool {
+    let trimmed = trimmed
+        .trim_start_matches('+')
+        .trim_start_matches('-')
+        .trim_start();
+    let Some(rest) = trimmed
+        .strip_prefix("fn ")
+        .or_else(|| trimmed.strip_prefix("pub fn "))
+        .or_else(|| trimmed.strip_prefix("async fn "))
+        .or_else(|| trimmed.strip_prefix("pub async fn "))
+    else {
+        return false;
+    };
+    let Some(name) = rest.split_once('(').map(|(name, _)| name.trim()) else {
+        return false;
+    };
+    !name.is_empty()
+        && [
+            "headroom",
+            "compression",
+            "compress",
+            "retrieve",
+            "anchor",
+            "cli",
+            "read_compress",
+            "dogfood",
+            "fixture",
+            "eval",
+        ]
+        .iter()
+        .any(|needle| name.contains(needle))
 }
 
 fn has_cli_flag_token(line: &str) -> bool {
@@ -909,6 +946,7 @@ mod tests {
             "test tools::tests::read_compression_respects_headroom_mode_and_shared_store ... ok",
             "cargo run -p omegon-headroom --bin headroom-eval -- --fixtures DIR",
             "headroom_compress stores originals for headroom_retrieve",
+            "+    fn scored_anchors_prioritize_headroom_test_and_cli_tokens() {",
         ]
         .join("\n");
 
@@ -929,6 +967,9 @@ mod tests {
                 .iter()
                 .any(|(_, _, line)| line.contains("headroom_compress"))
         );
+        assert!(anchors.iter().any(|(_, _, line)| {
+            line.contains("scored_anchors_prioritize_headroom_test_and_cli_tokens")
+        }));
     }
 
     #[test]
