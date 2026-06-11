@@ -1259,7 +1259,7 @@ pub async fn run(
 
         // Push tool results to conversation and update intent
         let mut results = results;
-        let plan_snapshot_before = conversation.intent.work_plan_snapshot_json();
+        let plan_snapshot_before = work_plan_snapshot_with_lifecycle(&conversation.intent, &config.cwd);
         conversation
             .intent
             .update_from_tools(dispatch_calls, &results);
@@ -1267,7 +1267,7 @@ pub async fn run(
         for result in &results {
             conversation.push_tool_result(result.clone());
         }
-        let plan_snapshot_after = conversation.intent.work_plan_snapshot_json();
+        let plan_snapshot_after = work_plan_snapshot_with_lifecycle(&conversation.intent, &config.cwd);
 
         if let Some(message) = plan_status_notification(dispatch_calls, &conversation.intent) {
             let _ = events.send(AgentEvent::SystemNotification { message });
@@ -1717,6 +1717,17 @@ fn plan_status_notification(calls: &[ToolCall], intent: &IntentDocument) -> Opti
         }
     };
     Some(format!("{heading}\n{}", intent.render_work_plan()))
+}
+
+fn work_plan_snapshot_with_lifecycle(
+    intent: &IntentDocument,
+    cwd: &std::path::Path,
+) -> serde_json::Value {
+    let mut registry = intent.plan_registry();
+    let repo_root = crate::setup::find_project_root(cwd);
+    let lifecycle = crate::tools::lifecycle_plan_projection(&repo_root);
+    registry.entries.extend(lifecycle.entries);
+    intent.work_plan_snapshot_json_with_registry_entries(registry.entries)
 }
 
 fn work_plan_snapshot_changed(before: &serde_json::Value, after: &serde_json::Value) -> bool {

@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Include lifecycle-derived workstreams in Plan Dock update payloads from both `/plan` commands and tool-result plan mutations so active plans can be shown alongside paused/waiting/blocked lifecycle work.
 - Add `just test-commit` as the focused changed-crate validation gate for local commits while keeping `just test-rust` as the full CI/release workspace gate.
 - Keep slim TUI instrument footers to inference and tools only; engine telemetry now stays solely in the slim status sidecar row instead of duplicating as a footer block.
 - Render the slim TUI engine sidecar as its own status row below the lifecycle row so lifecycle and engine telemetry no longer compete for one line.

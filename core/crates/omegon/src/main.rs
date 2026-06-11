@@ -4102,7 +4102,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 respond_to,
             } => {
                 let response = execute_plan_slash_command(&mut runtime_state, command);
-                let snapshot_json = runtime_state.conversation.intent.work_plan_snapshot_json();
+                let snapshot_json = work_plan_snapshot_with_lifecycle(&runtime_state.conversation.intent);
                 if let Some(output) = response.output.clone() {
                     let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
                 }
@@ -6984,6 +6984,15 @@ Last completed plan
         accepted: true,
         output: Some(output),
     }
+}
+
+fn work_plan_snapshot_with_lifecycle(intent: &crate::conversation::IntentDocument) -> serde_json::Value {
+    let mut registry = intent.plan_registry();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let repo_root = setup::find_project_root(&cwd);
+    let lifecycle = crate::tools::lifecycle_plan_projection(&repo_root);
+    registry.entries.extend(lifecycle.entries);
+    intent.work_plan_snapshot_json_with_registry_entries(registry.entries)
 }
 
 fn render_plan_show(runtime_state: &InteractiveAgentState, plan_id: &str) -> String {

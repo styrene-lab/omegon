@@ -950,6 +950,13 @@ impl crate::conversation::IntentDocument {
     }
 
     pub fn work_plan_snapshot_json(&self) -> serde_json::Value {
+        self.work_plan_snapshot_json_with_registry_entries(self.plan_registry().entries)
+    }
+
+    pub fn work_plan_snapshot_json_with_registry_entries<I>(&self, registry_entries: I) -> serde_json::Value
+    where
+        I: IntoIterator<Item = PlanRegistryEntry>,
+    {
         let done = self
             .work_plan
             .iter()
@@ -975,9 +982,7 @@ impl crate::conversation::IntentDocument {
             .as_ref()
             .map(|plan| plan.plan_id.as_str())
             .unwrap_or("session:current");
-        let workstreams: Vec<serde_json::Value> = self
-            .plan_registry()
-            .entries
+        let workstreams: Vec<serde_json::Value> = registry_entries
             .into_iter()
             .filter(|entry| entry.plan_id != visible_plan_id)
             .filter_map(|entry| {
