@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Pin the slim plan panel below the composer and above the engine status bar, with a compact height cap so large plans do not crowd typed input.
+
 ## [0.27.0] - 2026-06-11
 
 ### Added

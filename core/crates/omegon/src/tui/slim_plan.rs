@@ -12,8 +12,9 @@ pub fn slim_plan_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> 
         return 0;
     }
     let item_count = snapshot.items.len() as u16;
-    // Rule/header + compact task rows, capped so the plan never crowds out the transcript.
-    (1 + item_count.min(6)).clamp(2, 8)
+    // Rule/header + compact task rows. Keep the pinned plan compact so it stays
+    // adjacent to the composer without crowding the bottom interaction band.
+    (1 + item_count.min(4)).clamp(2, 5)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
