@@ -2492,6 +2492,18 @@ This agent runs in write mode and can modify files.
         let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
             .with_child_agent_binary(child)
             .with_timeouts(1, 30);
+        store.store_task(DelegateTask {
+            task_id: "delegate_timeout".to_string(),
+            task_description: "Do the thing".to_string(),
+            agent_name: Some("timeout-worker".to_string()),
+            status: DelegateTaskStatus::Running,
+            result: None,
+            started_at: SystemTime::now(),
+            completed_at: None,
+            last_tool: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
 
         let err = runner
             .run_delegate_child(
@@ -2511,6 +2523,92 @@ This agent runs in write mode and can modify files.
             .to_string();
 
         assert!(err.contains("Delegate wall-clock timeout after 1s"), "{err}");
+        store.update_task_status(
+            "delegate_timeout",
+            DelegateTaskStatus::Failed { error: err.clone() },
+            Some(err),
+        );
+        let progress = store.progress_snapshot();
+        assert!(!progress.active, "timeout should clear active delegate progress");
+        assert_eq!(progress.running, 0);
+        assert_eq!(progress.failed, 1);
+        let child = progress
+            .children
+            .iter()
+            .find(|child| child.task_id == "delegate_timeout")
+            .unwrap();
+        assert_eq!(child.status, "failed");
+        assert!(child.result_summary.as_deref().unwrap_or_default().contains("Delegate wall-clock timeout"));
+    }
+
+
+    #[tokio::test]
+    async fn delegate_runner_idle_timeout_kills_quiet_child_after_initial_activity() {
+        let temp_dir = TempDir::new().unwrap();
+        let child = write_fake_child(
+            temp_dir.path(),
+            "fake-child-idle-timeout.sh",
+            "#!/bin/sh
+echo initial activity >&2
+exec sleep 10
+",
+        );
+        let store = Arc::new(DelegateResultStore::new());
+        let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
+            .with_child_agent_binary(child)
+            .with_timeouts(30, 1);
+        store.store_task(DelegateTask {
+            task_id: "delegate_idle_timeout".to_string(),
+            task_description: "Do the quiet thing".to_string(),
+            agent_name: Some("idle-worker".to_string()),
+            status: DelegateTaskStatus::Running,
+            result: None,
+            started_at: SystemTime::now(),
+            completed_at: None,
+            last_tool: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+
+        let err = runner
+            .run_delegate_child(
+                "delegate_idle_timeout",
+                "Do the quiet thing",
+                &DelegateRuntimeRequest {
+                    scope: None,
+                    model: Some("test:model".into()),
+                    thinking_level: None,
+                    worker_profile: DelegateWorkerProfile::Scout,
+                },
+                None,
+                Some("test:model".into()),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("Delegate idle timeout"), "{err}");
+        assert!(err.contains("no output for 1s"), "{err}");
+        store.update_task_status(
+            "delegate_idle_timeout",
+            DelegateTaskStatus::Failed { error: err.clone() },
+            Some(err),
+        );
+        let progress = store.progress_snapshot();
+        assert!(!progress.active, "idle timeout should clear active delegate progress");
+        assert_eq!(progress.running, 0);
+        assert_eq!(progress.failed, 1);
+        let child = progress
+            .children
+            .iter()
+            .find(|child| child.task_id == "delegate_idle_timeout")
+            .unwrap();
+        assert_eq!(child.status, "failed");
+        assert!(child
+            .result_summary
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Delegate idle timeout"));
     }
 
 }

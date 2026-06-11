@@ -1754,6 +1754,20 @@ fn write_fake_child(dir: &Path, name: &str, body: &str) -> PathBuf {
         }
     }
 
+
+
+    fn progress_from_events(
+        events: &[crate::cleave::progress::ProgressEvent],
+    ) -> crate::features::cleave::CleaveProgress {
+        let shared = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::features::cleave::CleaveProgress::default(),
+        ));
+        for event in events {
+            crate::features::cleave::apply_progress_event(&shared, event);
+        }
+        shared.lock().unwrap().clone()
+    }
+
     #[tokio::test]
     async fn run_cleave_executes_injected_child_successfully() {
         let repo = tempfile::tempdir().unwrap();
@@ -1841,6 +1855,13 @@ fn write_fake_child(dir: &Path, name: &str, body: &str) -> PathBuf {
         );
         let events = events.lock().unwrap();
         assert!(events.iter().any(|event| matches!(event, crate::cleave::progress::ProgressEvent::ChildStatus { child, status: crate::cleave::progress::ChildProgressStatus::Failed, error: Some(error), .. } if child == "alpha" && error.contains("Wall-clock timeout"))));
+        let progress = progress_from_events(&events);
+        assert!(!progress.active, "timeout should clear active progress");
+        assert_eq!(progress.failed, 1);
+        let child_progress = progress.children.iter().find(|c| c.label == "alpha").unwrap();
+        assert_eq!(child_progress.status, "failed");
+        assert_eq!(child_progress.pid, None);
+        assert_eq!(child_progress.supervision_mode, None);
     }
 
     #[tokio::test]
@@ -1884,6 +1905,13 @@ fn write_fake_child(dir: &Path, name: &str, body: &str) -> PathBuf {
         );
         let events = events.lock().unwrap();
         assert!(events.iter().any(|event| matches!(event, crate::cleave::progress::ProgressEvent::ChildStatus { child, status: crate::cleave::progress::ChildProgressStatus::Failed, error: Some(error), .. } if child == "alpha" && error.contains("Cancelled"))));
+        let progress = progress_from_events(&events);
+        assert!(!progress.active, "cancellation should clear active progress");
+        assert_eq!(progress.failed, 1);
+        let child_progress = progress.children.iter().find(|c| c.label == "alpha").unwrap();
+        assert_eq!(child_progress.status, "failed");
+        assert_eq!(child_progress.pid, None);
+        assert_eq!(child_progress.supervision_mode, None);
     }
 
     #[tokio::test]

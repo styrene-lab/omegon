@@ -370,7 +370,7 @@ fn recompute_progress_counts(progress: &mut CleaveProgress) {
         .count();
 }
 
-fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEvent) {
+pub(crate) fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEvent) {
     let mut progress = shared.lock().unwrap();
 
     match event {
