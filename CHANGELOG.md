@@ -16,9 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-### Fixed
-
-- Update selector-policy regression coverage for current 1M Claude Sonnet context inference while preserving requested lower-class assembly constraints.
+## [0.27.0] - 2026-06-11
 
 ### Added
 
@@ -128,6 +126,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Update selector-policy regression coverage for current 1M Claude Sonnet context inference while preserving requested lower-class assembly constraints.
 - Reduce macOS Keychain prompts during startup by avoiding provider secret preflight when auth.json already satisfies the active model, keeping optional extension secrets lazy, and removing broad orphaned-keyring repair scans from normal launch.
 - Treat OpenAI-family models as connected when a valid Codex OAuth credential is available, preventing startup/footer status from showing `no provider` for `gpt-*` routes backed by `openai-codex`.
 - Re-adopt fresh external OpenAI/Codex OAuth credentials when stored credentials are expired, so rebuild/relaunch does not force an unnecessary login.
