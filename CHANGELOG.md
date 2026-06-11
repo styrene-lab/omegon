@@ -54,6 +54,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Slim the TUI engine footer into a compact model/status sidecar so the dashboard lifecycle strip owns posture/session/context details and the inference strip owns token/context/memory telemetry.
 - Add a read-only capability inventory substrate and ACP `_capabilities/inventory` surface for installed extensions, Armory assets, and catalog agents to support future console/TUI capability views.
 - Register provider retry/failure and turn-cancelled ACP telemetry surfaces in the backend endpoint registry so clients can discover issue #128 notification contracts.
+- Add a normalized capability graph and derived trust summaries to the assistant capability inventory so console consumers can inspect dependencies, secrets, widgets, and authority without interpreting raw manifests.
 - Add a metadata-only backend endpoint registry for ACP/runtime/lifecycle/provider/extension/secret/package/plan/task surfaces, including planned HTTP aliases for lifecycle projections.
 - Add cleave and delegate execution-evaluation tests with injected child binaries, including timeout and cancellation coverage.
 - Add richer cleave/delegate status visibility for subagent progress, including child activity, task progress, and runtime state.
