@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Add a native `omegon-headroom` crate with deterministic content routing, structured compression summaries, and in-memory CCR retrieval primitives for future context/tool-output compression.
 - Add `just headroom-fixture` for creating ignored dogfood fixture JSON files from local UTF-8 samples.
+- Add a restoration-budget gate to `headroom-eval` so automated dogfood can fail when required facts rely too heavily on evaluator restoration.
 - Add manual native headroom tools (`headroom_compress`, `headroom_retrieve`, `headroom_stats`) for opt-in CCR dogfooding before automatic context integration.
 - Add experimental `read` integration for native headroom compression in opt-in `mode=on`, sharing CCR retrieval storage with `headroom_retrieve`.
 - Prioritize protected-anchor retention in native headroom compression so dogfood-critical test names, CLI flags, and headroom retrieval/tool tokens survive raw compression without evaluator repair.

@@ -126,7 +126,10 @@ cargo run -p omegon-headroom --bin headroom-eval -- --json
 just headroom-eval --text --save .tmp/headroom/baseline.json
 just headroom-eval --text --compare .tmp/headroom/baseline.json
 just headroom-eval --text --fixtures .tmp/headroom/fixtures
+just headroom-eval --text --fixtures .tmp/headroom/fixtures --max-restored-facts 10
 ```
+
+`--max-restored-facts` is the automated quality ratchet for dogfood. It fails the evaluator when required facts are present only because the validator restored them from the original text more than the configured budget. Use a permissive budget while tuning (`10`), then ratchet toward `3` and eventually `0` as protected-anchor extraction improves.
 
 The evaluator runs canonical fixtures through the deterministic compressor and exits non-zero if any fixture violates its contract. The text output is intended for local dogfooding; JSON output is intended for CI snapshots and longitudinal benchmark comparison. `--save` writes the current report as JSON; `--compare` fails if evaluated byte savings or estimated token savings drop below the saved baseline, or if required-fact restoration count increases. `--fixtures DIR` appends non-recursive `*.json` fixtures from an ignored dogfood directory; invalid fixtures fail loudly and paths are sorted for deterministic report order.
 

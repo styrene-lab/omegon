@@ -14,6 +14,7 @@ fn main() -> ExitCode {
     let mut save_path: Option<PathBuf> = None;
     let mut compare_path: Option<PathBuf> = None;
     let mut fixture_dirs: Vec<PathBuf> = Vec::new();
+    let mut max_restored_facts: Option<usize> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -52,6 +53,19 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 };
                 fixture_dirs.push(PathBuf::from(value));
+            }
+            "--max-restored-facts" => {
+                let Some(value) = args.next() else {
+                    eprintln!("missing value for --max-restored-facts");
+                    return ExitCode::from(2);
+                };
+                max_restored_facts = match value.parse() {
+                    Ok(value) => Some(value),
+                    Err(_) => {
+                        eprintln!("invalid --max-restored-facts value: {value}");
+                        return ExitCode::from(2);
+                    }
+                };
             }
             "--save" => {
                 let Some(value) = args.next() else {
@@ -103,6 +117,8 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
 
+    let restoration_gate = max_restored_facts.map(|max| restoration_gate_report(&report, max));
+
     let comparison = match compare_path.as_ref() {
         Some(path) => match compare_report(path, &report) {
             Ok(comparison) => Some(comparison),
@@ -119,19 +135,23 @@ fn main() -> ExitCode {
             let output = serde_json::json!({
                 "report": report,
                 "comparison": comparison,
+                "restoration_gate": restoration_gate,
             });
             println!(
                 "{}",
                 serde_json::to_string_pretty(&output).expect("report serializes")
             );
         }
-        OutputFormat::Text => print_text_report(&report, comparison.as_ref()),
+        OutputFormat::Text => {
+            print_text_report(&report, comparison.as_ref(), restoration_gate.as_ref())
+        }
     }
 
     let comparison_passed = comparison
         .as_ref()
         .is_none_or(|comparison| comparison.passed);
-    if report.passed && comparison_passed {
+    let restoration_gate_passed = restoration_gate.as_ref().is_none_or(|gate| gate.passed);
+    if report.passed && comparison_passed && restoration_gate_passed {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
@@ -142,6 +162,14 @@ fn main() -> ExitCode {
 enum OutputFormat {
     Text,
     Json,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RestorationGateReport {
+    passed: bool,
+    max_restored_facts: usize,
+    actual_restored_facts: usize,
+    over_budget: usize,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -161,12 +189,12 @@ struct ComparisonReport {
 
 fn print_help() {
     println!(
-        "headroom-eval [--text|--json] [--min-bytes N] [--target-bytes N] [--fixtures DIR] [--save PATH] [--compare PATH]\n\n\
+        "headroom-eval [--text|--json] [--min-bytes N] [--target-bytes N] [--fixtures DIR] [--max-restored-facts N] [--save PATH] [--compare PATH]\n\n\
          Runs native headroom evaluation fixtures. Exits non-zero if evaluated savings,\n\
          fact retention, or expected compression behavior regress. JSON output is intended\n\
          for CI snapshots and longitudinal benchmark comparison. --fixtures loads additional\n\
          dogfood/regression JSON fixtures from a directory. --save writes the current report as\n\
-         JSON; --compare checks the current report against a saved baseline."
+         JSON; --compare checks the current report against a saved baseline. --max-restored-facts fails when evaluator restoration exceeds the given budget."
     );
 }
 
@@ -179,6 +207,19 @@ fn save_report(path: &PathBuf, report: &ValidationSuiteReport) -> anyhow::Result
     let json = serde_json::to_string_pretty(report)?;
     fs::write(path, format!("{json}\n"))?;
     Ok(())
+}
+
+fn restoration_gate_report(
+    report: &ValidationSuiteReport,
+    max_restored_facts: usize,
+) -> RestorationGateReport {
+    let actual_restored_facts = total_restored_facts(report);
+    RestorationGateReport {
+        passed: actual_restored_facts <= max_restored_facts,
+        max_restored_facts,
+        actual_restored_facts,
+        over_budget: actual_restored_facts.saturating_sub(max_restored_facts),
+    }
 }
 
 fn compare_report(
@@ -235,7 +276,11 @@ fn total_restored_facts(report: &ValidationSuiteReport) -> usize {
         .sum()
 }
 
-fn print_text_report(report: &ValidationSuiteReport, comparison: Option<&ComparisonReport>) {
+fn print_text_report(
+    report: &ValidationSuiteReport,
+    comparison: Option<&ComparisonReport>,
+    restoration_gate: Option<&RestorationGateReport>,
+) {
     println!(
         "Headroom evaluation: {}",
         if report.passed { "PASS" } else { "FAIL" }
@@ -255,6 +300,14 @@ fn print_text_report(report: &ValidationSuiteReport, comparison: Option<&Compari
         report.evaluated_estimated_tokens_after,
         report.evaluated_token_savings_percent
     );
+    if let Some(gate) = restoration_gate {
+        println!(
+            "restoration gate: {} (actual {} / max {})",
+            if gate.passed { "PASS" } else { "FAIL" },
+            gate.actual_restored_facts,
+            gate.max_restored_facts
+        );
+    }
     if let Some(comparison) = comparison {
         println!(
             "comparison: {} against {}",
