@@ -729,6 +729,81 @@ impl CleaveFeature {
         self.progress.lock().unwrap().clone()
     }
 
+
+    fn render_status(progress: &CleaveProgress) -> String {
+        if !progress.active && progress.total_children == 0 {
+            return "No active cleave run.".into();
+        }
+        let mut lines = Vec::new();
+        if progress.active {
+            lines.push(format!(
+                "Cleave active: {}/{} children ({} completed, {} failed)",
+                progress.completed + progress.failed,
+                progress.total_children,
+                progress.completed,
+                progress.failed
+            ));
+        } else {
+            lines.push(format!(
+                "Last cleave: {} completed, {} failed of {}",
+                progress.completed, progress.failed, progress.total_children
+            ));
+        }
+        for child in &progress.children {
+            let icon = match child.status.as_str() {
+                "completed" | "merged_after_failure" => "✓",
+                "failed" | "upstream_exhausted" => "✗",
+                "running" => "⏳",
+                _ => "○",
+            };
+            let dur = child
+                .duration_secs
+                .map(|d| format!(" duration={:.0}s", d))
+                .unwrap_or_default();
+            let pid = child
+                .pid
+                .map(|pid| format!(" pid={pid}"))
+                .unwrap_or_default();
+            let supervision = child
+                .supervision_mode
+                .map(|mode| format!(" supervision={mode:?}"))
+                .unwrap_or_default();
+            let last_tool = child
+                .last_tool
+                .as_deref()
+                .map(|tool| format!(" tool={tool}"))
+                .unwrap_or_default();
+            let last_turn = child
+                .last_turn
+                .map(|turn| format!(" turn={turn}"))
+                .unwrap_or_default();
+            let tasks = if child.tasks.is_empty() {
+                String::new()
+            } else {
+                format!(" tasks={}/{}", child.tasks_done, child.tasks.len())
+            };
+            let tokens = if child.tokens_in > 0 || child.tokens_out > 0 {
+                format!(" tokens={}/{}", child.tokens_in, child.tokens_out)
+            } else {
+                String::new()
+            };
+            lines.push(format!(
+                "  {} {} [{}]{}{}{}{}{}{}{}",
+                icon,
+                child.label,
+                child.status,
+                dur,
+                pid,
+                supervision,
+                last_tool,
+                last_turn,
+                tasks,
+                tokens
+            ));
+        }
+        lines.join("\n")
+    }
+
     /// Get a shared handle to the progress for live dashboard updates.
     pub fn shared_progress(&self) -> Arc<Mutex<CleaveProgress>> {
         Arc::clone(&self.progress)
@@ -2294,4 +2369,158 @@ mod assessment_tests {
             "confidence should be (0,1]: {conf}"
         );
     }
+
+    #[test]
+    fn apply_progress_event_tracks_spawn_activity_tasks_failure_and_done() {
+        let shared = Arc::new(Mutex::new(CleaveProgress::default()));
+
+        apply_progress_event(
+            &shared,
+            &ProgressEvent::ChildSpawned {
+                child: "alpha".into(),
+                pid: 4242,
+            },
+        );
+        {
+            let progress = shared.lock().unwrap();
+            assert!(progress.active);
+            assert_eq!(progress.total_children, 1);
+            let child = &progress.children[0];
+            assert_eq!(child.label, "alpha");
+            assert_eq!(child.status, "running");
+            assert_eq!(child.pid, Some(4242));
+            assert_eq!(child.supervision_mode, Some(ChildSupervisionMode::Attached));
+        }
+
+        apply_progress_event(
+            &shared,
+            &ProgressEvent::ChildTaskInventory {
+                child: "alpha".into(),
+                total_tasks: 2,
+                scope_files: 1,
+                tasks: vec![
+                    crate::cleave::progress::ChildTaskItem {
+                        description: "Inspect".into(),
+                        done: false,
+                    },
+                    crate::cleave::progress::ChildTaskItem {
+                        description: "Report".into(),
+                        done: false,
+                    },
+                ],
+            },
+        );
+        apply_progress_event(
+            &shared,
+            &ProgressEvent::ChildActivity {
+                child: "alpha".into(),
+                turn: Some(2),
+                tool: Some("bash".into()),
+                target: Some("cargo test".into()),
+            },
+        );
+        apply_progress_event(
+            &shared,
+            &ProgressEvent::ChildTokens {
+                child: "alpha".into(),
+                input_tokens: 11,
+                output_tokens: 7,
+            },
+        );
+        {
+            let progress = shared.lock().unwrap();
+            assert_eq!(progress.total_tokens_in, 11);
+            assert_eq!(progress.total_tokens_out, 7);
+            let child = &progress.children[0];
+            assert_eq!(child.last_turn, Some(2));
+            assert_eq!(child.last_tool.as_deref(), Some("bash"));
+            assert_eq!(child.tasks_done, 1);
+            assert_eq!(child.tokens_in, 11);
+            assert_eq!(child.tokens_out, 7);
+        }
+
+        apply_progress_event(
+            &shared,
+            &ProgressEvent::ChildStatus {
+                child: "alpha".into(),
+                status: ChildProgressStatus::Failed,
+                duration_secs: Some(3.5),
+                error: Some("non-zero exit".into()),
+            },
+        );
+        {
+            let progress = shared.lock().unwrap();
+            assert_eq!(progress.completed, 0);
+            assert_eq!(progress.failed, 1);
+            let child = &progress.children[0];
+            assert_eq!(child.status, "failed");
+            assert_eq!(child.pid, None);
+            assert_eq!(child.supervision_mode, None);
+            assert_eq!(child.duration_secs, Some(3.5));
+        }
+
+        apply_progress_event(
+            &shared,
+            &ProgressEvent::Done {
+                completed: 0,
+                failed: 1,
+                duration_secs: 4.0,
+            },
+        );
+        let progress = shared.lock().unwrap();
+        assert!(!progress.active);
+        assert_eq!(progress.failed, 1);
+    }
+
+
+    #[test]
+    fn cleave_status_render_exposes_child_runtime_activity_and_tasks() {
+        let mut progress = CleaveProgress {
+            active: true,
+            run_id: "run-test".into(),
+            total_children: 1,
+            completed: 0,
+            failed: 0,
+            children: vec![ChildProgress {
+                label: "alpha".into(),
+                status: "running".into(),
+                duration_secs: Some(12.0),
+                supervision_mode: Some(ChildSupervisionMode::Attached),
+                pid: Some(1234),
+                last_tool: Some("bash".into()),
+                last_turn: Some(3),
+                tasks: vec![
+                    crate::cleave::progress::ChildTaskItem { description: "Inspect".into(), done: true },
+                    crate::cleave::progress::ChildTaskItem { description: "Patch".into(), done: false },
+                ],
+                tasks_done: 1,
+                started_at: None,
+                last_activity_at: None,
+                tokens_in: 20,
+                tokens_out: 5,
+                runtime: None,
+            }],
+            total_tokens_in: 20,
+            total_tokens_out: 5,
+        };
+
+        let rendered = CleaveFeature::render_status(&progress);
+
+        assert!(rendered.contains("Cleave active: 0/1 children"), "{rendered}");
+        assert!(rendered.contains("alpha [running]"), "{rendered}");
+        assert!(rendered.contains("pid=1234"), "{rendered}");
+        assert!(rendered.contains("supervision=Attached"), "{rendered}");
+        assert!(rendered.contains("tool=bash"), "{rendered}");
+        assert!(rendered.contains("turn=3"), "{rendered}");
+        assert!(rendered.contains("tasks=1/2"), "{rendered}");
+        assert!(rendered.contains("tokens=20/5"), "{rendered}");
+
+        progress.active = false;
+        progress.completed = 1;
+        progress.children[0].status = "completed".into();
+        let rendered = CleaveFeature::render_status(&progress);
+        assert!(rendered.contains("Last cleave: 1 completed, 0 failed of 1"), "{rendered}");
+        assert!(rendered.contains("alpha [completed]"), "{rendered}");
+    }
+
 }

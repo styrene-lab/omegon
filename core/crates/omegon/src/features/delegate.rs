@@ -1609,40 +1609,75 @@ impl Feature for DelegateFeature {
             }
 
             crate::tool_registry::delegate::DELEGATE_STATUS => {
-                let tasks = self.result_store.list_all_tasks();
+                let snapshot = self.result_store.progress_snapshot();
                 let mut status_text = String::from(
-                    "# Delegate Tasks\n\n| Task ID | Agent | Status | Description |\n|---------|-------|--------|-------------|\n",
+                    "# Delegate Tasks
+
+| Task ID | Agent | Status | Last Tool | Turn | Tasks | Description |
+|---------|-------|--------|-----------|------|-------|-------------|
+",
                 );
 
-                for task in tasks {
-                    let agent = task.agent_name.as_deref().unwrap_or("default");
-                    let status = match task.status {
-                        DelegateTaskStatus::Running => "🔄 Running".to_string(),
-                        DelegateTaskStatus::Completed { success: true } => {
-                            "✅ Completed".to_string()
-                        }
-                        DelegateTaskStatus::Completed { success: false } => "❌ Failed".to_string(),
-                        DelegateTaskStatus::Failed { .. } => "❌ Error".to_string(),
+                for child in &snapshot.children {
+                    let task = self.result_store.get_task(&child.task_id);
+                    let agent = task
+                        .as_ref()
+                        .and_then(|t| t.agent_name.as_deref())
+                        .unwrap_or("default");
+                    let description = task
+                        .as_ref()
+                        .map(|t| {
+                            if t.task_description.len() > 50 {
+                                crate::util::truncate(&t.task_description, 50)
+                            } else {
+                                t.task_description.clone()
+                            }
+                        })
+                        .unwrap_or_else(|| child.label.clone());
+                    let status = match child.status.as_str() {
+                        "running" => "🔄 Running",
+                        "completed" => "✅ Completed",
+                        "failed" => "❌ Failed",
+                        other => other,
                     };
-                    let description = if task.task_description.len() > 50 {
-                        crate::util::truncate(&task.task_description, 50)
-                    } else {
-                        task.task_description.clone()
-                    };
-
+                    let last_tool = child.last_tool.as_deref().unwrap_or("-");
+                    let last_turn = child
+                        .last_turn
+                        .map(|turn| turn.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    let task_progress = format!("{}/{}", child.tasks_done, child.tasks.len());
                     status_text.push_str(&format!(
-                        "| {} | {} | {} | {} |\n",
-                        task.task_id, agent, status, description
+                        "| {} | {} | {} | {} | {} | {} | {} |
+",
+                        child.task_id, agent, status, last_tool, last_turn, task_progress, description
                     ));
                 }
 
-                if self.result_store.list_all_tasks().is_empty() {
-                    status_text.push_str("\nNo delegate tasks found.\n");
+                if snapshot.children.is_empty() {
+                    status_text.push_str("
+No delegate tasks found.
+");
                 }
 
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: status_text }],
-                    details: json!({ "task_count": self.result_store.list_all_tasks().len() }),
+                    details: json!({
+                        "active": snapshot.active,
+                        "running": snapshot.running,
+                        "completed": snapshot.completed,
+                        "failed": snapshot.failed,
+                        "task_count": snapshot.children.len(),
+                        "children": snapshot.children.iter().map(|child| json!({
+                            "task_id": child.task_id,
+                            "label": child.label,
+                            "status": child.status,
+                            "last_tool": child.last_tool,
+                            "last_turn": child.last_turn,
+                            "result_summary": child.result_summary,
+                            "tasks_done": child.tasks_done,
+                            "tasks_total": child.tasks.len(),
+                        })).collect::<Vec<_>>(),
+                    }),
                 })
             }
 
@@ -2279,4 +2314,67 @@ This agent runs in write mode and can modify files.
             );
         }
     }
+
+    #[test]
+    fn progress_snapshot_exposes_running_completed_and_failed_delegate_state() {
+        let store = DelegateResultStore::new();
+        let now = SystemTime::now();
+        store.store_task(DelegateTask {
+            task_id: "delegate_1".into(),
+            agent_name: Some("scout".into()),
+            task_description: "- [ ] Inspect files\n- [ ] Report findings".into(),
+            status: DelegateTaskStatus::Running,
+            result: None,
+            started_at: now,
+            completed_at: None,
+            last_tool: None,
+            last_turn: None,
+            tasks: crate::cleave::progress::extract_task_items("- [ ] Inspect files\n- [ ] Report findings"),
+        });
+        store.update_task_live_state("delegate_1", Some("read".into()), Some(2));
+        store.store_task(DelegateTask {
+            task_id: "delegate_2".into(),
+            agent_name: Some("verify".into()),
+            task_description: "Run checks".into(),
+            status: DelegateTaskStatus::Completed { success: true },
+            result: Some("Validation passed with a long enough result summary to truncate".into()),
+            started_at: now,
+            completed_at: Some(now),
+            last_tool: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+        store.store_task(DelegateTask {
+            task_id: "delegate_3".into(),
+            agent_name: Some("patch".into()),
+            task_description: "Patch bug".into(),
+            status: DelegateTaskStatus::Failed { error: "child exited".into() },
+            result: None,
+            started_at: now,
+            completed_at: Some(now),
+            last_tool: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+
+        let snapshot = store.progress_snapshot();
+
+        assert!(snapshot.active);
+        assert_eq!(snapshot.running, 1);
+        assert_eq!(snapshot.completed, 1);
+        assert_eq!(snapshot.failed, 1);
+        assert_eq!(snapshot.children.len(), 3);
+        let running = snapshot.children.iter().find(|c| c.task_id == "delegate_1").unwrap();
+        assert_eq!(running.status, "running");
+        assert_eq!(running.last_tool.as_deref(), Some("read"));
+        assert_eq!(running.last_turn, Some(2));
+        assert_eq!(running.tasks_done, 1);
+        let completed = snapshot.children.iter().find(|c| c.task_id == "delegate_2").unwrap();
+        assert_eq!(completed.status, "completed");
+        assert!(completed.result_summary.as_ref().unwrap().starts_with("Validation passed"));
+        assert!(completed.result_summary.as_ref().unwrap().len() < "Validation passed with a long enough result summary to truncate".len());
+        let failed = snapshot.children.iter().find(|c| c.task_id == "delegate_3").unwrap();
+        assert_eq!(failed.status, "failed");
+    }
+
 }
