@@ -327,14 +327,18 @@ mod tests {
     use std::sync::{Arc, Mutex as StdMutex};
 
     fn feature_with_headroom(mode: HeadroomCompressionMode) -> HeadroomFeature {
-        let mut settings = Settings::new("test-model");
-        settings.headroom = HeadroomRuntimeConfig {
+        feature_with_config(HeadroomRuntimeConfig {
             enabled: !matches!(mode, HeadroomCompressionMode::Off),
             mode,
             min_bytes: 1,
             target_bytes: 1024,
             ..HeadroomRuntimeConfig::default()
-        };
+        })
+    }
+
+    fn feature_with_config(headroom: HeadroomRuntimeConfig) -> HeadroomFeature {
+        let mut settings = Settings::new("test-model");
+        settings.headroom = headroom;
         HeadroomFeature::new(
             Arc::new(StdMutex::new(settings)),
             crate::tools::headroom_support::new_shared_store(),
@@ -386,4 +390,71 @@ mod tests {
         let retrieved = feature.retrieve(json!({"id": reference_id})).unwrap();
         assert!(result_text(&retrieved).contains("line 199"));
     }
+
+    #[test]
+    fn stats_reports_store_budget_and_evictions() {
+        let feature = feature_with_config(HeadroomRuntimeConfig {
+            enabled: true,
+            mode: HeadroomCompressionMode::Manual,
+            min_bytes: 1,
+            target_bytes: 1024,
+            max_store_objects: 1,
+            max_store_bytes: 1024 * 1024,
+            ..HeadroomRuntimeConfig::default()
+        });
+        let first = large_text("first");
+        let second = large_text("second");
+        feature
+            .compress(json!({"text": first, "kind_hint": "log", "source": "first"}))
+            .unwrap();
+        feature
+            .compress(json!({"text": second, "kind_hint": "log", "source": "second"}))
+            .unwrap();
+
+        let stats = feature.stats().unwrap();
+        let text = result_text(&stats);
+        assert!(text.contains("Store max objects"));
+        assert!(text.contains("Evicted originals"));
+        assert_eq!(
+            stats.details["headroom"]["store"]["stats"]["max_objects"],
+            1
+        );
+        assert_eq!(
+            stats.details["headroom"]["store"]["stats"]["evicted_count"],
+            1
+        );
+    }
+
+    #[test]
+    fn retrieve_reports_unknown_after_eviction() {
+        let feature = feature_with_config(HeadroomRuntimeConfig {
+            enabled: true,
+            mode: HeadroomCompressionMode::Manual,
+            min_bytes: 1,
+            target_bytes: 1024,
+            max_store_objects: 1,
+            max_store_bytes: 1024 * 1024,
+            ..HeadroomRuntimeConfig::default()
+        });
+        let first = feature
+            .compress(json!({"text": large_text("first"), "kind_hint": "log"}))
+            .unwrap();
+        let first_id = first.details["headroom"]["original_ref"]["id"]
+            .as_str()
+            .expect("first id")
+            .to_owned();
+        feature
+            .compress(json!({"text": large_text("second"), "kind_hint": "log"}))
+            .unwrap();
+
+        let retrieved = feature.retrieve(json!({"id": first_id})).unwrap();
+        assert!(result_text(&retrieved).contains("unknown headroom object"));
+    }
+}
+
+fn large_text(label: &str) -> String {
+    (0..200)
+        .map(|i| format!("{label} info line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
