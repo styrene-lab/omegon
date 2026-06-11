@@ -3872,7 +3872,7 @@ impl App {
             } else {
                 None
             },
-            background: Vec::new(),
+            workstreams: Vec::new(),
         };
         let raw_active_tool_stream_height = if self.ui_surfaces.is_compact() && !self.focus_mode {
             self.active_tool_stream
@@ -9667,18 +9667,18 @@ mod slash_command_parsing_tests {
     // ── Profile ───────────────────────────────────────────
 
     #[test]
-    fn plan_dock_background_only_uses_compact_height() {
-        use super::slim_plan::{PlanDockState, PlanLifecycleStatus, PlanSummary, plan_dock_preferred_height};
+    fn plan_dock_workstream_only_uses_compact_height() {
+        use super::slim_plan::{PlanDockState, WorkstreamStatus, WorkstreamSummary, plan_dock_preferred_height};
 
         let empty = PlanDockState::default();
         assert_eq!(plan_dock_preferred_height(&empty, 100), 0);
 
         let state = PlanDockState {
             active: None,
-            background: vec![PlanSummary {
+            workstreams: vec![WorkstreamSummary {
                 id: "release".into(),
                 title: "release hardening".into(),
-                status: PlanLifecycleStatus::Background,
+                status: WorkstreamStatus::Paused,
                 completed: 2,
                 total: 5,
             }],
@@ -9687,15 +9687,15 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn plan_dock_background_only_renders_summary_without_task_rows() {
-        use super::slim_plan::{PlanDockState, PlanLifecycleStatus, PlanSummary, render_plan_dock_panel};
+    fn plan_dock_workstream_only_renders_summary_without_task_rows() {
+        use super::slim_plan::{PlanDockState, WorkstreamStatus, WorkstreamSummary, render_plan_dock_panel};
 
         let state = PlanDockState {
             active: None,
-            background: vec![PlanSummary {
+            workstreams: vec![WorkstreamSummary {
                 id: "release".into(),
                 title: "release hardening".into(),
-                status: PlanLifecycleStatus::Waiting,
+                status: WorkstreamStatus::Waiting,
                 completed: 2,
                 total: 5,
             }],
@@ -9710,7 +9710,7 @@ mod slash_command_parsing_tests {
             text.push_str(terminal.backend().buffer()[(x, 0)].symbol());
         }
 
-        assert!(text.contains("background plans×1"), "{text}");
+        assert!(text.contains("workstreams×1"), "{text}");
         assert!(text.contains("waiting 2/5"), "{text}");
         assert!(text.contains("release hardening"), "{text}");
     }

@@ -22,7 +22,7 @@ pub fn plan_dock_preferred_height(state: &PlanDockState, width: u16) -> u16 {
     }
     if let Some(active) = state.active.as_ref() {
         plan_dock_snapshot_height(active, width)
-    } else if !state.background.is_empty() {
+    } else if !state.workstreams.is_empty() {
         1
     } else {
         0
@@ -32,22 +32,23 @@ pub fn plan_dock_preferred_height(state: &PlanDockState, width: u16) -> u16 {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlanDockState {
     pub active: Option<PlanDisplaySnapshot>,
-    pub background: Vec<PlanSummary>,
+    pub workstreams: Vec<WorkstreamSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlanSummary {
+pub struct WorkstreamSummary {
     pub id: String,
     pub title: String,
-    pub status: PlanLifecycleStatus,
+    pub status: WorkstreamStatus,
     pub completed: usize,
     pub total: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlanLifecycleStatus {
+pub enum WorkstreamStatus {
     Active,
-    Background,
+    Paused,
+    PendingApproval,
     Waiting,
     Blocked,
     Complete,
@@ -94,11 +95,12 @@ pub enum SlimTurnState {
     Finished(&'static str),
 }
 
-impl PlanLifecycleStatus {
+impl WorkstreamStatus {
     fn label(self) -> &'static str {
         match self {
             Self::Active => "active",
-            Self::Background => "background",
+            Self::Paused => "paused",
+            Self::PendingApproval => "pending",
             Self::Waiting => "waiting",
             Self::Blocked => "blocked",
             Self::Complete => "complete",
@@ -106,7 +108,7 @@ impl PlanLifecycleStatus {
     }
 }
 
-impl PlanSummary {
+impl WorkstreamSummary {
     fn progress(&self) -> String {
         if self.total > 0 {
             format!("{}/{}", self.completed, self.total)
@@ -483,9 +485,9 @@ pub fn render_plan_dock_panel(
 
     let bg = t.surface_bg();
     if let Some(snapshot) = state.active.as_ref() {
-        render_active_plan_dock_panel(area, frame, t, snapshot, state.background.len());
+        render_active_plan_dock_panel(area, frame, t, snapshot, state.workstreams.len());
     } else {
-        render_background_plan_summary(area, frame, t, state.background.as_slice(), bg);
+        render_workstream_summary(area, frame, t, state.workstreams.as_slice(), bg);
     }
 }
 
@@ -494,13 +496,13 @@ fn render_active_plan_dock_panel(
     frame: &mut Frame,
     t: &dyn theme::Theme,
     snapshot: &PlanDisplaySnapshot,
-    background_count: usize,
+    workstream_count: usize,
 ) {
     let bg = t.surface_bg();
     let mut lines: Vec<Line<'_>> = Vec::new();
     let mut summary = snapshot.summary();
-    if background_count > 0 {
-        summary.push_str(&format!(" · background×{background_count}"));
+    if workstream_count > 0 {
+        summary.push_str(&format!(" · workstreams×{workstream_count}"));
     }
     let rule_width = area.width.saturating_sub(summary.len() as u16 + 4) as usize;
     lines.push(Line::from(vec![
@@ -532,18 +534,18 @@ fn render_active_plan_dock_panel(
         .render(area, frame.buffer_mut());
 }
 
-fn render_background_plan_summary(
+fn render_workstream_summary(
     area: Rect,
     frame: &mut Frame,
     t: &dyn theme::Theme,
-    background: &[PlanSummary],
+    workstreams: &[WorkstreamSummary],
     bg: ratatui::style::Color,
 ) {
-    if background.is_empty() {
+    if workstreams.is_empty() {
         return;
     }
-    let mut text = format!(" background plans×{}", background.len());
-    if let Some(first) = background.first() {
+    let mut text = format!(" workstreams×{}", workstreams.len());
+    if let Some(first) = workstreams.first() {
         text.push_str(&format!(
             " · {} {} {}",
             first.status.label(),

@@ -132,3 +132,84 @@ The active plan projection should expose a one-to-two word `tab_title` for termi
 ```
 
 The tab title remains concise; bindings are shown in the Plan Dock, not the tab title.
+
+## Workstreams, plans, cleave, and delegate
+
+A **workstream** is the durable lifecycle envelope for a coherent unit of work. It may be bound to a forge issue, kanban task, OpenSpec change, design node, branch, or a combination of those artifacts.
+
+A **plan** is an execution episode inside a workstream. Plans are expected to be numerous over the lifetime of a larger workstream: discovery plan, design plan, implementation plan, review/fix plan, release plan, and so on. Completed plans remain evidence. Paused or unapproved plans remain resumable intent.
+
+`cleave` and `delegate` are execution mechanisms inside a plan episode. They do not own lifecycle state.
+
+```text
+Workstream
+  owns: durable intent, bindings, branch/worktree, evidence ledger, completion policy
+
+  Plan episode
+    owns: ordered operator-visible execution intent, approval gate, step evidence
+
+    cleave
+      owns: decomposition of a plan step into child lanes and merge/salvage results
+
+    delegate
+      owns: one bounded child lane or subtask execution
+```
+
+### Cleave contract
+
+`cleave` should run against a plan step or plan episode, not as a separate project lifecycle. Its output must attach evidence back to the active plan and owning workstream:
+
+- child lane id
+- child description and scope
+- worktree/branch if created
+- status: running, succeeded, failed, timed out, cancelled, salvaged
+- validation evidence
+- commit/merge evidence
+- final summary
+
+A cleave child can produce a completed plan item, a new follow-up plan item, or a blocking issue. It should not silently become its own durable owner.
+
+### Delegate contract
+
+`delegate` is the smaller execution primitive. A delegate task is a child lane under either:
+
+- a plan item, or
+- a cleave child lane.
+
+Delegate evidence must include the model/profile used, scope, result, and any validation output. The parent plan/workstream decides whether that evidence is sufficient.
+
+### Plan Dock projection
+
+The Plan Dock should show one active plan episode in detail and summarize workstreams around it:
+
+```text
+active plan: implement status sidecar 2/4 · workstreams×3
+1. done    inspect layout contract
+2. active  patch status height
+3. todo    validate focused tests
+
+workstreams summary:
+paused 3/8 issue #123 cleave retry cleanup
+pending 0/6 issue #140 auth docs refresh
+blocked 4/9 design node plan-gate substrate
+```
+
+The active plan remains the operator's immediate cockpit. Workstream summaries prevent loss of situational awareness without rendering every plan in full.
+
+### Lifecycle transitions
+
+A workstream can contain many plan episodes:
+
+```text
+issue/design node discovered
+  → workstream created/bound
+  → discovery plan approved/executed
+  → design plan approved/executed
+  → implementation plan approved/executed
+      → cleave child lanes and delegate subtasks run inside this plan
+  → review/fix plan approved/executed
+  → validation/release plan approved/executed
+  → workstream complete
+```
+
+When a plan completes, the workstream remains open unless its primary binding completion policy is satisfied.
