@@ -9,3 +9,4 @@ pub mod agents;
 pub mod armory;
 pub mod extensions;
 pub mod inventory;
+pub mod profiles;

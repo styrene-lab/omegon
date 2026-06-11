@@ -7,12 +7,14 @@ use super::armory::{ArmoryProfileSummary, list_armory_profiles_from_root};
 use super::extensions::{
     ExtensionCapabilitySummary, list_installed_extension_capabilities_from_dir,
 };
+use super::profiles::{AssistantProfileSummary, resolve_assistant_profiles};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CapabilityInventorySnapshot {
     pub installed_extensions: Vec<ExtensionCapabilitySummary>,
     pub armory_profiles: Vec<ArmoryProfileSummary>,
     pub agent_bundles: Vec<AgentBundleSummary>,
+    pub assistant_profiles: Vec<AssistantProfileSummary>,
     pub graph: CapabilityGraph,
 }
 
@@ -98,11 +100,13 @@ pub fn build_capability_inventory_snapshot(
     let armory_profiles = list_armory_profiles_from_root(roots.armory_root)?;
     let agent_bundles = list_agent_bundle_summaries_from_dir(roots.catalog_dir)?;
     let graph = build_capability_graph(&installed_extensions, &armory_profiles, &agent_bundles);
+    let assistant_profiles = resolve_assistant_profiles(&agent_bundles, &graph);
 
     Ok(CapabilityInventorySnapshot {
         installed_extensions,
         armory_profiles,
         agent_bundles,
+        assistant_profiles,
         graph,
     })
 }
@@ -362,6 +366,7 @@ mod tests {
         assert!(snapshot.installed_extensions.is_empty());
         assert!(snapshot.armory_profiles.is_empty());
         assert!(snapshot.agent_bundles.is_empty());
+        assert!(snapshot.assistant_profiles.is_empty());
         assert!(snapshot.graph.nodes.is_empty());
         assert!(snapshot.graph.edges.is_empty());
     }
