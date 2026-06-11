@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -73,9 +73,43 @@ pub struct CompressionOutput {
     pub compressed: bool,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct InMemoryHeadroomStore {
     objects: BTreeMap<String, StoredOriginal>,
+    order: VecDeque<String>,
+    policy: HeadroomStorePolicy,
+    total_original_bytes: usize,
+    evicted_count: usize,
+}
+
+impl Default for InMemoryHeadroomStore {
+    fn default() -> Self {
+        Self::with_policy(HeadroomStorePolicy::default())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeadroomStorePolicy {
+    pub max_objects: usize,
+    pub max_original_bytes: usize,
+}
+
+impl Default for HeadroomStorePolicy {
+    fn default() -> Self {
+        Self {
+            max_objects: 128,
+            max_original_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeadroomStoreStats {
+    pub objects: usize,
+    pub original_bytes: usize,
+    pub max_objects: usize,
+    pub max_original_bytes: usize,
+    pub evicted_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +120,39 @@ pub struct StoredOriginal {
 }
 
 impl InMemoryHeadroomStore {
+    pub fn with_policy(policy: HeadroomStorePolicy) -> Self {
+        Self {
+            objects: BTreeMap::new(),
+            order: VecDeque::new(),
+            policy,
+            total_original_bytes: 0,
+            evicted_count: 0,
+        }
+    }
+
+    pub fn set_policy(&mut self, policy: HeadroomStorePolicy) {
+        self.policy = policy;
+        self.enforce_policy();
+    }
+
+    pub fn policy(&self) -> HeadroomStorePolicy {
+        self.policy
+    }
+
+    pub fn evicted_count(&self) -> usize {
+        self.evicted_count
+    }
+
+    pub fn stats(&self) -> HeadroomStoreStats {
+        HeadroomStoreStats {
+            objects: self.len(),
+            original_bytes: self.total_original_bytes,
+            max_objects: self.policy.max_objects,
+            max_original_bytes: self.policy.max_original_bytes,
+            evicted_count: self.evicted_count,
+        }
+    }
+
     pub fn compress(&mut self, input: CompressionInput) -> CompressionOutput {
         let kind = input.kind_hint.unwrap_or_else(|| detect_kind(&input.text));
         let original_bytes = input.text.len();
@@ -164,10 +231,7 @@ impl InMemoryHeadroomStore {
     }
 
     pub fn total_original_bytes(&self) -> usize {
-        self.objects
-            .values()
-            .map(|stored| stored.reference.bytes)
-            .sum()
+        self.total_original_bytes
     }
 
     pub fn objects(&self) -> impl Iterator<Item = &StoredOriginal> {
@@ -175,13 +239,41 @@ impl InMemoryHeadroomStore {
     }
 
     fn store_original(&mut self, reference: HeadroomRef, source: &str, text: &str) {
-        self.objects
-            .entry(reference.id.clone())
-            .or_insert_with(|| StoredOriginal {
+        if self.objects.contains_key(&reference.id) {
+            return;
+        }
+        if self.policy.max_objects == 0 || self.policy.max_original_bytes == 0 {
+            self.evicted_count += 1;
+            return;
+        }
+        let id = reference.id.clone();
+        self.total_original_bytes += reference.bytes;
+        self.order.push_back(id.clone());
+        self.objects.insert(
+            id,
+            StoredOriginal {
                 reference,
                 source: source.to_owned(),
                 text: text.to_owned(),
-            });
+            },
+        );
+        self.enforce_policy();
+    }
+
+    fn enforce_policy(&mut self) {
+        while self.objects.len() > self.policy.max_objects
+            || self.total_original_bytes > self.policy.max_original_bytes
+        {
+            let Some(id) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(removed) = self.objects.remove(&id) {
+                self.total_original_bytes = self
+                    .total_original_bytes
+                    .saturating_sub(removed.reference.bytes);
+                self.evicted_count += 1;
+            }
+        }
     }
 }
 
@@ -878,6 +970,13 @@ mod tests {
         }
     }
 
+    fn large_text(label: &str, lines: usize) -> String {
+        (0..lines)
+            .map(|i| format!("{label} info line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[test]
     fn detects_json_arrays() {
         assert_eq!(detect_kind(r#"[{"path":"a","line":1}]"#), ContentKind::Json);
@@ -996,6 +1095,81 @@ mod tests {
         assert!(anchors.iter().any(|(_, _, line)| {
             line.contains("scored_anchors_prioritize_headroom_test_and_cli_tokens")
         }));
+    }
+
+    #[test]
+    fn store_evicts_oldest_by_object_limit() {
+        let mut store = InMemoryHeadroomStore::with_policy(HeadroomStorePolicy {
+            max_objects: 1,
+            max_original_bytes: 1024 * 1024,
+        });
+        let first = large_text("first", 300);
+        let second = large_text("second", 300);
+        let first_ref = store
+            .compress(CompressionInput {
+                kind_hint: Some(ContentKind::Log),
+                source: "first".into(),
+                text: first,
+                policy: policy(),
+            })
+            .original_ref
+            .expect("first compressed");
+        let second_ref = store
+            .compress(CompressionInput {
+                kind_hint: Some(ContentKind::Log),
+                source: "second".into(),
+                text: second,
+                policy: policy(),
+            })
+            .original_ref
+            .expect("second compressed");
+
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.evicted_count(), 1);
+        assert!(store.retrieve(&first_ref.id).is_err());
+        assert!(store.retrieve(&second_ref.id).is_ok());
+    }
+
+    #[test]
+    fn store_evicts_until_under_byte_limit() {
+        let mut store = InMemoryHeadroomStore::with_policy(HeadroomStorePolicy {
+            max_objects: 10,
+            max_original_bytes: 2_000,
+        });
+        for i in 0..3 {
+            let output = store.compress(CompressionInput {
+                kind_hint: Some(ContentKind::Log),
+                source: format!("item-{i}"),
+                text: large_text(&format!("item-{i}"), 220),
+                policy: policy(),
+            });
+            assert!(output.compressed);
+        }
+
+        let stats = store.stats();
+        assert!(stats.original_bytes <= stats.max_original_bytes);
+        assert!(stats.evicted_count >= 1);
+    }
+
+    #[test]
+    fn store_deduplicates_same_original() {
+        let mut store = InMemoryHeadroomStore::default();
+        let text = large_text("duplicate", 300);
+        let first = store.compress(CompressionInput {
+            kind_hint: Some(ContentKind::Log),
+            source: "a".into(),
+            text: text.clone(),
+            policy: policy(),
+        });
+        let second = store.compress(CompressionInput {
+            kind_hint: Some(ContentKind::Log),
+            source: "b".into(),
+            text,
+            policy: policy(),
+        });
+        assert_eq!(first.original_ref, second.original_ref);
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.evicted_count(), 0);
     }
 
     #[test]

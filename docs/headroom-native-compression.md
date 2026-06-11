@@ -318,4 +318,4 @@ A compressed output may contain a `HeadroomRef`:
 - `bytes`: original UTF-8 byte length
 - `content_kind`: detected or supplied content kind
 
-The original content remains retrievable by id. Future on-disk stores can use the same reference shape under `.omegon/headroom/objects/`.
+The original content remains retrievable by id while retained in the session CCR store. The in-memory store is bounded by object count and original-byte budgets so opt-in automatic compression cannot trade prompt pressure for unbounded process memory growth. Default policy retains up to `128` originals and `64 MiB` of original text. The runtime settings expose `max_store_objects` and `max_store_bytes`; integration points apply the live policy before compression/stats reporting. When the budget is exceeded, the oldest originals are evicted first and `headroom_retrieve` returns an unknown-object error for evicted handles. Future on-disk stores can use the same reference shape under `.omegon/headroom/objects/`, but need their own retention/redaction policy before becoming default.

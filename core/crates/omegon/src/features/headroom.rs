@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use omegon_headroom::{CompressionInput, ContentKind, HeadroomPolicy, HeadroomRef};
+use omegon_headroom::{
+    CompressionInput, ContentKind, HeadroomPolicy, HeadroomRef, HeadroomStorePolicy,
+};
 use omegon_traits::{ContentBlock, Feature, ToolDefinition, ToolResult};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -138,14 +140,17 @@ impl HeadroomFeature {
         };
 
         let mut store = self.store.lock().unwrap();
+        store.set_policy(HeadroomStorePolicy {
+            max_objects: settings.max_store_objects,
+            max_original_bytes: settings.max_store_bytes,
+        });
         let output = store.compress(CompressionInput {
             kind_hint,
             source,
             text: text.to_owned(),
             policy,
         });
-        let store_objects = store.len();
-        let store_bytes = store.total_original_bytes();
+        let store_stats = store.stats();
         drop(store);
 
         let ref_details = output.original_ref.as_ref().map(reference_json);
@@ -172,10 +177,7 @@ impl HeadroomFeature {
                         "collect_metrics": settings.collect_metrics,
                         "local_model": settings.local_model,
                     },
-                    "store": {
-                        "objects": store_objects,
-                        "original_bytes": store_bytes,
-                    }
+                    "store": store_stats,
                 }
             }),
         })
@@ -216,7 +218,12 @@ impl HeadroomFeature {
 
     fn stats(&self) -> anyhow::Result<ToolResult> {
         let settings = self.settings.lock().unwrap().headroom.clone();
-        let store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap();
+        store.set_policy(HeadroomStorePolicy {
+            max_objects: settings.max_store_objects,
+            max_original_bytes: settings.max_store_bytes,
+        });
+        let store_stats = store.stats();
         let objects = store
             .objects()
             .map(|stored| {
@@ -229,7 +236,7 @@ impl HeadroomFeature {
             })
             .collect::<Vec<_>>();
         let out = format!(
-            "## Headroom Stats\n\n- **Enabled**: {}\n- **Mode**: {}\n- **Reversible**: {}\n- **Metrics**: {}\n- **Min bytes**: {}\n- **Target bytes**: {}\n- **Local model**: {}\n- **Stored originals**: {}\n- **Stored original bytes**: {}",
+            "## Headroom Stats\n\n- **Enabled**: {}\n- **Mode**: {}\n- **Reversible**: {}\n- **Metrics**: {}\n- **Min bytes**: {}\n- **Target bytes**: {}\n- **Local model**: {}\n- **Stored originals**: {}\n- **Stored original bytes**: {}\n- **Store max objects**: {}\n- **Store max bytes**: {}\n- **Evicted originals**: {}",
             settings.enabled,
             settings.mode.as_str(),
             settings.reversible,
@@ -237,8 +244,11 @@ impl HeadroomFeature {
             settings.min_bytes,
             settings.target_bytes,
             settings.local_model.as_deref().unwrap_or("deterministic"),
-            store.len(),
-            store.total_original_bytes(),
+            store_stats.objects,
+            store_stats.original_bytes,
+            store_stats.max_objects,
+            store_stats.max_original_bytes,
+            store_stats.evicted_count,
         );
         Ok(ToolResult {
             content: vec![ContentBlock::Text { text: out }],
@@ -252,11 +262,12 @@ impl HeadroomFeature {
                         "collect_metrics": settings.collect_metrics,
                         "min_bytes": settings.min_bytes,
                         "target_bytes": settings.target_bytes,
+                        "max_store_objects": settings.max_store_objects,
+                        "max_store_bytes": settings.max_store_bytes,
                         "local_model": settings.local_model,
                     },
                     "store": {
-                        "objects": store.len(),
-                        "original_bytes": store.total_original_bytes(),
+                        "stats": store_stats,
                         "items": objects,
                     }
                 }

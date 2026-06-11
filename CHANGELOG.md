@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add manual native headroom tools (`headroom_compress`, `headroom_retrieve`, `headroom_stats`) for opt-in CCR dogfooding before automatic context integration.
 - Add experimental `read` integration for native headroom compression in opt-in `mode=on`, sharing CCR retrieval storage with `headroom_retrieve`.
 - Prioritize protected-anchor retention in native headroom compression so dogfood-critical test names, CLI flags, and headroom retrieval/tool tokens survive raw compression without evaluator repair.
+- Add bounded session CCR store policy and stats for native headroom originals so opt-in compression cannot grow in-memory originals without limits.
 - Add runtime caps and effective-window metadata for web search, memory recall/episodes, and session-log result windows.
 - Add the experimental `headroom` runtime settings surface and `harness_settings` opt-in action for dogfooding native compression before it becomes a default behavior.
 - Document Kompressor as a future optional compression-provider milestone behind the planned pluggable engine boundary, with deterministic fallback and dogfood validation requirements.

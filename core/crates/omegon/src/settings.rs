@@ -458,6 +458,12 @@ pub struct HeadroomRuntimeConfig {
     /// Target compressed payload size for conservative automatic compression.
     #[serde(default = "default_headroom_target_bytes")]
     pub target_bytes: usize,
+    /// Maximum number of exact originals retained in the session CCR store.
+    #[serde(default = "default_headroom_max_store_objects")]
+    pub max_store_objects: usize,
+    /// Maximum original bytes retained in the session CCR store.
+    #[serde(default = "default_headroom_max_store_bytes")]
+    pub max_store_bytes: usize,
     /// Optional local semantic compression/evaluation model. None means deterministic only.
     #[serde(default)]
     pub local_model: Option<String>,
@@ -472,6 +478,8 @@ impl Default for HeadroomRuntimeConfig {
             reversible: default_headroom_reversible(),
             min_bytes: default_headroom_min_bytes(),
             target_bytes: default_headroom_target_bytes(),
+            max_store_objects: default_headroom_max_store_objects(),
+            max_store_bytes: default_headroom_max_store_bytes(),
             local_model: None,
         }
     }
@@ -485,13 +493,15 @@ impl HeadroomRuntimeConfig {
     pub fn summary(&self) -> String {
         let model = self.local_model.as_deref().unwrap_or("deterministic");
         format!(
-            "enabled={} mode={} reversible={} metrics={} min_bytes={} target_bytes={} model={}",
+            "enabled={} mode={} reversible={} metrics={} min_bytes={} target_bytes={} max_store_objects={} max_store_bytes={} model={}",
             self.enabled,
             self.mode.as_str(),
             self.reversible,
             self.collect_metrics,
             self.min_bytes,
             self.target_bytes,
+            self.max_store_objects,
+            self.max_store_bytes,
             model
         )
     }
@@ -511,6 +521,14 @@ fn default_headroom_min_bytes() -> usize {
 
 fn default_headroom_target_bytes() -> usize {
     16 * 1024
+}
+
+fn default_headroom_max_store_objects() -> usize {
+    128
+}
+
+fn default_headroom_max_store_bytes() -> usize {
+    64 * 1024 * 1024
 }
 
 /// Tool card information density in the conversation view.

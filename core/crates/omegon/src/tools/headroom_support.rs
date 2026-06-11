@@ -1,6 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use omegon_headroom::{CompressionInput, ContentKind, HeadroomPolicy, InMemoryHeadroomStore};
+use omegon_headroom::{
+    CompressionInput, ContentKind, HeadroomPolicy, HeadroomStorePolicy, InMemoryHeadroomStore,
+};
 use serde_json::{Value, json};
 
 pub type SharedHeadroomStore = Arc<Mutex<InMemoryHeadroomStore>>;
@@ -92,14 +94,17 @@ pub fn maybe_compress_tool_text(
             };
         }
     };
+    store.set_policy(HeadroomStorePolicy {
+        max_objects: headroom.max_store_objects,
+        max_original_bytes: headroom.max_store_bytes,
+    });
     let output = store.compress(CompressionInput {
         kind_hint,
         source: source.to_owned(),
         text,
         policy,
     });
-    let store_objects = store.len();
-    let store_original_bytes = store.total_original_bytes();
+    let store_stats = store.stats();
     drop(store);
 
     HeadroomToolTextResult {
@@ -111,10 +116,7 @@ pub fn maybe_compress_tool_text(
             "original_ref": output.original_ref,
             "mode": headroom.mode.as_str(),
             "reversible": headroom.reversible,
-            "store": {
-                "objects": store_objects,
-                "original_bytes": store_original_bytes,
-            }
+            "store": store_stats,
         })),
     }
 }
