@@ -251,6 +251,8 @@ pub struct WebState {
     pub control_plane_state: Arc<Mutex<ControlPlaneState>>,
     /// Shared secrets manager for metadata-only readiness projections.
     pub secrets: Option<Arc<omegon_secrets::SecretsManager>>,
+    /// Project-local assistant run ledger path.
+    pub assistant_runs_db_path: Arc<std::path::PathBuf>,
     /// Received daemon/event-ingress envelopes (v1 in-memory queue).
     pub daemon_events: Arc<Mutex<Vec<DaemonEventEnvelope>>>,
     /// Shared queue/worker status for daemon event ingress.
@@ -293,6 +295,9 @@ impl WebState {
             startup_info: Arc::new(Mutex::new(None)),
             control_plane_state: Arc::new(Mutex::new(ControlPlaneState::Starting)),
             secrets,
+            assistant_runs_db_path: Arc::new(crate::paths::assistant_runs_db(
+                &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )),
             daemon_events: Arc::new(Mutex::new(Vec::new())),
             daemon_status: Arc::new(Mutex::new(WebDaemonStatus {
                 transport_warnings: default_transport_warnings(),

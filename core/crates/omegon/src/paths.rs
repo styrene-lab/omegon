@@ -76,6 +76,14 @@ pub fn memory_dir(repo_root: &Path) -> PathBuf {
     primary
 }
 
+/// Resolve the project-local assistant run ledger path.
+///
+/// Assistant runs are runtime/control-plane state, not knowledge artifacts, so
+/// they live under the project-local `.omegon/` directory rather than `ai/`.
+pub fn assistant_runs_db(repo_root: &Path) -> PathBuf {
+    repo_root.join(".omegon/assistant-runs.db")
+}
+
 /// Resolve the memory directory for writes.
 /// Prefers ai/memory/ if it exists, then .omegon/memory/ if it exists,
 /// otherwise defaults to ai/memory/ for new projects.

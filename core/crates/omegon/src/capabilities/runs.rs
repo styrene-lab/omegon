@@ -1,3 +1,7 @@
+use std::path::Path;
+use std::sync::Mutex;
+
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use super::profiles::AssistantLaunchStatus;
@@ -14,7 +18,7 @@ pub struct AssistantRunSummary {
     pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AssistantRunStatus {
     Queued,
@@ -24,13 +28,36 @@ pub enum AssistantRunStatus {
     Cancelled,
 }
 
+impl AssistantRunStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    fn from_str(value: &str) -> anyhow::Result<Self> {
+        match value {
+            "queued" => Ok(Self::Queued),
+            "running" => Ok(Self::Running),
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            other => anyhow::bail!("unknown assistant run status '{other}'"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AssistantRunTrigger {
     pub source: AssistantRunTriggerSource,
     pub label: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AssistantRunTriggerSource {
     Console,
@@ -39,30 +66,218 @@ pub enum AssistantRunTriggerSource {
     System,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AssistantRunStore {
-    pub runs: Vec<AssistantRunSummary>,
+impl AssistantRunTriggerSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Console => "console",
+            Self::Acp => "acp",
+            Self::Tui => "tui",
+            Self::System => "system",
+        }
+    }
+
+    fn from_str(value: &str) -> anyhow::Result<Self> {
+        match value {
+            "console" => Ok(Self::Console),
+            "acp" => Ok(Self::Acp),
+            "tui" => Ok(Self::Tui),
+            "system" => Ok(Self::System),
+            other => anyhow::bail!("unknown assistant run trigger source '{other}'"),
+        }
+    }
 }
 
-impl AssistantRunStore {
-    pub fn empty() -> Self {
-        Self { runs: Vec::new() }
+fn readiness_as_str(status: &AssistantLaunchStatus) -> &'static str {
+    match status {
+        AssistantLaunchStatus::Ready => "ready",
+        AssistantLaunchStatus::Degraded => "degraded",
+        AssistantLaunchStatus::Blocked => "blocked",
+    }
+}
+
+fn readiness_from_str(value: &str) -> anyhow::Result<AssistantLaunchStatus> {
+    match value {
+        "ready" => Ok(AssistantLaunchStatus::Ready),
+        "degraded" => Ok(AssistantLaunchStatus::Degraded),
+        "blocked" => Ok(AssistantLaunchStatus::Blocked),
+        other => anyhow::bail!("unknown assistant readiness status '{other}'"),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NewAssistantRun {
+    pub run_id: String,
+    pub assistant_id: String,
+    pub status: AssistantRunStatus,
+    pub trigger: AssistantRunTrigger,
+    pub readiness_status: AssistantLaunchStatus,
+    pub safe_progress: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+pub struct SqliteAssistantRunStore {
+    conn: Mutex<Connection>,
+}
+
+impl SqliteAssistantRunStore {
+    pub fn open(path: &Path) -> anyhow::Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let conn = Connection::open(path)?;
+        let store = Self {
+            conn: Mutex::new(conn),
+        };
+        store.init_schema()?;
+        Ok(store)
     }
 
-    pub fn list(&self) -> Vec<AssistantRunSummary> {
-        let mut runs = self.runs.clone();
-        runs.sort_by(|a, b| {
-            b.updated_at
-                .cmp(&a.updated_at)
-                .then_with(|| b.created_at.cmp(&a.created_at))
-                .then_with(|| a.run_id.cmp(&b.run_id))
-        });
-        runs
+    pub fn in_memory() -> anyhow::Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        let store = Self {
+            conn: Mutex::new(conn),
+        };
+        store.init_schema()?;
+        Ok(store)
     }
 
-    pub fn get(&self, run_id: &str) -> Option<AssistantRunSummary> {
-        self.runs.iter().find(|run| run.run_id == run_id).cloned()
+    fn init_schema(&self) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS assistant_runs (
+                run_id           TEXT PRIMARY KEY,
+                assistant_id     TEXT NOT NULL,
+                status           TEXT NOT NULL,
+                trigger_source   TEXT NOT NULL,
+                trigger_label    TEXT,
+                readiness_status TEXT NOT NULL,
+                safe_progress    TEXT,
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL,
+                started_at       TEXT,
+                completed_at     TEXT,
+                error_summary    TEXT,
+                executor_kind    TEXT NOT NULL DEFAULT 'local_daemon',
+                executor_ref     TEXT,
+                schema_version   INTEGER NOT NULL DEFAULT 1
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_assistant_runs_updated
+                ON assistant_runs(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_assistant_runs_assistant
+                ON assistant_runs(assistant_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_assistant_runs_status
+                ON assistant_runs(status, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS assistant_run_events (
+                event_id     TEXT PRIMARY KEY,
+                run_id       TEXT NOT NULL,
+                event_type   TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at   TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES assistant_runs(run_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_assistant_run_events_run
+                ON assistant_run_events(run_id, created_at ASC);
+            ",
+        )?;
+        Ok(())
     }
+
+    pub fn list(&self) -> anyhow::Result<Vec<AssistantRunSummary>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT run_id, assistant_id, status, trigger_source, trigger_label,
+                    readiness_status, safe_progress, created_at, updated_at
+             FROM assistant_runs
+             ORDER BY updated_at DESC, created_at DESC, run_id ASC",
+        )?;
+        let rows = stmt.query_map([], row_to_run)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn get(&self, run_id: &str) -> anyhow::Result<Option<AssistantRunSummary>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT run_id, assistant_id, status, trigger_source, trigger_label,
+                    readiness_status, safe_progress, created_at, updated_at
+             FROM assistant_runs
+             WHERE run_id = ?1",
+            params![run_id],
+            row_to_run,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn insert(&self, run: NewAssistantRun) -> anyhow::Result<AssistantRunSummary> {
+        let created_at = run.created_at.unwrap_or_else(now_sqlite);
+        let updated_at = run.updated_at.unwrap_or_else(|| created_at.clone());
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO assistant_runs (
+                run_id, assistant_id, status, trigger_source, trigger_label,
+                readiness_status, safe_progress, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                run.run_id,
+                run.assistant_id,
+                run.status.as_str(),
+                run.trigger.source.as_str(),
+                run.trigger.label,
+                readiness_as_str(&run.readiness_status),
+                run.safe_progress,
+                created_at,
+                updated_at,
+            ],
+        )?;
+        drop(conn);
+        self.get_latest_inserted()
+    }
+
+    fn get_latest_inserted(&self) -> anyhow::Result<AssistantRunSummary> {
+        self.list()?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("inserted assistant run missing"))
+    }
+}
+
+fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssistantRunSummary> {
+    let status: String = row.get(2)?;
+    let trigger_source: String = row.get(3)?;
+    let readiness_status: String = row.get(5)?;
+    Ok(AssistantRunSummary {
+        run_id: row.get(0)?,
+        assistant_id: row.get(1)?,
+        status: AssistantRunStatus::from_str(&status).map_err(to_sql_error)?,
+        trigger: AssistantRunTrigger {
+            source: AssistantRunTriggerSource::from_str(&trigger_source).map_err(to_sql_error)?,
+            label: row.get(4)?,
+        },
+        readiness_status: readiness_from_str(&readiness_status).map_err(to_sql_error)?,
+        safe_progress: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+fn to_sql_error(err: anyhow::Error) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        0,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::other(err.to_string())),
+    )
+}
+
+fn now_sqlite() -> String {
+    chrono::Utc::now().to_rfc3339()
 }
 
 #[cfg(test)]
@@ -70,44 +285,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn runtime_store_lists_newest_first_without_payloads() {
-        let store = AssistantRunStore {
-            runs: vec![
-                AssistantRunSummary {
-                    run_id: "old".into(),
-                    assistant_id: "daily".into(),
-                    status: AssistantRunStatus::Succeeded,
-                    trigger: AssistantRunTrigger {
-                        source: AssistantRunTriggerSource::Console,
-                        label: Some("manual".into()),
-                    },
-                    readiness_status: AssistantLaunchStatus::Ready,
-                    safe_progress: Some("completed".into()),
-                    created_at: Some("2026-06-11T00:00:00Z".into()),
-                    updated_at: Some("2026-06-11T00:01:00Z".into()),
-                },
-                AssistantRunSummary {
-                    run_id: "new".into(),
-                    assistant_id: "daily".into(),
-                    status: AssistantRunStatus::Running,
-                    trigger: AssistantRunTrigger {
-                        source: AssistantRunTriggerSource::Console,
-                        label: None,
-                    },
-                    readiness_status: AssistantLaunchStatus::Ready,
-                    safe_progress: None,
-                    created_at: Some("2026-06-11T00:02:00Z".into()),
-                    updated_at: Some("2026-06-11T00:03:00Z".into()),
-                },
-            ],
-        };
+    fn sqlite_store_lists_newest_first_without_payloads() {
+        let store = SqliteAssistantRunStore::in_memory().unwrap();
+        store
+            .insert(run("old", "2026-06-11T00:00:00Z", "2026-06-11T00:01:00Z"))
+            .unwrap();
+        store
+            .insert(run("new", "2026-06-11T00:02:00Z", "2026-06-11T00:03:00Z"))
+            .unwrap();
 
-        let runs = store.list();
+        let runs = store.list().unwrap();
         assert_eq!(runs[0].run_id, "new");
         assert_eq!(
-            store.get("old").unwrap().safe_progress.as_deref(),
+            store.get("old").unwrap().unwrap().safe_progress.as_deref(),
             Some("completed")
         );
-        assert!(store.get("missing").is_none());
+        assert!(store.get("missing").unwrap().is_none());
+    }
+
+    fn run(run_id: &str, created_at: &str, updated_at: &str) -> NewAssistantRun {
+        NewAssistantRun {
+            run_id: run_id.into(),
+            assistant_id: "daily".into(),
+            status: AssistantRunStatus::Running,
+            trigger: AssistantRunTrigger {
+                source: AssistantRunTriggerSource::Console,
+                label: Some("manual".into()),
+            },
+            readiness_status: AssistantLaunchStatus::Ready,
+            safe_progress: Some("completed".into()),
+            created_at: Some(created_at.into()),
+            updated_at: Some(updated_at.into()),
+        }
     }
 }

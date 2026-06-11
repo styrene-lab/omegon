@@ -171,16 +171,30 @@ pub struct AssistantRunShowResponse {
     pub run: crate::capabilities::runs::AssistantRunSummary,
 }
 
-pub async fn get_assistant_runs() -> Result<Json<AssistantRunsListResponse>, StatusCode> {
-    let store = crate::capabilities::runs::AssistantRunStore::empty();
-    Ok(Json(AssistantRunsListResponse { runs: store.list() }))
+pub async fn get_assistant_runs(
+    State(state): State<WebState>,
+) -> Result<Json<AssistantRunsListResponse>, StatusCode> {
+    let store =
+        crate::capabilities::runs::SqliteAssistantRunStore::open(&state.assistant_runs_db_path)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(AssistantRunsListResponse {
+        runs: store
+            .list()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    }))
 }
 
 pub async fn get_assistant_run(
+    State(state): State<WebState>,
     axum::extract::Path(run_id): axum::extract::Path<String>,
 ) -> Result<Json<AssistantRunShowResponse>, StatusCode> {
-    let store = crate::capabilities::runs::AssistantRunStore::empty();
-    let run = store.get(&run_id).ok_or(StatusCode::NOT_FOUND)?;
+    let store =
+        crate::capabilities::runs::SqliteAssistantRunStore::open(&state.assistant_runs_db_path)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let run = store
+        .get(&run_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(AssistantRunShowResponse { run }))
 }
 
@@ -821,6 +835,12 @@ mod tests {
                 ControlPlaneState::Ready,
             )),
             secrets: None,
+            assistant_runs_db_path: std::sync::Arc::new(
+                tempfile::tempdir()
+                    .unwrap()
+                    .path()
+                    .join("assistant-runs.db"),
+            ),
             daemon_events: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             daemon_status: std::sync::Arc::new(std::sync::Mutex::new(WebDaemonStatus::default())),
         }
@@ -854,15 +874,31 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn assistant_runs_endpoint_returns_empty_runtime_projection() {
-        let response = get_assistant_runs().await.unwrap().0;
+        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let cwd = std::env::current_dir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(home.path()).unwrap();
+        let response = get_assistant_runs(axum::extract::State(test_state()))
+            .await
+            .unwrap()
+            .0;
+        std::env::set_current_dir(cwd).unwrap();
         assert!(response.runs.is_empty());
     }
 
     #[tokio::test]
     async fn assistant_run_endpoint_404s_missing_runtime_run() {
-        let err = get_assistant_run(axum::extract::Path("missing".into()))
-            .await
-            .unwrap_err();
+        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let cwd = std::env::current_dir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(home.path()).unwrap();
+        let err = get_assistant_run(
+            axum::extract::State(test_state()),
+            axum::extract::Path("missing".into()),
+        )
+        .await
+        .unwrap_err();
+        std::env::set_current_dir(cwd).unwrap();
         assert_eq!(err, StatusCode::NOT_FOUND);
     }
 
