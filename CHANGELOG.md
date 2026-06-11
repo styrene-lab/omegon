@@ -19,7 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 
 - Add a native `omegon-headroom` crate with deterministic content routing, structured compression summaries, and in-memory CCR retrieval primitives for future context/tool-output compression.
-- Add saved-baseline comparison and file-backed dogfood fixture loading to `headroom-eval` so compression metrics can detect savings/fact-restoration regressions against real session samples.
+- Add `just headroom-fixture` for creating ignored dogfood fixture JSON files from local UTF-8 samples.
 - Add manual native headroom tools (`headroom_compress`, `headroom_retrieve`, `headroom_stats`) for opt-in CCR dogfooding before automatic context integration.
 - Add experimental `read` integration for native headroom compression in opt-in `mode=on`, sharing CCR retrieval storage with `headroom_retrieve`.
 - Add the experimental `headroom` runtime settings surface and `harness_settings` opt-in action for dogfooding native compression before it becomes a default behavior.
