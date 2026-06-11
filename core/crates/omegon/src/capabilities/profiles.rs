@@ -308,7 +308,102 @@ mod tests {
 
     #[test]
     fn assistant_profile_merges_reachable_capability_trust() {
-        let agent = AgentBundleSummary {
+        let agent = test_agent(AgentSecretsSummary {
+            required: vec!["ANTHROPIC_API_KEY".into()],
+            optional: Vec::new(),
+        });
+
+        let profiles = resolve_assistant_profiles(
+            &[agent],
+            &test_graph(),
+            &[ready_secret("ANTHROPIC_API_KEY")],
+        );
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].id, "daily");
+        assert_eq!(profiles[0].model.as_deref(), Some("anthropic:claude"));
+        assert!(profiles[0].trust.browser_action_capable);
+        assert!(profiles[0].trust.process_spawn_capable);
+        assert!(profiles[0].trust.secret_bound);
+        assert_eq!(profiles[0].secret_readiness.required_total, 1);
+        assert_eq!(profiles[0].secret_readiness.required_ready, 1);
+        assert_eq!(
+            profiles[0].launch_readiness.status,
+            AssistantLaunchStatus::Ready
+        );
+        assert!(profiles[0].launch_readiness.blockers.is_empty());
+        assert!(profiles[0].secret_readiness.missing_required.is_empty());
+        assert!(!profiles[0].trust.read_only);
+        assert!(
+            profiles[0]
+                .capability_node_ids
+                .contains(&"extension:browser".to_string())
+        );
+    }
+
+    #[test]
+    fn assistant_launch_readiness_blocks_missing_required_secrets() {
+        let agent = test_agent(AgentSecretsSummary {
+            required: vec!["ANTHROPIC_API_KEY".into()],
+            optional: Vec::new(),
+        });
+        let profiles = resolve_assistant_profiles(&[agent], &test_graph(), &[]);
+
+        assert_eq!(
+            profiles[0].launch_readiness.status,
+            AssistantLaunchStatus::Blocked
+        );
+        assert_eq!(profiles[0].launch_readiness.blockers.len(), 1);
+        assert_eq!(
+            profiles[0].launch_readiness.blockers[0].kind,
+            AssistantLaunchBlockerKind::RequiredSecretMissing
+        );
+        assert_eq!(
+            profiles[0].launch_readiness.blockers[0].id,
+            "ANTHROPIC_API_KEY"
+        );
+    }
+
+    #[test]
+    fn assistant_launch_readiness_degrades_for_optional_and_deferred_secrets() {
+        let agent = test_agent(AgentSecretsSummary {
+            required: vec!["ANTHROPIC_API_KEY".into()],
+            optional: vec!["OPTIONAL_TOKEN".into(), "VAULT_TOKEN".into()],
+        });
+        let profiles = resolve_assistant_profiles(
+            &[agent],
+            &test_graph(),
+            &[
+                ready_secret("ANTHROPIC_API_KEY"),
+                SecretReadiness {
+                    name: "VAULT_TOKEN".into(),
+                    required: false,
+                    optional: true,
+                    consumers: Vec::new(),
+                    status: SecretReadinessStatus::Deferred,
+                    recipe_kind: Some("vault".into()),
+                    warmed: false,
+                },
+            ],
+        );
+
+        assert_eq!(
+            profiles[0].launch_readiness.status,
+            AssistantLaunchStatus::Degraded
+        );
+        assert!(profiles[0].launch_readiness.blockers.is_empty());
+        assert!(profiles[0].launch_readiness.warnings.iter().any(|warning| {
+            warning.kind == AssistantLaunchWarningKind::OptionalSecretMissing
+                && warning.id == "OPTIONAL_TOKEN"
+        }));
+        assert!(profiles[0].launch_readiness.warnings.iter().any(|warning| {
+            warning.kind == AssistantLaunchWarningKind::SecretDeferred
+                && warning.id == "VAULT_TOKEN"
+        }));
+    }
+
+    fn test_agent(secrets: AgentSecretsSummary) -> AgentBundleSummary {
+        AgentBundleSummary {
             id: "daily".into(),
             name: "Daily".into(),
             version: "0.1.0".into(),
@@ -328,13 +423,13 @@ mod tests {
                 ..Default::default()
             },
             workflow: None,
-            secrets: AgentSecretsSummary {
-                required: vec!["ANTHROPIC_API_KEY".into()],
-                optional: Vec::new(),
-            },
+            secrets,
             triggers: Vec::new(),
-        };
-        let graph = CapabilityGraph {
+        }
+    }
+
+    fn test_graph() -> CapabilityGraph {
+        CapabilityGraph {
             nodes: vec![
                 CapabilityNode {
                     id: "agent:daily".into(),
@@ -367,41 +462,18 @@ mod tests {
                 to: "extension:browser".into(),
                 kind: CapabilityEdgeKind::UsesExtension,
             }],
-        };
+        }
+    }
 
-        let profiles = resolve_assistant_profiles(
-            &[agent],
-            &graph,
-            &[SecretReadiness {
-                name: "ANTHROPIC_API_KEY".into(),
-                required: true,
-                optional: false,
-                consumers: Vec::new(),
-                status: SecretReadinessStatus::Warmed,
-                recipe_kind: None,
-                warmed: true,
-            }],
-        );
-
-        assert_eq!(profiles.len(), 1);
-        assert_eq!(profiles[0].id, "daily");
-        assert_eq!(profiles[0].model.as_deref(), Some("anthropic:claude"));
-        assert!(profiles[0].trust.browser_action_capable);
-        assert!(profiles[0].trust.process_spawn_capable);
-        assert!(profiles[0].trust.secret_bound);
-        assert_eq!(profiles[0].secret_readiness.required_total, 1);
-        assert_eq!(profiles[0].secret_readiness.required_ready, 1);
-        assert_eq!(
-            profiles[0].launch_readiness.status,
-            AssistantLaunchStatus::Ready
-        );
-        assert!(profiles[0].launch_readiness.blockers.is_empty());
-        assert!(profiles[0].secret_readiness.missing_required.is_empty());
-        assert!(!profiles[0].trust.read_only);
-        assert!(
-            profiles[0]
-                .capability_node_ids
-                .contains(&"extension:browser".to_string())
-        );
+    fn ready_secret(name: &str) -> SecretReadiness {
+        SecretReadiness {
+            name: name.into(),
+            required: true,
+            optional: false,
+            consumers: Vec::new(),
+            status: SecretReadinessStatus::Warmed,
+            recipe_kind: None,
+            warmed: true,
+        }
     }
 }
