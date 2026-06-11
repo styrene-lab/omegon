@@ -876,14 +876,6 @@ fn has_test_count_summary(line: &str) -> bool {
         && (lower.contains("failed") || lower.contains("failure") || lower.contains("ignored"))
 }
 
-fn push_excerpt<'a>(out: &mut String, label: &str, lines: impl Iterator<Item = &'a str>) {
-    out.push_str(&format!("\n{label}:\n"));
-    for line in lines {
-        out.push_str(line);
-        out.push('\n');
-    }
-}
-
 fn is_signal_line(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
     lower.contains("error")
