@@ -71,6 +71,7 @@ mod agent_manifest;
 mod armory;
 mod bundle_verify;
 mod catalog;
+pub mod capabilities;
 mod checkpoint;
 mod child_agent;
 mod conversation;

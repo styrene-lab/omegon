@@ -2,11 +2,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::agents::{AgentBundleSummary, list_agent_bundle_summaries_from_dir};
-use super::armory::{ArmoryProfileSummary, list_armory_profiles_from_root};
-use super::extensions::{
-    ExtensionCapabilitySummary, list_installed_extension_capabilities_from_dir,
-};
+use super::agents::{list_agent_bundle_summaries_from_dir, AgentBundleSummary};
+use super::armory::{list_armory_profiles_from_root, ArmoryProfileSummary};
+use super::extensions::{list_installed_extension_capabilities_from_dir, ExtensionCapabilitySummary};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CapabilityInventorySnapshot {

@@ -58,6 +58,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add cleave and delegate execution-evaluation tests with injected child binaries, including timeout and cancellation coverage.
 - Add richer cleave/delegate status visibility for subagent progress, including child activity, task progress, and runtime state.
 - Add headless ACP lifecycle read surfaces for lifecycle snapshots and design-node list/get/ready/blocked/frontier projections.
+- Expose the composed capability inventory through the `_capabilities/inventory` ACP ext_method and advertise it in runtime capabilities.
+- Expose the composed capability inventory snapshot through `GET /api/capabilities` for future assistant console consumers.
+- Add a capability inventory snapshot model that composes installed extension capability health, Armory profile recipes, and catalog agent templates.
+- Add an agent bundle read model for assistant templates, including persona/mind presence, extension dependencies, settings, workflow phases, secrets, and triggers.
+- Add an Armory profile read model for assistant capability recipes, including defaults, export policy, dependency graph, and activation policy.
+- Add an Armory organization assessment to the Omegon Console backend design node, identifying profiles, agent bundles, personas, tones, skills, machine profiles, payloads, workstations, and readiness projection as first-class assistant catalog inputs.
+- Add a structured installed-extension capability read model as the first backend substrate for future assistant capability graph and console surfaces.
 - Add a substrate evaluation and adversarial assessment to the Omegon Console backend design node, positioning the console around persistent agent operations, assistant profiles, capability graphs, durable tasks, lifecycle authority, ecosystem capabilities, Auspex deployment boundaries, and backend-first daemon APIs.
 - Add an Omegon Console backend design node planning daemon APIs, ACP-over-WebSocket sessions, and future Dioxus UI integration.
 - Add an ACP expansion design node mapping lifecycle, OpenSpec, conversation, dashboard, instrument, UI-control, context, and memory projection surfaces for external clients.

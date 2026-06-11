@@ -102,7 +102,11 @@ pub fn extension_capability_summary_from_dir(
 ) -> anyhow::Result<ExtensionCapabilitySummary> {
     let manifest = ExtensionManifest::from_extension_dir(extension_dir)?;
     let state = ExtensionState::load(extension_dir)?;
-    Ok(extension_capability_summary(extension_dir, manifest, state))
+    Ok(extension_capability_summary(
+        extension_dir,
+        manifest,
+        state,
+    ))
 }
 
 fn extension_capability_summary(
@@ -154,8 +158,7 @@ fn extension_capability_summary(
         required_secrets: manifest.secrets.required,
         optional_secrets: manifest.secrets.optional,
         widgets,
-        capabilities: serde_json::to_value(manifest.capabilities)
-            .unwrap_or(serde_json::Value::Null),
+        capabilities: serde_json::to_value(manifest.capabilities).unwrap_or(serde_json::Value::Null),
         permissions: serde_json::to_value(manifest.permissions).unwrap_or(serde_json::Value::Null),
         mcp: manifest.mcp.map(|mcp| ExtensionMcpSummary {
             transport: format!("{:?}", mcp.transport).to_ascii_lowercase(),

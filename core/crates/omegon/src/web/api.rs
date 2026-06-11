@@ -161,6 +161,33 @@ pub struct EventAccepted {
     pub queued_events: usize,
 }
 
+/// GET /api/capabilities — assistant capability inventory snapshot.
+pub async fn get_capabilities() -> Result<Json<crate::capabilities::inventory::CapabilityInventorySnapshot>, StatusCode> {
+    let home = crate::paths::omegon_home().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let cwd = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let roots = crate::capabilities::inventory::CapabilityInventoryRoots {
+        extensions_dir: &home.join("extensions"),
+        armory_root: &home.join("armory"),
+        catalog_dir: &home.join("catalog"),
+    };
+    let mut snapshot = crate::capabilities::inventory::build_capability_inventory_snapshot(roots)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Project-local Armory checkouts are useful during assistant development and
+    // mirror how project-local skills/plugins can overlay user-global assets.
+    if snapshot.armory_profiles.is_empty() {
+        let project_armory = cwd.join("../omegon-armory");
+        if project_armory.join("profiles").exists() {
+            snapshot.armory_profiles = crate::capabilities::armory::list_armory_profiles_from_root(
+                &project_armory,
+            )
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+    }
+
+    Ok(Json(snapshot))
+}
+
 /// GET /api/startup — machine-readable dashboard startup/discovery metadata.
 pub async fn get_startup(
     State(state): State<WebState>,

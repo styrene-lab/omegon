@@ -2351,16 +2351,26 @@ impl OmegonAcpAgent {
                 }
             })),
 
-            "capabilities/inventory" => {
+            "capabilities/inventory" | "_capabilities/inventory" => {
                 let home = crate::paths::omegon_home()?;
                 let roots = crate::capabilities::inventory::CapabilityInventoryRoots {
                     extensions_dir: &home.join("extensions"),
                     armory_root: &home.join("armory"),
                     catalog_dir: &home.join("catalog"),
                 };
-                Ok(serde_json::to_value(
-                    crate::capabilities::inventory::build_capability_inventory_snapshot(roots)?,
-                )?)
+                let mut snapshot =
+                    crate::capabilities::inventory::build_capability_inventory_snapshot(roots)?;
+                if snapshot.armory_profiles.is_empty() {
+                    let cwd = std::env::current_dir()?;
+                    let project_armory = cwd.join("../omegon-armory");
+                    if project_armory.join("profiles").exists() {
+                        snapshot.armory_profiles =
+                            crate::capabilities::armory::list_armory_profiles_from_root(
+                                &project_armory,
+                            )?;
+                    }
+                }
+                Ok(serde_json::to_value(snapshot)?)
             }
 
             "extensions/list" => {
