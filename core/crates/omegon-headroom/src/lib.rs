@@ -300,24 +300,33 @@ fn compress_signal_text(
     reference: Option<&HeadroomRef>,
 ) -> String {
     let mut out = header(kind, text, reference);
-    push_protected_anchors(&mut out, text, policy.signal_lines);
-    push_excerpt(&mut out, "first", text.lines().take(policy.excerpt_lines));
+    let mut budget = SectionBudget::new(policy.target_bytes, out.len());
+    push_budgeted_section(
+        &mut out,
+        "protected_anchors",
+        protected_anchor_lines(text, policy.signal_lines).into_iter(),
+        &mut budget,
+    );
     let signals = text
         .lines()
         .filter(|line| is_signal_line(line))
         .take(policy.signal_lines)
         .collect::<Vec<_>>();
-    if !signals.is_empty() {
-        push_excerpt(&mut out, "signal_lines", signals.into_iter());
-    }
+    push_budgeted_section(&mut out, "signal_lines", signals.into_iter(), &mut budget);
+    push_budgeted_section(
+        &mut out,
+        "first",
+        text.lines().take(policy.excerpt_lines),
+        &mut budget,
+    );
     let mut tail = text
         .lines()
         .rev()
         .take(policy.excerpt_lines)
         .collect::<Vec<_>>();
     tail.reverse();
-    push_excerpt(&mut out, "last", tail.into_iter());
-    trim_to_target(out, policy.target_bytes)
+    push_budgeted_section(&mut out, "last", tail.into_iter(), &mut budget);
+    out
 }
 
 fn compress_code(text: &str, policy: HeadroomPolicy, reference: Option<&HeadroomRef>) -> String {
@@ -350,44 +359,119 @@ fn compress_plain(
     reference: Option<&HeadroomRef>,
 ) -> String {
     let mut out = header(kind, text, reference);
-    push_protected_anchors(&mut out, text, policy.signal_lines);
+    let mut budget = SectionBudget::new(policy.target_bytes, out.len());
+    push_budgeted_section(
+        &mut out,
+        "protected_anchors",
+        protected_anchor_lines(text, policy.signal_lines).into_iter(),
+        &mut budget,
+    );
     let headings = text
         .lines()
         .filter(|line| line.trim_start().starts_with('#'))
         .take(policy.signal_lines)
         .collect::<Vec<_>>();
-    if !headings.is_empty() {
-        push_excerpt(&mut out, "headings", headings.into_iter());
-    }
-    push_excerpt(&mut out, "first", text.lines().take(policy.excerpt_lines));
+    push_budgeted_section(&mut out, "headings", headings.into_iter(), &mut budget);
+    push_budgeted_section(
+        &mut out,
+        "first",
+        text.lines().take(policy.excerpt_lines),
+        &mut budget,
+    );
     let mut tail = text
         .lines()
         .rev()
         .take(policy.excerpt_lines)
         .collect::<Vec<_>>();
     tail.reverse();
-    push_excerpt(&mut out, "last", tail.into_iter());
-    trim_to_target(out, policy.target_bytes)
+    push_budgeted_section(&mut out, "last", tail.into_iter(), &mut budget);
+    out
 }
 
-fn push_protected_anchors(out: &mut String, text: &str, limit: usize) {
-    let anchors = protected_anchor_lines(text, limit);
-    if !anchors.is_empty() {
-        push_excerpt(out, "protected_anchors", anchors.into_iter());
+struct SectionBudget {
+    remaining: usize,
+}
+
+impl SectionBudget {
+    fn new(target_bytes: usize, used_bytes: usize) -> Self {
+        Self {
+            remaining: target_bytes.saturating_sub(used_bytes),
+        }
+    }
+
+    fn consume(&mut self, bytes: usize) {
+        self.remaining = self.remaining.saturating_sub(bytes);
+    }
+}
+
+fn push_budgeted_section<'a>(
+    out: &mut String,
+    label: &str,
+    lines: impl Iterator<Item = &'a str>,
+    budget: &mut SectionBudget,
+) {
+    if budget.remaining == 0 {
+        return;
+    }
+    let lines = lines.collect::<Vec<_>>();
+    if lines.is_empty() {
+        return;
+    }
+
+    let header = format!("\n{label}:\n");
+    if budget.remaining <= header.len() {
+        return;
+    }
+    out.push_str(&header);
+    budget.consume(header.len());
+
+    let mut emitted = 0usize;
+    let mut clipped = false;
+    for line in lines {
+        let needed = line.len() + 1;
+        if needed > budget.remaining {
+            clipped = true;
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+        budget.consume(needed);
+        emitted += 1;
+    }
+
+    if clipped && budget.remaining > 0 {
+        let marker = format!("[headroom: {label} clipped]\n");
+        if marker.len() <= budget.remaining {
+            out.push_str(&marker);
+            budget.consume(marker.len());
+        }
+    }
+
+    if emitted == 0 {
+        out.push_str("[headroom: section omitted by budget]\n");
     }
 }
 
 fn protected_anchor_lines(text: &str, limit: usize) -> Vec<&str> {
-    let mut anchors = Vec::new();
-    for line in text.lines() {
-        if anchors.len() >= limit {
-            break;
+    scored_anchor_lines(text)
+        .into_iter()
+        .take(limit)
+        .map(|(_, _, line)| line)
+        .collect()
+}
+
+fn scored_anchor_lines(text: &str) -> Vec<(u8, usize, &str)> {
+    let mut scored = Vec::<(u8, usize, &str)>::new();
+    for (index, line) in text.lines().enumerate() {
+        if !is_protected_anchor_line(line)
+            || scored.iter().any(|(_, _, existing)| *existing == line)
+        {
+            continue;
         }
-        if is_protected_anchor_line(line) && !anchors.contains(&line) {
-            anchors.push(line);
-        }
+        scored.push((anchor_score(line), index, line));
     }
-    anchors
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    scored
 }
 
 fn is_protected_anchor_line(line: &str) -> bool {
@@ -398,10 +482,93 @@ fn is_protected_anchor_line(line: &str) -> bool {
         || has_hash_like_token(trimmed)
         || has_nonzero_exit_code(trimmed)
         || has_test_count_summary(trimmed)
+        || is_rust_test_result_line(trimmed)
+        || has_cli_flag_token(trimmed)
+        || has_headroom_token(trimmed)
+}
+
+fn anchor_score(line: &str) -> u8 {
+    let trimmed = line.trim_start();
+    let lower = trimmed.to_ascii_lowercase();
+    if is_rust_test_result_line(trimmed)
+        && ["headroom", "compression", "retrieve", "store"]
+            .iter()
+            .any(|needle| lower.contains(needle))
+    {
+        return 110;
+    }
+    if has_test_count_summary(trimmed) && lower.contains(" passed") && !lower.contains("0 passed") {
+        return 100;
+    }
+    if lower.contains("failed")
+        || lower.contains("failure")
+        || lower.contains("panic")
+        || lower.contains("fatal")
+        || lower.contains("error")
+    {
+        return 90;
+    }
+    if has_path_with_line_number(trimmed) {
+        return 80;
+    }
+    if has_headroom_token(trimmed) {
+        return 85;
+    }
+    if has_nonzero_exit_code(trimmed) {
+        return 70;
+    }
+    if has_cli_flag_token(trimmed) {
+        return 75;
+    }
+    if is_rust_test_result_line(trimmed) {
+        return 60;
+    }
+    if is_task_checkbox_line(trimmed) || has_hash_like_token(trimmed) {
+        return 50;
+    }
+    40
 }
 
 fn is_task_checkbox_line(trimmed: &str) -> bool {
     trimmed.starts_with("- [ ]") || trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]")
+}
+
+fn is_rust_test_result_line(trimmed: &str) -> bool {
+    trimmed.starts_with("test ")
+        && trimmed.contains("::")
+        && trimmed.contains(" ... ")
+        && (trimmed.ends_with(" ok")
+            || trimmed.ends_with(" FAILED")
+            || trimmed.ends_with(" ignored")
+            || trimmed.ends_with(" measured"))
+}
+
+fn has_cli_flag_token(line: &str) -> bool {
+    line.split_whitespace().any(|token| {
+        let token = token.trim_matches(|c: char| {
+            matches!(c, '`' | ',' | '.' | ')' | '(' | '[' | ']' | ':' | ';')
+        });
+        token.starts_with("--")
+            && token.len() > 2
+            && token[2..]
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    })
+}
+
+fn has_headroom_token(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    [
+        "headroom_compress",
+        "headroom_retrieve",
+        "headroom_stats",
+        "set_headroom_compression",
+        "headroom-eval",
+        "headroom-fixture",
+        "omegon-headroom",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn has_path_with_line_number(line: &str) -> bool {
@@ -732,6 +899,36 @@ mod tests {
         });
         assert!(output.text.contains("src/main.rs:42"));
         assert!(output.text.contains("exit code 101"));
+    }
+
+    #[test]
+    fn scored_anchors_prioritize_headroom_test_and_cli_tokens() {
+        let text = [
+            "test result: ok. 84 passed; 0 failed; 0 ignored; 0 measured; 2742 filtered out; finished in 0.18s",
+            "test tools::tests::ordinary_read_test ... ok",
+            "test tools::tests::read_compression_respects_headroom_mode_and_shared_store ... ok",
+            "cargo run -p omegon-headroom --bin headroom-eval -- --fixtures DIR",
+            "headroom_compress stores originals for headroom_retrieve",
+        ]
+        .join("\n");
+
+        let anchors = scored_anchor_lines(&text);
+        assert_eq!(
+            anchors.first().map(|(_, _, line)| *line),
+            Some(
+                "test tools::tests::read_compression_respects_headroom_mode_and_shared_store ... ok"
+            )
+        );
+        assert!(
+            anchors
+                .iter()
+                .any(|(_, _, line)| line.contains("--fixtures"))
+        );
+        assert!(
+            anchors
+                .iter()
+                .any(|(_, _, line)| line.contains("headroom_compress"))
+        );
     }
 
     #[test]
