@@ -161,10 +161,23 @@ pub struct EventAccepted {
     pub queued_events: usize,
 }
 
-/// GET /api/capabilities — assistant capability inventory snapshot.
-pub async fn get_capabilities(
+#[derive(Debug, Clone, Serialize)]
+pub struct CapabilityAssistantsResponse {
+    pub assistants: Vec<crate::capabilities::profiles::AssistantListItem>,
+}
+
+pub async fn get_capability_assistants(
     State(state): State<WebState>,
-) -> Result<Json<crate::capabilities::inventory::CapabilityInventorySnapshot>, StatusCode> {
+) -> Result<Json<CapabilityAssistantsResponse>, StatusCode> {
+    let snapshot = capability_inventory_snapshot(state)?;
+    Ok(Json(CapabilityAssistantsResponse {
+        assistants: snapshot.assistant_list,
+    }))
+}
+
+fn capability_inventory_snapshot(
+    state: WebState,
+) -> Result<crate::capabilities::inventory::CapabilityInventorySnapshot, StatusCode> {
     let home = crate::paths::omegon_home().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let cwd = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let armory_home = home.join("armory");
@@ -208,14 +221,18 @@ pub async fn get_capabilities(
             },
         )
         .unwrap_or_default();
-    let snapshot =
-        crate::capabilities::inventory::build_capability_inventory_snapshot_with_secrets(
-            roots,
-            secret_inputs,
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::capabilities::inventory::build_capability_inventory_snapshot_with_secrets(
+        roots,
+        secret_inputs,
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
 
-    Ok(Json(snapshot))
+/// GET /api/capabilities — assistant capability inventory snapshot.
+pub async fn get_capabilities(
+    State(state): State<WebState>,
+) -> Result<Json<crate::capabilities::inventory::CapabilityInventorySnapshot>, StatusCode> {
+    Ok(Json(capability_inventory_snapshot(state)?))
 }
 
 /// GET /api/startup — machine-readable dashboard startup/discovery metadata.
@@ -815,6 +832,52 @@ required = ["MISSING_REQUIRED_TOKEN"]
                 == crate::capabilities::profiles::AssistantLaunchBlockerKind::RequiredSecretMissing
                 && blocker.id == "MISSING_REQUIRED_TOKEN"
         }));
+    }
+
+    #[tokio::test]
+    async fn capability_assistants_endpoint_returns_compact_blocked_readiness() {
+        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let agent_dir = home.path().join("catalog").join("blocked-agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(
+            agent_dir.join("agent.toml"),
+            r#"[agent]
+id = "blocked-agent"
+name = "Blocked Agent"
+version = "0.1.0"
+description = "Requires a missing secret"
+domain = "security"
+
+[secrets]
+required = ["MISSING_REQUIRED_TOKEN"]
+"#,
+        )
+        .unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = get_capability_assistants(axum::extract::State(test_state()))
+            .await
+            .unwrap()
+            .0;
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let assistant = response
+            .assistants
+            .iter()
+            .find(|assistant| assistant.id == "blocked-agent")
+            .expect("blocked assistant list item");
+        assert_eq!(
+            assistant.launch_readiness.status,
+            crate::capabilities::profiles::AssistantLaunchStatus::Blocked
+        );
+        assert_eq!(assistant.required_secret_count, 1);
+        assert_eq!(assistant.blocker_count, 1);
     }
 
     #[tokio::test]

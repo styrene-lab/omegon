@@ -330,6 +330,24 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         "Task event projection."
     ),
     BackendEndpoint {
+        id: "_capabilities/assistants",
+        version: 1,
+        domain: BackendDomain::Capabilities,
+        mutability: BackendMutability::Read,
+        permission: BackendPermission::Read,
+        transports: &[
+            BackendTransport::AcpExt {
+                method: "_capabilities/assistants",
+            },
+            BackendTransport::Http {
+                method: "GET",
+                path: "/api/capabilities/assistants",
+            },
+        ],
+        side_effects: &[],
+        description: "Compact assistant list projection with launch readiness and trust summaries.",
+    },
+    BackendEndpoint {
         id: "_capabilities/inventory",
         version: 1,
         domain: BackendDomain::Capabilities,
