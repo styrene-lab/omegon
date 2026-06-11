@@ -73,6 +73,7 @@ class TaskSpec:
     budget: dict[str, Any]
     process_expectations: dict[str, Any]
     expected_solution: dict[str, Any]
+    headroom: dict[str, Any]
     model: str | None = None
     slim: bool = False
     notes: str | None = None
@@ -202,6 +203,10 @@ def load_task_spec(path: Path) -> TaskSpec:
     if not isinstance(expected_solution, dict):
         raise TaskSpecError("expected_solution must be an object")
 
+    headroom = raw.get("headroom") or {}
+    if not isinstance(headroom, dict):
+        raise TaskSpecError("headroom must be an object")
+
     return TaskSpec(
         id=str(raw["id"]),
         kind=str(raw.get("kind") or "implementation"),
@@ -217,6 +222,7 @@ def load_task_spec(path: Path) -> TaskSpec:
         budget=raw.get("budget") or {},
         process_expectations=process_expectations,
         expected_solution=expected_solution,
+        headroom=headroom,
         model=default_model,
         slim=bool(raw.get("slim", False)),
         notes=str(raw["notes"]) if raw.get("notes") is not None else None,
@@ -1329,6 +1335,105 @@ def result_harness_label(harness: str, slim: bool) -> str:
     return harness
 
 
+def run_headroom_eval(root: Path, spec: TaskSpec, out_dir: Path) -> dict[str, Any] | None:
+    config = spec.headroom or {}
+    if not config.get("run_eval"):
+        return None
+
+    fixtures = config.get("eval_fixtures")
+    if fixtures is None:
+        raise TaskSpecError("headroom.run_eval requires headroom.eval_fixtures")
+    if not isinstance(fixtures, str):
+        raise TaskSpecError("headroom.eval_fixtures must be a string path")
+
+    artifact = out_dir / f"{_sanitize_filename_component(spec.id)}-headroom-eval.json"
+    cmd = [
+        "cargo",
+        "run",
+        "-p",
+        "omegon-headroom",
+        "--bin",
+        "headroom-eval",
+        "--",
+        "--json",
+        "--fixtures",
+        fixtures,
+    ]
+    max_restored = config.get("max_restored_facts")
+    if max_restored is not None:
+        if not isinstance(max_restored, int) or isinstance(max_restored, bool) or max_restored < 0:
+            raise TaskSpecError("headroom.max_restored_facts must be a non-negative integer")
+        cmd.extend(["--max-restored-facts", str(max_restored)])
+    token_counter = config.get("token_counter")
+    if token_counter is not None:
+        if not isinstance(token_counter, str):
+            raise TaskSpecError("headroom.token_counter must be a string")
+        cmd.extend(["--token-counter", token_counter])
+
+    started = time.monotonic()
+    audit(f"headroom eval start: {shlex.join(cmd)}")
+    proc = subprocess.run(
+        cmd,
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    elapsed = time.monotonic() - started
+    artifact.write_text(proc.stdout, encoding="utf-8")
+    parsed: dict[str, Any] | None = None
+    parse_error: str | None = None
+    if proc.stdout.strip():
+        try:
+            loaded = json.loads(proc.stdout)
+            if isinstance(loaded, dict):
+                parsed = loaded
+            else:
+                parse_error = "headroom eval JSON root was not an object"
+        except json.JSONDecodeError as err:
+            parse_error = str(err)
+    report = parsed.get("report") if isinstance(parsed, dict) else None
+    comparison = parsed.get("comparison") if isinstance(parsed, dict) else None
+    restored_facts = None
+    savings = None
+    passed = None
+    if isinstance(report, dict):
+        passed = bool(report.get("passed"))
+        savings = report.get("evaluated_savings_percent")
+        restored_facts = report.get("restored_fact_count")
+        if restored_facts is None and isinstance(report.get("fixtures"), list):
+            restored_facts = sum(
+                int(fixture.get("restored_fact_count") or 0)
+                for fixture in report["fixtures"]
+                if isinstance(fixture, dict)
+            )
+    status = "pass" if proc.returncode == 0 and parse_error is None and passed is not False else "fail"
+    result = {
+        "status": status,
+        "exit_code": proc.returncode,
+        "elapsed_sec": round(elapsed, 3),
+        "artifact_path": str(artifact),
+        "fixtures": fixtures,
+        "max_restored_facts": max_restored,
+        "token_counter": token_counter,
+        "stderr": proc.stderr,
+        "parse_error": parse_error,
+        "summary": {
+            "passed": passed,
+            "evaluated_savings_percent": savings,
+            "restored_fact_count": restored_facts,
+        },
+    }
+    if comparison is not None:
+        result["comparison"] = comparison
+    audit(
+        "headroom eval done: "
+        f"status={status} exit={proc.returncode} artifact={artifact} elapsed={elapsed:.3f}s"
+    )
+    return result
+
+
 def build_result(
     *,
     spec: TaskSpec,
@@ -1340,6 +1445,7 @@ def build_result(
     optional_results: list[dict[str, Any]] | None = None,
     failure_if_results: list[dict[str, Any]] | None = None,
     failure_if_triggered: bool = False,
+    headroom_eval: dict[str, Any] | None = None,
     wall_clock_sec: float,
 ) -> dict[str, Any]:
     total_tokens = compute_total_tokens(adapter.usage)
@@ -1372,6 +1478,7 @@ def build_result(
             "success_files": list(spec.success_files),
             "process_expectations": spec.process_expectations,
             "expected_solution": spec.expected_solution,
+            "headroom": spec.headroom,
             "budgets": spec.budget,
             "matrix": {
                 "harnesses": list(spec.harnesses),
@@ -1441,6 +1548,9 @@ def build_result(
         value = adapter.usage.get(key)
         if isinstance(value, dict):
             payload[key] = value
+    if headroom_eval is not None:
+        payload["headroom_eval"] = headroom_eval
+        payload["artifact_paths"]["headroom_eval"] = headroom_eval.get("artifact_path")
     return payload
 
 
@@ -1918,6 +2028,7 @@ def main() -> int:
         clean_repo_path,
         env=process_env,
     )
+    headroom_eval = run_headroom_eval(root, spec, out_dir)
     payload = build_result(
         spec=spec,
         harness=harness,
@@ -1928,6 +2039,7 @@ def main() -> int:
         optional_results=optional_results,
         failure_if_results=failure_if_results,
         failure_if_triggered=failure_if_triggered,
+        headroom_eval=headroom_eval,
         wall_clock_sec=time.monotonic() - run_started,
     )
     payload.setdefault("timing", {})
