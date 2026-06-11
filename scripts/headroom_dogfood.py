@@ -11,6 +11,7 @@ import json
 import re
 import subprocess
 import sys
+from typing import Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -88,6 +89,8 @@ FILES = [
     ),
 ]
 
+VALID_KIND_HINTS = {"json", "code", "log", "diff", "markdown", "plain_text"}
+
 SIGNAL_SUBSTRINGS = (
     "headroom",
     "compression",
@@ -118,6 +121,73 @@ RUST_FN_RE = re.compile(r"^[+\- ]*\s*(?:pub\s+)?fn\s+[A-Za-z0-9_]+\s*\(")
 CLI_FLAG_RE = re.compile(r"--[A-Za-z0-9][A-Za-z0-9-]*")
 HASH_RE = re.compile(r"\b[0-9a-f]{8,64}\b")
 MARKDOWN_HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$")
+
+
+def _require_str(obj: dict[str, Any], key: str, context: str) -> str:
+    value = obj.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{context}.{key} must be a non-empty string")
+    return value
+
+
+def _optional_int(obj: dict[str, Any], key: str, default: int, context: str) -> int:
+    value = obj.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{context}.{key} must be a non-negative integer")
+    return value
+
+
+def _optional_expected_compressed(obj: dict[str, Any], context: str) -> bool | None:
+    value = obj.get("expected_compressed")
+    if value is not None and not isinstance(value, bool):
+        raise ValueError(f"{context}.expected_compressed must be true, false, or null")
+    return value
+
+
+def _validate_kind(kind_hint: str, context: str) -> str:
+    if kind_hint not in VALID_KIND_HINTS:
+        raise ValueError(f"{context}.kind_hint must be one of {sorted(VALID_KIND_HINTS)}")
+    return kind_hint
+
+
+def load_manifest(path: Path) -> tuple[list[CommandFixture], list[FileFixture]]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("manifest root must be an object")
+    commands: list[CommandFixture] = []
+    files: list[FileFixture] = []
+    for index, item in enumerate(raw.get("commands", [])):
+        context = f"commands[{index}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{context} must be an object")
+        command = item.get("command")
+        if not isinstance(command, list) or not command or not all(isinstance(part, str) and part for part in command):
+            raise ValueError(f"{context}.command must be a non-empty string array")
+        commands.append(
+            CommandFixture(
+                name=_require_str(item, "name", context),
+                kind_hint=_validate_kind(_require_str(item, "kind_hint", context), context),
+                command=command,
+                min_savings_percent=_optional_int(item, "min_savings_percent", 50, context),
+                expected_compressed=_optional_expected_compressed(item, context),
+                max_output_bytes=_optional_int(item, "max_output_bytes", 500_000, context),
+            )
+        )
+    for index, item in enumerate(raw.get("files", [])):
+        context = f"files[{index}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{context} must be an object")
+        files.append(
+            FileFixture(
+                name=_require_str(item, "name", context),
+                kind_hint=_validate_kind(_require_str(item, "kind_hint", context), context),
+                path=_require_str(item, "path", context),
+                min_savings_percent=_optional_int(item, "min_savings_percent", 50, context),
+                expected_compressed=_optional_expected_compressed(item, context),
+                max_output_bytes=_optional_int(item, "max_output_bytes", 500_000, context),
+            )
+        )
+    return commands, files
 
 
 def clipped_text(text: str, max_output_bytes: int) -> str:
@@ -247,12 +317,24 @@ def write_fixture(
 
 
 def main() -> int:
+    commands = COMMANDS
+    files = FILES
+    if len(sys.argv) > 2:
+        print("usage: headroom_dogfood.py [manifest.json]", file=sys.stderr)
+        return 2
+    if len(sys.argv) == 2:
+        try:
+            commands, files = load_manifest((ROOT / sys.argv[1]).resolve())
+        except Exception as exc:  # noqa: BLE001 - CLI should report manifest failures.
+            print(f"error: failed to load manifest: {exc}", file=sys.stderr)
+            return 2
+
     SAMPLES.mkdir(parents=True, exist_ok=True)
     FIXTURES.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []
     failures: list[str] = []
-    for spec in COMMANDS:
+    for spec in commands:
         print(f"running {' '.join(spec.command)}", file=sys.stderr)
         try:
             text, returncode = run_command(spec)
@@ -271,7 +353,7 @@ def main() -> int:
         written.append(path)
         print(f"wrote {path.relative_to(ROOT)}", file=sys.stderr)
 
-    for spec in FILES:
+    for spec in files:
         print(f"reading {spec.path}", file=sys.stderr)
         try:
             text, returncode = read_file(spec)

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "description": "Example local corpus manifest for native headroom dogfood fixture generation. Paths and commands are evaluated from the repository root and outputs are written under .tmp/headroom/.",
+  "commands": [
+    {
+      "name": "headroom-tests",
+      "kind_hint": "log",
+      "command": ["cargo", "test", "-p", "omegon-headroom", "--", "--nocapture"],
+      "min_savings_percent": 0,
+      "expected_compressed": false,
+      "max_output_bytes": 500000
+    },
+    {
+      "name": "recent-headroom-work",
+      "kind_hint": "diff",
+      "command": ["git", "show", "--stat", "--patch", "HEAD~5..HEAD"],
+      "min_savings_percent": 60,
+      "expected_compressed": true,
+      "max_output_bytes": 500000
+    }
+  ],
+  "files": [
+    {
+      "name": "native-headroom-design-doc",
+      "kind_hint": "markdown",
+      "path": "docs/headroom-native-compression.md",
+      "min_savings_percent": 40,
+      "expected_compressed": true,
+      "max_output_bytes": 500000
+    },
+    {
+      "name": "headroom-source",
+      "kind_hint": "code",
+      "path": "core/crates/omegon-headroom/src/lib.rs",
+      "min_savings_percent": 50,
+      "expected_compressed": true,
+      "max_output_bytes": 500000
+    }
+  ],
+  "future_corpus_notes": [
+    "Clone large public repositories under .tmp/headroom/repos/ and add file entries for representative source/docs/config outputs.",
+    "Convert PDFs/EPUBs to UTF-8 text outside runtime compression, then add file entries pointing at ignored .tmp/headroom/sources/*.txt samples.",
+    "Keep committed manifests source-oriented and small; keep generated fixture JSON and raw samples ignored under .tmp/."
+  ]
+}
