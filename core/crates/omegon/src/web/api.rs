@@ -734,6 +734,8 @@ mod tests {
     use crate::web::{ControlPlaneState, WebAuthState, WebDaemonStatus, WebStartupInfo};
     use std::sync::{Arc, Mutex};
 
+    static WEB_API_TEST_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     fn test_state() -> WebState {
         WebState {
             handles: DashboardHandles::default(),
@@ -764,6 +766,63 @@ mod tests {
             daemon_events: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             daemon_status: std::sync::Arc::new(std::sync::Mutex::new(WebDaemonStatus::default())),
         }
+    }
+
+    #[tokio::test]
+    async fn capabilities_endpoint_reports_secret_metadata_without_values() {
+        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let ext_dir = home.path().join("extensions").join("secure-ext");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        std::fs::write(
+            ext_dir.join("manifest.toml"),
+            r#"[extension]
+name = "secure-ext"
+version = "0.1.0"
+description = "Secure extension"
+
+[runtime]
+type = "native"
+binary = "bin/secure-ext"
+
+[secrets]
+required = ["BRAVE_API_KEY"]
+"#,
+        )
+        .unwrap();
+        let secrets = Arc::new(omegon_secrets::SecretsManager::new(home.path()).unwrap());
+        secrets
+            .set_recipe("BRAVE_API_KEY", "env:OMEGON_TEST_BRAVE_KEY")
+            .unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let mut state = test_state();
+        state.secrets = Some(secrets);
+        let response = get_capabilities(axum::extract::State(state))
+            .await
+            .unwrap()
+            .0;
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let readiness = response
+            .secret_readiness
+            .secrets
+            .iter()
+            .find(|secret| secret.name == "BRAVE_API_KEY")
+            .expect("BRAVE_API_KEY readiness");
+        assert_eq!(
+            readiness.status,
+            crate::capabilities::secrets::SecretReadinessStatus::Configured
+        );
+        assert_eq!(readiness.recipe_kind.as_deref(), Some("env"));
+        let payload = serde_json::to_string(&response).unwrap();
+        assert!(!payload.contains("brave-test-key"));
+        assert!(!payload.contains("OMEGON_TEST_BRAVE_KEY"));
     }
 
     #[test]
