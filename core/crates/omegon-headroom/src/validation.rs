@@ -90,8 +90,31 @@ pub struct ValidationSuiteReport {
     pub evaluated_savings_percent: u8,
 }
 
+pub trait TokenCounter {
+    fn name(&self) -> &'static str;
+    fn kind(&self) -> &'static str;
+    fn count(&self, text: &str) -> usize;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BytesDiv4TokenCounter;
+
+impl TokenCounter for BytesDiv4TokenCounter {
+    fn name(&self) -> &'static str {
+        "bytes_div_4"
+    }
+
+    fn kind(&self) -> &'static str {
+        "approximate"
+    }
+
+    fn count(&self, text: &str) -> usize {
+        text.len().div_ceil(4)
+    }
+}
+
 pub fn estimated_tokens(text: &str) -> usize {
-    text.len().div_ceil(4)
+    BytesDiv4TokenCounter.count(text)
 }
 
 fn percent_saved(before: usize, after: usize) -> u8 {
@@ -105,6 +128,15 @@ pub fn validate_fixture(
     store: &mut InMemoryHeadroomStore,
     fixture: &ValidationFixture,
     policy: HeadroomPolicy,
+) -> FixtureValidationReport {
+    validate_fixture_with_counter(store, fixture, policy, &BytesDiv4TokenCounter)
+}
+
+pub fn validate_fixture_with_counter(
+    store: &mut InMemoryHeadroomStore,
+    fixture: &ValidationFixture,
+    policy: HeadroomPolicy,
+    token_counter: &dyn TokenCounter,
 ) -> FixtureValidationReport {
     let started = Instant::now();
     let output = store.compress(CompressionInput {
@@ -132,9 +164,9 @@ pub fn validate_fixture(
     let evaluated_text = restoration.text;
     let evaluated_missing_facts = missing_facts(&evaluated_text, &fixture.required_facts);
 
-    let estimated_tokens_before = estimated_tokens(&fixture.input);
-    let raw_estimated_tokens_after = estimated_tokens(&raw_text);
-    let evaluated_estimated_tokens_after = estimated_tokens(&evaluated_text);
+    let estimated_tokens_before = token_counter.count(&fixture.input);
+    let raw_estimated_tokens_after = token_counter.count(&raw_text);
+    let evaluated_estimated_tokens_after = token_counter.count(&evaluated_text);
     let raw_savings_percent = percent_saved(output.stats.original_bytes, raw_text.len());
     let evaluated_savings_percent =
         percent_saved(output.stats.original_bytes, evaluated_text.len());
@@ -249,10 +281,18 @@ pub fn validate_suite(
     fixtures: &[ValidationFixture],
     policy: HeadroomPolicy,
 ) -> ValidationSuiteReport {
+    validate_suite_with_counter(fixtures, policy, &BytesDiv4TokenCounter)
+}
+
+pub fn validate_suite_with_counter(
+    fixtures: &[ValidationFixture],
+    policy: HeadroomPolicy,
+    token_counter: &dyn TokenCounter,
+) -> ValidationSuiteReport {
     let mut store = InMemoryHeadroomStore::default();
     let reports = fixtures
         .iter()
-        .map(|fixture| validate_fixture(&mut store, fixture, policy))
+        .map(|fixture| validate_fixture_with_counter(&mut store, fixture, policy, token_counter))
         .collect::<Vec<_>>();
 
     let total_original_bytes: usize = reports.iter().map(|report| report.original_bytes).sum();
@@ -282,8 +322,8 @@ pub fn validate_suite(
         total_evaluated_compressed_bytes,
         estimated_tokens_before,
         evaluated_estimated_tokens_after,
-        token_counter: "bytes_div_4".to_string(),
-        token_counter_kind: "approximate".to_string(),
+        token_counter: token_counter.name().to_string(),
+        token_counter_kind: token_counter.kind().to_string(),
         evaluated_token_savings_percent,
         evaluated_savings_percent,
     }

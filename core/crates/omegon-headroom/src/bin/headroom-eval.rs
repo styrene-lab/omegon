@@ -4,7 +4,8 @@ use std::process::ExitCode;
 
 use omegon_headroom::HeadroomPolicy;
 use omegon_headroom::validation::{
-    ValidationSuiteReport, append_fixture_dirs, canonical_validation_fixtures, validate_suite,
+    BytesDiv4TokenCounter, ValidationSuiteReport, append_fixture_dirs,
+    canonical_validation_fixtures, validate_suite_with_counter,
 };
 
 fn main() -> ExitCode {
@@ -14,6 +15,7 @@ fn main() -> ExitCode {
     let mut save_path: Option<PathBuf> = None;
     let mut compare_path: Option<PathBuf> = None;
     let mut fixture_dirs: Vec<PathBuf> = Vec::new();
+    let mut token_counter_name = "bytes_div_4".to_string();
     let mut max_restored_facts: Option<usize> = None;
 
     let mut args = std::env::args().skip(1);
@@ -53,6 +55,17 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 };
                 fixture_dirs.push(PathBuf::from(value));
+            }
+            "--token-counter" => {
+                let Some(value) = args.next() else {
+                    eprintln!("missing value for --token-counter");
+                    return ExitCode::from(2);
+                };
+                if value != "bytes_div_4" {
+                    eprintln!("unknown token counter: {value}. Options: bytes_div_4");
+                    return ExitCode::from(2);
+                }
+                token_counter_name = value;
             }
             "--max-restored-facts" => {
                 let Some(value) = args.next() else {
@@ -101,13 +114,18 @@ fn main() -> ExitCode {
         }
     };
 
-    let report = validate_suite(
+    let token_counter = match token_counter_name.as_str() {
+        "bytes_div_4" => BytesDiv4TokenCounter,
+        _ => unreachable!("validated token counter name"),
+    };
+    let report = validate_suite_with_counter(
         &fixtures,
         HeadroomPolicy {
             min_bytes,
             target_bytes,
             ..HeadroomPolicy::default()
         },
+        &token_counter,
     );
 
     if let Some(path) = save_path.as_ref()
@@ -189,12 +207,12 @@ struct ComparisonReport {
 
 fn print_help() {
     println!(
-        "headroom-eval [--text|--json] [--min-bytes N] [--target-bytes N] [--fixtures DIR] [--max-restored-facts N] [--save PATH] [--compare PATH]\n\n\
+        "headroom-eval [--text|--json] [--min-bytes N] [--target-bytes N] [--fixtures DIR] [--max-restored-facts N] [--token-counter bytes_div_4] [--save PATH] [--compare PATH]\n\n\
          Runs native headroom evaluation fixtures. Exits non-zero if evaluated savings,\n\
          fact retention, or expected compression behavior regress. JSON output is intended\n\
          for CI snapshots and longitudinal benchmark comparison. --fixtures loads additional\n\
          dogfood/regression JSON fixtures from a directory. --save writes the current report as\n\
-         JSON; --compare checks the current report against a saved baseline. --max-restored-facts fails when evaluator restoration exceeds the given budget."
+         JSON; --compare checks the current report against a saved baseline. --max-restored-facts fails when evaluator restoration exceeds the given budget. --token-counter selects the measurement backend; only bytes_div_4 is currently implemented."
     );
 }
 

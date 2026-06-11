@@ -693,6 +693,7 @@ fn has_quoted_signal_token(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
     [
         "\"test result:\"",
+        "\\\"test result:\\\"",
         "'test result:'",
         "\"error\"",
         "'error'",

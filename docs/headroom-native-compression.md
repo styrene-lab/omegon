@@ -127,7 +127,10 @@ just headroom-eval --text --save .tmp/headroom/baseline.json
 just headroom-eval --text --compare .tmp/headroom/baseline.json
 just headroom-eval --text --fixtures .tmp/headroom/fixtures
 just headroom-eval --text --fixtures .tmp/headroom/fixtures --max-restored-facts 10
+just headroom-eval --text --fixtures .tmp/headroom/fixtures --max-restored-facts 0 --token-counter bytes_div_4
 ```
+
+`--token-counter` selects the measurement backend for estimated token savings. Only `bytes_div_4` is currently implemented; this explicit seam exists so future provider/tokenizer integrations can be compared without changing the evaluator contract.
 
 `--max-restored-facts` is the automated quality ratchet for dogfood. It fails the evaluator when required facts are present only because the validator restored them from the original text more than the configured budget. Use a permissive budget while tuning (`10`), then ratchet toward `3` and eventually `0` as protected-anchor extraction improves.
 
