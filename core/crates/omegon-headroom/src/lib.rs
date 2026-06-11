@@ -108,9 +108,26 @@ impl InMemoryHeadroomStore {
         let reference = input
             .policy
             .reversible
-            .then(|| self.store_original(&input.source, kind, &input.text));
+            .then(|| make_reference(kind, &input.text));
         let compressed_text = compress_by_kind(kind, &input.text, input.policy, reference.as_ref());
         let compressed_bytes = compressed_text.len();
+        if compressed_bytes >= original_bytes {
+            return CompressionOutput {
+                text: input.text,
+                content_kind: kind,
+                original_ref: None,
+                stats: CompressionStats {
+                    original_bytes,
+                    compressed_bytes: original_bytes,
+                    saved_bytes: 0,
+                    savings_percent: 0,
+                },
+                compressed: false,
+            };
+        }
+        if let Some(reference) = reference.as_ref() {
+            self.store_original(reference.clone(), &input.source, &input.text);
+        }
         let saved_bytes = original_bytes.saturating_sub(compressed_bytes);
         let savings_percent = if original_bytes == 0 {
             0
@@ -157,21 +174,24 @@ impl InMemoryHeadroomStore {
         self.objects.values()
     }
 
-    fn store_original(&mut self, source: &str, kind: ContentKind, text: &str) -> HeadroomRef {
-        let sha256 = sha256_hex(text.as_bytes());
-        let id = format!("hr:{}", &sha256[..16]);
-        let reference = HeadroomRef {
-            id: id.clone(),
-            sha256,
-            bytes: text.len(),
-            content_kind: kind,
-        };
-        self.objects.entry(id).or_insert_with(|| StoredOriginal {
-            reference: reference.clone(),
-            source: source.to_owned(),
-            text: text.to_owned(),
-        });
-        reference
+    fn store_original(&mut self, reference: HeadroomRef, source: &str, text: &str) {
+        self.objects
+            .entry(reference.id.clone())
+            .or_insert_with(|| StoredOriginal {
+                reference,
+                source: source.to_owned(),
+                text: text.to_owned(),
+            });
+    }
+}
+
+fn make_reference(kind: ContentKind, text: &str) -> HeadroomRef {
+    let sha256 = sha256_hex(text.as_bytes());
+    HeadroomRef {
+        id: format!("hr:{}", &sha256[..16]),
+        sha256,
+        bytes: text.len(),
+        content_kind: kind,
     }
 }
 
