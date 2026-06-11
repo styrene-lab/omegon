@@ -188,6 +188,22 @@ In `mode=on`, the built-in `read` tool is the first automatic integration point.
 
 `manual` mode intentionally does not change `read`. It only enables explicit `headroom_compress` dogfooding.
 
+## Potential overflow/CCR targets
+
+Ranked/navigation tools should not receive generic compression in their hot path. Their primary output is already a compact index whose ordering, paths, IDs, scores, and line ranges are the value. For these tools the policy is: **cap first, evaluate second, CCR overflow third, generic compression last**.
+
+Potential targets if dogfood assessment stays positive:
+
+| Tool | Current pressure | First fix | Possible CCR use |
+|---|---|---|---|
+| `codebase_search` | `max_results` is caller-controlled; text previews are capped but large result counts can bloat details | Hard-cap effective `max_results`, expose requested/effective metadata | Store full result set/details while preserving top results unchanged |
+| `web_search` | Schema declares `max_results <= 20`, but runtime should still clamp; `compare` multiplies providers and extracted content can be large | Runtime clamp per-provider results; expose requested/effective metadata | Store extracted content overflow or full compare result set |
+| `memory_recall` | `k` is caller-controlled and also drives `fetch_k = k * 2` plus edge expansion | Cap `k` and `fetch_k`, expose requested/effective metadata | Usually none; ranked fact IDs and snippets should stay visible |
+| `memory_episodes` | `k` is caller-controlled; narratives are capped to 500 chars each | Cap `k`, expose requested/effective metadata | Store full narratives if users need deep session archaeology |
+| `session_log` | `count` is caller-controlled; entries can be verbose | Cap `count`, expose requested/effective metadata | Store full log window behind CCR for archaeology |
+
+These tools are also fixture sources. Before changing live behavior, create dogfood fixtures that preserve navigation affordances such as file paths, line ranges, URLs, provider names, fact IDs, similarity scores, dates, and tool names.
+
 ## Compression model strategy
 
 Omegon should treat "compression model" as a pluggable local capability, not as a required dependency for the native subsystem.

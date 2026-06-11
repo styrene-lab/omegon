@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Cap `codebase_search` result counts at 50 with requested/effective metadata as the first bounded-output step for ranked navigation tools.
 - Split `omegon-codescan` language-specific scanner logic into bounded modules, add Java/Kotlin/C# discovery, and attach extraction language/strategy/confidence metadata to code chunks.
 - Guard codescan's HEAD fast path against relevant dirty working-tree changes so local edits do not return stale cached chunks.
 - TUI conversation rendering now marks the explicitly selected segment, shows queued prompt info below the operator editor, and shows an `Enter: details` hint only for selected segments with detail affordances.

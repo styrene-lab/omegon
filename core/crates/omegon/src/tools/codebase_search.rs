@@ -13,6 +13,8 @@ use omegon_codescan::{BM25Index, Indexer, ScanCache, SearchScope};
 
 /// Rate-limit for the background HEAD-check task. One check per 30s max.
 const HEAD_CHECK_INTERVAL_SECS: u64 = 30;
+const DEFAULT_CODEBASE_SEARCH_RESULTS: usize = 10;
+const MAX_CODEBASE_SEARCH_RESULTS: usize = 50;
 
 pub struct CodescanProvider {
     repo_path: PathBuf,
@@ -53,7 +55,11 @@ impl CodescanProvider {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("query required"))?;
         let scope_str = args["scope"].as_str().unwrap_or("all");
-        let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
+        let requested_max_results = args["max_results"]
+            .as_u64()
+            .unwrap_or(DEFAULT_CODEBASE_SEARCH_RESULTS as u64)
+            as usize;
+        let max_results = requested_max_results.clamp(1, MAX_CODEBASE_SEARCH_RESULTS);
         let tag_filter: Vec<String> = args["tags"]
             .as_array()
             .map(|a| {
@@ -82,7 +88,13 @@ impl CodescanProvider {
                 content: vec![ContentBlock::Text {
                     text: format!("No results for `{}` (scope: {}).", query, scope_str),
                 }],
-                details: json!({"results": [], "query": query}),
+                details: json!({
+                    "results": [],
+                    "query": query,
+                    "requested_max_results": requested_max_results,
+                    "max_results": max_results,
+                    "truncated_by_limit": requested_max_results > max_results,
+                }),
             });
         }
 
@@ -134,6 +146,9 @@ impl CodescanProvider {
             details: json!({
                 "query": query,
                 "scope": scope_str,
+                "requested_max_results": requested_max_results,
+                "max_results": max_results,
+                "truncated_by_limit": requested_max_results > max_results,
                 "results": results.iter().map(|r| json!({
                     "file": r.file,
                     "start_line": r.start_line,
@@ -253,7 +268,7 @@ impl ToolProvider for CodescanProvider {
                     "properties": {
                         "query": { "type": "string", "description": "Search query — concept, function name, design topic, etc." },
                         "scope": { "type": "string", "enum": ["all", "code", "knowledge"], "description": "Search scope (default: all)" },
-                        "max_results": { "type": "number", "description": "Max results (default 10)" },
+                        "max_results": { "type": "number", "minimum": 1, "maximum": 50, "description": "Max results (default 10, capped at 50)" },
                         "tags": { "type": "array", "items": {"type": "string"}, "description": "Filter knowledge chunks by frontmatter tags" }
                     },
                     "required": ["query"]
@@ -340,22 +355,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_search_empty_returns_no_results() {
+    async fn execute_search_clamps_max_results_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let p = CodescanProvider::new(dir.path().to_path_buf());
         let result = p
             .execute(
                 "codebase_search",
                 "tc",
-                json!({"query": "zzz_not_found_12345"}),
+                json!({"query": "zzz_not_found_12345", "max_results": 500}),
                 CancellationToken::new(),
             )
             .await
             .unwrap();
-        let text = match &result.content[0] {
-            ContentBlock::Text { text } => text.clone(),
-            _ => panic!(),
-        };
-        assert!(text.contains("No results"), "{text}");
+        assert_eq!(result.details["requested_max_results"], 500);
+        assert_eq!(result.details["max_results"], MAX_CODEBASE_SEARCH_RESULTS);
+        assert_eq!(result.details["truncated_by_limit"], true);
     }
 }
