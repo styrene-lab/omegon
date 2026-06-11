@@ -451,16 +451,16 @@ fn build_finalization_section(submodules: &[String]) -> String {
 
     section.push_str("You MUST complete these steps before finishing:\n\n");
     section.push_str("1. Run all guardrail checks listed above and fix failures\n");
-    section.push_str("2. Commit your in-scope work with a clean git state when you are done\n");
+    section.push_str("2. Commit your in-scope work with a clean source-plane state when you are done\n");
 
     if !submodules.is_empty() {
         section.push_str("3. **Submodule note**: if your scope crosses a submodule boundary, commit your edits normally. The orchestrator will handle submodule pointer updates during harvest/merge.\n");
-        section.push_str("4. Verify clean state for the files you changed: `git status` should show nothing left to commit in your worktree\n");
+        section.push_str("4. Verify source-plane clean state for the files you changed: `just source-clean` should pass. Live `.omegon/` agent telemetry may still be dirty while agents are active.\n");
     } else {
         section.push_str(
             "3. Commit with a clear message: `git commit -m \"feat(<label>): <summary>\"`\n",
         );
-        section.push_str("4. Verify clean state: `git status` should show nothing to commit\n");
+        section.push_str("4. Verify source-plane clean state: `just source-clean` should pass. Live `.omegon/` agent telemetry may still be dirty while agents are active.\n");
     }
 
     section.push_str("\nDo NOT edit `.cleave-prompt.md` or any task/result metadata files. Those are orchestrator-owned and may be ignored by git.\n");

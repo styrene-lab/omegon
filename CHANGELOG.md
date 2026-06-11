@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Add `just source-clean` and source-vs-agent-state dirty classification so live `.omegon/` telemetry no longer blocks source-plane cleanliness checks.
+
 ### Changed
 
 - Add a local `just upstream-provider-check` gate for cheap provider drift checks without waiting for CI.
@@ -26,6 +30,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Reject staged agent-state telemetry in source-clean checks so live audit logs cannot accidentally leak into source commits.
 - Include lifecycle-derived workstreams in Plan Dock update payloads from both `/plan` commands and tool-result plan mutations so active plans can be shown alongside paused/waiting/blocked lifecycle work.
 - Add `just test-commit` as the focused changed-crate validation gate for local commits while keeping `just test-rust` as the full CI/release workspace gate.
 - Keep slim TUI instrument footers to inference and tools only; engine telemetry now stays solely in the slim status sidecar row instead of duplicating as a footer block.
