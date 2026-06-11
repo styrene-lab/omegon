@@ -30,6 +30,21 @@ pub struct AssistantProfileSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssistantListItem {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub domain: String,
+    pub model: Option<String>,
+    pub launch_readiness: AssistantLaunchReadiness,
+    pub required_secret_count: usize,
+    pub optional_secret_count: usize,
+    pub blocker_count: usize,
+    pub warning_count: usize,
+    pub trust: CapabilityTrustSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AssistantLaunchReadiness {
     pub status: AssistantLaunchStatus,
     pub blockers: Vec<AssistantLaunchBlocker>,
@@ -94,6 +109,40 @@ pub fn resolve_assistant_profiles(
         .collect();
     profiles.sort_by(|a, b| a.id.cmp(&b.id));
     profiles
+}
+
+pub fn assistant_list_items(profiles: &[AssistantProfileSummary]) -> Vec<AssistantListItem> {
+    let mut items: Vec<_> = profiles
+        .iter()
+        .map(|profile| AssistantListItem {
+            id: profile.id.clone(),
+            name: profile.name.clone(),
+            description: profile.description.clone(),
+            domain: profile.domain.clone(),
+            model: profile.model.clone(),
+            launch_readiness: profile.launch_readiness.clone(),
+            required_secret_count: profile.required_secrets.len(),
+            optional_secret_count: profile.optional_secrets.len(),
+            blocker_count: profile.launch_readiness.blockers.len(),
+            warning_count: profile.launch_readiness.warnings.len(),
+            trust: profile.trust.clone(),
+        })
+        .collect();
+    items.sort_by(|a, b| {
+        launch_status_rank(&a.launch_readiness.status)
+            .cmp(&launch_status_rank(&b.launch_readiness.status))
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    items
+}
+
+fn launch_status_rank(status: &AssistantLaunchStatus) -> u8 {
+    match status {
+        AssistantLaunchStatus::Ready => 0,
+        AssistantLaunchStatus::Degraded => 1,
+        AssistantLaunchStatus::Blocked => 2,
+    }
 }
 
 fn resolve_assistant_profile(
@@ -400,6 +449,77 @@ mod tests {
             warning.kind == AssistantLaunchWarningKind::SecretDeferred
                 && warning.id == "VAULT_TOKEN"
         }));
+    }
+
+    #[test]
+    fn assistant_list_items_sort_by_launch_readiness_and_counts() {
+        let ready = AssistantProfileSummary {
+            id: "ready".into(),
+            name: "Ready".into(),
+            version: "0.1.0".into(),
+            description: "Ready assistant".into(),
+            domain: "ops".into(),
+            source_path: "/catalog/ready".into(),
+            model: Some("anthropic:claude".into()),
+            thinking_level: None,
+            context_class: None,
+            max_turns: None,
+            activated_skills: Vec::new(),
+            disabled_tools: Vec::new(),
+            extensions: Vec::new(),
+            required_secrets: vec!["API_KEY".into()],
+            optional_secrets: Vec::new(),
+            triggers: Vec::new(),
+            trust: CapabilityTrustSummary::default(),
+            launch_readiness: AssistantLaunchReadiness {
+                status: AssistantLaunchStatus::Ready,
+                blockers: Vec::new(),
+                warnings: Vec::new(),
+            },
+            secret_readiness: AssistantSecretReadinessSummary::default(),
+            capability_node_ids: Vec::new(),
+            missing_required_node_ids: Vec::new(),
+        };
+        let mut degraded = ready.clone();
+        degraded.id = "degraded".into();
+        degraded.name = "Degraded".into();
+        degraded.launch_readiness = AssistantLaunchReadiness {
+            status: AssistantLaunchStatus::Degraded,
+            blockers: Vec::new(),
+            warnings: vec![AssistantLaunchWarning {
+                kind: AssistantLaunchWarningKind::OptionalSecretMissing,
+                id: "OPTIONAL".into(),
+            }],
+        };
+        degraded.optional_secrets = vec!["OPTIONAL".into()];
+        let mut blocked = ready.clone();
+        blocked.id = "blocked".into();
+        blocked.name = "Blocked".into();
+        blocked.launch_readiness = AssistantLaunchReadiness {
+            status: AssistantLaunchStatus::Blocked,
+            blockers: vec![AssistantLaunchBlocker {
+                kind: AssistantLaunchBlockerKind::RequiredSecretMissing,
+                id: "API_KEY".into(),
+            }],
+            warnings: Vec::new(),
+        };
+
+        let items = assistant_list_items(&[blocked, degraded, ready]);
+
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ready", "degraded", "blocked"]
+        );
+        assert_eq!(items[0].required_secret_count, 1);
+        assert_eq!(items[1].warning_count, 1);
+        assert_eq!(items[2].blocker_count, 1);
+        assert_eq!(
+            items[2].launch_readiness.status,
+            AssistantLaunchStatus::Blocked
+        );
     }
 
     fn test_agent(secrets: AgentSecretsSummary) -> AgentBundleSummary {

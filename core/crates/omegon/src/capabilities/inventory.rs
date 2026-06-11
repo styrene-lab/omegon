@@ -7,7 +7,7 @@ use super::armory::{ArmoryProfileSummary, list_armory_profiles_from_root};
 use super::extensions::{
     ExtensionCapabilitySummary, list_installed_extension_capabilities_from_dir,
 };
-use super::profiles::{AssistantProfileSummary, resolve_assistant_profiles};
+use super::profiles::{AssistantProfileSummary, assistant_list_items, resolve_assistant_profiles};
 use super::secrets::{
     SecretReadinessInputs, SecretReadinessSnapshot, build_secret_readiness_snapshot,
 };
@@ -18,6 +18,7 @@ pub struct CapabilityInventorySnapshot {
     pub armory_profiles: Vec<ArmoryProfileSummary>,
     pub agent_bundles: Vec<AgentBundleSummary>,
     pub assistant_profiles: Vec<AssistantProfileSummary>,
+    pub assistant_list: Vec<super::profiles::AssistantListItem>,
     pub secret_readiness: SecretReadinessSnapshot,
     pub graph: CapabilityGraph,
 }
@@ -115,12 +116,14 @@ pub fn build_capability_inventory_snapshot_with_secrets(
         build_secret_readiness_snapshot(&installed_extensions, &agent_bundles, secret_inputs);
     let assistant_profiles =
         resolve_assistant_profiles(&agent_bundles, &graph, &secret_readiness_snapshot.secrets);
+    let assistant_list = assistant_list_items(&assistant_profiles);
 
     Ok(CapabilityInventorySnapshot {
         installed_extensions,
         armory_profiles,
         agent_bundles,
         assistant_profiles,
+        assistant_list,
         secret_readiness: secret_readiness_snapshot,
         graph,
     })
