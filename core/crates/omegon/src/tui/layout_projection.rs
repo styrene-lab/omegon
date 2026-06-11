@@ -102,9 +102,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         segment_detail_height = bottom_budget;
     }
     if active_tool_stream_height.saturating_add(plan_dock_height) > bottom_budget {
-        let plan_budget =
-            bottom_budget.saturating_sub(active_tool_stream_height.min(bottom_budget));
-        plan_dock_height = plan_dock_height.min(plan_budget);
+        plan_dock_height = plan_dock_height.min(bottom_budget);
         let stream_budget = bottom_budget.saturating_sub(plan_dock_height);
         active_tool_stream_height = active_tool_stream_height.min(stream_budget);
     }
@@ -115,10 +113,10 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
             Constraint::Min(3),
             Constraint::Length(active_tool_stream_height),
             Constraint::Length(permission_lane_height),
-            Constraint::Length(plan_dock_height),
             Constraint::Length(segment_detail_height),
             Constraint::Length(inputs.editor_height),
             Constraint::Length(inputs.editor_info_height),
+            Constraint::Length(plan_dock_height),
             Constraint::Length(status_height),
             Constraint::Length(project_dashboard_height(inputs, show_dashboard)),
             Constraint::Length(footer_height),
@@ -133,10 +131,10 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         conversation_area: chunks[0],
         active_tool_stream_area: chunks[1],
         permission_lane_area: chunks[2],
-        plan_dock_area: chunks[3],
-        segment_detail_area: chunks[4],
-        editor_area: chunks[5],
-        editor_info_area: chunks[6],
+        segment_detail_area: chunks[3],
+        editor_area: chunks[4],
+        editor_info_area: chunks[5],
+        plan_dock_area: chunks[6],
         status_area: chunks[7],
         footer_area: chunks[9],
         footer_height,
@@ -201,6 +199,31 @@ mod tests {
     }
 
     #[test]
+    fn slim_layout_preserves_bottom_status_stack() {
+        let plan = plan_tui_layout(TuiLayoutInputs {
+            area: Rect::new(0, 0, 120, 36),
+            surfaces: UiSurfaces::lean(),
+            focus_mode: false,
+            dashboard_has_content: false,
+            editor_height: 4,
+            editor_info_height: 1,
+            instrument_footer_height: 3,
+            status_height: 2,
+            pending_permission: false,
+            active_tool_stream_height: 6,
+            plan_dock_height: 4,
+            segment_detail_height: 3,
+        });
+        assert_eq!(plan.footer_height, 0);
+        assert_eq!(plan.status_area.height, 2);
+        assert_eq!(plan.plan_dock_area.height, 4);
+        assert!(plan.segment_detail_area.y < plan.editor_area.y);
+        assert!(plan.editor_area.y < plan.editor_info_area.y);
+        assert!(plan.editor_info_area.y < plan.plan_dock_area.y);
+        assert!(plan.plan_dock_area.y < plan.status_area.y);
+    }
+
+    #[test]
     fn permission_lane_caps_slim_auxiliary_heights() {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 100, 30),
@@ -245,5 +268,56 @@ mod tests {
         assert_eq!(plan.segment_detail_height, 8);
         assert_eq!(plan.segment_detail_area.height, 8);
         assert!(plan.conversation_area.height >= 3);
+    }
+
+    #[test]
+    fn slim_plan_is_pinned_between_editor_and_status_bar() {
+        let plan = plan_tui_layout(TuiLayoutInputs {
+            area: Rect::new(0, 0, 120, 40),
+            surfaces: UiSurfaces::lean(),
+            focus_mode: false,
+            dashboard_has_content: false,
+            editor_height: 4,
+            editor_info_height: 1,
+            instrument_footer_height: 4,
+            status_height: 2,
+            pending_permission: false,
+            active_tool_stream_height: 5,
+            plan_dock_height: 5,
+            segment_detail_height: 4,
+        });
+
+        assert_eq!(plan.plan_dock_height, 5);
+        assert!(plan.active_tool_stream_area.y < plan.segment_detail_area.y);
+        assert!(plan.segment_detail_area.y < plan.editor_area.y);
+        assert!(plan.editor_area.y < plan.editor_info_area.y);
+        assert!(plan.editor_info_area.y < plan.plan_dock_area.y);
+        assert!(plan.plan_dock_area.y < plan.status_area.y);
+    }
+
+    #[test]
+    fn slim_layout_preserves_editor_and_status_under_auxiliary_pressure() {
+        let plan = plan_tui_layout(TuiLayoutInputs {
+            area: Rect::new(0, 0, 120, 18),
+            surfaces: UiSurfaces::lean(),
+            focus_mode: false,
+            dashboard_has_content: false,
+            editor_height: 4,
+            editor_info_height: 1,
+            instrument_footer_height: 4,
+            status_height: 2,
+            pending_permission: false,
+            active_tool_stream_height: 12,
+            plan_dock_height: 5,
+            segment_detail_height: 4,
+        });
+
+        assert!(plan.conversation_area.height >= 3);
+        assert_eq!(plan.editor_area.height, 4);
+        assert_eq!(plan.editor_info_area.height, 1);
+        assert_eq!(plan.status_area.height, 2);
+        assert!(plan.segment_detail_area.y < plan.editor_area.y);
+        assert!(plan.editor_info_area.y < plan.plan_dock_area.y);
+        assert!(plan.plan_dock_area.y < plan.status_area.y);
     }
 }
