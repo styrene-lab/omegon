@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use omegon_opsx::{JsonFileStore, Lifecycle as OpsxLifecycle, NodeState};
 
 use super::context::LifecycleContextProvider;
-use super::{design, spec, sync};
 use super::types::{DesignNode, FileScope, IssueType, NodeStatus};
+use super::{design, spec, sync};
 
 #[derive(Clone)]
 pub struct LifecycleMutationService {
@@ -125,10 +125,7 @@ impl LifecycleMutationService {
         }
     }
 
-    pub fn create_design_node(
-        &self,
-        req: CreateDesignNodeRequest,
-    ) -> anyhow::Result<DesignNode> {
+    pub fn create_design_node(&self, req: CreateDesignNodeRequest) -> anyhow::Result<DesignNode> {
         {
             let mut opsx = self.opsx.lock().unwrap();
             // Parent validation is advisory here because markdown parent
@@ -138,11 +135,7 @@ impl LifecycleMutationService {
                 && let Some(target) = NodeState::parse(status_str)
                 && target != NodeState::Seed
             {
-                let _ = opsx.force_transition_node(
-                    &req.id,
-                    target,
-                    "initial status on create",
-                );
+                let _ = opsx.force_transition_node(&req.id, target, "initial status on create");
             }
         }
 
@@ -242,10 +235,7 @@ impl LifecycleMutationService {
         Ok(())
     }
 
-    pub fn add_design_node_dependency(
-        &self,
-        req: AddDesignNodeLinkRequest,
-    ) -> anyhow::Result<()> {
+    pub fn add_design_node_dependency(&self, req: AddDesignNodeLinkRequest) -> anyhow::Result<()> {
         let mut node = self.get_node_clone(&req.id)?;
         design::update_node(&mut node, |n| {
             if !n.dependencies.contains(&req.target_id) {
@@ -256,10 +246,7 @@ impl LifecycleMutationService {
         Ok(())
     }
 
-    pub fn add_design_node_related(
-        &self,
-        req: AddDesignNodeLinkRequest,
-    ) -> anyhow::Result<()> {
+    pub fn add_design_node_related(&self, req: AddDesignNodeLinkRequest) -> anyhow::Result<()> {
         let mut node = self.get_node_clone(&req.id)?;
         design::update_node(&mut node, |n| {
             if !n.related.contains(&req.target_id) {
@@ -326,7 +313,6 @@ impl LifecycleMutationService {
         self.provider.lock().unwrap().refresh();
         Ok(())
     }
-
 
     pub fn implement_design_node(
         &self,
@@ -410,7 +396,8 @@ mod tests {
         let opsx = Arc::new(Mutex::new(
             OpsxLifecycle::load(JsonFileStore::new(&repo)).unwrap(),
         ));
-        let service = LifecycleMutationService::new(repo.clone(), Arc::clone(&provider), Arc::clone(&opsx));
+        let service =
+            LifecycleMutationService::new(repo.clone(), Arc::clone(&provider), Arc::clone(&opsx));
 
         let node = service
             .create_design_node(CreateDesignNodeRequest {
@@ -461,8 +448,19 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.node_title, "New Node");
-        assert_eq!(provider.lock().unwrap().get_node("new-node").unwrap().status, NodeStatus::Exploring);
-        assert_eq!(opsx.lock().unwrap().get_node("new-node").unwrap().state, NodeState::Exploring);
+        assert_eq!(
+            provider
+                .lock()
+                .unwrap()
+                .get_node("new-node")
+                .unwrap()
+                .status,
+            NodeStatus::Exploring
+        );
+        assert_eq!(
+            opsx.lock().unwrap().get_node("new-node").unwrap().state,
+            NodeState::Exploring
+        );
     }
 
     #[test]
@@ -491,7 +489,15 @@ mod tests {
                 question: "What next?".to_string(),
             })
             .unwrap();
-        assert_eq!(provider.lock().unwrap().get_node("new-node").unwrap().open_questions, vec!["What next?"]);
+        assert_eq!(
+            provider
+                .lock()
+                .unwrap()
+                .get_node("new-node")
+                .unwrap()
+                .open_questions,
+            vec!["What next?"]
+        );
 
         service
             .remove_design_node_question(UpdateDesignNodeQuestionRequest {
@@ -499,7 +505,15 @@ mod tests {
                 question: "What next?".to_string(),
             })
             .unwrap();
-        assert!(provider.lock().unwrap().get_node("new-node").unwrap().open_questions.is_empty());
+        assert!(
+            provider
+                .lock()
+                .unwrap()
+                .get_node("new-node")
+                .unwrap()
+                .open_questions
+                .is_empty()
+        );
     }
 
     #[test]
@@ -530,7 +544,12 @@ mod tests {
             })
             .unwrap();
 
-        let node = provider.lock().unwrap().get_node("new-node").cloned().unwrap();
+        let node = provider
+            .lock()
+            .unwrap()
+            .get_node("new-node")
+            .cloned()
+            .unwrap();
         let sections = design::read_node_sections(&node).unwrap();
         assert_eq!(sections.research.len(), 1);
         assert_eq!(sections.research[0].heading, "Finding");
@@ -566,7 +585,12 @@ mod tests {
             })
             .unwrap();
 
-        let node = provider.lock().unwrap().get_node("new-node").cloned().unwrap();
+        let node = provider
+            .lock()
+            .unwrap()
+            .get_node("new-node")
+            .cloned()
+            .unwrap();
         let sections = design::read_node_sections(&node).unwrap();
         assert_eq!(sections.decisions.len(), 1);
         assert_eq!(sections.decisions[0].title, "Choose Path");
@@ -609,7 +633,12 @@ mod tests {
                 .unwrap();
         }
 
-        let node = provider.lock().unwrap().get_node("new-node").cloned().unwrap();
+        let node = provider
+            .lock()
+            .unwrap()
+            .get_node("new-node")
+            .cloned()
+            .unwrap();
         assert_eq!(node.dependencies, vec!["dep"]);
         assert_eq!(node.related, vec!["rel"]);
     }
@@ -646,7 +675,12 @@ mod tests {
             })
             .unwrap();
 
-        let node = provider.lock().unwrap().get_node("new-node").cloned().unwrap();
+        let node = provider
+            .lock()
+            .unwrap()
+            .get_node("new-node")
+            .cloned()
+            .unwrap();
         let sections = design::read_node_sections(&node).unwrap();
         assert_eq!(sections.impl_file_scope.len(), 1);
         assert_eq!(sections.impl_file_scope[0].path, "src/lib.rs");
@@ -690,8 +724,17 @@ mod tests {
 
         assert_eq!(child.parent.as_deref(), Some("parent"));
         let provider = provider.lock().unwrap();
-        assert!(provider.get_node("parent").unwrap().open_questions.is_empty());
-        assert_eq!(provider.get_node("child").unwrap().parent.as_deref(), Some("parent"));
+        assert!(
+            provider
+                .get_node("parent")
+                .unwrap()
+                .open_questions
+                .is_empty()
+        );
+        assert_eq!(
+            provider.get_node("child").unwrap().parent.as_deref(),
+            Some("parent")
+        );
     }
 
     #[test]
@@ -740,7 +783,8 @@ mod tests {
         let opsx = Arc::new(Mutex::new(
             OpsxLifecycle::load(JsonFileStore::new(&repo)).unwrap(),
         ));
-        let service = LifecycleMutationService::new(repo.clone(), Arc::clone(&provider), Arc::clone(&opsx));
+        let service =
+            LifecycleMutationService::new(repo.clone(), Arc::clone(&provider), Arc::clone(&opsx));
         service
             .create_design_node(CreateDesignNodeRequest {
                 id: "impl-node".to_string(),
@@ -760,9 +804,21 @@ mod tests {
 
         assert_eq!(result.openspec_change, "impl-node");
         assert!(result.change_path.join("proposal.md").exists());
-        let node = provider.lock().unwrap().get_node("impl-node").cloned().unwrap();
+        let node = provider
+            .lock()
+            .unwrap()
+            .get_node("impl-node")
+            .cloned()
+            .unwrap();
         assert_eq!(node.status, NodeStatus::Implementing);
         assert_eq!(node.openspec_change.as_deref(), Some("impl-node"));
-        assert!(opsx.lock().unwrap().state().changes.iter().any(|c| c.name == "impl-node"));
+        assert!(
+            opsx.lock()
+                .unwrap()
+                .state()
+                .changes
+                .iter()
+                .any(|c| c.name == "impl-node")
+        );
     }
 }

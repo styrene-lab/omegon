@@ -19,7 +19,12 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::mutation::{AddDesignNodeDecisionRequest, AddDesignNodeImplNotesRequest, AddDesignNodeLinkRequest, AddDesignNodeResearchRequest, BranchDesignNodeQuestionRequest, CreateDesignNodeRequest, LifecycleMutationService, ImplementDesignNodeRequest, SetDesignNodeIssueTypeRequest, SetDesignNodePriorityRequest, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest};
+use crate::lifecycle::mutation::{
+    AddDesignNodeDecisionRequest, AddDesignNodeImplNotesRequest, AddDesignNodeLinkRequest,
+    AddDesignNodeResearchRequest, BranchDesignNodeQuestionRequest, CreateDesignNodeRequest,
+    ImplementDesignNodeRequest, LifecycleMutationService, SetDesignNodeIssueTypeRequest,
+    SetDesignNodePriorityRequest, SetDesignNodeStatusRequest, UpdateDesignNodeQuestionRequest,
+};
 use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{archive, design, doctor, query, spec, sync, types::*};
 
@@ -368,14 +373,16 @@ impl LifecycleFeature {
                             .collect()
                     })
                     .unwrap_or_default();
-                let node = self.mutation_service.create_design_node(CreateDesignNodeRequest {
-                    id: id.to_string(),
-                    title: title.to_string(),
-                    parent: args["parent"].as_str().map(str::to_string),
-                    status: args["status"].as_str().map(str::to_string),
-                    tags,
-                    overview: args["overview"].as_str().unwrap_or("").to_string(),
-                })?;
+                let node = self
+                    .mutation_service
+                    .create_design_node(CreateDesignNodeRequest {
+                        id: id.to_string(),
+                        title: title.to_string(),
+                        parent: args["parent"].as_str().map(str::to_string),
+                        status: args["status"].as_str().map(str::to_string),
+                        tags,
+                        overview: args["overview"].as_str().unwrap_or("").to_string(),
+                    })?;
                 Ok(text_result(&format!(
                     "Created design node '{id}' at {}",
                     node.file_path.display()
@@ -389,15 +396,14 @@ impl LifecycleFeature {
                     anyhow::bail!("cannot archive '{id}' while non-archived descendants remain");
                 }
 
-                self.mutation_service.set_design_node_status(
-                    SetDesignNodeStatusRequest {
+                self.mutation_service
+                    .set_design_node_status(SetDesignNodeStatusRequest {
                         id: id.to_string(),
                         status: NodeStatus::Archived,
                         archive_reason: args["archive_reason"].as_str().map(str::to_string),
                         superseded_by: args["superseded_by"].as_str().map(str::to_string),
                         archived_at: Some(Self::archive_timestamp()),
-                    },
-                )?;
+                    })?;
                 Ok(text_result(&format!("Archived '{id}'")))
             }
 
@@ -418,19 +424,19 @@ impl LifecycleFeature {
                     }
                 }
 
-                let result = self.mutation_service.set_design_node_status(
-                    SetDesignNodeStatusRequest {
-                        id: id.to_string(),
-                        status,
-                        archive_reason: args["archive_reason"].as_str().map(str::to_string),
-                        superseded_by: args["superseded_by"].as_str().map(str::to_string),
-                        archived_at: if matches!(status, NodeStatus::Archived) {
-                            Some(Self::archive_timestamp())
-                        } else {
-                            None
-                        },
-                    },
-                )?;
+                let result =
+                    self.mutation_service
+                        .set_design_node_status(SetDesignNodeStatusRequest {
+                            id: id.to_string(),
+                            status,
+                            archive_reason: args["archive_reason"].as_str().map(str::to_string),
+                            superseded_by: args["superseded_by"].as_str().map(str::to_string),
+                            archived_at: if matches!(status, NodeStatus::Archived) {
+                                Some(Self::archive_timestamp())
+                            } else {
+                                None
+                            },
+                        })?;
 
                 if matches!(status_str, "resolved" | "decided" | "implementing") {
                     let content = format!(
@@ -488,13 +494,12 @@ impl LifecycleFeature {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("content required"))?;
 
-                self.mutation_service.add_design_node_research(
-                    AddDesignNodeResearchRequest {
+                self.mutation_service
+                    .add_design_node_research(AddDesignNodeResearchRequest {
                         id: id.to_string(),
                         heading: heading.to_string(),
                         content: content.to_string(),
-                    },
-                )?;
+                    })?;
                 Ok(text_result(&format!(
                     "Added research '{heading}' to '{id}'"
                 )))
@@ -508,14 +513,13 @@ impl LifecycleFeature {
                 let status = args["decision_status"].as_str().unwrap_or("exploring");
                 let rationale = args["rationale"].as_str().unwrap_or("");
 
-                self.mutation_service.add_design_node_decision(
-                    AddDesignNodeDecisionRequest {
+                self.mutation_service
+                    .add_design_node_decision(AddDesignNodeDecisionRequest {
                         id: id.to_string(),
                         title: title.to_string(),
                         status: status.to_string(),
                         rationale: rationale.to_string(),
-                    },
-                )?;
+                    })?;
 
                 // Auto-ingest decisions to memory
                 let content = if rationale.is_empty() {
@@ -540,12 +544,11 @@ impl LifecycleFeature {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("target_id required"))?;
 
-                self.mutation_service.add_design_node_dependency(
-                    AddDesignNodeLinkRequest {
+                self.mutation_service
+                    .add_design_node_dependency(AddDesignNodeLinkRequest {
                         id: id.to_string(),
                         target_id: target.to_string(),
-                    },
-                )?;
+                    })?;
                 Ok(text_result(&format!(
                     "Added dependency '{id}' → '{target}'"
                 )))
@@ -557,12 +560,11 @@ impl LifecycleFeature {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("target_id required"))?;
 
-                self.mutation_service.add_design_node_related(
-                    AddDesignNodeLinkRequest {
+                self.mutation_service
+                    .add_design_node_related(AddDesignNodeLinkRequest {
                         id: id.to_string(),
                         target_id: target.to_string(),
-                    },
-                )?;
+                    })?;
                 Ok(text_result(&format!("Added related '{id}' ↔ '{target}'")))
             }
 
@@ -649,11 +651,9 @@ impl LifecycleFeature {
 
             "implement" => {
                 let id = node_id.ok_or_else(|| anyhow::anyhow!("node_id required"))?;
-                let result = self.mutation_service.implement_design_node(
-                    ImplementDesignNodeRequest {
-                        id: id.to_string(),
-                    },
-                )?;
+                let result = self
+                    .mutation_service
+                    .implement_design_node(ImplementDesignNodeRequest { id: id.to_string() })?;
                 Ok(text_result(&format!(
                     "Scaffolded OpenSpec change '{}' at {}\nNode '{}' → implementing",
                     result.openspec_change,
@@ -671,12 +671,11 @@ impl LifecycleFeature {
                     anyhow::bail!("Priority must be 1-5, got {priority}");
                 }
 
-                self.mutation_service.set_design_node_priority(
-                    SetDesignNodePriorityRequest {
+                self.mutation_service
+                    .set_design_node_priority(SetDesignNodePriorityRequest {
                         id: id.to_string(),
                         priority: priority as u8,
-                    },
-                )?;
+                    })?;
                 Ok(text_result(&format!("Set '{id}' priority to {priority}")))
             }
 

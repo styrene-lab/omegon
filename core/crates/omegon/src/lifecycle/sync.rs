@@ -145,7 +145,12 @@ mod tests {
     use super::*;
     use crate::lifecycle::types::{ChangeStage, SpecFile};
 
-    fn change(name: &str, specs: Vec<SpecFile>, total_tasks: usize, done_tasks: usize) -> ChangeInfo {
+    fn change(
+        name: &str,
+        specs: Vec<SpecFile>,
+        total_tasks: usize,
+        done_tasks: usize,
+    ) -> ChangeInfo {
         ChangeInfo {
             name: name.to_string(),
             path: std::path::PathBuf::from("openspec/changes").join(name),
@@ -173,8 +178,8 @@ mod tests {
     fn sync_creates_change_and_advances_to_specced() {
         let dir = tempfile::tempdir().unwrap();
         let mut opsx = OpsxLifecycle::load(JsonFileStore::new(dir.path())).unwrap();
-        let report = sync_change_from_info(&mut opsx, &change("demo", vec![spec("demo")], 0, 0))
-            .unwrap();
+        let report =
+            sync_change_from_info(&mut opsx, &change("demo", vec![spec("demo")], 0, 0)).unwrap();
 
         assert_eq!(report.changes_seen, 1);
         assert_eq!(report.changes_created, 1);
@@ -187,11 +192,8 @@ mod tests {
     fn sync_advances_specced_change_to_planned_when_tasks_exist() {
         let dir = tempfile::tempdir().unwrap();
         let mut opsx = OpsxLifecycle::load(JsonFileStore::new(dir.path())).unwrap();
-        let report = sync_change_from_info(
-            &mut opsx,
-            &change("demo", vec![spec("demo")], 3, 1),
-        )
-        .unwrap();
+        let report =
+            sync_change_from_info(&mut opsx, &change("demo", vec![spec("demo")], 3, 1)).unwrap();
 
         assert_eq!(change_state(&opsx, "demo"), Some(ChangeState::Planned));
         assert_eq!(report.transitions.len(), 2);

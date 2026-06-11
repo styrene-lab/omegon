@@ -155,7 +155,11 @@ pub fn archive_content_with_tx(
         .map_err(|err| opsx_store_error(&format!("mkdir {}", archive_parent.display()), err))?;
     std::fs::rename(&change_dir, &archive_dir).map_err(|err| {
         opsx_store_error(
-            &format!("archive {} to {}", change_dir.display(), archive_dir.display()),
+            &format!(
+                "archive {} to {}",
+                change_dir.display(),
+                archive_dir.display()
+            ),
             err,
         )
     })?;
@@ -170,7 +174,11 @@ pub fn rollback_archive_content(repo_path: &Path, change: &str) -> Result<(), Op
     if archive_dir.exists() && !change_dir.exists() {
         std::fs::rename(&archive_dir, &change_dir).map_err(|err| {
             opsx_store_error(
-                &format!("rollback archive {} to {}", archive_dir.display(), change_dir.display()),
+                &format!(
+                    "rollback archive {} to {}",
+                    archive_dir.display(),
+                    change_dir.display()
+                ),
                 err,
             )
         })?;
@@ -197,11 +205,16 @@ fn opsx_store_error(context: &str, err: std::io::Error) -> OpsxError {
 mod tests {
     use super::*;
 
-    fn opsx_for(repo: &Path, change: &str, state: ChangeState) -> Arc<Mutex<OpsxLifecycle<JsonFileStore>>> {
+    fn opsx_for(
+        repo: &Path,
+        change: &str,
+        state: ChangeState,
+    ) -> Arc<Mutex<OpsxLifecycle<JsonFileStore>>> {
         let mut opsx = OpsxLifecycle::load(JsonFileStore::new(repo)).unwrap();
         opsx.create_change(change, change, None).unwrap();
         if state != ChangeState::Proposed {
-            opsx.force_transition_change(change, state, "test setup").unwrap();
+            opsx.force_transition_change(change, state, "test setup")
+                .unwrap();
         }
         Arc::new(Mutex::new(opsx))
     }
@@ -218,9 +231,15 @@ mod tests {
 
         let recovered = recover_archive_transactions(repo, &opsx).unwrap();
 
-        assert_eq!(recovered, vec!["removed stale archive transaction for 'demo'"]);
+        assert_eq!(
+            recovered,
+            vec!["removed stale archive transaction for 'demo'"]
+        );
         assert!(!archive_tx_path(repo, change).exists());
-        assert_eq!(opsx_change_state(&opsx.lock().unwrap(), change), Some(ChangeState::Verifying));
+        assert_eq!(
+            opsx_change_state(&opsx.lock().unwrap(), change),
+            Some(ChangeState::Verifying)
+        );
     }
 
     #[test]
@@ -238,7 +257,10 @@ mod tests {
 
         assert_eq!(recovered, vec!["completed interrupted archive for 'demo'"]);
         assert!(!archive_tx_path(repo, change).exists());
-        assert_eq!(opsx_change_state(&opsx.lock().unwrap(), change), Some(ChangeState::Archived));
+        assert_eq!(
+            opsx_change_state(&opsx.lock().unwrap(), change),
+            Some(ChangeState::Archived)
+        );
     }
 
     #[test]
@@ -252,7 +274,9 @@ mod tests {
         write_archive_tx(repo, &tx).unwrap();
         let opsx = opsx_for(repo, change, ChangeState::Verifying);
 
-        let err = recover_archive_transactions(repo, &opsx).unwrap_err().to_string();
+        let err = recover_archive_transactions(repo, &opsx)
+            .unwrap_err()
+            .to_string();
 
         assert!(err.contains("both"));
         assert!(archive_tx_path(repo, change).exists());
@@ -267,7 +291,9 @@ mod tests {
         write_archive_tx(repo, &tx).unwrap();
         let opsx = opsx_for(repo, change, ChangeState::Verifying);
 
-        let err = recover_archive_transactions(repo, &opsx).unwrap_err().to_string();
+        let err = recover_archive_transactions(repo, &opsx)
+            .unwrap_err()
+            .to_string();
 
         assert!(err.contains("neither"));
         assert!(archive_tx_path(repo, change).exists());
