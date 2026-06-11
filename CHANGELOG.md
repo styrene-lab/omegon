@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - Reject staged agent-state telemetry in source-clean checks so live audit logs cannot accidentally leak into source commits.
+- Make interactive startup import discovered provider credentials before bridge selection, visibly warn on expired profile-model credentials, and fall back to an authenticated provider before installing the login-only null bridge.
 - Include lifecycle-derived workstreams in Plan Dock update payloads from both `/plan` commands and tool-result plan mutations so active plans can be shown alongside paused/waiting/blocked lifecycle work.
 - Add `just test-commit` as the focused changed-crate validation gate for local commits while keeping `just test-rust` as the full CI/release workspace gate.
 - Keep slim TUI instrument footers to inference and tools only; engine telemetry now stays solely in the slim status sidecar row instead of duplicating as a footer block.

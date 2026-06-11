@@ -3805,8 +3805,26 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         );
     }
 
+    let imported_credentials = auth::import_discovered_provider_credentials();
+    if imported_credentials > 0 {
+        tracing::info!(
+            imported = imported_credentials,
+            "imported discovered provider credentials before interactive bridge resolution"
+        );
+    }
+
+    let mut startup_auth_warnings = Vec::new();
+    let selected_provider_status = auth::provider_by_id(&requested_provider)
+        .map(auth::provider_session_status);
+    if selected_provider_status == Some(auth::ProviderSessionStatus::Expired) {
+        startup_auth_warnings.push(format!(
+            "Credentials for {} are expired. Run /login {} to refresh them before continuing with that profile model.",
+            requested_start_model, requested_provider
+        ));
+    }
+
     let resolved_bridge = providers::auto_detect_bridge(&resolved_cli_model).await;
-    let startup_decision = decide_interactive_startup_model(
+    let mut startup_decision = decide_interactive_startup_model(
         &requested_start_model,
         &resolved_cli_model,
         resolved_bridge.is_some(),
@@ -3814,6 +3832,24 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let (_effective_model, bridge): (String, Box<dyn LlmBridge>) = if let Some(native) = resolved_bridge {
         tracing::info!("using native LLM provider");
         (startup_decision.bridge_model.clone(), native)
+    } else if let Some(fallback_model) = providers::automation_safe_model()
+        && let Some(fallback_bridge) = providers::auto_detect_bridge(&fallback_model).await
+    {
+        tracing::warn!(
+            selected = %startup_decision.selected_model,
+            selected_provider = %providers::infer_provider_id(&startup_decision.selected_model),
+            fallback_model = %fallback_model,
+            fallback_provider = %providers::infer_provider_id(&fallback_model),
+            "selected interactive model unavailable; falling back to authenticated provider"
+        );
+        startup_auth_warnings.push(format!(
+            "Selected profile model {} is unavailable for this session; using {} as the runtime bridge. Update the profile model or refresh credentials to remove this fallback.",
+            startup_decision.selected_model, fallback_model
+        ));
+        startup_decision.bridge_model = fallback_model.clone();
+        startup_decision.provider_connected = true;
+        startup_decision.use_null_bridge = false;
+        (fallback_model, fallback_bridge)
     } else {
         tracing::warn!(
             selected = %startup_decision.selected_model,
@@ -3822,10 +3858,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             bridge_provider = %providers::infer_provider_id(&startup_decision.bridge_model),
             "no LLM provider available for selected interactive model"
         );
-        eprintln!(
+        startup_auth_warnings.push(format!(
             "No LLM provider configured for {}. Use /login <provider> in the TUI or run `omegon auth login` first.",
             startup_decision.selected_model
-        );
+        ));
         (
             startup_decision.bridge_model.clone(),
             Box::new(bridge::NullBridge) as Box<dyn LlmBridge>,
@@ -3856,6 +3892,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     // to AgentEvent (consumed by TUI + WebSocket)
     if let Ok(status_json) = serde_json::to_value(&agent.initial_harness_status) {
         let _ = events_tx.send(AgentEvent::HarnessStatusChanged { status_json });
+    }
+    for message in startup_auth_warnings {
+        let _ = events_tx.send(AgentEvent::SystemNotification { message });
     }
     match &agent.workspace_state.admission {
         crate::workspace::types::AdmissionOutcome::GrantedMutable
