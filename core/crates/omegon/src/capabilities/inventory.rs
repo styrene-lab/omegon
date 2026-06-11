@@ -111,16 +111,17 @@ pub fn build_capability_inventory_snapshot_with_secrets(
     let armory_profiles = list_armory_profiles_from_root(roots.armory_root)?;
     let agent_bundles = list_agent_bundle_summaries_from_dir(roots.catalog_dir)?;
     let graph = build_capability_graph(&installed_extensions, &armory_profiles, &agent_bundles);
-    let assistant_profiles = resolve_assistant_profiles(&agent_bundles, &graph);
-    let secret_readiness =
+    let secret_readiness_snapshot =
         build_secret_readiness_snapshot(&installed_extensions, &agent_bundles, secret_inputs);
+    let assistant_profiles =
+        resolve_assistant_profiles(&agent_bundles, &graph, &secret_readiness_snapshot.secrets);
 
     Ok(CapabilityInventorySnapshot {
         installed_extensions,
         armory_profiles,
         agent_bundles,
         assistant_profiles,
-        secret_readiness,
+        secret_readiness: secret_readiness_snapshot,
         graph,
     })
 }

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::agents::AgentBundleSummary;
 use super::inventory::{CapabilityEdge, CapabilityGraph, CapabilityNode, CapabilityTrustSummary};
+use super::secrets::{SecretReadiness, SecretReadinessStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AssistantProfileSummary {
@@ -22,17 +23,32 @@ pub struct AssistantProfileSummary {
     pub optional_secrets: Vec<String>,
     pub triggers: Vec<String>,
     pub trust: CapabilityTrustSummary,
+    pub secret_readiness: AssistantSecretReadinessSummary,
     pub capability_node_ids: Vec<String>,
     pub missing_required_node_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssistantSecretReadinessSummary {
+    pub required_total: usize,
+    pub required_ready: usize,
+    pub required_missing: usize,
+    pub optional_total: usize,
+    pub optional_ready: usize,
+    pub optional_missing: usize,
+    pub missing_required: Vec<String>,
+    pub missing_optional: Vec<String>,
+    pub deferred: Vec<String>,
 }
 
 pub fn resolve_assistant_profiles(
     agents: &[AgentBundleSummary],
     graph: &CapabilityGraph,
+    secret_readiness: &[SecretReadiness],
 ) -> Vec<AssistantProfileSummary> {
     let mut profiles: Vec<_> = agents
         .iter()
-        .map(|agent| resolve_assistant_profile(agent, graph))
+        .map(|agent| resolve_assistant_profile(agent, graph, secret_readiness))
         .collect();
     profiles.sort_by(|a, b| a.id.cmp(&b.id));
     profiles
@@ -41,6 +57,7 @@ pub fn resolve_assistant_profiles(
 fn resolve_assistant_profile(
     agent: &AgentBundleSummary,
     graph: &CapabilityGraph,
+    secret_readiness: &[SecretReadiness],
 ) -> AssistantProfileSummary {
     let root_id = format!("agent:{}", agent.id);
     let capability_node_ids = reachable_node_ids(&root_id, graph);
@@ -81,9 +98,65 @@ fn resolve_assistant_profile(
             .map(|trigger| trigger.name.clone())
             .collect(),
         trust: merge_trust(&capability_node_ids, graph),
+        secret_readiness: summarize_agent_secret_readiness(agent, secret_readiness),
         capability_node_ids,
         missing_required_node_ids,
     }
+}
+
+fn summarize_agent_secret_readiness(
+    agent: &AgentBundleSummary,
+    readiness: &[SecretReadiness],
+) -> AssistantSecretReadinessSummary {
+    let mut summary = AssistantSecretReadinessSummary {
+        required_total: agent.secrets.required.len(),
+        optional_total: agent.secrets.optional.len(),
+        ..Default::default()
+    };
+
+    for name in &agent.secrets.required {
+        if secret_is_ready(name, readiness) {
+            summary.required_ready += 1;
+        } else {
+            summary.required_missing += 1;
+            summary.missing_required.push(name.clone());
+        }
+        if secret_is_deferred(name, readiness) {
+            summary.deferred.push(name.clone());
+        }
+    }
+
+    for name in &agent.secrets.optional {
+        if secret_is_ready(name, readiness) {
+            summary.optional_ready += 1;
+        } else {
+            summary.optional_missing += 1;
+            summary.missing_optional.push(name.clone());
+        }
+        if secret_is_deferred(name, readiness) {
+            summary.deferred.push(name.clone());
+        }
+    }
+
+    summary.deferred.sort();
+    summary.deferred.dedup();
+    summary
+}
+
+fn secret_is_ready(name: &str, readiness: &[SecretReadiness]) -> bool {
+    readiness.iter().any(|secret| {
+        secret.name == name
+            && matches!(
+                secret.status,
+                SecretReadinessStatus::Warmed | SecretReadinessStatus::Configured
+            )
+    })
+}
+
+fn secret_is_deferred(name: &str, readiness: &[SecretReadiness]) -> bool {
+    readiness.iter().any(|secret| {
+        secret.name == name && matches!(secret.status, SecretReadinessStatus::Deferred)
+    })
 }
 
 fn reachable_node_ids(root_id: &str, graph: &CapabilityGraph) -> Vec<String> {
@@ -202,7 +275,19 @@ mod tests {
             }],
         };
 
-        let profiles = resolve_assistant_profiles(&[agent], &graph);
+        let profiles = resolve_assistant_profiles(
+            &[agent],
+            &graph,
+            &[SecretReadiness {
+                name: "ANTHROPIC_API_KEY".into(),
+                required: true,
+                optional: false,
+                consumers: Vec::new(),
+                status: SecretReadinessStatus::Warmed,
+                recipe_kind: None,
+                warmed: true,
+            }],
+        );
 
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0].id, "daily");
@@ -210,6 +295,9 @@ mod tests {
         assert!(profiles[0].trust.browser_action_capable);
         assert!(profiles[0].trust.process_spawn_capable);
         assert!(profiles[0].trust.secret_bound);
+        assert_eq!(profiles[0].secret_readiness.required_total, 1);
+        assert_eq!(profiles[0].secret_readiness.required_ready, 1);
+        assert!(profiles[0].secret_readiness.missing_required.is_empty());
         assert!(!profiles[0].trust.read_only);
         assert!(
             profiles[0]
