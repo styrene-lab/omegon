@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Add a metadata-only backend endpoint registry for ACP/runtime/lifecycle/provider/extension/secret/package/plan/task surfaces, including planned HTTP aliases for lifecycle projections.
 - Add headless ACP lifecycle read surfaces for lifecycle snapshots and design-node list/get/ready/blocked/frontier projections.
 - Route design-tree implement scaffolding through the lifecycle mutation service while preserving existing OpenSpec proposal behavior.
 - Add a design node planning the future lifecycle `implement` service extraction pass.

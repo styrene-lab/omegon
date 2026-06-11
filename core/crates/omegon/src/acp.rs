@@ -2040,7 +2040,6 @@ impl OmegonAcpAgent {
         })
     }
 
-
     fn lifecycle_repo_root(&self) -> std::path::PathBuf {
         let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
@@ -2119,19 +2118,21 @@ impl OmegonAcpAgent {
         let list = nodes
             .values()
             .filter(|n| !crate::lifecycle::query::is_archived(n))
-            .map(|n| serde_json::json!({
-                "id": n.id,
-                "title": n.title,
-                "status": n.status.as_str(),
-                "parent": n.parent,
-                "tags": n.tags,
-                "open_questions": n.open_questions.len(),
-                "dependencies": n.dependencies,
-                "branches": n.branches,
-                "openspec_change": n.openspec_change,
-                "priority": n.priority,
-                "children": crate::lifecycle::design::get_children(nodes, &n.id).len(),
-            }))
+            .map(|n| {
+                serde_json::json!({
+                    "id": n.id,
+                    "title": n.title,
+                    "status": n.status.as_str(),
+                    "parent": n.parent,
+                    "tags": n.tags,
+                    "open_questions": n.open_questions.len(),
+                    "dependencies": n.dependencies,
+                    "branches": n.branches,
+                    "openspec_change": n.openspec_change,
+                    "priority": n.priority,
+                    "children": crate::lifecycle::design::get_children(nodes, &n.id).len(),
+                })
+            })
             .collect::<Vec<_>>();
         Ok(serde_json::json!({ "nodes": list }))
     }
@@ -2171,15 +2172,25 @@ impl OmegonAcpAgent {
         });
         if let Some(s) = sections {
             result["overview"] = serde_json::json!(s.overview);
-            result["research"] = serde_json::json!(s.research.into_iter().map(|r| serde_json::json!({
-                "heading": r.heading,
-                "content": r.content,
-            })).collect::<Vec<_>>());
-            result["decisions"] = serde_json::json!(s.decisions.into_iter().map(|d| serde_json::json!({
-                "title": d.title,
-                "status": d.status,
-                "rationale": d.rationale,
-            })).collect::<Vec<_>>());
+            result["research"] = serde_json::json!(
+                s.research
+                    .into_iter()
+                    .map(|r| serde_json::json!({
+                        "heading": r.heading,
+                        "content": r.content,
+                    }))
+                    .collect::<Vec<_>>()
+            );
+            result["decisions"] = serde_json::json!(
+                s.decisions
+                    .into_iter()
+                    .map(|d| serde_json::json!({
+                        "title": d.title,
+                        "status": d.status,
+                        "rationale": d.rationale,
+                    }))
+                    .collect::<Vec<_>>()
+            );
             result["impl_constraints"] = serde_json::json!(s.impl_constraints);
         }
         Ok(result)
@@ -2286,35 +2297,7 @@ impl OmegonAcpAgent {
             )),
 
             "runtime/capabilities" => Ok(serde_json::json!({
-                "surfaces": {
-                    "_runtime/capabilities": { "version": 1 },
-                    "_runtime/status": { "version": 1 },
-                    "_lifecycle/snapshot": { "version": 1 },
-                    "_lifecycle/design/list": { "version": 1 },
-                    "_lifecycle/design/get": { "version": 1 },
-                    "_lifecycle/design/ready": { "version": 1 },
-                    "_lifecycle/design/blocked": { "version": 1 },
-                    "_lifecycle/design/frontier": { "version": 1 },
-                    "_extensions/list": { "version": 1 },
-                    "_extensions/call": { "version": 1 },
-                    "_provider/status": { "version": 1 },
-                    "_packages/list": { "version": 1 },
-                    "_secrets/capabilities": { "version": 1 },
-                    "_secrets/list": { "version": 1 },
-                    "_secrets/check": { "version": 1 },
-                    "_secrets/set_value": { "version": 1 },
-                    "_secrets/set_recipe": { "version": 1 },
-                    "_plans/list": { "version": 1 },
-                    "_plans/show": { "version": 1 },
-                    "_plans/events": { "version": 1 },
-                    "_plans/switch": { "version": 1 },
-                    "_plans/detach": { "version": 1 },
-                    "_tasks/list": { "version": 1 },
-                    "_tasks/show": { "version": 1 },
-                    "_tasks/bind": { "version": 1 },
-                    "_tasks/events": { "version": 1 },
-                    "_external_tasks/import": { "version": 1 }
-                },
+                "surfaces": crate::backend::acp_capability_surfaces_json(),
                 "features": {
                     "packages": true,
                     "extensions": true,
@@ -4024,9 +4007,18 @@ mod extension_metadata_tests {
         assert_eq!(response["surfaces"]["_lifecycle/snapshot"]["version"], 1);
         assert_eq!(response["surfaces"]["_lifecycle/design/list"]["version"], 1);
         assert_eq!(response["surfaces"]["_lifecycle/design/get"]["version"], 1);
-        assert_eq!(response["surfaces"]["_lifecycle/design/ready"]["version"], 1);
-        assert_eq!(response["surfaces"]["_lifecycle/design/blocked"]["version"], 1);
-        assert_eq!(response["surfaces"]["_lifecycle/design/frontier"]["version"], 1);
+        assert_eq!(
+            response["surfaces"]["_lifecycle/design/ready"]["version"],
+            1
+        );
+        assert_eq!(
+            response["surfaces"]["_lifecycle/design/blocked"]["version"],
+            1
+        );
+        assert_eq!(
+            response["surfaces"]["_lifecycle/design/frontier"]["version"],
+            1
+        );
         assert_eq!(response["surfaces"].get("_ui/dashboard/snapshot"), None);
         assert_eq!(response["surfaces"]["_extensions/list"]["version"], 1);
         assert_eq!(response["surfaces"]["_extensions/call"]["version"], 1);
@@ -4078,7 +4070,6 @@ mod extension_metadata_tests {
         );
     }
 
-
     #[tokio::test]
     async fn acp_lifecycle_design_queries_return_headless_projection() {
         let home = tempfile::tempdir().unwrap();
@@ -4127,17 +4118,18 @@ mod extension_metadata_tests {
         let change_dir = home.path().join("openspec/changes/demo");
         std::fs::create_dir_all(&change_dir).unwrap();
         std::fs::write(change_dir.join("proposal.md"), "# Demo\n").unwrap();
-        std::fs::write(change_dir.join("tasks.md"), "## 1. Work\n\n- [ ] 1.1 Pending\n").unwrap();
+        std::fs::write(
+            change_dir.join("tasks.md"),
+            "## 1. Work\n\n- [ ] 1.1 Pending\n",
+        )
+        .unwrap();
         let agent = Rc::new(OmegonAcpAgent::new("test-model"));
         *agent.session_cwd.borrow_mut() = Some(home.path().to_path_buf());
 
-        let snapshot = handle_acp_request_result(
-            agent,
-            "_lifecycle/snapshot",
-            &serde_json::json!({}),
-        )
-        .await
-        .unwrap();
+        let snapshot =
+            handle_acp_request_result(agent, "_lifecycle/snapshot", &serde_json::json!({}))
+                .await
+                .unwrap();
 
         assert_eq!(snapshot["openspec"]["changes"][0]["name"], "demo");
         assert_eq!(snapshot["openspec"]["total_tasks"], 1);
