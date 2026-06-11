@@ -13,6 +13,103 @@ pub struct SystemRenderProps<'a> {
     pub mode: SegmentRenderMode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemRenderPlan {
+    pub chrome: SystemChrome,
+    pub first_line: SystemLineKind,
+    pub body: SystemBody,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemChrome {
+    pub bordered: bool,
+    pub title: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemLineKind {
+    Info,
+    Brand,
+    Warning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemBody {
+    Notice,
+}
+
+pub fn plan(props: &SystemRenderProps<'_>) -> SystemRenderPlan {
+    let first = props.text.lines().next().unwrap_or_default();
+    let first_line = if first.starts_with('Ω') {
+        SystemLineKind::Brand
+    } else if first.starts_with('⚠') || first.starts_with('⟳') || first.starts_with('✓') {
+        SystemLineKind::Warning
+    } else {
+        SystemLineKind::Info
+    };
+    let slim = matches!(props.mode, SegmentRenderMode::Slim);
+    SystemRenderPlan {
+        chrome: SystemChrome {
+            bordered: !slim,
+            title: !slim,
+        },
+        first_line,
+        body: SystemBody::Notice,
+    }
+}
+
+fn system_block<'a>(render_plan: SystemRenderPlan, bg: Color, border_color: Color) -> Block<'a> {
+    if !render_plan.chrome.bordered {
+        Block::default()
+            .padding(Padding::horizontal(0))
+            .style(Style::default().bg(bg))
+    } else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color).bg(bg))
+            .padding(Padding::horizontal(1))
+            .style(Style::default().bg(bg));
+        if render_plan.chrome.title {
+            block.title_top(Line::from(Span::styled(
+                " Ω ",
+                Style::default()
+                    .fg(border_color)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            )))
+        } else {
+            block
+        }
+    }
+}
+
+fn system_line_style(
+    line: &str,
+    index: usize,
+    render_plan: SystemRenderPlan,
+    theme: &dyn crate::tui::theme::Theme,
+    bg: Color,
+) -> Style {
+    if index == 0 {
+        match render_plan.first_line {
+            SystemLineKind::Brand => {
+                return Style::default()
+                    .fg(theme.accent())
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD);
+            }
+            SystemLineKind::Warning => return Style::default().fg(theme.warning()).bg(bg),
+            SystemLineKind::Info => {}
+        }
+    }
+    if line.starts_with("  ▸") || line.starts_with("  /") || line.starts_with("  Ctrl") {
+        Style::default().fg(theme.muted()).bg(bg)
+    } else {
+        Style::default().fg(theme.accent_muted()).bg(bg)
+    }
+}
+
 pub fn render(
     props: SystemRenderProps<'_>,
     area: Rect,
@@ -24,27 +121,10 @@ pub fn render(
         return;
     }
 
+    let render_plan = plan(&props);
     let bg = theme.card_bg();
     let border_color = theme.accent_muted();
-    let block = if matches!(props.mode, SegmentRenderMode::Slim) {
-        Block::default()
-            .padding(Padding::horizontal(0))
-            .style(Style::default().bg(bg))
-    } else {
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color).bg(bg))
-            .title_top(Line::from(Span::styled(
-                " Ω ",
-                Style::default()
-                    .fg(border_color)
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            )))
-            .padding(Padding::horizontal(1))
-            .style(Style::default().bg(bg))
-    };
+    let block = system_block(render_plan, bg, border_color);
     let inner = block.inner(area);
     block.render(area, buf);
 
@@ -52,25 +132,17 @@ pub fn render(
         return;
     }
 
-    let mut lines: Vec<Line<'_>> = Vec::new();
-    for (i, line) in props.text.lines().enumerate() {
-        let style = if i == 0 && line.starts_with('Ω') {
-            Style::default()
-                .fg(theme.accent())
-                .bg(bg)
-                .add_modifier(Modifier::BOLD)
-        } else if i == 0
-            && (line.starts_with('⚠') || line.starts_with('⟳') || line.starts_with('✓'))
-        {
-            Style::default().fg(theme.warning()).bg(bg)
-        } else if line.starts_with("  ▸") || line.starts_with("  /") || line.starts_with("  Ctrl")
-        {
-            Style::default().fg(theme.muted()).bg(bg)
-        } else {
-            Style::default().fg(theme.accent_muted()).bg(bg)
-        };
-        lines.push(Line::from(Span::styled(line.to_string(), style)));
-    }
+    let lines = match render_plan.body {
+        SystemBody::Notice => props
+            .text
+            .lines()
+            .enumerate()
+            .map(|(i, line)| {
+                let style = system_line_style(line, i, render_plan, theme, bg);
+                Line::from(Span::styled(line.to_string(), style))
+            })
+            .collect::<Vec<_>>(),
+    };
 
     Paragraph::new(lines.clone())
         .wrap(Wrap { trim: false })
@@ -101,6 +173,50 @@ mod tests {
         };
         assert_eq!(props.text, "notice");
         assert_eq!(props.mode, SegmentRenderMode::Full);
+    }
+
+    #[test]
+    fn system_plan_slim_omits_chrome() {
+        let props = SystemRenderProps {
+            text: "notice",
+            mode: SegmentRenderMode::Slim,
+        };
+
+        let plan = super::plan(&props);
+        assert!(!plan.chrome.bordered);
+        assert!(!plan.chrome.title);
+        assert_eq!(plan.first_line, SystemLineKind::Info);
+        assert_eq!(plan.body, SystemBody::Notice);
+    }
+
+    #[test]
+    fn system_plan_full_includes_chrome() {
+        let props = SystemRenderProps {
+            text: "notice",
+            mode: SegmentRenderMode::Full,
+        };
+
+        let plan = super::plan(&props);
+        assert!(plan.chrome.bordered);
+        assert!(plan.chrome.title);
+        assert_eq!(plan.first_line, SystemLineKind::Info);
+    }
+
+    #[test]
+    fn system_plan_classifies_brand_and_warning_first_lines() {
+        let brand = super::plan(&SystemRenderProps {
+            text: "Ω status",
+            mode: SegmentRenderMode::Full,
+        });
+        assert_eq!(brand.first_line, SystemLineKind::Brand);
+
+        for text in ["⚠ warning", "⟳ retry", "✓ complete"] {
+            let warning = super::plan(&SystemRenderProps {
+                text,
+                mode: SegmentRenderMode::Full,
+            });
+            assert_eq!(warning.first_line, SystemLineKind::Warning, "{text}");
+        }
     }
 
     #[test]

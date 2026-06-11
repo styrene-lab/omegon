@@ -72,25 +72,14 @@ pub fn plan(props: &AssistantRenderProps<'_>) -> AssistantRenderPlan {
     }
 }
 
-pub fn render(
-    props: AssistantRenderProps<'_>,
-    area: Rect,
-    buf: &mut Buffer,
-    ctx: &SegmentRenderContext<'_>,
-) {
-    let theme = ctx.theme;
-    if area.width < 3 || area.height == 0 {
-        return;
-    }
-
-    let render_plan = plan(&props);
-    let bg = theme.surface_bg();
-    let border_color = if props.complete {
-        theme.success()
-    } else {
-        theme.accent_muted()
-    };
-    let block = if !render_plan.chrome.bordered {
+fn assistant_block<'a>(
+    props: &AssistantRenderProps<'_>,
+    render_plan: AssistantRenderPlan,
+    theme: &'a dyn crate::tui::theme::Theme,
+    bg: Color,
+    border_color: Color,
+) -> Block<'a> {
+    if !render_plan.chrome.bordered {
         Block::default()
             .padding(Padding::horizontal(0))
             .style(Style::default().bg(bg))
@@ -106,43 +95,50 @@ pub fn render(
             )
             .padding(Padding::horizontal(1))
             .style(Style::default().bg(bg))
-    };
-    let inner = block.inner(area);
-    block.render(area, buf);
-
-    if inner.width == 0 || inner.height == 0 {
-        return;
     }
+}
 
-    let mut lines: Vec<Line<'_>> = Vec::new();
+fn push_identity_line<'a>(
+    lines: &mut Vec<Line<'a>>,
+    props: &AssistantRenderProps<'_>,
+    theme: &dyn crate::tui::theme::Theme,
+    bg: Color,
+    border_color: Color,
+) {
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("{} ", props.presentation.sigil),
+            Style::default()
+                .fg(border_color)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("omegon", Style::default().fg(theme.border_dim()).bg(bg)),
+    ]));
+}
 
-    // Assistant identity line — identify the source, not the current phase.
-    // Slim props.mode deliberately omits this chrome so prose remains easy to select
-    // and copy like a normal terminal transcript.
-    if render_plan.chrome.identity_line {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{} ", props.presentation.sigil),
-                Style::default()
-                    .fg(border_color)
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("omegon", Style::default().fg(theme.border_dim()).bg(bg)),
-        ]));
-    }
+fn push_meta_line<'a>(
+    lines: &mut Vec<Line<'a>>,
+    props: &AssistantRenderProps<'_>,
+    theme: &dyn crate::tui::theme::Theme,
+    bg: Color,
+) {
+    lines.push(Line::from(Span::styled(
+        build_meta_tag(props.meta),
+        Style::default().fg(theme.border_dim()).bg(bg),
+    )));
+}
 
-    // Meta tag line: props.model / provider / tier — dim secondary header.
-    // Hidden in slim props.mode to reduce visual noise.
-    if render_plan.chrome.meta_line {
-        lines.push(Line::from(Span::styled(
-            build_meta_tag(props.meta),
-            Style::default().fg(theme.border_dim()).bg(bg),
-        )));
-    }
-
-    // Reasoning block — stream full reasoning live, collapse after completion.
-    match render_plan.reasoning {
+fn push_reasoning_lines<'a>(
+    lines: &mut Vec<Line<'a>>,
+    props: &AssistantRenderProps<'_>,
+    reasoning: AssistantReasoning,
+    inner: Rect,
+    buf: &mut Buffer,
+    theme: &dyn crate::tui::theme::Theme,
+    bg: Color,
+) {
+    match reasoning {
         AssistantReasoning::Hidden => {}
         AssistantReasoning::SlimSummary => {
             let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(props.thinking);
@@ -221,33 +217,34 @@ pub fn render(
             )));
         }
     }
+}
 
-    if render_plan.chrome.answer_label {
-        lines.push(Line::from(vec![
-            Span::styled("◎ ", Style::default().fg(theme.accent()).bg(bg)),
-            Span::styled(
-                "answer",
-                Style::default()
-                    .fg(theme.accent_muted())
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-    }
+fn push_answer_label<'a>(
+    lines: &mut Vec<Line<'a>>,
+    theme: &dyn crate::tui::theme::Theme,
+    bg: Color,
+) {
+    lines.push(Line::from(vec![
+        Span::styled("◎ ", Style::default().fg(theme.accent()).bg(bg)),
+        Span::styled(
+            "answer",
+            Style::default()
+                .fg(theme.accent_muted())
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+}
 
-    // Assistant props.text with markdown structural highlighting.
-    //
-    // Pre-pass: materialize lines into a Vec so we can compute shared
-    // table column widths via `compute_table_widths` before rendering.
-    // The widths array is parallel to `text_lines` — entries are
-    // `Some(widths)` for lines belonging to a markdown table block,
-    // `None` otherwise. The rendering loop below looks up its row's
-    // shared widths so every row in a table block aligns with its
-    // neighbors instead of computing per-row widths in isolation
-    // (which produced the column-shred failure props.mode in
-    // codebase_search results and other table-bearing tool output).
-    let text_lines: Vec<&str> = split_trimmed_trailing_empty_lines(props.text);
-    let table_widths_per_line = compute_table_widths(&text_lines, area.width as usize);
+fn push_answer_body_lines<'a>(
+    lines: &mut Vec<Line<'a>>,
+    text: &'a str,
+    width: usize,
+    theme: &dyn crate::tui::theme::Theme,
+    bg: Color,
+) {
+    let text_lines: Vec<&str> = split_trimmed_trailing_empty_lines(text);
+    let table_widths_per_line = compute_table_widths(&text_lines, width);
     let mut in_code_fence = false;
     let mut table_state = TableState::None;
     for (idx, line) in text_lines.iter().enumerate() {
@@ -265,8 +262,6 @@ pub fn render(
                 Style::default().fg(theme.accent_muted()).bg(bg),
             )));
         } else if let Some(target_widths) = table_widths_per_line[idx].as_ref() {
-            // Pre-pass marked this as a table line — render with the
-            // shared widths from its block.
             let is_header = matches!(table_state, TableState::None);
             if is_table_separator(trimmed) || matches!(table_state, TableState::Header) {
                 table_state = TableState::Body;
@@ -286,6 +281,58 @@ pub fn render(
                 })
                 .collect();
             lines.push(Line::from(spans));
+        }
+    }
+}
+
+pub fn render(
+    props: AssistantRenderProps<'_>,
+    area: Rect,
+    buf: &mut Buffer,
+    ctx: &SegmentRenderContext<'_>,
+) {
+    let theme = ctx.theme;
+    if area.width < 3 || area.height == 0 {
+        return;
+    }
+
+    let render_plan = plan(&props);
+    let bg = theme.surface_bg();
+    let border_color = if props.complete {
+        theme.success()
+    } else {
+        theme.accent_muted()
+    };
+    let block = assistant_block(&props, render_plan, theme, bg, border_color);
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+    if render_plan.chrome.identity_line {
+        push_identity_line(&mut lines, &props, theme, bg, border_color);
+    }
+    if render_plan.chrome.meta_line {
+        push_meta_line(&mut lines, &props, theme, bg);
+    }
+    push_reasoning_lines(
+        &mut lines,
+        &props,
+        render_plan.reasoning,
+        inner,
+        buf,
+        theme,
+        bg,
+    );
+    if render_plan.chrome.answer_label {
+        push_answer_label(&mut lines, theme, bg);
+    }
+    match render_plan.body {
+        AssistantBody::MarkdownTranscript => {
+            push_answer_body_lines(&mut lines, props.text, area.width as usize, theme, bg);
         }
     }
 
@@ -336,6 +383,87 @@ mod tests {
         assert_eq!(props.thinking, "reasoning");
         assert!(!props.complete);
         assert_eq!(props.presentation.sigil, "Ω");
+    }
+
+    #[test]
+    fn assistant_plan_slim_omits_chrome_and_summarizes_reasoning() {
+        let meta = SegmentMeta::default();
+        let presentation = SegmentPresentation {
+            role: SegmentRole::Assistant,
+            sigil: "Ω",
+            emphasis: SegmentEmphasis::Normal,
+            tool_category: None,
+        };
+        let props = AssistantRenderProps {
+            text: "reply",
+            thinking: "reasoning",
+            complete: false,
+            meta: &meta,
+            presentation: &presentation,
+            mode: SegmentRenderMode::Slim,
+        };
+
+        let plan = super::plan(&props);
+        assert!(!plan.chrome.bordered);
+        assert!(!plan.chrome.identity_line);
+        assert!(!plan.chrome.meta_line);
+        assert!(!plan.chrome.answer_label);
+        assert_eq!(plan.reasoning, AssistantReasoning::SlimSummary);
+        assert_eq!(plan.body, AssistantBody::MarkdownTranscript);
+    }
+
+    #[test]
+    fn assistant_plan_full_uses_chrome_and_expanded_reasoning() {
+        let mut meta = SegmentMeta::default();
+        meta.model_id = Some("model".into());
+        let presentation = SegmentPresentation {
+            role: SegmentRole::Assistant,
+            sigil: "Ω",
+            emphasis: SegmentEmphasis::Normal,
+            tool_category: None,
+        };
+        let props = AssistantRenderProps {
+            text: "reply",
+            thinking: "reasoning",
+            complete: true,
+            meta: &meta,
+            presentation: &presentation,
+            mode: SegmentRenderMode::Full,
+        };
+
+        let plan = super::plan(&props);
+        assert!(plan.chrome.bordered);
+        assert!(plan.chrome.identity_line);
+        assert!(plan.chrome.meta_line);
+        assert!(plan.chrome.answer_label);
+        assert_eq!(
+            plan.reasoning,
+            AssistantReasoning::Expanded {
+                max_completed_lines: 6
+            }
+        );
+    }
+
+    #[test]
+    fn assistant_plan_hides_empty_reasoning() {
+        let meta = SegmentMeta::default();
+        let presentation = SegmentPresentation {
+            role: SegmentRole::Assistant,
+            sigil: "Ω",
+            emphasis: SegmentEmphasis::Normal,
+            tool_category: None,
+        };
+        let props = AssistantRenderProps {
+            text: "reply",
+            thinking: "",
+            complete: true,
+            meta: &meta,
+            presentation: &presentation,
+            mode: SegmentRenderMode::Full,
+        };
+
+        let plan = super::plan(&props);
+        assert_eq!(plan.reasoning, AssistantReasoning::Hidden);
     }
 
     #[test]
