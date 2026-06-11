@@ -8,6 +8,9 @@ use super::extensions::{
     ExtensionCapabilitySummary, list_installed_extension_capabilities_from_dir,
 };
 use super::profiles::{AssistantProfileSummary, resolve_assistant_profiles};
+use super::secrets::{
+    SecretReadinessInputs, SecretReadinessSnapshot, build_secret_readiness_snapshot,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CapabilityInventorySnapshot {
@@ -15,6 +18,7 @@ pub struct CapabilityInventorySnapshot {
     pub armory_profiles: Vec<ArmoryProfileSummary>,
     pub agent_bundles: Vec<AgentBundleSummary>,
     pub assistant_profiles: Vec<AssistantProfileSummary>,
+    pub secret_readiness: SecretReadinessSnapshot,
     pub graph: CapabilityGraph,
 }
 
@@ -95,18 +99,28 @@ pub struct CapabilityInventoryRoots<'a> {
 pub fn build_capability_inventory_snapshot(
     roots: CapabilityInventoryRoots<'_>,
 ) -> anyhow::Result<CapabilityInventorySnapshot> {
+    build_capability_inventory_snapshot_with_secrets(roots, SecretReadinessInputs::default())
+}
+
+pub fn build_capability_inventory_snapshot_with_secrets(
+    roots: CapabilityInventoryRoots<'_>,
+    secret_inputs: SecretReadinessInputs,
+) -> anyhow::Result<CapabilityInventorySnapshot> {
     let installed_extensions =
         list_installed_extension_capabilities_from_dir(roots.extensions_dir)?;
     let armory_profiles = list_armory_profiles_from_root(roots.armory_root)?;
     let agent_bundles = list_agent_bundle_summaries_from_dir(roots.catalog_dir)?;
     let graph = build_capability_graph(&installed_extensions, &armory_profiles, &agent_bundles);
     let assistant_profiles = resolve_assistant_profiles(&agent_bundles, &graph);
+    let secret_readiness =
+        build_secret_readiness_snapshot(&installed_extensions, &agent_bundles, secret_inputs);
 
     Ok(CapabilityInventorySnapshot {
         installed_extensions,
         armory_profiles,
         agent_bundles,
         assistant_profiles,
+        secret_readiness,
         graph,
     })
 }
@@ -367,6 +381,7 @@ mod tests {
         assert!(snapshot.armory_profiles.is_empty());
         assert!(snapshot.agent_bundles.is_empty());
         assert!(snapshot.assistant_profiles.is_empty());
+        assert!(snapshot.secret_readiness.secrets.is_empty());
         assert!(snapshot.graph.nodes.is_empty());
         assert!(snapshot.graph.edges.is_empty());
     }
