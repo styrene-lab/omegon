@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Add headless ACP lifecycle read surfaces for lifecycle snapshots and design-node list/get/ready/blocked/frontier projections.
 - Route design-tree implement scaffolding through the lifecycle mutation service while preserving existing OpenSpec proposal behavior.
 - Add a design node planning the future lifecycle `implement` service extraction pass.
 - Route design-tree archive mutation through the lifecycle mutation service while keeping descendant checks and timestamp policy adapter-side.

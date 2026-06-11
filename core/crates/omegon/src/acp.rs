@@ -2040,6 +2040,183 @@ impl OmegonAcpAgent {
         })
     }
 
+
+    fn lifecycle_repo_root(&self) -> std::path::PathBuf {
+        let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
+        crate::setup::find_project_root(&cwd)
+    }
+
+    fn lifecycle_read_handle(&self) -> crate::lifecycle::read_model::LifecycleReadHandle {
+        let repo_root = self.lifecycle_repo_root();
+        let provider = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::lifecycle::context::LifecycleContextProvider::new(&repo_root),
+        ));
+        let opsx = std::sync::Arc::new(std::sync::Mutex::new(
+            omegon_opsx::Lifecycle::load(omegon_opsx::JsonFileStore::new(&repo_root))
+                .expect("lifecycle store should load"),
+        ));
+        crate::lifecycle::read_model::LifecycleReadHandle::new(provider, opsx, repo_root)
+    }
+
+    fn acp_lifecycle_snapshot_json(
+        &self,
+        params: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let include_archived = params
+            .get("include_archived")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let include_specs = params
+            .get("include_specs")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let snapshot = self.lifecycle_read_handle().snapshot(
+            crate::lifecycle::read_model::SnapshotOptions {
+                include_archived,
+                include_specs,
+            },
+        )?;
+        Ok(serde_json::json!({
+            "openspec": {
+                "total_tasks": snapshot.openspec.total_tasks,
+                "done_tasks": snapshot.openspec.done_tasks,
+                "changes": snapshot.openspec.changes.into_iter().map(|c| serde_json::json!({
+                    "name": c.name,
+                    "lifecycle_state": c.lifecycle_state,
+                    "file_stage": c.file_stage,
+                    "has_proposal": c.has_proposal,
+                    "has_design": c.has_design,
+                    "has_specs": c.has_specs,
+                    "has_tasks": c.has_tasks,
+                    "total_tasks": c.total_tasks,
+                    "done_tasks": c.done_tasks,
+                    "archived_on_disk": c.archived_on_disk,
+                    "specs": c.specs.into_iter().map(|s| serde_json::json!({
+                        "domain": s.domain,
+                        "requirements": s.requirements,
+                        "scenarios": s.scenarios,
+                    })).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+            },
+            "tasking": {
+                "linked_task_refs": snapshot.tasking.linked_task_refs,
+            },
+            "drift": snapshot.drift.into_iter().map(|f| serde_json::json!({
+                "entity_id": f.entity_id,
+                "kind": f.kind,
+                "detail": f.detail,
+            })).collect::<Vec<_>>(),
+        }))
+    }
+
+    fn acp_lifecycle_design_list_json(&self) -> anyhow::Result<serde_json::Value> {
+        let repo_root = self.lifecycle_repo_root();
+        let mut provider = crate::lifecycle::context::LifecycleContextProvider::new(&repo_root);
+        provider.refresh();
+        let nodes = provider.all_nodes();
+        let list = nodes
+            .values()
+            .filter(|n| !crate::lifecycle::query::is_archived(n))
+            .map(|n| serde_json::json!({
+                "id": n.id,
+                "title": n.title,
+                "status": n.status.as_str(),
+                "parent": n.parent,
+                "tags": n.tags,
+                "open_questions": n.open_questions.len(),
+                "dependencies": n.dependencies,
+                "branches": n.branches,
+                "openspec_change": n.openspec_change,
+                "priority": n.priority,
+                "children": crate::lifecycle::design::get_children(nodes, &n.id).len(),
+            }))
+            .collect::<Vec<_>>();
+        Ok(serde_json::json!({ "nodes": list }))
+    }
+
+    fn acp_lifecycle_design_get_json(
+        &self,
+        params: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let node_id = params
+            .get("node_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("node_id required"))?;
+        let repo_root = self.lifecycle_repo_root();
+        let provider = crate::lifecycle::context::LifecycleContextProvider::new(&repo_root);
+        let node = provider
+            .get_node(node_id)
+            .ok_or_else(|| anyhow::anyhow!("Node '{node_id}' not found"))?;
+        let sections = crate::lifecycle::design::read_node_sections(node);
+        let children = crate::lifecycle::query::children(provider.all_nodes(), node_id);
+        let mut result = serde_json::json!({
+            "id": node.id,
+            "title": node.title,
+            "status": node.status.as_str(),
+            "parent": node.parent,
+            "tags": node.tags,
+            "open_questions": node.open_questions,
+            "dependencies": node.dependencies,
+            "related": node.related,
+            "branches": node.branches,
+            "openspec_change": node.openspec_change,
+            "priority": node.priority,
+            "children": children.into_iter().map(|c| serde_json::json!({
+                "id": c.id,
+                "title": c.title,
+                "status": c.status,
+            })).collect::<Vec<_>>(),
+        });
+        if let Some(s) = sections {
+            result["overview"] = serde_json::json!(s.overview);
+            result["research"] = serde_json::json!(s.research.into_iter().map(|r| serde_json::json!({
+                "heading": r.heading,
+                "content": r.content,
+            })).collect::<Vec<_>>());
+            result["decisions"] = serde_json::json!(s.decisions.into_iter().map(|d| serde_json::json!({
+                "title": d.title,
+                "status": d.status,
+                "rationale": d.rationale,
+            })).collect::<Vec<_>>());
+            result["impl_constraints"] = serde_json::json!(s.impl_constraints);
+        }
+        Ok(result)
+    }
+
+    fn acp_lifecycle_design_query_json(&self, query: &str) -> anyhow::Result<serde_json::Value> {
+        let repo_root = self.lifecycle_repo_root();
+        let provider = crate::lifecycle::context::LifecycleContextProvider::new(&repo_root);
+        let nodes = provider.all_nodes();
+        match query {
+            "ready" => Ok(serde_json::json!({
+                "nodes": crate::lifecycle::query::ready(nodes).into_iter().map(|n| serde_json::json!({
+                    "id": n.id,
+                    "title": n.title,
+                    "priority": n.priority,
+                })).collect::<Vec<_>>()
+            })),
+            "blocked" => Ok(serde_json::json!({
+                "nodes": crate::lifecycle::query::blocked(nodes).into_iter().map(|n| serde_json::json!({
+                    "id": n.id,
+                    "title": n.title,
+                    "status": n.status,
+                    "blocked_by": n.blocked_by,
+                })).collect::<Vec<_>>()
+            })),
+            "frontier" => Ok(serde_json::json!({
+                "nodes": crate::lifecycle::query::frontier(nodes).into_iter().map(|n| serde_json::json!({
+                    "id": n.id,
+                    "title": n.title,
+                    "status": n.status,
+                    "open_questions": n.open_questions,
+                })).collect::<Vec<_>>()
+            })),
+            _ => anyhow::bail!("unknown lifecycle design query: {query}"),
+        }
+    }
+
     fn acp_task_show_json(&self, params: serde_json::Value) -> serde_json::Value {
         let task_id = params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
         let projection = self.acp_plan_projection_json();
@@ -2057,6 +2234,13 @@ impl OmegonAcpAgent {
 
         match method {
             "runtime/status" => Ok(self.runtime_status_json()),
+
+            "lifecycle/snapshot" => self.acp_lifecycle_snapshot_json(params),
+            "lifecycle/design/list" => self.acp_lifecycle_design_list_json(),
+            "lifecycle/design/get" => self.acp_lifecycle_design_get_json(params),
+            "lifecycle/design/ready" => self.acp_lifecycle_design_query_json("ready"),
+            "lifecycle/design/blocked" => self.acp_lifecycle_design_query_json("blocked"),
+            "lifecycle/design/frontier" => self.acp_lifecycle_design_query_json("frontier"),
 
             "provider/status" => Ok(self.provider_status_json()),
 
@@ -2105,6 +2289,12 @@ impl OmegonAcpAgent {
                 "surfaces": {
                     "_runtime/capabilities": { "version": 1 },
                     "_runtime/status": { "version": 1 },
+                    "_lifecycle/snapshot": { "version": 1 },
+                    "_lifecycle/design/list": { "version": 1 },
+                    "_lifecycle/design/get": { "version": 1 },
+                    "_lifecycle/design/ready": { "version": 1 },
+                    "_lifecycle/design/blocked": { "version": 1 },
+                    "_lifecycle/design/frontier": { "version": 1 },
                     "_extensions/list": { "version": 1 },
                     "_extensions/call": { "version": 1 },
                     "_provider/status": { "version": 1 },
@@ -2132,6 +2322,7 @@ impl OmegonAcpAgent {
                     "secrets": true,
                     "tools": true,
                     "memory": true,
+                    "lifecycle": true,
                     "plans": true,
                     "plan_tasks": true,
                     "plan_tasks_contract": {
@@ -3830,6 +4021,13 @@ mod extension_metadata_tests {
 
         assert_eq!(response["surfaces"]["_runtime/status"]["version"], 1);
         assert_eq!(response["surfaces"]["_provider/status"]["version"], 1);
+        assert_eq!(response["surfaces"]["_lifecycle/snapshot"]["version"], 1);
+        assert_eq!(response["surfaces"]["_lifecycle/design/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_lifecycle/design/get"]["version"], 1);
+        assert_eq!(response["surfaces"]["_lifecycle/design/ready"]["version"], 1);
+        assert_eq!(response["surfaces"]["_lifecycle/design/blocked"]["version"], 1);
+        assert_eq!(response["surfaces"]["_lifecycle/design/frontier"]["version"], 1);
+        assert_eq!(response["surfaces"].get("_ui/dashboard/snapshot"), None);
         assert_eq!(response["surfaces"]["_extensions/list"]["version"], 1);
         assert_eq!(response["surfaces"]["_extensions/call"]["version"], 1);
         assert_eq!(response["surfaces"]["_secrets/capabilities"]["version"], 1);
@@ -3846,6 +4044,8 @@ mod extension_metadata_tests {
         assert_eq!(response["surfaces"]["_external_tasks/import"]["version"], 1);
         assert_eq!(response["features"]["extensions"], true);
         assert_eq!(response["features"]["secrets"], true);
+        assert_eq!(response["features"]["lifecycle"], true);
+        assert_eq!(response["features"].get("ui_surfaces"), None);
         assert_eq!(response["features"]["plans"], true);
         assert_eq!(response["features"]["plan_tasks"], true);
         assert_eq!(
@@ -3876,6 +4076,71 @@ mod extension_metadata_tests {
             response["features"]["plan_tasks_contract"]["pagination"],
             false
         );
+    }
+
+
+    #[tokio::test]
+    async fn acp_lifecycle_design_queries_return_headless_projection() {
+        let home = tempfile::tempdir().unwrap();
+        let docs = home.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(
+            docs.join("ready-node.md"),
+            "---\nid: ready-node\ntitle: Ready Node\nstatus: decided\ndependencies: []\nopen_questions: []\n---\n\n## Overview\nReady.\n",
+        )
+        .unwrap();
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        *agent.session_cwd.borrow_mut() = Some(home.path().to_path_buf());
+
+        let ready = handle_acp_request_result(
+            agent.clone(),
+            "_lifecycle/design/ready",
+            &serde_json::json!({}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(ready["nodes"][0]["id"], "ready-node");
+
+        let list = handle_acp_request_result(
+            agent.clone(),
+            "_lifecycle/design/list",
+            &serde_json::json!({}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(list["nodes"][0]["title"], "Ready Node");
+
+        let node = handle_acp_request_result(
+            agent,
+            "_lifecycle/design/get",
+            &serde_json::json!({ "node_id": "ready-node" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(node["status"], "decided");
+        assert_eq!(node["overview"], "Ready.");
+    }
+
+    #[tokio::test]
+    async fn acp_lifecycle_snapshot_returns_openspec_projection() {
+        let home = tempfile::tempdir().unwrap();
+        let change_dir = home.path().join("openspec/changes/demo");
+        std::fs::create_dir_all(&change_dir).unwrap();
+        std::fs::write(change_dir.join("proposal.md"), "# Demo\n").unwrap();
+        std::fs::write(change_dir.join("tasks.md"), "## 1. Work\n\n- [ ] 1.1 Pending\n").unwrap();
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        *agent.session_cwd.borrow_mut() = Some(home.path().to_path_buf());
+
+        let snapshot = handle_acp_request_result(
+            agent,
+            "_lifecycle/snapshot",
+            &serde_json::json!({}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(snapshot["openspec"]["changes"][0]["name"], "demo");
+        assert_eq!(snapshot["openspec"]["total_tasks"], 1);
     }
 
     #[tokio::test]
