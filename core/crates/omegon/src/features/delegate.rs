@@ -399,6 +399,7 @@ pub struct DelegateRunner {
     cwd: PathBuf,
     result_store: Arc<DelegateResultStore>,
     sandbox: bool,
+    child_agent_binary: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -643,7 +644,14 @@ impl DelegateRunner {
             cwd,
             result_store,
             sandbox,
+            child_agent_binary: None,
         }
+    }
+
+    #[cfg(test)]
+    fn with_child_agent_binary(mut self, child_agent_binary: PathBuf) -> Self {
+        self.child_agent_binary = Some(child_agent_binary);
+        self
     }
 
     fn spawn_sandboxed(
@@ -756,7 +764,11 @@ If blocked, say the blocker plainly.\n",
             }
         };
         let child_config = ChildAgentSpawnConfig {
-            agent_binary: std::env::current_exe()
+            agent_binary: self
+                .child_agent_binary
+                .clone()
+                .map(Ok)
+                .unwrap_or_else(std::env::current_exe)
                 .context("delegate runner could not locate current executable")?,
             model: model.clone(),
             max_turns: runtime.worker_profile.max_turns(),
@@ -2375,6 +2387,85 @@ This agent runs in write mode and can modify files.
         assert!(completed.result_summary.as_ref().unwrap().len() < "Validation passed with a long enough result summary to truncate".len());
         let failed = snapshot.children.iter().find(|c| c.task_id == "delegate_3").unwrap();
         assert_eq!(failed.status, "failed");
+    }
+
+
+    fn write_fake_child(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+        path
+    }
+
+    #[tokio::test]
+    async fn delegate_runner_executes_injected_child_successfully() {
+        let temp_dir = TempDir::new().unwrap();
+        let child = write_fake_child(
+            temp_dir.path(),
+            "fake-child-success.sh",
+            "#!/bin/sh\necho delegate-child-ok\n",
+        );
+        let store = Arc::new(DelegateResultStore::new());
+        let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
+            .with_child_agent_binary(child);
+
+        let result = runner
+            .run_delegate_child(
+                "delegate_success",
+                "Do the thing",
+                &DelegateRuntimeRequest {
+                    scope: None,
+                    model: Some("test:model".into()),
+                    thinking_level: None,
+                    worker_profile: DelegateWorkerProfile::Scout,
+                },
+                None,
+                Some("test:model".into()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, "delegate-child-ok");
+    }
+
+    #[tokio::test]
+    async fn delegate_runner_surfaces_injected_child_failure_context() {
+        let temp_dir = TempDir::new().unwrap();
+        let child = write_fake_child(
+            temp_dir.path(),
+            "fake-child-fail.sh",
+            "#!/bin/sh\necho child stderr line >&2\nexit 7\n",
+        );
+        let store = Arc::new(DelegateResultStore::new());
+        let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
+            .with_child_agent_binary(child);
+
+        let err = runner
+            .run_delegate_child(
+                "delegate_fail",
+                "Do the thing",
+                &DelegateRuntimeRequest {
+                    scope: None,
+                    model: Some("test:model".into()),
+                    thinking_level: None,
+                    worker_profile: DelegateWorkerProfile::Scout,
+                },
+                None,
+                Some("test:model".into()),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("exit_code: 7"), "{err}");
+        assert!(err.contains("child stderr line"), "{err}");
+        assert!(err.contains("test:model"), "{err}");
     }
 
 }
