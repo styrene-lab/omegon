@@ -656,17 +656,12 @@ fn render_cleave_workbench_panel(
         } else {
             format!(" · tasks {}/{}", child.tasks_done, child.tasks.len())
         };
-        let tool = child
-            .last_tool
-            .as_deref()
-            .map(|tool| format!(" · {tool}"))
-            .unwrap_or_default();
-        let text = crate::util::truncate(
-            &format!(
-                "{} {:<10}{}{}",
-                child.label, child.status, task_progress, tool
-            ),
-            area.width.saturating_sub(1) as usize,
+        let text = worker_chrome_line(
+            &child.label,
+            &child.status,
+            child.last_tool.as_deref(),
+            &task_progress,
+            area.width,
         );
         lines.push(Line::from(Span::styled(
             text,
@@ -702,17 +697,12 @@ fn render_delegate_workbench_panel(
         } else {
             format!(" · tasks {}/{}", child.tasks_done, child.tasks.len())
         };
-        let tool = child
-            .last_tool
-            .as_deref()
-            .map(|tool| format!(" · {tool}"))
-            .unwrap_or_default();
-        let text = crate::util::truncate(
-            &format!(
-                "{} {:<10}{}{}",
-                child.label, child.status, task_progress, tool
-            ),
-            area.width.saturating_sub(1) as usize,
+        let text = worker_chrome_line(
+            &child.label,
+            &child.status,
+            child.last_tool.as_deref(),
+            &task_progress,
+            area.width,
         );
         lines.push(Line::from(Span::styled(
             text,
@@ -723,6 +713,31 @@ fn render_delegate_workbench_panel(
         .style(Style::default().bg(bg))
         .wrap(Wrap { trim: false })
         .render(area, frame.buffer_mut());
+}
+
+
+fn worker_chrome_line(
+    label: &str,
+    status: &str,
+    last_tool: Option<&str>,
+    task_progress: &str,
+    width: u16,
+) -> String {
+    let glyphs = crate::tui::glyphs::glyphs();
+    let state = glyphs.tool_state(crate::tui::glyphs::tool_state_role_for_status(status));
+    let category = last_tool
+        .map(crate::tui::glyphs::tool_category_role_for_name)
+        .map(|role| glyphs.tool_category(role));
+    let tool = last_tool
+        .map(|tool| match category {
+            Some(category) => format!(" · {category} {tool}"),
+            None => format!(" · {tool}"),
+        })
+        .unwrap_or_default();
+    crate::util::truncate(
+        &format!("{state} {label} {status:<10}{task_progress}{tool}"),
+        width.saturating_sub(1) as usize,
+    )
 }
 
 fn workbench_rule_line<'a>(

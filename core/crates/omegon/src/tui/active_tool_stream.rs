@@ -67,9 +67,14 @@ pub fn render_active_tool_stream_panel(
 
     let bg = t.surface_bg();
     let mut lines = Vec::new();
+    let glyphs = crate::tui::glyphs::glyphs();
+    let category = glyphs.tool_category(crate::tui::glyphs::tool_category_role_for_name(&stream.name));
+    let running = glyphs.tool_state(crate::tui::glyphs::ToolStateGlyphRole::Running);
     lines.push(crate::tui::horizontal_line::horizontal_line(
         crate::tui::horizontal_line::HorizontalLineSpec::title("active tool")
             .with_title_emphasis(crate::tui::horizontal_line::LineEmphasis::Muted)
+            .with_metric(crate::tui::horizontal_line::LineMetric::new("", running))
+            .with_metric(crate::tui::horizontal_line::LineMetric::new("", category))
             .with_metric(
                 crate::tui::horizontal_line::LineMetric::new("", stream.name.as_str())
                     .with_emphasis(crate::tui::horizontal_line::LineEmphasis::Strong),
