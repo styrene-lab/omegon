@@ -1174,9 +1174,9 @@
       "updated_at": "2026-06-09T16:22:35Z"
     },
     {
-      "id": "prompt-library-loop-system",
-      "title": "Prompt library and loop execution system",
-      "state": "exploring",
+      "id": "assistant-run-substrate",
+      "title": "Assistant Run Substrate",
+      "state": "decided",
       "parent": null,
       "tags": [],
       "priority": null,
@@ -1185,8 +1185,8 @@
       "decisions": [],
       "overview": "",
       "bound_change": null,
-      "created_at": "2026-06-12T02:19:51Z",
-      "updated_at": "2026-06-12T02:19:51Z"
+      "created_at": "2026-06-11T20:48:52Z",
+      "updated_at": "2026-06-11T20:50:36Z"
     }
   ],
   "changes": [
@@ -3063,22 +3063,40 @@
       "forced": false
     },
     {
-      "timestamp": "2026-06-12T02:19:51Z",
+      "timestamp": "2026-06-11T20:48:52Z",
       "entity_type": "node",
-      "entity_id": "prompt-library-loop-system",
+      "entity_id": "assistant-run-substrate",
       "from_state": "(new)",
       "to_state": "seed",
       "reason": null,
       "forced": false
     },
     {
-      "timestamp": "2026-06-12T02:19:51Z",
+      "timestamp": "2026-06-11T20:50:19Z",
       "entity_type": "node",
-      "entity_id": "prompt-library-loop-system",
+      "entity_id": "assistant-run-substrate",
       "from_state": "seed",
       "to_state": "exploring",
-      "reason": "initial status on create",
-      "forced": true
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-11T20:50:32Z",
+      "entity_type": "node",
+      "entity_id": "assistant-run-substrate",
+      "from_state": "exploring",
+      "to_state": "resolved",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-11T20:50:36Z",
+      "entity_type": "node",
+      "entity_id": "assistant-run-substrate",
+      "from_state": "resolved",
+      "to_state": "decided",
+      "reason": null,
+      "forced": false
     }
   ]
 }

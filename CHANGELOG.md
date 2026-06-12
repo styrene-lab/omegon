@@ -63,10 +63,37 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Slim the TUI engine footer into a compact model/status sidecar so the dashboard lifecycle strip owns posture/session/context details and the inference strip owns token/context/memory telemetry.
 - Add a read-only capability inventory substrate and ACP `_capabilities/inventory` surface for installed extensions, Armory assets, and catalog agents to support future console/TUI capability views.
 - Register provider retry/failure and turn-cancelled ACP telemetry surfaces in the backend endpoint registry so clients can discover issue #128 notification contracts.
+- Add runtime-only assistant run DTOs plus read-only HTTP and ACP list/detail surfaces that currently expose empty secret-safe projections.
+- Add targeted single-assistant readiness surfaces for refreshing one assistant card over HTTP or ACP without fetching the full capability inventory.
+- Add dedicated HTTP and ACP assistant-list surfaces for compact launch-readiness cards without fetching the full capability inventory.
+- Add a compact assistant-list projection to capability inventory so console clients can render assistant cards without traversing full profile and graph internals.
+- Add a first-class blocked assistant-run status with structured unblock metadata and SQLite round-trip validation for long non-interactive assignments.
+- Register the capability inventory in the backend endpoint registry with ACP and HTTP transports so runtime capability advertisements include the assistant readiness surface.
+- Add HTTP and ACP regression coverage proving capability inventory exposes blocked assistant launch readiness at the external API boundary.
+- Add regression coverage for assistant launch readiness status transitions across ready, blocked, degraded, missing optional, and deferred-secret states.
+- Add explicit assistant launch-readiness status, blockers, and warnings so console clients do not need to infer safe/degraded/blocked state from secret and capability counters.
+- Add HTTP regression coverage proving `/api/capabilities` reports secret readiness metadata without emitting recipe payloads or secret values.
+- Add ACP regression coverage proving capability inventory reports secret readiness metadata without emitting recipe payloads or secret values.
+- Wire ACP capability inventory to the same live secret metadata path as HTTP so `_capabilities/inventory` reports warmed/configured/deferred/missing readiness without resolving values.
+- Add per-assistant secret readiness rollups to profile summaries so launch blockers can be shown at the assistant boundary without exposing secret values.
+- Wire live daemon secret metadata into the HTTP capability inventory endpoint so secret readiness reflects warmed session cache and configured recipes without resolving or exposing values.
+- Add metadata-only secret readiness projections to the assistant capability inventory so console consumers can see required/optional secret consumers, warmed/configured/deferred/missing status, and recipe kind without resolving or exposing secret values.
+- Add assistant profile summaries resolved from agent bundles and the capability graph, including settings, skills, extension bindings, secrets, triggers, reachable capability node IDs, and merged trust posture.
+- Add a normalized capability graph and derived trust summaries to the assistant capability inventory so console consumers can inspect dependencies, secrets, widgets, and authority without interpreting raw manifests.
 - Add a metadata-only backend endpoint registry for ACP/runtime/lifecycle/provider/extension/secret/package/plan/task surfaces, including planned HTTP aliases for lifecycle projections.
 - Add cleave and delegate execution-evaluation tests with injected child binaries, including timeout and cancellation coverage.
 - Add richer cleave/delegate status visibility for subagent progress, including child activity, task progress, and runtime state.
 - Add headless ACP lifecycle read surfaces for lifecycle snapshots and design-node list/get/ready/blocked/frontier projections.
+- Expose the composed capability inventory through the `_capabilities/inventory` ACP ext_method and advertise it in runtime capabilities.
+- Expose the composed capability inventory snapshot through `GET /api/capabilities` for future assistant console consumers.
+- Add a capability inventory snapshot model that composes installed extension capability health, Armory profile recipes, and catalog agent templates.
+- Add an agent bundle read model for assistant templates, including persona/mind presence, extension dependencies, settings, workflow phases, secrets, and triggers.
+- Add an Armory profile read model for assistant capability recipes, including defaults, export policy, dependency graph, and activation policy.
+- Add an Armory organization assessment to the Omegon Console backend design node, identifying profiles, agent bundles, personas, tones, skills, machine profiles, payloads, workstations, and readiness projection as first-class assistant catalog inputs.
+- Add a structured installed-extension capability read model as the first backend substrate for future assistant capability graph and console surfaces.
+- Add a substrate evaluation and adversarial assessment to the Omegon Console backend design node, positioning the console around persistent agent operations, assistant profiles, capability graphs, durable tasks, lifecycle authority, ecosystem capabilities, Auspex deployment boundaries, and backend-first daemon APIs.
+- Add an Omegon Console backend design node planning daemon APIs, ACP-over-WebSocket sessions, and future Dioxus UI integration.
+- Add an ACP expansion design node mapping lifecycle, OpenSpec, conversation, dashboard, instrument, UI-control, context, and memory projection surfaces for external clients.
 - Route design-tree implement scaffolding through the lifecycle mutation service while preserving existing OpenSpec proposal behavior.
 - Add a design node planning the future lifecycle `implement` service extraction pass.
 - Route design-tree archive mutation through the lifecycle mutation service while keeping descendant checks and timestamp policy adapter-side.

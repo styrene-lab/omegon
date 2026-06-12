@@ -249,6 +249,10 @@ pub struct WebState {
     pub startup_info: Arc<Mutex<Option<WebStartupInfo>>>,
     /// Control-plane lifecycle state for machine health/readiness probes.
     pub control_plane_state: Arc<Mutex<ControlPlaneState>>,
+    /// Shared secrets manager for metadata-only readiness projections.
+    pub secrets: Option<Arc<omegon_secrets::SecretsManager>>,
+    /// Project-local assistant run ledger path.
+    pub assistant_runs_db_path: Arc<std::path::PathBuf>,
     /// Received daemon/event-ingress envelopes (v1 in-memory queue).
     pub daemon_events: Arc<Mutex<Vec<DaemonEventEnvelope>>>,
     /// Shared queue/worker status for daemon event ingress.
@@ -273,6 +277,15 @@ impl WebState {
         events_tx: broadcast::Sender<omegon_traits::AgentEvent>,
         auth_state: WebAuthState,
     ) -> Self {
+        Self::with_auth_state_and_secrets(handles, events_tx, auth_state, None)
+    }
+
+    pub fn with_auth_state_and_secrets(
+        handles: DashboardHandles,
+        events_tx: broadcast::Sender<omegon_traits::AgentEvent>,
+        auth_state: WebAuthState,
+        secrets: Option<Arc<omegon_secrets::SecretsManager>>,
+    ) -> Self {
         let (command_tx, _) = mpsc::channel(32); // receiver returned by start_server
         Self {
             handles,
@@ -281,6 +294,10 @@ impl WebState {
             web_auth: Arc::new(auth_state),
             startup_info: Arc::new(Mutex::new(None)),
             control_plane_state: Arc::new(Mutex::new(ControlPlaneState::Starting)),
+            secrets,
+            assistant_runs_db_path: Arc::new(crate::paths::assistant_runs_db(
+                &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )),
             daemon_events: Arc::new(Mutex::new(Vec::new())),
             daemon_status: Arc::new(Mutex::new(WebDaemonStatus {
                 transport_warnings: default_transport_warnings(),
@@ -349,6 +366,26 @@ pub async fn start_server_with_options(
     let app_state_handles = state.handles.clone();
 
     let app = Router::new()
+        .route(
+            "/api/assistant-runs/{run_id}",
+            axum::routing::get(api::get_assistant_run),
+        )
+        .route(
+            "/api/assistant-runs",
+            axum::routing::get(api::get_assistant_runs),
+        )
+        .route(
+            "/api/capabilities/assistants/{id}/readiness",
+            axum::routing::get(api::get_capability_assistant_readiness),
+        )
+        .route(
+            "/api/capabilities/assistants",
+            axum::routing::get(api::get_capability_assistants),
+        )
+        .route(
+            "/api/capabilities",
+            axum::routing::get(api::get_capabilities),
+        )
         .route("/api/state", axum::routing::get(api::get_state))
         .route("/api/startup", axum::routing::get(api::get_startup))
         .route("/api/healthz", axum::routing::get(api::get_health))

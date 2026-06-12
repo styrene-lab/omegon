@@ -19,6 +19,8 @@ pub enum BackendDomain {
     Plans,
     Tasks,
     ExternalTasks,
+    Capabilities,
+    AssistantRuns,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -216,11 +218,6 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         "Active provider/auth/model readiness."
     ),
     acp_read_endpoint!(
-        "_capabilities/inventory",
-        BackendDomain::Runtime,
-        "Assistant, extension, and Armory capability inventory."
-    ),
-    acp_read_endpoint!(
         "_provider/retry",
         BackendDomain::Provider,
         "Provider retry telemetry notification."
@@ -328,6 +325,96 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         BackendDomain::Tasks,
         "Task event projection."
     ),
+    BackendEndpoint {
+        id: "_assistant_runs/list",
+        version: 1,
+        domain: BackendDomain::AssistantRuns,
+        mutability: BackendMutability::Read,
+        permission: BackendPermission::Read,
+        transports: &[
+            BackendTransport::AcpExt {
+                method: "_assistant_runs/list",
+            },
+            BackendTransport::Http {
+                method: "GET",
+                path: "/api/assistant-runs",
+            },
+        ],
+        side_effects: &[],
+        description: "Runtime-only assistant run list projection with secret-safe summaries.",
+    },
+    BackendEndpoint {
+        id: "_assistant_runs/show",
+        version: 1,
+        domain: BackendDomain::AssistantRuns,
+        mutability: BackendMutability::Read,
+        permission: BackendPermission::Read,
+        transports: &[
+            BackendTransport::AcpExt {
+                method: "_assistant_runs/show",
+            },
+            BackendTransport::Http {
+                method: "GET",
+                path: "/api/assistant-runs/{run_id}",
+            },
+        ],
+        side_effects: &[],
+        description: "Runtime-only assistant run detail projection with secret-safe summaries.",
+    },
+    BackendEndpoint {
+        id: "_capabilities/assistant_readiness",
+        version: 1,
+        domain: BackendDomain::Capabilities,
+        mutability: BackendMutability::Read,
+        permission: BackendPermission::Read,
+        transports: &[
+            BackendTransport::AcpExt {
+                method: "_capabilities/assistant_readiness",
+            },
+            BackendTransport::Http {
+                method: "GET",
+                path: "/api/capabilities/assistants/{id}/readiness",
+            },
+        ],
+        side_effects: &[],
+        description: "Single-assistant launch-readiness projection for targeted refreshes.",
+    },
+    BackendEndpoint {
+        id: "_capabilities/assistants",
+        version: 1,
+        domain: BackendDomain::Capabilities,
+        mutability: BackendMutability::Read,
+        permission: BackendPermission::Read,
+        transports: &[
+            BackendTransport::AcpExt {
+                method: "_capabilities/assistants",
+            },
+            BackendTransport::Http {
+                method: "GET",
+                path: "/api/capabilities/assistants",
+            },
+        ],
+        side_effects: &[],
+        description: "Compact assistant list projection with launch readiness and trust summaries.",
+    },
+    BackendEndpoint {
+        id: "_capabilities/inventory",
+        version: 1,
+        domain: BackendDomain::Capabilities,
+        mutability: BackendMutability::Read,
+        permission: BackendPermission::Read,
+        transports: &[
+            BackendTransport::AcpExt {
+                method: "_capabilities/inventory",
+            },
+            BackendTransport::Http {
+                method: "GET",
+                path: "/api/capabilities",
+            },
+        ],
+        side_effects: &[],
+        description: "Assistant capability inventory, graph, profiles, and metadata-only secret readiness.",
+    },
     acp_write_endpoint!(
         "_external_tasks/import",
         BackendDomain::ExternalTasks,
@@ -377,6 +464,18 @@ pub fn acp_capability_surfaces_json() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_contains_capability_inventory_http_alias() {
+        let inventory = find_by_acp_method("_capabilities/inventory").unwrap();
+        assert_eq!(inventory.domain, BackendDomain::Capabilities);
+        assert_eq!(inventory.mutability, BackendMutability::Read);
+        assert!(inventory.side_effects.is_empty());
+        assert!(inventory.transports.contains(&BackendTransport::Http {
+            method: "GET",
+            path: "/api/capabilities",
+        }));
+    }
 
     #[test]
     fn acp_registry_contains_lifecycle_http_aliases() {

@@ -161,6 +161,135 @@ pub struct EventAccepted {
     pub queued_events: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AssistantRunsListResponse {
+    pub runs: Vec<crate::capabilities::runs::AssistantRunSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AssistantRunShowResponse {
+    pub run: crate::capabilities::runs::AssistantRunSummary,
+}
+
+pub async fn get_assistant_runs(
+    State(state): State<WebState>,
+) -> Result<Json<AssistantRunsListResponse>, StatusCode> {
+    let store =
+        crate::capabilities::runs::SqliteAssistantRunStore::open(&state.assistant_runs_db_path)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(AssistantRunsListResponse {
+        runs: store
+            .list()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    }))
+}
+
+pub async fn get_assistant_run(
+    State(state): State<WebState>,
+    axum::extract::Path(run_id): axum::extract::Path<String>,
+) -> Result<Json<AssistantRunShowResponse>, StatusCode> {
+    let store =
+        crate::capabilities::runs::SqliteAssistantRunStore::open(&state.assistant_runs_db_path)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let run = store
+        .get(&run_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(AssistantRunShowResponse { run }))
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CapabilityAssistantsResponse {
+    pub assistants: Vec<crate::capabilities::profiles::AssistantListItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AssistantReadinessResponse {
+    pub assistant: crate::capabilities::profiles::AssistantListItem,
+}
+
+pub async fn get_capability_assistant_readiness(
+    State(state): State<WebState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<AssistantReadinessResponse>, StatusCode> {
+    let snapshot = capability_inventory_snapshot(state)?;
+    let assistant = snapshot
+        .assistant_list
+        .into_iter()
+        .find(|assistant| assistant.id == id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(AssistantReadinessResponse { assistant }))
+}
+
+pub async fn get_capability_assistants(
+    State(state): State<WebState>,
+) -> Result<Json<CapabilityAssistantsResponse>, StatusCode> {
+    let snapshot = capability_inventory_snapshot(state)?;
+    Ok(Json(CapabilityAssistantsResponse {
+        assistants: snapshot.assistant_list,
+    }))
+}
+
+fn capability_inventory_snapshot(
+    state: WebState,
+) -> Result<crate::capabilities::inventory::CapabilityInventorySnapshot, StatusCode> {
+    let home = crate::paths::omegon_home().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let cwd = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let armory_home = home.join("armory");
+    let project_armory = cwd.join("../omegon-armory");
+    let armory_root =
+        if !armory_home.join("profiles").exists() && project_armory.join("profiles").exists() {
+            project_armory.as_path()
+        } else {
+            armory_home.as_path()
+        };
+    let roots = crate::capabilities::inventory::CapabilityInventoryRoots {
+        extensions_dir: &home.join("extensions"),
+        armory_root,
+        catalog_dir: &home.join("catalog"),
+    };
+    let secret_inputs = state
+        .secrets
+        .as_ref()
+        .map(
+            |secrets| crate::capabilities::secrets::SecretReadinessInputs {
+                session_diagnostics: secrets
+                    .session_diagnostics()
+                    .into_iter()
+                    .map(
+                        |diag| crate::capabilities::secrets::SecretSessionDiagnostic {
+                            name: diag.name,
+                            warmed: diag.warmed,
+                        },
+                    )
+                    .collect(),
+                recipe_descriptors: secrets
+                    .list_recipe_descriptors()
+                    .into_iter()
+                    .map(
+                        |descriptor| crate::capabilities::secrets::SecretRecipeDescriptorSummary {
+                            name: descriptor.name,
+                            kind: descriptor.kind,
+                        },
+                    )
+                    .collect(),
+            },
+        )
+        .unwrap_or_default();
+    crate::capabilities::inventory::build_capability_inventory_snapshot_with_secrets(
+        roots,
+        secret_inputs,
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// GET /api/capabilities — assistant capability inventory snapshot.
+pub async fn get_capabilities(
+    State(state): State<WebState>,
+) -> Result<Json<crate::capabilities::inventory::CapabilityInventorySnapshot>, StatusCode> {
+    Ok(Json(capability_inventory_snapshot(state)?))
+}
+
 /// GET /api/startup — machine-readable dashboard startup/discovery metadata.
 pub async fn get_startup(
     State(state): State<WebState>,
@@ -703,9 +832,249 @@ mod tests {
             control_plane_state: std::sync::Arc::new(std::sync::Mutex::new(
                 ControlPlaneState::Ready,
             )),
+            secrets: None,
+            assistant_runs_db_path: std::sync::Arc::new(
+                tempfile::tempdir()
+                    .unwrap()
+                    .path()
+                    .join("assistant-runs.db"),
+            ),
             daemon_events: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             daemon_status: std::sync::Arc::new(std::sync::Mutex::new(WebDaemonStatus::default())),
         }
+    }
+
+    fn write_blocked_agent(home: &std::path::Path) {
+        let agent_dir = home.join("catalog").join("blocked-agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(
+            agent_dir.join("agent.toml"),
+            r#"[agent]
+id = "blocked-agent"
+name = "Blocked Agent"
+version = "0.1.0"
+description = "Requires a missing secret"
+domain = "security"
+
+[secrets]
+required = ["MISSING_REQUIRED_TOKEN"]
+"#,
+        )
+        .unwrap();
+    }
+
+    fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+
+    #[tokio::test]
+    async fn assistant_runs_endpoint_returns_empty_runtime_projection() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let cwd = std::env::current_dir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(home.path()).unwrap();
+        let response = get_assistant_runs(axum::extract::State(test_state()))
+            .await
+            .unwrap()
+            .0;
+        std::env::set_current_dir(cwd).unwrap();
+        assert!(response.runs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn assistant_run_endpoint_404s_missing_runtime_run() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let cwd = std::env::current_dir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(home.path()).unwrap();
+        let err = get_assistant_run(
+            axum::extract::State(test_state()),
+            axum::extract::Path("missing".into()),
+        )
+        .await
+        .unwrap_err();
+        std::env::set_current_dir(cwd).unwrap();
+        assert_eq!(err, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn capabilities_endpoint_reports_blocked_assistant_launch_readiness() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let agent_dir = home.path().join("catalog").join("blocked-agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(
+            agent_dir.join("agent.toml"),
+            r#"[agent]
+id = "blocked-agent"
+name = "Blocked Agent"
+version = "0.1.0"
+description = "Requires a missing secret"
+domain = "security"
+
+[secrets]
+required = ["MISSING_REQUIRED_TOKEN"]
+"#,
+        )
+        .unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = get_capabilities(axum::extract::State(test_state()))
+            .await
+            .unwrap()
+            .0;
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let profile = response
+            .assistant_profiles
+            .iter()
+            .find(|profile| profile.id == "blocked-agent")
+            .expect("blocked assistant profile");
+        assert_eq!(
+            profile.launch_readiness.status,
+            crate::capabilities::profiles::AssistantLaunchStatus::Blocked
+        );
+        assert!(profile.launch_readiness.blockers.iter().any(|blocker| {
+            blocker.kind
+                == crate::capabilities::profiles::AssistantLaunchBlockerKind::RequiredSecretMissing
+                && blocker.id == "MISSING_REQUIRED_TOKEN"
+        }));
+    }
+
+    #[tokio::test]
+    async fn capability_assistants_endpoint_returns_compact_blocked_readiness() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        write_blocked_agent(home.path());
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = get_capability_assistants(axum::extract::State(test_state()))
+            .await
+            .unwrap()
+            .0;
+
+        restore_env("OMEGON_HOME", previous_home);
+
+        let assistant = response
+            .assistants
+            .iter()
+            .find(|assistant| assistant.id == "blocked-agent")
+            .expect("blocked assistant list item");
+        assert_eq!(
+            assistant.launch_readiness.status,
+            crate::capabilities::profiles::AssistantLaunchStatus::Blocked
+        );
+        assert_eq!(assistant.required_secret_count, 1);
+        assert_eq!(assistant.blocker_count, 1);
+    }
+
+    #[tokio::test]
+    async fn capability_assistant_readiness_endpoint_returns_single_assistant() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        write_blocked_agent(home.path());
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = get_capability_assistant_readiness(
+            axum::extract::State(test_state()),
+            axum::extract::Path("blocked-agent".to_string()),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        restore_env("OMEGON_HOME", previous_home);
+
+        assert_eq!(response.assistant.id, "blocked-agent");
+        assert_eq!(
+            response.assistant.launch_readiness.status,
+            crate::capabilities::profiles::AssistantLaunchStatus::Blocked
+        );
+    }
+
+    #[tokio::test]
+    async fn capability_assistant_readiness_endpoint_404s_missing_assistant() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = get_capability_assistant_readiness(
+            axum::extract::State(test_state()),
+            axum::extract::Path("missing".to_string()),
+        )
+        .await;
+
+        restore_env("OMEGON_HOME", previous_home);
+
+        assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
+    }
+
+    #[tokio::test]
+    async fn capabilities_endpoint_reports_secret_metadata_without_values() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let ext_dir = home.path().join("extensions").join("secure-ext");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        std::fs::write(
+            ext_dir.join("manifest.toml"),
+            r#"[extension]
+name = "secure-ext"
+version = "0.1.0"
+description = "Secure extension"
+
+[runtime]
+type = "native"
+binary = "bin/secure-ext"
+
+[secrets]
+required = ["BRAVE_API_KEY"]
+"#,
+        )
+        .unwrap();
+        let secrets = Arc::new(omegon_secrets::SecretsManager::new(home.path()).unwrap());
+        secrets
+            .set_recipe("BRAVE_API_KEY", "env:OMEGON_TEST_BRAVE_KEY")
+            .unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let mut state = test_state();
+        state.secrets = Some(secrets);
+        let response = get_capabilities(axum::extract::State(state))
+            .await
+            .unwrap()
+            .0;
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let readiness = response
+            .secret_readiness
+            .secrets
+            .iter()
+            .find(|secret| secret.name == "BRAVE_API_KEY")
+            .expect("BRAVE_API_KEY readiness");
+        assert_eq!(
+            readiness.status,
+            crate::capabilities::secrets::SecretReadinessStatus::Configured
+        );
+        assert_eq!(readiness.recipe_kind.as_deref(), Some("env"));
+        let payload = serde_json::to_string(&response).unwrap();
+        assert!(!payload.contains("brave-test-key"));
+        assert!(!payload.contains("OMEGON_TEST_BRAVE_KEY"));
     }
 
     #[test]
