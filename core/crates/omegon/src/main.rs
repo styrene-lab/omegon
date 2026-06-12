@@ -3882,6 +3882,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     // while `effective_model` is only the bridge route for this startup.
     if let Ok(mut s) = shared_settings.lock() {
         s.provider_connected = startup_decision.provider_connected;
+        // Surface the actual bridge route when it diverges from operator intent
+        // so the TUI renders the model that is really serving the session.
+        s.runtime_bridge_model =
+            (effective_model != s.model).then(|| effective_model.clone());
     }
     let bridge: Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>> =
         Arc::new(tokio::sync::RwLock::new(bridge));
@@ -5019,6 +5023,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             if let Ok(mut s) = settings_for_login.lock() {
                                                 s.set_model(&effective_model);
                                                 s.provider_connected = auth::provider_connected_for_model(&effective_model);
+                                                // set_model aligned operator intent with the new
+                                                // bridge — no divergence left to surface.
+                                                s.runtime_bridge_model = None;
                                                 let mut profile = settings::Profile::load(&cwd_for_profile);
                                                 profile.capture_from(&s);
                                                 let _ = profile.save(&cwd_for_profile);

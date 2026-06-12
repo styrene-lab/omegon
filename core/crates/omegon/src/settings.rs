@@ -362,6 +362,14 @@ pub struct Settings {
     #[serde(skip)]
     pub provider_is_oauth: bool,
 
+    /// Model actually served by the runtime bridge when it diverges from the
+    /// operator-selected `model` (startup installed a fallback bridge because
+    /// the selected provider had no credentials). None when the bridge serves
+    /// the selected model. Runtime-only — never persisted. The TUI uses this
+    /// to render the real serving model instead of the profile model.
+    #[serde(skip)]
+    pub runtime_bridge_model: Option<String>,
+
     /// Enable mouse capture (pane clicks, wheel scroll, segment targeting).
     /// Defaults to true. Set to false to restore terminal-native text selection.
     #[serde(default = "default_mouse")]
@@ -675,6 +683,7 @@ impl Default for Settings {
             trusted_directories: Vec::new(),
             provider_connected: true, // optimistic default — set false when NullBridge
             provider_is_oauth: false,
+            runtime_bridge_model: None,
             mouse: true,
             sandbox: false,
             terminal_tool: true,
