@@ -250,6 +250,15 @@ impl PlanDisplayStatus {
         }
     }
 
+    fn glyph(self) -> char {
+        match self {
+            Self::Done => '●',
+            Self::Active => '◐',
+            Self::Skipped => '⊘',
+            Self::Todo => '○',
+        }
+    }
+
     fn style(self, t: &dyn theme::Theme, bg: ratatui::style::Color) -> Style {
         let color = match self {
             Self::Done => t.success(),
@@ -355,13 +364,12 @@ impl PlanDisplaySnapshot {
             String::new(),
         ];
         for (idx, item) in self.items.iter().enumerate() {
-            let icon = match item.status {
-                PlanDisplayStatus::Done => '●',
-                PlanDisplayStatus::Active => '◐',
-                PlanDisplayStatus::Skipped => '⊘',
-                PlanDisplayStatus::Todo => '○',
-            };
-            lines.push(format!("{}. {icon} {}", idx + 1, item.description));
+            lines.push(format!(
+                "{}. {} {}",
+                idx + 1,
+                item.status.glyph(),
+                item.description
+            ));
         }
         lines.join("\n")
     }
@@ -429,7 +437,8 @@ pub fn workbench_rows(
     let mut rows = Vec::new();
     for (idx, item) in snapshot.items.iter().take(visible_items).enumerate() {
         let label = item.status.label();
-        let line = format!("{}. {label:<7} {}", idx + 1, item.description);
+        let glyph = item.status.glyph();
+        let line = format!("{}. {glyph} {label:<7} {}", idx + 1, item.description);
         rows.push(PlanDisplayRow {
             text: crate::util::truncate(&line, text_budget),
             status: Some(item.status),

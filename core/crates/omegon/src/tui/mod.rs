@@ -9772,10 +9772,10 @@ mod slash_command_parsing_tests {
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
             vec![
-                "1. done    Inspect repo",
-                "2. active  Patch UI",
-                "3. skipped Skip old path",
-                "4. todo    Validate"
+                "1. ● done    Inspect repo",
+                "2. ◐ active  Patch UI",
+                "3. ⊘ skipped Skip old path",
+                "4. ○ todo    Validate"
             ]
         );
         assert_eq!(rows[2].status, Some(PlanDisplayStatus::Skipped));
@@ -9796,7 +9796,7 @@ mod slash_command_parsing_tests {
         let rows = workbench_rows(&snapshot, 40, 4);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
-            vec!["1. done    Step 0", "2. todo    Step 1", "+5 more"]
+            vec!["1. ● done    Step 0", "2. ○ todo    Step 1", "+5 more"]
         );
     }
 

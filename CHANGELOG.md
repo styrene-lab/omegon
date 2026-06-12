@@ -26,6 +26,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Preserve queued prompt dispatch mode at queue time so delayed prompts keep their original queue semantics.
 
 - Rename the TUI Plan Dock into a Workbench surface and surface active cleave/delegate progress there instead of only in optional instruments.
+- Render plan status glyphs (`●`/`◐`/`⊘`/`○`) in Workbench plan rows alongside the text labels so progress state is visible at a glance in Slim mode.
 - Make delegate runner script fixtures flush to disk before execution so CI timeout tests fail only on runner behavior, not file visibility races.
 - Add a local `just upstream-provider-check` gate for cheap provider drift checks without waiting for CI.
 - Add a lightweight Anthropic model drift checker that compares public Claude API model IDs against the registry.
