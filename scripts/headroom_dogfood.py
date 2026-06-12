@@ -215,9 +215,33 @@ def read_file(spec: FileFixture) -> tuple[str, int]:
     return clipped_text(path.read_text(encoding="utf-8"), spec.max_output_bytes), 0
 
 
-def extract_required_facts(text: str, limit: int = 24) -> list[str]:
+def has_pathline_signal(line: str) -> bool:
+    lower = line.lower()
+    return (
+        "headroom" in lower
+        or "compression" in lower
+        or "error" in lower
+        or "failed" in lower
+        or "failure" in lower
+        or "panic" in lower
+        or "warning" in lower
+        or "rsx!" in lower
+        or "compile" in lower
+    )
+
+
+def has_hash_signal(line: str) -> bool:
+    lower = line.lower()
+    return any(
+        token in lower
+        for token in ("headroom", "compression", "error", "failed", "failure", "panic", "warning", "compile", "commit")
+    )
+
+
+def extract_required_facts(text: str, kind_hint: str, limit: int = 24) -> list[str]:
     facts: list[str] = []
     seen: set[str] = set()
+    broad_text = kind_hint in {"markdown", "plain_text"}
 
     def add(candidate: str) -> None:
         candidate = candidate.strip()
@@ -270,14 +294,24 @@ def extract_required_facts(text: str, limit: int = 24) -> list[str]:
         if any(token in lower for token in ("headroom_compress", "headroom_retrieve", "headroom_stats", "headroom-eval", "headroom-fixture")):
             add(line)
 
-    # Pull stable path:line and CLI/hash fragments even if the full line is noisy.
+    # Pull stable fragments. Broad prose/list fixtures only treat fragments as
+    # required facts when their containing line has high diagnostic value; this
+    # avoids making arbitrary link-list hashes, numeric ids, and grep rows
+    # authoritative.
     for line in lines:
+        lower = line.lower()
+        broad_pathline_signal = has_pathline_signal(line)
+        hash_signal = has_hash_signal(line)
         for match in PATH_LINE_RE.finditer(line):
-            add(match.group(0))
+            if not broad_text or broad_pathline_signal:
+                add(match.group(0))
         for match in CLI_FLAG_RE.finditer(line):
-            add(match.group(0))
+            signalish = any(token in lower for token in SIGNAL_SUBSTRINGS)
+            if not broad_text or signalish:
+                add(match.group(0))
         for match in HASH_RE.finditer(line):
-            add(match.group(0))
+            if hash_signal:
+                add(match.group(0))
 
     # Keep deterministic first-N with preference already encoded by loop order.
     return facts[:limit]
@@ -295,7 +329,7 @@ def write_fixture(
     sample_path = SAMPLES / f"{name}.txt"
     fixture_path = FIXTURES / f"{name}.json"
     sample_path.write_text(text, encoding="utf-8")
-    facts = extract_required_facts(text)
+    facts = extract_required_facts(text, kind_hint)
     fixture = {
         "name": name,
         "class": "dogfood",
