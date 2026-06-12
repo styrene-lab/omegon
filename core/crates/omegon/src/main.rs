@@ -4121,6 +4121,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         secrets: agent.secrets.clone(),
         context_metrics: agent.context_metrics.clone(),
         bridge_model: std::sync::Arc::new(std::sync::Mutex::new(Some(effective_model.clone()))),
+        route_controller: route_controller.clone(),
     };
 
     runtime_state.bus.emit(&omegon_traits::BusEvent::SessionStart {
@@ -5780,6 +5781,7 @@ struct InteractiveRuntimeResources {
     context_metrics:
         std::sync::Arc<std::sync::Mutex<crate::features::context::SharedContextMetrics>>,
     bridge_model: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    route_controller: Arc<route::RouteController>,
 }
 
 fn build_interactive_loop_config(
@@ -5812,6 +5814,7 @@ fn build_interactive_loop_config(
                 .lock()
                 .ok()
                 .and_then(|guard| guard.clone()),
+            route_controller: Some(runtime.route_controller.clone()),
             ..Default::default()
         },
     )
@@ -9646,6 +9649,17 @@ mod tests {
             ),
             context_metrics: crate::features::context::SharedContextMetrics::new(),
             bridge_model: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            route_controller: Arc::new(route::RouteController::new(
+                route::ProviderRoute::Disconnected {
+                    selected: "openai-codex:gpt-5.5".into(),
+                    reason: route::DisconnectedReason::ProviderUnavailable {
+                        provider: "openai-codex".into(),
+                        detail: "test".into(),
+                    },
+                },
+                Box::new(bridge::NullBridge),
+                None,
+            )),
         };
         let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
@@ -9671,6 +9685,17 @@ mod tests {
             bridge_model: std::sync::Arc::new(std::sync::Mutex::new(Some(
                 "anthropic:claude-fable-5".to_string(),
             ))),
+            route_controller: Arc::new(route::RouteController::new(
+                route::ProviderRoute::Fallback {
+                    selected: "openai-codex:gpt-5.5".into(),
+                    serving: "anthropic:claude-fable-5".into(),
+                    reason: route::FallbackReason::MissingCredentials {
+                        provider: "openai-codex".into(),
+                    },
+                },
+                Box::new(bridge::NullBridge),
+                None,
+            )),
         };
         let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 

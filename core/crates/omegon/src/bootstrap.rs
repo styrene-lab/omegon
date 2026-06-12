@@ -188,6 +188,8 @@ pub struct LoopConfigOverrides {
     /// Runtime bridge model override. Keeps UI/profile model intact while routing
     /// provider calls to the model supported by the active bridge.
     pub bridge_model: Option<String>,
+    /// Authoritative interactive route controller for per-turn serving model.
+    pub route_controller: Option<Arc<crate::route::RouteController>>,
 }
 
 /// Build a LoopConfig reading model/max_turns from shared settings, with the
@@ -212,6 +214,7 @@ pub fn build_loop_config(
         retry_delay_ms: 750,
         model,
         bridge_model: overrides.bridge_model,
+        route_controller: overrides.route_controller,
         cwd: cwd.to_path_buf(),
         extended_context: false,
         settings: Some(shared_settings.clone()),

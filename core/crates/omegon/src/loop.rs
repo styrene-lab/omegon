@@ -45,8 +45,13 @@ pub struct LoopConfig {
     /// Selected/profile model for UI intent and fallback defaults.
     pub model: String,
     /// Runtime model string to pass to the active bridge when it differs from the
-    /// selected/profile model (for example, authenticated-provider fallback).
+    /// selected/profile model (legacy fallback path; interactive mode should
+    /// prefer `route_controller`).
     pub bridge_model: Option<String>,
+    /// Authoritative provider/model route for interactive sessions. When present,
+    /// per-turn model routing and TurnEnd attribution read the route snapshot
+    /// instead of re-deriving from settings/bridge_model.
+    pub route_controller: Option<std::sync::Arc<crate::route::RouteController>>,
     /// Working directory — used for path resolution in auto-batch rollback.
     pub cwd: std::path::PathBuf,
     /// Extended context window (1M for Anthropic).
@@ -84,6 +89,7 @@ impl Default for LoopConfig {
             retry_delay_ms: 750,
             model: "anthropic:claude-sonnet-4-6".into(),
             bridge_model: None,
+            route_controller: None,
             cwd: std::env::current_dir().unwrap_or_default(),
             extended_context: false,
             settings: None,
@@ -700,17 +706,20 @@ pub async fn run(
                     crate::settings::ThinkingLevel::High => Some("high".to_string()),
                 }
             });
-            // Also re-read model (can change via /sonnet, /opus, etc.), unless
-            // startup installed a bridge-specific runtime model. In that case,
-            // the selected/profile model remains UI intent, but provider calls
-            // must use the model belonging to the active bridge.
-            opts.model = config.bridge_model.clone().or_else(|| {
-                config
-                    .settings
-                    .as_ref()
-                    .and_then(|s| s.lock().ok().map(|g| g.model.clone()))
-                    .or_else(|| Some(config.model.clone()))
-            });
+            // RouteController is the authoritative serving model when present;
+            // legacy bridge_model/settings fallback remains for daemon/headless
+            // paths that have not adopted ProviderRoute yet.
+            opts.model = if let Some(controller) = config.route_controller.as_ref() {
+                controller.snapshot().await.serving_model().map(str::to_string)
+            } else {
+                config.bridge_model.clone().or_else(|| {
+                    config
+                        .settings
+                        .as_ref()
+                        .and_then(|s| s.lock().ok().map(|g| g.model.clone()))
+                        .or_else(|| Some(config.model.clone()))
+                })
+            };
             // Track the active model for this turn so TurnEnd events and
             // error classification use the current model, not the startup value.
             active_model = opts.model.clone().unwrap_or_else(|| config.model.clone());
@@ -4748,6 +4757,7 @@ mod tests {
             retry_delay_ms: 750,
             model: "test".into(),
             bridge_model: None,
+            route_controller: None,
             cwd: std::path::PathBuf::from("/tmp"),
             extended_context: false,
             settings: None,

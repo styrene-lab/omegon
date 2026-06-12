@@ -445,6 +445,7 @@ async fn worker_loop(
                     retry_delay_ms: 750,
                     model: current_model,
                     bridge_model: None,
+                    route_controller: None,
                     cwd: cwd.clone(),
                     extended_context: false,
                     settings: Some(shared_settings.clone()),
