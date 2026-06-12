@@ -4571,8 +4571,10 @@ mod tests {
             "should have display name for ls: {text}"
         );
         assert!(
-            text.contains("▸"),
-            "completed tools should use the same teal indicator family as the tool instrument panel: {text}"
+            text.contains(
+                crate::tui::glyphs::glyphs().tool(crate::tui::glyphs::ToolGlyphRole::Completed)
+            ),
+            "completed tools should use the semantic completed indicator from the glyph registry: {text}"
         );
     }
 
@@ -4676,7 +4678,9 @@ mod tests {
             .map(|x| buf[(x, 0)].symbol())
             .collect::<String>();
         assert!(
-            top_row.contains("▸"),
+            top_row.contains(
+                crate::tui::glyphs::glyphs().tool(crate::tui::glyphs::ToolGlyphRole::Completed)
+            ),
             "top row should retain completed tool icon: {top_row}"
         );
         assert!(

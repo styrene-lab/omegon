@@ -131,13 +131,29 @@ pub fn tool_card_chrome(
     let category_color = tool_category
         .map(|k| tool_category_color(k, t))
         .unwrap_or(t.accent_muted());
+    let glyphs = crate::tui::glyphs::glyphs();
     let (status_icon, status_color, border_color, background) = if is_error {
-        ("✗", t.error(), t.error(), t.tool_error_bg())
+        (
+            glyphs.tool(crate::tui::glyphs::ToolGlyphRole::Failed),
+            t.error(),
+            t.error(),
+            t.tool_error_bg(),
+        )
     } else if !complete {
-        ("▷", t.warning(), t.warning(), t.tool_success_bg())
+        (
+            glyphs.tool(crate::tui::glyphs::ToolGlyphRole::Running),
+            t.warning(),
+            t.warning(),
+            t.tool_success_bg(),
+        )
     } else {
         let muted_border = crate::tui::segments::dim_color(category_color, 0.4);
-        ("▸", category_color, muted_border, t.tool_success_bg())
+        (
+            glyphs.tool(crate::tui::glyphs::ToolGlyphRole::Completed),
+            category_color,
+            muted_border,
+            t.tool_success_bg(),
+        )
     };
 
     ToolCardChrome {
@@ -259,7 +275,10 @@ mod tests {
             &Alpharius,
         );
         assert_eq!(chrome.display_name, "cargo");
-        assert_eq!(chrome.status_icon, "▸");
+        assert_eq!(
+            chrome.status_icon,
+            crate::tui::glyphs::glyphs().tool(crate::tui::glyphs::ToolGlyphRole::Completed)
+        );
         assert_eq!(
             chrome.status_color,
             tool_category_color(ToolCategory::CommandExec, &Alpharius)

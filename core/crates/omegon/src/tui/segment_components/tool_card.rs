@@ -625,9 +625,8 @@ fn render_tool_card(
     density: crate::settings::ToolDetail,
     pinned: bool,
 ) {
-    // `▶` U+25B6 is in the Unicode emoji set — replaced with `▷` U+25B7
-    // for the same reason as the instruments-panel pass. Both `✗` and
-    // `▸` are already safe.
+    // Tool status glyphs are semantic policy from `tui::glyphs`; this component
+    // only renders the projected chrome.
     let chrome = crate::tui::conversation_render_projection::tool_card_chrome(
         name,
         detail_args,
@@ -875,7 +874,10 @@ fn render_tool_card(
     {
         let file_path = args.lines().next().unwrap_or(args).trim().to_string();
         if !file_path.is_empty() && card_inner.height > 0 {
-            let prefix = "▸ ";
+            let prefix = format!(
+                "{} ",
+                crate::tui::glyphs::glyphs().tool(crate::tui::glyphs::ToolGlyphRole::Detail)
+            );
             let row_style = Style::default().bg(bg);
             let link_style = Style::default()
                 .fg(t.accent_muted())
@@ -891,7 +893,9 @@ fn render_tool_card(
 
             if card_inner.width >= prefix.len() as u16 {
                 if let Some(cell) = buf.cell_mut((card_inner.x, card_inner.y)) {
-                    cell.set_symbol("▸");
+                    cell.set_symbol(
+                        crate::tui::glyphs::glyphs().tool(crate::tui::glyphs::ToolGlyphRole::Detail),
+                    );
                     cell.set_style(Style::default().fg(t.accent_muted()).bg(bg));
                 }
                 if let Some(cell) = buf.cell_mut((card_inner.x + 1, card_inner.y)) {
