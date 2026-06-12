@@ -920,6 +920,21 @@ pub enum IpcEventPayload {
     #[serde(rename = "plan.updated")]
     PlanUpdated { snapshot: Value },
 
+    // ── Provider routing ───────────────────────────────────────────────────
+    /// Runtime provider/model route changed. Consumers should treat this as
+    /// readiness telemetry, not assistant-authored conversation content.
+    #[serde(rename = "provider.route_changed")]
+    ProviderRouteChanged {
+        state: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        selected: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        serving: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        warning: Option<String>,
+        message: String,
+    },
+
     // ── Harness ────────────────────────────────────────────────────────────
     /// Harness state changed. Call `get_state` to refresh the `harness` section.
     #[serde(rename = "harness.changed")]
@@ -2132,6 +2147,15 @@ pub enum AgentEvent {
     /// every state change inside an active run.
     FamilyVitalSignsUpdated {
         signs: FamilyVitalSigns,
+    },
+    /// Provider/model route changed. Renderers should treat this as runtime
+    /// telemetry, not assistant-authored conversation content.
+    RouteChanged {
+        state: String,
+        selected: Option<String>,
+        serving: Option<String>,
+        warning: Option<String>,
+        message: String,
     },
     /// System notification — displayed in TUI but not sent to the LLM.
     SystemNotification {

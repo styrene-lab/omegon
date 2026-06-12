@@ -2147,6 +2147,15 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "event_name": "plan.updated",
             "snapshot": snapshot_json,
         }),
+        AgentEvent::RouteChanged { state, selected, serving, warning, message } => json!({
+            "type": "provider_route_changed",
+            "event_name": "provider.route_changed",
+            "state": state,
+            "selected": selected,
+            "serving": serving,
+            "warning": warning.as_deref().map(escape_html),
+            "message": escape_html(message),
+        }),
         AgentEvent::SystemNotification { message } => json!({
             "type": "system_notification",
             "event_name": "system.notification",
@@ -2750,6 +2759,7 @@ mod tests {
             AgentEvent::DecompositionCompleted { .. } => {}
             AgentEvent::FamilyVitalSignsUpdated { .. } => {}
             AgentEvent::PlanUpdated { .. } => {}
+            AgentEvent::RouteChanged { .. } => {}
             AgentEvent::SystemNotification { .. } => {}
             AgentEvent::ProviderRetry { .. } => {}
             AgentEvent::ProviderFailure { .. } => {}
@@ -2864,6 +2874,13 @@ mod tests {
                     ]
                 }),
             },
+            AgentEvent::RouteChanged {
+                state: "fallback".into(),
+                selected: Some("openai-codex:gpt-5.5".into()),
+                serving: Some("anthropic:claude-fable-5".into()),
+                warning: Some("fallback engaged".into()),
+                message: "Provider route changed".into(),
+            },
             AgentEvent::SystemNotification {
                 message: "test".into(),
             },
@@ -2917,8 +2934,8 @@ mod tests {
         }
         assert_eq!(
             events.len(),
-            23,
-            "should cover all 23 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
+            24,
+            "should cover all 24 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
         );
     }
 

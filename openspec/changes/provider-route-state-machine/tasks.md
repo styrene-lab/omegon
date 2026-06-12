@@ -21,7 +21,7 @@ delegate/cleave child routing.
 - [x] 2.2 Replace the ad-hoc fallback block in main.rs:3843-3885 with `RouteController::resolve_startup`; retire `automation_safe_model()` from the interactive path
 - [x] 2.3 Disconnected message: name the selected provider, list probed credential sources from the ledger, give the exact remediation (`/login <provider>` or env var name)
 - [x] 2.4 Fallback-exhausted message lists every provider tried and the per-provider ledger reason
-- [ ] 2.5 Integration tests: empty-fallback startup with missing creds → Disconnected + NullBridge; configured fallback with valid creds → Fallback + RouteChanged emitted
+- [x] 2.5 Integration tests: empty-fallback startup with missing creds → Disconnected + NullBridge; configured fallback with valid creds → Fallback + RouteChanged emitted
 
 ## 3. Login lifecycle on the controller
 <!-- specs: provider-route/login -->

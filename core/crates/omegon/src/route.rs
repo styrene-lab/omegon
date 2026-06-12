@@ -422,11 +422,36 @@ impl RouteController {
     async fn emit_changed(&self) -> RouteSnapshot {
         let snapshot = self.snapshot().await;
         if let Some(tx) = &self.events_tx {
-            let _ = tx.send(omegon_traits::AgentEvent::SystemNotification {
+            let (state, selected, serving) = route_event_fields(&snapshot.route);
+            let _ = tx.send(omegon_traits::AgentEvent::RouteChanged {
+                state,
+                selected,
+                serving,
+                warning: snapshot.warning.clone(),
                 message: route_summary(&snapshot),
             });
         }
         snapshot
+    }
+}
+
+fn route_event_fields(route: &ProviderRoute) -> (String, Option<String>, Option<String>) {
+    match route {
+        ProviderRoute::Serving { model } => ("serving".into(), Some(model.clone()), Some(model.clone())),
+        ProviderRoute::Fallback {
+            selected, serving, ..
+        } => (
+            "fallback".into(),
+            Some(selected.clone()),
+            Some(serving.clone()),
+        ),
+        ProviderRoute::LoginPending { provider, prior, .. } => {
+            let selected = route_event_fields(prior).1;
+            ("login_pending".into(), selected, Some(provider.clone()))
+        }
+        ProviderRoute::Disconnected { selected, .. } => {
+            ("disconnected".into(), Some(selected.clone()), None)
+        }
     }
 }
 
@@ -800,9 +825,11 @@ mod tests {
         let controller = RouteController::new(route, Box::new(NullBridge), Some(tx));
         controller.begin_login("openai-codex".into()).await;
         let event = rx.recv().await.unwrap();
-        let omegon_traits::AgentEvent::SystemNotification { message } = event else {
-            panic!("route controller should emit an operator-visible route event");
+        let omegon_traits::AgentEvent::RouteChanged { state, serving, message, .. } = event else {
+            panic!("route controller should emit a first-class RouteChanged event");
         };
+        assert_eq!(state, "login_pending");
+        assert_eq!(serving.as_deref(), Some("openai-codex"));
         assert!(message.contains("Provider login pending for openai-codex"), "{message}");
     }
 

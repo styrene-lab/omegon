@@ -240,6 +240,19 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
         AgentEvent::PlanUpdated { snapshot_json } => Some(IpcEventPayload::PlanUpdated {
             snapshot: snapshot_json.clone(),
         }),
+        AgentEvent::RouteChanged {
+            state,
+            selected,
+            serving,
+            warning,
+            message,
+        } => Some(IpcEventPayload::ProviderRouteChanged {
+            state: state.clone(),
+            selected: selected.clone(),
+            serving: serving.clone(),
+            warning: warning.clone(),
+            message: message.clone(),
+        }),
         AgentEvent::HarnessStatusChanged { .. } => Some(IpcEventPayload::HarnessChanged),
         AgentEvent::SessionReset => Some(IpcEventPayload::SessionReset),
         // Internal-only — not published to MQTT.
@@ -271,6 +284,7 @@ fn event_name(ev: &IpcEventPayload) -> &'static str {
         IpcEventPayload::DecompositionCompleted { .. } => "decomposition.completed",
         IpcEventPayload::FamilyVitalSignsUpdated { .. } => "family.vital_signs",
         IpcEventPayload::PlanUpdated { .. } => "plan.updated",
+        IpcEventPayload::ProviderRouteChanged { .. } => "provider.route_changed",
         IpcEventPayload::HarnessChanged => "harness.changed",
         IpcEventPayload::StateChanged { .. } => "state.changed",
         IpcEventPayload::SystemNotification { .. } => "system.notification",
