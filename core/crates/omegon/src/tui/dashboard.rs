@@ -102,6 +102,12 @@ impl DashboardHandles {
         {
             state.cleave = Some(cp.clone());
         }
+        // Delegate
+        if let Some(ref dp_lock) = self.delegate
+            && let Ok(dp) = dp_lock.lock()
+        {
+            state.delegate = Some(dp.clone());
+        }
         // Harness
         if let Some(ref harness_lock) = self.harness
             && let Ok(harness) = harness_lock.lock()
@@ -296,6 +302,7 @@ pub struct DashboardState {
     pub focused_node: Option<FocusedNodeSummary>,
     pub active_changes: Vec<ChangeSummary>,
     pub cleave: Option<CleaveProgress>,
+    pub delegate: Option<crate::features::delegate::DelegateProgress>,
     pub harness: Option<HarnessStatus>,
     pub turns: u32,
     pub tool_calls: u32,

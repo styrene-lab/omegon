@@ -2899,7 +2899,7 @@ mod tests {
     }
 
     #[test]
-    fn slim_plan_progress_has_zero_scrollback_height() {
+    fn workbench_progress_has_zero_scrollback_height() {
         let seg = Segment::system("Plan progress\nProgress: 1/2\n\n1. ◐ Do it");
         assert_eq!(
             seg.height_in_mode(80, &Alpharius, SegmentRenderMode::Slim),

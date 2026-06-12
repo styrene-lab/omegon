@@ -1347,7 +1347,7 @@ fn completed_plan_update_enables_done_view_hint_without_pinning() {
     });
 
     assert!(app.completed_plan_history_available);
-    assert!(app.plan_dock_state.active.is_none());
+    assert!(app.workbench_state.active.is_none());
     let text = render_app_to_string(&mut app, 120, 18);
     assert!(text.contains("plan complete · history available"), "{text}");
     assert!(
@@ -1361,7 +1361,7 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
     let mut app = test_app();
     app.conversation.conv_state.scroll_offset = 46;
     app.conversation.conv_state.user_scrolled = true;
-    app.plan_dock_state.active = PlanDisplaySnapshot::from_json(serde_json::json!({
+    app.workbench_state.active = PlanDisplaySnapshot::from_json(serde_json::json!({
         "mode": "executing",
         "completed": 1,
         "total": 2,
@@ -1385,7 +1385,7 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
 
     assert_eq!(app.conversation.conv_state.scroll_offset, 0);
     assert!(!app.conversation.conv_state.user_scrolled);
-    assert!(app.plan_dock_state.active.is_none());
+    assert!(app.workbench_state.active.is_none());
     assert!(
         app.conversation
             .latest_plan_progress()
@@ -1415,7 +1415,7 @@ fn assistant_completed_turn_clears_stale_live_plan_lane() {
             ]
         }),
     });
-    assert!(app.plan_dock_state.active.is_some());
+    assert!(app.workbench_state.active.is_some());
 
     app.handle_agent_event(AgentEvent::TurnEnd(Box::new(
         omegon_traits::AgentEventTurnEnd {
@@ -1443,7 +1443,7 @@ fn assistant_completed_turn_clears_stale_live_plan_lane() {
         },
     )));
 
-    assert!(app.plan_dock_state.active.is_none());
+    assert!(app.workbench_state.active.is_none());
     let text = render_app_to_string(&mut app, 140, 18);
     assert!(!text.contains("plan active"), "{text}");
     assert!(!text.contains("Harden set_recipe"), "{text}");
@@ -1854,12 +1854,12 @@ fn ctrl_shift_y_is_reserved_for_copy_latest_assistant_answer() {
 
 #[test]
 fn normal_transcript_hint_advertises_scroll_and_answer_copy() {
-    let hint = super::slim_plan::slim_operator_hint(
+    let hint = super::workbench::slim_operator_hint(
         false,
         false,
         false,
-        super::slim_plan::SlimPlanHintState::None,
-        &super::slim_plan::SlimPlanContext::from_dashboard(false, &[], None),
+        super::workbench::SlimPlanHintState::None,
+        &super::workbench::SlimPlanContext::from_dashboard(false, &[], None),
     );
 
     assert!(hint.contains("PgUp/PgDn scroll"), "{hint}");
@@ -1868,12 +1868,12 @@ fn normal_transcript_hint_advertises_scroll_and_answer_copy() {
 
 #[test]
 fn terminal_copy_hint_describes_mouse_passthrough_not_copy_mode() {
-    let hint = super::slim_plan::slim_operator_hint(
+    let hint = super::workbench::slim_operator_hint(
         false,
         false,
         true,
-        super::slim_plan::SlimPlanHintState::None,
-        &super::slim_plan::SlimPlanContext::from_dashboard(false, &[], None),
+        super::workbench::SlimPlanHintState::None,
+        &super::workbench::SlimPlanContext::from_dashboard(false, &[], None),
     );
 
     assert!(hint.contains("mouse passthrough"), "{hint}");
@@ -3465,6 +3465,77 @@ directive = "TONE.md"
 // ═══════════════════════════════════════════════════════════════════
 // Event handling
 // ═══════════════════════════════════════════════════════════════════
+
+
+
+#[test]
+fn draw_routes_active_cleave_to_workbench_without_instruments() {
+    let mut app = test_app();
+    app.ui_surfaces.footer = true;
+    app.ui_surfaces.instruments = false;
+    app.dashboard.cleave = Some(crate::features::cleave::CleaveProgress {
+        active: true,
+        run_id: "run-1".into(),
+        total_children: 2,
+        completed: 1,
+        failed: 0,
+        children: vec![crate::features::cleave::ChildProgress {
+            label: "ui".into(),
+            status: "running".into(),
+            duration_secs: None,
+            supervision_mode: None,
+            pid: None,
+            last_tool: Some("bash".into()),
+            last_turn: Some(1),
+            tasks: vec![],
+            tasks_done: 0,
+            started_at: None,
+            last_activity_at: None,
+            tokens_in: 0,
+            tokens_out: 0,
+            runtime: None,
+        }],
+        total_tokens_in: 0,
+        total_tokens_out: 0,
+    });
+
+    let rendered = render_app_to_string(&mut app, 140, 36);
+
+    assert!(rendered.contains("cleave 1/2"), "{rendered}");
+    assert!(rendered.contains("ui running"), "{rendered}");
+    assert!(rendered.contains("bash"), "{rendered}");
+}
+
+#[test]
+fn draw_routes_active_delegate_to_workbench_without_instruments() {
+    let mut app = test_app();
+    app.ui_surfaces.footer = true;
+    app.ui_surfaces.instruments = false;
+    app.dashboard.delegate = Some(crate::features::delegate::DelegateProgress {
+        active: true,
+        running: 1,
+        completed: 2,
+        failed: 0,
+        children: vec![crate::features::delegate::DelegateProgressChild {
+            task_id: "delegate_1".into(),
+            label: "scout".into(),
+            status: "running".into(),
+            last_tool: Some("read".into()),
+            last_turn: Some(1),
+            started_at: None,
+            completed_at: None,
+            result_summary: None,
+            tasks: vec![],
+            tasks_done: 0,
+        }],
+    });
+
+    let rendered = render_app_to_string(&mut app, 140, 36);
+
+    assert!(rendered.contains("delegate running 1"), "{rendered}");
+    assert!(rendered.contains("scout running"), "{rendered}");
+    assert!(rendered.contains("read"), "{rendered}");
+}
 
 #[test]
 fn draw_clears_stale_completed_cleave_snapshot_from_tools_panel() {
