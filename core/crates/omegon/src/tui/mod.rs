@@ -33,7 +33,7 @@ pub mod segment_components;
 pub mod segment_detail;
 pub mod segments;
 pub mod selector;
-pub mod slim_plan;
+pub mod workbench;
 pub mod spinner;
 pub mod splash;
 pub mod statusline;
@@ -90,9 +90,9 @@ use self::instruments::InstrumentPanel;
 use self::layout_projection::{TuiLayoutInputs, plan_tui_layout};
 use self::permission_lane::{format_permission_prompt, permission_response_for_key};
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode};
-use self::slim_plan::{
-    PlanDisplaySnapshot, PlanDockState, SlimPlanContext, SlimPlanHintState, SlimTurnState,
-    active_plan_dock_snapshot, plan_dock_preferred_height, render_plan_dock_panel,
+use self::workbench::{
+    PlanDisplaySnapshot, WorkbenchState, SlimPlanContext, SlimPlanHintState, SlimTurnState,
+    active_workbench_snapshot, workbench_preferred_height, render_workbench_panel,
     slim_completed_plan_hint_available, slim_operator_hint, upstream_retry_hint,
 };
 use crate::surfaces::layout::UiSurfaces;
@@ -428,8 +428,8 @@ pub struct App {
     plugin_registry: Option<crate::plugins::registry::PluginRegistry>,
     /// Slim-mode status line — persistent telemetry bar.
     status_line: statusline::StatusLine,
-    /// Structured session plan snapshot for the active Plan Dock panel.
-    plan_dock_state: PlanDockState,
+    /// Structured session plan snapshot for the active Workbench panel.
+    workbench_state: WorkbenchState,
     active_tool_stream: Option<ActiveToolStream>,
     /// Explicit Slim turn state rendered in the status line.
     slim_turn_state: SlimTurnState,
@@ -1604,7 +1604,7 @@ impl App {
                 crate::prompt::load_lex_imperialis(),
             )),
             status_line: statusline::StatusLine::default(),
-            plan_dock_state: PlanDockState::default(),
+            workbench_state: WorkbenchState::default(),
             completed_plan_history_available: false,
             active_tool_stream: None,
             slim_turn_state: SlimTurnState::Ready,
@@ -3863,16 +3863,19 @@ impl App {
         let dashboard_has_content = self.dashboard.status_counts.total > 0
             || self.dashboard.focused_node.is_some()
             || !self.dashboard.active_changes.is_empty()
-            || self.dashboard.cleave.as_ref().is_some_and(|c| c.active);
+            || self.dashboard.cleave.as_ref().is_some_and(|c| c.active)
+            || self.dashboard.delegate.as_ref().is_some_and(|d| d.active || d.running > 0);
         let editor_height = editor_height_for(&self.editor, area);
         let editor_info_height = u16::from(!self.queued_prompts.is_empty());
-        let plan_dock_state = if self.ui_surfaces.is_compact() && !self.focus_mode {
-            PlanDockState {
-                active: active_plan_dock_snapshot(self.plan_dock_state.active.as_ref(), None),
-                workstreams: self.plan_dock_state.workstreams.clone(),
+        let workbench_state = if !self.focus_mode {
+            WorkbenchState {
+                active: active_workbench_snapshot(self.workbench_state.active.as_ref(), None),
+                cleave: self.dashboard.cleave.clone().filter(|p| p.active),
+                delegate: self.dashboard.delegate.clone().filter(|p| p.active || p.running > 0),
+                workstreams: self.workbench_state.workstreams.clone(),
             }
         } else {
-            PlanDockState::default()
+            WorkbenchState::default()
         };
         let raw_active_tool_stream_height = if self.ui_surfaces.is_compact() && !self.focus_mode {
             self.active_tool_stream
@@ -3882,7 +3885,7 @@ impl App {
         } else {
             0
         };
-        let raw_plan_dock_height = plan_dock_preferred_height(&plan_dock_state, area.width);
+        let raw_workbench_height = workbench_preferred_height(&workbench_state, area.width);
         let segment_detail_index = self.conversation.timeline_expanded_segment();
         let segment_detail_height = segment_detail::preferred_height(
             segment_detail_index.and_then(|idx| self.conversation.segments().get(idx)),
@@ -3899,7 +3902,7 @@ impl App {
             status_height: statusline::StatusLine::preferred_height(area.width),
             pending_permission: false,
             active_tool_stream_height: raw_active_tool_stream_height,
-            plan_dock_height: raw_plan_dock_height,
+            workbench_height: raw_workbench_height,
             segment_detail_height,
         });
 
@@ -3907,7 +3910,7 @@ impl App {
         let main_area = layout_plan.main_area;
         let conversation_area = layout_plan.conversation_area;
         let active_tool_stream_area = layout_plan.active_tool_stream_area;
-        let plan_dock_area = layout_plan.plan_dock_area;
+        let workbench_area = layout_plan.workbench_area;
         let segment_detail_area = layout_plan.segment_detail_area;
         let editor_area = layout_plan.editor_area;
         let editor_info_area = layout_plan.editor_info_area;
@@ -4001,8 +4004,13 @@ impl App {
             );
         }
 
-        if plan_dock_state.active.is_some() && plan_dock_area.height > 0 {
-            render_plan_dock_panel(plan_dock_area, frame, self.theme.as_ref(), &plan_dock_state);
+        if (workbench_state.active.is_some()
+            || workbench_state.cleave.is_some()
+            || workbench_state.delegate.is_some()
+            || !workbench_state.workstreams.is_empty())
+            && workbench_area.height > 0
+        {
+            render_workbench_panel(workbench_area, frame, self.theme.as_ref(), &workbench_state);
         }
 
         if segment_detail_area.height > 0
@@ -4062,10 +4070,10 @@ impl App {
                 None
             };
             self.status_line.turn_state = Some(self.slim_turn_state.label());
-            let plan_state = plan_dock_state
+            let plan_state = workbench_state
                 .active
                 .as_ref()
-                .map(|snapshot| snapshot.hint_state(plan_dock_area.height))
+                .map(|snapshot| snapshot.hint_state(workbench_area.height))
                 .unwrap_or_else(|| {
                     if slim_completed_plan_hint_available(self.completed_plan_history_available) {
                         SlimPlanHintState::Complete
@@ -4074,7 +4082,7 @@ impl App {
                     }
                 });
             let plan_context = SlimPlanContext::from_dashboard(
-                plan_dock_state.active.is_some(),
+                workbench_state.active.is_some(),
                 &self.dashboard.active_changes,
                 self.dashboard.focused_node.as_ref(),
             );
@@ -6924,7 +6932,7 @@ Scroll transcript:
                     // If no completion PlanUpdated arrives before the assistant turn
                     // finishes, clear it rather than leaving stale "plan active" chrome
                     // held under a "turn done" status line.
-                    self.plan_dock_state.active = None;
+                    self.workbench_state.active = None;
                 }
                 // Update status line with behavioral signals
                 self.status_line.phase = te.dominant_phase;
@@ -7378,7 +7386,7 @@ Scroll transcript:
                 }
             }
             AgentEvent::PlanUpdated { snapshot_json } => {
-                let dock_state = PlanDockState::from_plan_update_json(snapshot_json);
+                let dock_state = WorkbenchState::from_plan_update_json(snapshot_json);
                 self.completed_plan_history_available = dock_state
                     .active
                     .as_ref()
@@ -7397,17 +7405,18 @@ Scroll transcript:
                             .push_system(&snapshot.system_notification_text("Plan progress"));
                     }
                     self.conversation.snap_to_bottom();
-                    self.plan_dock_state = PlanDockState {
+                    self.workbench_state = WorkbenchState {
                         active: None,
                         workstreams: dock_state.workstreams,
+                        ..WorkbenchState::default()
                     };
                 } else {
-                    self.plan_dock_state = dock_state;
+                    self.workbench_state = dock_state;
                 }
             }
             AgentEvent::SessionReset => {
                 self.conversation = ConversationView::new();
-                self.plan_dock_state.active = None;
+                self.workbench_state.active = None;
                 self.completed_plan_history_available = false;
                 self.active_tool_stream = None;
                 self.turn = 0;
@@ -9659,10 +9668,10 @@ mod slash_command_parsing_tests {
     use super::permission_lane::{
         format_permission_prompt, permission_persist_scope_label, permission_response_for_key,
     };
-    use super::slim_plan::{
+    use super::workbench::{
         PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus, SlimPlanContext,
         SlimPlanHintState, slim_completed_plan_hint_available, slim_operator_hint,
-        active_plan_dock_snapshot, plan_dock_rows,
+        active_workbench_snapshot, workbench_rows,
     };
     use crate::lifecycle::types::NodeStatus;
     use crossterm::event::{KeyCode, KeyModifiers};
@@ -9671,13 +9680,13 @@ mod slash_command_parsing_tests {
     // ── Profile ───────────────────────────────────────────
 
     #[test]
-    fn plan_dock_workstream_only_uses_compact_height() {
-        use super::slim_plan::{PlanDockState, WorkstreamStatus, WorkstreamSummary, plan_dock_preferred_height};
+    fn workbench_workstream_only_uses_compact_height() {
+        use super::workbench::{WorkbenchState, WorkstreamStatus, WorkstreamSummary, workbench_preferred_height};
 
-        let empty = PlanDockState::default();
-        assert_eq!(plan_dock_preferred_height(&empty, 100), 0);
+        let empty = WorkbenchState::default();
+        assert_eq!(workbench_preferred_height(&empty, 100), 0);
 
-        let state = PlanDockState {
+        let state = WorkbenchState {
             active: None,
             workstreams: vec![WorkstreamSummary {
                 id: "release".into(),
@@ -9686,15 +9695,16 @@ mod slash_command_parsing_tests {
                 completed: 2,
                 total: 5,
             }],
+            ..WorkbenchState::default()
         };
-        assert_eq!(plan_dock_preferred_height(&state, 100), 1);
+        assert_eq!(workbench_preferred_height(&state, 100), 1);
     }
 
     #[test]
-    fn plan_dock_workstream_only_renders_summary_without_task_rows() {
-        use super::slim_plan::{PlanDockState, WorkstreamStatus, WorkstreamSummary, render_plan_dock_panel};
+    fn workbench_workstream_only_renders_summary_without_task_rows() {
+        use super::workbench::{WorkbenchState, WorkstreamStatus, WorkstreamSummary, render_workbench_panel};
 
-        let state = PlanDockState {
+        let state = WorkbenchState {
             active: None,
             workstreams: vec![WorkstreamSummary {
                 id: "release".into(),
@@ -9703,11 +9713,12 @@ mod slash_command_parsing_tests {
                 completed: 2,
                 total: 5,
             }],
+            ..WorkbenchState::default()
         };
         let backend = ratatui::backend::TestBackend::new(80, 1);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| render_plan_dock_panel(frame.area(), frame, &super::theme::Alpharius, &state))
+            .draw(|frame| render_workbench_panel(frame.area(), frame, &super::theme::Alpharius, &state))
             .unwrap();
         let mut text = String::new();
         for x in 0..80 {
@@ -9720,7 +9731,7 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn slim_plan_contract_renders_structured_snapshot() {
+    fn workbench_contract_renders_structured_snapshot() {
         let snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
             "mode": "executing",
             "completed": 2,
@@ -9734,7 +9745,7 @@ mod slash_command_parsing_tests {
         }))
         .unwrap();
         assert_eq!(snapshot.summary(), "plan 2/4 · executing");
-        let rows = plan_dock_rows(&snapshot, 80, 5);
+        let rows = workbench_rows(&snapshot, 80, 5);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
             vec![
@@ -9748,7 +9759,7 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn slim_plan_contract_marks_hidden_rows() {
+    fn workbench_contract_marks_hidden_rows() {
         let snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
             "mode": "executing",
             "completed": 1,
@@ -9759,7 +9770,7 @@ mod slash_command_parsing_tests {
             })).collect::<Vec<_>>()
         }))
         .unwrap();
-        let rows = plan_dock_rows(&snapshot, 40, 4);
+        let rows = workbench_rows(&snapshot, 40, 4);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
             vec!["1. done    Step 0", "2. todo    Step 1", "+5 more"]
@@ -9820,7 +9831,7 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn slim_plan_legacy_text_remains_fallback_only() {
+    fn workbench_legacy_text_remains_fallback_only() {
         let snapshot = PlanDisplaySnapshot::from_legacy_text(
             "Plan progress\nPlan mode: executing\nProgress: 2/3\n\n1. ● Inspect\n2. ◐ Patch\n3. ⊘ Skip",
         )
@@ -9873,8 +9884,8 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn completed_legacy_plan_does_not_activate_plan_dock() {
-        let active = active_plan_dock_snapshot(
+    fn completed_legacy_plan_does_not_activate_workbench() {
+        let active = active_workbench_snapshot(
             None,
             Some("Plan progress\nPlan mode: complete\nProgress: 2/2\n\n1. ● A\n2. ● B"),
         );
@@ -9883,8 +9894,8 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn legacy_plan_history_does_not_activate_plan_dock() {
-        let active = active_plan_dock_snapshot(
+    fn legacy_plan_history_does_not_activate_workbench() {
+        let active = active_workbench_snapshot(
             None,
             Some("Plan progress\nPlan mode: executing\nProgress: 1/2\n\n1. ● Old\n2. ◐ Stale"),
         );
@@ -9893,7 +9904,7 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn live_active_plan_still_activates_plan_dock() {
+    fn live_active_plan_still_activates_workbench() {
         let live = PlanDisplaySnapshot {
             mode: "executing".to_string(),
             completed: 1,
@@ -9909,14 +9920,14 @@ mod slash_command_parsing_tests {
                 },
             ],
         };
-        let active = active_plan_dock_snapshot(Some(&live), None).unwrap();
+        let active = active_workbench_snapshot(Some(&live), None).unwrap();
 
         assert_eq!(active.summary(), "plan 1/2 · executing");
         assert!(!active.is_complete());
     }
 
     #[test]
-    fn completed_live_plan_snapshot_does_not_activate_plan_dock() {
+    fn completed_live_plan_snapshot_does_not_activate_workbench() {
         let completed = PlanDisplaySnapshot {
             mode: "complete".to_string(),
             completed: 1,
@@ -9927,7 +9938,7 @@ mod slash_command_parsing_tests {
             }],
         };
 
-        assert!(active_plan_dock_snapshot(Some(&completed), None).is_none());
+        assert!(active_workbench_snapshot(Some(&completed), None).is_none());
     }
 
     #[test]
@@ -9955,7 +9966,7 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn slim_plan_hint_matches_actually_visible_next_row() {
+    fn workbench_hint_matches_actually_visible_next_row() {
         let snapshot = PlanDisplaySnapshot {
             mode: "executing".to_string(),
             completed: 1,
@@ -10046,7 +10057,7 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn slim_plan_context_labels_active_tracking_and_lifecycle_links() {
+    fn workbench_context_labels_active_tracking_and_lifecycle_links() {
         let changes = vec![dashboard::ChangeSummary {
             name: "rollup".into(),
             stage: "implementing".into(),

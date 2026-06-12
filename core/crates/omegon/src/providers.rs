@@ -4435,7 +4435,7 @@ mod tests {
         assert!(anthropic_supports_adaptive_thinking(
             "anthropic:claude-opus-4-6"
         ));
-        assert!(!anthropic_supports_adaptive_thinking("claude-sonnet-4-5"));
+        assert!(anthropic_supports_adaptive_thinking("claude-sonnet-4-5"));
         assert!(!anthropic_should_use_adaptive_thinking(
             "anthropic:claude-sonnet-4-6",
             "minimal"
@@ -4474,7 +4474,7 @@ mod tests {
         assert!(bounded_46.get("effort").is_none());
 
         let mut manual = json!({});
-        apply_anthropic_thinking(&mut manual, "anthropic:claude-sonnet-4-5", Some("high"));
+        apply_anthropic_thinking(&mut manual, "anthropic:claude-haiku-4-5-20251001", Some("high"));
         assert_eq!(
             manual["thinking"],
             json!({ "type": "enabled", "budget_tokens": 50_000 })

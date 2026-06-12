@@ -1,4 +1,4 @@
-//! Plan dock snapshot surface rendering and hint policy.
+//! Workbench snapshot surface rendering and hint policy.
 
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
@@ -6,8 +6,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 use super::{dashboard, theme};
+use crate::features::cleave::CleaveProgress;
+use crate::features::delegate::DelegateProgress;
 
-pub fn plan_dock_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 {
+pub fn workbench_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 {
     if width == 0 || snapshot.items.is_empty() {
         return 0;
     }
@@ -17,12 +19,16 @@ pub fn plan_dock_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> 
     (1 + item_count.min(4)).clamp(2, 5)
 }
 
-pub fn plan_dock_preferred_height(state: &PlanDockState, width: u16) -> u16 {
+pub fn workbench_preferred_height(state: &WorkbenchState, width: u16) -> u16 {
     if width == 0 {
         return 0;
     }
     if let Some(active) = state.active.as_ref() {
-        plan_dock_snapshot_height(active, width)
+        workbench_snapshot_height(active, width)
+    } else if state.cleave.as_ref().is_some_and(|p| p.active) {
+        5
+    } else if state.delegate.as_ref().is_some_and(|p| p.active || p.running > 0) {
+        5
     } else if !state.workstreams.is_empty() {
         1
     } else {
@@ -30,9 +36,11 @@ pub fn plan_dock_preferred_height(state: &PlanDockState, width: u16) -> u16 {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PlanDockState {
+#[derive(Clone, Default)]
+pub struct WorkbenchState {
     pub active: Option<PlanDisplaySnapshot>,
+    pub cleave: Option<CleaveProgress>,
+    pub delegate: Option<DelegateProgress>,
     pub workstreams: Vec<WorkstreamSummary>,
 }
 
@@ -93,7 +101,7 @@ impl WorkstreamSummary {
     }
 }
 
-impl PlanDockState {
+impl WorkbenchState {
     pub fn from_plan_update_json(value: serde_json::Value) -> Self {
         let workstreams = value
             .get("workstreams")
@@ -103,6 +111,7 @@ impl PlanDockState {
         Self {
             active: PlanDisplaySnapshot::from_json(value),
             workstreams,
+            ..Self::default()
         }
     }
 }
@@ -376,11 +385,11 @@ impl PlanDisplaySnapshot {
     }
 }
 
-pub fn active_plan_dock_snapshot(
+pub fn active_workbench_snapshot(
     live_snapshot: Option<&PlanDisplaySnapshot>,
     _legacy_plan_text: Option<&str>,
 ) -> Option<PlanDisplaySnapshot> {
-    // Only the live PlanUpdated projection may drive the Plan Dock. Legacy
+    // Only the live PlanUpdated projection may drive the Workbench. Legacy
     // transcript text is durable history, not active state; falling back to it
     // resurrects old unfinished plans after branch/session/task changes.
     live_snapshot
@@ -388,7 +397,7 @@ pub fn active_plan_dock_snapshot(
         .cloned()
 }
 
-pub fn plan_dock_rows(
+pub fn workbench_rows(
     snapshot: &PlanDisplaySnapshot,
     width: u16,
     height: u16,
@@ -526,11 +535,11 @@ pub fn slim_operator_hint(
     }
 }
 
-pub fn render_plan_dock_panel(
+pub fn render_workbench_panel(
     area: Rect,
     frame: &mut Frame,
     t: &dyn theme::Theme,
-    state: &PlanDockState,
+    state: &WorkbenchState,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -538,13 +547,17 @@ pub fn render_plan_dock_panel(
 
     let bg = t.surface_bg();
     if let Some(snapshot) = state.active.as_ref() {
-        render_active_plan_dock_panel(area, frame, t, snapshot, state.workstreams.len());
+        render_active_workbench_panel(area, frame, t, snapshot, state.workstreams.len());
+    } else if let Some(cleave) = state.cleave.as_ref().filter(|p| p.active) {
+        render_cleave_workbench_panel(area, frame, t, cleave);
+    } else if let Some(delegate) = state.delegate.as_ref().filter(|p| p.active || p.running > 0) {
+        render_delegate_workbench_panel(area, frame, t, delegate);
     } else {
         render_workstream_summary(area, frame, t, state.workstreams.as_slice(), bg);
     }
 }
 
-fn render_active_plan_dock_panel(
+fn render_active_workbench_panel(
     area: Rect,
     frame: &mut Frame,
     t: &dyn theme::Theme,
@@ -573,7 +586,7 @@ fn render_active_plan_dock_panel(
         ),
     ]));
 
-    for row in plan_dock_rows(snapshot, area.width, area.height) {
+    for row in workbench_rows(snapshot, area.width, area.height) {
         let style = row
             .status
             .map(|status| status.style(t, bg))
@@ -585,6 +598,129 @@ fn render_active_plan_dock_panel(
         .style(Style::default().bg(bg))
         .wrap(Wrap { trim: false })
         .render(area, frame.buffer_mut());
+}
+
+fn render_cleave_workbench_panel(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    progress: &CleaveProgress,
+) {
+    let bg = t.surface_bg();
+    let mut lines = vec![workbench_rule_line(
+        t,
+        bg,
+        format!(
+            "cleave {}/{} · failed {}",
+            progress.completed, progress.total_children, progress.failed
+        ),
+        area.width,
+    )];
+    let max_rows = area.height.saturating_sub(1) as usize;
+    for child in progress.children.iter().take(max_rows) {
+        let task_progress = if child.tasks.is_empty() {
+            String::new()
+        } else {
+            format!(" · tasks {}/{}", child.tasks_done, child.tasks.len())
+        };
+        let tool = child
+            .last_tool
+            .as_deref()
+            .map(|tool| format!(" · {tool}"))
+            .unwrap_or_default();
+        let text = crate::util::truncate(
+            &format!("{} {:<10}{}{}", child.label, child.status, task_progress, tool),
+            area.width.saturating_sub(1) as usize,
+        );
+        lines.push(Line::from(Span::styled(
+            text,
+            worker_status_style(&child.status, t, bg),
+        )));
+    }
+    Paragraph::new(lines)
+        .style(Style::default().bg(bg))
+        .wrap(Wrap { trim: false })
+        .render(area, frame.buffer_mut());
+}
+
+fn render_delegate_workbench_panel(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    progress: &DelegateProgress,
+) {
+    let bg = t.surface_bg();
+    let mut lines = vec![workbench_rule_line(
+        t,
+        bg,
+        format!(
+            "delegate running {} · done {} · failed {}",
+            progress.running, progress.completed, progress.failed
+        ),
+        area.width,
+    )];
+    let max_rows = area.height.saturating_sub(1) as usize;
+    for child in progress.children.iter().take(max_rows) {
+        let task_progress = if child.tasks.is_empty() {
+            String::new()
+        } else {
+            format!(" · tasks {}/{}", child.tasks_done, child.tasks.len())
+        };
+        let tool = child
+            .last_tool
+            .as_deref()
+            .map(|tool| format!(" · {tool}"))
+            .unwrap_or_default();
+        let text = crate::util::truncate(
+            &format!("{} {:<10}{}{}", child.label, child.status, task_progress, tool),
+            area.width.saturating_sub(1) as usize,
+        );
+        lines.push(Line::from(Span::styled(
+            text,
+            worker_status_style(&child.status, t, bg),
+        )));
+    }
+    Paragraph::new(lines)
+        .style(Style::default().bg(bg))
+        .wrap(Wrap { trim: false })
+        .render(area, frame.buffer_mut());
+}
+
+fn workbench_rule_line<'a>(
+    t: &dyn theme::Theme,
+    bg: ratatui::style::Color,
+    summary: String,
+    width: u16,
+) -> Line<'a> {
+    let rule_width = width.saturating_sub(summary.len() as u16 + 4) as usize;
+    Line::from(vec![
+        Span::styled("─ ", Style::default().fg(t.border_dim()).bg(bg)),
+        Span::styled(
+            summary,
+            Style::default()
+                .fg(t.accent_muted())
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {}", "─".repeat(rule_width)),
+            Style::default().fg(t.border_dim()).bg(bg),
+        ),
+    ])
+}
+
+fn worker_status_style(
+    status: &str,
+    t: &dyn theme::Theme,
+    bg: ratatui::style::Color,
+) -> Style {
+    let fg = match status {
+        "completed" | "merged_after_failure" => t.success(),
+        "running" => t.warning(),
+        "failed" | "upstream_exhausted" => t.error(),
+        _ => t.accent_muted(),
+    };
+    Style::default().fg(fg).bg(bg)
 }
 
 fn render_workstream_summary(
