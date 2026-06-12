@@ -4395,6 +4395,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     &mut agent,
                     &shared_settings,
                     &bridge,
+                    Some(route_controller.clone()),
                     &model,
                 )
                 .await;

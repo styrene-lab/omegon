@@ -34,7 +34,7 @@ delegate/cleave child routing.
 ## 4. Consumers become route projections
 <!-- specs: provider-route -->
 
-- [ ] 4.1 loop.rs: StreamOptions.model and TurnEnd model attribution read the RouteSnapshot; delete `config.bridge_model` seeding (loop.rs:340-380) and the bridge_model/settings fallback chain at loop.rs:707
+- [x] 4.1 loop.rs: StreamOptions.model and TurnEnd model attribution read the RouteSnapshot; delete `config.bridge_model` seeding (loop.rs:340-380) and the bridge_model/settings fallback chain at loop.rs:707
 - [x] 4.2 tui/mod.rs + footer.rs: footer sync projects RouteSnapshot; delete `settings.runtime_bridge_model` and `footer_data.fallback_from` (interim 77bf6227 mechanism); Fallback/Disconnected render persistent warnings, LoginPending renders provider + elapsed
 - [ ] 4.3 Command handlers (/model, set_model_tier, switch_to_offline_driver) call `controller.switch_model`; remove direct `settings.set_model` mutation from handlers; refused switch keeps route and reports why
 - [ ] 4.4 Tests: footer fallback render against RouteSnapshot (port model_card_shows_fallback_marker_when_bridge_diverges); refused /model switch leaves settings.model and route unchanged

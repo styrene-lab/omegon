@@ -348,14 +348,22 @@ pub async fn run(
     // this bridges it to the AgentEvent channel.
     // (Called from the TUI entrypoint which passes the initial status)
 
+    let startup_serving_model = if let Some(controller) = config.route_controller.as_ref() {
+        controller
+            .snapshot()
+            .await
+            .serving_model()
+            .map(str::to_string)
+            .unwrap_or_else(|| config.model.clone())
+    } else {
+        config
+            .bridge_model
+            .as_ref()
+            .unwrap_or(&config.model)
+            .clone()
+    };
     let base_stream_options = StreamOptions {
-        model: Some(
-            config
-                .bridge_model
-                .as_ref()
-                .unwrap_or(&config.model)
-                .clone(),
-        ),
+        model: Some(startup_serving_model.clone()),
         reasoning: None,
         extended_context: config.extended_context,
         ..Default::default()
@@ -378,10 +386,7 @@ pub async fn run(
     // immutable config.model which is frozen at startup. Starts from the
     // bridge runtime model when fallback installed one, so events emitted
     // before the first per-turn re-read still report the real model.
-    let mut active_model = config
-        .bridge_model
-        .clone()
-        .unwrap_or_else(|| config.model.clone());
+    let mut active_model = startup_serving_model;
 
     loop {
         if cancel.is_cancelled() {

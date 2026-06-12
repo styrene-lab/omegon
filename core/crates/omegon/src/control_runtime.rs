@@ -556,7 +556,7 @@ pub async fn execute_control(
 
     match request {
         ControlRequest::SetModel { requested_model } => {
-            set_model_response(ctx.agent, ctx.shared_settings, ctx.bridge, &requested_model).await
+            set_model_response(ctx.agent, ctx.shared_settings, ctx.bridge, None, &requested_model).await
         }
         ControlRequest::SwitchDispatcher {
             request_id,
@@ -884,6 +884,7 @@ pub async fn set_model_response(
     agent: &mut InteractiveAgentHost,
     shared_settings: &settings::SharedSettings,
     bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+    route_controller: Option<Arc<crate::route::RouteController>>,
     requested_model: &str,
 ) -> SlashCommandResponse {
     let effective_model = providers::resolve_execution_model_spec(requested_model)
@@ -900,6 +901,55 @@ pub async fn set_model_response(
         })
         .unwrap_or_else(|| (String::new(), String::new()));
     let new_provider = crate::providers::infer_provider_id(&effective_model);
+    if let Some(controller) = route_controller {
+        let new_bridge = providers::auto_detect_bridge(&effective_model).await;
+        let snapshot = match controller
+            .switch_model(
+                effective_model.clone(),
+                &crate::route::CredentialLedger,
+                new_bridge,
+            )
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                return SlashCommandResponse {
+                    accepted: false,
+                    output: Some(format!("Model switch failed: {err}")),
+                };
+            }
+        };
+        let serving_matches = snapshot.serving_model() == Some(effective_model.as_str());
+        if !serving_matches {
+            return SlashCommandResponse {
+                accepted: false,
+                output: Some(snapshot.operator_status()),
+            };
+        }
+        if let Ok(mut s) = shared_settings.lock() {
+            s.set_model(&effective_model);
+            s.provider_connected = crate::auth::provider_connected_for_model(&effective_model);
+            let mut profile = settings::Profile::load(&agent.cwd);
+            profile.capture_from(&s);
+            let _ = profile.save(&agent.cwd);
+        }
+        let provider_label = crate::auth::provider_by_id(&new_provider)
+            .map(|p| p.display_name)
+            .unwrap_or(new_provider.as_str());
+        let mut messages = Vec::new();
+        if effective_model != requested_model {
+            messages.push(format!(
+                "Requested {requested_model}; using executable route {effective_model} via {provider_label}."
+            ));
+        }
+        messages.push(format!(
+            "Provider route switched to {provider_label} ({effective_model})."
+        ));
+        return SlashCommandResponse {
+            accepted: true,
+            output: Some(messages.join("\n")),
+        };
+    }
     if let Ok(mut s) = shared_settings.lock() {
         s.set_model(&effective_model);
         let mut profile = settings::Profile::load(&agent.cwd);
