@@ -72,13 +72,20 @@ Related long-form design: [[docs/headroom-native-compression|Native Headroom-Com
 - [ ] Track class/domain metrics separately so aggregate savings cannot hide domain regressions.
 - [ ] Add automated fixture minimization/redaction guidance before any fixture is committed.
 
-### Phase D — integrate with existing benchmark harness
+### Phase D — integrate with existing benchmark harness (future release)
 
-- [ ] Add a benchmark task under `ai/benchmarks/tasks/` that exercises headroom read compression in a controlled repo.
+Status: deferred. The existing benchmark harness is the right eventual home for high-level, end-to-end evaluator work, but it is not needed for the current headroom implementation slice. Continue localized headroom evaluation until the deterministic compressor, CCR retrieval, corpus fixtures, and provider boundary are stable.
+
+Future release tasks:
+
+- [ ] Add benchmark task specs under `ai/benchmarks/tasks/` that exercise headroom read compression in controlled repos.
 - [ ] Teach `scripts/benchmark_harness.py` to pass headroom dogfood env/settings when a task opts in.
 - [ ] Capture headroom eval artifacts beside benchmark result JSON.
 - [ ] Add benchmark report fields for headroom savings/restoration counts.
+- [ ] Compare headroom-off vs headroom-on task success, token usage, turns, retrieval calls, and wall-clock cost.
 - [ ] Keep this optional until it is cheap and deterministic enough for CI.
+
+Do not spend more current-session effort on benchmark harness expansion unless the localized headroom evaluator exposes a blocker that only an end-to-end task run can answer.
 
 ### Phase E — additional automatic integration points
 

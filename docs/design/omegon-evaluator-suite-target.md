@@ -28,6 +28,25 @@ low-level component correctness
 
 This document is the pie-in-the-sky target. Current implementation should continue with localized native headroom evaluations while leaving clean interfaces for this broader evaluator work.
 
+## Current strategy decision
+
+The broad evaluator suite is future-release work. The immediate headroom workstream should not continue expanding `scripts/benchmark_harness.py` or adding high-level benchmark tasks. The benchmark harness remains the right eventual Tier 3+ integration point, but current effort returns to localized headroom evaluation and compressor correctness.
+
+Current focus:
+
+- `omegon-headroom` deterministic compressor behavior
+- CCR storage/retrieval correctness
+- protected-anchor extraction
+- dogfood corpus breadth through `headroom-dogfood`/`headroom-eval`
+- provider-boundary preparation for future learned compressors
+
+Deferred until a later evaluator release:
+
+- benchmark task specs for headroom A/B runs
+- cross-harness/provider matrices
+- report dashboards
+- release gates spanning non-headroom subsystems
+
 ## Principles
 
 - Deterministic first: prefer replayable fixtures, fixed inputs, local repos, seeded generators, and explicit acceptance commands.
