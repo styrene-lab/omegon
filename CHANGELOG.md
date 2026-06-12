@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Changed
 
 - Rename the TUI Plan Dock into a Workbench surface and surface active cleave/delegate progress there instead of only in optional instruments.
+- Make delegate runner script fixtures flush to disk before execution so CI timeout tests fail only on runner behavior, not file visibility races.
 - Add a local `just upstream-provider-check` gate for cheap provider drift checks without waiting for CI.
 - Add a lightweight Anthropic model drift checker that compares public Claude API model IDs against the registry.
 - Add Claude Fable 5 and limited-access Claude Mythos 5 to the Anthropic registry, make Fable the highest-tier Anthropic default, and update Claude Code OAuth UA to 2.1.173.
