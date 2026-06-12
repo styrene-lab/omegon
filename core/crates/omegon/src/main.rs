@@ -3839,7 +3839,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         &resolved_cli_model,
         resolved_bridge.is_some(),
     );
-    let (_effective_model, bridge): (String, Box<dyn LlmBridge>) = if let Some(native) = resolved_bridge {
+    let (effective_model, bridge): (String, Box<dyn LlmBridge>) = if let Some(native) = resolved_bridge {
         tracing::info!("using native LLM provider");
         (startup_decision.bridge_model.clone(), native)
     } else if let Some(fallback_model) = providers::automation_safe_model()
@@ -4077,6 +4077,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         cwd: agent.cwd.clone(),
         secrets: agent.secrets.clone(),
         context_metrics: agent.context_metrics.clone(),
+        bridge_model: std::sync::Arc::new(std::sync::Mutex::new(Some(effective_model.clone()))),
     };
 
     runtime_state.bus.emit(&omegon_traits::BusEvent::SessionStart {
@@ -4360,6 +4361,11 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         });
                     }
                 }
+                if response.accepted
+                    && let Ok(mut bridge_model) = runtime_resources.bridge_model.lock()
+                {
+                    *bridge_model = None;
+                }
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
                         accepted: response.accepted,
@@ -4387,8 +4393,14 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 let bridge_guard = bridge.read().await;
                 let stream_options = {
                     let s = shared_settings.lock().unwrap();
+                    let model = runtime_resources
+                        .bridge_model
+                        .lock()
+                        .ok()
+                        .and_then(|guard| guard.clone())
+                        .unwrap_or_else(|| s.model.clone());
                     crate::bridge::StreamOptions {
-                        model: Some(s.model.clone()),
+                        model: Some(model),
                         reasoning: Some(s.thinking.as_str().to_string()),
                         extended_context: false,
                         ..Default::default()
@@ -4924,6 +4936,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 .unwrap_or_else(|| cli.model.clone());
                             let cwd_for_profile = agent.cwd.clone();
                             let settings_for_login = shared_settings.clone();
+                            let bridge_model_for_login = runtime_resources.bridge_model.clone();
                             crate::task_spawn::spawn_operator_task(
                                 "interactive-auth-login",
                                 events_tx_clone.clone(),
@@ -5009,6 +5022,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                                 let mut profile = settings::Profile::load(&cwd_for_profile);
                                                 profile.capture_from(&s);
                                                 let _ = profile.save(&cwd_for_profile);
+                                            }
+                                            if let Ok(mut bridge_model) = bridge_model_for_login.lock() {
+                                                *bridge_model = Some(effective_model.clone());
                                             }
                                             tracing::info!("bridge hot-swapped after successful login");
                                             let _ =
@@ -5676,6 +5692,7 @@ struct InteractiveRuntimeResources {
     secrets: std::sync::Arc<omegon_secrets::SecretsManager>,
     context_metrics:
         std::sync::Arc<std::sync::Mutex<crate::features::context::SharedContextMetrics>>,
+    bridge_model: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 fn build_interactive_loop_config(
@@ -5703,6 +5720,11 @@ fn build_interactive_loop_config(
             force_compact: Some(pending_compact.clone()),
             allow_commit_nudge: true,
             ollama_manager,
+            bridge_model: runtime
+                .bridge_model
+                .lock()
+                .ok()
+                .and_then(|guard| guard.clone()),
             ..Default::default()
         },
     )
@@ -9536,6 +9558,7 @@ mod tests {
                 omegon_secrets::SecretsManager::new(secrets_dir.path()).unwrap(),
             ),
             context_metrics: crate::features::context::SharedContextMetrics::new(),
+            bridge_model: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
         let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
@@ -9544,6 +9567,38 @@ mod tests {
 
         assert_eq!(loop_config.model, "openai-codex:gpt-5.5");
         assert!(!shared_settings.lock().unwrap().provider_connected);
+    }
+
+    #[test]
+    fn interactive_loop_config_preserves_bridge_fallback_model_separately() {
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
+            "openai-codex:gpt-5.5",
+        )));
+        let secrets_dir = tempfile::tempdir().unwrap();
+        let runtime = InteractiveRuntimeResources {
+            cwd: PathBuf::from("."),
+            secrets: std::sync::Arc::new(
+                omegon_secrets::SecretsManager::new(secrets_dir.path()).unwrap(),
+            ),
+            context_metrics: crate::features::context::SharedContextMetrics::new(),
+            bridge_model: std::sync::Arc::new(std::sync::Mutex::new(Some(
+                "anthropic:claude-fable-5".to_string(),
+            ))),
+        };
+        let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let loop_config =
+            build_interactive_loop_config(&runtime, &shared_settings, &pending_compact);
+
+        assert_eq!(loop_config.model, "openai-codex:gpt-5.5");
+        assert_eq!(
+            loop_config.bridge_model.as_deref(),
+            Some("anthropic:claude-fable-5")
+        );
+        assert_eq!(
+            shared_settings.lock().unwrap().model,
+            "openai-codex:gpt-5.5"
+        );
     }
 
     #[test]

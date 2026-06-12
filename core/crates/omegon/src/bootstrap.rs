@@ -185,6 +185,9 @@ pub struct LoopConfigOverrides {
     pub secrets: Option<Arc<omegon_secrets::SecretsManager>>,
     /// Ollama manager (created at startup for interactive mode).
     pub ollama_manager: Option<crate::ollama::OllamaManager>,
+    /// Runtime bridge model override. Keeps UI/profile model intact while routing
+    /// provider calls to the model supported by the active bridge.
+    pub bridge_model: Option<String>,
 }
 
 /// Build a LoopConfig reading model/max_turns from shared settings, with the
@@ -208,6 +211,7 @@ pub fn build_loop_config(
         max_retries: overrides.max_retries,
         retry_delay_ms: 750,
         model,
+        bridge_model: overrides.bridge_model,
         cwd: cwd.to_path_buf(),
         extended_context: false,
         settings: Some(shared_settings.clone()),

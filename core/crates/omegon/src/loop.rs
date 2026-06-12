@@ -42,8 +42,11 @@ pub struct LoopConfig {
     pub max_retries: u32,
     /// Initial retry delay in milliseconds.
     pub retry_delay_ms: u64,
-    /// Model string to pass to the bridge (e.g. "anthropic:claude-sonnet-4-6")
+    /// Selected/profile model for UI intent and fallback defaults.
     pub model: String,
+    /// Runtime model string to pass to the active bridge when it differs from the
+    /// selected/profile model (for example, authenticated-provider fallback).
+    pub bridge_model: Option<String>,
     /// Working directory — used for path resolution in auto-batch rollback.
     pub cwd: std::path::PathBuf,
     /// Extended context window (1M for Anthropic).
@@ -80,6 +83,7 @@ impl Default for LoopConfig {
             max_retries: 0,
             retry_delay_ms: 750,
             model: "anthropic:claude-sonnet-4-6".into(),
+            bridge_model: None,
             cwd: std::env::current_dir().unwrap_or_default(),
             extended_context: false,
             settings: None,
@@ -339,7 +343,13 @@ pub async fn run(
     // (Called from the TUI entrypoint which passes the initial status)
 
     let base_stream_options = StreamOptions {
-        model: Some(config.model.clone()),
+        model: Some(
+            config
+                .bridge_model
+                .as_ref()
+                .unwrap_or(&config.model)
+                .clone(),
+        ),
         reasoning: None,
         extended_context: config.extended_context,
         ..Default::default()
@@ -685,12 +695,17 @@ pub async fn run(
                     crate::settings::ThinkingLevel::High => Some("high".to_string()),
                 }
             });
-            // Also re-read model (can change via /sonnet, /opus, etc.)
-            opts.model = config
-                .settings
-                .as_ref()
-                .and_then(|s| s.lock().ok().map(|g| g.model.clone()))
-                .or_else(|| Some(config.model.clone()));
+            // Also re-read model (can change via /sonnet, /opus, etc.), unless
+            // startup installed a bridge-specific runtime model. In that case,
+            // the selected/profile model remains UI intent, but provider calls
+            // must use the model belonging to the active bridge.
+            opts.model = config.bridge_model.clone().or_else(|| {
+                config
+                    .settings
+                    .as_ref()
+                    .and_then(|s| s.lock().ok().map(|g| g.model.clone()))
+                    .or_else(|| Some(config.model.clone()))
+            });
             // Track the active model for this turn so TurnEnd events and
             // error classification use the current model, not the startup value.
             active_model = opts.model.clone().unwrap_or_else(|| config.model.clone());
@@ -4727,6 +4742,7 @@ mod tests {
             max_retries: 8,
             retry_delay_ms: 750,
             model: "test".into(),
+            bridge_model: None,
             cwd: std::path::PathBuf::from("/tmp"),
             extended_context: false,
             settings: None,
