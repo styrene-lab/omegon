@@ -51,10 +51,10 @@ Related long-form design: [[docs/headroom-native-compression|Native Headroom-Com
 
 ### Phase A — stabilize current foundation
 
-- [ ] Commit current foundation slice: provider metadata, bounded CCR store, docs, strict dogfood tuning.
-- [ ] Add a regression fixture directory for redacted committed fixtures if any dogfood samples can be safely checked in.
+- [x] Commit current foundation slice: provider metadata, bounded CCR store, docs, strict dogfood tuning.
+- [x] Add a regression fixture directory for redacted committed fixtures if any dogfood samples can be safely checked in.
 - [x] Ensure `just headroom-dogfood` and strict `headroom-eval` are documented as the local gate.
-- [ ] Keep `.tmp/headroom` outputs ignored and non-authoritative.
+- [x] Keep `.tmp/headroom` outputs ignored and non-authoritative.
 
 For current localized work, use these gates:
 
@@ -73,7 +73,7 @@ Status: mostly complete for the deterministic baseline.
 - [x] Introduce `CompressionProvider` trait.
 - [x] Move deterministic implementation behind `NativeDeterministicProvider`.
 - [x] Preserve the current public behavior and provider identity.
-- [ ] Extend `headroom-eval` with `--provider native_deterministic` as a no-op baseline.
+- [x] Extend `headroom-eval` with `--provider native_deterministic` as a no-op baseline.
 - [ ] Add comparison output that can compare providers on the same fixture set.
 
 Do not add Kompressor/Ollama/ONNX providers until corpus breadth and strict deterministic gates are stronger.
