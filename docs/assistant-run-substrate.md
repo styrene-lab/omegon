@@ -39,3 +39,9 @@ Define a backend-owned assistant run/readiness substrate for the console. The su
 **Status:** accepted
 
 **Rationale:** The first assistant-run substrate should model runs launched through future console/backend control surfaces. Existing ACP sessions, TUI commands, and plan/task bindings can be related later without conflating their current lifecycles.
+
+### Assistant runs must support terminal blocked status
+
+**Status:** accepted
+
+**Rationale:** Long non-interactive assignments must have an explicit terminal outcome for work that cannot proceed without external input. The run contract must distinguish completed from blocked so agents do not end with conversational readiness text like 'ready to begin' while the orchestrator waits indefinitely.

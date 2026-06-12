@@ -58,6 +58,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add targeted single-assistant readiness surfaces for refreshing one assistant card over HTTP or ACP without fetching the full capability inventory.
 - Add dedicated HTTP and ACP assistant-list surfaces for compact launch-readiness cards without fetching the full capability inventory.
 - Add a compact assistant-list projection to capability inventory so console clients can render assistant cards without traversing full profile and graph internals.
+- Add a first-class blocked assistant-run status with structured unblock metadata and SQLite round-trip validation for long non-interactive assignments.
 - Register the capability inventory in the backend endpoint registry with ACP and HTTP transports so runtime capability advertisements include the assistant readiness surface.
 - Add HTTP and ACP regression coverage proving capability inventory exposes blocked assistant launch readiness at the external API boundary.
 - Add regression coverage for assistant launch readiness status transitions across ready, blocked, degraded, missing optional, and deferred-secret states.

@@ -22,6 +22,10 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+#[cfg(test)]
+pub(crate) static GLOBAL_TEST_ENV_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+
 #[allow(clippy::await_holding_refcell_ref)] // single-threaded LocalSet — no concurrent mutations
 mod acp;
 mod acp_plan_tasks;

@@ -806,8 +806,6 @@ mod tests {
     use crate::web::{ControlPlaneState, WebAuthState, WebDaemonStatus, WebStartupInfo};
     use std::sync::{Arc, Mutex};
 
-    static WEB_API_TEST_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
     fn test_state() -> WebState {
         WebState {
             handles: DashboardHandles::default(),
@@ -874,7 +872,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn assistant_runs_endpoint_returns_empty_runtime_projection() {
-        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
         std::env::set_current_dir(home.path()).unwrap();
@@ -888,7 +886,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn assistant_run_endpoint_404s_missing_runtime_run() {
-        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
         std::env::set_current_dir(home.path()).unwrap();
@@ -904,7 +902,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn capabilities_endpoint_reports_blocked_assistant_launch_readiness() {
-        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let agent_dir = home.path().join("catalog").join("blocked-agent");
         std::fs::create_dir_all(&agent_dir).unwrap();
@@ -953,7 +951,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn capability_assistants_endpoint_returns_compact_blocked_readiness() {
-        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         write_blocked_agent(home.path());
         let previous_home = std::env::var_os("OMEGON_HOME");
@@ -981,7 +979,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn capability_assistant_readiness_endpoint_returns_single_assistant() {
-        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         write_blocked_agent(home.path());
         let previous_home = std::env::var_os("OMEGON_HOME");
@@ -1006,7 +1004,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn capability_assistant_readiness_endpoint_404s_missing_assistant() {
-        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
@@ -1024,7 +1022,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn capabilities_endpoint_reports_secret_metadata_without_values() {
-        let _guard = WEB_API_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let ext_dir = home.path().join("extensions").join("secure-ext");
         std::fs::create_dir_all(&ext_dir).unwrap();

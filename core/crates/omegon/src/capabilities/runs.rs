@@ -13,6 +13,7 @@ pub struct AssistantRunSummary {
     pub status: AssistantRunStatus,
     pub trigger: AssistantRunTrigger,
     pub readiness_status: AssistantLaunchStatus,
+    pub blocked: Option<AssistantRunBlocked>,
     pub safe_progress: Option<String>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
@@ -26,6 +27,7 @@ pub enum AssistantRunStatus {
     Succeeded,
     Failed,
     Cancelled,
+    Blocked,
 }
 
 impl AssistantRunStatus {
@@ -36,6 +38,7 @@ impl AssistantRunStatus {
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
+            Self::Blocked => "blocked",
         }
     }
 
@@ -46,9 +49,51 @@ impl AssistantRunStatus {
             "succeeded" => Ok(Self::Succeeded),
             "failed" => Ok(Self::Failed),
             "cancelled" => Ok(Self::Cancelled),
+            "blocked" => Ok(Self::Blocked),
             other => anyhow::bail!("unknown assistant run status '{other}'"),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssistantRunBlocked {
+    pub reason: AssistantRunBlockedReason,
+    pub summary: String,
+    pub required_inputs: Vec<AssistantRunRequiredInput>,
+    pub resumable: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantRunBlockedReason {
+    MissingCredential,
+    MissingRepoAccess,
+    AmbiguousAcceptanceCriteria,
+    ApprovalRequired,
+    DependencyUnavailable,
+    TestEnvironmentUnavailable,
+    ExternalServiceUnavailable,
+    CannotReproduce,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssistantRunRequiredInput {
+    pub kind: AssistantRunRequiredInputKind,
+    pub label: String,
+    pub details: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantRunRequiredInputKind {
+    Secret,
+    Permission,
+    Clarification,
+    Approval,
+    ExternalDependency,
+    Environment,
+    Other,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,6 +156,7 @@ pub struct NewAssistantRun {
     pub status: AssistantRunStatus,
     pub trigger: AssistantRunTrigger,
     pub readiness_status: AssistantLaunchStatus,
+    pub blocked: Option<AssistantRunBlocked>,
     pub safe_progress: Option<String>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
@@ -157,6 +203,7 @@ impl SqliteAssistantRunStore {
                 trigger_label    TEXT,
                 readiness_status TEXT NOT NULL,
                 safe_progress    TEXT,
+                blocked_json     TEXT,
                 created_at       TEXT NOT NULL,
                 updated_at       TEXT NOT NULL,
                 started_at       TEXT,
@@ -187,6 +234,9 @@ impl SqliteAssistantRunStore {
                 ON assistant_run_events(run_id, created_at ASC);
             ",
         )?;
+        conn.execute_batch("ALTER TABLE assistant_runs ADD COLUMN blocked_json TEXT;")
+            .ok();
+
         Ok(())
     }
 
@@ -194,7 +244,7 @@ impl SqliteAssistantRunStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT run_id, assistant_id, status, trigger_source, trigger_label,
-                    readiness_status, safe_progress, created_at, updated_at
+                    readiness_status, safe_progress, blocked_json, created_at, updated_at
              FROM assistant_runs
              ORDER BY updated_at DESC, created_at DESC, run_id ASC",
         )?;
@@ -206,7 +256,7 @@ impl SqliteAssistantRunStore {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT run_id, assistant_id, status, trigger_source, trigger_label,
-                    readiness_status, safe_progress, created_at, updated_at
+                    readiness_status, safe_progress, blocked_json, created_at, updated_at
              FROM assistant_runs
              WHERE run_id = ?1",
             params![run_id],
@@ -217,14 +267,20 @@ impl SqliteAssistantRunStore {
     }
 
     pub fn insert(&self, run: NewAssistantRun) -> anyhow::Result<AssistantRunSummary> {
+        validate_blocked_contract(&run)?;
+        let blocked_json = run
+            .blocked
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
         let created_at = run.created_at.unwrap_or_else(now_sqlite);
         let updated_at = run.updated_at.unwrap_or_else(|| created_at.clone());
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO assistant_runs (
                 run_id, assistant_id, status, trigger_source, trigger_label,
-                readiness_status, safe_progress, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                readiness_status, safe_progress, blocked_json, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 run.run_id,
                 run.assistant_id,
@@ -233,6 +289,7 @@ impl SqliteAssistantRunStore {
                 run.trigger.label,
                 readiness_as_str(&run.readiness_status),
                 run.safe_progress,
+                blocked_json,
                 created_at,
                 updated_at,
             ],
@@ -249,10 +306,27 @@ impl SqliteAssistantRunStore {
     }
 }
 
+fn validate_blocked_contract(run: &NewAssistantRun) -> anyhow::Result<()> {
+    match (run.status, run.blocked.is_some()) {
+        (AssistantRunStatus::Blocked, true) => Ok(()),
+        (AssistantRunStatus::Blocked, false) => {
+            anyhow::bail!("blocked assistant runs require blocked metadata")
+        }
+        (_, true) => anyhow::bail!("blocked metadata is only valid for blocked assistant runs"),
+        (_, false) => Ok(()),
+    }
+}
+
 fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssistantRunSummary> {
     let status: String = row.get(2)?;
     let trigger_source: String = row.get(3)?;
     let readiness_status: String = row.get(5)?;
+    let blocked_json: Option<String> = row.get(7)?;
+    let blocked = blocked_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|err| to_sql_error(anyhow::Error::new(err)))?;
     Ok(AssistantRunSummary {
         run_id: row.get(0)?,
         assistant_id: row.get(1)?,
@@ -262,9 +336,10 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssistantRunSummary> 
             label: row.get(4)?,
         },
         readiness_status: readiness_from_str(&readiness_status).map_err(to_sql_error)?,
+        blocked,
         safe_progress: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 
@@ -303,6 +378,57 @@ mod tests {
         assert!(store.get("missing").unwrap().is_none());
     }
 
+    #[test]
+    fn blocked_runs_round_trip_with_required_inputs() {
+        let store = SqliteAssistantRunStore::in_memory().unwrap();
+        let mut run = run("blocked", "2026-06-11T00:00:00Z", "2026-06-11T00:01:00Z");
+        run.status = AssistantRunStatus::Blocked;
+        run.safe_progress = Some("blocked: missing credentials".into());
+        run.blocked = Some(AssistantRunBlocked {
+            reason: AssistantRunBlockedReason::MissingCredential,
+            summary: "GitHub credentials are required before issue work can continue.".into(),
+            required_inputs: vec![AssistantRunRequiredInput {
+                kind: AssistantRunRequiredInputKind::Secret,
+                label: "GITHUB_TOKEN".into(),
+                details: Some("Provide a token with repo read/write access.".into()),
+            }],
+            resumable: true,
+        });
+
+        let inserted = store.insert(run).unwrap();
+        assert_eq!(inserted.status, AssistantRunStatus::Blocked);
+        let blocked = inserted.blocked.as_ref().expect("blocked metadata");
+        assert_eq!(blocked.reason, AssistantRunBlockedReason::MissingCredential);
+        assert_eq!(
+            blocked.required_inputs[0].kind,
+            AssistantRunRequiredInputKind::Secret
+        );
+        assert_eq!(blocked.required_inputs[0].label, "GITHUB_TOKEN");
+        assert!(blocked.resumable);
+
+        let fetched = store.get("blocked").unwrap().unwrap();
+        assert_eq!(fetched.blocked, inserted.blocked);
+    }
+
+    #[test]
+    fn blocked_contract_rejects_invalid_metadata_combinations() {
+        let store = SqliteAssistantRunStore::in_memory().unwrap();
+        let mut blocked_without_metadata =
+            run("blocked", "2026-06-11T00:00:00Z", "2026-06-11T00:01:00Z");
+        blocked_without_metadata.status = AssistantRunStatus::Blocked;
+        assert!(store.insert(blocked_without_metadata).is_err());
+
+        let mut running_with_blocked_metadata =
+            run("running", "2026-06-11T00:00:00Z", "2026-06-11T00:01:00Z");
+        running_with_blocked_metadata.blocked = Some(AssistantRunBlocked {
+            reason: AssistantRunBlockedReason::Other,
+            summary: "not allowed while running".into(),
+            required_inputs: Vec::new(),
+            resumable: false,
+        });
+        assert!(store.insert(running_with_blocked_metadata).is_err());
+    }
+
     fn run(run_id: &str, created_at: &str, updated_at: &str) -> NewAssistantRun {
         NewAssistantRun {
             run_id: run_id.into(),
@@ -313,6 +439,7 @@ mod tests {
                 label: Some("manual".into()),
             },
             readiness_status: AssistantLaunchStatus::Ready,
+            blocked: None,
             safe_progress: Some("completed".into()),
             created_at: Some(created_at.into()),
             updated_at: Some(updated_at.into()),

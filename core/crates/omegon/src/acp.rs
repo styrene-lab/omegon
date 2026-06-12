@@ -4051,10 +4051,6 @@ fn convert_acp_mcp_server(
 #[cfg(test)]
 mod extension_metadata_tests {
     use super::*;
-    use std::sync::LazyLock;
-
-    static ACP_TEST_ENV_LOCK: LazyLock<tokio::sync::Mutex<()>> =
-        LazyLock::new(|| tokio::sync::Mutex::new(()));
     use agent_client_protocol::schema::{InitializeRequest, ProtocolVersion};
 
     #[tokio::test]
@@ -4561,7 +4557,7 @@ mod extension_metadata_tests {
 
     #[tokio::test]
     async fn extensions_list_reports_installed_not_callable_extension() {
-        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let ext_dir = home.path().join("extensions").join("dummy-ext");
         std::fs::create_dir_all(&ext_dir).unwrap();
@@ -4621,7 +4617,7 @@ optional = ["DUMMY_OPTIONAL"]
 
     #[tokio::test]
     async fn extensions_enable_clears_auto_disabled_stability_state() {
-        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let ext_dir = home.path().join("extensions").join("flynt");
         std::fs::create_dir_all(ext_dir.join(".omegon")).unwrap();
@@ -4825,7 +4821,7 @@ auto_disabled = true
 
     #[tokio::test]
     async fn assistant_runs_list_reports_empty_runtime_projection() {
-        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
         std::env::set_current_dir(home.path()).unwrap();
@@ -4841,7 +4837,7 @@ auto_disabled = true
 
     #[tokio::test]
     async fn assistant_runs_show_reports_missing_runtime_run() {
-        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
         std::env::set_current_dir(home.path()).unwrap();
@@ -4860,7 +4856,7 @@ auto_disabled = true
 
     #[tokio::test]
     async fn capabilities_inventory_reports_blocked_assistant_launch_readiness() {
-        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let agent_dir = home.path().join("catalog").join("blocked-agent");
         std::fs::create_dir_all(&agent_dir).unwrap();
@@ -4911,7 +4907,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn capability_assistant_readiness_reports_single_assistant() {
-        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let agent_dir = home.path().join("catalog").join("blocked-agent");
         std::fs::create_dir_all(&agent_dir).unwrap();
@@ -4955,7 +4951,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn capability_assistant_readiness_reports_missing_assistant() {
-        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
@@ -4979,7 +4975,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn capability_assistants_reports_compact_blocked_readiness() {
-        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let agent_dir = home.path().join("catalog").join("blocked-agent");
         std::fs::create_dir_all(&agent_dir).unwrap();
@@ -5024,7 +5020,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn capabilities_inventory_reports_secret_metadata_without_values() {
-        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let ext_dir = home.path().join("extensions").join("secure-ext");
         std::fs::create_dir_all(&ext_dir).unwrap();
