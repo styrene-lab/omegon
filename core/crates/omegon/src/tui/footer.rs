@@ -37,9 +37,6 @@ pub struct SessionUsageSlice {
 pub struct FooterData {
     pub model_id: String,
     pub model_provider: String,
-    /// Operator-selected model when the runtime bridge serves a different one
-    /// (startup fallback). None when selection and bridge agree.
-    pub fallback_from: Option<String>,
     pub context_percent: f32,
     pub context_window: usize,
     pub context_class: ContextClass,
@@ -598,16 +595,6 @@ impl FooterData {
             ),
         ];
 
-        // Fallback marker — the bridge is serving a different model than the
-        // operator selected (credentials missing for the selection). Own line:
-        // the auth line is already at card width.
-        let fallback_line: Option<Line<'static>> = self.fallback_from.as_ref().map(|selected| {
-            Line::from(Span::styled(
-                format!("⇄ selected {} unavailable", short_model(selected)),
-                Style::default().fg(t.warning()),
-            ))
-        });
-
         // Persona badge
         if let Some(ref p) = self.harness.active_persona {
             auth_parts.push(Span::styled(" · ", Style::default().fg(t.border_dim())));
@@ -626,9 +613,6 @@ impl FooterData {
         }
 
         lines.push(Line::from(auth_parts));
-        if let Some(line) = fallback_line {
-            lines.push(line);
-        }
         if let Some(ref warning) = self.route_warning {
             lines.push(Line::from(Span::styled(
                 crate::util::truncate(warning, inner.width.saturating_sub(1) as usize),
@@ -1178,43 +1162,6 @@ mod tests {
         assert!(
             text.contains("75") || text.contains("200k"),
             "should show context info: {text}"
-        );
-    }
-
-    #[test]
-    fn model_card_shows_fallback_marker_when_bridge_diverges() {
-        let data = FooterData {
-            model_id: "claude-fable-5".into(),
-            model_provider: "anthropic".into(),
-            fallback_from: Some("openai-codex:gpt-5.5".into()),
-            context_window: 200_000,
-            ..Default::default()
-        };
-        let area = Rect::new(0, 0, 160, 8);
-        let backend = TestBackend::new(area.width, area.height);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal
-            .draw(|frame| data.render(area, frame, &super::super::theme::Alpharius))
-            .unwrap();
-
-        let text: String = {
-            let buf = terminal.backend().buffer();
-            let a = buf.area;
-            (0..a.height)
-                .flat_map(|y| (0..a.width).map(move |x| buf[(x, y)].symbol().to_string()))
-                .collect()
-        };
-        assert!(
-            text.contains("claude-fable-5"),
-            "should show the serving model: {text}"
-        );
-        assert!(
-            text.contains("unavailable"),
-            "should flag bridge/selection divergence: {text}"
-        );
-        assert!(
-            text.contains("gpt-5.5"),
-            "should name the operator-selected model: {text}"
         );
     }
 

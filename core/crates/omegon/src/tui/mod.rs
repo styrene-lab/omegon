@@ -4094,22 +4094,8 @@ impl App {
         // ── Sync footer data from settings (every frame) ────
         {
             let s = self.settings();
-            if let Some(bridge_model) = s
-                .runtime_bridge_model
-                .as_ref()
-                .filter(|m| **m != s.model)
-            {
-                // Bridge diverged from operator selection (startup fallback):
-                // show the model that is actually serving the session.
-                self.footer_data.model_id = bridge_model.clone();
-                self.footer_data.model_provider =
-                    crate::providers::infer_provider_id(bridge_model);
-                self.footer_data.fallback_from = Some(s.model.clone());
-            } else {
-                self.footer_data.model_id = s.model.clone();
-                self.footer_data.model_provider = s.provider().to_string();
-                self.footer_data.fallback_from = None;
-            }
+            self.footer_data.model_id = s.model.clone();
+            self.footer_data.model_provider = s.provider().to_string();
             self.footer_data.context_class = s.effective_requested_class();
             self.footer_data.actual_context_class = s.context_class;
             self.footer_data.context_window = s.context_window;
@@ -7447,7 +7433,7 @@ Scroll transcript:
             }
             AgentEvent::RouteChanged {
                 state,
-                selected,
+                selected: _,
                 serving,
                 warning,
                 message,
@@ -7456,11 +7442,6 @@ Scroll transcript:
                     self.footer_data.model_id = serving.clone();
                     self.footer_data.model_provider = crate::providers::infer_provider_id(serving);
                 }
-                self.footer_data.fallback_from = if state == "fallback" {
-                    selected.clone()
-                } else {
-                    None
-                };
                 self.footer_data.route_warning = warning.clone().or_else(|| {
                     if state == "serving" {
                         None
