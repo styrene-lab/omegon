@@ -298,6 +298,46 @@ impl SqliteAssistantRunStore {
         self.get_latest_inserted()
     }
 
+    pub fn mark_blocked(
+        &self,
+        run_id: &str,
+        blocked: AssistantRunBlocked,
+        safe_progress: Option<String>,
+        updated_at: Option<String>,
+    ) -> anyhow::Result<Option<AssistantRunSummary>> {
+        let Some(current) = self.get(run_id)? else {
+            return Ok(None);
+        };
+        if !matches!(
+            current.status,
+            AssistantRunStatus::Queued | AssistantRunStatus::Running
+        ) {
+            anyhow::bail!(
+                "cannot mark assistant run '{}' blocked from terminal status '{}'",
+                run_id,
+                current.status.as_str()
+            );
+        }
+
+        let blocked_json = serde_json::to_string(&blocked)?;
+        let updated_at = updated_at.unwrap_or_else(now_sqlite);
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE assistant_runs
+             SET status = ?2, blocked_json = ?3, safe_progress = ?4, updated_at = ?5
+             WHERE run_id = ?1",
+            params![
+                run_id,
+                AssistantRunStatus::Blocked.as_str(),
+                blocked_json,
+                safe_progress,
+                updated_at,
+            ],
+        )?;
+        drop(conn);
+        self.get(run_id)
+    }
+
     fn get_latest_inserted(&self) -> anyhow::Result<AssistantRunSummary> {
         self.list()?
             .into_iter()
@@ -427,6 +467,74 @@ mod tests {
             resumable: false,
         });
         assert!(store.insert(running_with_blocked_metadata).is_err());
+    }
+
+    #[test]
+    fn mark_blocked_updates_running_run_with_structured_metadata() {
+        let store = SqliteAssistantRunStore::in_memory().unwrap();
+        store
+            .insert(run(
+                "running",
+                "2026-06-11T00:00:00Z",
+                "2026-06-11T00:01:00Z",
+            ))
+            .unwrap();
+
+        let updated = store
+            .mark_blocked(
+                "running",
+                github_token_blocker(),
+                Some("blocked: missing GitHub token".into()),
+                Some("2026-06-11T00:02:00Z".into()),
+            )
+            .unwrap()
+            .expect("updated run");
+
+        assert_eq!(updated.status, AssistantRunStatus::Blocked);
+        assert_eq!(updated.updated_at.as_deref(), Some("2026-06-11T00:02:00Z"));
+        assert_eq!(
+            updated.safe_progress.as_deref(),
+            Some("blocked: missing GitHub token")
+        );
+        assert_eq!(
+            updated.blocked.as_ref().unwrap().reason,
+            AssistantRunBlockedReason::MissingCredential
+        );
+    }
+
+    #[test]
+    fn mark_blocked_returns_none_for_missing_run() {
+        let store = SqliteAssistantRunStore::in_memory().unwrap();
+        let updated = store
+            .mark_blocked("missing", github_token_blocker(), None, None)
+            .unwrap();
+        assert!(updated.is_none());
+    }
+
+    #[test]
+    fn mark_blocked_rejects_terminal_runs() {
+        let store = SqliteAssistantRunStore::in_memory().unwrap();
+        let mut terminal = run("done", "2026-06-11T00:00:00Z", "2026-06-11T00:01:00Z");
+        terminal.status = AssistantRunStatus::Succeeded;
+        store.insert(terminal).unwrap();
+
+        let err = store
+            .mark_blocked("done", github_token_blocker(), None, None)
+            .unwrap_err();
+        assert!(err.to_string().contains("terminal status 'succeeded'"));
+    }
+
+    fn github_token_blocker() -> AssistantRunBlocked {
+        AssistantRunBlocked {
+            reason: AssistantRunBlockedReason::MissingCredential,
+            summary: "GitHub credentials are required before issue work can continue.".into(),
+            required_inputs: vec![AssistantRunRequiredInput {
+                kind: AssistantRunRequiredInputKind::Secret,
+                label: "GITHUB_TOKEN".into(),
+                details: Some("Provide a token with repo read/write access.".into()),
+            }],
+            resumable: true,
+        }
     }
 
     fn run(run_id: &str, created_at: &str, updated_at: &str) -> NewAssistantRun {
