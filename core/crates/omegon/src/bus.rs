@@ -229,6 +229,19 @@ impl EventBus {
         self.features.push(feature);
     }
 
+    /// Replace an existing feature by name, or register it if absent.
+    /// Call `finalize()` afterwards to rebuild cached command/tool definitions.
+    pub fn replace_feature(&mut self, feature: Box<dyn Feature>) {
+        let name = feature.name().to_string();
+        if let Some(idx) = self.features.iter().position(|f| f.name() == name) {
+            tracing::info!(feature = %name, "replaced feature");
+            self.features[idx] = feature;
+        } else {
+            tracing::info!(feature = %name, "registered feature");
+            self.features.push(feature);
+        }
+    }
+
     /// Register an internal tool name → feature mapping. Internal tools
     /// are NOT in the LLM-visible tool_defs but can be called via
     /// `execute_internal`. The feature_name must match a previously

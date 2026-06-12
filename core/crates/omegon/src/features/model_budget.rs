@@ -7,6 +7,8 @@
 //! Tools: set_model_tier, set_thinking_level
 //! Commands: /gloriana, /victory, /retribution, /haiku, /sonnet, /opus
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -86,18 +88,74 @@ impl ModelTier {
 
 pub struct ModelBudget {
     settings: SharedSettings,
+    route_controller: Option<Arc<crate::route::RouteController>>,
 }
 
 impl ModelBudget {
     pub fn new(settings: SharedSettings) -> Self {
-        Self { settings }
+        Self {
+            settings,
+            route_controller: None,
+        }
+    }
+
+    pub fn with_route_controller(
+        settings: SharedSettings,
+        route_controller: Arc<crate::route::RouteController>,
+    ) -> Self {
+        Self {
+            settings,
+            route_controller: Some(route_controller),
+        }
     }
 
     fn current_provider(&self) -> String {
         self.settings.lock().unwrap().provider().to_string()
     }
 
-    fn switch_tier(&self, tier: ModelTier, reason: &str) -> String {
+    async fn switch_tier(&self, tier: ModelTier, reason: &str) -> anyhow::Result<String> {
+        let (provider, current) = {
+            let s = self.settings.lock().unwrap();
+            let provider = if matches!(tier, ModelTier::Local) {
+                "ollama".to_string()
+            } else {
+                s.provider().to_string()
+            };
+            (provider, s.model_short().to_string())
+        };
+        let model = if matches!(tier, ModelTier::Local) {
+            if provider == "ollama" && current != "local" {
+                current
+            } else {
+                "qwen3:30b".to_string()
+            }
+        } else {
+            tier.resolve_model(&provider, &current)
+        };
+        let target = format!("{provider}:{model}");
+        if let Some(controller) = self.route_controller.as_ref() {
+            let bridge = crate::providers::auto_detect_bridge(&target).await;
+            let snapshot = controller
+                .switch_model(target.clone(), &crate::route::CredentialLedger, bridge)
+                .await?;
+            if snapshot.serving_model() != Some(target.as_str()) {
+                anyhow::bail!(snapshot.operator_status());
+            }
+        }
+        {
+            let mut s = self.settings.lock().unwrap();
+            s.set_model(&target);
+            s.provider_connected = crate::auth::provider_connected_for_model(&target);
+        }
+        Ok(format!(
+            "{} {} → {target} ({})\n{reason}",
+            tier.icon(),
+            tier.as_str(),
+            tier.description(),
+        ))
+    }
+
+    fn switch_tier_legacy(&self, tier: ModelTier, reason: &str) -> String {
         let mut s = self.settings.lock().unwrap();
         let provider = if matches!(tier, ModelTier::Local) {
             "ollama".to_string()
@@ -114,11 +172,12 @@ impl ModelBudget {
         } else {
             tier.resolve_model(&provider, &current)
         };
-        s.model = format!("{provider}:{model}");
-        s.context_window = crate::settings::Settings::new(&s.model).context_window;
+        let target = format!("{provider}:{model}");
+        s.set_model(&target);
+        s.provider_connected = crate::auth::provider_connected_for_model(&target);
         drop(s);
         format!(
-            "{} {} → {provider}:{model} ({})\n{reason}",
+            "{} {} → {target} ({})\n{reason}",
             tier.icon(),
             tier.as_str(),
             tier.description(),
@@ -224,7 +283,7 @@ impl Feature for ModelBudget {
                 let reason = args["reason"].as_str().unwrap_or("No reason given");
                 let tier = ModelTier::parse(tier_str)
                     .ok_or_else(|| anyhow::anyhow!("Invalid tier: {tier_str}"))?;
-                let msg = self.switch_tier(tier, reason);
+                let msg = self.switch_tier(tier, reason).await?;
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: msg }],
                     details: json!({"tier": tier_str, "model": tier.resolve_model(&self.current_provider(), "")}),
@@ -236,7 +295,7 @@ impl Feature for ModelBudget {
                     .unwrap_or("User requested offline mode");
                 let preferred = args["preferred_model"].as_str();
                 let model = preferred.unwrap_or("auto");
-                let msg = self.switch_tier(ModelTier::Local, reason);
+                let msg = self.switch_tier(ModelTier::Local, reason).await?;
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: format!(
@@ -318,7 +377,7 @@ impl Feature for ModelBudget {
             "retribution" | "haiku" => ModelTier::Retribution,
             _ => return CommandResult::NotHandled,
         };
-        let msg = self.switch_tier(tier, &format!("/{name} command"));
+        let msg = self.switch_tier_legacy(tier, &format!("/{name} command"));
         CommandResult::Display(msg)
     }
 }
@@ -384,7 +443,7 @@ mod tests {
     fn switch_tier_updates_settings() {
         let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
         let budget = ModelBudget::new(settings.clone());
-        let msg = budget.switch_tier(ModelTier::Gloriana, "test");
+        let msg = budget.switch_tier_legacy(ModelTier::Gloriana, "test");
         assert!(msg.contains("gloriana"), "should mention tier: {msg}");
         assert_eq!(
             settings.lock().unwrap().model,
@@ -397,7 +456,7 @@ mod tests {
     fn switch_local_tier_moves_to_ollama_instead_of_anthropic() {
         let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
         let budget = ModelBudget::new(settings.clone());
-        let msg = budget.switch_tier(ModelTier::Local, "offline please");
+        let msg = budget.switch_tier_legacy(ModelTier::Local, "offline please");
         assert!(
             msg.contains("ollama:qwen3:30b"),
             "unexpected message: {msg}"

@@ -3930,6 +3930,15 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         Some(events_tx.clone()),
     ));
     let bridge: Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>> = route_controller.bridge();
+    if shared_settings.lock().is_ok() {
+        agent.bus.replace_feature(Box::new(
+            features::model_budget::ModelBudget::with_route_controller(
+                shared_settings.clone(),
+                route_controller.clone(),
+            ),
+        ));
+        agent.bus.finalize();
+    }
     let (command_tx, mut command_rx) = tokio::sync::mpsc::channel::<tui::TuiCommand>(16);
 
     // Wire command_tx to ContextProvider for tool dispatch
