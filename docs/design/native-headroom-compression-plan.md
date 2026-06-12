@@ -89,7 +89,7 @@ Status: active current focus.
 - [ ] Generate fixtures from public repositories using the optional broad corpus manifest.
 - [ ] Add corpus-level labels beyond fixture class where needed: `canonical`, `adversarial`, `dogfood`, `regression`, `corpus`.
 - [x] Track class/domain metrics separately so aggregate savings cannot hide domain regressions.
-- [ ] Add automated fixture minimization/redaction guidance before any fixture is committed.
+- [x] Add automated fixture minimization/redaction guidance before any fixture is committed.
 
 Current committed/supporting manifest artifacts:
 
@@ -98,6 +98,7 @@ Current committed/supporting manifest artifacts:
 - `docs/evals/headroom-corpus-large.example.json` — optional broad corpus references under ignored `.tmp/headroom/` paths.
 - `scripts/headroom_dogfood.py [manifest.json]` — manifest-driven fixture generation.
 - `scripts/headroom_corpus_collect.py <collector-manifest.json>` — copies/clones bounded corpus sources under `.tmp/headroom/` and emits `.tmp/headroom/generated-corpus.json` for dogfood generation.
+- `docs/evals/headroom-fixture-guidelines.md` — minimization/redaction policy for converting local dogfood failures into committed regression fixtures.
 
 ### Phase D — integrate with existing benchmark harness (future release)
 
