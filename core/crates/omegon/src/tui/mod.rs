@@ -3860,18 +3860,37 @@ impl App {
         }
 
         // ── Main surface layout ────────────────────────────────────
+        let live_cleave = self
+            .dashboard_handles
+            .cleave
+            .as_ref()
+            .and_then(|cp_lock| cp_lock.lock().ok().map(|cp| cp.clone()))
+            .filter(|cp| cp.active)
+            .or_else(|| self.dashboard.cleave.clone().filter(|cp| cp.active));
+        let live_delegate = self
+            .dashboard_handles
+            .delegate
+            .as_ref()
+            .and_then(|dp_lock| dp_lock.lock().ok().map(|dp| dp.clone()))
+            .filter(|dp| dp.active || dp.running > 0)
+            .or_else(|| {
+                self.dashboard
+                    .delegate
+                    .clone()
+                    .filter(|dp| dp.active || dp.running > 0)
+            });
         let dashboard_has_content = self.dashboard.status_counts.total > 0
             || self.dashboard.focused_node.is_some()
             || !self.dashboard.active_changes.is_empty()
-            || self.dashboard.cleave.as_ref().is_some_and(|c| c.active)
-            || self.dashboard.delegate.as_ref().is_some_and(|d| d.active || d.running > 0);
+            || live_cleave.is_some()
+            || live_delegate.is_some();
         let editor_height = editor_height_for(&self.editor, area);
         let editor_info_height = u16::from(!self.queued_prompts.is_empty());
         let workbench_state = if !self.focus_mode {
             WorkbenchState {
                 active: active_workbench_snapshot(self.workbench_state.active.as_ref(), None),
-                cleave: self.dashboard.cleave.clone().filter(|p| p.active),
-                delegate: self.dashboard.delegate.clone().filter(|p| p.active || p.running > 0),
+                cleave: live_cleave,
+                delegate: live_delegate,
                 workstreams: self.workbench_state.workstreams.clone(),
             }
         } else {
