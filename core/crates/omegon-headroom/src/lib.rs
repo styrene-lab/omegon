@@ -1,4 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -193,6 +196,81 @@ pub struct HeadroomStoreStats {
     pub max_objects: usize,
     pub max_original_bytes: usize,
     pub evicted_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileStoredOriginal {
+    pub reference: HeadroomRef,
+    pub source: String,
+    pub created_at_unix: u64,
+    pub text: String,
+}
+
+pub struct FileHeadroomStore {
+    root: PathBuf,
+}
+
+impl FileHeadroomStore {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn store_original(
+        &self,
+        reference: HeadroomRef,
+        source: &str,
+        text: &str,
+    ) -> Result<PathBuf> {
+        fs::create_dir_all(&self.root)?;
+        let path = self.object_path(&reference.id)?;
+        if path.exists() {
+            return Ok(path);
+        }
+        let stored = FileStoredOriginal {
+            reference,
+            source: source.to_owned(),
+            created_at_unix: current_unix_time(),
+            text: text.to_owned(),
+        };
+        let body = serde_json::to_vec_pretty(&stored)?;
+        fs::write(&path, body)?;
+        Ok(path)
+    }
+
+    pub fn retrieve(&self, id: &str) -> Result<FileStoredOriginal> {
+        let path = self.object_path(id)?;
+        let text = fs::read_to_string(&path)
+            .map_err(|err| anyhow!("unknown headroom object: {id} ({err})"))?;
+        let stored = serde_json::from_str::<FileStoredOriginal>(&text)?;
+        if stored.reference.id != id {
+            return Err(anyhow!(
+                "headroom object id mismatch: requested {id}, found {}",
+                stored.reference.id
+            ));
+        }
+        Ok(stored)
+    }
+
+    pub fn store_compression_input(&self, input: &CompressionInput) -> Result<HeadroomRef> {
+        let kind = input.kind_hint.unwrap_or_else(|| detect_kind(&input.text));
+        let reference = make_reference(kind, &input.text);
+        self.store_original(reference.clone(), &input.source, &input.text)?;
+        Ok(reference)
+    }
+
+    pub fn object_path(&self, id: &str) -> Result<PathBuf> {
+        let Some(suffix) = id.strip_prefix("hr:") else {
+            return Err(anyhow!("invalid headroom id: {id}"));
+        };
+        if suffix.is_empty() || !suffix.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(anyhow!("invalid headroom id: {id}"));
+        }
+        Ok(self.root.join(format!("{suffix}.json")))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1116,6 +1194,13 @@ fn trim_to_target(mut text: String, target_bytes: usize) -> String {
     text.truncate(boundary);
     text.push_str("\n[headroom: compressed output clipped to policy target]\n");
     text
+}
+
+fn current_unix_time() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 fn floor_char_boundary(text: &str, index: usize) -> usize {

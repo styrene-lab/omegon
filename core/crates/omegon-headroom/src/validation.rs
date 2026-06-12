@@ -33,6 +33,7 @@ impl FixtureClass {
 pub struct ValidationFixture {
     pub name: String,
     pub class: FixtureClass,
+    pub domain: Option<String>,
     pub kind_hint: Option<ContentKind>,
     pub input: String,
     pub required_facts: Vec<String>,
@@ -44,6 +45,7 @@ pub struct ValidationFixture {
 pub struct FixtureValidationReport {
     pub name: String,
     pub class: FixtureClass,
+    pub domain: String,
     pub content_kind: ContentKind,
     pub compressed: bool,
     pub original_bytes: usize,
@@ -79,9 +81,23 @@ pub struct ClassValidationSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomainValidationSummary {
+    pub domain: String,
+    pub fixtures: usize,
+    pub passed: bool,
+    pub total_original_bytes: usize,
+    pub total_evaluated_compressed_bytes: usize,
+    pub estimated_tokens_before: usize,
+    pub evaluated_estimated_tokens_after: usize,
+    pub evaluated_savings_percent: u8,
+    pub evaluated_token_savings_percent: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidationSuiteReport {
     pub fixtures: Vec<FixtureValidationReport>,
     pub classes: Vec<ClassValidationSummary>,
+    pub domains: Vec<DomainValidationSummary>,
     pub compression_provider: CompressionProviderInfo,
     pub passed: bool,
     pub total_original_bytes: usize,
@@ -204,6 +220,7 @@ pub fn validate_fixture_with_counter(
     FixtureValidationReport {
         name: fixture.name.clone(),
         class: fixture.class,
+        domain: fixture_domain(fixture, output.content_kind),
         content_kind: output.content_kind,
         compressed: output.compressed,
         original_bytes: output.stats.original_bytes,
@@ -313,6 +330,7 @@ pub fn validate_suite_with_counter(
         .map(|report| report.evaluated_estimated_tokens_after)
         .sum();
     let classes = class_summaries(&reports);
+    let domains = domain_summaries(&reports);
     let evaluated_savings_percent =
         percent_saved(total_original_bytes, total_evaluated_compressed_bytes);
     let evaluated_token_savings_percent =
@@ -322,6 +340,7 @@ pub fn validate_suite_with_counter(
         passed: reports.iter().all(|report| report.passed),
         fixtures: reports,
         classes,
+        domains,
         compression_provider: NativeDeterministicProvider::new().info(),
         total_original_bytes,
         total_evaluated_compressed_bytes,
@@ -331,6 +350,31 @@ pub fn validate_suite_with_counter(
         token_counter_kind: token_counter.kind().to_string(),
         evaluated_token_savings_percent,
         evaluated_savings_percent,
+    }
+}
+
+fn fixture_domain(fixture: &ValidationFixture, content_kind: ContentKind) -> String {
+    fixture
+        .domain
+        .clone()
+        .unwrap_or_else(|| content_kind_domain(content_kind).to_owned())
+}
+
+fn normalize_domain(domain: Option<String>, kind_hint: Option<ContentKind>) -> Option<String> {
+    domain
+        .map(|domain| domain.trim().to_ascii_lowercase())
+        .filter(|domain| !domain.is_empty())
+        .or_else(|| kind_hint.map(|kind| content_kind_domain(kind).to_owned()))
+}
+
+fn content_kind_domain(kind: ContentKind) -> &'static str {
+    match kind {
+        ContentKind::Json => "json",
+        ContentKind::Code => "code",
+        ContentKind::Log => "log",
+        ContentKind::Diff => "diff",
+        ContentKind::Markdown => "markdown",
+        ContentKind::PlainText => "plain_text",
     }
 }
 
@@ -387,6 +431,55 @@ fn class_summaries(reports: &[FixtureValidationReport]) -> Vec<ClassValidationSu
     .collect()
 }
 
+fn domain_summaries(reports: &[FixtureValidationReport]) -> Vec<DomainValidationSummary> {
+    let mut domains = reports
+        .iter()
+        .map(|report| report.domain.clone())
+        .collect::<Vec<_>>();
+    domains.sort();
+    domains.dedup();
+
+    domains
+        .into_iter()
+        .map(|domain| {
+            let matching = reports
+                .iter()
+                .filter(|report| report.domain == domain)
+                .collect::<Vec<_>>();
+            let total_original_bytes = matching.iter().map(|report| report.original_bytes).sum();
+            let total_evaluated_compressed_bytes = matching
+                .iter()
+                .map(|report| report.evaluated_compressed_bytes)
+                .sum();
+            let estimated_tokens_before = matching
+                .iter()
+                .map(|report| report.estimated_tokens_before)
+                .sum();
+            let evaluated_estimated_tokens_after = matching
+                .iter()
+                .map(|report| report.evaluated_estimated_tokens_after)
+                .sum();
+            DomainValidationSummary {
+                domain,
+                fixtures: matching.len(),
+                passed: matching.iter().all(|report| report.passed),
+                total_original_bytes,
+                total_evaluated_compressed_bytes,
+                estimated_tokens_before,
+                evaluated_estimated_tokens_after,
+                evaluated_savings_percent: percent_saved(
+                    total_original_bytes,
+                    total_evaluated_compressed_bytes,
+                ),
+                evaluated_token_savings_percent: percent_saved(
+                    estimated_tokens_before,
+                    evaluated_estimated_tokens_after,
+                ),
+            }
+        })
+        .collect()
+}
+
 pub fn canonical_validation_fixtures() -> Vec<ValidationFixture> {
     vec![
         json_error_fixture(),
@@ -403,6 +496,8 @@ struct FileValidationFixture {
     name: String,
     #[serde(default)]
     class: Option<FixtureClass>,
+    #[serde(default)]
+    domain: Option<String>,
     #[serde(default)]
     kind_hint: Option<ContentKind>,
     input: String,
@@ -423,6 +518,7 @@ impl From<FileValidationFixture> for ValidationFixture {
         Self {
             name: value.name,
             class: value.class.unwrap_or(FixtureClass::Dogfood),
+            domain: normalize_domain(value.domain, value.kind_hint),
             kind_hint: value.kind_hint,
             input: value.input,
             required_facts: value.required_facts,
@@ -501,6 +597,7 @@ fn json_error_fixture() -> ValidationFixture {
     ValidationFixture {
         name: "json-critical-error".into(),
         class: FixtureClass::CanonicalSmoke,
+        domain: Some("json".into()),
         kind_hint: Some(ContentKind::Json),
         input: serde_json::to_string(&rows).expect("fixture json serializes"),
         required_facts: vec![
@@ -537,6 +634,7 @@ fn cargo_failure_fixture() -> ValidationFixture {
     ValidationFixture {
         name: "cargo-failure-log".into(),
         class: FixtureClass::CanonicalSmoke,
+        domain: Some("log".into()),
         kind_hint: Some(ContentKind::Log),
         input: lines.join("\n"),
         required_facts: vec![
@@ -558,6 +656,7 @@ fn compact_grep_passthrough_fixture() -> ValidationFixture {
     ValidationFixture {
         name: "compact-grep-passthrough".into(),
         class: FixtureClass::CanonicalSmoke,
+        domain: Some("plain_text".into()),
         kind_hint: Some(ContentKind::PlainText),
         input,
         required_facts: vec!["src/module_7.rs:17:fn target_7() {}".into()],
@@ -583,6 +682,7 @@ impl Compressor {
     ValidationFixture {
         name: "fresh-rust-source-passthrough".into(),
         class: FixtureClass::CanonicalSmoke,
+        domain: Some("code".into()),
         kind_hint: Some(ContentKind::Code),
         input,
         required_facts: vec!["pub fn compress".into()],
@@ -618,6 +718,7 @@ fn json_schema_signal_fixture() -> ValidationFixture {
     ValidationFixture {
         name: "json-schema-signal-critical-row".into(),
         class: FixtureClass::Adversarial,
+        domain: Some("json".into()),
         kind_hint: Some(ContentKind::Json),
         input: serde_json::to_string(&rows).expect("fixture json serializes"),
         required_facts: vec![
@@ -648,6 +749,7 @@ fn threshold_plaintext_fixture() -> ValidationFixture {
     ValidationFixture {
         name: "threshold-plaintext-required-decision".into(),
         class: FixtureClass::Adversarial,
+        domain: Some("plain_text".into()),
         kind_hint: Some(ContentKind::PlainText),
         input: lines.join("\n"),
         required_facts: vec!["keep compression default-off".into()],
@@ -689,6 +791,7 @@ mod tests {
         let fixture = ValidationFixture {
             name: "missing-fact".into(),
             class: FixtureClass::Regression,
+            domain: Some("log".into()),
             kind_hint: Some(ContentKind::Log),
             input: (0..200)
                 .map(|i| format!("info line {i}"))
