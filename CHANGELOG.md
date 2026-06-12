@@ -35,6 +35,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Keep incomplete Workbench plans visible after an assistant turn completes so operators can inspect and continue active plans between turns.
 - Pin the slim plan panel below the composer and above the engine status bar, with a compact height cap so large plans do not crowd typed input.
 - Reject staged agent-state telemetry in source-clean checks so live audit logs cannot accidentally leak into source commits.
 - Make interactive startup import discovered provider credentials before bridge selection, visibly warn on expired profile-model credentials, and fall back to an authenticated provider before installing the login-only null bridge.

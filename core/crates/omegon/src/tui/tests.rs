@@ -1438,7 +1438,7 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
 }
 
 #[test]
-fn assistant_completed_turn_clears_stale_live_plan_lane() {
+fn assistant_completed_turn_keeps_incomplete_live_plan_lane() {
     let mut app = test_app();
     app.handle_agent_event(AgentEvent::PlanUpdated {
         snapshot_json: serde_json::json!({
@@ -1481,10 +1481,10 @@ fn assistant_completed_turn_clears_stale_live_plan_lane() {
         },
     )));
 
-    assert!(app.workbench_state.active.is_none());
+    assert!(app.workbench_state.active.is_some());
     let text = render_app_to_string(&mut app, 140, 18);
-    assert!(!text.contains("plan active"), "{text}");
-    assert!(!text.contains("Harden set_recipe"), "{text}");
+    assert!(text.contains("plan active"), "{text}");
+    assert!(text.contains("Harden set_recipe"), "{text}");
     assert!(text.contains("turn done"), "{text}");
 }
 

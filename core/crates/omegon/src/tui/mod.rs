@@ -6988,15 +6988,11 @@ Scroll transcript:
                     omegon_traits::TurnEndReason::ProgressNudge => "nudged",
                     omegon_traits::TurnEndReason::Cancelled => "cancelled",
                 });
-                if matches!(
-                    turn_end_reason,
-                    omegon_traits::TurnEndReason::AssistantCompleted
-                        | omegon_traits::TurnEndReason::Cancelled
-                ) {
-                    // A live slim plan lane is turn-scoped UI, not durable history.
-                    // If no completion PlanUpdated arrives before the assistant turn
-                    // finishes, clear it rather than leaving stale "plan active" chrome
-                    // held under a "turn done" status line.
+                if matches!(turn_end_reason, omegon_traits::TurnEndReason::Cancelled) {
+                    // Cancellation abandons the in-flight turn, so clear the live workbench
+                    // lane. Completed plans are still cleared by PlanUpdated handling; incomplete
+                    // plans survive AssistantCompleted so the operator can inspect and continue
+                    // the visible work plan between turns.
                     self.workbench_state.active = None;
                 }
                 // Update status line with behavioral signals
