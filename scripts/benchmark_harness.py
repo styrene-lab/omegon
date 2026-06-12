@@ -119,6 +119,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--harness", help="Harness to run; defaults to first declared harness")
     parser.add_argument("--model", help="Optional model override for implemented adapters")
     parser.add_argument("--slim", action="store_true", help="Enable Omegon slim mode for this run")
+    parser.add_argument("--headroom-smoke", action="store_true", help="Validate headroom benchmark env/eval plumbing without running an agent")
     parser.add_argument(
         "--out-dir",
         help="Directory for JSON result artifacts (default: <root>/ai/benchmarks/runs)",
@@ -1595,6 +1596,43 @@ def _sanitize_filename_component(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in value)
 
 
+def run_headroom_smoke(root: Path, spec: TaskSpec, out_dir: Path) -> Path:
+    runtime_env = headroom_env_from_spec(spec)
+    headroom_eval = run_headroom_eval(root, spec, out_dir)
+    status = "pass"
+    if headroom_eval is not None and headroom_eval.get("status") != "pass":
+        status = "fail"
+    payload = {
+        "task_id": spec.id,
+        "task_kind": spec.kind,
+        "harness": "headroom-smoke",
+        "model": None,
+        "status": status,
+        "score": 1.0 if status == "pass" else 0.0,
+        "wall_clock_sec": 0,
+        "attempts": 1,
+        "benchmark_mode": {
+            "clean_room": False,
+            "adapter_profile": "headroom-smoke",
+        },
+        "task": {
+            "kind": spec.kind,
+            "prompt": spec.prompt,
+            "base_ref": spec.base_ref,
+            "repo": spec.repo,
+            "headroom": spec.headroom,
+        },
+        "headroom_runtime_env": runtime_env,
+        "headroom_eval": headroom_eval,
+        "artifact_paths": {
+            "headroom_eval": headroom_eval.get("artifact_path") if headroom_eval else None,
+        },
+    }
+    path = write_result(out_dir, spec, "headroom-smoke", False, payload)
+    audit(f"headroom smoke done: task={spec.id} status={status} result={path}")
+    return path
+
+
 def write_result(out_dir: Path, spec: TaskSpec, harness: str, slim: bool, payload: dict[str, Any]) -> Path:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     label = result_harness_label(harness, slim)
@@ -2032,6 +2070,14 @@ def main() -> int:
     repo_path = resolve_repo_path(root, spec)
     enforce_workspace_authority(repo_path, spec)
     out_dir = ensure_clean_out_dir(root, args.out_dir)
+    if args.headroom_smoke:
+        try:
+            path = run_headroom_smoke(root, spec, out_dir)
+        except TaskSpecError as err:
+            print(str(err), file=sys.stderr)
+            return 1
+        print(path)
+        return 0
     audit(
         "benchmark start: "
         f"task={spec.id} harness={harness} model={model or 'default'} slim={slim} "
