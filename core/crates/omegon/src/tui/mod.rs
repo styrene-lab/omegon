@@ -24,6 +24,8 @@ pub mod extension_overlays;
 pub mod focus_view;
 pub mod footer;
 pub mod footer_projection;
+pub mod glyphs;
+pub mod horizontal_line;
 pub mod image;
 pub mod instruments;
 pub mod layout_projection;

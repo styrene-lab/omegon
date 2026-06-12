@@ -1,7 +1,6 @@
 //! Turn separator segment component.
 
 use ratatui::prelude::*;
-use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
 use super::super::conversation_render_projection::SegmentRenderContext;
@@ -11,14 +10,14 @@ pub fn render(area: Rect, buf: &mut Buffer, ctx: &SegmentRenderContext<'_>) {
     if area.height == 0 || area.width < 4 {
         return;
     }
-    // Thin ruled divider with faded edges.
-    let pad = 2;
-    let rule_w = (area.width as usize).saturating_sub(pad * 2);
-    let line = Line::from(vec![
-        Span::styled(" ".repeat(pad), Style::default()),
-        Span::styled("─".repeat(rule_w), Style::default().fg(theme.border_dim())),
-        Span::styled(" ".repeat(pad), Style::default()),
-    ]);
+    let line = crate::tui::horizontal_line::horizontal_line(
+        crate::tui::horizontal_line::HorizontalLineSpec::rule(
+            crate::tui::horizontal_line::RulePlacement::Full,
+        ),
+        area.width,
+        theme,
+        ctx.theme.surface_bg(),
+    );
     Paragraph::new(line).render(area, buf);
 }
 
