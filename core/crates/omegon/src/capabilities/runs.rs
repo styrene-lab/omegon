@@ -24,7 +24,7 @@ pub struct AssistantRunSummary {
 pub enum AssistantRunStatus {
     Queued,
     Running,
-    Succeeded,
+    Completed,
     Failed,
     Cancelled,
     Blocked,
@@ -35,7 +35,7 @@ impl AssistantRunStatus {
         match self {
             Self::Queued => "queued",
             Self::Running => "running",
-            Self::Succeeded => "succeeded",
+            Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
             Self::Blocked => "blocked",
@@ -46,7 +46,7 @@ impl AssistantRunStatus {
         match value {
             "queued" => Ok(Self::Queued),
             "running" => Ok(Self::Running),
-            "succeeded" => Ok(Self::Succeeded),
+            "succeeded" | "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
             "cancelled" => Ok(Self::Cancelled),
             "blocked" => Ok(Self::Blocked),
@@ -515,13 +515,13 @@ mod tests {
     fn mark_blocked_rejects_terminal_runs() {
         let store = SqliteAssistantRunStore::in_memory().unwrap();
         let mut terminal = run("done", "2026-06-11T00:00:00Z", "2026-06-11T00:01:00Z");
-        terminal.status = AssistantRunStatus::Succeeded;
+        terminal.status = AssistantRunStatus::Completed;
         store.insert(terminal).unwrap();
 
         let err = store
             .mark_blocked("done", github_token_blocker(), None, None)
             .unwrap_err();
-        assert!(err.to_string().contains("terminal status 'succeeded'"));
+        assert!(err.to_string().contains("terminal status 'completed'"));
     }
 
     fn github_token_blocker() -> AssistantRunBlocked {

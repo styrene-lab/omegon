@@ -73,6 +73,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Register the capability inventory in the backend endpoint registry with ACP and HTTP transports so runtime capability advertisements include the assistant readiness surface.
 - Add HTTP and ACP regression coverage proving capability inventory exposes blocked assistant launch readiness at the external API boundary.
 - Add regression coverage for assistant launch readiness status transitions across ready, blocked, degraded, missing optional, and deferred-secret states.
+- Rename assistant run terminal success status to `completed` while accepting legacy `succeeded`, aligning run state with the blocked/completed non-interactive contract.
 - Add explicit assistant launch-readiness status, blockers, and warnings so console clients do not need to infer safe/degraded/blocked state from secret and capability counters.
 - Add HTTP regression coverage proving `/api/capabilities` reports secret readiness metadata without emitting recipe payloads or secret values.
 - Add ACP regression coverage proving capability inventory reports secret readiness metadata without emitting recipe payloads or secret values.
