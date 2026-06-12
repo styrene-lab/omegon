@@ -29,7 +29,7 @@ delegate/cleave child routing.
 - [x] 3.1 Rework the login task (main.rs ~5000): `begin_login` before spawn, `complete_login(Succeeded)` or `complete_login(Failed{timeout|stale_state_only|refused})` at terminal outcome — map from accept_oauth_callback errors and token-exchange failures
 - [x] 3.2 Failed login reverts route to `prior` and sets a persistent footer warning (cleared on next attempt), not only a SystemNotification
 - [x] 3.3 `/auth status` renders the current RouteSnapshot including LoginPending elapsed time and last terminal outcome with reason
-- [ ] 3.4 Tests: timeout reverts to prior Fallback; stale-state-only deadline produces Failed{stale_state_only} with close-old-tabs guidance; success from Fallback clears the warning
+- [x] 3.4 Tests: timeout reverts to prior Fallback; stale-state-only deadline produces Failed{stale_state_only} with close-old-tabs guidance; success from Fallback clears the warning
 
 ## 4. Consumers become route projections
 <!-- specs: provider-route -->

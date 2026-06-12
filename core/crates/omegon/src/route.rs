@@ -816,6 +816,66 @@ mod tests {
         assert!(message.contains("google: missing credentials"), "{message}");
     }
 
+    #[tokio::test]
+    async fn timeout_reverts_prior_fallback_and_warns_until_success() {
+        let prior = ProviderRoute::Fallback {
+            selected: "openai-codex:gpt-5.5".into(),
+            serving: "anthropic:claude-fable-5".into(),
+            reason: FallbackReason::MissingCredentials {
+                provider: "openai-codex".into(),
+            },
+        };
+        let controller = RouteController::new(prior.clone(), Box::new(NullBridge), None);
+        controller.begin_login("openai-codex".into()).await;
+        let failed = controller
+            .complete_login(
+                LoginOutcome::Failed {
+                    reason: LoginFailureReason::Timeout,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(failed.route, prior);
+        assert!(failed.warning.unwrap().contains("timed out"));
+
+        controller.begin_login("openai-codex".into()).await;
+        let succeeded = controller
+            .complete_login(
+                LoginOutcome::Succeeded {
+                    model: "openai-codex:gpt-5.5".into(),
+                },
+                Some(Box::new(NullBridge)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            succeeded.route,
+            ProviderRoute::Serving {
+                model: "openai-codex:gpt-5.5".into()
+            }
+        );
+        assert!(succeeded.warning.is_none());
+    }
+
+    #[tokio::test]
+    async fn stale_state_only_failure_gives_close_old_tabs_guidance() {
+        let controller = RouteController::default();
+        controller.begin_login("openai-codex".into()).await;
+        let failed = controller
+            .complete_login(
+                LoginOutcome::Failed {
+                    reason: LoginFailureReason::StaleStateOnly,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let warning = failed.warning.unwrap();
+        assert!(warning.contains("stale callback tabs"), "{warning}");
+        assert!(warning.contains("Close old login tabs"), "{warning}");
+    }
+
     #[test]
     fn route_status_reports_login_pending_and_last_outcome() {
         let pending = RouteSnapshot {
