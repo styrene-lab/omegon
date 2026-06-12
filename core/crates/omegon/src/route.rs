@@ -699,6 +699,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn timeout_login_reverts_to_prior_fallback_with_retry_guidance() {
+        let controller = RouteController::new(
+            ProviderRoute::Fallback {
+                selected: "openai-codex:gpt-5.5".into(),
+                serving: "anthropic:claude-fable-5".into(),
+                reason: FallbackReason::MissingCredentials {
+                    provider: "openai-codex".into(),
+                },
+            },
+            Box::new(NullBridge),
+            None,
+        );
+        controller.begin_login("openai-codex".into()).await;
+        let snapshot = controller
+            .complete_login(
+                LoginOutcome::Failed {
+                    reason: LoginFailureReason::Timeout,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(snapshot.route, ProviderRoute::Fallback { .. }));
+        let warning = snapshot.warning.unwrap();
+        assert!(warning.contains("timed out"), "{warning}");
+        assert!(warning.contains("run /login again"), "{warning}");
+    }
+
+    #[tokio::test]
+    async fn successful_login_from_fallback_clears_warning_and_serves_selected_model() {
+        let controller = RouteController::new(
+            ProviderRoute::Fallback {
+                selected: "openai-codex:gpt-5.5".into(),
+                serving: "anthropic:claude-fable-5".into(),
+                reason: FallbackReason::MissingCredentials {
+                    provider: "openai-codex".into(),
+                },
+            },
+            Box::new(NullBridge),
+            None,
+        );
+        controller.begin_login("openai-codex".into()).await;
+        let snapshot = controller
+            .complete_login(
+                LoginOutcome::Succeeded {
+                    model: "openai-codex:gpt-5.5".into(),
+                },
+                Some(Box::new(NullBridge)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot.route,
+            ProviderRoute::Serving {
+                model: "openai-codex:gpt-5.5".into()
+            }
+        );
+        assert!(snapshot.warning.is_none());
+    }
+
+    #[tokio::test]
     async fn successful_login_installs_serving_route() {
         let controller = RouteController::default();
         controller.begin_login("anthropic".into()).await;
