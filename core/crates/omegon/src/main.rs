@@ -2295,7 +2295,7 @@ async fn run_embedded_command(
         model: model.to_string(),
         cwd: cwd.clone(),
         agent_id: agent_id.map(String::from),
-        dangerously_bypass_permissions: dangerously_bypass_permissions,
+        dangerously_bypass_permissions,
         active_connections: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         shutdown: global_cancel.clone(),
     };
@@ -8469,6 +8469,17 @@ mod tests {
     use clap::CommandFactory;
     use tempfile::tempdir;
 
+    fn with_auth_env_lock<T>(f: impl FnOnce() -> T + std::panic::UnwindSafe) -> T {
+        let _guard = crate::auth::TEST_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let result = std::panic::catch_unwind(f);
+        match result {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
     fn test_workspace_lease(cwd: &Path) -> crate::workspace::types::WorkspaceLease {
         use crate::workspace::types::{
             Mutability, WorkspaceBackendKind, WorkspaceBindings, WorkspaceKind, WorkspaceLease,
@@ -9304,6 +9315,7 @@ mod tests {
         handled
     }
 
+    #[allow(clippy::type_complexity)]
     fn remote_command_test_context(
         bypass: bool,
     ) -> (
@@ -10401,56 +10413,92 @@ mod tests {
 
     #[test]
     fn logout_clears_all_provider_auth_env_vars() {
-        unsafe {
-            std::env::set_var("ANTHROPIC_OAUTH_TOKEN", "token-1");
-            std::env::set_var("ANTHROPIC_API_KEY", "key-1");
-        }
+        with_auth_env_lock(|| {
+            let original_oauth = std::env::var("ANTHROPIC_OAUTH_TOKEN").ok();
+            let original_api = std::env::var("ANTHROPIC_API_KEY").ok();
+            unsafe {
+                std::env::set_var("ANTHROPIC_OAUTH_TOKEN", "token-1");
+                std::env::set_var("ANTHROPIC_API_KEY", "key-1");
+            }
 
-        auth::clear_provider_auth_env("anthropic");
+            auth::clear_provider_auth_env("anthropic");
 
-        assert!(std::env::var("ANTHROPIC_OAUTH_TOKEN").is_err());
-        assert!(std::env::var("ANTHROPIC_API_KEY").is_err());
+            assert!(std::env::var("ANTHROPIC_OAUTH_TOKEN").is_err());
+            assert!(std::env::var("ANTHROPIC_API_KEY").is_err());
+
+            unsafe {
+                match original_oauth {
+                    Some(value) => std::env::set_var("ANTHROPIC_OAUTH_TOKEN", value),
+                    None => std::env::remove_var("ANTHROPIC_OAUTH_TOKEN"),
+                }
+                match original_api {
+                    Some(value) => std::env::set_var("ANTHROPIC_API_KEY", value),
+                    None => std::env::remove_var("ANTHROPIC_API_KEY"),
+                }
+            }
+        });
     }
 
     #[test]
     fn logout_clears_openai_codex_session_env_var() {
-        unsafe {
-            std::env::set_var("CHATGPT_OAUTH_TOKEN", "token-1");
-        }
+        with_auth_env_lock(|| {
+            let original = std::env::var("CHATGPT_OAUTH_TOKEN").ok();
+            unsafe {
+                std::env::set_var("CHATGPT_OAUTH_TOKEN", "token-1");
+            }
 
-        auth::clear_provider_auth_env("openai-codex");
+            auth::clear_provider_auth_env("openai-codex");
 
-        assert!(std::env::var("CHATGPT_OAUTH_TOKEN").is_err());
+            assert!(std::env::var("CHATGPT_OAUTH_TOKEN").is_err());
+
+            unsafe {
+                match original {
+                    Some(value) => std::env::set_var("CHATGPT_OAUTH_TOKEN", value),
+                    None => std::env::remove_var("CHATGPT_OAUTH_TOKEN"),
+                }
+            }
+        });
     }
 
     #[test]
     fn anthropic_subscription_automation_warning_only_for_headless_anthropic_oauth() {
-        unsafe {
-            std::env::remove_var("ANTHROPIC_API_KEY");
-            std::env::set_var("ANTHROPIC_OAUTH_TOKEN", "subscription-token");
-        }
-        let cli = Cli::try_parse_from(vec!["omegon", "--prompt", "hello"]).unwrap();
-        let warning = anthropic_subscription_automation_warning(&cli)
-            .expect("expected warning for headless anthropic oauth");
-        assert!(warning.contains("operator agency wins"), "got: {warning}");
-        assert!(warning.contains("ANTHROPIC_API_KEY"), "got: {warning}");
+        with_auth_env_lock(|| {
+            let original_api = std::env::var("ANTHROPIC_API_KEY").ok();
+            let original_oauth = std::env::var("ANTHROPIC_OAUTH_TOKEN").ok();
+            unsafe {
+                std::env::remove_var("ANTHROPIC_API_KEY");
+                std::env::set_var("ANTHROPIC_OAUTH_TOKEN", "subscription-token");
+            }
+            let cli = Cli::try_parse_from(vec!["omegon", "--prompt", "hello"]).unwrap();
+            let warning = anthropic_subscription_automation_warning(&cli)
+                .expect("expected warning for headless anthropic oauth");
+            assert!(warning.contains("operator agency wins"), "got: {warning}");
+            assert!(warning.contains("ANTHROPIC_API_KEY"), "got: {warning}");
 
-        let openai_cli = Cli::try_parse_from(vec![
-            "omegon",
-            "--model",
-            "openai:gpt-4o",
-            "--prompt",
-            "hello",
-        ])
-        .unwrap();
-        assert!(anthropic_subscription_automation_warning(&openai_cli).is_none());
+            let openai_cli = Cli::try_parse_from(vec![
+                "omegon",
+                "--model",
+                "openai:gpt-4o",
+                "--prompt",
+                "hello",
+            ])
+            .unwrap();
+            assert!(anthropic_subscription_automation_warning(&openai_cli).is_none());
 
-        let interactive_cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
-        assert!(anthropic_subscription_automation_warning(&interactive_cli).is_none());
+            let interactive_cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
+            assert!(anthropic_subscription_automation_warning(&interactive_cli).is_none());
 
-        unsafe {
-            std::env::remove_var("ANTHROPIC_OAUTH_TOKEN");
-        }
+            unsafe {
+                match original_api {
+                    Some(value) => std::env::set_var("ANTHROPIC_API_KEY", value),
+                    None => std::env::remove_var("ANTHROPIC_API_KEY"),
+                }
+                match original_oauth {
+                    Some(value) => std::env::set_var("ANTHROPIC_OAUTH_TOKEN", value),
+                    None => std::env::remove_var("ANTHROPIC_OAUTH_TOKEN"),
+                }
+            }
+        });
     }
 
     #[test]

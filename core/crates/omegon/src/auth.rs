@@ -16,6 +16,10 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::time::Duration;
 
+#[cfg(test)]
+pub(crate) static TEST_AUTH_ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
 // Single source of truth for every provider's auth.json key, env vars,
 // display name, and auth type. Every resolution path MUST use this map
 // instead of hardcoding key names.
@@ -395,10 +399,11 @@ fn provider_candidates_for_model(model_spec: &str) -> Vec<&'static ProviderCrede
         if let Some(codex) = provider_by_id("openai-codex") {
             providers.push(codex);
         }
-    } else if provider.id == "openai-codex" && openai_family_model(model_spec) {
-        if let Some(openai) = provider_by_id("openai") {
-            providers.push(openai);
-        }
+    } else if provider.id == "openai-codex"
+        && openai_family_model(model_spec)
+        && let Some(openai) = provider_by_id("openai")
+    {
+        providers.push(openai);
     }
 
     providers
@@ -2110,15 +2115,12 @@ pub fn auth_status_to_provider_statuses(status: &AuthStatus) -> Vec<ProviderStat
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{LazyLock, Mutex};
-
-    static AUTH_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     fn with_auth_json_path_env<T>(
         path: Option<&Path>,
         f: impl FnOnce() -> T + std::panic::UnwindSafe,
     ) -> T {
-        let _guard = AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = TEST_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
         unsafe {
             match path {
@@ -2144,7 +2146,7 @@ mod tests {
         home: &Path,
         f: impl FnOnce() -> T + std::panic::UnwindSafe,
     ) -> T {
-        let _guard = AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = TEST_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original_auth = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
         let original_home = std::env::var("HOME").ok();
         unsafe {

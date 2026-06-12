@@ -896,7 +896,7 @@ impl LifecycleFeature {
                 let path = spec::add_spec(&self.repo_path, name, domain, content)?;
                 {
                     let mut opsx = self.opsx.lock().unwrap();
-                    sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?.0;
+                    sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?;
                 }
                 self.provider.lock().unwrap().refresh();
                 Ok(text_result(&format!(
@@ -911,7 +911,7 @@ impl LifecycleFeature {
                     .ok_or_else(|| anyhow::anyhow!("change_name required"))?;
 
                 let mut opsx = self.opsx.lock().unwrap();
-                let change = sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?.0;
+                let (change, _) = sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?;
                 if args.get("total_tasks").is_some() || args.get("done_tasks").is_some() {
                     anyhow::bail!(
                         "register_tasks reads task counts from tasks.md; update OpenSpec tasks first"
@@ -962,7 +962,7 @@ impl LifecycleFeature {
                     spec::set_task_checkbox_status(&self.repo_path, name, group, task_id, status)?;
                 {
                     let mut opsx = self.opsx.lock().unwrap();
-                    let change = sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?.0;
+                    let (change, _) = sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?;
                     opsx.update_change_progress(name, change.total_tasks, change.done_tasks)?;
                 }
                 self.provider.lock().unwrap().refresh();
@@ -1002,7 +1002,7 @@ impl LifecycleFeature {
                 }
 
                 let mut opsx = self.opsx.lock().unwrap();
-                sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?.0;
+                sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?;
                 let state = sync::change_state(&opsx, name);
                 if !matches!(
                     state,
@@ -1047,7 +1047,7 @@ impl LifecycleFeature {
                 }
                 {
                     let mut opsx = self.opsx.lock().unwrap();
-                    sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?.0;
+                    sync::sync_change_by_name(&mut opsx, &self.repo_path, name)?;
                     if sync::change_state(&opsx, name) != Some(OpsxChangeState::Verifying) {
                         anyhow::bail!(
                             "Change '{name}' must be verifying before archive; register specs, tasks, test files, and completed tasks first"

@@ -96,6 +96,19 @@ pub struct ConversationView {
     pub selected_segment: Option<usize>,
     /// Tab state — manages conversation tab and extension widget tabs
     pub tabs: TabState,
+    /// Control-plane tool calls hidden from the main transcript unless they fail.
+    suppressed_tool_calls: std::collections::HashMap<String, SuppressedToolCall>,
+}
+
+#[derive(Debug, Clone)]
+struct SuppressedToolCall {
+    name: String,
+    args_summary: Option<String>,
+    detail_args: Option<String>,
+}
+
+fn is_suppressed_control_plane_tool(name: &str) -> bool {
+    name == crate::tool_registry::core::PLAN
 }
 
 /// Build a rich one-liner for consolidated tree entries.
@@ -283,6 +296,7 @@ impl ConversationView {
             pinned_segment: None,
             selected_segment: None,
             tabs: TabState::new(),
+            suppressed_tool_calls: std::collections::HashMap::new(),
         }
     }
 
@@ -457,6 +471,18 @@ impl ConversationView {
         args_summary: Option<&str>,
         detail_args: Option<&str>,
     ) {
+        if is_suppressed_control_plane_tool(name) {
+            self.suppressed_tool_calls.insert(
+                id.to_string(),
+                SuppressedToolCall {
+                    name: name.to_string(),
+                    args_summary: args_summary.map(str::to_string),
+                    detail_args: detail_args.map(str::to_string),
+                },
+            );
+            return;
+        }
+
         let mut seg = Segment::tool_card(id, name);
         if let SegmentContent::ToolCard {
             args_summary: ref mut a,
@@ -478,6 +504,10 @@ impl ConversationView {
     /// Silently no-op if the card is already complete or not found —
     /// late or stale updates shouldn't crash anything.
     pub fn push_tool_update(&mut self, id: &str, partial: omegon_traits::PartialToolResult) {
+        if self.suppressed_tool_calls.contains_key(id) {
+            return;
+        }
+
         for seg in self.segments.iter_mut().rev() {
             if let SegmentContent::ToolCard {
                 id: tool_id,
@@ -496,6 +526,33 @@ impl ConversationView {
     }
 
     pub fn push_tool_end(&mut self, id: &str, is_error: bool, result_text: Option<&str>) {
+        if let Some(suppressed) = self.suppressed_tool_calls.remove(id) {
+            if is_error {
+                self.push_tool_start(
+                    id,
+                    &suppressed.name,
+                    suppressed.args_summary.as_deref(),
+                    suppressed.detail_args.as_deref(),
+                );
+                // `push_tool_start` suppresses plan again; remove that pending
+                // entry and materialize the failed call as an ordinary card.
+                self.suppressed_tool_calls.remove(id);
+                let mut seg = Segment::tool_card(id, &suppressed.name);
+                if let SegmentContent::ToolCard {
+                    args_summary: ref mut a,
+                    detail_args: ref mut d,
+                    ..
+                } = seg.content
+                {
+                    *a = suppressed.args_summary;
+                    *d = suppressed.detail_args;
+                }
+                self.segments.push(seg);
+                self.push_tool_end(id, true, result_text);
+            }
+            return;
+        }
+
         // Find the card for this tool call and complete it.
         let mut completed_name: Option<String> = None;
         let mut completed_summary: Option<String> = None;
@@ -557,6 +614,15 @@ impl ConversationView {
             }
         }
 
+        if completed_name.as_deref() == Some("plan")
+            && !is_error
+            && let Some(idx) = completed_idx
+        {
+            self.remove_segment(idx);
+            self.conv_state.invalidate();
+            return;
+        }
+
         // ── CONSOLIDATION ─────────────────────────────────────────
         // Merge consecutive completed cards of the same tool name
         // into a single grouped card with tree-style entries.
@@ -569,6 +635,24 @@ impl ConversationView {
         }
 
         self.conv_state.invalidate();
+    }
+
+    fn remove_segment(&mut self, idx: usize) {
+        self.segments.remove(idx);
+        if let Some(ref mut p) = self.pinned_segment {
+            if *p == idx {
+                self.pinned_segment = None;
+            } else if *p > idx {
+                *p -= 1;
+            }
+        }
+        if let Some(ref mut s) = self.selected_segment {
+            if *s == idx {
+                self.selected_segment = None;
+            } else if *s > idx {
+                *s -= 1;
+            }
+        }
     }
 
     /// Attempt to merge segment at `idx` into the preceding segment if both
@@ -634,21 +718,7 @@ impl ConversationView {
         }
 
         // Remove and fix up tracked indices
-        self.segments.remove(idx);
-        if let Some(ref mut p) = self.pinned_segment {
-            if *p == idx {
-                self.pinned_segment = None;
-            } else if *p > idx {
-                *p -= 1;
-            }
-        }
-        if let Some(ref mut s) = self.selected_segment {
-            if *s == idx {
-                self.selected_segment = None;
-            } else if *s > idx {
-                *s -= 1;
-            }
-        }
+        self.remove_segment(idx);
     }
 
     pub fn finalize_message(&mut self) {
@@ -1188,6 +1258,12 @@ mod tests {
             Some("{\"action\":\"complete\",\"index\":2}"),
             Some("complete 2"),
         );
+        assert!(
+            cv.segments.iter().all(
+                |segment| !matches!(&segment.content, SegmentContent::ToolCard { name, .. } if name == "plan")
+            ),
+            "routine plan tool cards should not flash into the transcript while running"
+        );
         cv.push_tool_end("plan-1", false, Some("Marked item 2 complete."));
         cv.push_system(
             "Plan progress\nPlan mode: executing\nProgress: 3/6\n\n1. ● A\n2. ● B\n3. ◐ C",
@@ -1208,11 +1284,92 @@ mod tests {
         assert!(plan_segments[0].contains("Progress: 3/6"));
         assert!(!plan_segments[0].contains("Progress: 2/6"));
         assert!(
-            cv.segments
-                .iter()
-                .any(|segment| matches!(segment.content, SegmentContent::ToolCard { .. })),
-            "tool card should remain available for audit/detail"
+            cv.segments.iter().all(
+                |segment| !matches!(&segment.content, SegmentContent::ToolCard { name, .. } if name == "plan")
+            ),
+            "successful plan tool cards should not clutter the transcript"
         );
+    }
+
+    #[test]
+    fn multiple_successful_plan_calls_leave_one_snapshot_and_no_plan_cards() {
+        let mut cv = ConversationView::new();
+        for (idx, action) in ["set", "approve", "execute", "complete"]
+            .into_iter()
+            .enumerate()
+        {
+            let id = format!("plan-{idx}");
+            cv.push_tool_start(&id, "plan", Some(action), Some(action));
+            cv.push_tool_end(&id, false, Some("ok"));
+            cv.push_system(&format!(
+                "Plan progress\nPlan mode: executing\nProgress: {idx}/4\n\n1. ◐ Item"
+            ));
+        }
+
+        let plan_segments: Vec<&str> = cv
+            .segments
+            .iter()
+            .filter_map(|segment| match &segment.content {
+                SegmentContent::SystemNotification { text } if is_plan_progress_text(text) => {
+                    Some(text.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(plan_segments.len(), 1);
+        assert!(plan_segments[0].contains("Progress: 3/4"));
+        assert!(cv.segments.iter().all(
+            |segment| !matches!(&segment.content, SegmentContent::ToolCard { name, .. } if name == "plan")
+        ));
+    }
+
+    #[test]
+    fn errored_plan_tool_cards_remain_visible() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start(
+            "plan-1",
+            "plan",
+            Some("{\"action\":\"complete\",\"index\":99}"),
+            Some("complete 99"),
+        );
+        cv.push_tool_end("plan-1", true, Some("Plan item index out of range."));
+
+        assert!(
+            cv.segments.iter().any(
+                |segment| matches!(&segment.content, SegmentContent::ToolCard { name, is_error: true, .. } if name == "plan")
+            ),
+            "errored plan calls should stay visible because they are actionable"
+        );
+    }
+
+    #[test]
+    fn suppressed_successful_plan_calls_do_not_disturb_selected_or_pinned_indices() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start("read-1", "read", Some("README.md"), Some("README.md"));
+        cv.push_tool_end("read-1", false, Some("contents"));
+        cv.push_tool_start("bash-1", "bash", Some("echo hi"), Some("echo hi"));
+        cv.push_tool_end("bash-1", false, Some("hi"));
+        cv.selected_segment = Some(1);
+        cv.pinned_segment = Some(0);
+
+        cv.push_tool_start("plan-1", "plan", Some("complete 1"), Some("complete 1"));
+        cv.push_tool_end("plan-1", false, Some("Marked item 1 complete."));
+
+        assert_eq!(cv.selected_segment, Some(1));
+        assert_eq!(cv.pinned_segment, Some(0));
+        assert_eq!(cv.segments.len(), 2);
+    }
+
+    #[test]
+    fn non_plan_tool_cards_still_render_normally() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start("read-1", "read", Some("README.md"), Some("README.md"));
+        cv.push_tool_end("read-1", false, Some("contents"));
+
+        assert!(cv.segments.iter().any(
+            |segment| matches!(&segment.content, SegmentContent::ToolCard { name, complete: true, .. } if name == "read")
+        ));
     }
 
     #[test]

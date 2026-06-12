@@ -49,7 +49,7 @@ mod tests {
 
     #[test]
     fn tab_labels_are_available_for_rendering() {
-        let tabs = vec![
+        let tabs = [
             Tab::Conversation,
             Tab::Extension {
                 widget_id: "w".into(),

@@ -35,6 +35,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Hide successful `/plan` tool-call cards from the main TUI transcript before they render so Workbench progress appears as one live plan snapshot instead of separate approve/execute/complete audit blocks.
 - Keep incomplete Workbench plans visible after an assistant turn completes so operators can inspect and continue active plans between turns.
 - Pin the slim plan panel below the composer and above the engine status bar, with a compact height cap so large plans do not crowd typed input.
 - Reject staged agent-state telemetry in source-clean checks so live audit logs cannot accidentally leak into source commits.

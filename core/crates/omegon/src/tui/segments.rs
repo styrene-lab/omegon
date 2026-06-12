@@ -1896,7 +1896,6 @@ pub(crate) fn tool_title_line(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 /// Attempt syntax highlighting for tool result text.
 /// Returns None if no syntax can be detected.
 pub(crate) fn try_highlight<'a>(
@@ -2321,26 +2320,26 @@ fn strip_inline_markdown(text: &str) -> String {
     out
 }
 
-/// Render a placeholder for an image (used when StatefulProtocol isn't available).
-/// The actual image rendering happens in conv_widget.rs via ratatui-image.
-///
-/// Visual choices:
-/// - **Frame**: doubled-line border in `accent_muted` rather than the
-///   default `border_dim`/rounded combo. The image content gets composited
-///   on top of this rectangle in a second pass; if the image happens to
-///   share colors with the surrounding TUI surface (light screenshots,
-///   pasted UI captures, etc.) the doubled frame makes the segment
-///   bounds unambiguous.
-/// - **Glyph**: `▦` U+25A6 SQUARE WITH ORTHOGONAL CROSSHATCH FILL.
-///   Single-cell, not in the Unicode emoji set. The previous `📎`
-///   U+1F4CE PAPERCLIP is an emoji-presentation codepoint and is
-///   forbidden by the same constraint that drove the instruments-panel
-///   glyph audit.
-/// - **Title**: full disk path (`path.display()`) rather than just
-///   `file_name()`. Operators need to know where on disk the file
-///   lives — especially for clipboard-paste files like
-///   `omegon-clipboard-78315-16.png` whose names are uninformative
-///   without their parent directory.
+// Render a placeholder for an image (used when StatefulProtocol isn't available).
+// The actual image rendering happens in conv_widget.rs via ratatui-image.
+//
+// Visual choices:
+// - **Frame**: doubled-line border in `accent_muted` rather than the
+//   default `border_dim`/rounded combo. The image content gets composited
+//   on top of this rectangle in a second pass; if the image happens to
+//   share colors with the surrounding TUI surface (light screenshots,
+//   pasted UI captures, etc.) the doubled frame makes the segment
+//   bounds unambiguous.
+// - **Glyph**: `▦` U+25A6 SQUARE WITH ORTHOGONAL CROSSHATCH FILL.
+//   Single-cell, not in the Unicode emoji set. The previous `📎`
+//   U+1F4CE PAPERCLIP is an emoji-presentation codepoint and is
+//   forbidden by the same constraint that drove the instruments-panel
+//   glyph audit.
+// - **Title**: full disk path (`path.display()`) rather than just
+//   `file_name()`. Operators need to know where on disk the file
+//   lives — especially for clipboard-paste files like
+//   `omegon-clipboard-78315-16.png` whose names are uninformative
+//   without their parent directory.
 // ═══════════════════════════════════════════════════════════════════════════
 // Tests
 // ═══════════════════════════════════════════════════════════════════════════

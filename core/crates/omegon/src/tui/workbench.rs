@@ -25,12 +25,11 @@ pub fn workbench_preferred_height(state: &WorkbenchState, width: u16) -> u16 {
     }
     if let Some(active) = state.active.as_ref() {
         workbench_snapshot_height(active, width)
-    } else if state.cleave.as_ref().is_some_and(|p| p.active) {
-        5
-    } else if state
-        .delegate
-        .as_ref()
-        .is_some_and(|p| p.active || p.running > 0)
+    } else if state.cleave.as_ref().is_some_and(|p| p.active)
+        || state
+            .delegate
+            .as_ref()
+            .is_some_and(|p| p.active || p.running > 0)
     {
         5
     } else if !state.workstreams.is_empty() {

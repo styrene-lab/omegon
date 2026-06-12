@@ -1775,6 +1775,17 @@ fn activate_startup_tone(registry: &mut crate::plugins::registry::PluginRegistry
 mod tests {
     use super::*;
 
+    fn with_auth_env_lock<T>(f: impl FnOnce() -> T + std::panic::UnwindSafe) -> T {
+        let _guard = crate::auth::TEST_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let result = std::panic::catch_unwind(f);
+        match result {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
     #[test]
     fn explicit_project_marker_wins_over_parent_git_repo() {
         let dir = tempfile::tempdir().unwrap();
@@ -1857,30 +1868,33 @@ mod tests {
         )
         .unwrap();
 
-        let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
-        unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path) };
-        let secrets = omegon_secrets::SecretsManager::new(dir.path()).expect("secrets manager");
-        let mut session_secret_env = Vec::new();
-        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
-        unsafe {
-            match original {
-                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
-                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+        with_auth_env_lock(|| {
+            let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+            unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path) };
+            let secrets = omegon_secrets::SecretsManager::new(dir.path()).expect("secrets manager");
+            let mut session_secret_env = Vec::new();
+            hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
+            unsafe {
+                match original {
+                    Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
+                    None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+                }
             }
-        }
 
-        assert!(
-            !session_secret_env.iter().any(
-                |(name, value)| name == "CHATGPT_OAUTH_TOKEN" && value == "expired-codex-token"
-            ),
-            "expired Codex OAuth must not be inherited by child sessions"
-        );
-        assert!(
-            session_secret_env
-                .iter()
-                .any(|(name, value)| name == "BRAVE_API_KEY" && value == "brave-token"),
-            "static credentials should still be hydrated"
-        );
+            assert!(
+                !session_secret_env
+                    .iter()
+                    .any(|(name, value)| name == "CHATGPT_OAUTH_TOKEN"
+                        && value == "expired-codex-token"),
+                "expired Codex OAuth must not be inherited by child sessions"
+            );
+            assert!(
+                session_secret_env
+                    .iter()
+                    .any(|(name, value)| name == "BRAVE_API_KEY" && value == "brave-token"),
+                "static credentials should still be hydrated"
+            );
+        });
     }
 
     #[test]
@@ -1936,41 +1950,43 @@ mod tests {
         )
         .unwrap();
 
-        let original_auth = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
-        let original_home = std::env::var("HOME").ok();
-        unsafe {
-            std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path);
-            std::env::set_var("HOME", &home);
-        }
-        let secrets = omegon_secrets::SecretsManager::new(dir.path()).expect("secrets manager");
-        let mut session_secret_env = Vec::new();
-        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
-        unsafe {
-            match original_auth {
-                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
-                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+        with_auth_env_lock(|| {
+            let original_auth = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+            let original_home = std::env::var("HOME").ok();
+            unsafe {
+                std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path);
+                std::env::set_var("HOME", &home);
             }
-            match original_home {
-                Some(value) => std::env::set_var("HOME", value),
-                None => std::env::remove_var("HOME"),
+            let secrets = omegon_secrets::SecretsManager::new(dir.path()).expect("secrets manager");
+            let mut session_secret_env = Vec::new();
+            hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
+            unsafe {
+                match original_auth {
+                    Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
+                    None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+                }
+                match original_home {
+                    Some(value) => std::env::set_var("HOME", value),
+                    None => std::env::remove_var("HOME"),
+                }
             }
-        }
 
-        assert!(
-            session_secret_env
-                .iter()
-                .any(|(name, value)| name == "CHATGPT_OAUTH_TOKEN"
-                    && value == &fresh_external_access),
-            "fresh external Codex OAuth should be hydrated when internal auth is expired"
-        );
-        let persisted: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&auth_path).unwrap()).unwrap();
-        assert_eq!(
-            persisted
-                .pointer("/openai-codex/accountId")
-                .and_then(|v| v.as_str()),
-            Some("acct_external")
-        );
+            assert!(
+                session_secret_env
+                    .iter()
+                    .any(|(name, value)| name == "CHATGPT_OAUTH_TOKEN"
+                        && value == &fresh_external_access),
+                "fresh external Codex OAuth should be hydrated when internal auth is expired"
+            );
+            let persisted: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&auth_path).unwrap()).unwrap();
+            assert_eq!(
+                persisted
+                    .pointer("/openai-codex/accountId")
+                    .and_then(|v| v.as_str()),
+                Some("acct_external")
+            );
+        });
     }
 
     #[test]

@@ -195,6 +195,7 @@ pub fn spawn_worker(
 }
 
 /// The worker's main loop — runs on a dedicated thread with its own runtime.
+#[allow(clippy::too_many_arguments)]
 async fn worker_loop(
     model: String,
     cwd: PathBuf,
@@ -1136,6 +1137,92 @@ pub(crate) fn handle_registered_acp_command(
     }
 }
 
+fn workspace_ctx<'a>(
+    cwd: &'a std::path::Path,
+    session_id: &'a str,
+    instance_id: &'a str,
+) -> crate::workspace::control::WorkspaceControlContext<'a> {
+    crate::workspace::control::WorkspaceControlContext::new(cwd, session_id, instance_id)
+        .with_owner_agent_id("omegon-acp")
+}
+
+fn workspace_response_text(response: omegon_traits::SlashCommandResponse) -> String {
+    response.output.unwrap_or_else(|| {
+        if response.accepted {
+            "Workspace command accepted.".into()
+        } else {
+            "Workspace command rejected.".into()
+        }
+    })
+}
+
+/// Convert raw agent loop errors into actionable messages for the user.
+fn humanize_agent_error(raw: &str, model: &str) -> String {
+    let lower = raw.to_lowercase();
+
+    if lower.contains("connection closed")
+        || lower.contains("connection reset")
+        || lower.contains("connection refused")
+    {
+        let provider = if model.contains("claude") || model.starts_with("anthropic:") {
+            "Anthropic"
+        } else if model.contains("gpt") || model.starts_with("openai:") {
+            "OpenAI"
+        } else if model.contains("llama")
+            || model.contains("qwen")
+            || model.contains("mistral")
+            || model.starts_with("ollama:")
+        {
+            return format!(
+                "Cannot connect to Ollama. Make sure it's running: `ollama serve`\n\
+                 Model: {model}"
+            );
+        } else {
+            "The provider"
+        };
+        return format!(
+            "{provider} connection failed — your token may be expired.\n\
+             Use /login in the agent panel to re-authenticate, \
+             or switch to a local model via the model dropdown.\n\
+             Model: {model}"
+        );
+    }
+
+    if lower.contains("401") || lower.contains("unauthorized") || lower.contains("invalid.*key") {
+        return format!(
+            "Authentication failed — your API key or token is invalid or expired.\n\
+             Use /login to re-authenticate.\n\
+             Model: {model}"
+        );
+    }
+
+    if lower.contains("429") || lower.contains("rate limit") || lower.contains("quota") {
+        return format!(
+            "Rate limited — you've exceeded the API quota for this provider.\n\
+             Wait a few minutes or switch to a different model.\n\
+             Model: {model}"
+        );
+    }
+
+    if lower.contains("timeout") || lower.contains("timed out") {
+        return format!(
+            "Request timed out — the model took too long to respond.\n\
+             Try a smaller model or check your connection.\n\
+             Model: {model}"
+        );
+    }
+
+    if lower.contains("no llm provider") || lower.contains("no executable provider") {
+        return format!(
+            "No provider available for {model}.\n\
+             Configure an API key with /login, or start Ollama: `ollama serve`"
+        );
+    }
+
+    // Fallback — still include the model for context
+    format!("{raw}\n\nModel: {model}")
+}
+
 #[cfg(test)]
 mod command_safety_tests {
     use super::*;
@@ -1238,90 +1325,4 @@ mod command_safety_tests {
         assert!(response.contains("not available over ACP"), "{response}");
         assert!(!handled.load(Ordering::SeqCst));
     }
-}
-
-fn workspace_ctx<'a>(
-    cwd: &'a std::path::Path,
-    session_id: &'a str,
-    instance_id: &'a str,
-) -> crate::workspace::control::WorkspaceControlContext<'a> {
-    crate::workspace::control::WorkspaceControlContext::new(cwd, session_id, instance_id)
-        .with_owner_agent_id("omegon-acp")
-}
-
-fn workspace_response_text(response: omegon_traits::SlashCommandResponse) -> String {
-    response.output.unwrap_or_else(|| {
-        if response.accepted {
-            "Workspace command accepted.".into()
-        } else {
-            "Workspace command rejected.".into()
-        }
-    })
-}
-
-/// Convert raw agent loop errors into actionable messages for the user.
-fn humanize_agent_error(raw: &str, model: &str) -> String {
-    let lower = raw.to_lowercase();
-
-    if lower.contains("connection closed")
-        || lower.contains("connection reset")
-        || lower.contains("connection refused")
-    {
-        let provider = if model.contains("claude") || model.starts_with("anthropic:") {
-            "Anthropic"
-        } else if model.contains("gpt") || model.starts_with("openai:") {
-            "OpenAI"
-        } else if model.contains("llama")
-            || model.contains("qwen")
-            || model.contains("mistral")
-            || model.starts_with("ollama:")
-        {
-            return format!(
-                "Cannot connect to Ollama. Make sure it's running: `ollama serve`\n\
-                 Model: {model}"
-            );
-        } else {
-            "The provider"
-        };
-        return format!(
-            "{provider} connection failed — your token may be expired.\n\
-             Use /login in the agent panel to re-authenticate, \
-             or switch to a local model via the model dropdown.\n\
-             Model: {model}"
-        );
-    }
-
-    if lower.contains("401") || lower.contains("unauthorized") || lower.contains("invalid.*key") {
-        return format!(
-            "Authentication failed — your API key or token is invalid or expired.\n\
-             Use /login to re-authenticate.\n\
-             Model: {model}"
-        );
-    }
-
-    if lower.contains("429") || lower.contains("rate limit") || lower.contains("quota") {
-        return format!(
-            "Rate limited — you've exceeded the API quota for this provider.\n\
-             Wait a few minutes or switch to a different model.\n\
-             Model: {model}"
-        );
-    }
-
-    if lower.contains("timeout") || lower.contains("timed out") {
-        return format!(
-            "Request timed out — the model took too long to respond.\n\
-             Try a smaller model or check your connection.\n\
-             Model: {model}"
-        );
-    }
-
-    if lower.contains("no llm provider") || lower.contains("no executable provider") {
-        return format!(
-            "No provider available for {model}.\n\
-             Configure an API key with /login, or start Ollama: `ollama serve`"
-        );
-    }
-
-    // Fallback — still include the model for context
-    format!("{raw}\n\nModel: {model}")
 }

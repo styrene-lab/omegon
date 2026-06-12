@@ -606,6 +606,7 @@ pub fn render(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_tool_card(
     name: &str,
     detail_args: Option<&str>,
