@@ -27,7 +27,13 @@
       "commands": [
         {
           "name": "tokio-recent-log",
-          "command": ["git", "log", "--oneline", "-n", "200"],
+          "command": [
+            "git",
+            "log",
+            "--oneline",
+            "-n",
+            "200"
+          ],
           "kind_hint": "plain_text",
           "min_savings_percent": 20,
           "expected_compressed": true,
@@ -35,7 +41,12 @@
         },
         {
           "name": "tokio-grep-tests",
-          "command": ["git", "grep", "-n", "#\\[tokio::test\\]"],
+          "command": [
+            "git",
+            "grep",
+            "-n",
+            "#\\[tokio::test\\]"
+          ],
           "kind_hint": "plain_text",
           "min_savings_percent": 20,
           "expected_compressed": true,
@@ -68,7 +79,13 @@
       "commands": [
         {
           "name": "ratatui-recent-log",
-          "command": ["git", "log", "--oneline", "-n", "200"],
+          "command": [
+            "git",
+            "log",
+            "--oneline",
+            "-n",
+            "200"
+          ],
           "kind_hint": "plain_text",
           "min_savings_percent": 20,
           "expected_compressed": true,
@@ -101,7 +118,13 @@
       "commands": [
         {
           "name": "dioxus-recent-log",
-          "command": ["git", "log", "--oneline", "-n", "200"],
+          "command": [
+            "git",
+            "log",
+            "--oneline",
+            "-n",
+            "200"
+          ],
           "kind_hint": "plain_text",
           "min_savings_percent": 20,
           "expected_compressed": true,
@@ -109,7 +132,104 @@
         },
         {
           "name": "dioxus-grep-rsx",
-          "command": ["git", "grep", "-n", "rsx!"],
+          "command": [
+            "git",
+            "grep",
+            "-n",
+            "rsx!"
+          ],
+          "kind_hint": "plain_text",
+          "min_savings_percent": 20,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ]
+    },
+    {
+      "name": "awesome-rust",
+      "url": "https://github.com/rust-unofficial/awesome-rust.git",
+      "ref": "main",
+      "files": [
+        {
+          "name": "awesome-rust-readme",
+          "path": "README.md",
+          "kind_hint": "markdown",
+          "min_savings_percent": 30,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ],
+      "commands": [
+        {
+          "name": "awesome-rust-recent-log",
+          "command": [
+            "git",
+            "log",
+            "--oneline",
+            "-n",
+            "200"
+          ],
+          "kind_hint": "plain_text",
+          "min_savings_percent": 20,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ]
+    },
+    {
+      "name": "awesome-json-datasets",
+      "url": "https://github.com/jdorfman/awesome-json-datasets.git",
+      "ref": "master",
+      "files": [
+        {
+          "name": "awesome-json-datasets-readme",
+          "path": "README.md",
+          "kind_hint": "markdown",
+          "min_savings_percent": 30,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ],
+      "commands": [
+        {
+          "name": "awesome-json-datasets-links",
+          "command": [
+            "git",
+            "grep",
+            "-n",
+            "http"
+          ],
+          "kind_hint": "plain_text",
+          "min_savings_percent": 20,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ]
+    },
+    {
+      "name": "awesome-public-datasets",
+      "url": "https://github.com/awesomedata/awesome-public-datasets.git",
+      "ref": "master",
+      "files": [
+        {
+          "name": "awesome-public-datasets-readme",
+          "path": "README.rst",
+          "kind_hint": "markdown",
+          "min_savings_percent": 30,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ],
+      "commands": [
+        {
+          "name": "awesome-public-datasets-recent-log",
+          "command": [
+            "git",
+            "log",
+            "--oneline",
+            "-n",
+            "200"
+          ],
           "kind_hint": "plain_text",
           "min_savings_percent": 20,
           "expected_compressed": true,
@@ -125,7 +245,8 @@
       "kind_hint": "plain_text",
       "min_savings_percent": 40,
       "expected_compressed": true,
-      "max_output_bytes": 500000
+      "max_output_bytes": 500000,
+      "optional": true
     },
     {
       "name": "public-domain-epub-text-placeholder",
@@ -133,12 +254,16 @@
       "kind_hint": "plain_text",
       "min_savings_percent": 40,
       "expected_compressed": true,
-      "max_output_bytes": 500000
+      "max_output_bytes": 500000,
+      "optional": true
     }
   ],
   "notes": [
     "Document entries are placeholders for operator-provided UTF-8 text extracted from PDFs/EPUBs; create those .tmp files locally before running the collector.",
     "Repository commands are intentionally limited to read-only git operations by scripts/headroom_corpus_collect.py.",
-    "Generated samples, fixtures, cloned repositories, PDFs, EPUBs, and extracted text stay under .tmp/headroom and must not be committed."
+    "Generated samples, fixtures, cloned repositories, PDFs, EPUBs, and extracted text stay under .tmp/headroom and must not be committed.",
+    "Project Gutenberg/Gutendex are recommended public-domain prose sources; download bounded UTF-8 TXT/EPUB-derived text into .tmp/headroom/sources/ and use optional document entries.",
+    "arXiv is useful for technical PDF-like prose, but use manually selected/extracted UTF-8 text samples rather than bulk S3/Kaggle downloads.",
+    "GitHub events/GH Archive style JSON should be sampled or synthesized in bounded form; do not require bulk public-event datasets for local eval."
   ]
 }

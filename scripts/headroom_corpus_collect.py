@@ -133,9 +133,15 @@ def collect_repo_command(repo: Path, repo_name: str, spec: dict[str, Any], conte
     return manifest_file_entry(name, require_str(spec, "kind_hint", context), out, spec, context)
 
 
-def collect_document(spec: dict[str, Any], context: str) -> dict[str, Any]:
+def collect_document(spec: dict[str, Any], context: str) -> dict[str, Any] | None:
     src = (ROOT / require_str(spec, "path", context)).resolve()
+    optional = spec.get("optional", False)
+    if not isinstance(optional, bool):
+        raise ValueError(f"{context}.optional must be a boolean when present")
     if not src.is_file() or not str(src).startswith(str(ROOT)):
+        if optional:
+            print(f"skipping optional missing document {src}", file=sys.stderr)
+            return None
         raise ValueError(f"{context}.path must be a file inside workspace/.tmp: {src}")
     text = src.read_text(encoding="utf-8", errors="replace")
     name = require_str(spec, "name", context)
@@ -162,7 +168,9 @@ def collect(manifest: Path) -> dict[str, Any]:
     for i, doc_spec in enumerate(raw.get("documents", [])):
         if not isinstance(doc_spec, dict):
             raise ValueError(f"documents[{i}] must be an object")
-        files.append(collect_document(doc_spec, f"documents[{i}]"))
+        collected = collect_document(doc_spec, f"documents[{i}]")
+        if collected is not None:
+            files.append(collected)
     return {"files": files}
 
 
