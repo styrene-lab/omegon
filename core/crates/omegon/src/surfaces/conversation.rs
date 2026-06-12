@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 pub enum SegmentRole {
     Operator,
     Assistant,
+    /// Agent-to-agent conversation participants such as cleave children,
+    /// delegated workers, or remote peer agents.
+    PeerAgent,
     Tool,
     System,
     Lifecycle,
@@ -78,6 +81,7 @@ where
 pub enum ConversationSegmentKind<TText = String, TPath = PathBuf> {
     User(UserSegment<TText>),
     Assistant(AssistantSegment<TText>),
+    PeerAgent(PeerAgentSegment<TText>),
     Tool(ToolSegment<TText>),
     System(SystemSegment<TText>),
     Lifecycle(LifecycleSegment<TText>),
@@ -90,6 +94,7 @@ impl<TText, TPath> ConversationSegmentKind<TText, TPath> {
         match self {
             Self::User(_) => SegmentRole::Operator,
             Self::Assistant(_) => SegmentRole::Assistant,
+            Self::PeerAgent(_) => SegmentRole::PeerAgent,
             Self::Tool(_) => SegmentRole::Tool,
             Self::System(_) => SegmentRole::System,
             Self::Lifecycle(_) => SegmentRole::Lifecycle,
@@ -121,6 +126,56 @@ pub struct AssistantSegment<TText = String> {
     pub text: TText,
     pub thinking: TText,
     pub complete: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerAgentSource {
+    Delegate,
+    Cleave,
+    A2a,
+}
+
+impl PeerAgentSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Delegate => "delegate",
+            Self::Cleave => "cleave",
+            Self::A2a => "a2a",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerAgentStatus {
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+    Deferred,
+}
+
+impl PeerAgentStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Deferred => "deferred",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        !matches!(self, Self::Running | Self::Deferred)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerAgentSegment<TText = String> {
+    pub label: TText,
+    pub source: PeerAgentSource,
+    pub status: PeerAgentStatus,
+    pub text: TText,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,6 +283,12 @@ pub fn presentation_for_role(
             emphasis: SegmentEmphasis::Normal,
             tool_category: None,
         },
+        SegmentRole::PeerAgent => SegmentPresentation {
+            role,
+            sigil: "⬡",
+            emphasis: SegmentEmphasis::Normal,
+            tool_category: None,
+        },
         SegmentRole::Tool => SegmentPresentation {
             role,
             sigil: "⚙",
@@ -330,4 +391,25 @@ mod tests {
         assert_eq!(projection.role(), SegmentRole::Media);
         assert_eq!(projection.presentation.sigil, "◈");
     }
+
+    #[test]
+    fn peer_agent_projection_uses_peer_role_and_terminal_status() {
+        let projection = ConversationSegmentProjection::<&str>::new(
+            ConversationSegmentKind::PeerAgent(PeerAgentSegment {
+                label: "scout",
+                source: PeerAgentSource::Delegate,
+                status: PeerAgentStatus::Completed,
+                text: "review complete",
+            }),
+        );
+
+        assert_eq!(projection.role(), SegmentRole::PeerAgent);
+        assert_eq!(projection.presentation.sigil, "⬡");
+        assert_eq!(projection.presentation.tool_category, None);
+        assert_eq!(PeerAgentSource::Delegate.as_str(), "delegate");
+        assert_eq!(PeerAgentStatus::Completed.as_str(), "completed");
+        assert!(PeerAgentStatus::Completed.is_terminal());
+        assert!(!PeerAgentStatus::Running.is_terminal());
+    }
+
 }

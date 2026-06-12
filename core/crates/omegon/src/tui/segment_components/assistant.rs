@@ -98,6 +98,14 @@ fn assistant_block<'a>(
     }
 }
 
+fn presentation_label(presentation: &SegmentPresentation) -> &'static str {
+    match presentation.role {
+        crate::surfaces::conversation::SegmentRole::Assistant => "omegon",
+        crate::surfaces::conversation::SegmentRole::PeerAgent => "peer agent",
+        _ => "omegon",
+    }
+}
+
 fn push_identity_line<'a>(
     lines: &mut Vec<Line<'a>>,
     props: &AssistantRenderProps<'_>,
@@ -113,7 +121,10 @@ fn push_identity_line<'a>(
                 .bg(bg)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("omegon", Style::default().fg(theme.border_dim()).bg(bg)),
+        Span::styled(
+            presentation_label(props.presentation),
+            Style::default().fg(theme.border_dim()).bg(bg),
+        ),
     ]));
 }
 

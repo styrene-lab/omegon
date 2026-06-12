@@ -1,7 +1,6 @@
 //! Active tool stream lane rendering for slim/full TUI layouts.
 
 use ratatui::prelude::*;
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
@@ -68,20 +67,21 @@ pub fn render_active_tool_stream_panel(
 
     let bg = t.surface_bg();
     let mut lines = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled("─ active tool ", Style::default().fg(t.border_dim()).bg(bg)),
-        Span::styled(
-            stream.name.as_str(),
-            Style::default()
-                .fg(t.accent())
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" · {}", format_short_elapsed(stream.started_at.elapsed())),
-            Style::default().fg(t.muted()).bg(bg),
-        ),
-    ]));
+    lines.push(crate::tui::horizontal_line::horizontal_line(
+        crate::tui::horizontal_line::HorizontalLineSpec::title("active tool")
+            .with_title_emphasis(crate::tui::horizontal_line::LineEmphasis::Muted)
+            .with_metric(
+                crate::tui::horizontal_line::LineMetric::new("", stream.name.as_str())
+                    .with_emphasis(crate::tui::horizontal_line::LineEmphasis::Strong),
+            )
+            .with_metric(crate::tui::horizontal_line::LineMetric::new(
+                "",
+                format_short_elapsed(stream.started_at.elapsed()),
+            )),
+        area.width,
+        t,
+        bg,
+    ));
     let max_tail = area.height.saturating_sub(1) as usize;
     let text_budget = area.width.saturating_sub(2) as usize;
     for line in stream.visible_lines(max_tail) {

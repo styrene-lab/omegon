@@ -80,6 +80,12 @@ pub enum AcpConversationSegmentKind {
         text: String,
         thinking: Option<String>,
     },
+    PeerAgent {
+        label: String,
+        source: String,
+        status: String,
+        text: String,
+    },
     Tool {
         id: String,
         name: String,
@@ -156,6 +162,12 @@ where
                 }
             },
         },
+        ConversationSegmentKind::PeerAgent(peer) => AcpConversationSegmentKind::PeerAgent {
+            label: redact(peer.label.as_ref()),
+            source: peer.source.as_str().to_string(),
+            status: peer.status.as_str().to_string(),
+            text: redact(peer.text.as_ref()),
+        },
         ConversationSegmentKind::Tool(tool) => {
             let include_details = !matches!(policy, SurfaceRedaction::ExternalClient);
             AcpConversationSegmentKind::Tool {
@@ -208,6 +220,7 @@ where
 fn segment_complete<TText, TPath>(kind: &ConversationSegmentKind<TText, TPath>) -> bool {
     match kind {
         ConversationSegmentKind::Assistant(assistant) => assistant.complete,
+        ConversationSegmentKind::PeerAgent(peer) => peer.status.is_terminal(),
         ConversationSegmentKind::Tool(tool) => tool.complete,
         _ => true,
     }
@@ -217,6 +230,7 @@ fn role_name(role: SegmentRole) -> &'static str {
     match role {
         SegmentRole::Operator => "operator",
         SegmentRole::Assistant => "assistant",
+        SegmentRole::PeerAgent => "peer_agent",
         SegmentRole::Tool => "tool",
         SegmentRole::System => "system",
         SegmentRole::Lifecycle => "lifecycle",
@@ -614,7 +628,8 @@ impl AcpConversationSurfaceAdapter {
 mod tests {
     use super::*;
     use crate::surfaces::conversation::{
-        AssistantSegment, ConversationSegmentKind, ImageSegment, ToolSegment,
+        AssistantSegment, ConversationSegmentKind, ImageSegment, PeerAgentSegment, PeerAgentSource,
+        PeerAgentStatus, ToolSegment,
     };
 
     fn redact_secret(text: &str) -> String {
@@ -768,6 +783,36 @@ stack [REDACTED]"
                 assert_eq!(thinking, None);
             }
             other => panic!("expected assistant DTO, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn peer_agent_projection_serializes_role_payload_and_completion() {
+        let projection = ConversationSegmentProjection::new(
+            ConversationSegmentKind::<&str, &Path>::PeerAgent(PeerAgentSegment {
+                label: "scout SECRET",
+                source: PeerAgentSource::Delegate,
+                status: PeerAgentStatus::Running,
+                text: "working SECRET",
+            }),
+        );
+        let dto = AcpConversationSegment::from_projection(
+            AcpConversationIdentity::new("peer-1", 9),
+            &projection,
+            SurfaceRedaction::ExternalClient,
+            redact_secret,
+        );
+
+        assert_eq!(dto.role, "peer_agent");
+        assert!(!dto.complete);
+        match dto.kind {
+            AcpConversationSegmentKind::PeerAgent { label, source, status, text } => {
+                assert_eq!(label, "scout [REDACTED]");
+                assert_eq!(source, "delegate");
+                assert_eq!(status, "running");
+                assert_eq!(text, "working [REDACTED]");
+            }
+            other => panic!("expected peer agent DTO, got {other:?}"),
         }
     }
 

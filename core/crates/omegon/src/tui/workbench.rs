@@ -731,21 +731,13 @@ fn workbench_rule_line<'a>(
     summary: String,
     width: u16,
 ) -> Line<'a> {
-    let rule_width = width.saturating_sub(summary.len() as u16 + 4) as usize;
-    Line::from(vec![
-        Span::styled("─ ", Style::default().fg(t.border_dim()).bg(bg)),
-        Span::styled(
-            summary,
-            Style::default()
-                .fg(t.accent_muted())
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" {}", "─".repeat(rule_width)),
-            Style::default().fg(t.border_dim()).bg(bg),
-        ),
-    ])
+    crate::tui::horizontal_line::horizontal_line(
+        crate::tui::horizontal_line::HorizontalLineSpec::title(summary)
+            .with_title_emphasis(crate::tui::horizontal_line::LineEmphasis::Strong),
+        width,
+        t,
+        bg,
+    )
 }
 
 fn worker_status_style(status: &str, t: &dyn theme::Theme, bg: ratatui::style::Color) -> Style {
