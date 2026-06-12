@@ -4959,7 +4959,12 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     match name.as_str() {
                         "auth_status" => {
                             let status = auth::probe_all_providers().await;
-                            let message = control_runtime::format_auth_status(&status);
+                            let route_snapshot = route_controller.snapshot().await;
+                            let message = format!(
+                                "{}\n\n{}",
+                                control_runtime::format_auth_status(&status),
+                                route_snapshot.operator_status()
+                            );
                             let _ = events_tx.send(AgentEvent::SystemNotification { message });
                         }
                         "auth_login" => {

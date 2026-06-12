@@ -223,6 +223,17 @@ impl RouteSnapshot {
             ProviderRoute::Disconnected { .. } => None,
         }
     }
+
+    pub fn operator_status(&self) -> String {
+        let mut lines = vec![format!("Provider route: {}", route_summary(self))];
+        if let Some(warning) = &self.warning {
+            lines.push(format!("Route warning: {warning}"));
+        }
+        if let Some(outcome) = &self.last_login_outcome {
+            lines.push(format!("Last login outcome: {}", login_outcome_summary(outcome)));
+        }
+        lines.join("\n")
+    }
 }
 
 fn serving_model_from_route(route: &ProviderRoute) -> Option<&str> {
@@ -455,6 +466,13 @@ fn route_event_fields(route: &ProviderRoute) -> (String, Option<String>, Option<
     }
 }
 
+fn login_outcome_summary(outcome: &LoginOutcome) -> String {
+    match outcome {
+        LoginOutcome::Succeeded { model } => format!("succeeded; serving {model}"),
+        LoginOutcome::Failed { reason } => format!("failed; {}", login_failure_label(reason)),
+    }
+}
+
 fn route_summary(snapshot: &RouteSnapshot) -> String {
     match &snapshot.route {
         ProviderRoute::Serving { model } => format!("Provider route: serving {model}"),
@@ -468,6 +486,14 @@ fn route_summary(snapshot: &RouteSnapshot) -> String {
         ProviderRoute::Disconnected { selected, reason } => {
             format!("Provider route disconnected for {selected}: {reason:?}")
         }
+    }
+}
+
+fn login_failure_label(reason: &LoginFailureReason) -> String {
+    match reason {
+        LoginFailureReason::Timeout => "timed out".to_string(),
+        LoginFailureReason::StaleStateOnly => "only stale callback tabs were observed".to_string(),
+        LoginFailureReason::Refused(detail) => format!("refused: {detail}"),
     }
 }
 
@@ -788,6 +814,31 @@ mod tests {
         assert!(message.contains("fallbackProviders exhausted"), "{message}");
         assert!(message.contains("anthropic: expired OAuth"), "{message}");
         assert!(message.contains("google: missing credentials"), "{message}");
+    }
+
+    #[test]
+    fn route_status_reports_login_pending_and_last_outcome() {
+        let pending = RouteSnapshot {
+            route: ProviderRoute::LoginPending {
+                provider: "openai-codex".into(),
+                since: SystemTime::now(),
+                prior: Box::new(ProviderRoute::Fallback {
+                    selected: "openai-codex:gpt-5.5".into(),
+                    serving: "anthropic:claude-fable-5".into(),
+                    reason: FallbackReason::MissingCredentials {
+                        provider: "openai-codex".into(),
+                    },
+                }),
+            },
+            last_login_outcome: Some(LoginOutcome::Failed {
+                reason: LoginFailureReason::Timeout,
+            }),
+            warning: Some("Login failed: timed out".into()),
+        };
+        let status = pending.operator_status();
+        assert!(status.contains("Provider login pending for openai-codex"), "{status}");
+        assert!(status.contains("Last login outcome: failed; timed out"), "{status}");
+        assert!(status.contains("Route warning: Login failed"), "{status}");
     }
 
     #[tokio::test]
