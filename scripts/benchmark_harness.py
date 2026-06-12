@@ -1666,6 +1666,14 @@ def fmt_seconds(value: Any) -> str:
     return "unknown"
 
 
+def fmt_percent(value: Any) -> str:
+    return f"{value}%" if isinstance(value, int) else "unknown"
+
+
+def fmt_count(value: Any) -> str:
+    return str(value) if isinstance(value, int) else "unknown"
+
+
 def find_likely_excess_buckets(results: list[dict[str, Any]]) -> str | None:
     omegon = next((r for r in results if r.get("harness") == "omegon"), None)
     if not omegon:
@@ -1714,6 +1722,27 @@ def render_report(results: list[dict[str, Any]]) -> str:
             # silently look comparable when one side has process telemetry
             # and the other doesn't.
             lines.append(f"  process telemetry: {availability}")
+        headroom_env = result.get("headroom_runtime_env")
+        if isinstance(headroom_env, dict) and headroom_env:
+            mode = headroom_env.get("OMEGON_HEADROOM_MODE", "unset")
+            min_bytes = headroom_env.get("OMEGON_HEADROOM_MIN_BYTES")
+            target_bytes = headroom_env.get("OMEGON_HEADROOM_TARGET_BYTES")
+            parts = [f"mode={mode}"]
+            if min_bytes is not None:
+                parts.append(f"min={min_bytes}")
+            if target_bytes is not None:
+                parts.append(f"target={target_bytes}")
+            lines.append(f"  headroom runtime: {', '.join(parts)}")
+        headroom_eval = result.get("headroom_eval")
+        if isinstance(headroom_eval, dict):
+            summary = headroom_eval.get("summary") if isinstance(headroom_eval.get("summary"), dict) else {}
+            eval_status = headroom_eval.get("status", "unknown")
+            savings = summary.get("evaluated_savings_percent") if isinstance(summary, dict) else None
+            restored = summary.get("restored_fact_count") if isinstance(summary, dict) else None
+            lines.append(
+                "  headroom eval: "
+                f"{eval_status}, savings={fmt_percent(savings)}, restored={fmt_count(restored)}"
+            )
         omegon_context = result.get("omegon_context")
         if isinstance(omegon_context, dict):
             ordered = ["sys", "tools", "conv", "mem", "hist", "think"]
