@@ -16,6 +16,7 @@ fn main() -> ExitCode {
     let mut compare_path: Option<PathBuf> = None;
     let mut fixture_dirs: Vec<PathBuf> = Vec::new();
     let mut token_counter_name = "bytes_div_4".to_string();
+    let mut provider_name = "native_deterministic".to_string();
     let mut max_restored_facts: Option<usize> = None;
 
     let mut args = std::env::args().skip(1);
@@ -66,6 +67,17 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
                 token_counter_name = value;
+            }
+            "--provider" => {
+                let Some(value) = args.next() else {
+                    eprintln!("missing value for --provider");
+                    return ExitCode::from(2);
+                };
+                if value != "native_deterministic" {
+                    eprintln!("unknown provider: {value}. Options: native_deterministic");
+                    return ExitCode::from(2);
+                }
+                provider_name = value;
             }
             "--max-restored-facts" => {
                 let Some(value) = args.next() else {
@@ -127,6 +139,13 @@ fn main() -> ExitCode {
         },
         &token_counter,
     );
+    if report.compression_provider.id != provider_name {
+        eprintln!(
+            "selected provider {provider_name} produced report provider {}",
+            report.compression_provider.id
+        );
+        return ExitCode::from(2);
+    }
 
     if let Some(path) = save_path.as_ref()
         && let Err(err) = save_report(path, &report)
