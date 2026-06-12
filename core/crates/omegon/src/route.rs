@@ -766,6 +766,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_fallback_startup_disconnects_and_null_bridge_errors() {
+        let route = RouteController::resolve_startup(
+            "openai-codex:gpt-5.5".into(),
+            &[],
+            &ledger(&[("openai-codex", missing())]),
+        )
+        .await;
+        assert!(matches!(route, ProviderRoute::Disconnected { .. }));
+
+        let controller = RouteController::new(route, Box::new(NullBridge), None);
+        let bridge = controller.bridge();
+        let stream_result = bridge
+            .read()
+            .await
+            .stream("", &[], &[], &crate::bridge::StreamOptions::default())
+            .await;
+        let err = stream_result.unwrap_err().to_string();
+        assert!(err.contains("No LLM provider configured"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn configured_fallback_startup_emits_fallback_route_summary() {
+        let route = RouteController::resolve_startup(
+            "openai-codex:gpt-5.5".into(),
+            &["anthropic".to_string()],
+            &ledger(&[("openai-codex", missing()), ("anthropic", valid())]),
+        )
+        .await;
+        assert!(matches!(route, ProviderRoute::Fallback { .. }));
+
+        let (tx, mut rx) = broadcast::channel(4);
+        let controller = RouteController::new(route, Box::new(NullBridge), Some(tx));
+        controller.begin_login("openai-codex".into()).await;
+        let event = rx.recv().await.unwrap();
+        let omegon_traits::AgentEvent::SystemNotification { message } = event else {
+            panic!("route controller should emit an operator-visible route event");
+        };
+        assert!(message.contains("Provider login pending for openai-codex"), "{message}");
+    }
+
+    #[tokio::test]
     async fn startup_matrix_is_total_and_fallback_is_explicit() {
         let selected_states = [valid(), expired(), missing()];
         let fallback_sets: Vec<Vec<String>> = vec![
