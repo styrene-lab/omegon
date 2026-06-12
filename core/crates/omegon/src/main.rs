@@ -3909,10 +3909,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         }
         (route::ProviderRoute::Disconnected { selected, reason }, _) => {
             tracing::warn!(selected = %selected, reason = ?reason, "no LLM provider available for selected interactive model and no explicit fallback engaged");
-            startup_auth_warnings.push(format!(
-                "No LLM provider configured for {selected}. No fallback provider will be used unless `fallbackProviders` is explicitly set. Run /login {} or configure credentials for the selected provider.",
-                providers::infer_provider_id(selected)
-            ));
+            startup_auth_warnings.push(reason.operator_message(selected));
             startup_decision.provider_connected = false;
             startup_decision.use_null_bridge = true;
             (

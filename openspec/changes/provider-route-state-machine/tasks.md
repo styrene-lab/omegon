@@ -19,8 +19,8 @@ delegate/cleave child routing.
 
 - [x] 2.1 Add `fallback_providers: Vec<String>` to Settings (persisted, default empty) and to the Pkl profile schema in `pkl/`
 - [x] 2.2 Replace the ad-hoc fallback block in main.rs:3843-3885 with `RouteController::resolve_startup`; retire `automation_safe_model()` from the interactive path
-- [ ] 2.3 Disconnected message: name the selected provider, list probed credential sources from the ledger, give the exact remediation (`/login <provider>` or env var name)
-- [ ] 2.4 Fallback-exhausted message lists every provider tried and the per-provider ledger reason
+- [x] 2.3 Disconnected message: name the selected provider, list probed credential sources from the ledger, give the exact remediation (`/login <provider>` or env var name)
+- [x] 2.4 Fallback-exhausted message lists every provider tried and the per-provider ledger reason
 - [ ] 2.5 Integration tests: empty-fallback startup with missing creds → Disconnected + NullBridge; configured fallback with valid creds → Fallback + RouteChanged emitted
 
 ## 3. Login lifecycle on the controller

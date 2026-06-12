@@ -76,9 +76,91 @@ pub enum CredentialSource {
     External,
 }
 
+impl CredentialSource {
+    pub fn label(&self) -> &'static str {
+        match self {
+            CredentialSource::Environment => "environment",
+            CredentialSource::AuthJson => "auth.json",
+            CredentialSource::External => "external",
+        }
+    }
+}
+
 impl CredentialState {
     pub fn is_valid(&self) -> bool {
         matches!(self, CredentialState::Valid { .. })
+    }
+
+    pub fn summary(&self) -> String {
+        match self {
+            CredentialState::Valid { source, oauth } => {
+                let kind = if *oauth { "OAuth" } else { "API key" };
+                format!("valid {kind} credentials from {}", source.label())
+            }
+            CredentialState::Expired { source, refreshable } => {
+                let refresh = if *refreshable {
+                    "refreshable"
+                } else {
+                    "not refreshable"
+                };
+                format!("expired OAuth credentials from {} ({refresh})", source.label())
+            }
+            CredentialState::Missing { probed_sources } => {
+                format!("missing credentials; probed {}", probed_sources.join(", "))
+            }
+        }
+    }
+}
+
+impl DisconnectedReason {
+    pub fn operator_message(&self, selected: &str) -> String {
+        match self {
+            DisconnectedReason::MissingCredentials {
+                provider,
+                probed_sources,
+            } => format!(
+                "No credentials for selected model {selected} ({provider}). Probed: {}. Remediation: run `/login {provider}` or set one of: {}.",
+                probed_sources.join(", "),
+                provider_env_var_list(provider)
+            ),
+            DisconnectedReason::ExpiredCredentials {
+                provider,
+                refreshable,
+            } => {
+                let refresh = if *refreshable {
+                    "refreshable token expired"
+                } else {
+                    "token expired and is not refreshable"
+                };
+                format!(
+                    "Expired credentials for selected model {selected} ({provider}): {refresh}. Remediation: run `/login {provider}` or set one of: {}.",
+                    provider_env_var_list(provider)
+                )
+            }
+            DisconnectedReason::FallbackExhausted { selected, attempts } => {
+                let tried = attempts
+                    .iter()
+                    .map(|attempt| format!("{}: {}", attempt.provider, attempt.state.summary()))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                format!(
+                    "No usable route for selected model {selected}. Explicit fallbackProviders exhausted: {tried}. Remediation: run `/login {}` or configure fallbackProviders with a provider that has credentials.",
+                    crate::providers::infer_provider_id(selected)
+                )
+            }
+            DisconnectedReason::ProviderUnavailable { provider, detail } => format!(
+                "Provider {provider} is unavailable for selected model {selected}: {detail}. Remediation: run `/login {provider}` or check provider configuration."
+            ),
+        }
+    }
+}
+
+fn provider_env_var_list(provider: &str) -> String {
+    let vars = crate::auth::provider_env_vars(provider);
+    if vars.is_empty() {
+        format!("{}_API_KEY", provider.to_ascii_uppercase().replace('-', "_"))
+    } else {
+        vars.join(", ")
     }
 }
 
@@ -647,6 +729,40 @@ mod tests {
             .await;
         assert!(matches!(snapshot.route, ProviderRoute::Disconnected { .. }));
         assert!(snapshot.warning.unwrap().contains("disconnected"));
+    }
+
+    #[test]
+    fn disconnected_message_lists_sources_and_remediation() {
+        let reason = DisconnectedReason::MissingCredentials {
+            provider: "openai-codex".into(),
+            probed_sources: vec!["environment".into(), "auth.json".into(), "external".into()],
+        };
+        let message = reason.operator_message("openai-codex:gpt-5.5");
+        assert!(message.contains("openai-codex:gpt-5.5"), "{message}");
+        assert!(message.contains("environment, auth.json, external"), "{message}");
+        assert!(message.contains("/login openai-codex"), "{message}");
+        assert!(message.contains("CHATGPT_OAUTH_TOKEN"), "{message}");
+    }
+
+    #[test]
+    fn fallback_exhausted_message_lists_each_attempt() {
+        let reason = DisconnectedReason::FallbackExhausted {
+            selected: "openai-codex:gpt-5.5".into(),
+            attempts: vec![
+                ProviderAttempt {
+                    provider: "anthropic".into(),
+                    state: expired(),
+                },
+                ProviderAttempt {
+                    provider: "google".into(),
+                    state: missing(),
+                },
+            ],
+        };
+        let message = reason.operator_message("openai-codex:gpt-5.5");
+        assert!(message.contains("fallbackProviders exhausted"), "{message}");
+        assert!(message.contains("anthropic: expired OAuth"), "{message}");
+        assert!(message.contains("google: missing credentials"), "{message}");
     }
 
     #[tokio::test]
