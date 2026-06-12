@@ -120,6 +120,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", help="Optional model override for implemented adapters")
     parser.add_argument("--slim", action="store_true", help="Enable Omegon slim mode for this run")
     parser.add_argument("--headroom-smoke", action="store_true", help="Validate headroom benchmark env/eval plumbing without running an agent")
+    parser.add_argument("--headroom-ab", action="store_true", help="Run paired headroom off/on benchmark variants")
+    parser.add_argument(
+        "--headroom-ab-report",
+        nargs="+",
+        help="Print a plain-text report from one or more headroom A/B summary JSON artifacts",
+    )
     parser.add_argument(
         "--out-dir",
         help="Directory for JSON result artifacts (default: <root>/ai/benchmarks/runs)",
@@ -1373,6 +1379,61 @@ def result_harness_label(harness: str, slim: bool) -> str:
     return harness
 
 
+def ensure_headroom_eval_fixtures(root: Path, config: dict[str, Any]) -> dict[str, Any] | None:
+    fixtures = config.get("eval_fixtures")
+    if not isinstance(fixtures, str):
+        return None
+    refresh = config.get("refresh_fixtures", "never")
+    if refresh not in ("never", "auto", "always"):
+        raise TaskSpecError("headroom.refresh_fixtures must be never, auto, or always")
+    fixture_dir = (root / fixtures).resolve()
+    has_fixtures = fixture_dir.exists() and any(fixture_dir.glob("*.json"))
+    if refresh == "never" or (refresh == "auto" and has_fixtures):
+        return None
+    manifest = config.get("corpus_manifest")
+    if not isinstance(manifest, str) or not manifest.strip():
+        raise TaskSpecError(
+            "headroom eval fixtures are missing; set headroom.corpus_manifest or refresh fixtures manually"
+        )
+    commands = [
+        [sys.executable, "scripts/headroom_corpus_collect.py", manifest],
+        [sys.executable, "scripts/headroom_dogfood.py", ".tmp/headroom/generated-corpus.json"],
+    ]
+    steps: list[dict[str, Any]] = []
+    for cmd in commands:
+        started = time.monotonic()
+        audit(f"headroom fixture refresh: {shlex.join(cmd)}")
+        proc = subprocess.run(
+            cmd,
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        step = {
+            "command": cmd,
+            "exit_code": proc.returncode,
+            "elapsed_sec": round(time.monotonic() - started, 3),
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+        }
+        steps.append(step)
+        if proc.returncode != 0:
+            raise TaskSpecError(
+                f"headroom fixture refresh failed: {shlex.join(cmd)} exited {proc.returncode}\n{proc.stderr}"
+            )
+    refreshed = fixture_dir.exists() and any(fixture_dir.glob("*.json"))
+    if not refreshed:
+        raise TaskSpecError(f"headroom fixture refresh produced no fixtures in {fixtures}")
+    return {
+        "mode": refresh,
+        "corpus_manifest": manifest,
+        "fixtures": fixtures,
+        "steps": steps,
+    }
+
+
 def run_headroom_eval(root: Path, spec: TaskSpec, out_dir: Path) -> dict[str, Any] | None:
     config = spec.headroom or {}
     if not config.get("run_eval"):
@@ -1383,6 +1444,7 @@ def run_headroom_eval(root: Path, spec: TaskSpec, out_dir: Path) -> dict[str, An
         raise TaskSpecError("headroom.run_eval requires headroom.eval_fixtures")
     if not isinstance(fixtures, str):
         raise TaskSpecError("headroom.eval_fixtures must be a string path")
+    refresh_result = ensure_headroom_eval_fixtures(root, config)
 
     artifact = out_dir / f"{_sanitize_filename_component(spec.id)}-headroom-eval.json"
     cmd = [
@@ -1596,7 +1658,7 @@ def _sanitize_filename_component(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in value)
 
 
-def run_headroom_smoke(root: Path, spec: TaskSpec, out_dir: Path) -> Path:
+def run_headroom_smoke(root: Path, spec: TaskSpec, out_dir: Path, label: str = "headroom-smoke") -> Path:
     runtime_env = headroom_env_from_spec(spec)
     headroom_eval = run_headroom_eval(root, spec, out_dir)
     status = "pass"
@@ -1605,7 +1667,7 @@ def run_headroom_smoke(root: Path, spec: TaskSpec, out_dir: Path) -> Path:
     payload = {
         "task_id": spec.id,
         "task_kind": spec.kind,
-        "harness": "headroom-smoke",
+        "harness": label,
         "model": None,
         "status": status,
         "score": 1.0 if status == "pass" else 0.0,
@@ -1628,9 +1690,72 @@ def run_headroom_smoke(root: Path, spec: TaskSpec, out_dir: Path) -> Path:
             "headroom_eval": headroom_eval.get("artifact_path") if headroom_eval else None,
         },
     }
-    path = write_result(out_dir, spec, "headroom-smoke", False, payload)
+    path = write_result(out_dir, spec, label, False, payload)
     audit(f"headroom smoke done: task={spec.id} status={status} result={path}")
     return path
+
+
+def clone_task_spec_with_headroom(spec: TaskSpec, headroom: dict[str, Any]) -> TaskSpec:
+    return TaskSpec(
+        id=spec.id,
+        kind=spec.kind,
+        prompt=spec.prompt,
+        repo=spec.repo,
+        base_ref=spec.base_ref,
+        success_files=list(spec.success_files),
+        acceptance=list(spec.acceptance),
+        acceptance_optional=list(spec.acceptance_optional),
+        acceptance_failure_if=list(spec.acceptance_failure_if),
+        process_expectations=dict(spec.process_expectations),
+        expected_solution=dict(spec.expected_solution),
+        headroom=headroom,
+        budget=dict(spec.budget),
+        harnesses=list(spec.harnesses),
+        models=list(spec.models),
+    )
+
+
+def run_headroom_ab_smoke(root: Path, spec: TaskSpec, out_dir: Path) -> Path:
+    on_headroom = dict(spec.headroom or {})
+    off_headroom = dict(on_headroom)
+    off_headroom["mode"] = "off"
+    off_headroom["run_eval"] = False
+    on_headroom.setdefault("mode", "on")
+    off_spec = clone_task_spec_with_headroom(spec, off_headroom)
+    on_spec = clone_task_spec_with_headroom(spec, on_headroom)
+    off_path = run_headroom_smoke(root, off_spec, out_dir, label="headroom-ab-off-smoke")
+    on_path = run_headroom_smoke(root, on_spec, out_dir, label="headroom-ab-on-smoke")
+    off_payload = load_result(off_path)
+    on_payload = load_result(on_path)
+    summary = {
+        "task_id": spec.id,
+        "mode": "headroom-ab-smoke",
+        "status": "pass" if off_payload.get("status") == "pass" and on_payload.get("status") == "pass" else "fail",
+        "off_result": str(off_path),
+        "on_result": str(on_path),
+        "off": summarize_headroom_ab_payload(off_payload),
+        "on": summarize_headroom_ab_payload(on_payload),
+    }
+    out_path = out_dir / f"{_sanitize_filename_component(spec.id)}-headroom-ab-smoke.json"
+    out_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    audit(f"headroom A/B smoke done: task={spec.id} status={summary['status']} result={out_path}")
+    return out_path
+
+
+def summarize_headroom_ab_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    tokens = payload.get("tokens") if isinstance(payload.get("tokens"), dict) else {}
+    headroom_eval = payload.get("headroom_eval") if isinstance(payload.get("headroom_eval"), dict) else None
+    summary = headroom_eval.get("summary") if isinstance(headroom_eval, dict) and isinstance(headroom_eval.get("summary"), dict) else {}
+    return {
+        "harness": payload.get("harness"),
+        "status": payload.get("status"),
+        "score": payload.get("score"),
+        "total_tokens": tokens.get("total") if isinstance(tokens, dict) else None,
+        "headroom_runtime_env": payload.get("headroom_runtime_env"),
+        "headroom_eval_status": headroom_eval.get("status") if isinstance(headroom_eval, dict) else None,
+        "headroom_savings_percent": summary.get("evaluated_savings_percent") if isinstance(summary, dict) else None,
+        "headroom_restored_fact_count": summary.get("restored_fact_count") if isinstance(summary, dict) else None,
+    }
 
 
 def write_result(out_dir: Path, spec: TaskSpec, harness: str, slim: bool, payload: dict[str, Any]) -> Path:
@@ -2045,6 +2170,50 @@ def render_regressions(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def render_headroom_ab_report(summaries: list[dict[str, Any]]) -> str:
+    if not summaries:
+        raise TaskSpecError("headroom A/B report requires at least one summary artifact")
+    lines = ["Headroom A/B Report", ""]
+    for summary in summaries:
+        task_id = summary.get("task_id", "unknown-task")
+        status = summary.get("status", "unknown")
+        off = summary.get("off") if isinstance(summary.get("off"), dict) else {}
+        on = summary.get("on") if isinstance(summary.get("on"), dict) else {}
+        lines.append(f"Task: {task_id}")
+        lines.append(f"  status: {status}")
+        lines.append(
+            "  off: "
+            f"status={off.get('status', 'unknown')} tokens={fmt_tokens(off.get('total_tokens'))}"
+        )
+        lines.append(
+            "  on: "
+            f"status={on.get('status', 'unknown')} tokens={fmt_tokens(on.get('total_tokens'))} "
+            f"eval={on.get('headroom_eval_status', 'unknown')} "
+            f"savings={fmt_percent(on.get('headroom_savings_percent'))} "
+            f"restored={fmt_count(on.get('headroom_restored_fact_count'))}"
+        )
+        off_tokens = off.get("total_tokens")
+        on_tokens = on.get("total_tokens")
+        if isinstance(off_tokens, int) and isinstance(on_tokens, int) and off_tokens > 0:
+            delta = off_tokens - on_tokens
+            pct = int((delta * 100) / off_tokens)
+            lines.append(f"  token delta: {delta} ({pct}% saved vs off)")
+        else:
+            lines.append("  token delta: unavailable")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def run_headroom_ab_report_mode(paths: list[str]) -> int:
+    try:
+        summaries = [load_result(Path(path).resolve()) for path in paths]
+        print(render_headroom_ab_report(summaries), end="")
+        return 0
+    except (OSError, json.JSONDecodeError, TaskSpecError) as err:
+        print(str(err), file=sys.stderr)
+        return 1
+
+
 def run_report_mode(paths: list[str], baseline_paths: list[str] | None = None) -> int:
     try:
         expanded_paths = expand_report_inputs(paths)
@@ -2074,6 +2243,8 @@ def main() -> int:
     args = parse_args()
     if args.report:
         return run_report_mode(args.report, baseline_paths=args.baseline)
+    if args.headroom_ab_report:
+        return run_headroom_ab_report_mode(args.headroom_ab_report)
     if args.baseline:
         print("--baseline is only meaningful with --report", file=sys.stderr)
         return 1
@@ -2102,6 +2273,14 @@ def main() -> int:
     if args.headroom_smoke:
         try:
             path = run_headroom_smoke(root, spec, out_dir)
+        except TaskSpecError as err:
+            print(str(err), file=sys.stderr)
+            return 1
+        print(path)
+        return 0
+    if args.headroom_ab:
+        try:
+            path = run_headroom_ab_smoke(root, spec, out_dir)
         except TaskSpecError as err:
             print(str(err), file=sys.stderr)
             return 1
