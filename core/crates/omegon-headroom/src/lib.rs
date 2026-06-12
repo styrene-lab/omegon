@@ -588,6 +588,12 @@ fn compress_signal_text(
 fn compress_code(text: &str, policy: HeadroomPolicy, reference: Option<&HeadroomRef>) -> String {
     let mut out = header(ContentKind::Code, text, reference);
     let mut budget = SectionBudget::new(policy.target_bytes, out.len());
+    push_budgeted_section(
+        &mut out,
+        "protected_anchors",
+        protected_anchor_lines(text, policy.signal_lines).into_iter(),
+        &mut budget,
+    );
     let signatures = text
         .lines()
         .filter(|line| {
@@ -748,10 +754,17 @@ fn has_code_signal_token(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
     [
         "json_parse: failed",
+        "compile_error!",
+        "pub use ",
+        "cfg(",
+        "feature =",
         "error_code",
         "exit_code",
         "failures",
         "failed",
+        "failure",
+        "panic",
+        "warning",
         "blocked",
         "critical",
     ]
@@ -835,6 +848,7 @@ fn is_protected_anchor_line(line: &str) -> bool {
         || has_test_count_summary(trimmed)
         || is_rust_test_result_line(trimmed)
         || is_rust_function_declaration_anchor(trimmed)
+        || is_code_declaration_anchor(trimmed)
         || has_cli_flag_token(trimmed)
         || has_headroom_token(trimmed)
         || has_quoted_signal_token(trimmed)
@@ -872,6 +886,9 @@ fn anchor_score(line: &str) -> u8 {
     }
     if is_rust_function_declaration_anchor(trimmed) {
         return if lower.contains("headroom") { 108 } else { 82 };
+    }
+    if is_code_declaration_anchor(trimmed) {
+        return 84;
     }
     if has_nonzero_exit_code(trimmed) {
         return 70;
@@ -933,6 +950,26 @@ fn is_rust_function_declaration_anchor(trimmed: &str) -> bool {
         ]
         .iter()
         .any(|needle| name.contains(needle))
+}
+
+fn is_code_declaration_anchor(trimmed: &str) -> bool {
+    let trimmed = trimmed
+        .trim_start_matches('+')
+        .trim_start_matches('-')
+        .trim_start()
+        .trim_start_matches("//!")
+        .trim_start_matches("///")
+        .trim_start();
+    trimmed.starts_with("compile_error!")
+        || trimmed.starts_with("pub use ")
+        || trimmed.starts_with("pub(crate) use ")
+        || trimmed.starts_with("#[cfg(")
+        || trimmed.starts_with("cfg(")
+        || trimmed.contains("feature =")
+        || (trimmed.starts_with("//")
+            && ["panic", "failure", "failed", "error", "warning"]
+                .iter()
+                .any(|needle| trimmed.to_ascii_lowercase().contains(needle)))
 }
 
 fn has_cli_flag_token(line: &str) -> bool {
@@ -1329,6 +1366,8 @@ mod tests {
             "cargo run -p omegon-headroom --bin headroom-eval -- --fixtures DIR",
             "headroom_compress stores originals for headroom_retrieve",
             "+    fn scored_anchors_prioritize_headroom_test_and_cli_tokens() {",
+            "compile_error!(\"The `io-uring` feature requires `--cfg tokio_unstable`.\");",
+            "pub use dioxus_logger::tracing::{debug, error, info, trace, warn};",
         ]
         .join("\n");
 
@@ -1352,6 +1391,16 @@ mod tests {
         assert!(anchors.iter().any(|(_, _, line)| {
             line.contains("scored_anchors_prioritize_headroom_test_and_cli_tokens")
         }));
+        assert!(
+            anchors
+                .iter()
+                .any(|(_, _, line)| line.contains("compile_error!"))
+        );
+        assert!(
+            anchors
+                .iter()
+                .any(|(_, _, line)| line.contains("pub use dioxus_logger"))
+        );
     }
 
     #[test]

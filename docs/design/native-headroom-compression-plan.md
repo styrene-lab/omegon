@@ -86,7 +86,7 @@ Status: active current focus.
 - [x] Support source-oriented command/file manifests for dogfood generation.
 - [x] Add optional broad-corpus manifest entries for local public repos and extracted document text.
 - [x] Generate fixtures from real command/tool outputs and local document/code corpora.
-- [ ] Generate fixtures from public repositories using the optional broad corpus manifest.
+- [x] Generate fixtures from public repositories using the optional broad corpus manifest.
 - [ ] Add corpus-level labels beyond fixture class where needed: `canonical`, `adversarial`, `dogfood`, `regression`, `corpus`.
 - [x] Track class/domain metrics separately so aggregate savings cannot hide domain regressions.
 - [x] Add automated fixture minimization/redaction guidance before any fixture is committed.
@@ -99,6 +99,20 @@ Current committed/supporting manifest artifacts:
 - `scripts/headroom_dogfood.py [manifest.json]` — manifest-driven fixture generation.
 - `scripts/headroom_corpus_collect.py <collector-manifest.json>` — copies/clones bounded corpus sources under `.tmp/headroom/` and emits `.tmp/headroom/generated-corpus.json` for dogfood generation.
 - `docs/evals/headroom-fixture-guidelines.md` — minimization/redaction policy for converting local dogfood failures into committed regression fixtures.
+
+Current broad corpus evidence from `docs/evals/headroom-corpus-large.example.json`:
+
+```text
+fixtures: 25
+evaluated bytes: 1838392 -> 55303
+estimated tokens: 459605 -> 13834
+savings: 96%
+restoration gate: PASS (45 / 100)
+```
+
+This includes real public repo samples plus public-domain TXT/EPUB-derived prose. The PDF target is present but optional and was skipped on the current host because neither `pdftotext` nor `pypdf` was available.
+
+Remaining Phase C pressure is no longer corpus breadth; it is reducing restored facts toward zero for strict default-on confidence, especially in code/doc-comment anchors, grep-like path:line lists, and noisy curated Markdown lists.
 
 ### Phase D — integrate with existing benchmark harness (future release)
 
