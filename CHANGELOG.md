@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Add an explicit assess-time assumption question to the design-tree prompt injection: reviewing a design node now directs the agent to ask what unstated assumptions the design makes and record them as `[assumption]`-tagged questions.
 - Add `just source-clean` and source-vs-agent-state dirty classification so live `.omegon/` telemetry no longer blocks source-plane cleanliness checks.
 
 ### Changed
