@@ -112,9 +112,23 @@ headroom-eval *args:
 headroom-fixture name kind input_file:
     python3 scripts/headroom_fixture.py "{{name}}" "{{kind}}" "{{input_file}}"
 
+# Run committed native headroom regression fixtures with strict restoration budget.
+headroom-regression:
+    {{cargo}} run -p omegon-headroom --bin headroom-eval -- --text --fixtures core/crates/omegon-headroom/fixtures/regression --max-restored-facts 0
+
 # Generate ignored dogfood fixtures from real local commands.
 headroom-dogfood:
     python3 scripts/headroom_dogfood.py
+
+# Generate ignored dogfood fixtures and run strict local evaluation.
+headroom-dogfood-eval:
+    python3 scripts/headroom_dogfood.py
+    {{cargo}} run -p omegon-headroom --bin headroom-eval -- --text --fixtures .tmp/headroom/fixtures --max-restored-facts 0
+
+# Generate ignored dogfood fixtures from a corpus manifest and run strict local evaluation.
+headroom-corpus-eval manifest:
+    python3 scripts/headroom_dogfood.py "{{manifest}}"
+    {{cargo}} run -p omegon-headroom --bin headroom-eval -- --text --fixtures .tmp/headroom/fixtures --max-restored-facts 0
 
 # Run a quick token-efficiency benchmark. Writes per-turn snapshots to .tmp/bench/.
 # Usage: just bench "read Cargo.toml and summarize the dependencies"

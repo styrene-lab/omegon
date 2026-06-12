@@ -118,6 +118,16 @@ Tool names:
 
 ## Evaluation workflow
 
+For local validation, use the strict recipes:
+
+```bash
+just headroom-regression
+just headroom-dogfood-eval
+just headroom-corpus-eval docs/evals/headroom-corpus.example.json
+```
+
+`headroom-regression` runs committed regression fixtures with `--max-restored-facts 0`. `headroom-dogfood-eval` regenerates ignored fixtures from local commands and then runs the same strict restoration budget. `headroom-corpus-eval` does the same from a selected source-oriented corpus manifest.
+
 Native compression effectiveness is measured by the `headroom-eval` binary in the `omegon-headroom` crate:
 
 ```bash

@@ -53,8 +53,18 @@ Related long-form design: [[docs/headroom-native-compression|Native Headroom-Com
 
 - [ ] Commit current foundation slice: provider metadata, bounded CCR store, docs, strict dogfood tuning.
 - [ ] Add a regression fixture directory for redacted committed fixtures if any dogfood samples can be safely checked in.
-- [ ] Ensure `just headroom-dogfood` and strict `headroom-eval` are documented as the local gate.
+- [x] Ensure `just headroom-dogfood` and strict `headroom-eval` are documented as the local gate.
 - [ ] Keep `.tmp/headroom` outputs ignored and non-authoritative.
+
+For current localized work, use these gates:
+
+```bash
+just headroom-regression
+just headroom-dogfood-eval
+just headroom-corpus-eval docs/evals/headroom-corpus.example.json
+```
+
+All three use a strict restoration budget (`--max-restored-facts 0`) so required facts must be preserved by the compressor rather than evaluator repair.
 
 ### Phase B — provider boundary
 
