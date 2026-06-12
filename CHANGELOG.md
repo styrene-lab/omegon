@@ -30,6 +30,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add runtime caps and effective-window metadata for web search, memory recall/episodes, and session-log result windows.
 - Add the experimental `headroom` runtime settings surface and `harness_settings` opt-in action for dogfooding native compression before it becomes a default behavior.
 - Document Kompressor as a future optional compression-provider milestone behind the planned pluggable engine boundary, with deterministic fallback and dogfood validation requirements.
+- Add corpus-manifest collection support for broad headroom dogfood, including public repo samples plus optional TXT, EPUB, and PDF download/extraction targets under ignored `.tmp/headroom` storage.
 - Add affected-crate detection plus scoped `just affected`, `just test-changed`, `just check-changed`, and `just clippy-changed` recipes for faster local validation of changed Rust workspace slices.
 - Add `just test-profile` to statically summarize Rust test/coupling hotspots before choosing validation or extraction targets.
 - Add Python unit coverage for the affected-crate and test-profile developer tooling.

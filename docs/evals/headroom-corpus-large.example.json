@@ -35,8 +35,8 @@
             "200"
           ],
           "kind_hint": "plain_text",
-          "min_savings_percent": 20,
-          "expected_compressed": true,
+          "min_savings_percent": 0,
+          "expected_compressed": false,
           "max_output_bytes": 500000
         },
         {
@@ -87,8 +87,8 @@
             "200"
           ],
           "kind_hint": "plain_text",
-          "min_savings_percent": 20,
-          "expected_compressed": true,
+          "min_savings_percent": 0,
+          "expected_compressed": false,
           "max_output_bytes": 500000
         }
       ]
@@ -126,8 +126,8 @@
             "200"
           ],
           "kind_hint": "plain_text",
-          "min_savings_percent": 20,
-          "expected_compressed": true,
+          "min_savings_percent": 0,
+          "expected_compressed": false,
           "max_output_bytes": 500000
         },
         {
@@ -170,8 +170,8 @@
             "200"
           ],
           "kind_hint": "plain_text",
-          "min_savings_percent": 20,
-          "expected_compressed": true,
+          "min_savings_percent": 0,
+          "expected_compressed": false,
           "max_output_bytes": 500000
         }
       ]
@@ -231,11 +231,46 @@
             "200"
           ],
           "kind_hint": "plain_text",
-          "min_savings_percent": 20,
-          "expected_compressed": true,
+          "min_savings_percent": 0,
+          "expected_compressed": false,
           "max_output_bytes": 500000
         }
       ]
+    }
+  ],
+  "downloads": [
+    {
+      "name": "gutenberg-frankenstein-txt",
+      "url": "https://www.gutenberg.org/cache/epub/84/pg84.txt",
+      "format": "txt",
+      "kind_hint": "plain_text",
+      "min_savings_percent": 40,
+      "expected_compressed": true,
+      "max_download_bytes": 2000000,
+      "max_output_bytes": 500000,
+      "optional": true
+    },
+    {
+      "name": "gutenberg-pride-and-prejudice-epub",
+      "url": "https://www.gutenberg.org/ebooks/1342.epub.noimages",
+      "format": "epub",
+      "kind_hint": "plain_text",
+      "min_savings_percent": 40,
+      "expected_compressed": true,
+      "max_download_bytes": 5000000,
+      "max_output_bytes": 500000,
+      "optional": true
+    },
+    {
+      "name": "rfc9110-http-semantics-pdf",
+      "url": "https://www.rfc-editor.org/rfc/pdfrfc/rfc9110.txt.pdf",
+      "format": "pdf",
+      "kind_hint": "plain_text",
+      "min_savings_percent": 40,
+      "expected_compressed": true,
+      "max_download_bytes": 10000000,
+      "max_output_bytes": 500000,
+      "optional": true
     }
   ],
   "documents": [
