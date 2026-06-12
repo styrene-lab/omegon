@@ -233,7 +233,10 @@ fn detect_lifecycle_context(cwd: &Path, tools: &[ToolDefinition]) -> String {
              [assumption]-tagged open questions (e.g. '[assumption] The operator has git installed'). \
              Assumptions are unknowns we're treating as true but haven't validated. \
              A node's readiness = decisions / (decisions + questions + assumptions). \
-             Resolve all unknowns before deciding."
+             Resolve all unknowns before deciding. \
+             When assessing or reviewing a design node, explicitly ask: \
+             'What assumptions is this design making that haven't been stated?' \
+             and record the answers as [assumption]-tagged questions."
         ));
     }
 
