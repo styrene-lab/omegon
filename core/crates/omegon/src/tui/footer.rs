@@ -65,6 +65,10 @@ pub struct FooterData {
     pub compactions: u32,
     pub cwd: String,
     pub is_oauth: bool,
+    /// Persistent provider-route warning surfaced by RouteChanged events
+    /// (fallback active, disconnected, or login failure). Cleared when route
+    /// reaches a clean Serving state.
+    pub route_warning: Option<String>,
     /// HarnessStatus — persona, MCP, secrets, inference state.
     /// Updated via BusEvent::HarnessStatusChanged.
     pub harness: HarnessStatus,
@@ -624,6 +628,12 @@ impl FooterData {
         lines.push(Line::from(auth_parts));
         if let Some(line) = fallback_line {
             lines.push(line);
+        }
+        if let Some(ref warning) = self.route_warning {
+            lines.push(Line::from(Span::styled(
+                crate::util::truncate(warning, inner.width.saturating_sub(1) as usize),
+                Style::default().fg(t.warning()),
+            )));
         }
 
         if let Some(line) = format_provider_telemetry_compact(self.provider_telemetry.as_ref()) {
@@ -1206,6 +1216,26 @@ mod tests {
             text.contains("gpt-5.5"),
             "should name the operator-selected model: {text}"
         );
+    }
+
+    #[test]
+    fn model_card_shows_persistent_route_warning() {
+        let data = FooterData {
+            model_id: "claude-fable-5".into(),
+            model_provider: "anthropic".into(),
+            route_warning: Some("Login timed out waiting for browser callback".into()),
+            context_window: 200_000,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 180, 8);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| data.render(area, frame, &super::super::theme::Alpharius))
+            .unwrap();
+
+        let text = render_to_string(&terminal);
+        assert!(text.contains("Login timed out"), "{text}");
     }
 
     #[test]

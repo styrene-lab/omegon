@@ -7445,6 +7445,34 @@ Scroll transcript:
                     self.web_startup = Some(startup);
                 }
             }
+            AgentEvent::RouteChanged {
+                state,
+                selected,
+                serving,
+                warning,
+                message,
+            } => {
+                if let Some(serving) = serving.as_ref() {
+                    self.footer_data.model_id = serving.clone();
+                    self.footer_data.model_provider = crate::providers::infer_provider_id(serving);
+                }
+                self.footer_data.fallback_from = if state == "fallback" {
+                    selected.clone()
+                } else {
+                    None
+                };
+                self.footer_data.route_warning = warning.clone().or_else(|| {
+                    if state == "serving" {
+                        None
+                    } else {
+                        Some(message.clone())
+                    }
+                });
+                if state == "serving" {
+                    self.footer_data.route_warning = None;
+                }
+                self.show_toast(&message, ratatui_toaster::ToastType::Info);
+            }
             AgentEvent::SystemNotification { message } => {
                 if let Some(detail) = upstream_retry_hint(&message) {
                     self.slim_turn_state = SlimTurnState::UpstreamRetrying(detail);
