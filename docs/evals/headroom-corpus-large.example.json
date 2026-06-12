@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "description": "Optional broad local corpus for native headroom dogfooding. The collector clones public repositories and copies bounded samples under .tmp/headroom/; no corpus data should be committed.",
+  "repos": [
+    {
+      "name": "tokio",
+      "url": "https://github.com/tokio-rs/tokio.git",
+      "ref": "master",
+      "files": [
+        {
+          "name": "tokio-lib-rs",
+          "path": "tokio/src/lib.rs",
+          "kind_hint": "code",
+          "min_savings_percent": 25,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        },
+        {
+          "name": "tokio-readme",
+          "path": "README.md",
+          "kind_hint": "markdown",
+          "min_savings_percent": 25,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ],
+      "commands": [
+        {
+          "name": "tokio-recent-log",
+          "command": ["git", "log", "--oneline", "-n", "200"],
+          "kind_hint": "plain_text",
+          "min_savings_percent": 20,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        },
+        {
+          "name": "tokio-grep-tests",
+          "command": ["git", "grep", "-n", "#\\[tokio::test\\]"],
+          "kind_hint": "plain_text",
+          "min_savings_percent": 20,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ]
+    },
+    {
+      "name": "ratatui",
+      "url": "https://github.com/ratatui/ratatui.git",
+      "ref": "main",
+      "files": [
+        {
+          "name": "ratatui-lib-rs",
+          "path": "ratatui/src/lib.rs",
+          "kind_hint": "code",
+          "min_savings_percent": 25,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        },
+        {
+          "name": "ratatui-readme",
+          "path": "README.md",
+          "kind_hint": "markdown",
+          "min_savings_percent": 25,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ],
+      "commands": [
+        {
+          "name": "ratatui-recent-log",
+          "command": ["git", "log", "--oneline", "-n", "200"],
+          "kind_hint": "plain_text",
+          "min_savings_percent": 20,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ]
+    },
+    {
+      "name": "dioxus",
+      "url": "https://github.com/DioxusLabs/dioxus.git",
+      "ref": "main",
+      "files": [
+        {
+          "name": "dioxus-lib-rs",
+          "path": "packages/dioxus/src/lib.rs",
+          "kind_hint": "code",
+          "min_savings_percent": 25,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        },
+        {
+          "name": "dioxus-readme",
+          "path": "README.md",
+          "kind_hint": "markdown",
+          "min_savings_percent": 25,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ],
+      "commands": [
+        {
+          "name": "dioxus-recent-log",
+          "command": ["git", "log", "--oneline", "-n", "200"],
+          "kind_hint": "plain_text",
+          "min_savings_percent": 20,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        },
+        {
+          "name": "dioxus-grep-rsx",
+          "command": ["git", "grep", "-n", "rsx!"],
+          "kind_hint": "plain_text",
+          "min_savings_percent": 20,
+          "expected_compressed": true,
+          "max_output_bytes": 500000
+        }
+      ]
+    }
+  ],
+  "documents": [
+    {
+      "name": "public-domain-pdf-text-placeholder",
+      "path": ".tmp/headroom/sources/public-domain-pdf.txt",
+      "kind_hint": "plain_text",
+      "min_savings_percent": 40,
+      "expected_compressed": true,
+      "max_output_bytes": 500000
+    },
+    {
+      "name": "public-domain-epub-text-placeholder",
+      "path": ".tmp/headroom/sources/public-domain-epub.txt",
+      "kind_hint": "plain_text",
+      "min_savings_percent": 40,
+      "expected_compressed": true,
+      "max_output_bytes": 500000
+    }
+  ],
+  "notes": [
+    "Document entries are placeholders for operator-provided UTF-8 text extracted from PDFs/EPUBs; create those .tmp files locally before running the collector.",
+    "Repository commands are intentionally limited to read-only git operations by scripts/headroom_corpus_collect.py.",
+    "Generated samples, fixtures, cloned repositories, PDFs, EPUBs, and extracted text stay under .tmp/headroom and must not be committed."
+  ]
+}

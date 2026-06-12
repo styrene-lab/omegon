@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "description": "Local no-network collector smoke manifest for native headroom corpus collection. The collector copies bounded workspace files under .tmp/headroom/sources/ and emits .tmp/headroom/generated-corpus.json for scripts/headroom_dogfood.py.",
+  "documents": [
+    {
+      "name": "native-headroom-design-doc-collected",
+      "path": "docs/headroom-native-compression.md",
+      "kind_hint": "markdown",
+      "min_savings_percent": 40,
+      "expected_compressed": true,
+      "max_output_bytes": 500000
+    },
+    {
+      "name": "headroom-source-collected",
+      "path": "core/crates/omegon-headroom/src/lib.rs",
+      "kind_hint": "code",
+      "min_savings_percent": 50,
+      "expected_compressed": true,
+      "max_output_bytes": 500000
+    }
+  ]
+}

@@ -125,6 +125,10 @@ headroom-dogfood-eval:
     python3 scripts/headroom_dogfood.py
     {{cargo}} run -p omegon-headroom --bin headroom-eval -- --text --fixtures .tmp/headroom/fixtures --max-restored-facts 0
 
+# Collect broad local corpus samples into an ignored dogfood manifest.
+headroom-corpus-collect manifest:
+    python3 scripts/headroom_corpus_collect.py "{{manifest}}"
+
 # Generate ignored dogfood fixtures from a corpus manifest and run strict local evaluation.
 headroom-corpus-eval manifest:
     python3 scripts/headroom_dogfood.py "{{manifest}}"
