@@ -59,6 +59,60 @@ where
     pub kind: ConversationSegmentKind<TText, TPath>,
 }
 
+fn text_form(text: &str) -> ContentForm {
+    let trimmed = text.trim_start();
+    if trimmed.is_empty() {
+        ContentForm::Empty
+    } else if trimmed.starts_with('#')
+        || trimmed.starts_with("```")
+        || trimmed.contains(
+            "
+#",
+        )
+        || trimmed.contains(
+            "
+- ",
+        )
+        || trimmed.contains(
+            "
+* ",
+        )
+    {
+        ContentForm::Markdown
+    } else {
+        ContentForm::Prose
+    }
+}
+
+fn tool_content_form<TText: AsRef<str>>(tool: &ToolSegment<TText>) -> ContentForm {
+    let name = tool.name.as_ref();
+    let detail = tool
+        .detail_result
+        .as_ref()
+        .map(|t| t.as_ref())
+        .unwrap_or("");
+    match name {
+        "read" | "view" => text_form(detail),
+        "bash" => ContentForm::Log,
+        "edit" | "change" => ContentForm::Diff,
+        _ => {
+            let text = tool
+                .detail_result
+                .as_ref()
+                .or(tool.result_summary.as_ref())
+                .map(|t| t.as_ref())
+                .unwrap_or("");
+            if text.trim_start().starts_with(['{', '[']) {
+                ContentForm::Json
+            } else if text.is_empty() {
+                ContentForm::Empty
+            } else {
+                ContentForm::Structured
+            }
+        }
+    }
+}
+
 impl<TText, TPath> ConversationSegmentProjection<TText, TPath>
 where
     TText: AsRef<str>,
@@ -73,6 +127,158 @@ where
 
     pub fn role(&self) -> SegmentRole {
         self.presentation.role
+    }
+
+    pub fn presentation_model(&self) -> SegmentPresentationModel<'_> {
+        match &self.kind {
+            ConversationSegmentKind::User(user) => SegmentPresentationModel {
+                producer: SegmentProducer::Operator,
+                state: SegmentState::Completed,
+                content: SegmentContentPresentation {
+                    form: text_form(user.text.as_ref()),
+                    title: None,
+                    summary: Some(user.text.as_ref()),
+                    body: Some(user.text.as_ref()),
+                },
+                metrics: Vec::new(),
+                affordances: SegmentAffordances {
+                    copyable: true,
+                    selectable: true,
+                    ..Default::default()
+                },
+            },
+            ConversationSegmentKind::Assistant(assistant) => SegmentPresentationModel {
+                producer: SegmentProducer::Assistant,
+                state: if assistant.complete {
+                    SegmentState::Completed
+                } else {
+                    SegmentState::Running
+                },
+                content: SegmentContentPresentation {
+                    form: text_form(assistant.text.as_ref()),
+                    title: None,
+                    summary: Some(assistant.text.as_ref()),
+                    body: Some(assistant.text.as_ref()),
+                },
+                metrics: Vec::new(),
+                affordances: SegmentAffordances {
+                    copyable: true,
+                    selectable: true,
+                    ..Default::default()
+                },
+            },
+            ConversationSegmentKind::PeerAgent(peer) => SegmentPresentationModel {
+                producer: SegmentProducer::PeerAgent {
+                    label: peer.label.as_ref(),
+                    source: peer.source,
+                },
+                state: match peer.status {
+                    PeerAgentStatus::Running => SegmentState::Running,
+                    PeerAgentStatus::Completed => SegmentState::Completed,
+                    PeerAgentStatus::Failed => SegmentState::Failed,
+                    PeerAgentStatus::Cancelled => SegmentState::Cancelled,
+                    PeerAgentStatus::Deferred => SegmentState::Pending,
+                },
+                content: SegmentContentPresentation {
+                    form: text_form(peer.text.as_ref()),
+                    title: Some(peer.label.as_ref()),
+                    summary: Some(peer.text.as_ref()),
+                    body: Some(peer.text.as_ref()),
+                },
+                metrics: vec![
+                    SegmentMetric::new(peer.source.as_str()).with_emphasis(MetricEmphasis::Muted),
+                ],
+                affordances: SegmentAffordances {
+                    copyable: true,
+                    selectable: true,
+                    ..Default::default()
+                },
+            },
+            ConversationSegmentKind::Tool(tool) => SegmentPresentationModel {
+                producer: SegmentProducer::Tool {
+                    name: tool.name.as_ref(),
+                    category: tool_category_for_name(tool.name.as_ref()),
+                },
+                state: if tool.is_error {
+                    SegmentState::Failed
+                } else if tool.complete {
+                    SegmentState::Completed
+                } else {
+                    SegmentState::Running
+                },
+                content: SegmentContentPresentation {
+                    form: tool_content_form(tool),
+                    title: Some(tool.name.as_ref()),
+                    summary: tool.result_summary.as_ref().map(|t| t.as_ref()),
+                    body: tool.detail_result.as_ref().map(|t| t.as_ref()),
+                },
+                metrics: Vec::new(),
+                affordances: SegmentAffordances {
+                    detail_available: tool.detail_args.is_some() || tool.detail_result.is_some(),
+                    expandable: tool.detail_args.is_some() || tool.detail_result.is_some(),
+                    selectable: true,
+                    copyable: tool.detail_result.is_some(),
+                },
+            },
+            ConversationSegmentKind::System(system) => SegmentPresentationModel {
+                producer: SegmentProducer::System,
+                state: SegmentState::Informational,
+                content: SegmentContentPresentation {
+                    form: text_form(system.text.as_ref()),
+                    title: None,
+                    summary: Some(system.text.as_ref()),
+                    body: Some(system.text.as_ref()),
+                },
+                metrics: Vec::new(),
+                affordances: SegmentAffordances {
+                    selectable: true,
+                    ..Default::default()
+                },
+            },
+            ConversationSegmentKind::Lifecycle(lifecycle) => SegmentPresentationModel {
+                producer: SegmentProducer::Lifecycle,
+                state: SegmentState::Informational,
+                content: SegmentContentPresentation {
+                    form: ContentForm::Structured,
+                    title: Some(lifecycle.icon.as_ref()),
+                    summary: Some(lifecycle.text.as_ref()),
+                    body: Some(lifecycle.text.as_ref()),
+                },
+                metrics: Vec::new(),
+                affordances: SegmentAffordances {
+                    selectable: true,
+                    ..Default::default()
+                },
+            },
+            ConversationSegmentKind::Image(image) => SegmentPresentationModel {
+                producer: SegmentProducer::Media,
+                state: SegmentState::Completed,
+                content: SegmentContentPresentation {
+                    form: ContentForm::Image,
+                    title: Some(image.alt.as_ref()),
+                    summary: Some(image.alt.as_ref()),
+                    body: None,
+                },
+                metrics: Vec::new(),
+                affordances: SegmentAffordances {
+                    detail_available: true,
+                    selectable: true,
+                    ..Default::default()
+                },
+            },
+            ConversationSegmentKind::Separator => SegmentPresentationModel {
+                producer: SegmentProducer::Separator,
+                state: SegmentState::Informational,
+                content: SegmentContentPresentation {
+                    form: ContentForm::Separator,
+                    title: None,
+                    summary: None,
+                    body: None,
+                },
+                metrics: Vec::new(),
+                affordances: SegmentAffordances::default(),
+            },
+        }
     }
 }
 
@@ -114,6 +320,110 @@ where
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentState {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+    Informational,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentProducer<'a> {
+    Operator,
+    Assistant,
+    PeerAgent {
+        label: &'a str,
+        source: PeerAgentSource,
+    },
+    Tool {
+        name: &'a str,
+        category: ToolCategory,
+    },
+    System,
+    Lifecycle,
+    Media,
+    Separator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentForm {
+    Prose,
+    Markdown,
+    Code,
+    Log,
+    Diff,
+    Json,
+    Structured,
+    Image,
+    Separator,
+    Empty,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetricEmphasis {
+    Normal,
+    Muted,
+    Strong,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentMetric<'a> {
+    pub label: Option<&'a str>,
+    pub value: &'a str,
+    pub emphasis: MetricEmphasis,
+}
+
+impl<'a> SegmentMetric<'a> {
+    pub fn new(value: &'a str) -> Self {
+        Self {
+            label: None,
+            value,
+            emphasis: MetricEmphasis::Normal,
+        }
+    }
+
+    pub fn labeled(label: &'a str, value: &'a str) -> Self {
+        Self {
+            label: Some(label),
+            value,
+            emphasis: MetricEmphasis::Normal,
+        }
+    }
+
+    pub fn with_emphasis(mut self, emphasis: MetricEmphasis) -> Self {
+        self.emphasis = emphasis;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SegmentAffordances {
+    pub detail_available: bool,
+    pub expandable: bool,
+    pub selectable: bool,
+    pub copyable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentContentPresentation<'a> {
+    pub form: ContentForm,
+    pub title: Option<&'a str>,
+    pub summary: Option<&'a str>,
+    pub body: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentPresentationModel<'a> {
+    pub producer: SegmentProducer<'a>,
+    pub state: SegmentState,
+    pub content: SegmentContentPresentation<'a>,
+    pub metrics: Vec<SegmentMetric<'a>>,
+    pub affordances: SegmentAffordances,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,4 +722,101 @@ mod tests {
         assert!(!PeerAgentStatus::Running.is_terminal());
     }
 
+    #[test]
+    fn presentation_model_separates_assistant_producer_from_markdown_form() {
+        let projection = ConversationSegmentProjection::<&str>::new(
+            ConversationSegmentKind::Assistant(AssistantSegment {
+                text: "# Plan
+
+- ship it",
+                thinking: "",
+                complete: true,
+            }),
+        );
+
+        let model = projection.presentation_model();
+        assert_eq!(model.producer, SegmentProducer::Assistant);
+        assert_eq!(model.state, SegmentState::Completed);
+        assert_eq!(model.content.form, ContentForm::Markdown);
+        assert_eq!(
+            model.content.body,
+            Some(
+                "# Plan
+
+- ship it"
+            )
+        );
+    }
+
+    #[test]
+    fn presentation_model_uses_same_markdown_form_for_read_tool_output() {
+        let projection = ConversationSegmentProjection::<&str>::new(ConversationSegmentKind::Tool(
+            ToolSegment {
+                id: "tool-1",
+                name: "read",
+                args_summary: Some("README.md"),
+                detail_args: None,
+                result_summary: Some("# Plan"),
+                detail_result: Some(
+                    "# Plan
+
+- ship it",
+                ),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        ));
+
+        let model = projection.presentation_model();
+        assert_eq!(
+            model.producer,
+            SegmentProducer::Tool {
+                name: "read",
+                category: ToolCategory::FileRead,
+            }
+        );
+        assert_eq!(model.state, SegmentState::Completed);
+        assert_eq!(model.content.form, ContentForm::Markdown);
+        assert!(model.affordances.detail_available);
+        assert!(model.affordances.copyable);
+    }
+
+    #[test]
+    fn presentation_model_classifies_structured_tool_forms_without_role_coupling() {
+        let bash = ConversationSegmentProjection::<&str>::new(ConversationSegmentKind::Tool(
+            ToolSegment {
+                id: "tool-1",
+                name: "bash",
+                args_summary: Some("cargo test"),
+                detail_args: None,
+                result_summary: Some("ok"),
+                detail_result: Some("running tests..."),
+                is_error: false,
+                complete: false,
+                expanded: false,
+            },
+        ));
+        let edit = ConversationSegmentProjection::<&str>::new(ConversationSegmentKind::Tool(
+            ToolSegment {
+                id: "tool-2",
+                name: "edit",
+                args_summary: Some("file.rs"),
+                detail_args: None,
+                result_summary: Some("1 file"),
+                detail_result: Some(
+                    "- old
++ new",
+                ),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        ));
+
+        assert_eq!(bash.presentation_model().content.form, ContentForm::Log);
+        assert_eq!(bash.presentation_model().state, SegmentState::Running);
+        assert_eq!(edit.presentation_model().content.form, ContentForm::Diff);
+        assert_eq!(edit.presentation_model().state, SegmentState::Completed);
+    }
 }
