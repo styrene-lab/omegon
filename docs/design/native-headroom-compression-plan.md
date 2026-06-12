@@ -58,23 +58,37 @@ Related long-form design: [[docs/headroom-native-compression|Native Headroom-Com
 
 ### Phase B — provider boundary
 
-- [ ] Introduce `CompressionProvider` trait.
-- [ ] Move deterministic implementation behind `NativeDeterministicProvider`.
-- [ ] Preserve the current public behavior and provider identity.
+Status: mostly complete for the deterministic baseline.
+
+- [x] Introduce `CompressionProvider` trait.
+- [x] Move deterministic implementation behind `NativeDeterministicProvider`.
+- [x] Preserve the current public behavior and provider identity.
 - [ ] Extend `headroom-eval` with `--provider native_deterministic` as a no-op baseline.
 - [ ] Add comparison output that can compare providers on the same fixture set.
 
+Do not add Kompressor/Ollama/ONNX providers until corpus breadth and strict deterministic gates are stronger.
+
 ### Phase C — broaden dogfood fixture corpus
 
-- [ ] Add fixture-corpus manifest format for local datasets.
+Status: active current focus.
+
+- [x] Add fixture-corpus manifest format for local datasets.
+- [x] Support source-oriented command/file manifests for dogfood generation.
+- [x] Add optional broad-corpus manifest entries for local public repos and extracted document text.
 - [ ] Generate fixtures from real command/tool outputs, document/code corpora, and public repositories.
-- [ ] Add corpus-level labels: `canonical`, `adversarial`, `dogfood`, `regression`, `corpus`.
+- [ ] Add corpus-level labels beyond fixture class where needed: `canonical`, `adversarial`, `dogfood`, `regression`, `corpus`.
 - [ ] Track class/domain metrics separately so aggregate savings cannot hide domain regressions.
 - [ ] Add automated fixture minimization/redaction guidance before any fixture is committed.
 
+Current committed/supporting manifest artifacts:
+
+- `docs/evals/headroom-corpus.example.json` — small source-oriented corpus for local dogfood.
+- `docs/evals/headroom-corpus-large.example.json` — optional broad corpus references under ignored `.tmp/headroom/` paths.
+- `scripts/headroom_dogfood.py [manifest.json]` — manifest-driven fixture generation.
+
 ### Phase D — integrate with existing benchmark harness (future release)
 
-Status: deferred. The existing benchmark harness is the right eventual home for high-level, end-to-end evaluator work, but it is not needed for the current headroom implementation slice. Continue localized headroom evaluation until the deterministic compressor, CCR retrieval, corpus fixtures, and provider boundary are stable.
+Status: deferred by operator decision. The existing benchmark harness is the right eventual home for high-level, end-to-end evaluator work, but it is not needed for the current headroom implementation slice. Continue localized headroom evaluation until the deterministic compressor, CCR retrieval, corpus fixtures, and provider boundary are stable.
 
 Future release tasks:
 
