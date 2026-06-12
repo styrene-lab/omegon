@@ -27,6 +27,8 @@ budget:
 headroom:
   run_eval: true
   eval_fixtures: .tmp/headroom/fixtures
+  corpus_manifest: docs/evals/headroom-corpus-large.example.json
+  refresh_fixtures: auto
   max_restored_facts: 0
   token_counter: bytes_div_4
 notes: |
