@@ -1,0 +1,33 @@
+id: headroom-read-large-rust
+kind: evaluation
+repo: .
+base_ref: main
+model: anthropic:claude-sonnet-4-6
+slim: false
+prompt: |
+  Evaluate native headroom on a large Rust source surface. Inspect core/crates/omegon-headroom/src/lib.rs and report the roles of CompressionProvider, NativeDeterministicProvider, FileHeadroomStore, and protected-anchor extraction. If compression emits a retrieval handle, retrieve the original before answering.
+harnesses:
+  - omegon
+acceptance:
+  required:
+    - 'grep -q "trait CompressionProvider" core/crates/omegon-headroom/src/lib.rs'
+    - 'grep -q "struct NativeDeterministicProvider" core/crates/omegon-headroom/src/lib.rs'
+    - 'grep -q "struct FileHeadroomStore" core/crates/omegon-headroom/src/lib.rs'
+success_files:
+  - core/crates/omegon-headroom/src/lib.rs
+budget:
+  soft:
+    max_turns: 12
+    max_total_tokens: 800000
+    max_wall_clock_sec: 900
+  hard:
+    max_turns: 24
+    max_total_tokens: 1600000
+    max_wall_clock_sec: 1800
+headroom:
+  run_eval: true
+  eval_fixtures: .tmp/headroom/fixtures
+  max_restored_facts: 0
+  token_counter: bytes_div_4
+notes: |
+  Evidence-gathering benchmark: compare future headroom-off/on runs for task success and context pressure.

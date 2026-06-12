@@ -1,0 +1,34 @@
+id: headroom-retrieve-original
+kind: evaluation
+repo: .
+base_ref: main
+model: anthropic:claude-sonnet-4-6
+slim: false
+prompt: |
+  Evaluate native headroom CCR behavior. Use headroom_compress on a large sample from docs/headroom-native-compression.md or core/crates/omegon-headroom/src/lib.rs with force=true if needed, then use headroom_retrieve on the emitted hr:* handle and confirm the retrieved original contains the protected-anchor and provider sections.
+harnesses:
+  - omegon
+acceptance:
+  required:
+    - 'grep -q "headroom_compress" docs/headroom-native-compression.md'
+    - 'grep -q "headroom_retrieve" docs/headroom-native-compression.md'
+    - 'grep -q "CompressionProvider" core/crates/omegon-headroom/src/lib.rs'
+success_files:
+  - docs/headroom-native-compression.md
+  - core/crates/omegon-headroom/src/lib.rs
+budget:
+  soft:
+    max_turns: 14
+    max_total_tokens: 900000
+    max_wall_clock_sec: 900
+  hard:
+    max_turns: 28
+    max_total_tokens: 1800000
+    max_wall_clock_sec: 1800
+headroom:
+  run_eval: true
+  eval_fixtures: .tmp/headroom/fixtures
+  max_restored_facts: 0
+  token_counter: bytes_div_4
+notes: |
+  Evidence-gathering benchmark for explicit manual CCR round-trip behavior.

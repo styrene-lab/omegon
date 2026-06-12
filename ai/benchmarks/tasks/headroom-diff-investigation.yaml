@@ -1,0 +1,33 @@
+id: headroom-diff-investigation
+kind: evaluation
+repo: .
+base_ref: main
+model: anthropic:claude-sonnet-4-6
+slim: false
+prompt: |
+  Evaluate native headroom on a large diff/investigation surface. Inspect recent headroom commits with git show --stat --patch HEAD~5..HEAD, identify the most risk-bearing changes, and explain which tests or gates cover them. Retrieve originals if compressed handles are emitted.
+harnesses:
+  - omegon
+acceptance:
+  required:
+    - 'git show --stat --patch HEAD~5..HEAD >/dev/null'
+    - 'git log --oneline -n 5 | grep -E "headroom|eval|dogfood|benchmark"'
+success_files:
+  - core/crates/omegon-headroom/src/lib.rs
+  - scripts/headroom_dogfood.py
+budget:
+  soft:
+    max_turns: 14
+    max_total_tokens: 900000
+    max_wall_clock_sec: 900
+  hard:
+    max_turns: 28
+    max_total_tokens: 1800000
+    max_wall_clock_sec: 1800
+headroom:
+  run_eval: true
+  eval_fixtures: .tmp/headroom/fixtures
+  max_restored_facts: 0
+  token_counter: bytes_div_4
+notes: |
+  Evidence-gathering benchmark for diff anchors, function declarations, CLI flags, and retrieval handles.

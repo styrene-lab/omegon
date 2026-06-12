@@ -1,0 +1,33 @@
+id: headroom-read-large-markdown
+kind: evaluation
+repo: .
+base_ref: main
+model: anthropic:claude-sonnet-4-6
+slim: false
+prompt: |
+  Evaluate native headroom on long markdown/design surfaces. Read docs/headroom-native-compression.md and docs/design/native-headroom-compression-plan.md, then summarize the current default-on readiness gates, remaining provider work, and benchmark evidence requirements. Retrieve originals if compressed handles are emitted.
+harnesses:
+  - omegon
+acceptance:
+  required:
+    - 'grep -q "Native Headroom-Compatible Compression" docs/headroom-native-compression.md'
+    - 'grep -q "default-on" docs/design/native-headroom-compression-plan.md'
+success_files:
+  - docs/headroom-native-compression.md
+  - docs/design/native-headroom-compression-plan.md
+budget:
+  soft:
+    max_turns: 12
+    max_total_tokens: 700000
+    max_wall_clock_sec: 900
+  hard:
+    max_turns: 24
+    max_total_tokens: 1400000
+    max_wall_clock_sec: 1800
+headroom:
+  run_eval: true
+  eval_fixtures: .tmp/headroom/fixtures
+  max_restored_facts: 0
+  token_counter: bytes_div_4
+notes: |
+  Evidence-gathering benchmark for markdown compression and decision retention.

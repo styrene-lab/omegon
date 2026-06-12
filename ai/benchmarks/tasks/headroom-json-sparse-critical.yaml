@@ -1,0 +1,33 @@
+id: headroom-json-sparse-critical
+kind: evaluation
+repo: .
+base_ref: main
+model: anthropic:claude-sonnet-4-6
+slim: false
+prompt: |
+  Evaluate native headroom on sparse critical JSON data. Inspect the canonical JSON critical-row fixture in core/crates/omegon-headroom/src/validation.rs and explain how the compressor preserves sparse signal rows such as PAYMENT_TIMEOUT and data_loss. Retrieve originals if compressed handles are emitted.
+harnesses:
+  - omegon
+acceptance:
+  required:
+    - 'grep -q "PAYMENT_TIMEOUT" core/crates/omegon-headroom/src/validation.rs'
+    - 'grep -q "json-schema-signal-critical-row" core/crates/omegon-headroom/src/validation.rs'
+    - 'grep -q "data_loss" core/crates/omegon-headroom/src/validation.rs'
+success_files:
+  - core/crates/omegon-headroom/src/validation.rs
+budget:
+  soft:
+    max_turns: 10
+    max_total_tokens: 600000
+    max_wall_clock_sec: 600
+  hard:
+    max_turns: 20
+    max_total_tokens: 1200000
+    max_wall_clock_sec: 1200
+headroom:
+  run_eval: true
+  eval_fixtures: .tmp/headroom/fixtures
+  max_restored_facts: 0
+  token_counter: bytes_div_4
+notes: |
+  Evidence-gathering benchmark for structured JSON signal extraction.
