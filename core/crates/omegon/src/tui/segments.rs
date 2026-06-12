@@ -14,8 +14,9 @@ use super::conversation_render_projection::SegmentRenderMetadata;
 use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
-    ConversationSegmentProjection, ImageSegment, LifecycleSegment, ProjectConversationSegment,
-    SegmentPresentation, SegmentRole, SystemSegment, ToolSegment, UserSegment,
+    ConversationSegmentProjection, ImageSegment, LifecycleSegment, PeerAgentSegment,
+    PeerAgentSource, PeerAgentStatus, ProjectConversationSegment, SegmentPresentation, SegmentRole,
+    SystemSegment, ToolSegment, UserSegment,
 };
 
 const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
@@ -1024,6 +1025,15 @@ pub enum SegmentContent {
         complete: bool,
     },
 
+    /// Agent-to-agent response from delegated workers, cleave children, or
+    /// remote peer agents.
+    PeerAgentText {
+        label: String,
+        source: PeerAgentSource,
+        status: PeerAgentStatus,
+        text: String,
+    },
+
     /// Tool call with args and result.
     ToolCard {
         id: String,
@@ -1104,6 +1114,22 @@ impl Segment {
             },
         }
     }
+    pub fn peer_agent(
+        label: impl Into<String>,
+        source: PeerAgentSource,
+        status: PeerAgentStatus,
+        text: impl Into<String>,
+    ) -> Self {
+        Self {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::PeerAgentText {
+                label: label.into(),
+                source,
+                status,
+                text: text.into(),
+            },
+        }
+    }
     pub fn tool_card(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             meta: SegmentMeta::default(),
@@ -1171,6 +1197,17 @@ impl<'a> ProjectConversationSegment<'a> for Segment {
                 text: text.as_str(),
                 thinking: thinking.as_str(),
                 complete: *complete,
+            }),
+            SegmentContent::PeerAgentText {
+                label,
+                source,
+                status,
+                text,
+            } => ConversationSegmentKind::PeerAgent(PeerAgentSegment {
+                label: label.as_str(),
+                source: *source,
+                status: *status,
+                text: text.as_str(),
             }),
             SegmentContent::ToolCard {
                 id,
@@ -1246,6 +1283,10 @@ impl Segment {
                 stream_updatable: !*complete,
                 ..SegmentCapabilities::timeline_item()
             },
+            SegmentContent::PeerAgentText { status, .. } => SegmentCapabilities {
+                stream_updatable: !status.is_terminal(),
+                ..SegmentCapabilities::timeline_item()
+            },
             SegmentContent::ToolCard {
                 is_error, complete, ..
             } => SegmentCapabilities {
@@ -1294,6 +1335,28 @@ impl Segment {
                 } else {
                     format!("[thinking]\n{thinking}\n\n[text]\n{text}")
                 }
+            }
+            SegmentContent::PeerAgentText {
+                label,
+                source,
+                status,
+                text,
+            } => {
+                let text = match mode {
+                    SegmentExportMode::Raw => text.trim_end().to_string(),
+                    SegmentExportMode::Plaintext => normalize_markdown_for_plaintext(text),
+                };
+                format!(
+                    "peer agent: {label}
+source: {}
+status: {}
+
+{text}",
+                    source.as_str(),
+                    status.as_str()
+                )
+                .trim_end()
+                .to_string()
             }
             SegmentContent::ToolCard {
                 name,
@@ -1409,6 +1472,25 @@ impl Segment {
                     &render_ctx,
                 );
             }
+            PeerAgentText {
+                text,
+                status,
+                ..
+            } => {
+                super::segment_components::assistant::render(
+                    super::segment_components::assistant::AssistantRenderProps {
+                        text,
+                        thinking: "",
+                        complete: status.is_terminal(),
+                        meta: &self.meta,
+                        presentation: &presentation,
+                        mode,
+                    },
+                    area,
+                    buf,
+                    &render_ctx,
+                );
+            }
             ToolCard {
                 name,
                 detail_args,
@@ -1503,6 +1585,9 @@ impl Segment {
                     wrapped_rows(text, width).max(1)
                 };
                 (text_rows + thinking_rows).max(1)
+            }
+            PeerAgentText { text, .. } if matches!(mode, SegmentRenderMode::Slim) => {
+                wrapped_rows(text, width).max(1)
             }
             AssistantText { text, thinking, .. } => {
                 let meta_line = if self.meta.model_id.is_some() || self.meta.provider.is_some() {
@@ -3499,6 +3584,40 @@ mod tests {
             op_count <= 1,
             "operator card should not duplicate the OP sigil in both title and body: {text}"
         );
+    }
+
+    #[test]
+    fn peer_agent_segment_projects_and_renders_peer_chrome() {
+        let seg = Segment::peer_agent(
+            "scout",
+            crate::surfaces::conversation::PeerAgentSource::Delegate,
+            crate::surfaces::conversation::PeerAgentStatus::Running,
+            "reviewing the patch",
+        );
+        let projection = seg.projection();
+        assert_eq!(projection.role(), SegmentRole::PeerAgent);
+        match projection.kind {
+            ConversationSegmentKind::PeerAgent(peer) => {
+                assert_eq!(peer.label, "scout");
+                assert_eq!(peer.source.as_str(), "delegate");
+                assert_eq!(peer.status.as_str(), "running");
+                assert_eq!(peer.text, "reviewing the patch");
+            }
+            other => panic!("expected peer agent projection, got {other:?}"),
+        }
+
+        let (area, mut buf) = make_buf(80, 8);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Full,
+            crate::settings::ToolDetail::Detailed,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("peer agent"), "{text}");
+        assert!(text.contains("⬡"), "{text}");
+        assert!(text.contains("reviewing the patch"), "{text}");
     }
 
     #[test]

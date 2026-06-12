@@ -41,6 +41,7 @@ pub fn segment_chrome(
     let (role_label, sigil, role_color) = match presentation.role {
         SegmentRole::Operator => ("operator", "OP", t.accent()),
         SegmentRole::Assistant => ("assistant", "Ω", t.success()),
+        SegmentRole::PeerAgent => ("peer agent", "⬡", t.accent()),
         SegmentRole::Tool => {
             let category = presentation.tool_category.unwrap_or(ToolCategory::Generic);
             (category.label(), "⚙", tool_category_color(category, t))

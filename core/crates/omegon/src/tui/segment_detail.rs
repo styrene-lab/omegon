@@ -44,6 +44,7 @@ fn segment_kind_label(segment: &Segment) -> &'static str {
     match segment.content {
         SegmentContent::UserPrompt { .. } => "user",
         SegmentContent::AssistantText { .. } => "assistant",
+        SegmentContent::PeerAgentText { .. } => "peer_agent",
         SegmentContent::ToolCard { .. } => "tool",
         SegmentContent::SystemNotification { .. } => "system",
         SegmentContent::LifecycleEvent { .. } => "lifecycle",

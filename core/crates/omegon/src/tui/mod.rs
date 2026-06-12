@@ -4791,6 +4791,7 @@ impl App {
             let role = match segment.role() {
                 crate::surfaces::conversation::SegmentRole::Operator => "## Operator",
                 crate::surfaces::conversation::SegmentRole::Assistant => "## Assistant",
+                crate::surfaces::conversation::SegmentRole::PeerAgent => "## Peer Agent",
                 crate::surfaces::conversation::SegmentRole::Tool => "## Tool",
                 crate::surfaces::conversation::SegmentRole::System => "## System",
                 crate::surfaces::conversation::SegmentRole::Lifecycle => "## Event",
