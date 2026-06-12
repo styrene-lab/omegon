@@ -932,37 +932,45 @@ pub fn import_discovered_provider_credentials() -> usize {
             continue;
         }
 
-        let Some(discovered) = read_external_credentials(provider.auth_key) else {
-            continue;
-        };
-        if discovered.cred_type == "oauth" && discovered.is_expired() {
-            continue;
-        }
-
-        let persist_result = if provider.auth_key == "openai-codex" {
-            let account_id = read_external_credential_extra(provider.auth_key, "accountId");
-            write_credentials_with_extra(provider.auth_key, &discovered, account_id.as_deref())
-        } else {
-            write_credentials(provider.auth_key, &discovered)
-        };
-
-        match persist_result {
-            Ok(()) => {
-                imported += 1;
-                tracing::info!(
-                    provider = provider.id,
-                    "imported discovered provider credentials into auth.json"
-                );
-            }
-            Err(e) => tracing::warn!(
+        if adopt_external_credentials(provider.auth_key).is_some() {
+            imported += 1;
+            tracing::info!(
                 provider = provider.id,
-                error = %auth_write_failure_operator_message(&e),
-                "discovered provider credential could not be imported"
-            ),
+                "imported discovered provider credentials into auth.json"
+            );
         }
     }
 
     imported
+}
+
+/// Adopt a valid provider credential from supported external tools and persist
+/// it into Omegon auth storage. Returns the adopted credential on success.
+pub fn adopt_external_credentials(provider: &str) -> Option<OAuthCredentials> {
+    let auth_key = auth_json_key(provider);
+    let discovered = read_external_credentials(auth_key)?;
+    if discovered.cred_type == "oauth" && discovered.is_expired() {
+        return None;
+    }
+
+    let persist_result = if auth_key == "openai-codex" {
+        let account_id = read_external_credential_extra(auth_key, "accountId");
+        write_credentials_with_extra(auth_key, &discovered, account_id.as_deref())
+    } else {
+        write_credentials(auth_key, &discovered)
+    };
+
+    match persist_result {
+        Ok(()) => Some(discovered),
+        Err(e) => {
+            tracing::warn!(
+                provider = auth_key,
+                error = %auth_write_failure_operator_message(&e),
+                "external provider credential could not be adopted"
+            );
+            None
+        }
+    }
 }
 
 /// Resolve API key with automatic token refresh.

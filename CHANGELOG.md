@@ -43,6 +43,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Keep slim TUI instrument footers to inference and tools only; engine telemetry now stays solely in the slim status sidecar row instead of duplicating as a footer block.
 - Render the slim TUI engine sidecar as its own status row below the lifecycle row so lifecycle and engine telemetry no longer compete for one line.
 - Import discovered external provider credentials into Omegon auth storage once at startup so OpenAI/Codex OAuth survives rebuilt binary relinks and subsequent session hydration uses internal auth.json.
+- Adopt valid external provider credentials during startup env hydration when Omegon auth storage is missing or expired, preventing rebuilt sessions from falling back to login-only mode.
 
 ## [0.27.0] - 2026-06-11
 

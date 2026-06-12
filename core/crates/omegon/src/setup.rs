@@ -1425,15 +1425,25 @@ fn hydrate_provider_auth_env_from_auth_json(
         {
             continue;
         }
-        if let Some(creds) = crate::auth::read_credentials(provider.auth_key) {
-            if creds.cred_type == "oauth" && creds.is_expired() {
+        let mut source = "auth.json";
+        let creds = match crate::auth::read_credentials(provider.auth_key) {
+            Some(creds) if creds.cred_type == "oauth" && creds.is_expired() => {
                 tracing::debug!(
                     provider = provider.id,
                     env = primary_env,
-                    "skipping expired provider OAuth env hydration from auth.json"
+                    "stored provider OAuth credential expired; trying external adoption before env hydration"
                 );
-                continue;
+                source = "external";
+                crate::auth::adopt_external_credentials(provider.auth_key)
             }
+            Some(creds) => Some(creds),
+            None => {
+                source = "external";
+                crate::auth::adopt_external_credentials(provider.auth_key)
+            }
+        };
+
+        if let Some(creds) = creds {
             secrets.register_redaction_secret(primary_env, &creds.access);
             secrets.register_redaction_secret(
                 &format!("{}_AUTH_JSON_ACCESS", provider.id),
@@ -1455,7 +1465,8 @@ fn hydrate_provider_auth_env_from_auth_json(
             tracing::info!(
                 provider = provider.id,
                 env = primary_env,
-                "hydrated provider auth env from auth.json"
+                source,
+                "hydrated provider auth env"
             );
         }
     }
@@ -1869,6 +1880,96 @@ mod tests {
                 .iter()
                 .any(|(name, value)| name == "BRAVE_API_KEY" && value == "brave-token"),
             "static credentials should still be hydrated"
+        );
+    }
+
+    #[test]
+    fn provider_auth_hydration_adopts_fresh_external_codex_when_internal_is_expired() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth_path = dir.path().join("auth.json");
+        let home = dir.path().join("home");
+        let codex_dir = home.join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let expired = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            - 1_000;
+        let fresh_external_access = format!(
+            "e30.{}.sig",
+            base64::Engine::encode(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                serde_json::json!({
+                    "exp": std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs()
+                        + 3600
+                })
+                .to_string()
+            )
+        );
+        std::fs::write(
+            &auth_path,
+            serde_json::json!({
+                "openai-codex": {
+                    "type": "oauth",
+                    "access": "expired-codex-token",
+                    "refresh": "expired-refresh-token",
+                    "expires": expired,
+                    "accountId": "acct_expired"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            codex_dir.join("auth.json"),
+            serde_json::json!({
+                "tokens": {
+                    "access_token": fresh_external_access,
+                    "refresh_token": "fresh-external-refresh",
+                    "account_id": "acct_external"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let original_auth = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+        let original_home = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path);
+            std::env::set_var("HOME", &home);
+        }
+        let secrets = omegon_secrets::SecretsManager::new(dir.path()).expect("secrets manager");
+        let mut session_secret_env = Vec::new();
+        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
+        unsafe {
+            match original_auth {
+                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
+                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+            }
+            match original_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+
+        assert!(
+            session_secret_env
+                .iter()
+                .any(|(name, value)| name == "CHATGPT_OAUTH_TOKEN"
+                    && value == &fresh_external_access),
+            "fresh external Codex OAuth should be hydrated when internal auth is expired"
+        );
+        let persisted: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&auth_path).unwrap()).unwrap();
+        assert_eq!(
+            persisted
+                .pointer("/openai-codex/accountId")
+                .and_then(|v| v.as_str()),
+            Some("acct_external")
         );
     }
 
