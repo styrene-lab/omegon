@@ -3929,10 +3929,13 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         s.runtime_bridge_model =
             (effective_model != s.model).then(|| effective_model.clone());
     }
-    let bridge: Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>> =
-        Arc::new(tokio::sync::RwLock::new(bridge));
-
     let (events_tx, events_rx) = bootstrap::wire_event_channel(&agent, 256);
+    let route_controller = Arc::new(route::RouteController::new(
+        startup_route.clone(),
+        bridge,
+        Some(events_tx.clone()),
+    ));
+    let bridge: Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>> = route_controller.bridge();
     let (command_tx, mut command_rx) = tokio::sync::mpsc::channel::<tui::TuiCommand>(16);
 
     // Wire command_tx to ContextProvider for tool dispatch
@@ -4975,7 +4978,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             let prompt_tx_for_login = events_tx.clone();
                             let login_prompt_slot = login_prompt_tx.clone();
                             let provider_clone = provider.to_string();
-                            let bridge_clone = bridge.clone();
+                            let route_controller_for_login = route_controller.clone();
                             let model_for_redetect = shared_settings
                                 .lock()
                                 .ok()
@@ -4991,6 +4994,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                     panic_notification_prefix: "⚠ Background login task crashed — authentication did not complete safely".to_string(),
                                 },
                                 async move {
+                                    route_controller_for_login
+                                        .begin_login(provider_clone.clone())
+                                        .await;
                                     let progress: auth::LoginProgress = Box::new(move |msg| {
                                         let _ = progress_tx.send(AgentEvent::SystemNotification {
                                             message: msg.to_string(),
@@ -5061,8 +5067,14 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                         if let Some(new_bridge) =
                                             providers::auto_detect_bridge(&effective_model).await
                                         {
-                                            let mut guard = bridge_clone.write().await;
-                                            *guard = new_bridge;
+                                            let _ = route_controller_for_login
+                                                .complete_login(
+                                                    route::LoginOutcome::Succeeded {
+                                                        model: effective_model.clone(),
+                                                    },
+                                                    Some(new_bridge),
+                                                )
+                                                .await;
                                             if let Ok(mut s) = settings_for_login.lock() {
                                                 s.set_model(&effective_model);
                                                 s.provider_connected = auth::provider_connected_for_model(&effective_model);
@@ -5081,7 +5093,35 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                                 events_tx_clone.send(AgentEvent::SystemNotification {
                                                     message: auth::operator_provider_connected_message(&effective_model),
                                                 });
+                                        } else {
+                                            let _ = route_controller_for_login
+                                                .complete_login(
+                                                    route::LoginOutcome::Failed {
+                                                        reason: route::LoginFailureReason::Refused(
+                                                            format!(
+                                                                "provider bridge could not start for {effective_model}"
+                                                            ),
+                                                        ),
+                                                    },
+                                                    None,
+                                                )
+                                                .await;
                                         }
+                                    } else if let Err(e) = &result {
+                                        let text = e.to_string();
+                                        let reason = if text.contains("timed out") {
+                                            route::LoginFailureReason::Timeout
+                                        } else if text.contains("stale") || text.contains("state") {
+                                            route::LoginFailureReason::StaleStateOnly
+                                        } else {
+                                            route::LoginFailureReason::Refused(text)
+                                        };
+                                        let _ = route_controller_for_login
+                                            .complete_login(
+                                                route::LoginOutcome::Failed { reason },
+                                                None,
+                                            )
+                                            .await;
                                     }
 
                                     Ok(())
