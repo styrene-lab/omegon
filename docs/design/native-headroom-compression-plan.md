@@ -85,16 +85,19 @@ Status: active current focus.
 - [x] Add fixture-corpus manifest format for local datasets.
 - [x] Support source-oriented command/file manifests for dogfood generation.
 - [x] Add optional broad-corpus manifest entries for local public repos and extracted document text.
-- [ ] Generate fixtures from real command/tool outputs, document/code corpora, and public repositories.
+- [x] Generate fixtures from real command/tool outputs and local document/code corpora.
+- [ ] Generate fixtures from public repositories using the optional broad corpus manifest.
 - [ ] Add corpus-level labels beyond fixture class where needed: `canonical`, `adversarial`, `dogfood`, `regression`, `corpus`.
-- [ ] Track class/domain metrics separately so aggregate savings cannot hide domain regressions.
+- [x] Track class/domain metrics separately so aggregate savings cannot hide domain regressions.
 - [ ] Add automated fixture minimization/redaction guidance before any fixture is committed.
 
 Current committed/supporting manifest artifacts:
 
 - `docs/evals/headroom-corpus.example.json` — small source-oriented corpus for local dogfood.
+- `docs/evals/headroom-corpus-local.example.json` — no-network collector smoke corpus for workspace docs/code.
 - `docs/evals/headroom-corpus-large.example.json` — optional broad corpus references under ignored `.tmp/headroom/` paths.
 - `scripts/headroom_dogfood.py [manifest.json]` — manifest-driven fixture generation.
+- `scripts/headroom_corpus_collect.py <collector-manifest.json>` — copies/clones bounded corpus sources under `.tmp/headroom/` and emits `.tmp/headroom/generated-corpus.json` for dogfood generation.
 
 ### Phase D — integrate with existing benchmark harness (future release)
 
