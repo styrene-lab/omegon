@@ -369,8 +369,13 @@ pub async fn run(
     let mut turn: u32 = 0;
     // Active model for this turn — updated each iteration from settings.
     // Used in TurnEnd events and error classification instead of the
-    // immutable config.model which is frozen at startup.
-    let mut active_model = config.model.clone();
+    // immutable config.model which is frozen at startup. Starts from the
+    // bridge runtime model when fallback installed one, so events emitted
+    // before the first per-turn re-read still report the real model.
+    let mut active_model = config
+        .bridge_model
+        .clone()
+        .unwrap_or_else(|| config.model.clone());
 
     loop {
         if cancel.is_cancelled() {
