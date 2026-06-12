@@ -451,7 +451,9 @@ fn build_finalization_section(submodules: &[String]) -> String {
 
     section.push_str("You MUST complete these steps before finishing:\n\n");
     section.push_str("1. Run all guardrail checks listed above and fix failures\n");
-    section.push_str("2. Commit your in-scope work with a clean source-plane state when you are done\n");
+    section.push_str(
+        "2. Commit your in-scope work with a clean source-plane state when you are done\n",
+    );
 
     if !submodules.is_empty() {
         section.push_str("3. **Submodule note**: if your scope crosses a submodule boundary, commit your edits normally. The orchestrator will handle submodule pointer updates during harvest/merge.\n");

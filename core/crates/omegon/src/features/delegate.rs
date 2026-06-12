@@ -1672,14 +1672,22 @@ impl Feature for DelegateFeature {
                     status_text.push_str(&format!(
                         "| {} | {} | {} | {} | {} | {} | {} |
 ",
-                        child.task_id, agent, status, last_tool, last_turn, task_progress, description
+                        child.task_id,
+                        agent,
+                        status,
+                        last_tool,
+                        last_turn,
+                        task_progress,
+                        description
                     ));
                 }
 
                 if snapshot.children.is_empty() {
-                    status_text.push_str("
+                    status_text.push_str(
+                        "
 No delegate tasks found.
-");
+",
+                    );
                 }
 
                 Ok(ToolResult {
@@ -1713,6 +1721,8 @@ No delegate tasks found.
             name: crate::tool_registry::delegate::DELEGATE.to_string(),
             description: "delegate task management".to_string(),
             subcommands: vec!["status".to_string()],
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::STATE_CHANGING,
         }]
     }
 
@@ -2352,7 +2362,9 @@ This agent runs in write mode and can modify files.
             completed_at: None,
             last_tool: None,
             last_turn: None,
-            tasks: crate::cleave::progress::extract_task_items("- [ ] Inspect files\n- [ ] Report findings"),
+            tasks: crate::cleave::progress::extract_task_items(
+                "- [ ] Inspect files\n- [ ] Report findings",
+            ),
         });
         store.update_task_live_state("delegate_1", Some("read".into()), Some(2));
         store.store_task(DelegateTask {
@@ -2371,7 +2383,9 @@ This agent runs in write mode and can modify files.
             task_id: "delegate_3".into(),
             agent_name: Some("patch".into()),
             task_description: "Patch bug".into(),
-            status: DelegateTaskStatus::Failed { error: "child exited".into() },
+            status: DelegateTaskStatus::Failed {
+                error: "child exited".into(),
+            },
             result: None,
             started_at: now,
             completed_at: Some(now),
@@ -2387,19 +2401,39 @@ This agent runs in write mode and can modify files.
         assert_eq!(snapshot.completed, 1);
         assert_eq!(snapshot.failed, 1);
         assert_eq!(snapshot.children.len(), 3);
-        let running = snapshot.children.iter().find(|c| c.task_id == "delegate_1").unwrap();
+        let running = snapshot
+            .children
+            .iter()
+            .find(|c| c.task_id == "delegate_1")
+            .unwrap();
         assert_eq!(running.status, "running");
         assert_eq!(running.last_tool.as_deref(), Some("read"));
         assert_eq!(running.last_turn, Some(2));
         assert_eq!(running.tasks_done, 1);
-        let completed = snapshot.children.iter().find(|c| c.task_id == "delegate_2").unwrap();
+        let completed = snapshot
+            .children
+            .iter()
+            .find(|c| c.task_id == "delegate_2")
+            .unwrap();
         assert_eq!(completed.status, "completed");
-        assert!(completed.result_summary.as_ref().unwrap().starts_with("Validation passed"));
-        assert!(completed.result_summary.as_ref().unwrap().len() < "Validation passed with a long enough result summary to truncate".len());
-        let failed = snapshot.children.iter().find(|c| c.task_id == "delegate_3").unwrap();
+        assert!(
+            completed
+                .result_summary
+                .as_ref()
+                .unwrap()
+                .starts_with("Validation passed")
+        );
+        assert!(
+            completed.result_summary.as_ref().unwrap().len()
+                < "Validation passed with a long enough result summary to truncate".len()
+        );
+        let failed = snapshot
+            .children
+            .iter()
+            .find(|c| c.task_id == "delegate_3")
+            .unwrap();
         assert_eq!(failed.status, "failed");
     }
-
 
     fn write_fake_child(dir: &Path, name: &str, body: &str) -> PathBuf {
         let path = dir.join(name);
@@ -2484,7 +2518,6 @@ This agent runs in write mode and can modify files.
         assert!(err.contains("test:model"), "{err}");
     }
 
-
     #[tokio::test]
     async fn delegate_runner_times_out_and_kills_silent_child() {
         let temp_dir = TempDir::new().unwrap();
@@ -2527,14 +2560,20 @@ This agent runs in write mode and can modify files.
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("Delegate wall-clock timeout after 1s"), "{err}");
+        assert!(
+            err.contains("Delegate wall-clock timeout after 1s"),
+            "{err}"
+        );
         store.update_task_status(
             "delegate_timeout",
             DelegateTaskStatus::Failed { error: err.clone() },
             Some(err),
         );
         let progress = store.progress_snapshot();
-        assert!(!progress.active, "timeout should clear active delegate progress");
+        assert!(
+            !progress.active,
+            "timeout should clear active delegate progress"
+        );
         assert_eq!(progress.running, 0);
         assert_eq!(progress.failed, 1);
         let child = progress
@@ -2543,9 +2582,14 @@ This agent runs in write mode and can modify files.
             .find(|child| child.task_id == "delegate_timeout")
             .unwrap();
         assert_eq!(child.status, "failed");
-        assert!(child.result_summary.as_deref().unwrap_or_default().contains("Delegate wall-clock timeout"));
+        assert!(
+            child
+                .result_summary
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Delegate wall-clock timeout")
+        );
     }
-
 
     #[tokio::test]
     async fn delegate_runner_idle_timeout_kills_quiet_child_after_initial_activity() {
@@ -2600,7 +2644,10 @@ exec sleep 10
             Some(err),
         );
         let progress = store.progress_snapshot();
-        assert!(!progress.active, "idle timeout should clear active delegate progress");
+        assert!(
+            !progress.active,
+            "idle timeout should clear active delegate progress"
+        );
         assert_eq!(progress.running, 0);
         assert_eq!(progress.failed, 1);
         let child = progress
@@ -2609,11 +2656,12 @@ exec sleep 10
             .find(|child| child.task_id == "delegate_idle_timeout")
             .unwrap();
         assert_eq!(child.status, "failed");
-        assert!(child
-            .result_summary
-            .as_deref()
-            .unwrap_or_default()
-            .contains("Delegate idle timeout"));
+        assert!(
+            child
+                .result_summary
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Delegate idle timeout")
+        );
     }
-
 }

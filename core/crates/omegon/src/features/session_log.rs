@@ -829,6 +829,8 @@ impl Feature for SessionLog {
             name: "session-log".into(),
             description: "Read .omegon/agent-journal.md entries and summarize usage".into(),
             subcommands: vec!["read".into(), "usage".into()],
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::READ_ONLY,
         }]
     }
 

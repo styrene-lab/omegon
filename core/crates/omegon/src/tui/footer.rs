@@ -1464,7 +1464,11 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
-                data.render_engine_fallback_panel(frame.area(), frame, &super::super::theme::Alpharius);
+                data.render_engine_fallback_panel(
+                    frame.area(),
+                    frame,
+                    &super::super::theme::Alpharius,
+                );
             })
             .unwrap();
 
@@ -1656,12 +1660,20 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                verbose.render_engine_fallback_panel(frame.area(), frame, &super::super::theme::Alpharius)
+                verbose.render_engine_fallback_panel(
+                    frame.area(),
+                    frame,
+                    &super::super::theme::Alpharius,
+                )
             })
             .unwrap();
         terminal
             .draw(|frame| {
-                compact.render_engine_fallback_panel(frame.area(), frame, &super::super::theme::Alpharius)
+                compact.render_engine_fallback_panel(
+                    frame.area(),
+                    frame,
+                    &super::super::theme::Alpharius,
+                )
             })
             .unwrap();
 

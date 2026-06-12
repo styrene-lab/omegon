@@ -322,6 +322,7 @@ pub async fn start_server(
         model: String::new(),
         cwd: std::env::current_dir().unwrap_or_default(),
         agent_id: None,
+        dangerously_bypass_permissions: false,
         active_connections: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         shutdown: tokio_util::sync::CancellationToken::new(),
     };

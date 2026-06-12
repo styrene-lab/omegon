@@ -152,6 +152,7 @@ pub fn spawn_worker(
     model: String,
     cwd: PathBuf,
     host_ctx: Option<crate::host_context::HostContext>,
+    dangerously_bypass_permissions: bool,
 ) -> WorkerHandle {
     let (request_tx, request_rx) = mpsc::channel::<WorkerRequest>(16);
     let (event_tx, event_rx) = tokio::sync::broadcast::channel::<WorkerEvent>(256);
@@ -179,6 +180,7 @@ pub fn spawn_worker(
                     event_tx,
                     secrets_tx,
                     host_ctx,
+                    dangerously_bypass_permissions,
                 ),
             );
         })
@@ -201,6 +203,7 @@ async fn worker_loop(
     event_tx: tokio::sync::broadcast::Sender<WorkerEvent>,
     secrets_tx: tokio::sync::oneshot::Sender<std::sync::Arc<omegon_secrets::SecretsManager>>,
     host_ctx: Option<crate::host_context::HostContext>,
+    dangerously_bypass_permissions: bool,
 ) {
     // Set the canonical project root env var so extensions can locate the workspace
     // without depending on embedder-specific names (FLYNT_VAULT, CODEX_VAULT).
@@ -561,6 +564,7 @@ async fn worker_loop(
                     &secrets,
                     workspace_ctx(&cwd, &session_id, &instance_id),
                     &mut bus,
+                    dangerously_bypass_permissions,
                 )
                 .await;
                 // Persona switch needs async bus.execute_tool — handle the marker
@@ -649,6 +653,7 @@ async fn handle_control_request(
     secrets: &std::sync::Arc<omegon_secrets::SecretsManager>,
     workspace_ctx: crate::workspace::control::WorkspaceControlContext<'_>,
     bus: &mut crate::bus::EventBus,
+    dangerously_bypass_permissions: bool,
 ) -> String {
     let cwd = workspace_ctx.cwd;
     let parts: Vec<&str> = command.splitn(2, char::is_whitespace).collect();
@@ -1096,7 +1101,142 @@ async fn handle_control_request(
             "Auth status requires interactive terminal. Use `omegon auth status` in a shell.".into()
         }
 
-        _ => format!("Unknown control request: {command}"),
+        _ => handle_registered_acp_command(bus, cmd, args, dangerously_bypass_permissions)
+            .unwrap_or_else(|| format!("Unknown control request: {command}")),
+    }
+}
+
+pub(crate) fn handle_registered_acp_command(
+    bus: &mut crate::bus::EventBus,
+    name: &str,
+    args: &str,
+    dangerously_bypass_permissions: bool,
+) -> Option<String> {
+    let definition = bus
+        .command_definitions()
+        .iter()
+        .map(|(_, definition)| definition)
+        .find(|definition| definition.name == name)?;
+
+    if !definition.availability.acp {
+        return Some(format!("Command /{name} is not available over ACP."));
+    }
+    if definition.safety.requires_confirmation && !dangerously_bypass_permissions {
+        return Some(format!(
+            "Command /{name} requires interactive confirmation and is unavailable over ACP."
+        ));
+    }
+
+    match bus.dispatch_command(name, args) {
+        omegon_traits::CommandResult::Display(text) => Some(text),
+        omegon_traits::CommandResult::Handled => Some(format!("/{name} handled.")),
+        omegon_traits::CommandResult::NotHandled => Some(format!(
+            "Command /{name} was registered but did not handle the request."
+        )),
+    }
+}
+
+#[cfg(test)]
+mod command_safety_tests {
+    use super::*;
+    use omegon_traits::{
+        CommandAvailability, CommandDefinition, CommandResult, CommandSafety, CommandSafetyClass,
+        Feature,
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    struct TestCommandFeature {
+        definition: CommandDefinition,
+        handled: Arc<AtomicBool>,
+    }
+
+    impl Feature for TestCommandFeature {
+        fn name(&self) -> &str {
+            "test-command"
+        }
+
+        fn commands(&self) -> Vec<CommandDefinition> {
+            vec![self.definition.clone()]
+        }
+
+        fn handle_command(&mut self, name: &str, args: &str) -> CommandResult {
+            if name == self.definition.name {
+                self.handled.store(true, Ordering::SeqCst);
+                CommandResult::Display(format!("handled {args}"))
+            } else {
+                CommandResult::NotHandled
+            }
+        }
+    }
+
+    fn bus_with_command(
+        availability: CommandAvailability,
+        requires_confirmation: bool,
+    ) -> (crate::bus::EventBus, Arc<AtomicBool>) {
+        let handled = Arc::new(AtomicBool::new(false));
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(TestCommandFeature {
+            definition: CommandDefinition {
+                name: "unsafe_test".into(),
+                description: "test command".into(),
+                subcommands: vec![],
+                availability,
+                safety: CommandSafety {
+                    class: CommandSafetyClass::StateChanging,
+                    requires_confirmation,
+                    prompt_injection_sensitive: false,
+                },
+            },
+            handled: handled.clone(),
+        }));
+        bus.finalize();
+        (bus, handled)
+    }
+
+    #[test]
+    fn acp_registered_command_requires_confirmation_without_bypass() {
+        let (mut bus, handled) = bus_with_command(CommandAvailability::ALL, true);
+
+        let response = handle_registered_acp_command(&mut bus, "unsafe_test", "args", false)
+            .expect("registered command response");
+
+        assert!(
+            response.contains("requires interactive confirmation"),
+            "{response}"
+        );
+        assert!(!handled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn acp_registered_command_bypass_allows_confirmation_required_command() {
+        let (mut bus, handled) = bus_with_command(CommandAvailability::ALL, true);
+
+        let response = handle_registered_acp_command(&mut bus, "unsafe_test", "args", true)
+            .expect("registered command response");
+
+        assert_eq!(response, "handled args");
+        assert!(handled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn acp_registered_command_availability_is_not_bypassed() {
+        let (mut bus, handled) = bus_with_command(
+            CommandAvailability {
+                tui: true,
+                cli: true,
+                acp: false,
+            },
+            true,
+        );
+
+        let response = handle_registered_acp_command(&mut bus, "unsafe_test", "args", true)
+            .expect("registered command response");
+
+        assert!(response.contains("not available over ACP"), "{response}");
+        assert!(!handled.load(Ordering::SeqCst));
     }
 }
 

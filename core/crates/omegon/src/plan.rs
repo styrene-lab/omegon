@@ -953,7 +953,10 @@ impl crate::conversation::IntentDocument {
         self.work_plan_snapshot_json_with_registry_entries(self.plan_registry().entries)
     }
 
-    pub fn work_plan_snapshot_json_with_registry_entries<I>(&self, registry_entries: I) -> serde_json::Value
+    pub fn work_plan_snapshot_json_with_registry_entries<I>(
+        &self,
+        registry_entries: I,
+    ) -> serde_json::Value
     where
         I: IntoIterator<Item = PlanRegistryEntry>,
     {

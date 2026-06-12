@@ -1259,7 +1259,8 @@ pub async fn run(
 
         // Push tool results to conversation and update intent
         let mut results = results;
-        let plan_snapshot_before = work_plan_snapshot_with_lifecycle(&conversation.intent, &config.cwd);
+        let plan_snapshot_before =
+            work_plan_snapshot_with_lifecycle(&conversation.intent, &config.cwd);
         conversation
             .intent
             .update_from_tools(dispatch_calls, &results);
@@ -1267,7 +1268,8 @@ pub async fn run(
         for result in &results {
             conversation.push_tool_result(result.clone());
         }
-        let plan_snapshot_after = work_plan_snapshot_with_lifecycle(&conversation.intent, &config.cwd);
+        let plan_snapshot_after =
+            work_plan_snapshot_with_lifecycle(&conversation.intent, &config.cwd);
 
         if let Some(message) = plan_status_notification(dispatch_calls, &conversation.intent) {
             let _ = events.send(AgentEvent::SystemNotification { message });

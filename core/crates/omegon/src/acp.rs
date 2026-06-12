@@ -513,6 +513,7 @@ pub struct OmegonAcpAgent {
         Rc<RefCell<std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>>>,
     session_task_bindings: RefCell<Vec<crate::conversation::SessionTaskBinding>>,
     surface_updates_enabled: RefCell<bool>,
+    dangerously_bypass_permissions: bool,
 }
 
 impl OmegonAcpAgent {
@@ -520,9 +521,25 @@ impl OmegonAcpAgent {
         Self::new_with_extension_metadata(model, Default::default())
     }
 
+    pub fn new_with_safety(model: &str, dangerously_bypass_permissions: bool) -> Self {
+        Self::new_with_extension_metadata_and_safety(
+            model,
+            Default::default(),
+            dangerously_bypass_permissions,
+        )
+    }
+
     pub fn new_with_extension_metadata(
         model: &str,
         extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Self {
+        Self::new_with_extension_metadata_and_safety(model, extension_metadata, false)
+    }
+
+    pub fn new_with_extension_metadata_and_safety(
+        model: &str,
+        extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+        dangerously_bypass_permissions: bool,
     ) -> Self {
         Self {
             model: model.to_string(),
@@ -536,6 +553,7 @@ impl OmegonAcpAgent {
             extension_rpc_handles: Rc::new(RefCell::new(Default::default())),
             session_task_bindings: RefCell::new(Vec::new()),
             surface_updates_enabled: RefCell::new(false),
+            dangerously_bypass_permissions,
         }
     }
 
@@ -722,8 +740,12 @@ impl OmegonAcpAgent {
                 None
             };
 
-            let mut handle =
-                acp_worker::spawn_worker(self.model.clone(), cwd.to_path_buf(), host_ctx);
+            let mut handle = acp_worker::spawn_worker(
+                self.model.clone(),
+                cwd.to_path_buf(),
+                host_ctx,
+                self.dangerously_bypass_permissions,
+            );
             // Drain the secrets channel asynchronously — the worker sends it
             // after AgentSetup completes. Store in self.secrets for redaction.
             let secrets_cell = self.secrets.clone();
@@ -4697,7 +4719,12 @@ auto_disabled = true
     }
 }
 
-pub async fn run(model: &str, agent_id: Option<&str>, cwd: &std::path::Path) -> anyhow::Result<()> {
+pub async fn run(
+    model: &str,
+    agent_id: Option<&str>,
+    cwd: &std::path::Path,
+    dangerously_bypass_permissions: bool,
+) -> anyhow::Result<()> {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
     let extension_metadata = if let Some(id) = agent_id {
@@ -4710,9 +4737,10 @@ pub async fn run(model: &str, agent_id: Option<&str>, cwd: &std::path::Path) -> 
         Default::default()
     };
 
-    let agent = Rc::new(OmegonAcpAgent::new_with_extension_metadata(
+    let agent = Rc::new(OmegonAcpAgent::new_with_extension_metadata_and_safety(
         model,
         extension_metadata,
+        dangerously_bypass_permissions,
     ));
 
     let stdout = tokio::io::stdout().compat_write();
@@ -4739,6 +4767,7 @@ pub async fn run_server(
     agent_id: Option<&str>,
     cwd: &std::path::Path,
     tls: Option<crate::control_tls::ControlTlsConfig>,
+    dangerously_bypass_permissions: bool,
 ) -> anyhow::Result<()> {
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
@@ -4758,6 +4787,7 @@ pub async fn run_server(
         model: model.to_string(),
         cwd: std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()),
         agent_id: agent_id.map(String::from),
+        dangerously_bypass_permissions,
         active_connections: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         shutdown: shutdown.clone(),
     };

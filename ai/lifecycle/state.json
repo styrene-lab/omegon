@@ -1172,6 +1172,21 @@
       "bound_change": null,
       "created_at": "2026-06-09T14:33:42Z",
       "updated_at": "2026-06-09T16:22:35Z"
+    },
+    {
+      "id": "prompt-library-loop-system",
+      "title": "Prompt library and loop execution system",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-12T02:19:51Z",
+      "updated_at": "2026-06-12T02:19:51Z"
     }
   ],
   "changes": [
@@ -3046,6 +3061,24 @@
       "to_state": "decided",
       "reason": null,
       "forced": false
+    },
+    {
+      "timestamp": "2026-06-12T02:19:51Z",
+      "entity_type": "node",
+      "entity_id": "prompt-library-loop-system",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-12T02:19:51Z",
+      "entity_type": "node",
+      "entity_id": "prompt-library-loop-system",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
     }
   ]
 }

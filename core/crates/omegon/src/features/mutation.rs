@@ -1739,6 +1739,8 @@ impl Feature for MutationFeature {
             name: "mutation".into(),
             description: "Mutation system — burn metrics, learned skills, diagnostics".into(),
             subcommands: vec!["stats".into(), "review".into(), "config".into()],
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::STATE_CHANGING,
         }]
     }
 

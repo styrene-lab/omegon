@@ -4474,7 +4474,11 @@ mod tests {
         assert!(bounded_46.get("effort").is_none());
 
         let mut manual = json!({});
-        apply_anthropic_thinking(&mut manual, "anthropic:claude-haiku-4-5-20251001", Some("high"));
+        apply_anthropic_thinking(
+            &mut manual,
+            "anthropic:claude-haiku-4-5-20251001",
+            Some("high"),
+        );
         assert_eq!(
             manual["thinking"],
             json!({ "type": "enabled", "budget_tokens": 50_000 })

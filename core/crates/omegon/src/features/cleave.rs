@@ -729,7 +729,6 @@ impl CleaveFeature {
         self.progress.lock().unwrap().clone()
     }
 
-
     fn render_status(progress: &CleaveProgress) -> String {
         if !progress.active && progress.total_children == 0 {
             return "No active cleave run.".into();
@@ -1314,6 +1313,8 @@ impl Feature for CleaveFeature {
             name: "cleave".into(),
             description: "Show cleave status or trigger decomposition".into(),
             subcommands: vec!["status".into(), "cancel <label>".into()],
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::STATE_CHANGING,
         }]
     }
 
@@ -2472,7 +2473,6 @@ mod assessment_tests {
         assert_eq!(progress.failed, 1);
     }
 
-
     #[test]
     fn cleave_status_render_exposes_child_runtime_activity_and_tasks() {
         let mut progress = CleaveProgress {
@@ -2490,8 +2490,14 @@ mod assessment_tests {
                 last_tool: Some("bash".into()),
                 last_turn: Some(3),
                 tasks: vec![
-                    crate::cleave::progress::ChildTaskItem { description: "Inspect".into(), done: true },
-                    crate::cleave::progress::ChildTaskItem { description: "Patch".into(), done: false },
+                    crate::cleave::progress::ChildTaskItem {
+                        description: "Inspect".into(),
+                        done: true,
+                    },
+                    crate::cleave::progress::ChildTaskItem {
+                        description: "Patch".into(),
+                        done: false,
+                    },
                 ],
                 tasks_done: 1,
                 started_at: None,
@@ -2506,7 +2512,10 @@ mod assessment_tests {
 
         let rendered = CleaveFeature::render_status(&progress);
 
-        assert!(rendered.contains("Cleave active: 0/1 children"), "{rendered}");
+        assert!(
+            rendered.contains("Cleave active: 0/1 children"),
+            "{rendered}"
+        );
         assert!(rendered.contains("alpha [running]"), "{rendered}");
         assert!(rendered.contains("pid=1234"), "{rendered}");
         assert!(rendered.contains("supervision=Attached"), "{rendered}");
@@ -2519,8 +2528,10 @@ mod assessment_tests {
         progress.completed = 1;
         progress.children[0].status = "completed".into();
         let rendered = CleaveFeature::render_status(&progress);
-        assert!(rendered.contains("Last cleave: 1 completed, 0 failed of 1"), "{rendered}");
+        assert!(
+            rendered.contains("Last cleave: 1 completed, 0 failed of 1"),
+            "{rendered}"
+        );
         assert!(rendered.contains("alpha [completed]"), "{rendered}");
     }
-
 }
