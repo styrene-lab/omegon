@@ -1191,6 +1191,85 @@ fn bind_callback_listener(port: u16) -> anyhow::Result<tokio::net::TcpListener> 
     Ok(tokio::net::TcpListener::from_std(std_listener)?)
 }
 
+/// Accept connections on an OAuth callback listener until a request carrying
+/// a valid `code` and the expected `state` arrives at `expected_path`, or the
+/// deadline passes.
+///
+/// A single `accept()` is not safe here: browsers open speculative
+/// preconnections that send no bytes, request `/favicon.ico` on the callback
+/// origin, and stale tabs from earlier login attempts redirect with old
+/// `state` values. All of those used to abort the login even though the
+/// operator completed authentication. This loop answers and skips them,
+/// completing only on the real callback for *this* attempt.
+async fn accept_oauth_callback(
+    listener: &tokio::net::TcpListener,
+    expected_path: &str,
+    expected_state: &str,
+    timeout: std::time::Duration,
+) -> anyhow::Result<(String, String)> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!(
+                "Login timed out waiting for browser callback. Run /login again to retry."
+            );
+        }
+        let (mut stream, _addr) = match tokio::time::timeout(remaining, listener.accept()).await {
+            Ok(accepted) => accepted?,
+            Err(_) => anyhow::bail!(
+                "Login timed out waiting for browser callback. Run /login again to retry."
+            ),
+        };
+        let mut buf = [0u8; 4096];
+        let n = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio::io::AsyncReadExt::read(&mut stream, &mut buf),
+        )
+        .await
+        {
+            Ok(Ok(n)) => n,
+            // Speculative preconnect (closed without data) or dead socket.
+            _ => continue,
+        };
+        if n == 0 {
+            continue;
+        }
+        let request = String::from_utf8_lossy(&buf[..n]);
+        let Ok((code, state)) = parse_callback_at_path(&request, expected_path) else {
+            // favicon.ico or other browser noise — answer and keep listening.
+            let _ = tokio::io::AsyncWriteExt::write_all(
+                &mut stream,
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n" as &[u8],
+            )
+            .await;
+            continue;
+        };
+        if state != expected_state {
+            // Redirect from a stale login tab — reject it without aborting
+            // the current attempt.
+            tracing::warn!("ignoring OAuth callback with non-matching state (stale login tab?)");
+            let _ = tokio::io::AsyncWriteExt::write_all(
+                &mut stream,
+                b"HTTP/1.1 409 Conflict\r\nContent-Type: text/html\r\n\r\n\
+                  <html><body><p>This login page is from an earlier attempt. \
+                  Close this tab and complete the most recent login page.</p></body></html>"
+                    as &[u8],
+            )
+            .await;
+            continue;
+        }
+        let _ = tokio::io::AsyncWriteExt::write_all(
+            &mut stream,
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
+              <html><body><p>Authentication successful. Return to your terminal.</p></body></html>"
+                as &[u8],
+        )
+        .await;
+        return Ok((code, state));
+    }
+}
+
 /// Detect headless environments where a browser cannot be opened locally.
 /// Returns true for SSH sessions and Linux systems without a display server.
 pub fn is_headless() -> bool {
@@ -1316,25 +1395,13 @@ pub async fn login_anthropic_with_callbacks(
         // Give the browser a moment to start
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        let (mut stream, _addr) =
-            tokio::time::timeout(std::time::Duration::from_secs(300), listener.accept())
-                .await
-                .map_err(|_| {
-                    anyhow::anyhow!(
-                        "Login timed out waiting for browser callback. Run /login again to retry."
-                    )
-                })??;
-        let mut buf = [0u8; 4096];
-        let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await?;
-        let request = String::from_utf8_lossy(&buf[..n]);
-
-        let result = parse_callback(&request)?;
-
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                        <html><body><p>Authentication successful. Return to your terminal.</p></body></html>";
-        tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await?;
-
-        result
+        accept_oauth_callback(
+            &listener,
+            "/callback",
+            &verifier,
+            std::time::Duration::from_secs(300),
+        )
+        .await?
     };
 
     // Verify state
@@ -1470,25 +1537,13 @@ pub async fn login_openai_with_callbacks(
         });
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        let (mut stream, _addr) =
-            tokio::time::timeout(std::time::Duration::from_secs(300), listener.accept())
-                .await
-                .map_err(|_| {
-                    anyhow::anyhow!(
-                        "Login timed out waiting for browser callback. Run /login again to retry."
-                    )
-                })??;
-        let mut buf = [0u8; 4096];
-        let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await?;
-        let request = String::from_utf8_lossy(&buf[..n]);
-
-        let result = parse_callback_at_path(&request, "/auth/callback")?;
-
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                        <html><body><p>Authentication successful. Return to your terminal.</p></body></html>";
-        tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await?;
-
-        result
+        accept_oauth_callback(
+            &listener,
+            "/auth/callback",
+            &state,
+            std::time::Duration::from_secs(300),
+        )
+        .await?
     };
 
     if recv_state != state {
@@ -1673,18 +1728,13 @@ pub async fn login_antigravity_with_callbacks(
             port = ANTIGRAVITY_CALLBACK_PORT,
             "listening for Antigravity OAuth callback"
         );
-        let (mut stream, _) = listener.accept().await?;
-        let mut buf = [0u8; 4096];
-        let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await?;
-        let request = String::from_utf8_lossy(&buf[..n]);
-
-        let result = parse_callback_at_path(&request, "/oauth-callback")?;
-
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                        <html><body><p>Authentication successful. Return to your terminal.</p></body></html>";
-        tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await?;
-
-        result
+        accept_oauth_callback(
+            &listener,
+            "/oauth-callback",
+            &state,
+            std::time::Duration::from_secs(300),
+        )
+        .await?
     };
 
     if recv_state != state {
@@ -2696,6 +2746,74 @@ mod tests {
         assert!(parse_callback_url("not a url").is_err());
         assert!(parse_callback_url("http://localhost/callback").is_err());
         assert!(parse_callback_url("http://localhost/callback?state=x").is_err());
+    }
+
+    #[tokio::test]
+    async fn accept_oauth_callback_skips_noise_and_stale_state() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let client = tokio::spawn(async move {
+            // 1. Speculative preconnect: connect and close without sending.
+            let pre = tokio::net::TcpStream::connect(addr).await.unwrap();
+            drop(pre);
+
+            // 2. Browser noise: favicon request.
+            let mut fav = tokio::net::TcpStream::connect(addr).await.unwrap();
+            fav.write_all(b"GET /favicon.ico HTTP/1.1\r\n\r\n")
+                .await
+                .unwrap();
+            let mut resp = String::new();
+            let _ = fav.read_to_string(&mut resp).await;
+            assert!(resp.starts_with("HTTP/1.1 404"), "favicon got: {resp}");
+
+            // 3. Stale tab: valid shape, wrong state.
+            let mut stale = tokio::net::TcpStream::connect(addr).await.unwrap();
+            stale
+                .write_all(b"GET /auth/callback?code=old_code&state=old_state HTTP/1.1\r\n\r\n")
+                .await
+                .unwrap();
+            let mut resp = String::new();
+            let _ = stale.read_to_string(&mut resp).await;
+            assert!(resp.starts_with("HTTP/1.1 409"), "stale got: {resp}");
+
+            // 4. The real callback for this attempt.
+            let mut real = tokio::net::TcpStream::connect(addr).await.unwrap();
+            real.write_all(b"GET /auth/callback?code=good_code&state=good_state HTTP/1.1\r\n\r\n")
+                .await
+                .unwrap();
+            let mut resp = String::new();
+            let _ = real.read_to_string(&mut resp).await;
+            assert!(resp.starts_with("HTTP/1.1 200"), "real got: {resp}");
+        });
+
+        let (code, state) = accept_oauth_callback(
+            &listener,
+            "/auth/callback",
+            "good_state",
+            std::time::Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+        assert_eq!(code, "good_code");
+        assert_eq!(state, "good_state");
+        client.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn accept_oauth_callback_times_out() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let err = accept_oauth_callback(
+            &listener,
+            "/callback",
+            "state",
+            std::time::Duration::from_millis(50),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("timed out"), "{err}");
     }
 
     #[test]
