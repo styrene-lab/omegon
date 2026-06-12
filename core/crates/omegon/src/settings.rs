@@ -490,6 +490,53 @@ impl HeadroomRuntimeConfig {
         self.enabled && !matches!(self.mode, HeadroomCompressionMode::Off)
     }
 
+    pub fn apply_env_overrides(&mut self) {
+        if let Ok(value) = std::env::var("OMEGON_HEADROOM_MODE") {
+            if let Some(mode) = HeadroomCompressionMode::parse(&value) {
+                self.mode = mode;
+                self.enabled = !matches!(mode, HeadroomCompressionMode::Off);
+            }
+        }
+        if let Ok(value) = std::env::var("OMEGON_HEADROOM_ENABLED") {
+            if let Some(enabled) = parse_env_bool(&value) {
+                self.enabled = enabled;
+                if !enabled {
+                    self.mode = HeadroomCompressionMode::Off;
+                } else if matches!(self.mode, HeadroomCompressionMode::Off) {
+                    self.mode = HeadroomCompressionMode::Manual;
+                }
+            }
+        }
+        if let Ok(value) = std::env::var("OMEGON_HEADROOM_MIN_BYTES")
+            && let Ok(parsed) = value.parse::<usize>()
+            && parsed > 0
+        {
+            self.min_bytes = parsed;
+        }
+        if let Ok(value) = std::env::var("OMEGON_HEADROOM_TARGET_BYTES")
+            && let Ok(parsed) = value.parse::<usize>()
+            && parsed > 0
+        {
+            self.target_bytes = parsed;
+        }
+        if let Ok(value) = std::env::var("OMEGON_HEADROOM_MAX_STORE_OBJECTS")
+            && let Ok(parsed) = value.parse::<usize>()
+            && parsed > 0
+        {
+            self.max_store_objects = parsed;
+        }
+        if let Ok(value) = std::env::var("OMEGON_HEADROOM_MAX_STORE_BYTES")
+            && let Ok(parsed) = value.parse::<usize>()
+            && parsed > 0
+        {
+            self.max_store_bytes = parsed;
+        }
+        if let Ok(value) = std::env::var("OMEGON_HEADROOM_LOCAL_MODEL") {
+            let trimmed = value.trim();
+            self.local_model = (!trimmed.is_empty()).then(|| trimmed.to_owned());
+        }
+    }
+
     pub fn summary(&self) -> String {
         let model = self.local_model.as_deref().unwrap_or("deterministic");
         format!(
@@ -504,6 +551,14 @@ impl HeadroomRuntimeConfig {
             self.max_store_bytes,
             model
         )
+    }
+}
+
+fn parse_env_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" | "enabled" => Some(true),
+        "0" | "false" | "no" | "off" | "disabled" => Some(false),
+        _ => None,
     }
 }
 
@@ -778,7 +833,7 @@ impl SelectorPolicy {
 impl Default for Settings {
     fn default() -> Self {
         let context_window = 200_000;
-        Self {
+        let mut settings = Self {
             model: "anthropic:claude-sonnet-4-6".into(),
             posture: BehavioralPosture::fixed(PosturePreset::Architect),
             thinking: ThinkingLevel::Medium,
@@ -802,7 +857,9 @@ impl Default for Settings {
             clipboard_retention_hours: default_clipboard_retention_hours(),
             posture_disabled_tools: Vec::new(),
             posture_enabled_tools: Vec::new(),
-        }
+        };
+        settings.headroom.apply_env_overrides();
+        settings
     }
 }
 

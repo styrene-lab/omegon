@@ -411,7 +411,42 @@ def benchmark_cache_root() -> Path:
     return (Path.home() / ".cache" / "omegon-benchmark").resolve()
 
 
-def benchmark_process_env(repo_path: Path, clean_repo_path: Path, harness: str, task_id: str) -> dict[str, str]:
+def headroom_env_from_spec(spec: TaskSpec) -> dict[str, str]:
+    config = spec.headroom or {}
+    env: dict[str, str] = {}
+    mapping = {
+        "mode": "OMEGON_HEADROOM_MODE",
+        "enabled": "OMEGON_HEADROOM_ENABLED",
+        "min_bytes": "OMEGON_HEADROOM_MIN_BYTES",
+        "target_bytes": "OMEGON_HEADROOM_TARGET_BYTES",
+        "max_store_objects": "OMEGON_HEADROOM_MAX_STORE_OBJECTS",
+        "max_store_bytes": "OMEGON_HEADROOM_MAX_STORE_BYTES",
+        "local_model": "OMEGON_HEADROOM_LOCAL_MODEL",
+    }
+    for key, env_key in mapping.items():
+        if key not in config or config[key] is None:
+            continue
+        value = config[key]
+        if isinstance(value, bool):
+            env[env_key] = "true" if value else "false"
+        elif isinstance(value, int) and not isinstance(value, bool):
+            if value < 0:
+                raise TaskSpecError(f"headroom.{key} must be non-negative")
+            env[env_key] = str(value)
+        elif isinstance(value, str):
+            env[env_key] = value
+        else:
+            raise TaskSpecError(f"headroom.{key} must be a string, integer, or boolean")
+    return env
+
+
+def benchmark_process_env(
+    repo_path: Path,
+    clean_repo_path: Path,
+    harness: str,
+    task_id: str,
+    spec: TaskSpec | None = None,
+) -> dict[str, str]:
     env = dict(os.environ)
     source_core = repo_path / "core"
     clean_core = clean_repo_path / "core"
@@ -424,6 +459,8 @@ def benchmark_process_env(repo_path: Path, clean_repo_path: Path, harness: str, 
         shared_target = benchmark_cache_root() / "cargo-target" / harness
         shared_target.mkdir(parents=True, exist_ok=True)
         env["CARGO_TARGET_DIR"] = str(shared_target.resolve())
+    if spec is not None and harness == "omegon":
+        env.update(headroom_env_from_spec(spec))
     return env
 
 
@@ -478,7 +515,7 @@ class OmegonAdapter(HarnessAdapter):
                 stdout=handle,
                 stderr=subprocess.STDOUT,
                 text=True,
-                env=benchmark_process_env(self.repo_path, self.clean_repo_path, self.harness_name, self.spec.id),
+                env=benchmark_process_env(self.repo_path, self.clean_repo_path, self.harness_name, self.spec.id, self.spec),
             )
         audit(f"adapter done: harness={self.harness_name} exit={proc.returncode} usage_json_exists={usage_file.exists()} log={log_file}")
 
@@ -604,7 +641,7 @@ class ClaudeCodeAdapter(HarnessAdapter):
             check=False,
             capture_output=True,
             text=True,
-            env=benchmark_process_env(self.repo_path, self.clean_repo_path, self.harness_name, self.spec.id),
+            env=benchmark_process_env(self.repo_path, self.clean_repo_path, self.harness_name, self.spec.id, self.spec),
         )
         log_file.write_text(
             f"[benchmark] adapter={self.harness_name} model={self.model or 'default'} slim={self.slim}\n"
@@ -2012,7 +2049,7 @@ def main() -> int:
     run_started = time.monotonic()
     adapter = adapter_impl.run()
 
-    process_env = benchmark_process_env(repo_path, clean_repo_path, harness, spec.id)
+    process_env = benchmark_process_env(repo_path, clean_repo_path, harness, spec.id, spec)
     acceptance_status, acceptance_elapsed, acceptance_results = run_acceptance(
         spec.acceptance,
         clean_repo_path,
