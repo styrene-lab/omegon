@@ -71,6 +71,73 @@ pub struct CompressionProviderInfo {
     pub version: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompressionProviderAvailability {
+    pub available: bool,
+    pub reason: Option<String>,
+}
+
+pub trait CompressionProvider {
+    fn info(&self) -> CompressionProviderInfo;
+
+    fn availability(&self) -> CompressionProviderAvailability {
+        CompressionProviderAvailability {
+            available: true,
+            reason: None,
+        }
+    }
+
+    fn compress(
+        &self,
+        input: &CompressionInput,
+        reference: Option<&HeadroomRef>,
+    ) -> CompressionOutput;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NativeDeterministicProvider;
+
+impl NativeDeterministicProvider {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl CompressionProvider for NativeDeterministicProvider {
+    fn info(&self) -> CompressionProviderInfo {
+        native_deterministic_provider()
+    }
+
+    fn compress(
+        &self,
+        input: &CompressionInput,
+        reference: Option<&HeadroomRef>,
+    ) -> CompressionOutput {
+        let kind = input.kind_hint.unwrap_or_else(|| detect_kind(&input.text));
+        let original_bytes = input.text.len();
+        let provider = self.info();
+
+        if !input.policy.enabled || original_bytes < input.policy.min_bytes {
+            return passthrough_output(input.text.clone(), kind, original_bytes, provider);
+        }
+
+        let compressed_text = compress_by_kind(kind, &input.text, input.policy, reference);
+        let compressed_bytes = compressed_text.len();
+        if compressed_bytes >= original_bytes {
+            return passthrough_output(input.text.clone(), kind, original_bytes, provider);
+        }
+
+        compressed_output(
+            compressed_text,
+            kind,
+            reference.cloned(),
+            original_bytes,
+            compressed_bytes,
+            provider,
+        )
+    }
+}
+
 pub fn native_deterministic_provider() -> CompressionProviderInfo {
     CompressionProviderInfo {
         id: "native_deterministic".into(),
@@ -171,70 +238,18 @@ impl InMemoryHeadroomStore {
 
     pub fn compress(&mut self, input: CompressionInput) -> CompressionOutput {
         let kind = input.kind_hint.unwrap_or_else(|| detect_kind(&input.text));
-        let original_bytes = input.text.len();
-
-        let provider = native_deterministic_provider();
-
-        if !input.policy.enabled || original_bytes < input.policy.min_bytes {
-            return CompressionOutput {
-                text: input.text,
-                content_kind: kind,
-                original_ref: None,
-                stats: CompressionStats {
-                    original_bytes,
-                    compressed_bytes: original_bytes,
-                    saved_bytes: 0,
-                    savings_percent: 0,
-                },
-                compressed: false,
-                provider: provider.clone(),
-            };
-        }
-
-        let reference = input
-            .policy
-            .reversible
+        let reference = (input.policy.enabled
+            && input.policy.reversible
+            && input.text.len() >= input.policy.min_bytes)
             .then(|| make_reference(kind, &input.text));
-        let compressed_text = compress_by_kind(kind, &input.text, input.policy, reference.as_ref());
-        let compressed_bytes = compressed_text.len();
-        if compressed_bytes >= original_bytes {
-            return CompressionOutput {
-                text: input.text,
-                content_kind: kind,
-                original_ref: None,
-                stats: CompressionStats {
-                    original_bytes,
-                    compressed_bytes: original_bytes,
-                    saved_bytes: 0,
-                    savings_percent: 0,
-                },
-                compressed: false,
-                provider: provider.clone(),
-            };
-        }
-        if let Some(reference) = reference.as_ref() {
+        let provider = NativeDeterministicProvider::new();
+        let output = provider.compress(&input, reference.as_ref());
+        if output.compressed
+            && let Some(reference) = output.original_ref.as_ref()
+        {
             self.store_original(reference.clone(), &input.source, &input.text);
         }
-        let saved_bytes = original_bytes.saturating_sub(compressed_bytes);
-        let savings_percent = if original_bytes == 0 {
-            0
-        } else {
-            ((saved_bytes * 100) / original_bytes).min(100) as u8
-        };
-
-        CompressionOutput {
-            text: compressed_text,
-            content_kind: kind,
-            original_ref: reference,
-            stats: CompressionStats {
-                original_bytes,
-                compressed_bytes,
-                saved_bytes,
-                savings_percent,
-            },
-            compressed: true,
-            provider,
-        }
+        output
     }
 
     pub fn retrieve(&self, id: &str) -> Result<&StoredOriginal> {
@@ -305,6 +320,56 @@ fn make_reference(kind: ContentKind, text: &str) -> HeadroomRef {
         sha256,
         bytes: text.len(),
         content_kind: kind,
+    }
+}
+
+fn passthrough_output(
+    text: String,
+    kind: ContentKind,
+    original_bytes: usize,
+    provider: CompressionProviderInfo,
+) -> CompressionOutput {
+    CompressionOutput {
+        text,
+        content_kind: kind,
+        original_ref: None,
+        stats: CompressionStats {
+            original_bytes,
+            compressed_bytes: original_bytes,
+            saved_bytes: 0,
+            savings_percent: 0,
+        },
+        compressed: false,
+        provider,
+    }
+}
+
+fn compressed_output(
+    text: String,
+    kind: ContentKind,
+    reference: Option<HeadroomRef>,
+    original_bytes: usize,
+    compressed_bytes: usize,
+    provider: CompressionProviderInfo,
+) -> CompressionOutput {
+    let saved_bytes = original_bytes.saturating_sub(compressed_bytes);
+    let savings_percent = if original_bytes == 0 {
+        0
+    } else {
+        ((saved_bytes * 100) / original_bytes).min(100) as u8
+    };
+    CompressionOutput {
+        text,
+        content_kind: kind,
+        original_ref: reference,
+        stats: CompressionStats {
+            original_bytes,
+            compressed_bytes,
+            saved_bytes,
+            savings_percent,
+        },
+        compressed: true,
+        provider,
     }
 }
 

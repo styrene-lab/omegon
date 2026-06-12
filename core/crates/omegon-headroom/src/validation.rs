@@ -4,8 +4,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CompressionInput, CompressionProviderInfo, ContentKind, HeadroomPolicy, InMemoryHeadroomStore,
-    native_deterministic_provider,
+    CompressionInput, CompressionProvider, CompressionProviderInfo, ContentKind, HeadroomPolicy,
+    InMemoryHeadroomStore, NativeDeterministicProvider,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,7 +322,7 @@ pub fn validate_suite_with_counter(
         passed: reports.iter().all(|report| report.passed),
         fixtures: reports,
         classes,
-        compression_provider: native_deterministic_provider(),
+        compression_provider: NativeDeterministicProvider::new().info(),
         total_original_bytes,
         total_evaluated_compressed_bytes,
         estimated_tokens_before,
