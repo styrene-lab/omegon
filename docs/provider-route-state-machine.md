@@ -38,6 +38,12 @@ enum ProviderRoute {
 
 Owned by one RouteController that also guards the bridge Arc — transitions only through it, every transition emits AgentEvent::RouteChanged plus a tracing event. All consumers (footer, loop StreamOptions.model, TurnEnd, session-log, /auth status, serve path) become read-only views of the route; settings.runtime_bridge_model / footer_data.fallback_from / loop active_model seeding are deleted, not maintained. Profile gains explicit `fallback_providers = [..]` ordered list; empty = fail hard to Disconnected with actionable message. Startup becomes a total decision table — (selected creds?, fallback creds?) maps to exactly one of the four states, enumerable by property test. Login attempts are tracked objects with terminal states: Succeeded → Serving (hot-swap inside the controller), Failed{timeout|stale_state|refused} → revert to prior route + persistent footer warning rather than a scrolling notification.
 
+## Research
+
+### PR 144 assistant-run substrate is the daemon adoption surface
+
+PR #144 merged to main (f9389709, 2026-06-12): assistant capability readiness surfaces — capabilities/{inventory,profiles,runs,secrets}, web API + ACP read routes, persisted run ledger with blocked-run support (docs/assistant-run-substrate.md). This is the daemon/serve surface the deferral decision pointed at. Integration hook for this change: when quartus/auspex adopts the RouteController, route state should be exposed through the capabilities inventory / web API surfaces from #144 (a Disconnected or Fallback route is a capability-readiness fact for assistant runs — a blocked-run reason). The RouteSnapshot-not-TUI-types constraint makes this adoption mechanical.
+
 ## Decisions
 
 ### Single RouteController owns route state and the bridge

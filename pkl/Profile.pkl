@@ -23,6 +23,13 @@ thinkingLevel: ("off"|"minimal"|"low"|"medium"|"high")?
 /// Maximum agent turns per invocation.
 maxTurns: Int(this > 0)?
 
+/// Provider preference order. First = most preferred.
+providerOrder: Listing<String>?
+
+/// Explicit fallback providers for interactive routing. Empty/missing means
+/// fail explicitly when selected-provider credentials are unavailable.
+fallbackProviders: Listing<String>?
+
 /// Default behavioral posture.
 defaultPosture: ("explorator"|"fabricator"|"architect"|"devastator")?
 

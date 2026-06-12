@@ -27,6 +27,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Interactive startup no longer silently falls back to `automation_safe_model()` when the selected provider is unavailable. Fallback is now opt-in via profile `fallbackProviders = ["provider-id"]`; otherwise startup enters an explicit disconnected state with remediation guidance.
+
 - Add explicit command registry availability/safety metadata, including CLI/ACP confirmation gates with `--dangerously-bypass-permissions` bypass support.
 - Preserve queued prompt dispatch mode at queue time so delayed prompts keep their original queue semantics.
 

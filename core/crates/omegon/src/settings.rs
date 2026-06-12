@@ -334,6 +334,12 @@ pub struct Settings {
     #[serde(default)]
     pub provider_order: Vec<String>,
 
+    /// Explicit fallback providers for the interactive route controller.
+    /// Empty by default: missing selected-provider credentials fail explicitly
+    /// instead of silently substituting another provider.
+    #[serde(default)]
+    pub fallback_providers: Vec<String>,
+
     /// Update channel for in-app self-update.
     #[serde(default = "default_update_channel")]
     pub update_channel: String,
@@ -678,6 +684,7 @@ impl Default for Settings {
             requested_context_class: None,
             tool_detail: ToolDetail::Detailed,
             provider_order: Vec::new(),
+            fallback_providers: Vec::new(),
             update_channel: default_update_channel(),
             auto_update: false,
             trusted_directories: Vec::new(),
@@ -1057,6 +1064,10 @@ pub struct Profile {
     /// Provider preference order. First = most preferred.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provider_order: Vec<String>,
+    /// Explicit fallback providers for interactive routing. Empty means fail
+    /// explicitly when the selected provider has no usable credentials.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_providers: Vec<String>,
     // ── Embedding service (hybrid search) ──
     /// Embedding service base URL (Ollama `/api/embed` endpoint).
     /// Overrides `OMEGON_EMBED_URL` env var. Default: `http://localhost:11434`.
@@ -1364,6 +1375,7 @@ impl Profile {
         if !self.provider_order.is_empty() {
             settings.provider_order = self.provider_order.clone();
         }
+        settings.fallback_providers = self.fallback_providers.clone();
         let trusted_directories = self.effective_trusted_directories();
         if !trusted_directories.is_empty() {
             settings.trusted_directories = trusted_directories;
@@ -1438,6 +1450,7 @@ impl Profile {
             self.automation.level = None;
         }
         self.provider_order = settings.provider_order.clone();
+        self.fallback_providers = settings.fallback_providers.clone();
         self.set_trusted_directories(settings.trusted_directories.clone());
         if settings.update_channel != "stable" {
             self.update_channel = Some(settings.update_channel.clone());
@@ -2098,6 +2111,7 @@ mod tests {
             thinking_level: Some("high".into()),
             max_turns: Some(50),
             provider_order: vec!["anthropic".into(), "openai".into()],
+            fallback_providers: vec!["ollama".into()],
             embed_url: None,
             embed_model: None,
             ..Profile::default()
@@ -2105,6 +2119,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&p).unwrap();
         let parsed: Profile = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.provider_order, vec!["anthropic", "openai"]);
+        assert_eq!(parsed.fallback_providers, vec!["ollama"]);
     }
 
     #[test]
@@ -2113,6 +2128,7 @@ mod tests {
         let json = r#"{"lastUsedModel": {"provider": "anthropic", "modelId": "claude-sonnet-4-6"}, "thinkingLevel": "medium"}"#;
         let p: Profile = serde_json::from_str(json).unwrap();
         assert!(p.provider_order.is_empty());
+        assert!(p.fallback_providers.is_empty());
         assert!(p.integrations.is_empty());
         assert!(p.extensions.is_empty());
     }

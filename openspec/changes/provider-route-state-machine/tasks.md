@@ -8,17 +8,17 @@ delegate/cleave child routing.
 ## 1. RouteController core and CredentialLedger
 <!-- specs: provider-route -->
 
-- [ ] 1.1 Create `core/crates/omegon/src/route.rs`: `ProviderRoute` enum (Serving/Fallback/LoginPending/Disconnected), `FallbackReason`, `RouteSnapshot`, `RouteController` owning `Arc<RwLock<Box<dyn LlmBridge>>>` plus route state behind one lock
-- [ ] 1.2 Controller transition methods: `resolve_startup(selected, fallback_providers, ledger)`, `begin_login(provider)`, `complete_login(outcome)`, `switch_model(to)`, `logout(provider)` — each returns the new snapshot and emits `AgentEvent::RouteChanged`
-- [ ] 1.3 `CredentialState` enum {Valid{source}, Expired{refreshable}, Missing{probed_sources}} and `CredentialLedger::probe(provider)` wrapping `resolve_api_key_sync` (providers.rs:178) with structured return; re-probe on every call, no caching
-- [ ] 1.4 No TUI types in route.rs API surface (quartus constraint) — consumers get `RouteSnapshot` + events only
-- [ ] 1.5 Unit tests: every transition method from every state; property test enumerating startup matrix {valid,expired,missing} × {empty,with-creds,without-creds} asserts exactly one state, no substitution without explicit fallback config
+- [x] 1.1 Create `core/crates/omegon/src/route.rs`: `ProviderRoute` enum (Serving/Fallback/LoginPending/Disconnected), `FallbackReason`, `RouteSnapshot`, `RouteController` owning `Arc<RwLock<Box<dyn LlmBridge>>>` plus route state behind one lock
+- [x] 1.2 Controller transition methods: `resolve_startup(selected, fallback_providers, ledger)`, `begin_login(provider)`, `complete_login(outcome)`, `switch_model(to)`, `logout(provider)` — each returns the new snapshot and emits `AgentEvent::RouteChanged`
+- [x] 1.3 `CredentialState` enum {Valid{source}, Expired{refreshable}, Missing{probed_sources}} and `CredentialLedger::probe(provider)` wrapping `resolve_api_key_sync` (providers.rs:178) with structured return; re-probe on every call, no caching
+- [x] 1.4 No TUI types in route.rs API surface (quartus constraint) — consumers get `RouteSnapshot` + events only
+- [x] 1.5 Unit tests: every transition method from every state; property test enumerating startup matrix {valid,expired,missing} × {empty,with-creds,without-creds} asserts exactly one state, no substitution without explicit fallback config
 
 ## 2. Startup decision table and fallback config
 <!-- specs: provider-route -->
 
-- [ ] 2.1 Add `fallback_providers: Vec<String>` to Settings (persisted, default empty) and to the Pkl profile schema in `pkl/`
-- [ ] 2.2 Replace the ad-hoc fallback block in main.rs:3843-3885 with `RouteController::resolve_startup`; retire `automation_safe_model()` from the interactive path
+- [x] 2.1 Add `fallback_providers: Vec<String>` to Settings (persisted, default empty) and to the Pkl profile schema in `pkl/`
+- [x] 2.2 Replace the ad-hoc fallback block in main.rs:3843-3885 with `RouteController::resolve_startup`; retire `automation_safe_model()` from the interactive path
 - [ ] 2.3 Disconnected message: name the selected provider, list probed credential sources from the ledger, give the exact remediation (`/login <provider>` or env var name)
 - [ ] 2.4 Fallback-exhausted message lists every provider tried and the per-provider ledger reason
 - [ ] 2.5 Integration tests: empty-fallback startup with missing creds → Disconnected + NullBridge; configured fallback with valid creds → Fallback + RouteChanged emitted

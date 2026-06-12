@@ -97,6 +97,7 @@ mod project_rules;
 mod prompt;
 mod providers;
 pub mod routing;
+mod route;
 mod secret_cli;
 mod sentry;
 mod session;
@@ -3837,49 +3838,89 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         ));
     }
 
-    let resolved_bridge = providers::auto_detect_bridge(&resolved_cli_model).await;
+    let fallback_providers = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.fallback_providers.clone())
+        .unwrap_or_default();
+    let route_ledger = route::CredentialLedger;
+    let startup_route = route::RouteController::resolve_startup(
+        resolved_cli_model.clone(),
+        &fallback_providers,
+        &route_ledger,
+    )
+    .await;
+    let resolved_bridge = match &startup_route {
+        route::ProviderRoute::Serving { model }
+        | route::ProviderRoute::Fallback { serving: model, .. } => {
+            providers::auto_detect_bridge(model).await
+        }
+        route::ProviderRoute::Disconnected { .. } | route::ProviderRoute::LoginPending { .. } => {
+            None
+        }
+    };
     let mut startup_decision = decide_interactive_startup_model(
         &requested_start_model,
         &resolved_cli_model,
         resolved_bridge.is_some(),
     );
-    let (effective_model, bridge): (String, Box<dyn LlmBridge>) = if let Some(native) = resolved_bridge {
-        tracing::info!("using native LLM provider");
-        (startup_decision.bridge_model.clone(), native)
-    } else if let Some(fallback_model) = providers::automation_safe_model()
-        && let Some(fallback_bridge) = providers::auto_detect_bridge(&fallback_model).await
-    {
-        tracing::warn!(
-            selected = %startup_decision.selected_model,
-            selected_provider = %providers::infer_provider_id(&startup_decision.selected_model),
-            fallback_model = %fallback_model,
-            fallback_provider = %providers::infer_provider_id(&fallback_model),
-            "selected interactive model unavailable; falling back to authenticated provider"
-        );
-        startup_auth_warnings.push(format!(
-            "Selected profile model {} is unavailable for this session; using {} as the runtime bridge. Update the profile model or refresh credentials to remove this fallback.",
-            startup_decision.selected_model, fallback_model
-        ));
-        startup_decision.bridge_model = fallback_model.clone();
-        startup_decision.provider_connected = true;
-        startup_decision.use_null_bridge = false;
-        (fallback_model, fallback_bridge)
-    } else {
-        tracing::warn!(
-            selected = %startup_decision.selected_model,
-            selected_provider = %providers::infer_provider_id(&startup_decision.selected_model),
-            bridge_model = %startup_decision.bridge_model,
-            bridge_provider = %providers::infer_provider_id(&startup_decision.bridge_model),
-            "no LLM provider available for selected interactive model"
-        );
-        startup_auth_warnings.push(format!(
-            "No LLM provider configured for {}. Use /login <provider> in the TUI or run `omegon auth login` first.",
-            startup_decision.selected_model
-        ));
-        (
-            startup_decision.bridge_model.clone(),
-            Box::new(bridge::NullBridge) as Box<dyn LlmBridge>,
-        )
+    let (effective_model, bridge): (String, Box<dyn LlmBridge>) = match (&startup_route, resolved_bridge) {
+        (route::ProviderRoute::Serving { model }, Some(native)) => {
+            tracing::info!(model = %model, "using native LLM provider");
+            startup_decision.bridge_model = model.clone();
+            startup_decision.provider_connected = true;
+            startup_decision.use_null_bridge = false;
+            (model.clone(), native)
+        }
+        (route::ProviderRoute::Fallback { selected, serving, reason }, Some(fallback_bridge)) => {
+            tracing::warn!(
+                selected = %selected,
+                serving = %serving,
+                reason = ?reason,
+                "selected interactive model unavailable; using explicitly configured fallback provider"
+            );
+            startup_auth_warnings.push(format!(
+                "Selected profile model {selected} is unavailable for this session; explicitly configured fallback {serving} is serving. Remove `fallbackProviders` or refresh credentials to stop fallback."
+            ));
+            startup_decision.bridge_model = serving.clone();
+            startup_decision.provider_connected = true;
+            startup_decision.use_null_bridge = false;
+            (serving.clone(), fallback_bridge)
+        }
+        (route::ProviderRoute::Fallback { selected, serving, .. }, None) => {
+            tracing::warn!(selected = %selected, serving = %serving, "configured fallback provider resolved but bridge detection failed");
+            startup_auth_warnings.push(format!(
+                "Configured fallback {serving} for {selected} could not start. Run /login {} or update fallbackProviders.",
+                providers::infer_provider_id(serving)
+            ));
+            startup_decision.provider_connected = false;
+            startup_decision.use_null_bridge = true;
+            (serving.clone(), Box::new(bridge::NullBridge) as Box<dyn LlmBridge>)
+        }
+        (route::ProviderRoute::Serving { model }, None) => {
+            tracing::warn!(model = %model, "startup credential probe passed but bridge detection failed");
+            startup_auth_warnings.push(format!(
+                "LLM provider credentials were detected for {model}, but the provider bridge could not start. Run /login {} or check provider configuration.",
+                providers::infer_provider_id(model)
+            ));
+            startup_decision.provider_connected = false;
+            startup_decision.use_null_bridge = true;
+            (model.clone(), Box::new(bridge::NullBridge) as Box<dyn LlmBridge>)
+        }
+        (route::ProviderRoute::Disconnected { selected, reason }, _) => {
+            tracing::warn!(selected = %selected, reason = ?reason, "no LLM provider available for selected interactive model and no explicit fallback engaged");
+            startup_auth_warnings.push(format!(
+                "No LLM provider configured for {selected}. No fallback provider will be used unless `fallbackProviders` is explicitly set. Run /login {} or configure credentials for the selected provider.",
+                providers::infer_provider_id(selected)
+            ));
+            startup_decision.provider_connected = false;
+            startup_decision.use_null_bridge = true;
+            (
+                startup_decision.bridge_model.clone(),
+                Box::new(bridge::NullBridge) as Box<dyn LlmBridge>,
+            )
+        }
+        (route::ProviderRoute::LoginPending { .. }, _) => unreachable!("startup route cannot be login-pending"),
     };
     // Update settings with selected-model provider status before TUI reads it.
     // Do not mutate s.model here: profile/CLI model selection is operator intent,
