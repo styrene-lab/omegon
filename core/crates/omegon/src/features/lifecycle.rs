@@ -1241,16 +1241,22 @@ impl Feature for LifecycleFeature {
                 name: "design-focus".into(),
                 description: "Pin a design node (inject its context) — use via agent tool, not operator command".into(),
                 subcommands: self.provider.lock().unwrap().all_nodes().keys().cloned().collect(),
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::STATE_CHANGING,
             },
             CommandDefinition {
                 name: "design-unfocus".into(),
                 description: "Clear design node pin — use via agent tool, not operator command".into(),
                 subcommands: vec![],
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::STATE_CHANGING,
             },
             CommandDefinition {
                 name: "design".into(),
                 description: "Show design tree summary".into(),
                 subcommands: vec!["list".into(), "frontier".into(), "ready".into()],
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::READ_ONLY,
             },
         ]
     }

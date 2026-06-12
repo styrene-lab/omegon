@@ -22,6 +22,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Add explicit command registry availability/safety metadata, including CLI/ACP confirmation gates with `--dangerously-bypass-permissions` bypass support.
+- Preserve queued prompt dispatch mode at queue time so delayed prompts keep their original queue semantics.
+
 - Rename the TUI Plan Dock into a Workbench surface and surface active cleave/delegate progress there instead of only in optional instruments.
 - Make delegate runner script fixtures flush to disk before execution so CI timeout tests fail only on runner behavior, not file visibility races.
 - Add a local `just upstream-provider-check` gate for cheap provider drift checks without waiting for CI.

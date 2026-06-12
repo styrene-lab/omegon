@@ -30,6 +30,7 @@ pub struct AcpWebState {
     pub model: String,
     pub cwd: PathBuf,
     pub agent_id: Option<String>,
+    pub dangerously_bypass_permissions: bool,
     pub active_connections: Arc<AtomicU64>,
     pub shutdown: CancellationToken,
 }
@@ -158,7 +159,14 @@ async fn handle_acp_socket(socket: WebSocket, state: AcpWebState) {
                 let local = tokio::task::LocalSet::new();
                 local.block_on(
                     &rt,
-                    run_acp_session(model, cwd, agent_id, inbound_rx, outbound_tx),
+                    run_acp_session(
+                        model,
+                        cwd,
+                        agent_id,
+                        state.dangerously_bypass_permissions,
+                        inbound_rx,
+                        outbound_tx,
+                    ),
                 );
             }));
             if let Err(e) = result {
@@ -208,6 +216,7 @@ async fn run_acp_session(
     model: String,
     cwd: PathBuf,
     agent_id: Option<String>,
+    dangerously_bypass_permissions: bool,
     mut inbound_rx: mpsc::UnboundedReceiver<String>,
     outbound_tx: mpsc::UnboundedSender<String>,
 ) {
@@ -221,7 +230,10 @@ async fn run_acp_session(
         }
     }
 
-    let agent = Rc::new(crate::acp::OmegonAcpAgent::new(&model));
+    let agent = Rc::new(crate::acp::OmegonAcpAgent::new_with_safety(
+        &model,
+        dangerously_bypass_permissions,
+    ));
 
     let (read_client, mut read_server) = tokio::io::duplex(DUPLEX_BUFFER_BYTES);
     let (write_client, write_server) = tokio::io::duplex(DUPLEX_BUFFER_BYTES);

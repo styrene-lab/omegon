@@ -27,7 +27,11 @@ pub fn workbench_preferred_height(state: &WorkbenchState, width: u16) -> u16 {
         workbench_snapshot_height(active, width)
     } else if state.cleave.as_ref().is_some_and(|p| p.active) {
         5
-    } else if state.delegate.as_ref().is_some_and(|p| p.active || p.running > 0) {
+    } else if state
+        .delegate
+        .as_ref()
+        .is_some_and(|p| p.active || p.running > 0)
+    {
         5
     } else if !state.workstreams.is_empty() {
         1
@@ -63,7 +67,6 @@ pub enum WorkstreamStatus {
     Complete,
 }
 
-
 impl WorkstreamStatus {
     pub fn from_label(value: &str) -> Self {
         match value {
@@ -97,7 +100,13 @@ impl WorkstreamSummary {
             .unwrap_or(WorkstreamStatus::Waiting);
         let completed = value.get("completed").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let total = value.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        Some(Self { id, title, status, completed, total })
+        Some(Self {
+            id,
+            title,
+            status,
+            completed,
+            total,
+        })
     }
 }
 
@@ -106,7 +115,12 @@ impl WorkbenchState {
         let workstreams = value
             .get("workstreams")
             .and_then(|v| v.as_array())
-            .map(|items| items.iter().filter_map(WorkstreamSummary::from_json).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(WorkstreamSummary::from_json)
+                    .collect()
+            })
             .unwrap_or_default();
         Self {
             active: PlanDisplaySnapshot::from_json(value),
@@ -482,7 +496,14 @@ impl SlimPlanContext {
 
     pub fn labels(&self) -> Vec<String> {
         let mut labels = Vec::new();
-        labels.push(if self.active { "active plan" } else { "no active plan" }.to_string());
+        labels.push(
+            if self.active {
+                "active plan"
+            } else {
+                "no active plan"
+            }
+            .to_string(),
+        );
         if self.tracked {
             labels.push("tracked".to_string());
         }
@@ -550,7 +571,11 @@ pub fn render_workbench_panel(
         render_active_workbench_panel(area, frame, t, snapshot, state.workstreams.len());
     } else if let Some(cleave) = state.cleave.as_ref().filter(|p| p.active) {
         render_cleave_workbench_panel(area, frame, t, cleave);
-    } else if let Some(delegate) = state.delegate.as_ref().filter(|p| p.active || p.running > 0) {
+    } else if let Some(delegate) = state
+        .delegate
+        .as_ref()
+        .filter(|p| p.active || p.running > 0)
+    {
         render_delegate_workbench_panel(area, frame, t, delegate);
     } else {
         render_workstream_summary(area, frame, t, state.workstreams.as_slice(), bg);
@@ -629,7 +654,10 @@ fn render_cleave_workbench_panel(
             .map(|tool| format!(" · {tool}"))
             .unwrap_or_default();
         let text = crate::util::truncate(
-            &format!("{} {:<10}{}{}", child.label, child.status, task_progress, tool),
+            &format!(
+                "{} {:<10}{}{}",
+                child.label, child.status, task_progress, tool
+            ),
             area.width.saturating_sub(1) as usize,
         );
         lines.push(Line::from(Span::styled(
@@ -672,7 +700,10 @@ fn render_delegate_workbench_panel(
             .map(|tool| format!(" · {tool}"))
             .unwrap_or_default();
         let text = crate::util::truncate(
-            &format!("{} {:<10}{}{}", child.label, child.status, task_progress, tool),
+            &format!(
+                "{} {:<10}{}{}",
+                child.label, child.status, task_progress, tool
+            ),
             area.width.saturating_sub(1) as usize,
         );
         lines.push(Line::from(Span::styled(
@@ -709,11 +740,7 @@ fn workbench_rule_line<'a>(
     ])
 }
 
-fn worker_status_style(
-    status: &str,
-    t: &dyn theme::Theme,
-    bg: ratatui::style::Color,
-) -> Style {
+fn worker_status_style(status: &str, t: &dyn theme::Theme, bg: ratatui::style::Color) -> Style {
     let fg = match status {
         "completed" | "merged_after_failure" => t.success(),
         "running" => t.warning(),

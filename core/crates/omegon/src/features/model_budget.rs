@@ -269,32 +269,44 @@ impl Feature for ModelBudget {
                 name: "gloriana".into(),
                 description: "Switch to gloriana tier (deep reasoning)".into(),
                 subcommands: vec![],
+                availability: omegon_traits::CommandAvailability::ALL,
+                safety: omegon_traits::CommandSafety::STATE_CHANGING,
             },
             CommandDefinition {
                 name: "victory".into(),
                 description: "Switch to victory tier (capable coding)".into(),
                 subcommands: vec![],
+                availability: omegon_traits::CommandAvailability::ALL,
+                safety: omegon_traits::CommandSafety::STATE_CHANGING,
             },
             CommandDefinition {
                 name: "retribution".into(),
                 description: "Switch to retribution tier (fast/cheap)".into(),
                 subcommands: vec![],
+                availability: omegon_traits::CommandAvailability::ALL,
+                safety: omegon_traits::CommandSafety::STATE_CHANGING,
             },
             // Aliases for familiarity
             CommandDefinition {
                 name: "opus".into(),
                 description: "Switch to gloriana/opus tier".into(),
                 subcommands: vec![],
+                availability: omegon_traits::CommandAvailability::ALL,
+                safety: omegon_traits::CommandSafety::STATE_CHANGING,
             },
             CommandDefinition {
                 name: "sonnet".into(),
                 description: "Switch to victory/sonnet tier".into(),
                 subcommands: vec![],
+                availability: omegon_traits::CommandAvailability::ALL,
+                safety: omegon_traits::CommandSafety::STATE_CHANGING,
             },
             CommandDefinition {
                 name: "haiku".into(),
                 description: "Switch to retribution/haiku tier".into(),
                 subcommands: vec![],
+                availability: omegon_traits::CommandAvailability::ALL,
+                safety: omegon_traits::CommandSafety::STATE_CHANGING,
             },
         ]
     }

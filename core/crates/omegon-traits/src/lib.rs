@@ -1561,6 +1561,93 @@ pub enum LifecyclePhase {
 // Slash commands
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// Surfaces where a slash command may be discovered and invoked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandAvailability {
+    /// Show/execute in the local terminal UI.
+    pub tui: bool,
+    /// Show/execute through CLI or remote slash-command entrypoints.
+    pub cli: bool,
+    /// Show/execute through ACP-hosted clients.
+    pub acp: bool,
+}
+
+impl CommandAvailability {
+    pub const ALL: Self = Self {
+        tui: true,
+        cli: true,
+        acp: true,
+    };
+    pub const TUI_ONLY: Self = Self {
+        tui: true,
+        cli: false,
+        acp: false,
+    };
+}
+
+/// Coarse command side-effect class for remote-surface policy decisions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandSafetyClass {
+    /// Command is only meaningful in a local interactive UI.
+    LocalOnly,
+    /// Command only reads state and returns information.
+    ReadOnly,
+    /// Command mutates the prompt queue or pending local work but does not touch external state.
+    QueueMutation,
+    /// Command mutates local/project state.
+    StateChanging,
+    /// Command may touch external services or host integrations.
+    ExternalSideEffect,
+    /// Command is destructive or irreversible without stronger confirmation.
+    Destructive,
+}
+
+/// Safety metadata used by CLI/ACP/TUI command surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandSafety {
+    pub class: CommandSafetyClass,
+    pub requires_confirmation: bool,
+    pub prompt_injection_sensitive: bool,
+}
+
+impl CommandSafety {
+    pub const READ_ONLY: Self = Self {
+        class: CommandSafetyClass::ReadOnly,
+        requires_confirmation: false,
+        prompt_injection_sensitive: false,
+    };
+
+    pub const LOCAL_ONLY: Self = Self {
+        class: CommandSafetyClass::LocalOnly,
+        requires_confirmation: false,
+        prompt_injection_sensitive: false,
+    };
+
+    pub const QUEUE_MUTATION: Self = Self {
+        class: CommandSafetyClass::QueueMutation,
+        requires_confirmation: false,
+        prompt_injection_sensitive: true,
+    };
+
+    pub const STATE_CHANGING: Self = Self {
+        class: CommandSafetyClass::StateChanging,
+        requires_confirmation: false,
+        prompt_injection_sensitive: false,
+    };
+
+    pub const EXTERNAL_SIDE_EFFECT: Self = Self {
+        class: CommandSafetyClass::ExternalSideEffect,
+        requires_confirmation: true,
+        prompt_injection_sensitive: false,
+    };
+
+    pub const DESTRUCTIVE: Self = Self {
+        class: CommandSafetyClass::Destructive,
+        requires_confirmation: true,
+        prompt_injection_sensitive: false,
+    };
+}
+
 /// Definition of a slash command that a feature registers.
 #[derive(Debug, Clone)]
 pub struct CommandDefinition {
@@ -1570,6 +1657,10 @@ pub struct CommandDefinition {
     pub description: String,
     /// Subcommand completions (e.g. ["200k", "1m"] for /context).
     pub subcommands: Vec<String>,
+    /// Surfaces where this command may be exposed.
+    pub availability: CommandAvailability,
+    /// Side-effect and prompt-injection safety metadata for remote surfaces.
+    pub safety: CommandSafety,
 }
 
 /// Result of handling a slash command.

@@ -1368,6 +1368,7 @@ async fn main() -> anyhow::Result<()> {
                 &cli.model,
                 agent.as_deref(),
                 tls.clone().into_config()?,
+                cli.dangerously_bypass_permissions,
             )
             .await
         }
@@ -1382,6 +1383,7 @@ async fn main() -> anyhow::Result<()> {
                 &cli.model,
                 None,
                 tls.clone().into_config()?,
+                cli.dangerously_bypass_permissions,
             )
             .await
         }
@@ -1460,12 +1462,18 @@ async fn main() -> anyhow::Result<()> {
                     agent.as_deref(),
                     &cli.cwd,
                     tls.clone().into_config()?,
+                    cli.dangerously_bypass_permissions,
                 )
                 .await
             } else {
                 let local = tokio::task::LocalSet::new();
                 local
-                    .run_until(acp::run(&cli.model, agent.as_deref(), &cli.cwd))
+                    .run_until(acp::run(
+                        &cli.model,
+                        agent.as_deref(),
+                        &cli.cwd,
+                        cli.dangerously_bypass_permissions,
+                    ))
                     .await
             }
         }
@@ -2193,6 +2201,7 @@ async fn run_embedded_command(
     model: &str,
     agent_id: Option<&str>,
     tls: Option<control_tls::ControlTlsConfig>,
+    dangerously_bypass_permissions: bool,
 ) -> anyhow::Result<()> {
     let cwd = std::fs::canonicalize(".")?;
 
@@ -2286,6 +2295,7 @@ async fn run_embedded_command(
         model: model.to_string(),
         cwd: cwd.clone(),
         agent_id: agent_id.map(String::from),
+        dangerously_bypass_permissions: dangerously_bypass_permissions,
         active_connections: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         shutdown: global_cancel.clone(),
     };
@@ -4122,6 +4132,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     cli: &CliRuntimeView {
                         no_session: cli.no_session,
                         model: &cli.model,
+                        dangerously_bypass_permissions: cli.dangerously_bypass_permissions,
                     },
                 };
                 let response = control_runtime::execute_control(&mut ctx, request).await;
@@ -4512,6 +4523,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     cli: &CliRuntimeView {
                         no_session: cli.no_session,
                         model: &cli.model,
+                        dangerously_bypass_permissions: cli.dangerously_bypass_permissions,
                     },
                 };
                 let response = control_runtime::execute_control(
@@ -4541,6 +4553,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     cli: &CliRuntimeView {
                         no_session: cli.no_session,
                         model: &cli.model,
+                        dangerously_bypass_permissions: cli.dangerously_bypass_permissions,
                     },
                 };
                 let response = control_runtime::execute_control(
@@ -4581,6 +4594,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     &CliRuntimeView {
                         no_session: cli.no_session,
                         model: &cli.model,
+                        dangerously_bypass_permissions: cli.dangerously_bypass_permissions,
                     },
                     &events_tx,
                 )
@@ -4615,6 +4629,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     &CliRuntimeView {
                         no_session: cli.no_session,
                         model: &cli.model,
+                        dangerously_bypass_permissions: cli.dangerously_bypass_permissions,
                     },
                     &agent.cwd,
                     &provider,
@@ -5601,6 +5616,7 @@ pub(crate) struct InteractiveAgentHost {
 pub(crate) struct CliRuntimeView<'a> {
     pub(crate) no_session: bool,
     pub(crate) model: &'a str,
+    pub(crate) dangerously_bypass_permissions: bool,
 }
 
 fn interactive_resume_mode(cli: &Cli) -> Option<Option<&str>> {
@@ -6857,6 +6873,9 @@ async fn execute_remote_slash_command(
     use omegon_traits::SlashCommandResponse;
 
     let Some(command) = canonical_slash_command(name, args) else {
+        if let Some(response) = execute_registered_remote_command(runtime_state, cli, name, args) {
+            return response;
+        }
         return SlashCommandResponse {
             accepted: false,
             output: Some(format!(
@@ -6876,6 +6895,7 @@ async fn execute_remote_slash_command(
             cli: &CliRuntimeView {
                 no_session: cli.no_session,
                 model: &cli.model,
+                dangerously_bypass_permissions: cli.dangerously_bypass_permissions,
             },
         };
         return control_runtime::execute_control(&mut ctx, control_request).await;
@@ -6903,11 +6923,65 @@ async fn execute_remote_slash_command(
         return execute_plan_slash_command(runtime_state, command);
     }
 
+    if let Some(response) = execute_registered_remote_command(runtime_state, cli, name, args) {
+        return response;
+    }
+
     SlashCommandResponse {
         accepted: false,
         output: Some(format!(
             "Command /{name} is interactive-only or unavailable via remote slash execution."
         )),
+    }
+}
+
+fn execute_registered_remote_command(
+    runtime_state: &mut InteractiveAgentState,
+    cli: &Cli,
+    name: &str,
+    args: &str,
+) -> Option<omegon_traits::SlashCommandResponse> {
+    use omegon_traits::{CommandResult, SlashCommandResponse};
+
+    let definition = runtime_state
+        .bus
+        .command_definitions()
+        .iter()
+        .map(|(_, definition)| definition)
+        .find(|definition| definition.name == name)?;
+
+    if !definition.availability.cli {
+        return Some(SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Command /{name} is not available via CLI/remote slash execution."
+            )),
+        });
+    }
+    if definition.safety.requires_confirmation && !cli.dangerously_bypass_permissions {
+        return Some(SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Command /{name} requires interactive confirmation and is unavailable via remote slash execution."
+            )),
+        });
+    }
+
+    match runtime_state.bus.dispatch_command(name, args) {
+        CommandResult::Display(text) => Some(SlashCommandResponse {
+            accepted: true,
+            output: Some(text),
+        }),
+        CommandResult::Handled => Some(SlashCommandResponse {
+            accepted: true,
+            output: None,
+        }),
+        CommandResult::NotHandled => Some(SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Command /{name} was registered but did not handle the request."
+            )),
+        }),
     }
 }
 
@@ -7025,7 +7099,9 @@ Last completed plan
     }
 }
 
-fn work_plan_snapshot_with_lifecycle(intent: &crate::conversation::IntentDocument) -> serde_json::Value {
+fn work_plan_snapshot_with_lifecycle(
+    intent: &crate::conversation::IntentDocument,
+) -> serde_json::Value {
     let mut registry = intent.plan_registry();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let repo_root = setup::find_project_root(&cwd);
@@ -9168,6 +9244,223 @@ mod tests {
         assert!(output.contains("anthropic"), "got: {output}");
         assert!(output.contains("openai-codex"), "got: {output}");
         assert!(!output.contains("ollama,"), "got: {output}");
+    }
+
+    struct TestRemoteCommandFeature {
+        definition: omegon_traits::CommandDefinition,
+        handled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl omegon_traits::Feature for TestRemoteCommandFeature {
+        fn name(&self) -> &str {
+            "test-remote-command"
+        }
+
+        fn commands(&self) -> Vec<omegon_traits::CommandDefinition> {
+            vec![self.definition.clone()]
+        }
+
+        fn handle_command(&mut self, name: &str, args: &str) -> omegon_traits::CommandResult {
+            if name == self.definition.name {
+                self.handled
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                omegon_traits::CommandResult::Display(format!("handled {args}"))
+            } else {
+                omegon_traits::CommandResult::NotHandled
+            }
+        }
+    }
+
+    fn remote_command_definition(
+        availability: omegon_traits::CommandAvailability,
+        requires_confirmation: bool,
+    ) -> omegon_traits::CommandDefinition {
+        omegon_traits::CommandDefinition {
+            name: "unsafe_test".into(),
+            description: "test command".into(),
+            subcommands: vec![],
+            availability,
+            safety: omegon_traits::CommandSafety {
+                class: omegon_traits::CommandSafetyClass::StateChanging,
+                requires_confirmation,
+                prompt_injection_sensitive: false,
+            },
+        }
+    }
+
+    fn register_remote_test_command(
+        runtime_state: &mut InteractiveAgentState,
+        availability: omegon_traits::CommandAvailability,
+        requires_confirmation: bool,
+    ) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        let handled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        runtime_state
+            .bus
+            .register(Box::new(TestRemoteCommandFeature {
+                definition: remote_command_definition(availability, requires_confirmation),
+                handled: handled.clone(),
+            }));
+        runtime_state.bus.finalize();
+        handled
+    }
+
+    fn remote_command_test_context(
+        bypass: bool,
+    ) -> (
+        tokio::runtime::Runtime,
+        InteractiveAgentHost,
+        InteractiveAgentState,
+        broadcast::Sender<AgentEvent>,
+        settings::SharedSettings,
+        std::sync::Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+        std::sync::Arc<tokio::sync::Mutex<Option<oneshot::Sender<String>>>>,
+        Cli,
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let agent = test_agent_setup();
+        let (events_tx, _) = broadcast::channel(16);
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
+            "anthropic:claude-sonnet-4-6",
+        )));
+        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(Box::new(
+            crate::bridge::NullBridge,
+        ) as Box<dyn LlmBridge>));
+        let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
+        let cli = if bypass {
+            Cli::try_parse_from(vec!["omegon", "--dangerously-bypass-permissions"]).unwrap()
+        } else {
+            Cli::try_parse_from(vec!["omegon"]).unwrap()
+        };
+        let (agent, runtime_state) = split_interactive_agent(agent);
+        (
+            rt,
+            agent,
+            runtime_state,
+            events_tx,
+            shared_settings,
+            bridge,
+            login_prompt_tx,
+            cli,
+        )
+    }
+
+    #[test]
+    fn remote_registered_command_requires_confirmation_without_bypass() {
+        let (
+            rt,
+            mut agent,
+            mut runtime_state,
+            events_tx,
+            shared_settings,
+            bridge,
+            login_prompt_tx,
+            cli,
+        ) = remote_command_test_context(false);
+        let handled = register_remote_test_command(
+            &mut runtime_state,
+            omegon_traits::CommandAvailability::ALL,
+            true,
+        );
+
+        let response = rt.block_on(execute_remote_slash_command(
+            &mut runtime_state,
+            &mut agent,
+            &events_tx,
+            &shared_settings,
+            &bridge,
+            &login_prompt_tx,
+            &cli,
+            "unsafe_test",
+            "args",
+        ));
+
+        assert!(!response.accepted);
+        assert!(
+            response
+                .output
+                .unwrap()
+                .contains("requires interactive confirmation")
+        );
+        assert!(!handled.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn remote_registered_command_bypass_allows_confirmation_required_command() {
+        let (
+            rt,
+            mut agent,
+            mut runtime_state,
+            events_tx,
+            shared_settings,
+            bridge,
+            login_prompt_tx,
+            cli,
+        ) = remote_command_test_context(true);
+        let handled = register_remote_test_command(
+            &mut runtime_state,
+            omegon_traits::CommandAvailability::ALL,
+            true,
+        );
+
+        let response = rt.block_on(execute_remote_slash_command(
+            &mut runtime_state,
+            &mut agent,
+            &events_tx,
+            &shared_settings,
+            &bridge,
+            &login_prompt_tx,
+            &cli,
+            "unsafe_test",
+            "args",
+        ));
+
+        assert!(response.accepted);
+        assert_eq!(response.output.as_deref(), Some("handled args"));
+        assert!(handled.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn remote_registered_command_availability_is_not_bypassed() {
+        let (
+            rt,
+            mut agent,
+            mut runtime_state,
+            events_tx,
+            shared_settings,
+            bridge,
+            login_prompt_tx,
+            cli,
+        ) = remote_command_test_context(true);
+        let handled = register_remote_test_command(
+            &mut runtime_state,
+            omegon_traits::CommandAvailability {
+                tui: true,
+                cli: false,
+                acp: true,
+            },
+            true,
+        );
+
+        let response = rt.block_on(execute_remote_slash_command(
+            &mut runtime_state,
+            &mut agent,
+            &events_tx,
+            &shared_settings,
+            &bridge,
+            &login_prompt_tx,
+            &cli,
+            "unsafe_test",
+            "args",
+        ));
+
+        assert!(!response.accepted);
+        assert!(
+            response
+                .output
+                .unwrap()
+                .contains("not available via CLI/remote slash execution")
+        );
+        assert!(!handled.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]

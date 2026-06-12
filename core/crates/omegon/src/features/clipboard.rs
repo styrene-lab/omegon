@@ -52,6 +52,8 @@ impl Feature for ClipboardFeature {
             name: "clipboard".into(),
             description: "Manage clipboard paste retention (subcommands: prune)".into(),
             subcommands: vec!["prune".into()],
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::DESTRUCTIVE,
         }]
     }
 

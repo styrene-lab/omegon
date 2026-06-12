@@ -99,6 +99,8 @@ impl Feature for UsageFeature {
             name: "usage".into(),
             description: "Show current provider usage telemetry and advisory".into(),
             subcommands: vec![],
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::READ_ONLY,
         }]
     }
 

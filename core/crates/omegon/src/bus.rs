@@ -723,6 +723,8 @@ mod tests {
                 name: "notify".into(),
                 description: "Send a test notification".into(),
                 subcommands: vec![],
+                availability: omegon_traits::CommandAvailability::ALL,
+                safety: omegon_traits::CommandSafety::READ_ONLY,
             }]
         }
 

@@ -717,6 +717,44 @@ async fn explicit_interrupt_queue_mode_still_requests_cancel() {
     );
 }
 
+#[tokio::test]
+async fn queued_prompt_dispatch_preserves_captured_queue_mode() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    app.queue_mode = PromptQueueMode::InterruptAfterTurn;
+    app.queue_prompt("queued under interrupt".to_string(), Vec::new());
+    app.queue_mode = PromptQueueMode::UntilReady;
+
+    app.dispatch_next_queued_prompt(&tx).await;
+
+    match rx.recv().await.expect("queued prompt dispatched") {
+        TuiCommand::SubmitPrompt(PromptSubmission {
+            text, queue_mode, ..
+        }) => {
+            assert_eq!(text, "queued under interrupt");
+            assert_eq!(queue_mode, PromptQueueMode::InterruptAfterTurn);
+        }
+        other => panic!("expected prompt submission, got {other:?}"),
+    }
+    assert!(app.queued_prompts.is_empty());
+    assert!(app.agent_active);
+}
+
+#[tokio::test]
+async fn queued_prompt_dispatch_waits_for_idle_agent() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    app.agent_active = true;
+    app.queue_prompt("wait for current turn".to_string(), Vec::new());
+
+    app.dispatch_next_queued_prompt(&tx).await;
+
+    assert_eq!(app.queued_prompts.len(), 1);
+    assert!(rx.try_recv().is_err());
+}
+
 #[test]
 fn queue_prompt_preserves_fifo_order() {
     let mut app = test_app();
@@ -3466,8 +3504,6 @@ directive = "TONE.md"
 // Event handling
 // ═══════════════════════════════════════════════════════════════════
 
-
-
 #[test]
 fn draw_routes_active_cleave_to_workbench_without_instruments() {
     let mut app = test_app();
@@ -3738,8 +3774,14 @@ fn footer_instrument_layout_renders_only_inference_and_tools_panels() {
         "expected tools panel: {rendered}"
     );
 
-    assert!(rendered.contains("┌ inference"), "missing inference panel: {rendered}");
-    assert!(rendered.contains("┌ tools"), "missing tools panel: {rendered}");
+    assert!(
+        rendered.contains("┌ inference"),
+        "missing inference panel: {rendered}"
+    );
+    assert!(
+        rendered.contains("┌ tools"),
+        "missing tools panel: {rendered}"
+    );
     assert!(
         !rendered.contains("┌ engine"),
         "engine telemetry belongs in the slim status sidecar, not the instrument footer: {rendered}"
@@ -4096,6 +4138,8 @@ fn slash_cleave_run_still_uses_bus_path() {
         name: "cleave".into(),
         description: "parallel work".into(),
         subcommands: vec!["status".into(), "cancel".into()],
+        availability: omegon_traits::CommandAvailability::ALL,
+        safety: omegon_traits::CommandSafety::READ_ONLY,
     });
     let (tx, mut rx) = test_tx_with_rx();
 
@@ -4131,11 +4175,15 @@ fn hidden_model_aliases_do_not_appear_in_palette() {
             name: "sonnet".into(),
             description: "hidden alias".into(),
             subcommands: vec![],
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::READ_ONLY,
         },
         omegon_traits::CommandDefinition {
             name: "victory".into(),
             description: "visible tier".into(),
             subcommands: vec![],
+            availability: omegon_traits::CommandAvailability::ALL,
+            safety: omegon_traits::CommandSafety::READ_ONLY,
         },
     ];
     app.editor.set_text("/");
@@ -4151,6 +4199,8 @@ fn palette_deduplicates_builtin_and_bus_commands() {
         name: "cleave".into(),
         description: "parallel work".into(),
         subcommands: vec!["status".into()],
+        availability: omegon_traits::CommandAvailability::ALL,
+        safety: omegon_traits::CommandSafety::READ_ONLY,
     }];
     app.editor.set_text("/cl");
     let matches = app.matching_commands();
@@ -4190,6 +4240,8 @@ fn slash_cleave_warns_on_anthropic_subscription_but_proceeds() {
         name: "cleave".into(),
         description: "parallel work".into(),
         subcommands: vec![],
+        availability: omegon_traits::CommandAvailability::ALL,
+        safety: omegon_traits::CommandSafety::READ_ONLY,
     });
     let tx = test_tx();
     let result = app.handle_slash_command("/cleave demo", &tx);

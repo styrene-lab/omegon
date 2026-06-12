@@ -33,7 +33,6 @@ pub mod segment_components;
 pub mod segment_detail;
 pub mod segments;
 pub mod selector;
-pub mod workbench;
 pub mod spinner;
 pub mod splash;
 pub mod statusline;
@@ -42,6 +41,7 @@ pub mod theme;
 pub mod tutorial;
 pub mod widget_renderer;
 pub mod widgets;
+pub mod workbench;
 
 #[cfg(test)]
 mod snapshot_tests;
@@ -91,9 +91,9 @@ use self::layout_projection::{TuiLayoutInputs, plan_tui_layout};
 use self::permission_lane::{format_permission_prompt, permission_response_for_key};
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode};
 use self::workbench::{
-    PlanDisplaySnapshot, WorkbenchState, SlimPlanContext, SlimPlanHintState, SlimTurnState,
-    active_workbench_snapshot, workbench_preferred_height, render_workbench_panel,
-    slim_completed_plan_hint_available, slim_operator_hint, upstream_retry_hint,
+    PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, WorkbenchState,
+    active_workbench_snapshot, render_workbench_panel, slim_completed_plan_hint_available,
+    slim_operator_hint, upstream_retry_hint, workbench_preferred_height,
 };
 use crate::surfaces::layout::UiSurfaces;
 use crate::ui_runtime::actions::{
@@ -300,6 +300,7 @@ pub(crate) struct QueuedPrompt {
     text: String,
     attachments: Vec<std::path::PathBuf>,
     metadata: PromptMetadata,
+    queue_mode: PromptQueueMode,
 }
 
 fn segment_meta_from_prompt_metadata(metadata: &PromptMetadata) -> SegmentMeta {
@@ -3303,6 +3304,7 @@ impl App {
             text,
             attachments,
             metadata: PromptMetadata::default(),
+            queue_mode: self.queue_mode,
         });
         tracing::debug!(queued = self.queued_prompts.len(), preview = %preview, "prompt queued");
     }
@@ -3673,6 +3675,47 @@ impl App {
             .await;
     }
 
+    async fn dispatch_next_queued_prompt(&mut self, command_tx: &mpsc::Sender<TuiCommand>) {
+        if self.agent_active || self.should_quit {
+            return;
+        }
+        let Some(queued) = self.queued_prompts.pop_front() else {
+            return;
+        };
+        let text = queued.text;
+        let attachments = queued.attachments;
+        let metadata = queued.metadata;
+        let queue_mode = queued.queue_mode;
+        let meta = segment_meta_from_prompt_metadata(&metadata);
+        if attachments.is_empty() {
+            self.conversation.push_user_with_meta(&text, meta);
+        } else {
+            self.conversation
+                .push_user_with_attachments_and_meta(&text, &attachments, meta);
+        }
+        self.history.push(text.clone());
+        self.history_idx = None;
+        self.agent_active = true;
+        if let Ok(mut ss) = self.dashboard_handles.session.lock() {
+            ss.busy = true;
+        }
+        let image_paths = if attachments.is_empty() {
+            Vec::new()
+        } else {
+            attachments
+        };
+        let _ = command_tx
+            .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                text,
+                image_paths,
+                submitted_by: "local-tui".to_string(),
+                via: "tui",
+                queue_mode,
+                metadata,
+            }))
+            .await;
+    }
+
     fn suppress_editor_input_for(&mut self, duration: Duration) {
         self.suppress_editor_input_until = Some(std::time::Instant::now() + duration);
     }
@@ -3743,7 +3786,8 @@ impl App {
         }
 
         if !self.ui_surfaces.instruments {
-            self.footer_data.render_engine_fallback_panel(area, frame, t);
+            self.footer_data
+                .render_engine_fallback_panel(area, frame, t);
             return area;
         }
 
@@ -5393,6 +5437,7 @@ Scroll transcript:
                         text: builder_prompt,
                         attachments: Vec::new(),
                         metadata: PromptMetadata::default(),
+                        queue_mode: PromptQueueMode::UntilReady,
                     });
                     self.queue_mode = PromptQueueMode::UntilReady;
                     tracing::debug!("skill builder queued");
@@ -5700,6 +5745,7 @@ Scroll transcript:
                         text: builder_prompt,
                         attachments: Vec::new(),
                         metadata: PromptMetadata::default(),
+                        queue_mode: PromptQueueMode::UntilReady,
                     });
                     self.queue_mode = PromptQueueMode::UntilReady;
                     tracing::debug!("persona builder queued");
@@ -8569,6 +8615,11 @@ pub async fn run_tui(
             }
         }
 
+        // Agent events were drained above; if a turn ended and a prompt is queued,
+        // dispatch it before drawing so the visible queue count ticks down on the
+        // same frame that work starts.
+        app.dispatch_next_queued_prompt(&command_tx).await;
+
         // Draw
         terminal.draw(|f| app.draw(f))?;
 
@@ -9479,55 +9530,6 @@ pub async fn run_tui(
             } // match event::read()
         } // if has_terminal_event
 
-        // Agent events already drained before draw (above).
-
-        // Drain queued prompts only after authoritative AgentEnd (but not if quitting)
-        if !app.agent_active && !app.should_quit && !app.queued_prompts.is_empty() {
-            let queued = app.queued_prompts.pop_front().unwrap();
-            let text = queued.text;
-            let attachments = queued.attachments;
-            let metadata = queued.metadata;
-            if attachments.is_empty() {
-                app.conversation
-                    .push_user_with_meta(&text, segment_meta_from_prompt_metadata(&metadata));
-            } else {
-                app.conversation.push_user_with_attachments_and_meta(
-                    &text,
-                    &attachments,
-                    segment_meta_from_prompt_metadata(&metadata),
-                );
-            }
-            app.history.push(text.clone());
-            app.history_idx = None;
-            app.agent_active = true;
-            if let Ok(mut ss) = app.dashboard_handles.session.lock() {
-                ss.busy = true;
-            }
-            if attachments.is_empty() {
-                let _ = command_tx
-                    .send(TuiCommand::SubmitPrompt(PromptSubmission {
-                        text,
-                        image_paths: Vec::new(),
-                        submitted_by: "local-tui".to_string(),
-                        via: "tui",
-                        queue_mode: app.queue_mode,
-                        metadata,
-                    }))
-                    .await;
-            } else {
-                let _ = command_tx
-                    .send(TuiCommand::SubmitPrompt(PromptSubmission {
-                        text,
-                        image_paths: attachments,
-                        submitted_by: "local-tui".to_string(),
-                        via: "tui",
-                        queue_mode: app.queue_mode,
-                        metadata,
-                    }))
-                    .await;
-            }
-        }
-
         if app.should_quit {
             break;
         }
@@ -9689,8 +9691,8 @@ mod slash_command_parsing_tests {
     };
     use super::workbench::{
         PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus, SlimPlanContext,
-        SlimPlanHintState, slim_completed_plan_hint_available, slim_operator_hint,
-        active_workbench_snapshot, workbench_rows,
+        SlimPlanHintState, active_workbench_snapshot, slim_completed_plan_hint_available,
+        slim_operator_hint, workbench_rows,
     };
     use crate::lifecycle::types::NodeStatus;
     use crossterm::event::{KeyCode, KeyModifiers};
@@ -9700,7 +9702,9 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn workbench_workstream_only_uses_compact_height() {
-        use super::workbench::{WorkbenchState, WorkstreamStatus, WorkstreamSummary, workbench_preferred_height};
+        use super::workbench::{
+            WorkbenchState, WorkstreamStatus, WorkstreamSummary, workbench_preferred_height,
+        };
 
         let empty = WorkbenchState::default();
         assert_eq!(workbench_preferred_height(&empty, 100), 0);
@@ -9721,7 +9725,9 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn workbench_workstream_only_renders_summary_without_task_rows() {
-        use super::workbench::{WorkbenchState, WorkstreamStatus, WorkstreamSummary, render_workbench_panel};
+        use super::workbench::{
+            WorkbenchState, WorkstreamStatus, WorkstreamSummary, render_workbench_panel,
+        };
 
         let state = WorkbenchState {
             active: None,
@@ -9737,7 +9743,9 @@ mod slash_command_parsing_tests {
         let backend = ratatui::backend::TestBackend::new(80, 1);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| render_workbench_panel(frame.area(), frame, &super::theme::Alpharius, &state))
+            .draw(|frame| {
+                render_workbench_panel(frame.area(), frame, &super::theme::Alpharius, &state)
+            })
             .unwrap();
         let mut text = String::new();
         for x in 0..80 {
