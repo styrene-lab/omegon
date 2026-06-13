@@ -2359,6 +2359,7 @@ impl OmegonAcpAgent {
                         "stable_id": true,
                         "revision": true,
                         "durable_bind": true,
+                        "durable_bind_scope": "repo_backed_explicit_stable_id_only",
                         "structured_errors": true,
                         "pagination": false,
                         "filtering": true,
@@ -4274,6 +4275,10 @@ mod extension_metadata_tests {
         assert_eq!(
             response["features"]["plan_tasks_contract"]["durable_bind"],
             true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["durable_bind_scope"],
+            "repo_backed_explicit_stable_id_only"
         );
         assert_eq!(
             response["features"]["plan_tasks_contract"]["structured_errors"],

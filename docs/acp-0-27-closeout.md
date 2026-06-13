@@ -111,3 +111,48 @@ Primary files to inspect:
 ## Initial triage decision
 
 For 0.27.0, prefer conservative capability truthfulness over direct-mapping ambition. Read-only/manual-link client behavior is acceptable if durability, mutation, and revision contracts are not fully proven. Do not block 0.27.0 on broad P1/P2 ACP diagnostics unless a shipped capability is misleading or broken.
+
+## Triage notes — 2026-06-13
+
+### ACP issue 128: turn control and provider telemetry
+
+Classification: **implemented for 0.27.0; keep focused verification, not a release blocker unless tests fail**.
+
+Evidence:
+
+- `core/crates/omegon/src/acp_worker.rs` maps provider retry/failure/cancel agent events into typed `WorkerEvent::ProviderRetry`, `WorkerEvent::ProviderFailure`, and `WorkerEvent::TurnCancelled` variants.
+- `core/crates/omegon/src/acp.rs` emits `_provider/retry`, `_provider/failure`, and `_turn/cancelled` ACP extension notifications with structured JSON payloads rather than assistant-authored text.
+- ACP cancellation calls the worker cancel token and emits `_turn/cancelled` with `reason=operator_cancelled`; the transport is not killed as part of cancellation.
+
+Remaining risk:
+
+- Provider telemetry still carries human-readable `message` fields. That is acceptable compatibility detail if clients key on typed notification method + structured fields, not message text.
+
+### ACP task/direct mapping contract
+
+Classification: **partially implemented and truthfully conservative; direct durable mapping ambition remains post-release unless a misleading capability is found**.
+
+Evidence:
+
+- `tasks/list`/`_tasks/list`, `tasks/show`, `tasks/bind`, `external_tasks/import`, and `tasks/events` are routed through ACP extension calls.
+- `_tasks/bind` checks `expected_revision` and returns structured `stale_revision`, `not_found`, `unsupported_source`, and `conflict` errors through `acp_plan_tasks::task_error`.
+- Session imports are explicitly reported as `durability=session` with review required.
+- Repo-durable binding is guarded by explicit stable IDs, explicit stable-id quality, and non-session source metadata before writing the task binding store.
+- Runtime capabilities advertise the plan task contract with compatibility modes and explicitly report `pagination=false`.
+
+Remaining risk:
+
+- Capability payload now advertises `durable_bind=true` with `durable_bind_scope=repo_backed_explicit_stable_id_only`, matching the guarded implementation instead of implying every task can be durably bound.
+
+### ACP session/config, diagnostics, and provenance follow-ups
+
+Classification: **post-release unless capability inventory claims exceed shipped behavior**.
+
+Evidence:
+
+- Runtime capability surfaces are exposed through `runtime/capabilities` and capability inventory/readiness extension calls.
+- The closeout should focus on truthfulness of advertised surfaces rather than expanding diagnostics breadth in 0.27.0.
+
+### Current release-blocker assessment
+
+No release-blocking ACP defect is proven from this triage pass. The strongest capability-truthfulness gap found in this pass was addressed by scoping advertised durable task binding to repo-backed tasks with explicit stable IDs.

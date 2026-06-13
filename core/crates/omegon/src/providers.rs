@@ -167,7 +167,10 @@ fn resolve_api_key_from_sources_with_external(
         if let Some(val) = value
             && !val.is_empty()
         {
-            tracing::debug!(source = *key, "OAuth token resolved from env source list fallback");
+            tracing::debug!(
+                source = *key,
+                "OAuth token resolved from env source list fallback"
+            );
             return Some((val.clone(), true));
         }
     }
