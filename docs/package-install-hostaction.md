@@ -1,7 +1,7 @@
 ---
 id: package-install-hostaction
 title: "package.install@1 HostAction"
-status: exploring
+status: deferred
 tags: [host-actions, extensions, sdk, security, package-install]
 open_questions:
   - "Should package.install@1 target only Omegon extensions/providers in v1, or also language package ecosystems such as cargo/pip/npm?"

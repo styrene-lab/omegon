@@ -1,7 +1,7 @@
 ---
 id: acp-send-vs-local-runtime-ownership-assessment
 title: "ACP Send handlers vs local single-thread runtime ownership assessment"
-status: exploring
+status: deferred
 tags: [acp, runtime-ownership, architecture, migration]
 open_questions:
   - "[assumption] ACP's Send-oriented builder API is an intentional upstream architectural commitment rather than an incidental implementation detail that may gain local/non-Send support soon."

@@ -1,7 +1,7 @@
 ---
 id: acp-132-0-26-9-completion
 title: "0.26.9: Complete issue 132 P0 ACP runtime surfaces"
-status: exploring
+status: implemented
 tags: [acp, issue-132, 0.26.9, runtime-observability, extensions, providers]
 open_questions:
   - "[assumption] 0.26.9 should complete only P0 and already-advertised capability surfaces, not P1/P2 diagnostics."

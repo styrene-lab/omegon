@@ -1,7 +1,7 @@
 ---
 id: acp-0-12-upgrade-0-23-2
 title: "ACP 0.12 upgrade for 0.23.2"
-status: exploring
+status: deferred
 tags: [acp, zed, 0.23.2, dependency-upgrade]
 open_questions:
   - "[assumption] Zed's bundled ACP host supports agent-client-protocol 0.12.x / schema 0.13.x without requiring protocol downgrade behavior from Omegon."

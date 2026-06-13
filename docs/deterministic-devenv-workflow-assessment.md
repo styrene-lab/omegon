@@ -1,7 +1,7 @@
 ---
 id: deterministic-devenv-workflow-assessment
 title: "Assess devenv.sh for deterministic Omegon developer workflow"
-status: exploring
+status: deferred
 tags: [developer-workflow, determinism, release-hardening, tooling]
 open_questions:
   - "[assumption] Omegon should prefer a Nix/devenv-managed shell for deterministic development while keeping plain Cargo/just commands usable for contributors who do not use Nix."

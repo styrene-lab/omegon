@@ -1,7 +1,7 @@
 ---
 id: slim-read-tool-markdown-link-bug
 title: "Slim read tool Markdown path link bug"
-status: exploring
+status: deferred
 tags: [tui, slim, tool-rendering, bugfix, 0.23.2]
 open_questions:
   - "Does `hyperrat::Link` intentionally render a visible terminal affordance glyph in some terminals, or is the orange `i` caused by a width/overlay mismatch in `apply_rendered_links`?"

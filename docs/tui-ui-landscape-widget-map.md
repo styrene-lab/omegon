@@ -7,7 +7,7 @@ tags = ["tui","ratatui","ui","widgets","architecture"]
 
 ---
 title: TUI UI Landscape and Widget Map
-status: exploring
+status: implemented
 tags: [tui, ratatui, ui, widgets, architecture]
 ---
 
