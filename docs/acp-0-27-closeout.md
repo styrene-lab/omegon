@@ -164,3 +164,34 @@ Deferred follow-ups:
 ### Current release-blocker assessment
 
 No release-blocking ACP defect is proven from this triage pass. The strongest capability-truthfulness gap found in this pass was addressed by scoping advertised durable task binding to repo-backed tasks with explicit stable IDs.
+
+## Absorbed-node closeout matrix
+
+| Absorbed node | Classification | Evidence / disposition | 0.27.0 blocker? |
+|---|---|---|---|
+| `acp-128-event-plumbing` | Implemented | `acp_worker.rs` maps typed provider/cancel agent events into worker events; `acp.rs` forwards them as ACP extension notifications. | No |
+| `acp-128-provider-events` | Implemented | `_provider/retry` and `_provider/failure` are advertised in backend surface metadata and emitted with structured payloads. | No |
+| `acp-128-session-cancel` | Implemented | ACP cancellation uses the worker cancellation token and emits `_turn/cancelled` without killing the transport. | No |
+| `acp-128-turn-control-telemetry` | Implemented | `CHANGELOG.md` records structured ACP turn-control telemetry; runtime/backend tests assert advertised telemetry surfaces. | No |
+| `acp-ecosystem-capability-negotiation` | Deferred / conservative | `runtime/capabilities` exposes the current inventory; broader negotiation remains post-release. | No |
+| `acp-extension-control-plane-hardening` | Deferred / partial | Extension list/get/config/call routes expose loaded/enabled/callable state and stability metadata; broader hardening is post-release unless a shipped capability lies. | No |
+| `acp-health-permissions-diagnostics-surfaces` | Partial via inventory | Capability inventory and extension/package surfaces expose health, permissions, stability counters, config metadata, and secret readiness. Rich virtual diagnostics remain post-release. | No |
+| `acp-plan-task-revision-events` | Partial | `_tasks/bind` checks `expected_revision`; `_tasks/events` exposes session binding hints. Repo-durable event cursors are explicitly not implemented. | No |
+| `acp-session-config-surfaces` | Deferred | `_session/status` and `_session/config` are neither routed nor advertised. Add only when a concrete ACP/Flynt client contract needs them. | No |
+| `acp-task-binding-store` | Partial / guarded | Repo binding writes the task binding store only for repo-backed tasks with explicit stable IDs and explicit stable-id quality. | No |
+| `acp-task-durability-contract` | Fixed for truthfulness | `runtime/capabilities` now scopes `durable_bind` with `durable_bind_scope=repo_backed_explicit_stable_id_only`. | No |
+| `acp-task-mutation-contract` | Deferred | 0.27.0 supports conservative read/manual/session/repo-bind compatibility; broad mutation semantics are not claimed as complete. | No |
+| `acp-task-stable-identity` | Partial | Task projections expose stable identity where available; repo-durable bind rejects non-explicit stable IDs. | No |
+| `acp-task-status-error-pagination-contract` | Partial / truthful | Structured task errors are present; filtering is supported; pagination is explicitly advertised as `false`. | No |
+| `acp-tool-package-provenance-surfaces` | Partial via inventory/package routes | Package and capability inventory routes expose package/tool/extension provenance at current breadth; no stronger diagnostic surface is advertised. | No |
+
+## Focused evidence and validation
+
+- `acp::extension_metadata_tests::runtime_capabilities_advertise_secret_surfaces` asserts advertised ACP surfaces, including `_provider/retry`, `_provider/failure`, `_turn/cancelled`, task routes, and `plan_tasks_contract` fields including `durable_bind_scope`.
+- `backend.rs` surface metadata tests assert the provider retry/failure/cancelled extension notifications are advertised as versioned ACP surfaces.
+- `_tasks/bind` tests cover stale revision structured errors (`code=stale_revision`, `durability=none`).
+- Focused validation run during closeout: `cargo test -p omegon runtime_capabilities -- --nocapture`.
+
+## Closeout status
+
+All fifteen absorbed ACP nodes now have a release classification. No remaining 0.27.0 ACP release blocker is proven from this closeout pass. Remaining ACP work is post-release unless a client depends on an unadvertised `_session/*` endpoint or a shipped capability expands beyond the scoped contracts recorded here.
