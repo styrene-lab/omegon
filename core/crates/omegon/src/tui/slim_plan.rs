@@ -291,6 +291,7 @@ pub fn slim_plan_rows(
         max_items
     };
     let visible = prioritized_plan_item_indices(&snapshot.items, visible_items, hidden > 0);
+    let hidden_count = snapshot.items.len().saturating_sub(visible.len());
     let text_budget = width.saturating_sub(2) as usize;
     let mut rows = Vec::new();
     for idx in visible {
@@ -302,9 +303,9 @@ pub fn slim_plan_rows(
             status: Some(item.status),
         });
     }
-    if hidden > 0 {
+    if hidden_count > 0 {
         rows.push(PlanDisplayRow {
-            text: format!("+{hidden} more"),
+            text: format!("+{hidden_count} more"),
             status: None,
         });
     }

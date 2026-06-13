@@ -9667,7 +9667,30 @@ mod slash_command_parsing_tests {
         let rows = slim_plan_rows(&snapshot, 40, 4);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
-            vec!["2. todo    Step 1", "3. todo    Step 2", "+5 more"]
+            vec!["2. todo    Step 1", "3. todo    Step 2", "+6 more"]
+        );
+    }
+
+    #[test]
+    fn slim_plan_overflow_count_matches_actual_hidden_rows() {
+        let snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
+            "mode": "executing",
+            "completed": 3,
+            "total": 5,
+            "items": [
+                {"description": "done one", "status": "done"},
+                {"description": "done two", "status": "done"},
+                {"description": "done three", "status": "done"},
+                {"description": "active", "status": "active"},
+                {"description": "todo", "status": "todo"}
+            ]
+        }))
+        .unwrap();
+
+        let rows = slim_plan_rows(&snapshot, 80, 4);
+        assert_eq!(
+            rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
+            vec!["4. active  active", "5. todo    todo", "+3 more"]
         );
     }
 
@@ -9695,7 +9718,7 @@ mod slash_command_parsing_tests {
             vec![
                 "4. active  Record lint blocker",
                 "5. todo    Commit mechanics docs",
-                "+3 more"
+                "+4 more"
             ]
         );
         assert!(snapshot.hint_state(4).matches_active_next_visible());
