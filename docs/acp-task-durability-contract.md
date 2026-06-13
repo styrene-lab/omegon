@@ -1,7 +1,7 @@
 ---
 id: acp-task-durability-contract
 title: "ACP task durability and binding contract"
-status: exploring
+status: deferred
 tags: [acp, tasks, flynt, durability, ecosystem]
 parent: plan-refinement
 related: [acp-plan-task-revision-events, external-work-surface-integration, acp-ecosystem-capability-negotiation]
@@ -153,3 +153,7 @@ Implementation targets:
 - Add status mapping docs for `WorkItemStatus` variants and conservative external mapping.
 - Reject ambiguous task ids and stale revision preconditions.
 - Add tests proving external refs do not mutate OpenSpec/design completion.
+
+## Consolidation note
+
+Active release work for this ACP topic has been consolidated into [[acp-0-27-closeout|ACP 0.27.0 closeout]]. This node remains as reference material for the closeout classification.

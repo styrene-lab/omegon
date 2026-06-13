@@ -1,7 +1,7 @@
 ---
 id: acp-ecosystem-capability-negotiation
 title: "ACP ecosystem capability negotiation"
-status: exploring
+status: deferred
 tags: [acp, ecosystem, capabilities, compatibility]
 parent: plan-refinement
 related: [acp-task-durability-contract, acp-plan-task-revision-events, external-work-surface-integration, acp-task-status-error-pagination-contract]
@@ -105,3 +105,7 @@ Implementation targets:
 - Include source-specific mutation capability hints.
 - Add field-level capability indicators for `stable_id`, `revision`, `durability`, `supported_mutations`, `pagination`, `filtering`, and `structured_errors`.
 - Add tests that Flynt-era compatibility returns `read_only + manual_link` until stronger contracts are present.
+
+## Consolidation note
+
+Active release work for this ACP topic has been consolidated into [[acp-0-27-closeout|ACP 0.27.0 closeout]]. This node remains as reference material for the closeout classification.

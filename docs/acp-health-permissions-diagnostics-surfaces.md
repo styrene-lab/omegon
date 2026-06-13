@@ -1,7 +1,7 @@
 ---
 id: acp-health-permissions-diagnostics-surfaces
 title: "ACP health, permissions, and diagnostics surfaces"
-status: exploring
+status: deferred
 tags: [acp, health, permissions, diagnostics, issue-132-followup]
 open_questions:
   - "[assumption] Diagnostic history can be bounded and redacted before exposure to ACP clients."
@@ -56,3 +56,7 @@ Diagnostics should be actionable and bounded. The UI should be able to say "bloc
 - ACP client can render a health dashboard without invoking mutating operations.
 - ACP client can distinguish policy-denied, user-denied, unavailable, degraded, and unknown states.
 - Reconnecting clients can retrieve recent structured failures without log scraping.
+
+## Consolidation note
+
+Active release work for this ACP topic has been consolidated into [[acp-0-27-closeout|ACP 0.27.0 closeout]]. This node remains as reference material for the closeout classification.

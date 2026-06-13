@@ -1,7 +1,7 @@
 ---
 id: acp-task-mutation-contract
 title: "ACP task mutation contract"
-status: exploring
+status: deferred
 tags: [acp, tasks, mutations, lifecycle, ecosystem]
 parent: acp-task-durability-contract
 related: [acp-ecosystem-capability-negotiation, acp-task-binding-store]
@@ -64,3 +64,7 @@ Implementation targets:
 - Add `expected_revision` to mutation requests.
 - Return structured `not_writable`, `unsupported_source`, `stale_revision`, and `conflict` errors.
 - Add tests that unsupported mutation UI inputs are rejected without source edits.
+
+## Consolidation note
+
+Active release work for this ACP topic has been consolidated into [[acp-0-27-closeout|ACP 0.27.0 closeout]]. This node remains as reference material for the closeout classification.

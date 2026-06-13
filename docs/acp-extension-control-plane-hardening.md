@@ -1,7 +1,7 @@
 ---
 id: acp-extension-control-plane-hardening
 title: "ACP extension control-plane hardening"
-status: exploring
+status: deferred
 tags: [acp, extensions, control-plane, policy, issue-132-followup]
 open_questions:
   - "[assumption] 0.26.9 generic extension call should be constrained to loaded/enabled extensions, while later hardening can add richer policy and lifecycle control."
@@ -49,3 +49,7 @@ Generic extension RPC is a control-plane, not just an escape hatch. After 0.26.9
 - Extension manifests or runtime metadata can describe callable method policy.
 - ACP clients can determine whether an extension method is read-only, mutating, or host-action mediated before invoking it.
 - Extension lifecycle state can be refreshed or restarted through structured operations without relying on chat commands.
+
+## Consolidation note
+
+Active release work for this ACP topic has been consolidated into [[acp-0-27-closeout|ACP 0.27.0 closeout]]. This node remains as reference material for the closeout classification.

@@ -1,7 +1,7 @@
 ---
 id: acp-task-stable-identity
 title: "ACP task stable identity"
-status: exploring
+status: deferred
 tags: [acp, tasks, identity, flynt, ecosystem]
 parent: acp-task-durability-contract
 related: [acp-task-binding-store, acp-plan-task-revision-events]
@@ -63,3 +63,7 @@ Implementation targets:
 - Define stable id constructors per source type.
 - Add tests for OpenSpec reorder/title-edit stability.
 - Mark session tasks as session-scoped identity unless explicitly promoted.
+
+## Consolidation note
+
+Active release work for this ACP topic has been consolidated into [[acp-0-27-closeout|ACP 0.27.0 closeout]]. This node remains as reference material for the closeout classification.

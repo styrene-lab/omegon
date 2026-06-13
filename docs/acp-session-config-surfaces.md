@@ -1,7 +1,7 @@
 ---
 id: acp-session-config-surfaces
 title: "ACP session and config observability surfaces"
-status: exploring
+status: deferred
 tags: [acp, session, config, runtime-observability, issue-132-followup]
 open_questions:
   - "[assumption] Session state can be exposed without leaking prompt content or tool arguments."
@@ -46,3 +46,7 @@ Expose session control-plane state, not conversation content. Responses should b
 - Client can reconnect and ask `_session/status` to determine whether a turn is active, cancelled, queued, or idle.
 - Client can ask `_session/config` for the current model/thinking/posture and available options.
 - Client can set supported config values and receive structured success/error results.
+
+## Consolidation note
+
+Active release work for this ACP topic has been consolidated into [[acp-0-27-closeout|ACP 0.27.0 closeout]]. This node remains as reference material for the closeout classification.

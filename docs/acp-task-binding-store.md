@@ -1,7 +1,7 @@
 ---
 id: acp-task-binding-store
 title: "ACP task binding store"
-status: exploring
+status: deferred
 tags: [acp, tasks, bindings, durability, flynt]
 parent: acp-task-durability-contract
 related: [acp-task-stable-identity, external-work-surface-integration]
@@ -66,3 +66,7 @@ Implementation targets:
 - Implement `_tasks/bind` durable response envelope.
 - Add structured stale/not-found/conflict errors.
 - Add tests proving repo-durable binding survives projection rebuild.
+
+## Consolidation note
+
+Active release work for this ACP topic has been consolidated into [[acp-0-27-closeout|ACP 0.27.0 closeout]]. This node remains as reference material for the closeout classification.

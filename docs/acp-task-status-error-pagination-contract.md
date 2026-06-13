@@ -1,7 +1,7 @@
 ---
 id: acp-task-status-error-pagination-contract
 title: "ACP task status, errors, filtering, and pagination"
-status: exploring
+status: deferred
 tags: [acp, tasks, errors, pagination, status, ecosystem]
 parent: acp-ecosystem-capability-negotiation
 related: [acp-task-mutation-contract, acp-plan-task-revision-events]
@@ -75,3 +75,7 @@ Implementation targets:
 - Add structured error helper for ACP plan/task surfaces.
 - Add `_tasks/list` filters: `plan_id`, `source`, `status`, `limit`, `cursor`.
 - Add tests for unknown status display and cursor/filter behavior.
+
+## Consolidation note
+
+Active release work for this ACP topic has been consolidated into [[acp-0-27-closeout|ACP 0.27.0 closeout]]. This node remains as reference material for the closeout classification.

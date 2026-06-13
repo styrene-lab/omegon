@@ -1,7 +1,7 @@
 ---
 id: acp-plan-task-revision-events
 title: "ACP plan/task revisions and event cursors"
-status: exploring
+status: deferred
 tags: [acp, events, revisions, tasks, ecosystem]
 parent: plan-refinement
 related: [acp-task-durability-contract, external-work-surface-integration, acp-ecosystem-capability-negotiation]
@@ -116,3 +116,7 @@ Implementation targets:
 - Add `since_revision` request handling for `_plans/events` and `_tasks/events` if cheap; otherwise explicitly return current revision and empty events.
 - Add pagination/filtering request fields for `_tasks/list` once revision semantics are in place.
 - Add tests that revisions change when backing `tasks.md` or design node content changes.
+
+## Consolidation note
+
+Active release work for this ACP topic has been consolidated into [[acp-0-27-closeout|ACP 0.27.0 closeout]]. This node remains as reference material for the closeout classification.
