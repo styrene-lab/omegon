@@ -4,12 +4,8 @@ title: "Plan Refinement: Lifecycle-Threaded Small Tasklists"
 status: exploring
 tags: [plan, lifecycle, openspec, ux]
 open_questions:
-  - "[assumption] Operators want the small tasklist to remain lightweight and directly editable during a turn, even when it is backed by OpenSpec or design-tree artifacts."
-  - "[assumption] OpenSpec tasks.md can be the durable task source for spec-backed work without forcing every conversation plan to become an OpenSpec change."
-  - "What should happen when an operator edits or completes a small plan item that is projected from OpenSpec tasks.md: write through, stage a proposed patch, or mark runtime-only?"
-  - "How should the UI disclose plan binding/source so operators understand whether they are editing ephemeral session state, design-tree state, or OpenSpec-backed task state?"
-  - "What lifecycle transitions should small-plan UX nudge toward, and which transitions should require explicit operator confirmation?"
-  - "How should plan bindings represent non-coding work such as research, design exploration, writing, review, operations, and decision capture without forcing those tasks into implementation-only semantics?"
+  - "Should the first implementation slice use names `VisiblePlanState` and `PlanAction`, or should it adopt existing Workbench/domain terminology before code lands?"
+  - "Where should local/session-only plan registry cache live so resume works without creating tracked repo churn?"
 dependencies: []
 related: []
 ---
@@ -46,13 +42,13 @@ Flynt now documents `docs/omegon-plan-task-acp-mapping.md` in its repository. Th
 
 ### Use binding-aware projections instead of a new durable task source
 
-**Status:** proposed
+**Status:** accepted
 
 **Rationale:** The small tasklist should remain fast and low-friction, but durable lifecycle-backed work should project from OpenSpec/design-tree artifacts where possible. Creating another authoritative task store would worsen divergence between conversation plan state, OpenSpec tasks.md, and design-tree implementation state.
 
 ### Make plan source/binding visible in the UX
 
-**Status:** proposed
+**Status:** accepted
 
 **Rationale:** Operators need to know whether a checklist action will affect only the current conversation, update design lifecycle state, or write/propose edits to OpenSpec tasks.md. Hidden binding state creates surprising side effects and undermines trust.
 
@@ -122,16 +118,52 @@ Flynt now documents `docs/omegon-plan-task-acp-mapping.md` in its repository. Th
 
 **Rationale:** Flynt can safely render Omegon plan/task projections and store Flynt-local `omegon-plan:<json>` references, but authoritative bidirectional mapping is unsafe until Omegon exposes stable ids, revision tokens, durable bind responses, explicit mutation lists, and event/revision polling.
 
+### Keep the small tasklist lightweight and directly editable
+
+**Status:** accepted
+
+**Rationale:** The in-turn tasklist is valuable because it is fast, visible, and low-friction. Lifecycle backing should enrich provenance and resume behavior, not make every checklist action feel like editing a database. For lifecycle-backed projections, direct edits are session/runtime actions unless the UI explicitly discloses and confirms a durable write.
+
+### Use OpenSpec tasks.md as the durable source for spec-backed work only
+
+**Status:** accepted
+
+**Rationale:** OpenSpec can be the durable task source when work is already spec-backed, but ordinary conversation plans remain session-scoped. Promotion to OpenSpec is explicit and nudged by complexity, multi-session scope, public API impact, or reviewability needs.
+
+### Treat OpenSpec-projected edits as runtime-only or staged until stable identity exists
+
+**Status:** accepted
+
+**Rationale:** Automatic write-through to tasks.md is unsafe until tasks have stable IDs, revision/concurrency tokens, and conflict behavior. Near-term plan actions on OpenSpec projections may update runtime view state or stage/propose a patch, but must not silently mutate durable task files.
+
+### Disclose plan source and mutation effect in the Workbench
+
+**Status:** accepted
+
+**Rationale:** Every visible plan projection should show compact source metadata such as `session`, `openspec:<change>`, `design:<node>`, or `branch:<name>`. Actions that would mutate durable lifecycle artifacts require explicit language before execution; runtime-only actions should say the durable source is unchanged.
+
+### Require confirmation for durable lifecycle transitions
+
+**Status:** accepted
+
+**Rationale:** The UX may nudge toward promotion, resume, deciding, or implementation, but durable transitions must remain explicit operator decisions. Confirm before writing OpenSpec/design-tree files, marking tasks complete in durable artifacts, marking design nodes decided/implemented, archiving, deleting, detaching durable plans, or promoting a session plan to repo-bound lifecycle state.
+
+### Model non-coding tasks with intent and evidence policy
+
+**Status:** accepted
+
+**Rationale:** Research, design, validation, operations, review, documentation, and decision-capture work should complete through evidence appropriate to the work, not through code diffs. Plan items need an intent and accepted evidence kinds such as command output, document paths, design decisions, validation logs, external references, operator acknowledgement, or commits.
+
 ## Open Questions
 
-- [assumption] Operators want the small tasklist to remain lightweight and directly editable during a turn, even when it is backed by OpenSpec or design-tree artifacts.
-- [assumption] OpenSpec tasks.md can be the durable task source for spec-backed work without forcing every conversation plan to become an OpenSpec change.
-- What should happen when an operator edits or completes a small plan item that is projected from OpenSpec tasks.md: write through, stage a proposed patch, or mark runtime-only?
-- How should the UI disclose plan binding/source so operators understand whether they are editing ephemeral session state, design-tree state, or OpenSpec-backed task state?
-- What lifecycle transitions should small-plan UX nudge toward, and which transitions should require explicit operator confirmation?
-- How should plan bindings represent non-coding work such as research, design exploration, writing, review, operations, and decision capture without forcing those tasks into implementation-only semantics?
+- Should the first implementation slice use names `VisiblePlanState` and `PlanAction`, or should it adopt existing Workbench/domain terminology before code lands?
+- Where should local/session-only plan registry cache live so resume works without creating tracked repo churn?
 
 ## Implementation Notes
+
+### First implementation slice
+
+Implement a compatibility wrapper before registry/write-through work. The first slice should centralize current `IntentDocument.work_plan` and `IntentDocument.plan_mode` handling behind one visible-plan API, route `/plan` slash commands and tool-result plan mutations through that API, and preserve current session snapshot/TUI JSON compatibility. It should not add OpenSpec write-through, a durable registry, or Flynt bidirectional task binding.
 
 ### Constraints
 
