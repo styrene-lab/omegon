@@ -1501,8 +1501,8 @@ fn slim_status_line_marks_turn_state() {
         stream.started_at -= std::time::Duration::from_secs(54);
     }
     let running = render_app_to_string(&mut app, 140, 18);
-    let running_glyph = crate::tui::glyphs::glyphs()
-        .tool(crate::tui::glyphs::ToolGlyphRole::Running);
+    let running_glyph =
+        crate::tui::glyphs::glyphs().tool(crate::tui::glyphs::ToolGlyphRole::Running);
     assert!(
         running.contains(&format!("{running_glyph} cargo · running")),
         "{running}"
