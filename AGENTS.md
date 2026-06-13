@@ -48,6 +48,15 @@ Omegon is a Rust-native agent loop and lifecycle engine. You are working on the 
 - Default mode is `Slim` — dashboard, instruments, and segment metadata hidden. `/ui full` reveals them.
 - Table rendering uses `markdown_display_width` for column measurement (strips bold/code markers before padding).
 
+
+## Current harness surfaces
+
+- **Workbench**: pinned structured-work surface for active plan, cleave, delegate, and workstream summaries. It is operational state, not decoration. If Workbench contradicts the assistant's final reply, investigate/reconcile before claiming completion.
+- **Semantic conversation surfaces**: shared projections live under `core/crates/omegon/src/surfaces/`. Keep producer/provenance independent from content form; TUI and ACP should consume semantic DTOs/projections rather than duplicating renderer logic.
+- **Command registry**: operator commands should register through `CommandDefinition` with availability/safety metadata for TUI, CLI remote slash execution, and ACP where applicable. Avoid TUI-only slash arms unless the operation is truly UI-local.
+- **Prompt and loop surfaces**: `/prompt` and `/loop` are intended registry commands across TUI/CLI/ACP. Prompt IDs are data resolved by those commands; do not register prompt IDs as top-level slash commands. Prompt/loop execution needs provenance and anti-prompt-injection safety checks.
+- **ACP**: first-class rich-client surface for Zed/Flynt/future clients. ACP DTOs should derive from semantic surfaces or domain read models, not Ratatui/TUI structs.
+
 ## Codex integration
 
 - Auto-detected when `.codex/config.toml` exists at project root. Config: `.codex/omegon-integration.toml` or `.omegon/codex.toml`.
@@ -72,3 +81,5 @@ Omegon is a Rust-native agent loop and lifecycle engine. You are working on the 
 - **Skill frontmatter is TOML** (`+++` delimiters), not YAML. `extract_description` handles both.
 - **Extension `execute_tool` RPC** — extensions must implement this handler or the call returns a graceful error.
 - **Memory/lifecycle features** have optional `codex_vault_path` — set via `with_codex_vault()` in `setup.rs`.
+- **Plan/Workbench consistency** — never report "nothing pending" while the active Workbench plan still has active/todo items. Either update/complete/clear the plan or state the mismatch explicitly.
+- **Logical commits** — split feature changes, rustfmt-only churn, and generated state changes into separate commits.
