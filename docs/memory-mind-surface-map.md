@@ -1,6 +1,6 @@
 ---
 title: Memory Mind Surface Map
-status: exploring
+status: deferred
 tags: [architecture, memory, mind, decoupling, correctness]
 ---
 

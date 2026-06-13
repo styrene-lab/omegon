@@ -22,7 +22,7 @@ open_questions = []
 
 ---
 title: Context Compaction Control Diagnostics
-status: exploring
+status: deferred
 tags: [design, context, diagnostics]
 issue: https://github.com/styrene-lab/omegon/issues/130
 ---

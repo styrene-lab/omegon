@@ -1,7 +1,7 @@
 ---
 id: acp-132-runtime-observability-extension-control
 title: "Issue 132: ACP runtime observability and extension control surfaces"
-status: exploring
+status: implemented
 tags: [acp, issue-132, flynt, runtime-observability, extensions, providers, packages]
 open_questions:
   - "[assumption] ACP clients will call underscore-prefixed methods and Omegon will continue routing them through the existing ExtRequest bridge."

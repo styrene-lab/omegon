@@ -7,7 +7,7 @@ tags = ["design","ci","release"]
 
 ---
 title: CI Footprint Consolidation
-status: exploring
+status: deferred
 tags: [design, ci, release]
 ---
 

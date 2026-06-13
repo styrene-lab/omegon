@@ -1,7 +1,7 @@
 ---
 id: nex-substrate-tool-boundary
 title: "Omegon Nex Substrate Tool Boundary"
-status: exploring
+status: implemented
 tags: [nex, tools, substrate, devenv, secrets, policy]
 open_questions:
   - "Should the public agent tool be named `nex_substrate`, `substrate_inspect`, or grouped under a future `runtime_profile` tool surface?"

@@ -1,7 +1,7 @@
 ---
 id: tui-acp-conversation-projection-seam
 title: "Unified Conversation Projection Seam for TUI and ACP"
-status: exploring
+status: implemented
 tags: [tui, acp, projection, conversation]
 open_questions:
   - "[assumption] TUI, ACP, and future client protocols should consume a shared semantic conversation projection rather than deriving segment meaning from raw SegmentContent independently."

@@ -7,7 +7,7 @@ tags = ["tui","conversation","segments","capabilities","architecture"]
 
 ---
 title: Conversation Segment Capability Model
-status: exploring
+status: implemented
 tags: [tui, conversation, segments, capabilities, architecture]
 ---
 

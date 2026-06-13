@@ -1,7 +1,7 @@
 ---
 id: prompt-library-loop-system
 title: "Prompt library and loop execution system"
-status: exploring
+status: deferred
 tags: [tui, prompts, queue, loop, ux]
 open_questions:
   - "[assumption] Reusable prompts should not automatically register top-level slash commands; /prompt is the routing surface."

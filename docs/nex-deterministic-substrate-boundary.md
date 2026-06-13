@@ -1,7 +1,7 @@
 ---
 id: nex-deterministic-substrate-boundary
 title: "Nex Deterministic Substrate Boundary"
-status: exploring
+status: implemented
 tags: [nex, substrate, tooling, secrets, capabilities, architecture]
 open_questions:
   - "Which existing Omegon host checks should move behind Nex first: release toolchain checks, package install HostActions, secrets-pack preflight, `nex_capability`, or provider/tool availability probes?"
