@@ -546,6 +546,123 @@ pub fn auth_json_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".config").join("omegon").join("auth.json"))
 }
 
+fn auth_path_trace_fields() -> (String, &'static str) {
+    if let Ok(path) = std::env::var("OMEGON_AUTH_JSON_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return (trimmed.to_string(), "OMEGON_AUTH_JSON_PATH");
+        }
+    }
+    let path = auth_json_path()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<unknown>".to_string());
+    (path, "default")
+}
+
+fn credential_expiry_state(creds: &OAuthCredentials) -> (&'static str, bool) {
+    if creds.cred_type == "oauth" {
+        if creds.is_expired() {
+            ("expired", !creds.refresh.is_empty())
+        } else {
+            ("valid", !creds.refresh.is_empty())
+        }
+    } else if creds.is_expired() {
+        ("expired", false)
+    } else {
+        ("valid", false)
+    }
+}
+
+pub fn trace_auth_store_probe(provider: &str, context: &str) {
+    let auth_key = auth_json_key(provider);
+    let Some(path) = auth_json_path() else {
+        tracing::warn!(
+            provider = auth_key,
+            context,
+            decision = "auth_path_unavailable",
+            "provider auth probe could not resolve auth.json path"
+        );
+        return;
+    };
+    let (path_display, path_source) = auth_path_trace_fields();
+    let external_codex_auth_exists = dirs::home_dir()
+        .map(|home| home.join(".codex/auth.json").exists())
+        .unwrap_or(false);
+    match std::fs::read_to_string(&path) {
+        Ok(content) => match serde_json::from_str::<Value>(&content) {
+            Ok(auth) => {
+                if let Some(entry) = auth.get(auth_key) {
+                    match serde_json::from_value::<OAuthCredentials>(entry.clone()) {
+                        Ok(creds) => {
+                            let (credential_state, refreshable) = credential_expiry_state(&creds);
+                            tracing::info!(
+                                provider = auth_key,
+                                context,
+                                auth_path = %path_display,
+                                auth_path_source = path_source,
+                                auth_file_exists = true,
+                                provider_entry_exists = true,
+                                credential_type = %creds.cred_type,
+                                credential_state,
+                                expires = creds.expires,
+                                refreshable,
+                                external_codex_auth_exists,
+                                "provider auth store probe"
+                            );
+                        }
+                        Err(error) => tracing::warn!(
+                            provider = auth_key,
+                            context,
+                            auth_path = %path_display,
+                            auth_path_source = path_source,
+                            auth_file_exists = true,
+                            provider_entry_exists = true,
+                            external_codex_auth_exists,
+                            error = %error,
+                            decision = "provider_entry_parse_failed",
+                            "provider auth store probe"
+                        ),
+                    }
+                } else {
+                    tracing::info!(
+                        provider = auth_key,
+                        context,
+                        auth_path = %path_display,
+                        auth_path_source = path_source,
+                        auth_file_exists = true,
+                        provider_entry_exists = false,
+                        external_codex_auth_exists,
+                        decision = "provider_entry_missing",
+                        "provider auth store probe"
+                    );
+                }
+            }
+            Err(error) => tracing::warn!(
+                provider = auth_key,
+                context,
+                auth_path = %path_display,
+                auth_path_source = path_source,
+                auth_file_exists = true,
+                external_codex_auth_exists,
+                error = %error,
+                decision = "auth_json_parse_failed",
+                "provider auth store probe"
+            ),
+        },
+        Err(error) => tracing::info!(
+            provider = auth_key,
+            context,
+            auth_path = %path_display,
+            auth_path_source = path_source,
+            auth_file_exists = false,
+            external_codex_auth_exists,
+            error = %error,
+            decision = "auth_json_missing_or_unreadable",
+            "provider auth store probe"
+        ),
+    }
+}
+
 /// Quick check: does auth.json exist with at least one token?
 /// Used by first_run.rs to detect whether the operator has any provider configured.
 pub fn any_oauth_token_exists() -> bool {
@@ -770,6 +887,8 @@ pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Re
         auth[provider] = serde_json::to_value(creds)?;
         atomic_write_auth_json(&path, &auth)?;
         set_auth_file_permissions(&path)?;
+        let (auth_path, auth_path_source) = auth_path_trace_fields();
+        tracing::info!(provider, auth_path = %auth_path, auth_path_source, credential_type = %creds.cred_type, expires = creds.expires, "persisted provider credentials to auth.json");
         Ok(())
     })
 }
@@ -981,6 +1100,7 @@ pub fn adopt_external_credentials(provider: &str) -> Option<OAuthCredentials> {
 /// Resolve API key with automatic token refresh.
 /// Returns (api_key, is_oauth_token).
 pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
+    trace_auth_store_probe(provider, "resolve_with_refresh:start");
     // Use canonical provider map for env vars
     let env_vars = provider_env_vars(provider);
 
@@ -1029,6 +1149,11 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
                 }
                 c
             } else {
+                tracing::warn!(
+                    provider = auth_key,
+                    decision = "missing_all_sources",
+                    "provider credential resolution failed"
+                );
                 return None;
             }
         }
@@ -1084,6 +1209,12 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
         }
     }
 
+    tracing::info!(
+        provider = auth_key,
+        decision = "use_oauth",
+        expires = creds.expires,
+        "provider credential resolved"
+    );
     Some((creds.access, true))
 }
 
@@ -1905,6 +2036,8 @@ fn write_credentials_with_extra(
         auth[provider] = entry;
         atomic_write_auth_json(&path, &auth)?;
         set_auth_file_permissions(&path)?;
+        let (auth_path, auth_path_source) = auth_path_trace_fields();
+        tracing::info!(provider, auth_path = %auth_path, auth_path_source, credential_type = %creds.cred_type, expires = creds.expires, account_id_present = account_id.is_some(), "persisted provider credentials with extra fields to auth.json");
         Ok(())
     })
 }
@@ -1949,6 +2082,8 @@ fn write_refreshed_credentials(provider: &str, creds: &OAuthCredentials) -> anyh
         auth[provider] = refreshed_credential_entry(provider, creds, existing_entry)?;
         atomic_write_auth_json(&path, &auth)?;
         set_auth_file_permissions(&path)?;
+        let (auth_path, auth_path_source) = auth_path_trace_fields();
+        tracing::info!(provider, auth_path = %auth_path, auth_path_source, expires = creds.expires, "persisted refreshed provider credentials to auth.json");
         Ok(())
     })
 }

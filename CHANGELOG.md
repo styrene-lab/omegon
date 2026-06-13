@@ -22,6 +22,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Add redacted provider-auth and route-state diagnostic tracing for auth.json path selection, credential source/probe decisions, OAuth refresh/write-back, login outcomes, and fallback/disconnected route causes so relaunch login regressions leave an attributable trail.
 - Add peer-agent conversation representation/projection support so delegate/cleave/A2A output can carry producer identity independently from assistant/tool rendering.
 - Add an explicit assess-time assumption question to the design-tree prompt injection: reviewing a design node now directs the agent to ask what unstated assumptions the design makes and record them as `[assumption]`-tagged questions.
 - Add `just source-clean` and source-vs-agent-state dirty classification so live `.omegon/` telemetry no longer blocks source-plane cleanliness checks.

@@ -314,7 +314,10 @@ impl RouteController {
         ledger: &impl CredentialProbe,
     ) -> ProviderRoute {
         let selected_provider = crate::providers::infer_provider_id(&selected_model);
-        match ledger.probe_provider(&selected_provider) {
+        crate::auth::trace_auth_store_probe(&selected_provider, "route_startup:selected");
+        let selected_probe = ledger.probe_provider(&selected_provider);
+        tracing::info!(selected_model = %selected_model, selected_provider = %selected_provider, credential_state = %selected_probe.summary(), fallback_providers = ?fallback_providers, "provider route startup credential probe");
+        match selected_probe {
             CredentialState::Valid { .. } => ProviderRoute::Serving {
                 model: selected_model,
             },
@@ -325,7 +328,9 @@ impl RouteController {
             selected_state => {
                 let mut attempts = Vec::new();
                 for provider in fallback_providers {
+                    crate::auth::trace_auth_store_probe(provider, "route_startup:fallback");
                     let state = ledger.probe_provider(provider);
+                    tracing::info!(selected_model = %selected_model, fallback_provider = %provider, credential_state = %state.summary(), "provider route fallback credential probe");
                     if state.is_valid()
                         && let Some(serving) =
                             crate::providers::default_model_for_provider(provider)
@@ -355,6 +360,7 @@ impl RouteController {
     pub async fn begin_login(&self, provider: String) -> RouteSnapshot {
         let mut state = self.state.write().await;
         let prior = Box::new(state.route.clone());
+        tracing::info!(provider = %provider, prior_route = ?state.route, "provider route login started");
         state.route = ProviderRoute::LoginPending {
             provider,
             since: SystemTime::now(),
@@ -376,6 +382,7 @@ impl RouteController {
             _ => None,
         };
 
+        tracing::info!(outcome = ?outcome, prior_route = ?prior, "provider route login completed");
         match &outcome {
             LoginOutcome::Succeeded { model } => {
                 let Some(bridge) = new_bridge else {
@@ -406,7 +413,9 @@ impl RouteController {
         new_bridge: Option<Box<dyn LlmBridge>>,
     ) -> anyhow::Result<RouteSnapshot> {
         let provider = crate::providers::infer_provider_id(&model);
+        crate::auth::trace_auth_store_probe(&provider, "route_switch_model");
         let credential_state = ledger.probe_provider(&provider);
+        tracing::info!(model = %model, provider = %provider, credential_state = %credential_state.summary(), "provider route model switch credential probe");
         if !credential_state.is_valid() {
             let reason = disconnected_for_provider_state(provider, credential_state);
             let mut state = self.state.write().await;
@@ -576,6 +585,8 @@ fn probe_provider_credentials(provider: &str) -> CredentialState {
             };
         }
     }
+
+    crate::auth::trace_auth_store_probe(auth_key, "route_credential_ledger");
 
     if let Some(creds) = crate::auth::read_credentials(auth_key) {
         if creds.cred_type == "oauth" && creds.is_expired() {
