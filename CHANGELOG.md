@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Trace auth.json provider key-set deltas on credential writes, refreshes, and logout so future OpenAI/Codex credential disappearance incidents identify the mutating operation and whether `openai-codex` was dropped. Auth updates now also refuse to replace an unparsable existing auth store with a partial credential file.
 - Add redacted provider-auth and route-state diagnostic tracing for auth.json path selection, credential source/probe decisions, OAuth refresh/write-back, login outcomes, and fallback/disconnected route causes so relaunch login regressions leave an attributable trail.
 - Rebuild the release binary inside `just link` before selecting the binary to alias so local `omegon --version` cannot point at a stale artifact from an older HEAD.
 - Add peer-agent conversation representation/projection support so delegate/cleave/A2A output can carry producer identity independently from assistant/tool rendering.
