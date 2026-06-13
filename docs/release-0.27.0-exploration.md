@@ -31,7 +31,6 @@ This is a working document, not a final release note. The release note source of
 
 The line is feature-rich enough that further broad feature work should be biased toward post-release unless it closes an observable release blocker.
 
-
 ## Mechanics validation update — 2026-06-13
 
 Release-state inspection in `release/0.27-mechanics-validation` found:
