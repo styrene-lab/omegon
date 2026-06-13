@@ -172,7 +172,9 @@ pub fn tool_category_role_for_name(name: &str) -> ToolCategoryGlyphRole {
         }
         name if name.contains("search") => ToolCategoryGlyphRole::Search,
         name if name.contains("memory") => ToolCategoryGlyphRole::Memory,
-        name if name.contains("design") || name.contains("drawing") => ToolCategoryGlyphRole::Design,
+        name if name.contains("design") || name.contains("drawing") => {
+            ToolCategoryGlyphRole::Design
+        }
         name if name.contains("fetch") || name.contains("browser") || name.contains("web") => {
             ToolCategoryGlyphRole::Network
         }
@@ -202,13 +204,34 @@ mod tests {
 
     #[test]
     fn tool_name_and_status_helpers_are_decoupled_presentation_fallbacks() {
-        assert_eq!(tool_category_role_for_name("bash"), ToolCategoryGlyphRole::Shell);
-        assert_eq!(tool_category_role_for_name("codebase_search"), ToolCategoryGlyphRole::Search);
-        assert_eq!(tool_category_role_for_name("memory_recall"), ToolCategoryGlyphRole::Memory);
-        assert_eq!(tool_category_role_for_name("unknown"), ToolCategoryGlyphRole::Generic);
-        assert_eq!(tool_state_role_for_status("running"), ToolStateGlyphRole::Running);
-        assert_eq!(tool_state_role_for_status("completed"), ToolStateGlyphRole::Completed);
-        assert_eq!(tool_state_role_for_status("failed"), ToolStateGlyphRole::Failed);
+        assert_eq!(
+            tool_category_role_for_name("bash"),
+            ToolCategoryGlyphRole::Shell
+        );
+        assert_eq!(
+            tool_category_role_for_name("codebase_search"),
+            ToolCategoryGlyphRole::Search
+        );
+        assert_eq!(
+            tool_category_role_for_name("memory_recall"),
+            ToolCategoryGlyphRole::Memory
+        );
+        assert_eq!(
+            tool_category_role_for_name("unknown"),
+            ToolCategoryGlyphRole::Generic
+        );
+        assert_eq!(
+            tool_state_role_for_status("running"),
+            ToolStateGlyphRole::Running
+        );
+        assert_eq!(
+            tool_state_role_for_status("completed"),
+            ToolStateGlyphRole::Completed
+        );
+        assert_eq!(
+            tool_state_role_for_status("failed"),
+            ToolStateGlyphRole::Failed
+        );
     }
 
     #[test]

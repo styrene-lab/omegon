@@ -519,7 +519,7 @@ fn summarize_live_tool_progress(
     parts.join(" · ")
 }
 
-fn tool_has_expandable_detail(
+pub(crate) fn tool_has_expandable_detail(
     detail_args: Option<&str>,
     detail_result: Option<&str>,
     live_partial: Option<&omegon_traits::PartialToolResult>,
@@ -1472,11 +1472,7 @@ status: {}
                     &render_ctx,
                 );
             }
-            PeerAgentText {
-                text,
-                status,
-                ..
-            } => {
+            PeerAgentText { text, status, .. } => {
                 super::segment_components::assistant::render(
                     super::segment_components::assistant::AssistantRenderProps {
                         text,

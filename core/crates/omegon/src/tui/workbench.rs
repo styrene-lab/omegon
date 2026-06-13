@@ -715,7 +715,6 @@ fn render_delegate_workbench_panel(
         .render(area, frame.buffer_mut());
 }
 
-
 fn worker_chrome_line(
     label: &str,
     status: &str,

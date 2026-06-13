@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 
 use crate::bridge::{LlmBridge, NullBridge};
 
@@ -64,9 +64,17 @@ pub enum LoginOutcome {
 /// Provider credential state as seen by the route resolver.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CredentialState {
-    Valid { source: CredentialSource, oauth: bool },
-    Expired { source: CredentialSource, refreshable: bool },
-    Missing { probed_sources: Vec<String> },
+    Valid {
+        source: CredentialSource,
+        oauth: bool,
+    },
+    Expired {
+        source: CredentialSource,
+        refreshable: bool,
+    },
+    Missing {
+        probed_sources: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,13 +105,19 @@ impl CredentialState {
                 let kind = if *oauth { "OAuth" } else { "API key" };
                 format!("valid {kind} credentials from {}", source.label())
             }
-            CredentialState::Expired { source, refreshable } => {
+            CredentialState::Expired {
+                source,
+                refreshable,
+            } => {
                 let refresh = if *refreshable {
                     "refreshable"
                 } else {
                     "not refreshable"
                 };
-                format!("expired OAuth credentials from {} ({refresh})", source.label())
+                format!(
+                    "expired OAuth credentials from {} ({refresh})",
+                    source.label()
+                )
             }
             CredentialState::Missing { probed_sources } => {
                 format!("missing credentials; probed {}", probed_sources.join(", "))
@@ -158,7 +172,10 @@ impl DisconnectedReason {
 fn provider_env_var_list(provider: &str) -> String {
     let vars = crate::auth::provider_env_vars(provider);
     if vars.is_empty() {
-        format!("{}_API_KEY", provider.to_ascii_uppercase().replace('-', "_"))
+        format!(
+            "{}_API_KEY",
+            provider.to_ascii_uppercase().replace('-', "_")
+        )
     } else {
         vars.join(", ")
     }
@@ -230,7 +247,10 @@ impl RouteSnapshot {
             lines.push(format!("Route warning: {warning}"));
         }
         if let Some(outcome) = &self.last_login_outcome {
-            lines.push(format!("Last login outcome: {}", login_outcome_summary(outcome)));
+            lines.push(format!(
+                "Last login outcome: {}",
+                login_outcome_summary(outcome)
+            ));
         }
         lines.join("\n")
     }
@@ -307,7 +327,8 @@ impl RouteController {
                 for provider in fallback_providers {
                     let state = ledger.probe_provider(provider);
                     if state.is_valid()
-                        && let Some(serving) = crate::providers::default_model_for_provider(provider)
+                        && let Some(serving) =
+                            crate::providers::default_model_for_provider(provider)
                     {
                         return ProviderRoute::Fallback {
                             selected: selected_model,
@@ -389,9 +410,7 @@ impl RouteController {
         if !credential_state.is_valid() {
             let reason = disconnected_for_provider_state(provider, credential_state);
             let mut state = self.state.write().await;
-            state.warning = Some(format!(
-                "Model switch to {model} refused: {reason:?}"
-            ));
+            state.warning = Some(format!("Model switch to {model} refused: {reason:?}"));
             drop(state);
             return Ok(self.emit_changed().await);
         }
@@ -424,7 +443,8 @@ impl RouteController {
                     probed_sources: vec!["logout".to_string()],
                 },
             };
-            state.warning = Some("Logged out of the active provider; route is disconnected.".to_string());
+            state.warning =
+                Some("Logged out of the active provider; route is disconnected.".to_string());
         }
         drop(state);
         self.emit_changed().await
@@ -448,7 +468,9 @@ impl RouteController {
 
 fn route_event_fields(route: &ProviderRoute) -> (String, Option<String>, Option<String>) {
     match route {
-        ProviderRoute::Serving { model } => ("serving".into(), Some(model.clone()), Some(model.clone())),
+        ProviderRoute::Serving { model } => {
+            ("serving".into(), Some(model.clone()), Some(model.clone()))
+        }
         ProviderRoute::Fallback {
             selected, serving, ..
         } => (
@@ -456,7 +478,9 @@ fn route_event_fields(route: &ProviderRoute) -> (String, Option<String>, Option<
             Some(selected.clone()),
             Some(serving.clone()),
         ),
-        ProviderRoute::LoginPending { provider, prior, .. } => {
+        ProviderRoute::LoginPending {
+            provider, prior, ..
+        } => {
             let selected = route_event_fields(prior).1;
             ("login_pending".into(), selected, Some(provider.clone()))
         }
@@ -479,7 +503,9 @@ fn route_summary(snapshot: &RouteSnapshot) -> String {
         ProviderRoute::Fallback {
             selected, serving, ..
         } => format!("Provider route: serving {serving} (fallback from {selected})"),
-        ProviderRoute::LoginPending { provider, since, .. } => {
+        ProviderRoute::LoginPending {
+            provider, since, ..
+        } => {
             let elapsed = since.elapsed().unwrap_or(Duration::ZERO).as_secs();
             format!("Provider login pending for {provider} ({elapsed}s)")
         }
@@ -516,9 +542,7 @@ fn disconnected_for_provider_state(provider: String, state: CredentialState) -> 
             provider,
             detail: "provider credentials are valid but no bridge is available".to_string(),
         },
-        CredentialState::Expired {
-            refreshable, ..
-        } => DisconnectedReason::ExpiredCredentials {
+        CredentialState::Expired { refreshable, .. } => DisconnectedReason::ExpiredCredentials {
             provider,
             refreshable,
         },
@@ -658,7 +682,9 @@ mod tests {
         );
         let snapshot = controller.begin_login("openai-codex".into()).await;
         match snapshot.route {
-            ProviderRoute::LoginPending { provider, prior, .. } => {
+            ProviderRoute::LoginPending {
+                provider, prior, ..
+            } => {
                 assert_eq!(provider, "openai-codex");
                 assert_eq!(
                     *prior,
@@ -851,7 +877,10 @@ mod tests {
         };
         let message = reason.operator_message("openai-codex:gpt-5.5");
         assert!(message.contains("openai-codex:gpt-5.5"), "{message}");
-        assert!(message.contains("environment, auth.json, external"), "{message}");
+        assert!(
+            message.contains("environment, auth.json, external"),
+            "{message}"
+        );
         assert!(message.contains("/login openai-codex"), "{message}");
         assert!(message.contains("CHATGPT_OAUTH_TOKEN"), "{message}");
     }
@@ -957,8 +986,14 @@ mod tests {
             warning: Some("Login failed: timed out".into()),
         };
         let status = pending.operator_status();
-        assert!(status.contains("Provider login pending for openai-codex"), "{status}");
-        assert!(status.contains("Last login outcome: failed; timed out"), "{status}");
+        assert!(
+            status.contains("Provider login pending for openai-codex"),
+            "{status}"
+        );
+        assert!(
+            status.contains("Last login outcome: failed; timed out"),
+            "{status}"
+        );
         assert!(status.contains("Route warning: Login failed"), "{status}");
     }
 
@@ -997,12 +1032,21 @@ mod tests {
         let controller = RouteController::new(route, Box::new(NullBridge), Some(tx));
         controller.begin_login("openai-codex".into()).await;
         let event = rx.recv().await.unwrap();
-        let omegon_traits::AgentEvent::RouteChanged { state, serving, message, .. } = event else {
+        let omegon_traits::AgentEvent::RouteChanged {
+            state,
+            serving,
+            message,
+            ..
+        } = event
+        else {
             panic!("route controller should emit a first-class RouteChanged event");
         };
         assert_eq!(state, "login_pending");
         assert_eq!(serving.as_deref(), Some("openai-codex"));
-        assert!(message.contains("Provider login pending for openai-codex"), "{message}");
+        assert!(
+            message.contains("Provider login pending for openai-codex"),
+            "{message}"
+        );
     }
 
     #[tokio::test]
@@ -1039,7 +1083,10 @@ mod tests {
                     (_, [provider], ProviderRoute::Disconnected { reason, .. })
                         if provider == "google" =>
                     {
-                        assert!(matches!(reason, DisconnectedReason::FallbackExhausted { .. }));
+                        assert!(matches!(
+                            reason,
+                            DisconnectedReason::FallbackExhausted { .. }
+                        ));
                     }
                     other => panic!("unexpected startup route matrix result: {other:?}"),
                 }
@@ -1047,4 +1094,3 @@ mod tests {
         }
     }
 }
-

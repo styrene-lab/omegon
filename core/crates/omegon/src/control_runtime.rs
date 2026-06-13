@@ -556,7 +556,14 @@ pub async fn execute_control(
 
     match request {
         ControlRequest::SetModel { requested_model } => {
-            set_model_response(ctx.agent, ctx.shared_settings, ctx.bridge, None, &requested_model).await
+            set_model_response(
+                ctx.agent,
+                ctx.shared_settings,
+                ctx.bridge,
+                None,
+                &requested_model,
+            )
+            .await
         }
         ControlRequest::SwitchDispatcher {
             request_id,

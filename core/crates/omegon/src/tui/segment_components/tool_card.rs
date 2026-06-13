@@ -9,7 +9,10 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, Wrap};
 
-use crate::surfaces::conversation::ToolCategory;
+use crate::surfaces::conversation::{
+    ContentForm, SegmentAffordances, SegmentContentPresentation, SegmentMetric, SegmentProducer,
+    SegmentState, ToolCategory,
+};
 
 use super::super::conversation_render_projection::SegmentRenderContext;
 use super::super::segments::{
@@ -20,6 +23,124 @@ use super::super::segments::{
 };
 use super::super::theme::Theme;
 use crate::tui::widgets;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SlimSegmentHeader<'a> {
+    pub producer: SegmentProducer<'a>,
+    pub state: SegmentState,
+    pub content: SegmentContentPresentation<'a>,
+    pub metrics: Vec<SegmentMetric<'a>>,
+    pub affordances: SegmentAffordances,
+    pub display_name: String,
+}
+
+impl<'a> SlimSegmentHeader<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn from_tool_fields(
+        name: &'a str,
+        detail_args: Option<&'a str>,
+        detail_result: Option<&'a str>,
+        is_error: bool,
+        complete: bool,
+        live_partial: Option<&'a omegon_traits::PartialToolResult>,
+        tool_category: Option<ToolCategory>,
+        display_name: String,
+    ) -> Self {
+        let state = if is_error {
+            SegmentState::Failed
+        } else if complete {
+            SegmentState::Completed
+        } else {
+            SegmentState::Running
+        };
+        let category = tool_category
+            .unwrap_or_else(|| crate::surfaces::conversation::tool_category_for_name(name));
+        let form = if name == "bash" {
+            ContentForm::Log
+        } else if matches!(name, "edit" | "change") {
+            ContentForm::Diff
+        } else if matches!(name, "read" | "view") {
+            detail_result
+                .map(|text| {
+                    let trimmed = text.trim_start();
+                    if trimmed.is_empty() {
+                        ContentForm::Empty
+                    } else if trimmed.starts_with('#')
+                        || trimmed.starts_with("```")
+                        || trimmed.contains("\n#")
+                        || trimmed.contains("\n- ")
+                        || trimmed.contains("\n* ")
+                    {
+                        ContentForm::Markdown
+                    } else {
+                        ContentForm::Prose
+                    }
+                })
+                .unwrap_or(ContentForm::Empty)
+        } else {
+            ContentForm::Structured
+        };
+        Self {
+            producer: SegmentProducer::Tool { name, category },
+            state,
+            content: SegmentContentPresentation {
+                form,
+                title: Some(name),
+                summary: detail_result,
+                body: detail_result,
+            },
+            metrics: Vec::new(),
+            affordances: SegmentAffordances {
+                detail_available: segments::tool_has_expandable_detail(
+                    detail_args,
+                    detail_result,
+                    live_partial,
+                ),
+                expandable: detail_args.is_some() || detail_result.is_some(),
+                selectable: true,
+                copyable: detail_result.is_some(),
+            },
+            display_name,
+        }
+    }
+}
+
+fn state_icon_for_segment_state(state: SegmentState) -> &'static str {
+    let glyphs = crate::tui::glyphs::glyphs();
+    let role = match state {
+        SegmentState::Pending => crate::tui::glyphs::ToolStateGlyphRole::Waiting,
+        SegmentState::Running => crate::tui::glyphs::ToolStateGlyphRole::Running,
+        SegmentState::Completed => crate::tui::glyphs::ToolStateGlyphRole::Completed,
+        SegmentState::Failed => crate::tui::glyphs::ToolStateGlyphRole::Failed,
+        SegmentState::Cancelled => crate::tui::glyphs::ToolStateGlyphRole::Cancelled,
+        SegmentState::Informational => crate::tui::glyphs::ToolStateGlyphRole::Detail,
+    };
+    glyphs.tool_state(role)
+}
+
+fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) -> Color {
+    match state {
+        SegmentState::Pending | SegmentState::Informational => t.dim(),
+        SegmentState::Running => t.warning(),
+        SegmentState::Completed => t.success(),
+        SegmentState::Failed => t.error(),
+        SegmentState::Cancelled => t.muted(),
+    }
+}
+
+fn slim_tool_header_cells(
+    header: &SlimSegmentHeader<'_>,
+    legacy_cells: Vec<String>,
+) -> Vec<String> {
+    let mut cells = Vec::new();
+    cells.extend(legacy_cells);
+    if header.affordances.detail_available
+        && !cells.iter().any(|cell| cell.contains("Ctrl+O details"))
+    {
+        cells.push("Ctrl+O details".to_string());
+    }
+    cells
+}
 
 pub struct ToolCardRenderProps<'a> {
     pub name: &'a str,
@@ -661,14 +782,27 @@ fn render_tool_card(
     );
 
     if matches!(mode, SegmentRenderMode::Slim) && !complete && !expanded {
-        let cells = segments::slim_tool_summary_cells(
+        let header = SlimSegmentHeader::from_tool_fields(
             name,
             detail_args,
             detail_result,
+            is_error,
             complete,
             live_partial,
-            started_at,
-            meta.duration_ms,
+            tool_category,
+            display_name.clone(),
+        );
+        let cells = slim_tool_header_cells(
+            &header,
+            segments::slim_tool_summary_cells(
+                name,
+                detail_args,
+                detail_result,
+                complete,
+                live_partial,
+                started_at,
+                meta.duration_ms,
+            ),
         );
         let detail_rows = segments::slim_tool_live_rows(area.width, &cells);
         render_slim_tool_live_rows(
@@ -676,9 +810,9 @@ fn render_tool_card(
             buf,
             t,
             bg,
-            status_icon,
-            status_color,
-            &display_name,
+            state_icon_for_segment_state(header.state),
+            state_color_for_segment_state(header.state, t),
+            &header.display_name,
             &detail_rows,
             pinned,
         );
@@ -686,14 +820,27 @@ fn render_tool_card(
     }
 
     if matches!(mode, SegmentRenderMode::Slim) && complete && !expanded {
-        let cells = segments::slim_tool_summary_cells(
+        let header = SlimSegmentHeader::from_tool_fields(
             name,
             detail_args,
             detail_result,
+            is_error,
             complete,
             live_partial,
-            started_at,
-            meta.duration_ms,
+            tool_category,
+            display_name.clone(),
+        );
+        let cells = slim_tool_header_cells(
+            &header,
+            segments::slim_tool_summary_cells(
+                name,
+                detail_args,
+                detail_result,
+                complete,
+                live_partial,
+                started_at,
+                meta.duration_ms,
+            ),
         );
         let detail_rows = vec![segments::slim_tool_collapsed_line(area.width, &cells)];
         render_slim_tool_summary_rows(
@@ -701,9 +848,9 @@ fn render_tool_card(
             buf,
             t,
             bg,
-            status_icon,
-            status_color,
-            &display_name,
+            state_icon_for_segment_state(header.state),
+            state_color_for_segment_state(header.state, t),
+            &header.display_name,
             &detail_rows,
             pinned,
         );
@@ -894,7 +1041,8 @@ fn render_tool_card(
             if card_inner.width >= prefix.len() as u16 {
                 if let Some(cell) = buf.cell_mut((card_inner.x, card_inner.y)) {
                     cell.set_symbol(
-                        crate::tui::glyphs::glyphs().tool(crate::tui::glyphs::ToolGlyphRole::Detail),
+                        crate::tui::glyphs::glyphs()
+                            .tool(crate::tui::glyphs::ToolGlyphRole::Detail),
                     );
                     cell.set_style(Style::default().fg(t.accent_muted()).bg(bg));
                 }

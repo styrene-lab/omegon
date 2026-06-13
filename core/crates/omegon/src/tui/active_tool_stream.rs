@@ -68,7 +68,9 @@ pub fn render_active_tool_stream_panel(
     let bg = t.surface_bg();
     let mut lines = Vec::new();
     let glyphs = crate::tui::glyphs::glyphs();
-    let category = glyphs.tool_category(crate::tui::glyphs::tool_category_role_for_name(&stream.name));
+    let category = glyphs.tool_category(crate::tui::glyphs::tool_category_role_for_name(
+        &stream.name,
+    ));
     let running = glyphs.tool_state(crate::tui::glyphs::ToolStateGlyphRole::Running);
     lines.push(crate::tui::horizontal_line::horizontal_line(
         crate::tui::horizontal_line::HorizontalLineSpec::title("active tool")
