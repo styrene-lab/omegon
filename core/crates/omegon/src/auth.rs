@@ -1117,14 +1117,10 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
         }
     }
 
-    // Check OAuth token env vars
-    for key in env_vars.iter().copied().filter(|key| key.contains("OAUTH")) {
-        if let Ok(val) = std::env::var(key)
-            && !val.is_empty()
-        {
-            return Some((val, true));
-        }
-    }
+    // OAuth env vars are checked only after refreshable auth.json/external
+    // credentials. Startup may hydrate OAuth env vars from auth.json for child
+    // process inheritance; treating those as authoritative here would shadow the
+    // persisted refresh token and keep using a stale access token.
 
     // 2. auth.json — with refresh if expired (canonical key mapping)
     let auth_key = auth_json_key(provider);
@@ -1149,6 +1145,19 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
                 }
                 c
             } else {
+                for key in env_vars.iter().copied().filter(|key| key.contains("OAUTH")) {
+                    if let Ok(val) = std::env::var(key)
+                        && !val.is_empty()
+                    {
+                        tracing::info!(
+                            provider = auth_key,
+                            env = key,
+                            decision = "use_oauth_env_fallback",
+                            "provider credential resolved from OAuth env fallback"
+                        );
+                        return Some((val, true));
+                    }
+                }
                 tracing::warn!(
                     provider = auth_key,
                     decision = "missing_all_sources",
@@ -2473,13 +2482,57 @@ mod tests {
     // ── Credential resolution edge cases ────────────────────────────────
 
     #[test]
-    fn resolve_with_refresh_env_var_takes_priority() {
-        // resolve_api_key_sync checks env vars BEFORE auth.json.
-        // This test verifies the priority by checking the code path.
-        // (Can't safely set env vars in parallel tests.)
+    fn resolve_with_refresh_env_var_takes_priority_for_api_keys_only() {
+        // API-key env vars intentionally override auth.json. OAuth env vars do
+        // not, because startup may hydrate them from auth.json and a stale
+        // hydrated access token must not shadow the refreshable persisted grant.
         let env_keys: &[&str] = &["ANTHROPIC_API_KEY"];
         // Verify the variable name is correct — compile-time check
         assert_eq!(env_keys[0], "ANTHROPIC_API_KEY");
+    }
+
+    #[tokio::test]
+    async fn resolve_with_refresh_prefers_persisted_oauth_over_oauth_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("auth.json");
+        let _guard = TEST_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let original_auth = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+        let original_token = std::env::var("CHATGPT_OAUTH_TOKEN").ok();
+
+        unsafe {
+            std::env::set_var("OMEGON_AUTH_JSON_PATH", &override_path);
+            std::env::set_var("CHATGPT_OAUTH_TOKEN", "stale-hydrated-env-token");
+        }
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        write_credentials(
+            "openai-codex",
+            &OAuthCredentials {
+                cred_type: "oauth".into(),
+                access: "fresh-persisted-token".into(),
+                refresh: "refresh-token".into(),
+                expires: now_ms + 3_600_000,
+            },
+        )
+        .expect("write persisted codex auth");
+
+        let resolved = resolve_with_refresh("openai-codex").await;
+
+        unsafe {
+            match original_auth {
+                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
+                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+            }
+            match original_token {
+                Some(value) => std::env::set_var("CHATGPT_OAUTH_TOKEN", value),
+                None => std::env::remove_var("CHATGPT_OAUTH_TOKEN"),
+            }
+        }
+
+        assert_eq!(resolved, Some(("fresh-persisted-token".into(), true)));
     }
 
     #[test]
