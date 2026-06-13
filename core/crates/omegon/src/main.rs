@@ -3910,6 +3910,17 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         (route::ProviderRoute::Disconnected { selected, reason }, _) => {
             tracing::warn!(selected = %selected, reason = ?reason, "no LLM provider available for selected interactive model and no explicit fallback engaged");
             startup_auth_warnings.push(reason.operator_message(selected));
+            if fallback_providers.is_empty()
+                && let Some(legacy_fallback) = providers::automation_safe_model()
+                && providers::infer_provider_id(&legacy_fallback)
+                    != providers::infer_provider_id(selected)
+            {
+                startup_auth_warnings.push(format!(
+                    "Omegon no longer silently falls back from {selected} to {legacy_fallback}. To opt into that route, add `fallbackProviders = [\"{}\"]` to the profile, or run `/login {}` to use the selected provider.",
+                    providers::infer_provider_id(&legacy_fallback),
+                    providers::infer_provider_id(selected)
+                ));
+            }
             startup_decision.provider_connected = false;
             startup_decision.use_null_bridge = true;
             (

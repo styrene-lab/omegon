@@ -42,14 +42,14 @@ delegate/cleave child routing.
 ## 5. End-to-end verification
 <!-- specs: provider-route, provider-route/login -->
 
-- [ ] 5.1 Scenario test: profile selects codex, no codex creds, empty fallback → Disconnected, actionable message, no Anthropic substitution
-- [ ] 5.2 Scenario test: same but fallback_providers=["anthropic"] → Fallback state, footer warning, StreamOptions carries anthropic model
-- [ ] 5.3 Scenario test: login success from Fallback → Serving, warning cleared, bridge and route swapped in one transition
-- [ ] 5.4 Full suite `cargo test -p omegon` green (known flake: extensions::sdk_compat_spawn_tests, pre-existing)
+- [x] 5.1 Scenario test: profile selects codex, no codex creds, empty fallback → Disconnected, actionable message, no Anthropic substitution
+- [x] 5.2 Scenario test: same but fallback_providers=["anthropic"] → Fallback state, footer warning, StreamOptions carries anthropic model
+- [x] 5.3 Scenario test: login success from Fallback → Serving, warning cleared, bridge and route swapped in one transition
+- [x] 5.4 Full suite `cargo test -p omegon` green (known flake: extensions::sdk_compat_spawn_tests, pre-existing)
 
 ## 6. Migration and release memory
 <!-- specs: provider-route -->
 
-- [ ] 6.1 CHANGELOG `[Unreleased]`: breaking-change entry — silent fallback removed; include exact `fallback_providers = [...]` profile snippet for operators who relied on it
-- [ ] 6.2 Startup one-time notice when Disconnected would have silently fallen back under the old behavior (detected: fallback_providers empty AND a provider with valid creds exists) pointing at the new config key
-- [ ] 6.3 Update docs/provider-route-state-machine.md design node impl notes with final file scope deltas
+- [x] 6.1 CHANGELOG `[Unreleased]`: breaking-change entry — silent fallback removed; include exact `fallback_providers = [...]` profile snippet for operators who relied on it
+- [x] 6.2 Startup one-time notice when Disconnected would have silently fallen back under the old behavior (detected: fallback_providers empty AND a provider with valid creds exists) pointing at the new config key
+- [x] 6.3 Update docs/provider-route-state-machine.md design node impl notes with final file scope deltas

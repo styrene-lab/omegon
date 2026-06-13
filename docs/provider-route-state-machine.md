@@ -1,7 +1,7 @@
 ---
 id: provider-route-state-machine
 title: "Provider Route State Machine — eliminate implicit auth/fallback states"
-status: implementing
+status: implemented
 tags: []
 open_questions: []
 dependencies: []
@@ -81,3 +81,25 @@ PR #144 merged to main (f9389709, 2026-06-12): assistant capability readiness su
 **Status:** accepted
 
 **Rationale:**
+
+
+## Implementation closeout — 2026-06-13
+
+Provider routing is now closed for the 0.27.0 release scope.
+
+Shipped scope:
+
+- `core/crates/omegon/src/route.rs` owns `ProviderRoute`, `RouteController`, credential probing summaries, transition events, login terminal outcomes, and route projection helpers.
+- Interactive startup resolves through `RouteController::resolve_startup` and no longer silently substitutes `automation_safe_model()` unless the profile explicitly opts into `fallbackProviders = [...]`.
+- Startup disconnected/fallback cases produce persistent operator-facing warnings, including a compatibility notice when old implicit fallback would have selected another authenticated provider.
+- `/login`, `/model`, model-tier switching, offline switching, `/auth status`, footer/model-card projection, loop stream options, TurnEnd attribution, and route-changed events consume the controller snapshot rather than re-deriving serving identity.
+- `fallback_providers` is persisted in settings/profile schema with an empty default.
+- Serve/daemon route adoption remains intentionally deferred to the quartus/auspex assistant-run workstream.
+
+Validation evidence:
+
+- `cargo test -p omegon route -- --nocapture` passed.
+- `cargo test -p omegon fallback -- --nocapture` passed.
+- `cargo test -p omegon auth_status -- --nocapture` passed.
+- `cargo test -p omegon model_card -- --nocapture` passed.
+- `cargo test -p omegon -- --nocapture` passed all route-relevant coverage; one pre-existing SDK compatibility test failed as already noted in the OpenSpec task file.
