@@ -188,6 +188,49 @@ Protected anchors are expected to be preserved by compressors where possible. An
 
 This baseline is intentionally small. It proves the harness and catches obvious regressions; it is not sufficient evidence to enable compression by default. Enabling by default requires dogfood fixtures from real Omegon sessions and stable savings/fact-retention results across tool outputs, build logs, source reads, and markdown/design surfaces.
 
+## Current A/B smoke gate
+
+The high-level benchmark harness can run paired headroom-off/headroom-on smoke checks without requiring model calls. The smoke path validates fixture refresh, low-level eval, result artifact wiring, and the machine-readable expectation contract.
+
+Run one task:
+
+```bash
+python3 scripts/benchmark_harness.py \
+  ai/benchmarks/tasks/headroom-json-sparse-critical.yaml \
+  --headroom-ab \
+  --out-dir .tmp/headroom-json-ab
+
+python3 scripts/benchmark_harness.py \
+  --headroom-ab-report \
+  .tmp/headroom-json-ab/*headroom-ab-smoke.json
+```
+
+Run the current behavioral smoke trio:
+
+```bash
+python3 scripts/benchmark_harness.py ai/benchmarks/tasks/headroom-json-sparse-critical.yaml --headroom-ab --out-dir .tmp/headroom-json-ab
+python3 scripts/benchmark_harness.py ai/benchmarks/tasks/headroom-read-large-markdown.yaml --headroom-ab --out-dir .tmp/headroom-md-ab
+python3 scripts/benchmark_harness.py ai/benchmarks/tasks/headroom-diff-investigation.yaml --headroom-ab --out-dir .tmp/headroom-diff-ab
+python3 scripts/benchmark_harness.py --headroom-ab-report .tmp/headroom-json-ab/*headroom-ab-smoke.json .tmp/headroom-md-ab/*headroom-ab-smoke.json .tmp/headroom-diff-ab/*headroom-ab-smoke.json
+```
+
+Each task owns its fixture-refresh contract:
+
+```yaml
+headroom:
+  run_eval: true
+  eval_fixtures: .tmp/headroom/fixtures
+  corpus_manifest: docs/evals/headroom-corpus-large.example.json
+  refresh_fixtures: auto
+  max_restored_facts: 0
+  token_counter: bytes_div_4
+  expect_eval_status: pass
+  expect_restored_facts_max: 0
+  expect_min_savings_percent: 80
+```
+
+`refresh_fixtures: auto` means missing `.tmp/headroom/fixtures` are regenerated from the corpus manifest before `headroom-eval` runs. The current smoke gate expects `headroom-eval` to pass, estimated savings to remain at or above 80%, and required-fact restoration to remain zero. These are smoke gates, not proof of default-on readiness; real behavioral A/B runs must still compare task success, context telemetry, retrieval behavior, and wall time with actual agent execution.
+
 ## Validation and Token-Savings Claims
 
 Omegon does not claim compression effectiveness by inspection. Every compressor is validated against canonical fixtures. A fixture defines input text, content kind, required facts, expected compression behavior, and a minimum savings threshold.
@@ -293,7 +336,7 @@ just headroom-dogfood
 just headroom-eval --text --fixtures .tmp/headroom/fixtures --max-restored-facts 0 --provider kompressor
 ```
 
-The exact `--provider` flag and provider packaging are future work; this command documents the desired evaluator contract rather than current CLI behavior.
+The `--provider` flag currently accepts only `native_deterministic`; additional provider packaging and runtime selection are future work. This command documents the desired evaluator contract for future providers while preserving today's deterministic-only default.
 
 ## Compression policy
 
