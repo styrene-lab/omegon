@@ -1,12 +1,9 @@
 ---
 id: acp-0-27-closeout
 title: "ACP 0.27.0 closeout — consolidate active ACP follow-ups"
-status: implementing
+status: implemented
 tags: [acp, release, 0.27.0, closeout, flynt, readiness]
-open_questions:
-  - "[assumption] 0.27.0 ACP closeout should prioritize release readiness and truthfulness over new protocol feature expansion."
-  - "Which active ACP follow-up items are already implemented in code but still need lifecycle/status closure?"
-  - "Which remaining ACP behaviors are actual 0.27.0 blockers versus post-release follow-ups?"
+open_questions: []
 dependencies:
   - provider-route-state-machine
 related:
@@ -194,4 +191,12 @@ No release-blocking ACP defect is proven from this triage pass. The strongest ca
 
 ## Closeout status
 
+Status: **implemented**.
+
 All fifteen absorbed ACP nodes now have a release classification. No remaining 0.27.0 ACP release blocker is proven from this closeout pass. Remaining ACP work is post-release unless a client depends on an unadvertised `_session/*` endpoint or a shipped capability expands beyond the scoped contracts recorded here.
+
+The initial closeout questions are resolved by the absorbed-node matrix above:
+
+- active ACP follow-ups are classified individually;
+- no remaining ACP behavior is identified as a 0.27.0 blocker;
+- deferred work is scoped to post-release surfaces unless capability truthfulness changes.
