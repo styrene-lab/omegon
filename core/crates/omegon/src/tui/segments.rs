@@ -564,7 +564,7 @@ fn slim_tool_overflow_hint(hidden_count: usize, hidden_cells: &[&String]) -> Str
         .iter()
         .any(|cell| cell.contains(DETAILS_HINT_LABEL));
     if has_expandable_hidden_cell {
-        format!("+{hidden_count} more · ⌃O details")
+        format!("+{hidden_count} more · {DETAILS_HINT_LABEL}")
     } else {
         format!("+{hidden_count} more")
     }
@@ -2436,12 +2436,12 @@ mod tests {
 
         assert_eq!(
             slim_tool_overflow_hint(1, &[&cells[5]]),
-            "+1 more · ⌃O details"
+            format!("+1 more · {DETAILS_HINT_LABEL}")
         );
         assert!(
             live_rows
                 .iter()
-                .any(|row| row.contains("+1 more · ⌃O details"))
+                .any(|row| row.contains(&format!("+1 more · {DETAILS_HINT_LABEL}")))
         );
     }
 
@@ -2461,7 +2461,7 @@ mod tests {
         );
         assert!(rendered.ends_with(DETAILS_HINT_LABEL), "{rendered:?}");
         assert!(
-            rendered.contains("  ⌃O details"),
+            rendered.contains(&format!("  {DETAILS_HINT_LABEL}")),
             "affordance should be separated by flex spacer: {rendered:?}"
         );
     }
