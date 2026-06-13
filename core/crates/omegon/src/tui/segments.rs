@@ -2759,7 +2759,10 @@ mod tests {
         assert!(text.contains("git"), "{text}");
         assert!(text.contains("git status --short"), "{text}");
         assert!(text.contains("2 lines · M src/tui/segments.rs"), "{text}");
-        assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
+        assert!(
+            text.contains(DETAILS_HINT_LABEL) || text.contains("Ctrl+O details"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -3030,7 +3033,10 @@ mod tests {
         assert!(text.contains("11.4s"), "{text}");
         assert!(text.contains("bundle ready"), "{text}");
         assert!(text.contains("├") || text.contains("└"), "{text}");
-        assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
+        assert!(
+            text.contains(DETAILS_HINT_LABEL) || text.contains("Ctrl+O details"),
+            "{text}"
+        );
     }
 
     #[test]

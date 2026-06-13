@@ -32,6 +32,22 @@ pub struct SessionUsageSlice {
     pub output_tokens: u64,
 }
 
+struct EngineFlexRowStyle {
+    label_color: Color,
+    value_color: Color,
+    value_bold: bool,
+}
+
+impl EngineFlexRowStyle {
+    fn new(label_color: Color, value_color: Color, value_bold: bool) -> Self {
+        Self {
+            label_color,
+            value_color,
+            value_bold,
+        }
+    }
+}
+
 /// Footer data — updated by the TUI on every event and rendered each frame.
 #[derive(Default)]
 pub struct FooterData {
@@ -352,9 +368,7 @@ impl FooterData {
         row_width: usize,
         label_width: usize,
         value_max_width: usize,
-        label_color: Color,
-        value_color: Color,
-        value_bold: bool,
+        style: EngineFlexRowStyle,
     ) -> Line<'static> {
         let label_text = format!(" {:<width$} ", label, width = label_width);
         let label_display_width = UnicodeWidthStr::width(label_text.as_str());
@@ -363,13 +377,13 @@ impl FooterData {
         let value_display_width = UnicodeWidthStr::width(value_text.as_str());
         let spacer_width = row_width.saturating_sub(label_display_width + value_display_width);
 
-        let mut value_style = Style::default().fg(value_color);
-        if value_bold {
+        let mut value_style = Style::default().fg(style.value_color);
+        if style.value_bold {
             value_style = value_style.add_modifier(Modifier::BOLD);
         }
 
         Line::from(vec![
-            Span::styled(label_text, Style::default().fg(label_color)),
+            Span::styled(label_text, Style::default().fg(style.label_color)),
             Span::raw(" ".repeat(spacer_width)),
             Span::styled(value_text, value_style),
         ])
@@ -1150,9 +1164,7 @@ mod tests {
             32,
             7,
             22,
-            Color::Blue,
-            Color::White,
-            true,
+            EngineFlexRowStyle::new(Color::Blue, Color::White, true),
         );
         let text = line
             .spans
@@ -1174,9 +1186,7 @@ mod tests {
             28,
             7,
             18,
-            Color::Blue,
-            Color::White,
-            false,
+            EngineFlexRowStyle::new(Color::Blue, Color::White, false),
         );
         let text = line
             .spans
