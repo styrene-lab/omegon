@@ -25,6 +25,7 @@ pub mod focus_view;
 pub mod footer;
 pub mod footer_projection;
 pub mod image;
+pub mod inline_render;
 pub mod instruments;
 pub mod layout_projection;
 pub mod model_catalog;

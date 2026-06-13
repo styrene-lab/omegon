@@ -11,12 +11,14 @@ use tui_syntax_highlight::Highlighter;
 use unicode_width::UnicodeWidthStr;
 
 use super::conversation_render_projection::SegmentRenderMetadata;
+use super::inline_render::{details_hint_cell, render_inline_text_row};
 use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
     ConversationSegmentProjection, ImageSegment, LifecycleSegment, ProjectConversationSegment,
     SegmentPresentation, SegmentRole, SystemSegment, ToolSegment, UserSegment,
 };
+use crate::surfaces::inline::{InlineCell, InlineCellRole, InlineRow};
 
 const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
     .add(b' ')
@@ -552,17 +554,15 @@ pub(crate) fn slim_tool_summary_cells(
         cells.push(summarize_live_tool_progress(live_partial, started_at));
     }
     if tool_has_expandable_detail(detail_args, detail_result, live_partial) {
-        cells.push("Ctrl+O details".to_string());
+        cells.push(details_hint_cell().text);
     }
     cells
 }
 
 fn slim_tool_overflow_hint(hidden_count: usize, hidden_cells: &[&String]) -> String {
-    let has_expandable_hidden_cell = hidden_cells
-        .iter()
-        .any(|cell| cell.contains("Ctrl+O details"));
+    let has_expandable_hidden_cell = hidden_cells.iter().any(|cell| cell.contains("⌃O details"));
     if has_expandable_hidden_cell {
-        format!("+{hidden_count} more · Ctrl+O details")
+        format!("+{hidden_count} more · ⌃O details")
     } else {
         format!("+{hidden_count} more")
     }
@@ -613,12 +613,26 @@ fn slim_tool_detail_lines(width: u16, cells: &[String]) -> Vec<String> {
 }
 
 pub(crate) fn slim_tool_collapsed_line(width: u16, cells: &[String]) -> String {
-    let budget = width.saturating_sub(16) as usize;
+    let budget = width.saturating_sub(16);
     if cells.is_empty() {
-        String::new()
-    } else {
-        crate::util::truncate(&cells.join(" · "), budget)
+        return String::new();
     }
+
+    let (left_cells, right_cells): (Vec<_>, Vec<_>) = cells
+        .iter()
+        .cloned()
+        .partition(|cell| !cell.contains("⌃O details"));
+    let row = InlineRow::new(
+        left_cells
+            .into_iter()
+            .map(|cell| InlineCell::new(cell, InlineCellRole::Value))
+            .collect(),
+        right_cells
+            .into_iter()
+            .map(|cell| InlineCell::new(cell, InlineCellRole::Affordance))
+            .collect(),
+    );
+    render_inline_text_row(&row, budget)
 }
 
 pub(crate) fn slim_tool_live_rows(width: u16, cells: &[String]) -> Vec<String> {
@@ -2396,8 +2410,8 @@ mod tests {
         let live_rows = slim_tool_live_rows(12, &cells);
 
         assert_eq!(slim_tool_overflow_hint(1, &[]), "+1 more");
-        assert!(!detail_rows.iter().any(|row| row.contains("Ctrl+O details")));
-        assert!(!live_rows.iter().any(|row| row.contains("Ctrl+O details")));
+        assert!(!detail_rows.iter().any(|row| row.contains("⌃O details")));
+        assert!(!live_rows.iter().any(|row| row.contains("⌃O details")));
     }
 
     #[test]
@@ -2408,7 +2422,7 @@ mod tests {
             "gamma".to_string(),
             "delta".to_string(),
             "epsilon".to_string(),
-            "Ctrl+O details".to_string(),
+            "⌃O details".to_string(),
         ];
 
         let _detail_rows = slim_tool_detail_lines(42, &cells);
@@ -2416,13 +2430,48 @@ mod tests {
 
         assert_eq!(
             slim_tool_overflow_hint(1, &[&cells[5]]),
-            "+1 more · Ctrl+O details"
+            "+1 more · ⌃O details"
         );
         assert!(
             live_rows
                 .iter()
-                .any(|row| row.contains("+1 more · Ctrl+O details"))
+                .any(|row| row.contains("+1 more · ⌃O details"))
         );
+    }
+
+    #[test]
+    fn slim_tool_collapsed_line_right_aligns_details_affordance() {
+        let cells = vec![
+            "bash".to_string(),
+            "git status --short".to_string(),
+            "⌃O details".to_string(),
+        ];
+        let rendered = slim_tool_collapsed_line(56, &cells);
+
+        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 40);
+        assert!(
+            rendered.starts_with("bash · git status --short"),
+            "{rendered:?}"
+        );
+        assert!(rendered.ends_with("⌃O details"), "{rendered:?}");
+        assert!(
+            rendered.contains("  ⌃O details"),
+            "affordance should be separated by flex spacer: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn slim_tool_collapsed_line_preserves_details_when_left_truncates() {
+        let cells = vec![
+            "bash".to_string(),
+            "very long command summary with enough tokens to overflow".to_string(),
+            "⌃O details".to_string(),
+        ];
+        let rendered = slim_tool_collapsed_line(44, &cells);
+
+        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 28);
+        assert!(rendered.contains('…'), "{rendered:?}");
+        assert!(rendered.ends_with("⌃O details"), "{rendered:?}");
     }
 
     #[test]
@@ -2624,7 +2673,7 @@ mod tests {
         assert!(text.contains("git"), "{text}");
         assert!(text.contains("git status --short"), "{text}");
         assert!(text.contains("2 lines · M src/tui/segments.rs"), "{text}");
-        assert!(text.contains("Ctrl+O details"), "{text}");
+        assert!(text.contains("⌃O details"), "{text}");
     }
 
     #[test]
@@ -2667,7 +2716,7 @@ mod tests {
         assert!(text.contains("running"), "{text}");
         assert!(text.contains("├") || text.contains("└"), "{text}");
         assert!(text.contains("git -C /Users/wilson/workspace"), "{text}");
-        assert!(text.contains("Ctrl+O details"), "{text}");
+        assert!(text.contains("⌃O details"), "{text}");
     }
 
     #[test]
@@ -2704,10 +2753,7 @@ mod tests {
         let text = buf_text(&buf, area);
         assert!(text.contains("git"), "{text}");
         assert!(!text.contains("├") && !text.contains("└"), "{text}");
-        assert!(
-            text.contains("Ctrl+O details") || text.contains("…"),
-            "{text}"
-        );
+        assert!(text.contains("⌃O details") || text.contains("…"), "{text}");
     }
 
     #[test]
@@ -2895,7 +2941,7 @@ mod tests {
         assert!(text.contains("11.4s"), "{text}");
         assert!(text.contains("bundle ready"), "{text}");
         assert!(text.contains("├") || text.contains("└"), "{text}");
-        assert!(text.contains("Ctrl+O details"), "{text}");
+        assert!(text.contains("⌃O details"), "{text}");
     }
 
     #[test]
