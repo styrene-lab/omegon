@@ -218,6 +218,8 @@ Recent prompt-surface directives call out prompt templates and `/loop` as execut
 
 ### 1. Provider route footer clarity
 
+Shipped release-polish update: disconnected Slim engine footer rows now name the selected provider and exact remediation command, e.g. `OpenAI/Codex login required` plus `/login openai-codex`, instead of a generic provider warning. Focused `left_panel` tests cover the copy and stale-row cleanup.
+
 The footer/model card should clearly distinguish:
 
 - selected profile model

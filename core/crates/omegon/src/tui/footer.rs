@@ -281,10 +281,23 @@ impl FooterData {
         }
 
         if !self.provider_connected {
+            let provider_label = crate::auth::provider_by_id(&self.model_provider)
+                .map(|p| p.display_name)
+                .unwrap_or(self.model_provider.as_str());
+            let status_text = if self.model_provider.trim().is_empty() {
+                "⚠ provider login required".to_string()
+            } else {
+                format!("⚠ {provider_label} login required")
+            };
+            let action_text = if self.model_provider.trim().is_empty() {
+                "/login <provider>".to_string()
+            } else {
+                format!("/login {}", self.model_provider)
+            };
             push_row(
                 &mut lines,
                 "status",
-                "⚠ no provider".to_string(),
+                status_text,
                 value_width,
                 t.border_dim(),
                 t.warning(),
@@ -293,7 +306,7 @@ impl FooterData {
             push_row(
                 &mut lines,
                 "action",
-                "/login to connect".to_string(),
+                action_text,
                 value_width,
                 t.border_dim(),
                 t.muted(),
@@ -1901,10 +1914,26 @@ mod tests {
             .unwrap();
 
         let text = render_to_string(&terminal);
-        assert!(text.contains("no provider"), "got {text}");
+        assert!(text.contains("OpenAI API login required"), "got {text}");
+        assert!(text.contains("/login openai"), "got {text}");
         assert!(!text.contains("stale row sentinel"), "got {text}");
         assert!(!text.contains("codex 0%"), "got {text}");
         assert!(!text.contains("T9"), "got {text}");
+    }
+
+    #[test]
+    fn left_panel_disconnected_provider_names_exact_login_command() {
+        let data = FooterData {
+            model_id: "openai-codex:gpt-5.5".into(),
+            model_provider: "openai-codex".into(),
+            provider_connected: false,
+            ..Default::default()
+        };
+        let text = render_left_panel_text(&data, 72, 6);
+
+        assert!(text.contains("OpenAI/Codex login required"), "got {text}");
+        assert!(text.contains("/login openai-codex"), "got {text}");
+        assert!(!text.contains("/login to connect"), "got {text}");
     }
 
     #[test]

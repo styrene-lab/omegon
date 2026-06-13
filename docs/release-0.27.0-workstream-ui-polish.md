@@ -41,6 +41,7 @@ Make 0.27.0’s operator-facing surfaces truthful, legible, and calm. The releas
 ## Progress
 
 - Shipped Slim Workbench overflow prioritization so active/todo plan rows stay visible before completed rows when the plan lane is height-constrained. Focused `cargo test -p omegon slim_plan -- --nocapture` coverage passes.
+- Shipped disconnected footer remediation copy so the engine panel names the selected provider and exact `/login <provider>` command. Focused `cargo test -p omegon left_panel -- --nocapture` coverage passes.
 
 ## Current findings
 
