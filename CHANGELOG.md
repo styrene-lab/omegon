@@ -27,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Slim Workbench plan rows now keep active and todo items visible before completed items when compact height forces overflow.
 - Disconnected TUI engine footer rows now name the selected provider and exact `/login <provider>` remediation instead of a generic provider warning.
 - Slim tool summary rows now render detail affordances as right-aligned inline controls using compact key glyphs such as `⌃O details`.
+- TUI engine footer rows now use flex-style spacing so row values align against the right edge while preserving label/value styling.
 - TUI conversation rendering now marks the explicitly selected segment, shows queued prompt info below the operator editor, and shows an `Enter: details` hint only for selected segments with detail affordances.
 - Keep extension JSON-RPC request IDs monotonic after optional `initialize` timeouts, and update extension test fixtures to echo dynamic request IDs.
 - Start decoupling TUI conversation segments by moving role/emphasis/tool visual projection types into a dedicated conversation projection module.

@@ -11,7 +11,7 @@ use tui_syntax_highlight::Highlighter;
 use unicode_width::UnicodeWidthStr;
 
 use super::conversation_render_projection::SegmentRenderMetadata;
-use super::inline_render::{details_hint_cell, render_inline_text_row};
+use super::inline_render::{DETAILS_HINT_LABEL, details_hint_cell, render_inline_text_row};
 use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
@@ -560,7 +560,9 @@ pub(crate) fn slim_tool_summary_cells(
 }
 
 fn slim_tool_overflow_hint(hidden_count: usize, hidden_cells: &[&String]) -> String {
-    let has_expandable_hidden_cell = hidden_cells.iter().any(|cell| cell.contains("⌃O details"));
+    let has_expandable_hidden_cell = hidden_cells
+        .iter()
+        .any(|cell| cell.contains(DETAILS_HINT_LABEL));
     if has_expandable_hidden_cell {
         format!("+{hidden_count} more · ⌃O details")
     } else {
@@ -621,7 +623,7 @@ pub(crate) fn slim_tool_collapsed_line(width: u16, cells: &[String]) -> String {
     let (left_cells, right_cells): (Vec<_>, Vec<_>) = cells
         .iter()
         .cloned()
-        .partition(|cell| !cell.contains("⌃O details"));
+        .partition(|cell| !cell.contains(DETAILS_HINT_LABEL));
     let row = InlineRow::new(
         left_cells
             .into_iter()
@@ -2410,8 +2412,12 @@ mod tests {
         let live_rows = slim_tool_live_rows(12, &cells);
 
         assert_eq!(slim_tool_overflow_hint(1, &[]), "+1 more");
-        assert!(!detail_rows.iter().any(|row| row.contains("⌃O details")));
-        assert!(!live_rows.iter().any(|row| row.contains("⌃O details")));
+        assert!(
+            !detail_rows
+                .iter()
+                .any(|row| row.contains(DETAILS_HINT_LABEL))
+        );
+        assert!(!live_rows.iter().any(|row| row.contains(DETAILS_HINT_LABEL)));
     }
 
     #[test]
@@ -2422,7 +2428,7 @@ mod tests {
             "gamma".to_string(),
             "delta".to_string(),
             "epsilon".to_string(),
-            "⌃O details".to_string(),
+            DETAILS_HINT_LABEL.to_string(),
         ];
 
         let _detail_rows = slim_tool_detail_lines(42, &cells);
@@ -2444,7 +2450,7 @@ mod tests {
         let cells = vec![
             "bash".to_string(),
             "git status --short".to_string(),
-            "⌃O details".to_string(),
+            DETAILS_HINT_LABEL.to_string(),
         ];
         let rendered = slim_tool_collapsed_line(56, &cells);
 
@@ -2453,7 +2459,7 @@ mod tests {
             rendered.starts_with("bash · git status --short"),
             "{rendered:?}"
         );
-        assert!(rendered.ends_with("⌃O details"), "{rendered:?}");
+        assert!(rendered.ends_with(DETAILS_HINT_LABEL), "{rendered:?}");
         assert!(
             rendered.contains("  ⌃O details"),
             "affordance should be separated by flex spacer: {rendered:?}"
@@ -2465,13 +2471,13 @@ mod tests {
         let cells = vec![
             "bash".to_string(),
             "very long command summary with enough tokens to overflow".to_string(),
-            "⌃O details".to_string(),
+            DETAILS_HINT_LABEL.to_string(),
         ];
         let rendered = slim_tool_collapsed_line(44, &cells);
 
         assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 28);
         assert!(rendered.contains('…'), "{rendered:?}");
-        assert!(rendered.ends_with("⌃O details"), "{rendered:?}");
+        assert!(rendered.ends_with(DETAILS_HINT_LABEL), "{rendered:?}");
     }
 
     #[test]
@@ -2673,7 +2679,7 @@ mod tests {
         assert!(text.contains("git"), "{text}");
         assert!(text.contains("git status --short"), "{text}");
         assert!(text.contains("2 lines · M src/tui/segments.rs"), "{text}");
-        assert!(text.contains("⌃O details"), "{text}");
+        assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
     }
 
     #[test]
@@ -2716,7 +2722,7 @@ mod tests {
         assert!(text.contains("running"), "{text}");
         assert!(text.contains("├") || text.contains("└"), "{text}");
         assert!(text.contains("git -C /Users/wilson/workspace"), "{text}");
-        assert!(text.contains("⌃O details"), "{text}");
+        assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
     }
 
     #[test]
@@ -2753,7 +2759,10 @@ mod tests {
         let text = buf_text(&buf, area);
         assert!(text.contains("git"), "{text}");
         assert!(!text.contains("├") && !text.contains("└"), "{text}");
-        assert!(text.contains("⌃O details") || text.contains("…"), "{text}");
+        assert!(
+            text.contains(DETAILS_HINT_LABEL) || text.contains("…"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -2941,7 +2950,7 @@ mod tests {
         assert!(text.contains("11.4s"), "{text}");
         assert!(text.contains("bundle ready"), "{text}");
         assert!(text.contains("├") || text.contains("└"), "{text}");
-        assert!(text.contains("⌃O details"), "{text}");
+        assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
     }
 
     #[test]

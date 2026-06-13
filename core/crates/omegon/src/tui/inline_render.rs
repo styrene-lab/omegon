@@ -11,6 +11,7 @@ use crate::surfaces::inline::{
 use super::theme::Theme;
 
 const ELLIPSIS: &str = "…";
+pub const DETAILS_HINT_LABEL: &str = "⌃O details";
 
 pub fn key_chord_label(chord: KeyChord) -> String {
     match chord {
@@ -27,14 +28,8 @@ pub fn action_hint_label(hint: ActionHint) -> String {
 }
 
 pub fn details_hint_cell() -> InlineCell<String> {
-    InlineCell::new(
-        action_hint_label(ActionHint::new(
-            InlineAffordance::Details,
-            KeyChord::Ctrl('O'),
-        )),
-        InlineCellRole::Affordance,
-    )
-    .with_priority(crate::surfaces::inline::InlinePriority::Required)
+    InlineCell::new(DETAILS_HINT_LABEL.to_string(), InlineCellRole::Affordance)
+        .with_priority(crate::surfaces::inline::InlinePriority::Required)
 }
 
 pub fn expand_hint_cell() -> InlineCell<String> {
