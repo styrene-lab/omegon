@@ -246,6 +246,8 @@ link:
         echo "  Check out main (or set OMEGON_ALLOW_DETACHED_LINK=1 for an intentional tagged/worktree build)."
         exit 1
     fi
+    echo "── Building release binary for current HEAD ──"
+    {{cargo}} build --release -p omegon
     REL="$(pwd)/target/release/omegon"
     DEV="$(pwd)/target/dev-release/omegon"
     # Pick whichever exists and is newer
