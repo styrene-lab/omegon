@@ -877,14 +877,11 @@ pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Re
     let _ = std::fs::create_dir_all(path.parent().unwrap());
 
     with_auth_json_lock(&path, || {
-        let mut auth: Value = if path.exists() {
-            let content = std::fs::read_to_string(&path)?;
-            serde_json::from_str(&content).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut auth = read_auth_json_for_update(&path, "write_credentials", provider)?;
 
+        let before_keys = auth_json_provider_keys(&auth);
         auth[provider] = serde_json::to_value(creds)?;
+        trace_auth_json_key_delta("write_credentials", provider, &before_keys, &auth);
         atomic_write_auth_json(&path, &auth)?;
         set_auth_file_permissions(&path)?;
         let (auth_path, auth_path_source) = auth_path_trace_fields();
@@ -1009,8 +1006,7 @@ pub fn logout_provider(provider: &str) -> anyhow::Result<()> {
     }
 
     with_auth_json_lock(&path, || {
-        let content = std::fs::read_to_string(&path)?;
-        let mut auth: Value = serde_json::from_str(&content)?;
+        let mut auth = read_auth_json_for_update(&path, "logout_provider", canonical)?;
 
         let auth_key = auth_json_key(canonical);
 
@@ -1019,9 +1015,11 @@ pub fn logout_provider(provider: &str) -> anyhow::Result<()> {
         }
 
         // Remove the provider's entry
+        let before_keys = auth_json_provider_keys(&auth);
         if let Some(obj) = auth.as_object_mut() {
             obj.remove(auth_key);
         }
+        trace_auth_json_key_delta("logout_provider", auth_key, &before_keys, &auth);
 
         // Write back
         atomic_write_auth_json(&path, &auth)?;
@@ -2032,17 +2030,19 @@ fn write_credentials_with_extra(
         auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let _ = std::fs::create_dir_all(path.parent().unwrap());
     with_auth_json_lock(&path, || {
-        let mut auth: Value = if path.exists() {
-            let content = std::fs::read_to_string(&path)?;
-            serde_json::from_str(&content).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut auth = read_auth_json_for_update(&path, "write_credentials_with_extra", provider)?;
         let mut entry = serde_json::to_value(creds)?;
         if let Some(id) = account_id {
             entry["accountId"] = json!(id);
         }
+        let before_keys = auth_json_provider_keys(&auth);
         auth[provider] = entry;
+        trace_auth_json_key_delta(
+            "write_credentials_with_extra",
+            provider,
+            &before_keys,
+            &auth,
+        );
         atomic_write_auth_json(&path, &auth)?;
         set_auth_file_permissions(&path)?;
         let (auth_path, auth_path_source) = auth_path_trace_fields();
@@ -2081,20 +2081,103 @@ fn write_refreshed_credentials(provider: &str, creds: &OAuthCredentials) -> anyh
         auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let _ = std::fs::create_dir_all(path.parent().unwrap());
     with_auth_json_lock(&path, || {
-        let mut auth: Value = if path.exists() {
-            let content = std::fs::read_to_string(&path)?;
-            serde_json::from_str(&content).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut auth = read_auth_json_for_update(&path, "write_refreshed_credentials", provider)?;
         let existing_entry = auth.get(provider);
-        auth[provider] = refreshed_credential_entry(provider, creds, existing_entry)?;
+        let refreshed_entry = refreshed_credential_entry(provider, creds, existing_entry)?;
+        let before_keys = auth_json_provider_keys(&auth);
+        auth[provider] = refreshed_entry;
+        trace_auth_json_key_delta("write_refreshed_credentials", provider, &before_keys, &auth);
         atomic_write_auth_json(&path, &auth)?;
         set_auth_file_permissions(&path)?;
         let (auth_path, auth_path_source) = auth_path_trace_fields();
         tracing::info!(provider, auth_path = %auth_path, auth_path_source, expires = creds.expires, "persisted refreshed provider credentials to auth.json");
         Ok(())
     })
+}
+
+fn read_auth_json_for_update(
+    path: &Path,
+    operation: &'static str,
+    provider: &str,
+) -> anyhow::Result<Value> {
+    if !path.exists() {
+        return Ok(json!({}));
+    }
+
+    let content = std::fs::read_to_string(path)?;
+    match serde_json::from_str(&content) {
+        Ok(auth) => Ok(auth),
+        Err(error) => {
+            let (auth_path, auth_path_source) = auth_path_trace_fields();
+            tracing::error!(
+                operation,
+                provider,
+                auth_path = %auth_path,
+                auth_path_source,
+                error = %error,
+                content_len = content.len(),
+                "auth.json parse failed before credential update; refusing to replace provider store with partial data"
+            );
+            Err(error.into())
+        }
+    }
+}
+
+fn auth_json_provider_keys(auth: &Value) -> Vec<String> {
+    let mut keys = auth
+        .as_object()
+        .map(|obj| obj.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    keys.sort();
+    keys
+}
+
+fn trace_auth_json_key_delta(
+    operation: &'static str,
+    provider: &str,
+    before_keys: &[String],
+    after: &Value,
+) {
+    let after_keys = auth_json_provider_keys(after);
+    let removed: Vec<&str> = before_keys
+        .iter()
+        .filter(|key| !after_keys.contains(key))
+        .map(String::as_str)
+        .collect();
+    let added: Vec<&str> = after_keys
+        .iter()
+        .filter(|key| !before_keys.contains(key))
+        .map(String::as_str)
+        .collect();
+    let dropped_openai_codex = before_keys.iter().any(|key| key == "openai-codex")
+        && !after_keys.iter().any(|key| key == "openai-codex");
+    let (auth_path, auth_path_source) = auth_path_trace_fields();
+
+    tracing::info!(
+        operation,
+        provider,
+        auth_path = %auth_path,
+        auth_path_source,
+        before_provider_count = before_keys.len(),
+        after_provider_count = after_keys.len(),
+        added = ?added,
+        removed = ?removed,
+        openai_codex_present_before = before_keys.iter().any(|key| key == "openai-codex"),
+        openai_codex_present_after = after_keys.iter().any(|key| key == "openai-codex"),
+        "auth.json provider key set changed"
+    );
+
+    if dropped_openai_codex && provider != "openai-codex" {
+        tracing::error!(
+            operation,
+            provider,
+            auth_path = %auth_path,
+            auth_path_source,
+            before_keys = ?before_keys,
+            after_keys = ?after_keys,
+            "auth.json mutation dropped openai-codex credentials while writing another provider"
+        );
+    }
 }
 
 fn atomic_write_auth_json(path: &Path, auth: &Value) -> anyhow::Result<()> {
@@ -2491,8 +2574,8 @@ mod tests {
         assert_eq!(env_keys[0], "ANTHROPIC_API_KEY");
     }
 
-    #[tokio::test]
-    async fn resolve_with_refresh_prefers_persisted_oauth_over_oauth_env() {
+    #[test]
+    fn resolve_with_refresh_prefers_persisted_oauth_over_oauth_env() {
         let dir = tempfile::tempdir().unwrap();
         let override_path = dir.path().join("auth.json");
         let _guard = TEST_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -2519,7 +2602,11 @@ mod tests {
         )
         .expect("write persisted codex auth");
 
-        let resolved = resolve_with_refresh("openai-codex").await;
+        let resolved = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test runtime")
+            .block_on(resolve_with_refresh("openai-codex"));
 
         unsafe {
             match original_auth {
@@ -2699,6 +2786,61 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&auth_path).unwrap()).unwrap();
         assert_eq!(contents["test-provider"]["access"], "test-access-token");
         assert_eq!(contents["test-provider"]["refresh"], "test-refresh-token");
+    }
+
+    #[test]
+    fn writing_one_provider_preserves_existing_codex_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("auth.json");
+        let codex = OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "codex-access-token".into(),
+            refresh: "codex-refresh-token".into(),
+            expires: 9_999_999_999_999,
+        };
+        let anthropic = OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "anthropic-access-token".into(),
+            refresh: "anthropic-refresh-token".into(),
+            expires: 9_999_999_999_999,
+        };
+
+        with_auth_json_path_env(Some(&override_path), || {
+            write_credentials_with_extra("openai-codex", &codex, Some("acct_preserved"))
+                .expect("write codex auth");
+            write_credentials("anthropic", &anthropic).expect("write anthropic auth");
+
+            let persisted_codex = read_credentials("openai-codex").expect("codex preserved");
+            assert_eq!(persisted_codex.access, "codex-access-token");
+            assert_eq!(persisted_codex.refresh, "codex-refresh-token");
+            assert_eq!(
+                read_credential_extra("openai-codex", "accountId").as_deref(),
+                Some("acct_preserved")
+            );
+        });
+    }
+
+    #[test]
+    fn credential_write_refuses_to_replace_unparsable_auth_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("auth.json");
+        std::fs::write(&override_path, "{not json").unwrap();
+        let creds = OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "new-access-token".into(),
+            refresh: "new-refresh-token".into(),
+            expires: 9_999_999_999_999,
+        };
+
+        with_auth_json_path_env(Some(&override_path), || {
+            let err = write_credentials("anthropic", &creds)
+                .expect_err("malformed existing auth.json must not be replaced");
+            assert!(!err.to_string().is_empty());
+            assert_eq!(
+                std::fs::read_to_string(&override_path).unwrap(),
+                "{not json"
+            );
+        });
     }
 
     #[test]

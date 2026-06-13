@@ -16,12 +16,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-### Fixed
-
-- The TUI footer/model card now renders the model actually served by the runtime bridge when startup installed a fallback bridge (selected provider had no credentials), with a warning line naming the unavailable operator-selected model. Previously the footer showed the profile-selected model (e.g. `gpt-5.5`) even while every request was being served by the fallback provider, making it look like the wrong provider was active.
-
 ### Added
 
+- Trace auth.json provider key-set deltas on credential writes, refreshes, and logout so future OpenAI/Codex credential disappearance incidents identify the mutating operation and whether `openai-codex` was dropped. Auth updates now also refuse to replace an unparsable existing auth store with a partial credential file.
 - Add redacted provider-auth and route-state diagnostic tracing for auth.json path selection, credential source/probe decisions, OAuth refresh/write-back, login outcomes, and fallback/disconnected route causes so relaunch login regressions leave an attributable trail.
 - Rebuild the release binary inside `just link` before selecting the binary to alias so local `omegon --version` cannot point at a stale artifact from an older HEAD.
 - Add peer-agent conversation representation/projection support so delegate/cleave/A2A output can carry producer identity independently from assistant/tool rendering.
@@ -47,6 +44,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Clear the release lint gate by grouping active-tool tail rendering style parameters and keeping the persisted OAuth precedence regression test's process-wide auth environment lock out of async execution.
 - Accept-loop the OAuth callback listener for Anthropic, OpenAI/Codex, and Antigravity logins: browser speculative preconnections, favicon requests, and redirects from stale login tabs no longer abort the login after the operator completed authentication in the browser.
 - Route interactive fallback LLM calls with the fallback bridge model while preserving the selected profile model, preventing OpenAI/Codex startup fallback from sending `gpt-5.5` to Anthropic.
 - Initialize the loop's active-model tracking from the bridge runtime model so TurnEnd events and session-log entries emitted before the first per-turn refresh report the real fallback model instead of the profile model.
@@ -62,6 +60,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Import discovered external provider credentials into Omegon auth storage once at startup so OpenAI/Codex OAuth survives rebuilt binary relinks and subsequent session hydration uses internal auth.json.
 - Adopt valid external provider credentials during startup env hydration when Omegon auth storage is missing or expired, preventing rebuilt sessions from falling back to login-only mode.
 - Prefer refreshable persisted OAuth credentials over hydrated OAuth env vars so stale `CHATGPT_OAUTH_TOKEN` session values cannot shadow `auth.json` refresh for OpenAI/Codex.
+- The TUI footer/model card now renders the model actually served by the runtime bridge when startup installed a fallback bridge (selected provider had no credentials), with a warning line naming the unavailable operator-selected model. Previously the footer showed the profile-selected model (e.g. `gpt-5.5`) even while every request was being served by the fallback provider, making it look like the wrong provider was active.
+
 ## [0.27.0] - 2026-06-11
 
 0.27.0 is a hardening and surface-coherence line. It makes provider/auth routing explicit instead of implicit, gives operators truthful TUI status when credentials or fallbacks are involved, expands the backend capability substrate for future console clients, and continues extracting lifecycle/TUI surfaces behind shared semantic boundaries.
