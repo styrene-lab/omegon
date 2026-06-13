@@ -9616,6 +9616,12 @@ mod slash_command_parsing_tests {
     use crossterm::event::{KeyCode, KeyModifiers};
     use tokio::sync::mpsc;
 
+    impl SlimPlanHintState {
+        fn matches_active_next_visible(self) -> bool {
+            matches!(self, SlimPlanHintState::Active { next_visible: true })
+        }
+    }
+
     // ── Profile ───────────────────────────────────────────
 
     #[test]
@@ -9661,8 +9667,38 @@ mod slash_command_parsing_tests {
         let rows = slim_plan_rows(&snapshot, 40, 4);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
-            vec!["1. done    Step 0", "2. todo    Step 1", "+5 more"]
+            vec!["2. todo    Step 1", "3. todo    Step 2", "+5 more"]
         );
+    }
+
+    #[test]
+    fn slim_plan_overflow_hides_done_before_active_or_todo() {
+        let snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
+            "mode": "executing",
+            "completed": 3,
+            "total": 6,
+            "items": [
+                {"description": "Copy release handoff docs", "status": "done"},
+                {"description": "Normalize changelog", "status": "done"},
+                {"description": "Inspect release state", "status": "done"},
+                {"description": "Record lint blocker", "status": "active"},
+                {"description": "Commit mechanics docs", "status": "todo"},
+                {"description": "Push branch", "status": "todo"}
+            ]
+        }))
+        .unwrap();
+
+        let rows = slim_plan_rows(&snapshot, 80, 4);
+        let text = rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            text,
+            vec![
+                "4. active  Record lint blocker",
+                "5. todo    Commit mechanics docs",
+                "+3 more"
+            ]
+        );
+        assert!(snapshot.hint_state(4).matches_active_next_visible());
     }
 
     #[test]
@@ -9885,9 +9921,7 @@ mod slash_command_parsing_tests {
         );
         assert_eq!(
             snapshot.hint_state(4),
-            SlimPlanHintState::Active {
-                next_visible: false
-            }
+            SlimPlanHintState::Active { next_visible: true }
         );
     }
 
