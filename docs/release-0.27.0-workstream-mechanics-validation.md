@@ -127,12 +127,11 @@ If a remote/published `v0.27.0` tag appears before final release work, do not re
 ## Validation log
 
 - `just test-commit`: **passed**. The changed-path detector found no affected Rust crates for the docs/changelog-only mechanics slice, so cargo tests were skipped.
-- `just lint`: **failed outside this workstream scope**. `cargo fmt --all --check` and `cargo check --workspace` passed, then clippy reported:
-  - `core/crates/omegon/src/tui/active_tool_stream.rs:132`: `clippy::too_many_arguments` on `append_visible_tail`; route to the UI polish workstream.
-  - `core/crates/omegon/src/auth.rs:2498`: `clippy::await_holding_lock` in `resolve_with_refresh_prefers_persisted_oauth_over_oauth_env`; route to the auth-integrity workstream.
+- `just test-rust`: **passed** for the full workspace release test gate.
+- `just lint`: **passed** after clearing the two clippy release-gate blockers: active-tool tail rendering now groups style parameters, and the persisted OAuth precedence regression test keeps its process-wide auth environment lock out of async execution.
 - `just source-clean`: **passed after commit**; source tree clean.
 - `just preflight`: **failed by branch/workspace role policy**, not by release content: current branch is `release/0.27-mechanics-validation`, while preflight only accepts `main` or `release/X.Y`, and this checkout has no release workspace role set. Rerun from `release/0.27`/`main` with release role when cutting.
-- `just link`: **passed**. It rebuilt `target/release/omegon`, linked aliases to that binary, installed bundled skills/catalog, and printed `omegon 0.27.0 (e7234c1 2026-06-13)`.
-- Binary freshness check: **passed** via `target/release/omegon --version` and an interactive shell sourcing `~/.omegon/dev-alias.sh`; both reported `omegon 0.27.0 (e7234c1 2026-06-13)`.
+- `just link`: **passed**. It rebuilt `target/release/omegon`, linked aliases to that binary, installed bundled skills/catalog, and printed `omegon 0.27.0 (8a30d45 2026-06-13)`.
+- Binary freshness check: **passed** via `target/release/omegon --version` and an interactive shell sourcing `~/.omegon/dev-alias.sh`; both reported `omegon 0.27.0 (8a30d45 2026-06-13)`.
 
-Validation status: mechanics normalization and binary freshness are complete. Final release readiness remains blocked on the UI/auth clippy failures or an explicit release-owner waiver, plus rerunning `just preflight` from an accepted release branch/workspace role.
+Validation status: mechanics normalization, lint, focused changed-crate validation, full workspace release tests, and binary freshness are complete. Final release readiness still requires rerunning `just preflight` from an accepted release branch/workspace role.

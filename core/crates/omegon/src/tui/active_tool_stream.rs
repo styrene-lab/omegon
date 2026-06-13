@@ -129,17 +129,21 @@ fn append_tail_line(
     ]));
 }
 
+struct TailRenderStyle {
+    content_form: crate::surfaces::conversation::ContentForm,
+    tail_style: Style,
+    bg: Color,
+}
+
 fn append_visible_tail(
     lines: &mut Vec<Line<'_>>,
     stream: &ActiveToolStream,
     max_tail: usize,
     text_budget: usize,
-    content_form: crate::surfaces::conversation::ContentForm,
-    tail_style: Style,
-    bg: Color,
+    style: TailRenderStyle,
     t: &dyn theme::Theme,
 ) {
-    let prefix = match content_form {
+    let prefix = match style.content_form {
         crate::surfaces::conversation::ContentForm::Log => "│ ",
         crate::surfaces::conversation::ContentForm::Diff => "╎ ",
         crate::surfaces::conversation::ContentForm::Json
@@ -163,8 +167,8 @@ fn append_visible_tail(
                     prefix,
                     &expand_tabs(&plain),
                     text_budget,
-                    tail_style,
-                    bg,
+                    style.tail_style,
+                    style.bg,
                     t,
                 );
             }
@@ -178,8 +182,8 @@ fn append_visible_tail(
             prefix,
             &strip_control_preserving_tabs(line),
             text_budget,
-            tail_style,
-            bg,
+            style.tail_style,
+            style.bg,
             t,
         );
     }
@@ -247,9 +251,11 @@ pub fn render_active_tool_stream_panel(
         stream,
         max_tail,
         text_budget,
-        content_form,
-        tail_style,
-        bg,
+        TailRenderStyle {
+            content_form,
+            tail_style,
+            bg,
+        },
         t,
     );
 

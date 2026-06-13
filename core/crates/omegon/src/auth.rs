@@ -2491,8 +2491,8 @@ mod tests {
         assert_eq!(env_keys[0], "ANTHROPIC_API_KEY");
     }
 
-    #[tokio::test]
-    async fn resolve_with_refresh_prefers_persisted_oauth_over_oauth_env() {
+    #[test]
+    fn resolve_with_refresh_prefers_persisted_oauth_over_oauth_env() {
         let dir = tempfile::tempdir().unwrap();
         let override_path = dir.path().join("auth.json");
         let _guard = TEST_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -2519,7 +2519,11 @@ mod tests {
         )
         .expect("write persisted codex auth");
 
-        let resolved = resolve_with_refresh("openai-codex").await;
+        let resolved = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test runtime")
+            .block_on(resolve_with_refresh("openai-codex"));
 
         unsafe {
             match original_auth {
