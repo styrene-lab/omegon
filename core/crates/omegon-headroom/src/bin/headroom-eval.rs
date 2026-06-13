@@ -337,6 +337,7 @@ fn print_text_report(
         report.evaluated_estimated_tokens_after,
         report.evaluated_token_savings_percent
     );
+    println!("provider: {}", report.compression_provider.id);
     if let Some(gate) = restoration_gate {
         println!(
             "restoration gate: {} (actual {} / max {})",
