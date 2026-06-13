@@ -255,10 +255,11 @@ impl PlanDisplaySnapshot {
         } else {
             max_items
         };
+        let visible = prioritized_plan_item_indices(&self.items, visible_items, hidden > 0);
         self.items
             .iter()
             .position(|item| matches!(item.status, PlanDisplayStatus::Todo))
-            .is_some_and(|idx| idx < visible_items)
+            .is_some_and(|idx| visible.contains(&idx))
     }
 }
 
@@ -289,9 +290,12 @@ pub fn slim_plan_rows(
     } else {
         max_items
     };
+    let visible = prioritized_plan_item_indices(&snapshot.items, visible_items, hidden > 0);
+    let hidden_count = snapshot.items.len().saturating_sub(visible.len());
     let text_budget = width.saturating_sub(2) as usize;
     let mut rows = Vec::new();
-    for (idx, item) in snapshot.items.iter().take(visible_items).enumerate() {
+    for idx in visible {
+        let item = &snapshot.items[idx];
         let label = item.status.label();
         let line = format!("{}. {label:<7} {}", idx + 1, item.description);
         rows.push(PlanDisplayRow {
@@ -299,13 +303,46 @@ pub fn slim_plan_rows(
             status: Some(item.status),
         });
     }
-    if hidden > 0 {
+    if hidden_count > 0 {
         rows.push(PlanDisplayRow {
-            text: format!("+{hidden} more"),
+            text: format!("+{hidden_count} more"),
             status: None,
         });
     }
     rows
+}
+
+fn prioritized_plan_item_indices(
+    items: &[PlanDisplayItem],
+    visible_items: usize,
+    overflowing: bool,
+) -> Vec<usize> {
+    if visible_items == 0 {
+        return Vec::new();
+    }
+    if !overflowing {
+        return (0..items.len().min(visible_items)).collect();
+    }
+
+    let mut selected = Vec::new();
+    for status in [
+        PlanDisplayStatus::Active,
+        PlanDisplayStatus::Todo,
+        PlanDisplayStatus::Skipped,
+        PlanDisplayStatus::Done,
+    ] {
+        for (idx, item) in items.iter().enumerate() {
+            if item.status == status && !selected.contains(&idx) {
+                selected.push(idx);
+                if selected.len() == visible_items {
+                    selected.sort_unstable();
+                    return selected;
+                }
+            }
+        }
+    }
+    selected.sort_unstable();
+    selected
 }
 
 fn legacy_plan_item(raw: &str) -> Option<(String, PlanDisplayStatus)> {
