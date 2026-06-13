@@ -83,9 +83,23 @@ impl BM25Index {
     }
 
     pub fn search(&self, query: &str, scope: SearchScope, max_results: usize) -> Vec<SearchChunk> {
+        self.search_with_cancel(query, scope, max_results, || false)
+            .unwrap_or_default()
+    }
+
+    pub fn search_with_cancel(
+        &self,
+        query: &str,
+        scope: SearchScope,
+        max_results: usize,
+        is_cancelled: impl Fn() -> bool,
+    ) -> anyhow::Result<Vec<SearchChunk>> {
+        if is_cancelled() {
+            anyhow::bail!("codebase search cancelled");
+        }
         let qtoks = tokenize(query);
         if qtoks.is_empty() {
-            return vec![];
+            return Ok(vec![]);
         }
         let mut results = Vec::new();
 
@@ -104,6 +118,9 @@ impl BM25Index {
                         preview: trunc(&chunk.text, 1000),
                         label: format!("{}::{}", chunk.item_kind, chunk.item_name),
                     });
+                }
+                if is_cancelled() {
+                    anyhow::bail!("codebase search cancelled");
                 }
             }
         }
@@ -124,6 +141,9 @@ impl BM25Index {
                         label: chunk.heading.clone(),
                     });
                 }
+                if is_cancelled() {
+                    anyhow::bail!("codebase search cancelled");
+                }
             }
         }
 
@@ -133,7 +153,7 @@ impl BM25Index {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         results.truncate(max_results);
-        results
+        Ok(results)
     }
 }
 

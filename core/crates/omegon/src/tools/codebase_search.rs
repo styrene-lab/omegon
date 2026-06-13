@@ -1,6 +1,6 @@
 //! codebase_search and codebase_index tools backed by omegon-codescan.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -48,12 +48,49 @@ impl CodescanProvider {
         f(guard.as_mut().unwrap())
     }
 
-    fn execute_search(&self, args: &Value) -> anyhow::Result<ToolResult> {
+    fn resolve_within(&self, args: &Value) -> anyhow::Result<Option<PathBuf>> {
+        let Some(raw) = args["within"].as_str() else {
+            return Ok(None);
+        };
+        let rel = Path::new(raw);
+        if raw.trim().is_empty()
+            || rel.is_absolute()
+            || rel
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            anyhow::bail!("within must be a non-empty repo-relative path inside the repository");
+        }
+        let root = self
+            .repo_path
+            .canonicalize()
+            .unwrap_or_else(|_| self.repo_path.clone());
+        let candidate = root.join(rel);
+        let resolved = candidate.canonicalize().unwrap_or(candidate);
+        if !resolved.starts_with(&root) {
+            anyhow::bail!("within must resolve inside the repository");
+        }
+        Ok(Some(rel.to_path_buf()))
+    }
+
+    fn path_in_within(path: &Path, within: Option<&Path>) -> bool {
+        within.is_none_or(|within| path.starts_with(within))
+    }
+
+    fn execute_search(
+        &self,
+        args: &Value,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<ToolResult> {
         let query = args["query"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("query required"))?;
         let scope_str = args["scope"].as_str().unwrap_or("all");
         let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
+        let within = self.resolve_within(args)?;
+        if cancel.is_cancelled() {
+            anyhow::bail!("codebase search cancelled");
+        }
         let tag_filter: Vec<String> = args["tags"]
             .as_array()
             .map(|a| {
@@ -66,23 +103,38 @@ impl CodescanProvider {
         let scope = SearchScope::parse(scope_str);
 
         let (code_chunks, mut knowledge_chunks) = self.with_cache(|cache| {
-            Indexer::run(&self.repo_path, cache)?;
+            Indexer::run_with_cancel(&self.repo_path, cache, || cancel.is_cancelled())?;
             Ok((cache.all_code_chunks()?, cache.all_knowledge_chunks()?))
         })?;
+
+        let code_chunks: Vec<_> = code_chunks
+            .into_iter()
+            .filter(|c| Self::path_in_within(&c.path, within.as_deref()))
+            .collect();
+        knowledge_chunks.retain(|c| Self::path_in_within(&c.path, within.as_deref()));
 
         if !tag_filter.is_empty() {
             knowledge_chunks.retain(|c| tag_filter.iter().any(|t| c.tags.contains(t)));
         }
 
         let idx = BM25Index::build(&code_chunks, &knowledge_chunks);
-        let results = idx.search(query, scope, max_results);
+        let results =
+            idx.search_with_cancel(query, scope, max_results, || cancel.is_cancelled())?;
 
         if results.is_empty() {
             return Ok(ToolResult {
                 content: vec![ContentBlock::Text {
-                    text: format!("No results for `{}` (scope: {}).", query, scope_str),
+                    text: format!(
+                        "No results for `{}` (scope: {}, within: {}).",
+                        query,
+                        scope_str,
+                        within
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| ".".into())
+                    ),
                 }],
-                details: json!({"results": [], "query": query}),
+                details: json!({"results": [], "query": query, "scope": scope_str, "within": within.as_ref().map(|p| p.display().to_string()), "root": self.repo_path.display().to_string()}),
             });
         }
 
@@ -134,6 +186,10 @@ impl CodescanProvider {
             details: json!({
                 "query": query,
                 "scope": scope_str,
+                "within": within.as_ref().map(|p| p.display().to_string()),
+                "root": self.repo_path.display().to_string(),
+                "indexed_code_chunks": code_chunks.len(),
+                "indexed_knowledge_chunks": knowledge_chunks.len(),
                 "results": results.iter().map(|r| json!({
                     "file": r.file,
                     "start_line": r.start_line,
@@ -147,7 +203,11 @@ impl CodescanProvider {
         })
     }
 
-    fn execute_index(&self, args: &Value) -> anyhow::Result<ToolResult> {
+    fn execute_index(
+        &self,
+        args: &Value,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<ToolResult> {
         let invalidate = args["invalidate"].as_bool().unwrap_or(false);
         let stats = self.with_cache(|cache| {
             if invalidate {
@@ -155,7 +215,7 @@ impl CodescanProvider {
                 // Also clear HEAD so fast-path doesn't short-circuit after clear
                 let _ = cache.set_meta("last_head", "");
             }
-            Indexer::run(&self.repo_path, cache)
+            Indexer::run_with_cancel(&self.repo_path, cache, || cancel.is_cancelled())
         })?;
         let text = format!(
             "## codebase_index\n\n**Status:** {}\n\n\
@@ -254,7 +314,8 @@ impl ToolProvider for CodescanProvider {
                         "query": { "type": "string", "description": "Search query — concept, function name, design topic, etc." },
                         "scope": { "type": "string", "enum": ["all", "code", "knowledge"], "description": "Search scope (default: all)" },
                         "max_results": { "type": "number", "description": "Max results (default 10)" },
-                        "tags": { "type": "array", "items": {"type": "string"}, "description": "Filter knowledge chunks by frontmatter tags" }
+                        "tags": { "type": "array", "items": {"type": "string"}, "description": "Filter knowledge chunks by frontmatter tags" },
+                        "within": { "type": "string", "description": "Repo-relative path prefix to limit returned code and knowledge results. Must stay inside the repository." }
                     },
                     "required": ["query"]
                 }),
@@ -286,11 +347,11 @@ impl ToolProvider for CodescanProvider {
         tool_name: &str,
         _call_id: &str,
         args: Value,
-        _cancel: CancellationToken,
+        cancel: CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
-            crate::tool_registry::codescan::CODEBASE_SEARCH => self.execute_search(&args),
-            crate::tool_registry::codescan::CODEBASE_INDEX => self.execute_index(&args),
+            crate::tool_registry::codescan::CODEBASE_SEARCH => self.execute_search(&args, &cancel),
+            crate::tool_registry::codescan::CODEBASE_INDEX => self.execute_index(&args, &cancel),
             _ => anyhow::bail!("Unknown codescan tool: {tool_name}"),
         }
     }
@@ -357,5 +418,71 @@ mod tests {
             _ => panic!(),
         };
         assert!(text.contains("No results"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn execute_search_within_filters_results() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("alpha")).unwrap();
+        std::fs::create_dir_all(dir.path().join("beta")).unwrap();
+        std::fs::write(
+            dir.path().join("alpha/Needle.java"),
+            "public class Needle { public void alphaNeedle() {} }",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("beta/Needle.java"),
+            "public class Needle { public void betaNeedle() {} }",
+        )
+        .unwrap();
+
+        let p = CodescanProvider::new(dir.path().to_path_buf());
+        let result = p
+            .execute(
+                "codebase_search",
+                "tc",
+                json!({"query": "Needle", "within": "alpha", "max_results": 10}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let files = result.details["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["file"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert!(!files.is_empty(), "expected scoped results: {result:?}");
+        assert!(files.iter().all(|f| f.starts_with("alpha/")), "{files:?}");
+        assert_eq!(result.details["within"], "alpha");
+    }
+
+    #[tokio::test]
+    async fn execute_search_rejects_within_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = CodescanProvider::new(dir.path().to_path_buf());
+        let err = p
+            .execute(
+                "codebase_search",
+                "tc",
+                json!({"query": "x", "within": "../outside"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("within must"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn execute_search_respects_pre_cancelled_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = CodescanProvider::new(dir.path().to_path_buf());
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let err = p
+            .execute("codebase_search", "tc", json!({"query": "x"}), cancel)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("cancelled"), "{err}");
     }
 }

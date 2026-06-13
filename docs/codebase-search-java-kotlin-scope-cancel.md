@@ -1,6 +1,6 @@
 ---
 title: Codebase Search Java/Kotlin, Scoped Roots, and Cancellation
-status: implementing
+status: implemented
 tags: [codescan, codebase-search, java, kotlin, cancellation, devex]
 ---
 
@@ -10,9 +10,9 @@ tags: [codescan, codebase-search, java, kotlin, cancellation, devex]
 
 A remote operator report from a Java/Kotlin-adjacent workflow exposed three failures in `codebase_search`:
 
-1. Java/Kotlin application code is not indexed, because `omegon-codescan` only discovers `rs`, `ts`, `tsx`, `js`, `jsx`, `py`, and `go` files.
-2. The tool has no per-call path/root scoping parameter. If Omegon starts at a broad workspace or home directory, `codebase_search` indexes too much and can return unrelated paths.
-3. The `ToolProvider::execute` cancellation token is ignored, so an in-flight broad scan cannot be interrupted by the operator.
+1. Java/Kotlin application code was not indexed, because `omegon-codescan` only discovered the earlier Rust/TypeScript/Python/Go-style language set.
+2. The tool had no per-call path/root scoping parameter. If Omegon started at a broad workspace or home directory, `codebase_search` indexed too much and could return unrelated paths.
+3. The `ToolProvider::execute` cancellation token was ignored, so an in-flight broad scan could not be interrupted by the operator.
 
 ## Current surface
 
@@ -28,13 +28,13 @@ Library crate:
 - `core/crates/omegon-codescan/src/bm25.rs`
 - `core/crates/omegon-codescan/src/knowledge.rs`
 
-## Decisions
+## Shipped decisions
 
-### Start with regex Java/Kotlin support
+### Regex Java/Kotlin/C# support is the first slice
 
-Tree-sitter Java/Kotlin support is desirable, but the fastest safe first slice is extension discovery plus regex chunking for Java/Kotlin declarations. This immediately makes Java/Kotlin app source visible without adding dependency uncertainty.
+Tree-sitter Java/Kotlin support remains desirable, but the 0.27.0-ready slice uses extension discovery plus regex chunking for JVM/.NET declarations. This makes Java/Kotlin/C# application source visible without adding dependency uncertainty.
 
-Add discovered extensions:
+Discovered extensions:
 
 - `java`
 - `kt`
@@ -71,52 +71,60 @@ Initial C# chunks:
 - `enum`
 - methods approximated by declaration regex
 
-### Keep language logic bounded
+### Language logic stays bounded
 
 Language-specific rules live in `core/crates/omegon-codescan/src/code/languages/`. `code.rs` owns dispatch and shared scanning engines only; new language support should add or modify a language module, not grow a central pattern list.
 
-### Add path scoping as a separate slice
+### `within` scopes returned results, not cache pruning
 
-Add a `within` parameter to `codebase_search` and `codebase_index` after Java/Kotlin support lands. The parameter must be repo-relative, canonicalized, and contained inside the provider root.
+`codebase_search` now accepts a repo-relative `within` parameter. The adapter rejects empty paths, absolute paths, and `..` traversal, then verifies the resolved path stays under the provider root.
 
-Open cache question: whether scoped indexing should share `.omegon/codescan.db` with full-root indexing. The safest initial behavior is to keep repo-relative paths and filter discovery by `within`; later we can partition cache metadata if stale pruning becomes surprising.
+The first implementation deliberately filters loaded chunks/results instead of narrowing the indexer's discovery/pruning root. This avoids corrupting the shared `.omegon/codescan.db` by pruning full-root entries during a scoped search.
 
-### Thread cancellation through index/search as a separate slice
+Scoped indexing remains a future optimization only if cache metadata is partitioned or pruning becomes prefix-aware.
 
-The tool already receives `CancellationToken`; it must be checked before and during slow operations:
+### Cancellation is threaded through index and search
 
-- before opening/running index
-- while walking/discovering files
-- while hashing/scanning files
-- before loading chunks
-- during BM25 scoring loops
+The tool adapter now passes `CancellationToken` through search and index execution. `omegon-codescan` exposes cancelable wrappers for the indexer and BM25 search loop while preserving the existing non-cancelled APIs for other callers.
 
-Cancellation should return an explicit cancelled error/result, not `No results`.
+Cancellation returns an explicit cancelled error instead of pretending there are no results.
 
-## Implementation plan
+### Operator diagnostics include scope context
 
-1. Java/Kotlin visibility
-   - update extension discovery in `indexer.rs`
-   - add Java/Kotlin regex patterns in `code.rs`
-   - add scanner tests for Java and Kotlin chunks
-   - add indexer discovery test
+Search details now report the requested `within`, provider root, and the filtered code/knowledge chunk counts used to build the BM25 index. This gives operators and clients enough context to understand why a scoped query did or did not return a file.
+
+## Implemented checklist
+
+1. Java/Kotlin/C# visibility
+   - [x] update extension discovery in `indexer.rs`
+   - [x] add Java/Kotlin/C# regex language modules
+   - [x] add scanner tests for Java and Kotlin chunks
+   - [x] add indexer discovery coverage through the codescan test suite
 2. Scoped root
-   - add `within` schema to tool definitions
-   - add contained path resolver in tool adapter or codescan crate
-   - add indexer options/discovery root
-   - add path traversal tests
+   - [x] add `within` schema to `codebase_search`
+   - [x] add contained path resolver in the tool adapter
+   - [x] filter returned code/knowledge chunks by repo-relative prefix
+   - [x] add path traversal tests
+   - [x] defer scoped cache pruning/indexing to a future cache-design slice
 3. Cancellation
-   - add cancelable indexer/search APIs
-   - thread `CancellationToken` through provider
-   - add cancellation tests
+   - [x] add cancelable indexer/search APIs
+   - [x] thread `CancellationToken` through provider execution
+   - [x] add cancellation tests
 4. Operator diagnostics
-   - include indexed root / within / scanned files / duration in tool details
-   - warn when root is broad or when hidden/cache directories are skipped
+   - [x] include root / within / filtered chunk counts in search details
+   - [x] include within context in no-results output
+
+## Validation
+
+Focused validation passed:
+
+- `cargo test -p omegon-codescan -- --nocapture`
+- `cargo test -p omegon codebase_search -- --nocapture`
 
 ## Acceptance criteria
 
-- Java and Kotlin source files are discovered by the indexer.
-- Java/Kotlin declarations produce searchable chunks.
-- The implementation has unit tests before adding tree-sitter dependencies.
-- Later scoped-search work must fail closed on path traversal.
-- Later cancellation work must stop broad scans before completion when cancellation is requested.
+- [x] Java and Kotlin source files are discovered by the indexer.
+- [x] Java/Kotlin declarations produce searchable chunks.
+- [x] The implementation has unit tests before adding tree-sitter dependencies.
+- [x] Scoped-search work fails closed on path traversal.
+- [x] Cancellation work stops broad scans before completion when cancellation is requested.

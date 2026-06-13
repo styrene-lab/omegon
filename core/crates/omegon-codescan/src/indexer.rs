@@ -28,7 +28,18 @@ pub struct Indexer;
 
 impl Indexer {
     pub fn run(repo_path: &Path, cache: &mut ScanCache) -> Result<IndexStats> {
+        Self::run_with_cancel(repo_path, cache, || false)
+    }
+
+    pub fn run_with_cancel(
+        repo_path: &Path,
+        cache: &mut ScanCache,
+        is_cancelled: impl Fn() -> bool,
+    ) -> Result<IndexStats> {
         let started = Instant::now();
+        if is_cancelled() {
+            anyhow::bail!("codebase index cancelled");
+        }
 
         // ── Fast path: skip file walk if HEAD hasn't changed and the working tree
         // has no relevant dirty files that could make cached chunks stale.
@@ -54,7 +65,13 @@ impl Indexer {
 
         // ── Slow path: walk, hash, diff, re-scan stale files ─────────────
         let code_files = discover_code_files(repo_path);
+        if is_cancelled() {
+            anyhow::bail!("codebase index cancelled");
+        }
         let knowledge_files = discover_knowledge_files(repo_path, &KnowledgeDirs::default());
+        if is_cancelled() {
+            anyhow::bail!("codebase index cancelled");
+        }
 
         // Compute content hashes
         let code_hashes: Vec<(PathBuf, String)> = code_files
@@ -78,6 +95,9 @@ impl Indexer {
         cache.prune_missing_paths(&live_paths)?;
 
         for (path, hash) in &code_hashes {
+            if is_cancelled() {
+                anyhow::bail!("codebase index cancelled");
+            }
             if !stale.contains(path) {
                 continue;
             }
