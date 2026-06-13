@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add a token-counter abstraction and `headroom-eval --token-counter bytes_div_4` so native headroom savings measurement has an explicit provider seam before future tokenizer integrations.
 - Add native compression-provider metadata to headroom outputs and eval reports so the deterministic built-in provider is machine-visible before future Kompressor/Ollama providers.
 - Add CLI regression coverage for `headroom-eval --provider native_deterministic` and unknown-provider failures, and show provider identity in text eval output.
+- Add `--headroom-ab-real` to the benchmark harness so paired headroom off/on runs can execute the real Omegon adapter and emit the same A/B summary contract as smoke mode.
 - Add manual native headroom tools (`headroom_compress`, `headroom_retrieve`, `headroom_stats`) for opt-in CCR dogfooding before automatic context integration.
 - Add experimental `read` integration for native headroom compression in opt-in `mode=on`, sharing CCR retrieval storage with `headroom_retrieve`.
 - Prioritize protected-anchor retention in native headroom compression so dogfood-critical test names, CLI flags, and headroom retrieval/tool tokens survive raw compression without evaluator repair.

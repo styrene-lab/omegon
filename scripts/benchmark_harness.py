@@ -121,6 +121,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--slim", action="store_true", help="Enable Omegon slim mode for this run")
     parser.add_argument("--headroom-smoke", action="store_true", help="Validate headroom benchmark env/eval plumbing without running an agent")
     parser.add_argument("--headroom-ab", action="store_true", help="Run paired headroom off/on benchmark variants")
+    parser.add_argument("--headroom-ab-real", action="store_true", help="Run paired headroom off/on benchmark variants with the real harness adapter")
     parser.add_argument(
         "--headroom-ab-report",
         nargs="+",
@@ -2285,6 +2286,148 @@ def run_report_mode(paths: list[str], baseline_paths: list[str] | None = None) -
         return 1
 
 
+
+def run_benchmark_cell(
+    *,
+    root: Path,
+    spec: TaskSpec,
+    harness: str,
+    model: str | None,
+    slim: bool,
+    repo_path: Path,
+    out_dir: Path,
+) -> tuple[Path, dict[str, Any]]:
+    audit(
+        "benchmark start: "
+        f"task={spec.id} harness={harness} model={model or 'default'} slim={slim} "
+        f"repo={repo_path} out_dir={out_dir}"
+    )
+    clean_repo_path = prepare_clean_repo(repo_path, spec.base_ref)
+    adapter: AdapterResult | None = None
+    try:
+        adapter_impl = adapter_for(harness, repo_path, spec, model, clean_repo_path, slim)
+        adapter_impl.validate_environment()
+        run_started = time.monotonic()
+        adapter = adapter_impl.run()
+
+        process_env = benchmark_process_env(repo_path, clean_repo_path, harness, spec.id, spec)
+        acceptance_status, acceptance_elapsed, acceptance_results = run_acceptance(
+            spec.acceptance,
+            clean_repo_path,
+            env=process_env,
+        )
+        optional_elapsed, optional_results = run_optional_acceptance(
+            spec.acceptance_optional,
+            clean_repo_path,
+            env=process_env,
+        )
+        failure_if_triggered, failure_if_elapsed, failure_if_results = run_failure_if(
+            spec.acceptance_failure_if,
+            clean_repo_path,
+            env=process_env,
+        )
+        headroom_eval = run_headroom_eval(root, spec, out_dir)
+        payload = build_result(
+            spec=spec,
+            harness=harness,
+            slim=slim,
+            adapter=adapter,
+            acceptance_status=acceptance_status,
+            acceptance_results=acceptance_results,
+            optional_results=optional_results,
+            failure_if_results=failure_if_results,
+            failure_if_triggered=failure_if_triggered,
+            headroom_eval=headroom_eval,
+            wall_clock_sec=time.monotonic() - run_started,
+        )
+        payload.setdefault("timing", {})
+        payload["timing"] = {
+            "acceptance_wall_clock_sec": round(acceptance_elapsed, 3),
+            "acceptance_optional_wall_clock_sec": round(optional_elapsed, 3),
+            "acceptance_failure_if_wall_clock_sec": round(failure_if_elapsed, 3),
+        }
+        payload["headroom_runtime_env"] = headroom_env_from_spec(spec)
+        result_path = write_result(out_dir, spec, harness, slim, payload)
+        audit(
+            "benchmark done: "
+            f"task={spec.id} harness={harness} status={payload.get('status')} "
+            f"wall={payload.get('wall_clock_sec')}s result={result_path}"
+        )
+        return result_path, payload
+    finally:
+        if not should_preserve_benchmark_tempfiles():
+            cleanup_targets: list[Path] = [clean_repo_path]
+            if adapter is not None and adapter.log_path is not None:
+                cleanup_targets.append(adapter.log_path)
+            usage_json_path = (adapter.extra or {}).get("usage_json_path") if adapter is not None else None
+            if isinstance(usage_json_path, str) and usage_json_path:
+                cleanup_targets.append(Path(usage_json_path))
+            cleanup_benchmark_tempfiles(cleanup_targets)
+
+
+def run_headroom_ab_real(
+    *,
+    root: Path,
+    spec: TaskSpec,
+    harness: str,
+    model: str | None,
+    slim: bool,
+    repo_path: Path,
+    out_dir: Path,
+) -> Path:
+    on_headroom = dict(spec.headroom or {})
+    off_headroom = dict(on_headroom)
+    off_headroom["mode"] = "off"
+    off_headroom["enabled"] = False
+    off_headroom["run_eval"] = False
+    on_headroom.setdefault("mode", "on")
+    on_headroom.setdefault("enabled", True)
+    off_spec = clone_task_spec_with_headroom(spec, off_headroom)
+    on_spec = clone_task_spec_with_headroom(spec, on_headroom)
+
+    off_path, off_payload = run_benchmark_cell(
+        root=root,
+        spec=off_spec,
+        harness=harness,
+        model=model,
+        slim=slim,
+        repo_path=repo_path,
+        out_dir=out_dir,
+    )
+    on_path, on_payload = run_benchmark_cell(
+        root=root,
+        spec=on_spec,
+        harness=harness,
+        model=model,
+        slim=slim,
+        repo_path=repo_path,
+        out_dir=out_dir,
+    )
+    off_summary = summarize_headroom_ab_payload(off_payload)
+    on_summary = summarize_headroom_ab_payload(on_payload)
+    expectations = evaluate_headroom_ab_expectations(spec, on_summary)
+    summary_status = (
+        "pass"
+        if off_payload.get("status") == "pass"
+        and on_payload.get("status") == "pass"
+        and expectations.get("passed") is True
+        else "fail"
+    )
+    summary = {
+        "task_id": spec.id,
+        "mode": "headroom-ab-real",
+        "status": summary_status,
+        "off_result": str(off_path),
+        "on_result": str(on_path),
+        "off": off_summary,
+        "on": on_summary,
+        "expectations": expectations,
+    }
+    out_path = out_dir / f"{_sanitize_filename_component(spec.id)}-headroom-ab-real.json"
+    out_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    audit(f"headroom A/B real done: task={spec.id} status={summary_status} result={out_path}")
+    return out_path
+
 def main() -> int:
     try:
         sys.stderr.reconfigure(line_buffering=True)
@@ -2337,74 +2480,41 @@ def main() -> int:
             return 1
         print(path)
         return 0
-    audit(
-        "benchmark start: "
-        f"task={spec.id} harness={harness} model={model or 'default'} slim={slim} "
-        f"repo={repo_path} out_dir={out_dir}"
-    )
-    clean_repo_path = prepare_clean_repo(repo_path, spec.base_ref)
+    if args.headroom_ab_real:
+        try:
+            path = run_headroom_ab_real(
+                root=root,
+                spec=spec,
+                harness=harness,
+                model=model,
+                slim=slim,
+                repo_path=repo_path,
+                out_dir=out_dir,
+            )
+        except TaskSpecError as err:
+            print(str(err), file=sys.stderr)
+            return 1
+        except AdapterError as err:
+            print(str(err), file=sys.stderr)
+            return 2
+        print(path)
+        summary = load_result(path)
+        return 0 if summary.get("status") == "pass" else 3
 
     try:
-        adapter_impl = adapter_for(harness, repo_path, spec, model, clean_repo_path, slim)
-        adapter_impl.validate_environment()
+        result_path, payload = run_benchmark_cell(
+            root=root,
+            spec=spec,
+            harness=harness,
+            model=model,
+            slim=slim,
+            repo_path=repo_path,
+            out_dir=out_dir,
+        )
     except (TaskSpecError, AdapterError) as err:
         print(str(err), file=sys.stderr)
         return 2
-
-    run_started = time.monotonic()
-    adapter = adapter_impl.run()
-
-    process_env = benchmark_process_env(repo_path, clean_repo_path, harness, spec.id, spec)
-    acceptance_status, acceptance_elapsed, acceptance_results = run_acceptance(
-        spec.acceptance,
-        clean_repo_path,
-        env=process_env,
-    )
-    optional_elapsed, optional_results = run_optional_acceptance(
-        spec.acceptance_optional,
-        clean_repo_path,
-        env=process_env,
-    )
-    failure_if_triggered, failure_if_elapsed, failure_if_results = run_failure_if(
-        spec.acceptance_failure_if,
-        clean_repo_path,
-        env=process_env,
-    )
-    headroom_eval = run_headroom_eval(root, spec, out_dir)
-    payload = build_result(
-        spec=spec,
-        harness=harness,
-        slim=slim,
-        adapter=adapter,
-        acceptance_status=acceptance_status,
-        acceptance_results=acceptance_results,
-        optional_results=optional_results,
-        failure_if_results=failure_if_results,
-        failure_if_triggered=failure_if_triggered,
-        headroom_eval=headroom_eval,
-        wall_clock_sec=time.monotonic() - run_started,
-    )
-    payload.setdefault("timing", {})
-    payload["timing"] = {
-        "acceptance_wall_clock_sec": round(acceptance_elapsed, 3),
-        "acceptance_optional_wall_clock_sec": round(optional_elapsed, 3),
-        "acceptance_failure_if_wall_clock_sec": round(failure_if_elapsed, 3),
-    }
-    result_path = write_result(out_dir, spec, harness, slim, payload)
-    audit(
-        "benchmark done: "
-        f"task={spec.id} harness={harness} status={payload.get('status')} "
-        f"wall={payload.get('wall_clock_sec')}s result={result_path}"
-    )
     print(result_path)
-    if not should_preserve_benchmark_tempfiles():
-        cleanup_targets = [clean_repo_path]
-        if adapter.log_path is not None:
-            cleanup_targets.append(adapter.log_path)
-        usage_json_path = (adapter.extra or {}).get("usage_json_path")
-        if isinstance(usage_json_path, str) and usage_json_path:
-            cleanup_targets.append(Path(usage_json_path))
-        cleanup_benchmark_tempfiles(cleanup_targets)
     return 0 if payload.get("status") == "pass" else 3
 
 
