@@ -31,5 +31,8 @@ headroom:
   refresh_fixtures: auto
   max_restored_facts: 0
   token_counter: bytes_div_4
+  expect_eval_status: pass
+  expect_restored_facts_max: 0
+  expect_min_savings_percent: 80
 notes: |
   Evidence-gathering benchmark for markdown compression and decision retention.

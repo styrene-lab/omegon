@@ -1715,6 +1715,46 @@ def clone_task_spec_with_headroom(spec: TaskSpec, headroom: dict[str, Any]) -> T
     )
 
 
+
+def evaluate_headroom_ab_expectations(spec: TaskSpec, on_summary: dict[str, Any]) -> dict[str, Any]:
+    config = spec.headroom or {}
+    failures: list[str] = []
+    expected_status = config.get("expect_eval_status")
+    if expected_status is not None:
+        if not isinstance(expected_status, str):
+            raise TaskSpecError("headroom.expect_eval_status must be a string")
+        actual_status = on_summary.get("headroom_eval_status")
+        if actual_status != expected_status:
+            failures.append(f"expected eval status {expected_status}, got {actual_status}")
+
+    restored_max = config.get("expect_restored_facts_max")
+    if restored_max is not None:
+        if not isinstance(restored_max, int) or isinstance(restored_max, bool) or restored_max < 0:
+            raise TaskSpecError("headroom.expect_restored_facts_max must be a non-negative integer")
+        actual_restored = on_summary.get("headroom_restored_fact_count")
+        if not isinstance(actual_restored, int):
+            failures.append(f"expected restored facts <= {restored_max}, got unavailable")
+        elif actual_restored > restored_max:
+            failures.append(f"expected restored facts <= {restored_max}, got {actual_restored}")
+
+    min_savings = config.get("expect_min_savings_percent")
+    if min_savings is not None:
+        if not isinstance(min_savings, int) or isinstance(min_savings, bool) or min_savings < 0:
+            raise TaskSpecError("headroom.expect_min_savings_percent must be a non-negative integer")
+        actual_savings = on_summary.get("headroom_savings_percent")
+        if not isinstance(actual_savings, int):
+            failures.append(f"expected savings >= {min_savings}%, got unavailable")
+        elif actual_savings < min_savings:
+            failures.append(f"expected savings >= {min_savings}%, got {actual_savings}%")
+
+    return {
+        "passed": not failures,
+        "failures": failures,
+        "expected_eval_status": expected_status,
+        "expected_restored_facts_max": restored_max,
+        "expected_min_savings_percent": min_savings,
+    }
+
 def run_headroom_ab_smoke(root: Path, spec: TaskSpec, out_dir: Path) -> Path:
     on_headroom = dict(spec.headroom or {})
     off_headroom = dict(on_headroom)
@@ -1727,14 +1767,25 @@ def run_headroom_ab_smoke(root: Path, spec: TaskSpec, out_dir: Path) -> Path:
     on_path = run_headroom_smoke(root, on_spec, out_dir, label="headroom-ab-on-smoke")
     off_payload = load_result(off_path)
     on_payload = load_result(on_path)
+    off_summary = summarize_headroom_ab_payload(off_payload)
+    on_summary = summarize_headroom_ab_payload(on_payload)
+    expectations = evaluate_headroom_ab_expectations(spec, on_summary)
+    summary_status = (
+        "pass"
+        if off_payload.get("status") == "pass"
+        and on_payload.get("status") == "pass"
+        and expectations.get("passed") is True
+        else "fail"
+    )
     summary = {
         "task_id": spec.id,
         "mode": "headroom-ab-smoke",
-        "status": "pass" if off_payload.get("status") == "pass" and on_payload.get("status") == "pass" else "fail",
+        "status": summary_status,
         "off_result": str(off_path),
         "on_result": str(on_path),
-        "off": summarize_headroom_ab_payload(off_payload),
-        "on": summarize_headroom_ab_payload(on_payload),
+        "off": off_summary,
+        "on": on_summary,
+        "expectations": expectations,
     }
     out_path = out_dir / f"{_sanitize_filename_component(spec.id)}-headroom-ab-smoke.json"
     out_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
