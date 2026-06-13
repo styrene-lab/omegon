@@ -806,7 +806,12 @@ stack [REDACTED]"
         assert_eq!(dto.role, "peer_agent");
         assert!(!dto.complete);
         match dto.kind {
-            AcpConversationSegmentKind::PeerAgent { label, source, status, text } => {
+            AcpConversationSegmentKind::PeerAgent {
+                label,
+                source,
+                status,
+                text,
+            } => {
                 assert_eq!(label, "scout [REDACTED]");
                 assert_eq!(source, "delegate");
                 assert_eq!(status, "running");
