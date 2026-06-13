@@ -6,7 +6,7 @@
 use chrono::{DateTime, Utc};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::model_catalog::ModelCatalog;
 use super::theme::Theme;
@@ -238,10 +238,23 @@ impl FooterData {
             .find(|p| p.name.eq_ignore_ascii_case(&self.model_provider));
 
         if !self.provider_connected {
+            let provider_label = crate::auth::provider_by_id(&self.model_provider)
+                .map(|p| p.display_name)
+                .unwrap_or(self.model_provider.as_str());
+            let status_text = if self.model_provider.trim().is_empty() {
+                "⚠ provider login required".to_string()
+            } else {
+                format!("⚠ {provider_label} login required")
+            };
+            let action_text = if self.model_provider.trim().is_empty() {
+                "/login <provider>".to_string()
+            } else {
+                format!("/login {}", self.model_provider)
+            };
             push_row(
                 &mut lines,
                 "status",
-                "⚠ no provider".to_string(),
+                status_text,
                 value_width,
                 t.border_dim(),
                 t.warning(),
@@ -250,7 +263,7 @@ impl FooterData {
             push_row(
                 &mut lines,
                 "action",
-                "/login to connect".to_string(),
+                action_text,
                 value_width,
                 t.border_dim(),
                 t.muted(),
@@ -331,6 +344,35 @@ impl FooterData {
         frame.render_widget(Clear, inner);
         let widget = Paragraph::new(lines).style(Style::default().bg(bg));
         frame.render_widget(widget, inner);
+    }
+
+    fn engine_flex_row(
+        label: &str,
+        value: String,
+        row_width: usize,
+        label_width: usize,
+        value_max_width: usize,
+        label_color: Color,
+        value_color: Color,
+        value_bold: bool,
+    ) -> Line<'static> {
+        let label_text = format!(" {:<width$} ", label, width = label_width);
+        let label_display_width = UnicodeWidthStr::width(label_text.as_str());
+        let value_budget = value_max_width.min(row_width.saturating_sub(label_display_width + 1));
+        let value_text = truncate_for_width(&value, value_budget);
+        let value_display_width = UnicodeWidthStr::width(value_text.as_str());
+        let spacer_width = row_width.saturating_sub(label_display_width + value_display_width);
+
+        let mut value_style = Style::default().fg(value_color);
+        if value_bold {
+            value_style = value_style.add_modifier(Modifier::BOLD);
+        }
+
+        Line::from(vec![
+            Span::styled(label_text, Style::default().fg(label_color)),
+            Span::raw(" ".repeat(spacer_width)),
+            Span::styled(value_text, value_style),
+        ])
     }
 
     fn render_memory_section(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
@@ -1101,6 +1143,53 @@ mod tests {
     }
 
     #[test]
+    fn engine_flex_row_right_aligns_value() {
+        let line = FooterData::engine_flex_row(
+            "model",
+            "gpt-5.5".to_string(),
+            32,
+            7,
+            22,
+            Color::Blue,
+            Color::White,
+            true,
+        );
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(UnicodeWidthStr::width(text.as_str()), 32);
+        assert!(text.starts_with(" model   "), "{text:?}");
+        assert!(text.ends_with("gpt-5.5"), "{text:?}");
+        assert!(text.contains("  gpt-5.5"), "{text:?}");
+    }
+
+    #[test]
+    fn engine_flex_row_truncates_value_before_right_edge() {
+        let line = FooterData::engine_flex_row(
+            "limit",
+            "codex 100% left · 7d 40% left · credits metered · ok".to_string(),
+            28,
+            7,
+            18,
+            Color::Blue,
+            Color::White,
+            false,
+        );
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(UnicodeWidthStr::width(text.as_str()), 28);
+        assert!(text.starts_with(" limit   "), "{text:?}");
+        assert!(text.ends_with('…'), "{text:?}");
+    }
+
+    #[test]
     fn footer_narrow_terminal() {
         let data = FooterData::default();
         let backend = TestBackend::new(40, 5);
@@ -1708,10 +1797,26 @@ mod tests {
             .unwrap();
 
         let text = render_to_string(&terminal);
-        assert!(text.contains("no provider"), "got {text}");
+        assert!(text.contains("OpenAI API login required"), "got {text}");
+        assert!(text.contains("/login openai"), "got {text}");
         assert!(!text.contains("stale row sentinel"), "got {text}");
         assert!(!text.contains("codex 0%"), "got {text}");
         assert!(!text.contains("T9"), "got {text}");
+    }
+
+    #[test]
+    fn left_panel_disconnected_provider_names_exact_login_command() {
+        let data = FooterData {
+            model_id: "openai-codex:gpt-5.5".into(),
+            model_provider: "openai-codex".into(),
+            provider_connected: false,
+            ..Default::default()
+        };
+        let text = render_engine_fallback_panel_text(&data, 72, 6);
+
+        assert!(text.contains("OpenAI/Codex login required"), "got {text}");
+        assert!(text.contains("/login openai-codex"), "got {text}");
+        assert!(!text.contains("/login to connect"), "got {text}");
     }
 
     #[test]

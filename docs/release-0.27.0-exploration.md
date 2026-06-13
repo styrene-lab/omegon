@@ -229,6 +229,8 @@ Recent prompt-surface directives call out prompt templates and `/loop` as execut
 
 ### 1. Provider route footer clarity
 
+Shipped release-polish update: disconnected Slim engine footer rows now name the selected provider and exact remediation command, e.g. `OpenAI/Codex login required` plus `/login openai-codex`, instead of a generic provider warning. Focused `left_panel` tests cover the copy and stale-row cleanup.
+
 The footer/model card should clearly distinguish:
 
 - selected profile model
@@ -246,6 +248,9 @@ Avoid dense text in Slim mode. Suggested pattern:
 ### 2. Workbench visual hierarchy
 
 Workbench has accumulated plan rows, workstreams, delegate/cleave progress, and lifecycle state. Polish opportunities:
+Shipped release-polish update: Slim Workbench plan overflow now prioritizes actionable rows (`active`, then `todo`) before completed rows, preserving full plan context while hiding done items first when vertical space is constrained. Focused `slim_plan` tests cover the policy and hint behavior.
+
+Workbench has accumulated plan rows, workstreams, delegate/cleave progress, and lifecycle state. Remaining polish opportunities:
 
 - Use stable glyph grammar for todo/in-progress/done/blocked.
 - Keep Slim mode compact but preserve actionable state.

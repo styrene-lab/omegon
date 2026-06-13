@@ -38,6 +38,13 @@ Make 0.27.0’s operator-facing surfaces truthful, legible, and calm. The releas
 - Workbench/plan rendering helpers under `core/crates/omegon/src/tools.rs` and TUI modules
 - startup warning paths in `core/crates/omegon/src/main.rs` / `setup.rs`
 
+## Progress
+
+- Shipped Slim Workbench overflow prioritization so active/todo plan rows stay visible before completed rows when the plan lane is height-constrained. Focused `cargo test -p omegon slim_plan -- --nocapture` coverage passes.
+- Shipped disconnected footer remediation copy so the engine panel names the selected provider and exact `/login <provider>` command. Focused `cargo test -p omegon left_panel -- --nocapture` coverage passes.
+- Shipped the first inline/flex-row migration for Slim tool summaries: detail affordances now use compact `⌃O details` glyphs and right-align behind an elastic spacer. Focused `cargo test -p omegon 'slim_tool_' -- --nocapture` coverage passes.
+- Shipped footer engine-row flex spacing so label/value rows keep styling while aligning values to the right edge. Focused `cargo test -p omegon engine_flex_row -- --nocapture` and `cargo test -p omegon left_panel -- --nocapture` coverage passes.
+
 ## Current findings
 
 - Provider-route surfaces now distinguish selected vs served route state, fallback, login-pending, and disconnected states.

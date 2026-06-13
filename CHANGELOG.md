@@ -42,6 +42,81 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add Claude Fable 5 and limited-access Claude Mythos 5 to the Anthropic registry, make Fable the highest-tier Anthropic default, and update Claude Code OAuth UA to 2.1.173.
 - Derive Anthropic adaptive-thinking support from model registry metadata with a family fallback for unreleased Fable/Mythos/Sonnet/Opus model IDs.
 - Recommend Anthropic OAuth relogin on repeated stalled-stream exhaustion when the active credential source is OAuth-only.
+- Slim Workbench plan rows now keep active and todo items visible before completed items when compact height forces overflow.
+- Disconnected TUI engine footer rows now name the selected provider and exact `/login <provider>` remediation instead of a generic provider warning.
+- Slim tool summary rows now render detail affordances as right-aligned inline controls using compact key glyphs such as `⌃O details`.
+- TUI engine footer rows now use flex-style spacing so row values align against the right edge while preserving label/value styling.
+- TUI conversation rendering now marks the explicitly selected segment, shows queued prompt info below the operator editor, and shows an `Enter: details` hint only for selected segments with detail affordances.
+- Keep extension JSON-RPC request IDs monotonic after optional `initialize` timeouts, and update extension test fixtures to echo dynamic request IDs.
+- Start decoupling TUI conversation segments by moving role/emphasis/tool visual projection types into a dedicated conversation projection module.
+- Add parameterized conversation segment projection structs for user, assistant, tool, system, lifecycle, image, and separator segment types.
+- Add Ratatui-facing conversation render projection traits so widget measurement/rendering can target render metadata instead of matching segment internals.
+- Add a borrowed semantic projection trait for concrete conversation segments, giving TUI and future ACP adapters a shared client-facing interface boundary.
+- Extract high-level TUI surface preset state into a shared surface projection module to seed the same projection-boundary pattern for dashboard, instruments, and footer surfaces.
+- Add a dashboard semantic projection boundary for lifecycle, OpenSpec, session, and context dashboard state before Ratatui rendering.
+- Add footer/status semantic projection types so slim status and future clients consume provider, context, memory, session, and workspace telemetry through a shared boundary.
+- Add an instrument panel semantic projection boundary for inference, tool activity, and worker activity telemetry before Ratatui rendering.
+- Add an editor/input semantic projection boundary for prompt text, mode, cursor, visual line count, and inline token state.
+- Move tool visual color resolution out of semantic conversation projection into the Ratatui render adapter boundary.
+- Add an ACP conversation surface DTO adapter with explicit identity, revision, and redaction policy derived from semantic conversation projections.
+- Add an ACP conversation surface stream adapter that assigns stable segment identities and revisions from worker-style conversation events before protocol emission.
+- Shadow the live ACP worker event stream through the conversation surface adapter while preserving existing SessionUpdate client behavior.
+- Factor ACP shadow surface ingestion helpers so worker-event-to-surface mapping remains isolated from live SessionUpdate emission.
+- Add trace-only observability for ACP shadow conversation surface updates without changing client-visible protocol output.
+- Add a default-off ACP extension-notification hook for shadow conversation surface updates.
+- Advertise ACP conversation surface metadata during initialize and enable surface updates by default for Flynt clients while preserving Zed defaults.
+- Add ACP initialize regression coverage for Flynt-enabled and Zed-disabled conversation surface metadata.
+- Centralize ACP conversation surface extension metadata constants to keep initialize advertisements and notifications aligned.
+- Move conversation semantic projection out of the TUI module into shared surfaces so ACP and TUI consume a sibling contract.
+- Clarify shared conversation surface semantics by renaming tool visual classification to semantic tool categories and adding projection boundary tests.
+- Move footer/status semantic projection types into shared surfaces while keeping the TUI FooterData adapter in the TUI layer.
+- Move dashboard, editor, instrument, and layout semantic projection types into shared surfaces while keeping TUI adapters/rendering in the TUI layer.
+- Replace footer context class Debug-string projection with explicit context-class mapping.
+- Rename the TUI conversation render adapter color hook to `tool_category_color` to align Ratatui rendering with shared semantic tool categories.
+- Centralize focus-mode conversation segment chrome resolution in the Ratatui conversation render adapter.
+- Centralize tool-card display name and status chrome resolution in the Ratatui conversation render adapter.
+- Extract slim/full TUI surface area allocation into a dedicated layout projection seam.
+- Extract active tool stream rendering into a dedicated TUI sub-surface module.
+- Extract permission lane rendering and key mapping into a dedicated TUI sub-surface module.
+- Extract slim plan snapshot rendering and hint policy into a dedicated TUI sub-surface module.
+- Extract extension modal and action prompt overlay rendering into a dedicated TUI sub-surface module.
+- Extract focus-mode conversation line projection and rendering into a dedicated TUI sub-surface module.
+- Extract conversation tab bar rendering into a dedicated TUI sub-surface module.
+- Add a tool-card segment component boundary for conversation segment rendering.
+- Move slim tool-card row rendering helpers into the tool-card segment component.
+- Move tool-card right-title metadata span construction into the tool-card segment component.
+- Move tool-card args and lean-summary section construction into the tool-card segment component.
+- Move tool-card live progress section construction into the tool-card segment component.
+- Move tool-card edit diff section construction into the tool-card segment component.
+- Move tool-card generic result section construction into the tool-card segment component.
+- Move full tool-card segment rendering into the tool-card segment component.
+- Add an assistant segment component boundary for conversation segment rendering.
+- Add an operator prompt segment component boundary for conversation segment rendering.
+- Add system and lifecycle segment component boundaries for conversation segment rendering.
+- Add image and separator segment component boundaries for conversation segment rendering.
+- Move separator segment rendering into its dedicated component module.
+- Move lifecycle segment rendering into its dedicated component module.
+- Move image placeholder segment rendering into its dedicated component module.
+- Move assistant segment rendering into its dedicated component module.
+- Add an internal UI runtime action contract and route initial Ratatui prompt, slash command, permission, and operator-wait actions through the semantic action seam.
+- Route active-turn Escape/Ctrl+C cancellation through the semantic UI action seam.
+- Add internal versioned UI runtime envelopes for semantic surface/action replay boundaries.
+- Add UI action outcome replay helpers for deterministic semantic action tests.
+- Add a monotonic UI revision counter for runtime/replay fixtures without introducing clock semantics.
+- Add a pure Rust UI replay fixture builder that records action outcomes and advances revisions only for accepted actions.
+- Route UI preset and individual surface visibility changes through semantic UI actions.
+- Add semantic conversation segment selection and detail-open actions for portable conversation affordances.
+- Add a first-pass selected segment detail pane using existing Ratatui primitives.
+- Add conversation segment capability flags and route selection/detail-open eligibility through them.
+- Remove the automatic launch/resume welcome block from the conversation transcript; `/status` and live surfaces now carry startup/status information on demand.
+- Keep queued prompts and skill/persona builder starts out of the conversation transcript; they now update runtime state without adding chrome-only system cards.
+- Move selector confirmations, mouse-mode toggles, empty catalog notices, and queued voice prompts from conversation system cards to transient UI toasts/logs.
+- Add reusable TUI command surface componentry for panel, toast, and modal-style outputs, and route slash-command display responses into a command panel instead of the conversation transcript.
+- Route focus-mode and mouse conversation segment selection/detail paths through semantic UI action helpers.
+- Move system notification segment rendering into its dedicated component module.
+- Move user prompt segment rendering into its dedicated component module.
+- Document the TUI surface architecture boundaries across shared semantic surfaces, ACP adapters, layout projection, sub-surfaces, and segment components.
+- Remove Google and Bing from zero-key web search: automatic free search now uses only DuckDuckGo, while reliable search remains available through configured Brave, Tavily, Serper, or Firecrawl API keys.
 
 ### Fixed
 
