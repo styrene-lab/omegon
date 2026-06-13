@@ -123,7 +123,7 @@ pub fn automation_safe_model() -> Option<String> {
 }
 
 /// Resolve provider credentials from explicit env values and an optional persisted credential.
-/// Precedence is authoritative and testable: non-OAuth env vars > OAuth env vars > valid auth.json.
+/// Precedence is authoritative and testable: non-OAuth env vars > valid persisted/external credentials > OAuth env vars.
 fn resolve_api_key_from_sources(
     env_values: &[(&str, Option<String>)],
     persisted: Option<crate::auth::OAuthCredentials>,
@@ -145,15 +145,6 @@ fn resolve_api_key_from_sources_with_external(
         }
     }
 
-    for (key, value) in env_values.iter().filter(|(key, _)| key.contains("OAUTH")) {
-        if let Some(val) = value
-            && !val.is_empty()
-        {
-            tracing::debug!(source = *key, "OAuth token resolved from env source list");
-            return Some((val.clone(), true));
-        }
-    }
-
     if let Some(creds) = persisted {
         if creds.cred_type != "oauth" {
             return Some((creds.access, false));
@@ -165,12 +156,23 @@ fn resolve_api_key_from_sources_with_external(
 
     match external {
         Some(creds) if creds.cred_type == "oauth" && !creds.is_expired() => {
-            Some((creds.access, true))
+            return Some((creds.access, true));
         }
-        Some(creds) if creds.cred_type == "oauth" => None,
-        Some(creds) => Some((creds.access, false)),
-        None => None,
+        Some(creds) if creds.cred_type == "oauth" => {}
+        Some(creds) => return Some((creds.access, false)),
+        None => {}
     }
+
+    for (key, value) in env_values.iter().filter(|(key, _)| key.contains("OAUTH")) {
+        if let Some(val) = value
+            && !val.is_empty()
+        {
+            tracing::debug!(source = *key, "OAuth token resolved from env source list fallback");
+            return Some((val.clone(), true));
+        }
+    }
+
+    None
 }
 
 /// Resolve API key synchronously — env vars and unexpired auth.json tokens.
@@ -4072,7 +4074,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_api_key_from_sources_prefers_oauth_env_over_persisted() {
+    fn resolve_api_key_from_sources_prefers_persisted_over_oauth_env() {
         let persisted = crate::auth::OAuthCredentials {
             cred_type: "oauth".into(),
             access: "persisted-oauth".into(),
@@ -4083,7 +4085,7 @@ mod tests {
             &[("CHATGPT_OAUTH_TOKEN", Some("oauth-env".into()))],
             Some(persisted),
         );
-        assert_eq!(resolved, Some(("oauth-env".into(), true)));
+        assert_eq!(resolved, Some(("persisted-oauth".into(), true)));
     }
 
     #[test]

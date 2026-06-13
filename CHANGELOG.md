@@ -44,6 +44,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Prefer fresh persisted/external OAuth credentials over stale OAuth environment variables during synchronous provider resolution so `/login openai-codex` immediately unblocks the selected Codex route.
 - Clear the release lint gate by grouping active-tool tail rendering style parameters and keeping the persisted OAuth precedence regression test's process-wide auth environment lock out of async execution.
 - Accept-loop the OAuth callback listener for Anthropic, OpenAI/Codex, and Antigravity logins: browser speculative preconnections, favicon requests, and redirects from stale login tabs no longer abort the login after the operator completed authentication in the browser.
 - Route interactive fallback LLM calls with the fallback bridge model while preserving the selected profile model, preventing OpenAI/Codex startup fallback from sending `gpt-5.5` to Anthropic.
