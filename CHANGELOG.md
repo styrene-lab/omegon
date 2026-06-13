@@ -16,10 +16,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-### Fixed
-
-- The TUI footer/model card now renders the model actually served by the runtime bridge when startup installed a fallback bridge (selected provider had no credentials), with a warning line naming the unavailable operator-selected model. Previously the footer showed the profile-selected model (e.g. `gpt-5.5`) even while every request was being served by the fallback provider, making it look like the wrong provider was active.
-
 ### Added
 
 - Add redacted provider-auth and route-state diagnostic tracing for auth.json path selection, credential source/probe decisions, OAuth refresh/write-back, login outcomes, and fallback/disconnected route causes so relaunch login regressions leave an attributable trail.
@@ -62,6 +58,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Import discovered external provider credentials into Omegon auth storage once at startup so OpenAI/Codex OAuth survives rebuilt binary relinks and subsequent session hydration uses internal auth.json.
 - Adopt valid external provider credentials during startup env hydration when Omegon auth storage is missing or expired, preventing rebuilt sessions from falling back to login-only mode.
 - Prefer refreshable persisted OAuth credentials over hydrated OAuth env vars so stale `CHATGPT_OAUTH_TOKEN` session values cannot shadow `auth.json` refresh for OpenAI/Codex.
+- The TUI footer/model card now renders the model actually served by the runtime bridge when startup installed a fallback bridge (selected provider had no credentials), with a warning line naming the unavailable operator-selected model. Previously the footer showed the profile-selected model (e.g. `gpt-5.5`) even while every request was being served by the fallback provider, making it look like the wrong provider was active.
+
 ## [0.27.0] - 2026-06-11
 
 0.27.0 is a hardening and surface-coherence line. It makes provider/auth routing explicit instead of implicit, gives operators truthful TUI status when credentials or fallbacks are involved, expands the backend capability substrate for future console clients, and continues extracting lifecycle/TUI surfaces behind shared semantic boundaries.
