@@ -150,8 +150,16 @@ Classification: **post-release unless capability inventory claims exceed shipped
 
 Evidence:
 
+- `_session/status` and `_session/config` are not currently routed ACP extension methods. They also are not advertised in backend capability-surface metadata, so deferring them does not create a known capability-truthfulness bug.
 - Runtime capability surfaces are exposed through `runtime/capabilities` and capability inventory/readiness extension calls.
+- Extension and package inventory surfaces expose partial diagnostics/provenance: loaded/enabled/callable state, stability counters, last error metadata, config schema/values, secret readiness, package inventory, permissions, and capability health.
+- `docs/acp-surface.md` explicitly does not pretend virtual Zed resources such as diagnostics are local files; richer virtual-resource diagnostics remain a future resource-fetch/unsupported-marker contract.
 - The closeout should focus on truthfulness of advertised surfaces rather than expanding diagnostics breadth in 0.27.0.
+
+Deferred follow-ups:
+
+- Add explicit `_session/status` and `_session/config` only when a concrete ACP/Flynt client contract needs them.
+- Expand diagnostics/provenance beyond capability inventory only if runtime/capabilities advertises a stronger diagnostic surface or a client consumes one.
 
 ### Current release-blocker assessment
 
