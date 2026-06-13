@@ -2147,7 +2147,13 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "event_name": "plan.updated",
             "snapshot": snapshot_json,
         }),
-        AgentEvent::RouteChanged { state, selected, serving, warning, message } => json!({
+        AgentEvent::RouteChanged {
+            state,
+            selected,
+            serving,
+            warning,
+            message,
+        } => json!({
             "type": "provider_route_changed",
             "event_name": "provider.route_changed",
             "state": state,

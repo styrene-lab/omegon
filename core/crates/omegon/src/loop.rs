@@ -715,7 +715,11 @@ pub async fn run(
             // legacy bridge_model/settings fallback remains for daemon/headless
             // paths that have not adopted ProviderRoute yet.
             opts.model = if let Some(controller) = config.route_controller.as_ref() {
-                controller.snapshot().await.serving_model().map(str::to_string)
+                controller
+                    .snapshot()
+                    .await
+                    .serving_model()
+                    .map(str::to_string)
             } else {
                 config.bridge_model.clone().or_else(|| {
                     config
