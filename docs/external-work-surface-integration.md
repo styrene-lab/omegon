@@ -1,7 +1,7 @@
 ---
 id: external-work-surface-integration
 title: "External work surface integration model"
-status: exploring
+status: deferred
 tags: [acp, ecosystem, flynt, integrations, tasks]
 parent: plan-refinement
 related: [acp-task-durability-contract, acp-plan-task-revision-events, acp-ecosystem-capability-negotiation, external-task-promotion]
@@ -84,3 +84,7 @@ Implementation targets:
 - Add `external_task_refs[].system`, `board_id`, `task_id`, `external_refs`, and future `metadata` semantics to docs/specs.
 - Document Flynt 0.12.x compatibility mode as `read_only + manual_link`.
 - Define when external systems may request mutations and which source remains authoritative.
+
+## Hygiene note
+
+External work-surface integration is now tracked as post-0.27 follow-up context under [[acp-0-27-closeout|ACP 0.27.0 closeout]] and the broader [[plan-refinement]] work. This node remains reference material for future external board/issue/IDE integrations.

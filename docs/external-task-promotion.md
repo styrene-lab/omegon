@@ -1,7 +1,7 @@
 ---
 id: external-task-promotion
 title: "External task promotion into Omegon lifecycle"
-status: exploring
+status: deferred
 tags: [acp, flynt, tasks, promotion, ecosystem]
 parent: external-work-surface-integration
 related: [acp-task-durability-contract, acp-task-binding-store, acp-task-mutation-contract]
@@ -154,3 +154,7 @@ Acceptance gates:
 - Online bind requires stable id and matching revision.
 - Imported task response includes source, stable id, revision, and binding durability.
 - Flynt UI shows states: local, promotion pending review, session-bound, repo-bound, conflict/stale.
+
+## Hygiene note
+
+External work-surface promotion is now tracked as post-0.27 follow-up context under [[acp-0-27-closeout|ACP 0.27.0 closeout]] and the broader [[plan-refinement]] work. This node remains reference material for future Flynt/import promotion design.

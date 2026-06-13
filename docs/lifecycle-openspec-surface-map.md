@@ -1,6 +1,6 @@
 ---
 title: Lifecycle/OpenSpec Surface Map
-status: exploring
+status: implemented
 tags: [architecture, lifecycle, openspec, design-tree, decoupling, correctness]
 ---
 
@@ -289,3 +289,7 @@ Promotion between these surfaces should be explicit. For example, archiving a ch
 2. Extract archive transaction recovery from `features/lifecycle.rs` into `lifecycle/`.
 3. Keep `LifecycleFeature` tool schemas and result rendering unchanged.
 4. Validate with `cargo test -p omegon lifecycle` or narrower filters, then `cargo check -p omegon`.
+
+## Hygiene note
+
+The lifecycle/OpenSpec surface map has served its mapping purpose and remains as reference architecture. Follow-up implementation work should happen through narrower lifecycle service or plan-refinement nodes rather than keeping this map active.
