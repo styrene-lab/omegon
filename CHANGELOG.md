@@ -59,170 +59,59 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Render the slim TUI engine sidecar as its own status row below the lifecycle row so lifecycle and engine telemetry no longer compete for one line.
 - Import discovered external provider credentials into Omegon auth storage once at startup so OpenAI/Codex OAuth survives rebuilt binary relinks and subsequent session hydration uses internal auth.json.
 - Adopt valid external provider credentials during startup env hydration when Omegon auth storage is missing or expired, preventing rebuilt sessions from falling back to login-only mode.
-
 ## [0.27.0] - 2026-06-11
+
+0.27.0 is a hardening and surface-coherence line. It makes provider/auth routing explicit instead of implicit, gives operators truthful TUI status when credentials or fallbacks are involved, expands the backend capability substrate for future console clients, and continues extracting lifecycle/TUI surfaces behind shared semantic boundaries.
 
 ### Added
 
-- Slim the TUI engine footer into a compact model/status sidecar so the dashboard lifecycle strip owns posture/session/context details and the inference strip owns token/context/memory telemetry.
-- Add a read-only capability inventory substrate and ACP `_capabilities/inventory` surface for installed extensions, Armory assets, and catalog agents to support future console/TUI capability views.
-- Register provider retry/failure and turn-cancelled ACP telemetry surfaces in the backend endpoint registry so clients can discover issue #128 notification contracts.
-- Add runtime-only assistant run DTOs plus read-only HTTP and ACP list/detail surfaces that currently expose empty secret-safe projections.
-- Add targeted single-assistant readiness surfaces for refreshing one assistant card over HTTP or ACP without fetching the full capability inventory.
-- Add dedicated HTTP and ACP assistant-list surfaces for compact launch-readiness cards without fetching the full capability inventory.
-- Add a compact assistant-list projection to capability inventory so console clients can render assistant cards without traversing full profile and graph internals.
-- Add a first-class blocked assistant-run status with structured unblock metadata and SQLite round-trip validation for long non-interactive assignments.
-- Register the capability inventory in the backend endpoint registry with ACP and HTTP transports so runtime capability advertisements include the assistant readiness surface.
-- Add HTTP and ACP regression coverage proving capability inventory exposes blocked assistant launch readiness at the external API boundary.
-- Add regression coverage for assistant launch readiness status transitions across ready, blocked, degraded, missing optional, and deferred-secret states.
-- Rename assistant run terminal success status to `completed` while accepting legacy `succeeded`, aligning run state with the blocked/completed non-interactive contract.
-- Add explicit assistant launch-readiness status, blockers, and warnings so console clients do not need to infer safe/degraded/blocked state from secret and capability counters.
-- Add HTTP regression coverage proving `/api/capabilities` reports secret readiness metadata without emitting recipe payloads or secret values.
-- Add ACP regression coverage proving capability inventory reports secret readiness metadata without emitting recipe payloads or secret values.
-- Wire ACP capability inventory to the same live secret metadata path as HTTP so `_capabilities/inventory` reports warmed/configured/deferred/missing readiness without resolving values.
-- Add per-assistant secret readiness rollups to profile summaries so launch blockers can be shown at the assistant boundary without exposing secret values.
-- Wire live daemon secret metadata into the HTTP capability inventory endpoint so secret readiness reflects warmed session cache and configured recipes without resolving or exposing values.
-- Add metadata-only secret readiness projections to the assistant capability inventory so console consumers can see required/optional secret consumers, warmed/configured/deferred/missing status, and recipe kind without resolving or exposing secret values.
-- Add assistant profile summaries resolved from agent bundles and the capability graph, including settings, skills, extension bindings, secrets, triggers, reachable capability node IDs, and merged trust posture.
-- Add a normalized capability graph and derived trust summaries to the assistant capability inventory so console consumers can inspect dependencies, secrets, widgets, and authority without interpreting raw manifests.
-- Add a metadata-only backend endpoint registry for ACP/runtime/lifecycle/provider/extension/secret/package/plan/task surfaces, including planned HTTP aliases for lifecycle projections.
-- Add cleave and delegate execution-evaluation tests with injected child binaries, including timeout and cancellation coverage.
-- Add richer cleave/delegate status visibility for subagent progress, including child activity, task progress, and runtime state.
+- Add a provider route controller path for startup, login, model-tier switches, offline model switches, and runtime turn configuration so route state is explicit instead of inferred from whichever bridge happens to be installed.
+- Publish provider route changes as structured events and persist provider route warnings in the TUI footer so unavailable credentials, fallback routing, and disconnected states remain visible after the triggering operation.
+- Include provider route state in `/auth status`, including the selected route, served bridge, credential diagnostics, and remediation guidance.
+- Add explicit startup-route, route-login terminal outcome, and login-lifecycle regression coverage for connected, fallback, disconnected, relogin, and failed-login paths.
+- Add a read-only capability inventory substrate and ACP `_capabilities/inventory` surface for installed extensions, Armory assets, catalog agents, assistant profiles, capability graphs, trust summaries, secret readiness, assistant launch readiness, assistant-list projections, and assistant run read models.
+- Add assistant run read surfaces and terminal-state compatibility so the non-interactive run contract uses `completed` while still accepting legacy `succeeded`.
+- Add metadata-only backend endpoint registry entries for ACP/runtime/lifecycle/provider/extension/secret/package/plan/task surfaces, including provider retry/failure and turn-cancelled telemetry contracts.
+- Add richer cleave/delegate progress visibility, injected-child execution tests, timeout/cancellation coverage, and Workbench integration for active lifecycle workstreams.
 - Add headless ACP lifecycle read surfaces for lifecycle snapshots and design-node list/get/ready/blocked/frontier projections.
-- Expose the composed capability inventory through the `_capabilities/inventory` ACP ext_method and advertise it in runtime capabilities.
-- Expose the composed capability inventory snapshot through `GET /api/capabilities` for future assistant console consumers.
-- Add a capability inventory snapshot model that composes installed extension capability health, Armory profile recipes, and catalog agent templates.
-- Add an agent bundle read model for assistant templates, including persona/mind presence, extension dependencies, settings, workflow phases, secrets, and triggers.
-- Add an Armory profile read model for assistant capability recipes, including defaults, export policy, dependency graph, and activation policy.
-- Add an Armory organization assessment to the Omegon Console backend design node, identifying profiles, agent bundles, personas, tones, skills, machine profiles, payloads, workstations, and readiness projection as first-class assistant catalog inputs.
-- Add a structured installed-extension capability read model as the first backend substrate for future assistant capability graph and console surfaces.
-- Add a substrate evaluation and adversarial assessment to the Omegon Console backend design node, positioning the console around persistent agent operations, assistant profiles, capability graphs, durable tasks, lifecycle authority, ecosystem capabilities, Auspex deployment boundaries, and backend-first daemon APIs.
-- Add an Omegon Console backend design node planning daemon APIs, ACP-over-WebSocket sessions, and future Dioxus UI integration.
-- Add an ACP expansion design node mapping lifecycle, OpenSpec, conversation, dashboard, instrument, UI-control, context, and memory projection surfaces for external clients.
-- Route design-tree implement scaffolding through the lifecycle mutation service while preserving existing OpenSpec proposal behavior.
-- Add a design node planning the future lifecycle `implement` service extraction pass.
-- Route design-tree archive mutation through the lifecycle mutation service while keeping descendant checks and timestamp policy adapter-side.
-- Route design-tree priority and issue-type metadata mutations through the lifecycle mutation service.
-- Route design-tree branch mutation through the lifecycle mutation service as one parent/child operation.
-- Route design-tree implementation-notes mutation through the lifecycle mutation service with markdown coverage.
-- Route design-tree dependency and related-link mutations through the lifecycle mutation service with idempotency coverage.
-- Route design-tree decision mutation through the lifecycle mutation service while keeping memory auto-ingest adapter-side.
-- Route design-tree research mutation through the lifecycle mutation service with direct markdown coverage.
-- Route design-tree question add/remove mutations through the lifecycle mutation service with direct service coverage.
-- Route design-tree status mutation through the lifecycle mutation service while keeping descendant checks, memory ingestion, and tool rendering adapter-side.
-- Introduce a lifecycle mutation service and route design-tree node creation through it while keeping tool JSON parsing/rendering adapter-side.
-- Extract design-tree ready/blocked/frontier query policy into a lifecycle query module with direct projection tests.
-- Extract OpenSpec markdown-to-FSM synchronization into a named lifecycle sync module with structured sync reports and transition tests.
-- Extract OpenSpec archive transaction recovery from the lifecycle tool adapter into a lifecycle-domain archive module with direct recovery tests.
-- Add a Lifecycle/OpenSpec surface map documenting tool adapters, engine/FSM boundaries, correctness invariants, and low-risk extraction seams.
-- Add `/copy answer` and focused `/help copy`/`/help mouse` contract text for normal-mode answer copy, transcript scroll, and mouse passthrough.
-- Add affected-crate detection plus scoped `just affected`, `just test-changed`, `just check-changed`, and `just clippy-changed` recipes for faster local validation of changed Rust workspace slices.
-- Add `just test-profile` to statically summarize Rust test/coupling hotspots before choosing validation or extraction targets.
-- Add Python unit coverage for the affected-crate and test-profile developer tooling.
-- Add a Codebase Mind design node defining durable structural repository memory, freshness, and projection policy.
-
-### Fixed
-
-- Create cleave git worktree branches explicitly before adding libgit2 worktrees, and report failed children with no salvaged changes as skipped instead of successful no-op merges.
+- Add `/copy answer` plus focused `/help copy` and `/help mouse` guidance for normal-mode answer copy, transcript scroll, and mouse passthrough.
+- Add affected-crate validation tooling (`just affected`, `just test-changed`, `just check-changed`, `just clippy-changed`, `just test-commit`) plus `just source-clean` and source-vs-agent-state dirty classification for safer local commits.
+- Add provider-drift tooling with `just upstream-provider-check`, Anthropic public-model drift checks, Claude Fable 5 / limited-access Mythos 5 registry entries, and adaptive-thinking metadata derived from the model registry.
+- Add lifecycle/design documentation and an assess-time assumption prompt so design reviews explicitly ask what unstated assumptions should be recorded as `[assumption]` questions.
+- Add Codebase Mind metadata and design documentation for durable structural repository memory.
 
 ### Changed
 
-- Replace the old dashboard tree renderer with a read-only one-line project lifecycle strip.
-- Make the full TUI dashboard a thin vertical project strip above the footer/tooling area instead of an entire-height right sidebar.
-- Clarify mouse passthrough versus app mouse interaction and advertise normal-mode answer copy/scroll hints.
+- Interactive startup no longer silently falls back to `automation_safe_model()` when the selected provider is unavailable. Fallback is now explicit and opt-in through profile `fallbackProviders = ["provider-id"]`; otherwise Omegon enters a disconnected state with remediation guidance.
+- Import discovered external provider credentials into Omegon auth storage during startup hydration, adopt valid external credentials when internal auth storage is missing or expired, and warn visibly when profile-model credentials are unavailable.
+- Keep the selected provider/model distinct from the served bridge/model throughout fallback routing, turn configuration, active-model tracking, footer projection, and session-log emission.
+- Rename the TUI Plan Dock to the Workbench and surface active cleave/delegate/lifecycle work there with plan status glyphs (`●`/`◐`/`⊘`/`○`) in Slim mode.
+- Slim the TUI engine footer into a compact model/status sidecar and keep lifecycle, engine, inference, tools, and Workbench telemetry in separate rows/surfaces instead of competing for one footer block.
+- Replace the old full-dashboard tree renderer with a thin read-only project lifecycle strip above the footer/tooling area.
+- Extract TUI conversation, footer, dashboard, editor, instrument, layout, tool-card, segment, permission, plan, extension-overlay, focus-view, and tab-bar rendering behind semantic projection/component boundaries shared with future ACP surfaces.
+- Add command registry availability/safety metadata, including CLI/ACP confirmation gates and `--dangerously-bypass-permissions` bypass support.
+- Preserve queued prompt dispatch mode at queue time so delayed prompts keep their original queue semantics.
+- Rename context classes from Squad/Maniple/Clan/Legion to Compact/Standard/Extended/Massive while retaining legacy aliases.
+- Route design-tree and OpenSpec lifecycle mutations through named lifecycle services for node creation, status, questions, research, decisions, links, implementation notes, branch, metadata, archive, implement scaffolding, query policy, FSM sync, and archive recovery.
 - Split `omegon-codescan` language-specific scanner logic into bounded modules, add Java/Kotlin/C# discovery, and attach extraction language/strategy/confidence metadata to code chunks.
-- Guard codescan's HEAD fast path against relevant dirty working-tree changes so local edits do not return stale cached chunks.
-- Rename context classes from Squad/Maniple/Clan/Legion to Compact/Standard/Extended/Massive while retaining legacy aliases for existing configs and commands.
-- Clarify that `main` is trunk/nightly source while `release/X.Y` branches are internal stabilization branches that must merge forward after hardening fixes.
-- TUI conversation rendering now marks the explicitly selected segment, shows queued prompt info below the operator editor, and shows an `Enter: details` hint only for selected segments with detail affordances.
-- Keep extension JSON-RPC request IDs monotonic after optional `initialize` timeouts, and update extension test fixtures to echo dynamic request IDs.
-- Start decoupling TUI conversation segments by moving role/emphasis/tool visual projection types into a dedicated conversation projection module.
-- Add parameterized conversation segment projection structs for user, assistant, tool, system, lifecycle, image, and separator segment types.
-- Add Ratatui-facing conversation render projection traits so widget measurement/rendering can target render metadata instead of matching segment internals.
-- Add a borrowed semantic projection trait for concrete conversation segments, giving TUI and future ACP adapters a shared client-facing interface boundary.
-- Extract high-level TUI surface preset state into a shared surface projection module to seed the same projection-boundary pattern for dashboard, instruments, and footer surfaces.
-- Add a dashboard semantic projection boundary for lifecycle, OpenSpec, session, and context dashboard state before Ratatui rendering.
-- Add footer/status semantic projection types so slim status and future clients consume provider, context, memory, session, and workspace telemetry through a shared boundary.
-- Add an instrument panel semantic projection boundary for inference, tool activity, and worker activity telemetry before Ratatui rendering.
-- Add an editor/input semantic projection boundary for prompt text, mode, cursor, visual line count, and inline token state.
-- Move tool visual color resolution out of semantic conversation projection into the Ratatui render adapter boundary.
-- Add an ACP conversation surface DTO adapter with explicit identity, revision, and redaction policy derived from semantic conversation projections.
-- Add an ACP conversation surface stream adapter that assigns stable segment identities and revisions from worker-style conversation events before protocol emission.
-- Shadow the live ACP worker event stream through the conversation surface adapter while preserving existing SessionUpdate client behavior.
-- Factor ACP shadow surface ingestion helpers so worker-event-to-surface mapping remains isolated from live SessionUpdate emission.
-- Add trace-only observability for ACP shadow conversation surface updates without changing client-visible protocol output.
-- Add a default-off ACP extension-notification hook for shadow conversation surface updates.
-- Advertise ACP conversation surface metadata during initialize and enable surface updates by default for Flynt clients while preserving Zed defaults.
-- Add ACP initialize regression coverage for Flynt-enabled and Zed-disabled conversation surface metadata.
-- Centralize ACP conversation surface extension metadata constants to keep initialize advertisements and notifications aligned.
-- Move conversation semantic projection out of the TUI module into shared surfaces so ACP and TUI consume a sibling contract.
-- Clarify shared conversation surface semantics by renaming tool visual classification to semantic tool categories and adding projection boundary tests.
-- Move footer/status semantic projection types into shared surfaces while keeping the TUI FooterData adapter in the TUI layer.
-- Move dashboard, editor, instrument, and layout semantic projection types into shared surfaces while keeping TUI adapters/rendering in the TUI layer.
-- Replace footer context class Debug-string projection with explicit context-class mapping.
-- Rename the TUI conversation render adapter color hook to `tool_category_color` to align Ratatui rendering with shared semantic tool categories.
-- Centralize focus-mode conversation segment chrome resolution in the Ratatui conversation render adapter.
-- Centralize tool-card display name and status chrome resolution in the Ratatui conversation render adapter.
-- Extract slim/full TUI surface area allocation into a dedicated layout projection seam.
-- Extract active tool stream rendering into a dedicated TUI sub-surface module.
-- Extract permission lane rendering and key mapping into a dedicated TUI sub-surface module.
-- Extract slim plan snapshot rendering and hint policy into a dedicated TUI sub-surface module.
-- Extract extension modal and action prompt overlay rendering into a dedicated TUI sub-surface module.
-- Extract focus-mode conversation line projection and rendering into a dedicated TUI sub-surface module.
-- Extract conversation tab bar rendering into a dedicated TUI sub-surface module.
-- Add a tool-card segment component boundary for conversation segment rendering.
-- Move slim tool-card row rendering helpers into the tool-card segment component.
-- Move tool-card right-title metadata span construction into the tool-card segment component.
-- Move tool-card args and lean-summary section construction into the tool-card segment component.
-- Move tool-card live progress section construction into the tool-card segment component.
-- Move tool-card edit diff section construction into the tool-card segment component.
-- Move tool-card generic result section construction into the tool-card segment component.
-- Move full tool-card segment rendering into the tool-card segment component.
-- Add an assistant segment component boundary for conversation segment rendering.
-- Add an operator prompt segment component boundary for conversation segment rendering.
-- Add system and lifecycle segment component boundaries for conversation segment rendering.
-- Add image and separator segment component boundaries for conversation segment rendering.
-- Move separator segment rendering into its dedicated component module.
-- Move lifecycle segment rendering into its dedicated component module.
-- Move image placeholder segment rendering into its dedicated component module.
-- Move assistant segment rendering into its dedicated component module.
-- Add an internal UI runtime action contract and route initial Ratatui prompt, slash command, permission, and operator-wait actions through the semantic action seam.
-- Route active-turn Escape/Ctrl+C cancellation through the semantic UI action seam.
-- Add internal versioned UI runtime envelopes for semantic surface/action replay boundaries.
-- Add UI action outcome replay helpers for deterministic semantic action tests.
-- Add a monotonic UI revision counter for runtime/replay fixtures without introducing clock semantics.
-- Add a pure Rust UI replay fixture builder that records action outcomes and advances revisions only for accepted actions.
-- Route UI preset and individual surface visibility changes through semantic UI actions.
-- Add semantic conversation segment selection and detail-open actions for portable conversation affordances.
-- Add a first-pass selected segment detail pane using existing Ratatui primitives.
-- Add conversation segment capability flags and route selection/detail-open eligibility through them.
-- Remove the automatic launch/resume welcome block from the conversation transcript; `/status` and live surfaces now carry startup/status information on demand.
-- Keep queued prompts and skill/persona builder starts out of the conversation transcript; they now update runtime state without adding chrome-only system cards.
-- Move selector confirmations, mouse-mode toggles, empty catalog notices, and queued voice prompts from conversation system cards to transient UI toasts/logs.
-- Add reusable TUI command surface componentry for panel, toast, and modal-style outputs, and route slash-command display responses into a command panel instead of the conversation transcript.
-- Route focus-mode and mouse conversation segment selection/detail paths through semantic UI action helpers.
-- Move system notification segment rendering into its dedicated component module.
-- Move user prompt segment rendering into its dedicated component module.
-- Document the TUI surface architecture boundaries across shared semantic surfaces, ACP adapters, layout projection, sub-surfaces, and segment components.
-- Remove Google and Bing from zero-key web search: automatic free search now uses only DuckDuckGo, while reliable search remains available through configured Brave, Tavily, Serper, or Firecrawl API keys.
+- Clarify trunk/release policy: `main` owns nightly/trunk work, `release/X.Y` branches are internal stabilization branches, and hardening fixes merge forward.
 
 ### Fixed
 
-- Update selector-policy regression coverage for current 1M Claude Sonnet context inference while preserving requested lower-class assembly constraints.
-- Reduce macOS Keychain prompts during startup by avoiding provider secret preflight when auth.json already satisfies the active model, keeping optional extension secrets lazy, and removing broad orphaned-keyring repair scans from normal launch.
-- Treat OpenAI-family models as connected when a valid Codex OAuth credential is available, preventing startup/footer status from showing `no provider` for `gpt-*` routes backed by `openai-codex`.
-- Re-adopt fresh external OpenAI/Codex OAuth credentials when stored credentials are expired, so rebuild/relaunch does not force an unnecessary login.
-- Decode top-level numeric JWT claims for Codex CLI credential adoption and log non-secret Codex bridge-construction failure diagnostics.
-- Treat dashed OpenAI o-series model IDs as OpenAI-family for Codex fallback routing and log startup selected/resolved provider routes.
-- Make the agent `secret_list` tool metadata-only so listing configured secret recipes does not resolve Keychain, Vault, file, or command recipes mid-session.
-- Suppress host Keychain access in secret tool tests so validation does not trigger operator approval prompts on macOS.
-- Repair orphaned well-known keyring secrets at startup, include Firecrawl in web-search secret handling and guidance, and treat duplicate keychain items as metadata-repair opportunities.
-- Hide the conversation `Enter: details` affordance unless focus mode makes Enter open segment details.
-- Show short slash-command confirmations as non-blocking toasts instead of oversized command panels.
-- Treat DuckDuckGo HTTP 202 Accepted responses as rate limiting so DDG throttle pages do not fall through into parser diagnostics.
-- Classify DuckDuckGo zero-key search responses before parsing so no-result pages, bot/challenge pages, consent/region interstitials, and unexpected HTML shells produce actionable diagnostics instead of a generic parser failure.
-- Stop advertising Brotli in zero-key web-search requests so DuckDuckGo does not return `br`-encoded HTML that the current reqwest client cannot decode before parsing.
-
+- Accept-loop OAuth callback listeners for Anthropic, OpenAI/Codex, and Antigravity logins so speculative browser preconnections, favicon requests, and stale login-tab redirects no longer consume the one request the login flow was waiting for.
+- Report route credential diagnostics and route interactive fallback calls with the fallback bridge model while preserving the operator-selected profile model.
+- Render the actual served runtime bridge model in the TUI footer/model card when fallback routing is active, with a warning naming the unavailable selected model.
+- Seed loop active-model tracking from the runtime bridge model so TurnEnd events and session logs report the real served model before the first per-turn refresh.
+- Repair provider secret resolution, skip expired OAuth session hydration, reduce startup credential preflight prompts, and prevent rebuilt sessions from falling into login-only mode when valid external credentials exist.
+- Recommend Anthropic OAuth relogin after repeated stalled-stream exhaustion when the active credential source is OAuth-only.
+- Keep incomplete Workbench plans visible between turns, hide successful `/plan` tool-call audit cards from the main transcript, refresh worker progress per frame, and pin the slim plan panel below the composer with a compact height cap.
+- Render the slim active-tool lane through the semantic conversation presentation hierarchy, preserving readable live-log gutters, tabular spacing, ANSI-sanitized output, and structured content labels.
+- Reject staged agent-state telemetry in source-clean checks so live `.omegon/` audit logs cannot leak into source commits.
+- Make delegate runner script fixtures flush before execution so timeout tests fail only on runner behavior, not file visibility races.
+- Create cleave git worktree branches explicitly before adding libgit2 worktrees, and report failed children with no salvaged changes as skipped instead of successful no-op merges.
+- Keep extension JSON-RPC request IDs monotonic after optional `initialize` timeouts, recover auto-disabled extensions, keep stdio logs out of transcripts, and retain extension setup events before prompts.
+- Preserve long assistant response tails, clear stale slim plan lanes, prioritize blocking prompt input, and keep interrupt/tutorial feedback out of the transcript.
+- Guard codescan's HEAD fast path against relevant dirty working-tree changes so local edits do not return stale cached chunks.
 
 ## [0.26.16] - 2026-06-07
 

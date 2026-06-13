@@ -99,6 +99,24 @@ import { snippet } from "../../lib/snippets";
   </table>
   <!-- DIAGRAM:provider-matrix | Heatmap or grid: providers (rows) x entry points (columns: TUI, headless, smoke, cleave). Show auth mode per cell (OAuth, API key, local). Visualize which providers work where at a glance -->
 
+  <h2>Route state and remediation</h2>
+  <p>
+    Omegon keeps the operator-selected route separate from the model bridge that is actually
+    serving turns. That distinction matters when credentials expire, a rebuilt binary discovers
+    external OAuth state, or a profile permits an explicit fallback provider.
+  </p>
+  <ul>
+    <li><strong>Selected route</strong> is the provider/model the operator or profile requested.</li>
+    <li><strong>Served bridge</strong> is the authenticated provider/model currently handling inference.</li>
+    <li><strong>Fallback</strong> only happens when the profile opts in with <code>fallbackProviders = ["provider-id"]</code>.</li>
+    <li><strong>Disconnected</strong> means no valid credential or allowed fallback is available; Omegon surfaces remediation instead of pretending another provider is active.</li>
+  </ul>
+  <p>
+    Use <code>/auth status</code> when startup or login looks wrong. It reports route state, credential
+    diagnostics, and the next remediation step. The TUI footer also preserves route warnings so a
+    fallback or disconnected startup is still visible after the immediate login/status message scrolls away.
+  </p>
+
   <h2>Runtime identity honesty</h2>
   <p>
     Omegon now keeps provider identity explicit in operator-facing surfaces:

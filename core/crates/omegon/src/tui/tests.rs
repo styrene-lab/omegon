@@ -1507,7 +1507,7 @@ fn slim_status_line_marks_turn_state() {
         running.contains(&format!("{running_glyph} cargo · running")),
         "{running}"
     );
-    assert!(running.contains("active tool"), "{running}");
+    assert!(running.contains("live log"), "{running}");
     assert!(running.contains("bash"), "{running}");
     assert!(running.contains("54s"), "{running}");
 

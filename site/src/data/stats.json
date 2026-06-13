@@ -1,7 +1,7 @@
 {
-  "crateCount": 8,
+  "crateCount": 7,
   "downloadMB": 15,
-  "releaseTag": "v0.24.8",
+  "releaseTag": "v0.26.16",
   "providerCount": 14,
   "providerNames": [
     "Anthropic/Claude",
@@ -35,8 +35,8 @@
     "ollama",
     "ollama-cloud"
   ],
-  "toolFiles": 21,
+  "toolFiles": 22,
   "skillCount": 10,
-  "searchProviderCount": 5,
-  "collectedAt": "2026-05-28T14:04:53.957Z"
+  "searchProviderCount": 3,
+  "collectedAt": "2026-06-13T01:51:13.773Z"
 }
