@@ -1,7 +1,7 @@
 ---
 id: browser-integration-system-fallback-approval
 title: "Browser Integration Pattern for Manual System Fallback Approval"
-status: exploring
+status: deferred
 tags: [host-actions, resource-open, browser, approval, system-default]
 open_questions:
   - "[assumption] ACP/Flynt approval cards can render degraded fallback metadata clearly enough for operators to distinguish host-owned backends from system-default/browser fallback."
@@ -49,3 +49,7 @@ Current HostAction taxonomy separates operator intent from concrete backend. ter
 - `core/crates/omegon/src/extensions/approval.rs` — 
 - `/Users/wilson/workspace/styrene-labs/omegon-extensions/omegon-extension-rs/src/actions/resource.rs` — 
 - `docs/browser-integration-system-fallback-approval.md` —
+
+## Hygiene note
+
+System/browser fallback approval is post-0.27 HostAction hardening. Keep the decision record as reference, but do not count it as active release work.

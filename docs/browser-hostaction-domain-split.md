@@ -1,7 +1,7 @@
 ---
 id: browser-hostaction-domain-split
 title: "Browser HostAction Domain Split"
-status: exploring
+status: deferred
 tags: [host-actions, browser, resource-open, security, sdk]
 open_questions:
   - "Should browser navigation be modeled as browser.open@1, browser.navigate@1, or a broader browser.action@1 operation enum?"
@@ -54,3 +54,7 @@ The operator explicitly expects browser profile selection, DOM/navigation contro
 - Should browser navigation be modeled as browser.open@1, browser.navigate@1, or a broader browser.action@1 operation enum?
 - Should Tampermonkey/userscript integration be host-owned through a browser bridge extension, or extension-origin HostActions that target a separately installed browser bridge?
 - What is the minimum safe profile selector contract: named profile, ephemeral profile, persistent isolated profile, or host default profile with manual approval?
+
+## Hygiene note
+
+Browser HostAction domain design is post-0.27 substrate/security work. It remains reference material for a future browser HostAction workstream; 0.27.0 should not grow new browser automation scope.

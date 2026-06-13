@@ -1,7 +1,7 @@
 ---
 id: repo-agent-runtime-profile
 title: "Repo Agent Runtime Profile"
-status: exploring
+status: deferred
 tags: [agent-runtime, nex, devenv, subagents, a2a, workflow]
 open_questions:
   - "[assumption] The repo profile should be declarative and versioned, with imperative setup delegated to Nex/devenv/devcontainer rather than embedded in the profile."
@@ -44,3 +44,7 @@ Define a repo-local, versioned agent runtime profile that travels with the repos
 - How should external agents discover and consume the profile when they do not understand Omegon schemas: generated `AGENTS.md`, `CONTRIBUTING.md` sections, `.codex/config.toml`, `CLAUDE.md`, or profile explain output?
 - What is the minimal v1 schema surface: commands, validations, lifecycle mode, safety policy, secrets pack reference, substrate profile reference, delegation policy, or all of these?
 - How should profile trust be established for autonomous/headless agents: commit-tracked file only, signed profile hash, org policy allowlist, or A2A-delivered profile digest?
+
+## Hygiene note
+
+Repo agent runtime profiles are post-0.27 substrate/profile work. The current 0.27 line should keep using AGENTS.md/project directives rather than introducing a new repo-profile contract.

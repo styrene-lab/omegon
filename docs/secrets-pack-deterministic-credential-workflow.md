@@ -1,7 +1,7 @@
 ---
 id: secrets-pack-deterministic-credential-workflow
 title: "Secrets-Pack Deterministic Credential Workflow"
-status: exploring
+status: deferred
 tags: [secrets, nex, devenv, headless, a2a, security]
 open_questions:
   - "[assumption] secrets-pack should be declarative policy only, never encrypted bulk value storage, so per-secret durable storage and least-privilege rotation remain intact."
@@ -63,3 +63,7 @@ Secrets-pack should be a shared contract surface, but ownership should split thi
 - Omegon: decide grant policy, session cache policy, child/A2A forwarding, approval requirements, and redaction enforcement.
 
 For headless work, Omegon should ask a Nex provider for a no-values check report before work begins only when the repo/workflow policy requires that verification. Without explicit opt-in, missing Nex remains a degraded capability rather than a global blocker.
+
+## Hygiene note
+
+Secrets-pack is post-0.27 deterministic substrate work. 0.27.0 auth hardening should stay focused on existing provider credential storage and route truthfulness, not a new secrets-pack contract.
