@@ -620,6 +620,9 @@ impl AgentSetup {
         // ─── Usage advisory (/usage from captured provider telemetry) ───
         bus.register(Box::new(features::usage::UsageFeature::new()));
 
+        // ─── Prompt library (/prompt registry-native command surface) ───
+        bus.register(Box::new(features::prompt::PromptFeature::new()));
+
         // ─── Clipboard paste retention (/clipboard prune) ────────────────
         // Manual on-demand sweep surface for clipboard image pastes.
         // The automatic 24h sweep at session start lives in main.rs;

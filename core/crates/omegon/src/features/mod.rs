@@ -34,6 +34,7 @@ pub mod memory;
 pub mod model_budget;
 pub mod mutation;
 pub mod persona;
+pub mod prompt;
 pub mod session_log;
 pub mod terminal_title;
 pub mod usage;
