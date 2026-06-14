@@ -10,10 +10,10 @@ poison the rest of the matrix. Cells run sequentially because the
 per-cell harness shares ``CARGO_TARGET_DIR`` with the source tree, which
 makes parallel runs unsafe today.
 
-The redesigned matrix schema treats ``om`` as a sibling harness label
-alongside ``omegon``, but the per-cell harness only knows ``omegon`` +
-``--slim``. This script translates ``om`` → ``omegon`` + ``slim=True`` so
-the per-cell harness does not need to grow a new harness identity.
+The matrix schema treats ``om`` as a spelling alias for ``omegon``.
+Slim/explorator comparisons are explicit via ``--include-slim`` or task specs
+that pass ``--slim`` to the per-cell harness; launcher name no longer changes
+runtime posture.
 """
 
 from __future__ import annotations
@@ -53,18 +53,17 @@ class Cell:
     harness: str  # one of SUPPORTED_HARNESSES in benchmark_harness.py
     model: str | None
     slim: bool
-    label: str  # cell label including slim variant ("om" for omegon+slim)
+    label: str  # cell label; explicit slim rows use "omegon-slim"
 
 
 def _normalize_harness(harness: str) -> tuple[str, bool]:
     """Translate matrix-level harness names into (per-cell harness, slim).
 
-    The matrix schema uses ``om`` as a sibling label, but the per-cell
-    harness only understands ``omegon`` + ``--slim``. Any other value
-    passes through unchanged with ``slim=False``.
+    ``om`` is a spelling alias for ``omegon``. Slim mode is explicit; any
+    other value passes through unchanged with ``slim=False``.
     """
     if harness == "om":
-        return "omegon", True
+        return "omegon", False
     return harness, False
 
 
@@ -80,7 +79,7 @@ def expand_matrix(
     ``restrict_harnesses`` / ``restrict_models``, if provided, filter the
     matrix down to a subset (matched against the *normalized* per-cell
     harness identity, so passing ``{"omegon"}`` keeps both ``omegon`` and
-    ``om`` cells).
+    ``om`` spellings).
 
     ``include_slim`` adds an explicit slim variant alongside every regular
     omegon cell. This is useful when a task spec only declares ``omegon``
@@ -101,7 +100,7 @@ def expand_matrix(
         for model in models:
             if restrict_models and (model is None or model not in restrict_models):
                 continue
-            label = "om" if (harness == "omegon" and slim) else harness
+            label = "omegon-slim" if (harness == "omegon" and slim) else harness
             key = (harness, model, slim)
             if key in seen:
                 continue
@@ -109,13 +108,13 @@ def expand_matrix(
             cells.append(Cell(harness=harness, model=model, slim=slim, label=label))
 
             # When include_slim is set, also add the slim variant for any
-            # plain omegon cell. The slim variant uses label "om" so it
-            # appears as a distinct row in the summary.
+            # plain omegon cell. The slim variant uses an explicit label so
+            # it appears as a distinct row in the summary.
             if include_slim and harness == "omegon" and not slim:
                 slim_key = (harness, model, True)
                 if slim_key not in seen:
                     seen.add(slim_key)
-                    cells.append(Cell(harness="omegon", model=model, slim=True, label="om"))
+                    cells.append(Cell(harness="omegon", model=model, slim=True, label="omegon-slim"))
 
     return cells
 
@@ -329,7 +328,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--include-slim",
         action="store_true",
-        help="Add an explicit omegon slim variant alongside each plain omegon cell",
+        help="Add an explicit omegon --slim variant alongside each plain omegon cell",
     )
     parser.add_argument(
         "--summary-only",

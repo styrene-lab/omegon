@@ -38,14 +38,11 @@ import yaml
 
 SUPPORTED_HARNESSES = {"omegon", "claude-code", "pi"}
 
-# Matrix-schema aliases. The redesign doc lists `om` in the matrix example
-# alongside `omegon`/`pi`/`claude-code`, but the per-cell harness only
-# understands `omegon` + `--slim`. Aliases are accepted in `spec.harnesses`
-# at parse time and translated at selection time so direct CLI invocation
-# (`--harness om`) and matrix-orchestrated invocation both work without
-# the per-cell adapter layer needing to grow a new harness identity.
+# Matrix-schema aliases. `om` is a spelling alias for the canonical Omegon
+# harness identity; slim/explorator comparisons are explicit via --slim or
+# matrix orchestration's --include-slim support.
 HARNESS_ALIASES: dict[str, tuple[str, bool]] = {
-    "om": ("omegon", True),
+    "om": ("omegon", False),
 }
 
 
@@ -260,7 +257,7 @@ def ensure_clean_out_dir(root: Path, out_dir: str | None) -> Path:
 def resolve_harness_alias(name: str) -> tuple[str, bool]:
     """Translate a possibly-aliased harness name into (canonical, slim_override).
 
-    `om` → `("omegon", True)`. Unknown / non-aliased names pass through with
+    `om` → `("omegon", False)`. Unknown / non-aliased names pass through with
     `slim_override=False`. Callers must combine `slim_override` with their
     own slim source via OR — an alias never *unsets* slim that was already
     requested by the user.
@@ -285,9 +282,8 @@ def select_model(spec: TaskSpec, explicit: str | None) -> str | None:
 def select_slim(spec: TaskSpec, explicit: bool, *, harness_request: str | None = None) -> bool:
     """Resolve the slim flag honoring user intent and matrix-schema aliases.
 
-    If the requested harness is an alias that implies slim (e.g. `om`), the
-    slim flag is forced on regardless of the spec/CLI state. Otherwise the
-    flag is the OR of the explicit CLI flag and the spec default.
+    Harness aliases do not imply slim mode. The flag is the OR of the explicit
+    CLI flag, the spec default, and any future alias override.
     """
     base = explicit or spec.slim
     if harness_request is not None:
@@ -1325,7 +1321,7 @@ def derive_final_status(
 
 def result_harness_label(harness: str, slim: bool) -> str:
     if harness == "omegon" and slim:
-        return "om"
+        return "omegon-slim"
     return harness
 
 
@@ -1872,7 +1868,7 @@ def main() -> int:
     try:
         spec = load_task_spec(task_path)
         # Capture the user's pre-alias-resolution harness request so the slim
-        # selector can detect alias-implied slim (e.g. `--harness om`).
+        # selector can normalize harness aliases without changing posture.
         harness_request = args.harness or (spec.harnesses[0] if spec.harnesses else None)
         harness = select_harness(spec, args.harness)
         model = select_model(spec, args.model)

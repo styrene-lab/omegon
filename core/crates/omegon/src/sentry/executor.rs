@@ -873,6 +873,7 @@ async fn run_agent_task(
             cwd,
             cli_posture: None,
             slim: true,
+            full: false,
             max_turns,
             apply_profile_posture: false,
         });

@@ -173,7 +173,7 @@ impl EventBus {
         disabled.insert(reg::model_budget::SET_THINKING_LEVEL.into());
 
         if slim_mode {
-            // om/slim: additionally suppress delegation, orchestration,
+            // Slim/explorator: additionally suppress delegation, orchestration,
             // lifecycle surfaces, and heavyweight tools beyond the base
             // defaults.  Hiding design_tree and openspec from the tool
             // list means the LLM cannot reference concepts the operator

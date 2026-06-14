@@ -81,21 +81,17 @@ omegon auth login openai-codex
 om
 ```
 
-Omegon now installs two standard entrypoints from the same binary:
+Omegon installs two standard spellings for the same binary and behavior:
 
-- `om` - slim mode: prompt, edit, validate. The agent sees the core coding tools by default. Memory works normally. `/help` shows the essentials; `/help all` reveals the full command set.
-- `omegon` - full harness mode: design tree, OpenSpec lifecycle, cleave orchestration, delegation, richer dashboard surfaces, and the same underlying binary.
+- `om` - short alias for `omegon`.
+- `omegon` - canonical executable name.
 
-Start with `om`. When you're ready for more, shift up:
-
-- `/warp` — toggle slim ↔ full
-- `/help all` — see every command without switching mode
-
-Flags override the entrypoint default when you need the opposite posture:
+Runtime posture is explicit and profile-driven, not inferred from the launcher name. Use posture flags when you want a different operating mode:
 
 ```sh
-om --full
-omegon --slim
+om --explorator      # lean/read-heavy mode
+omegon --slim        # compatibility spelling for lean mode
+omegon --architect   # systems-engineering/default posture
 ```
 
 ### API-key path
@@ -227,9 +223,9 @@ Use it to compare harnesses against the same task and acceptance criteria, then 
 
 Current stance:
 
-- `om` is the comparison profile for mainstream CLI coding agents.
-- `omegon` is the full systems-engineering harness profile.
-- `omegon --slim` and `om --full` remain valid overrides.
+- `om` and `omegon` are equivalent launcher spellings.
+- `omegon --slim` / `om --explorator` are explicit lean comparison profiles for mainstream CLI coding agents.
+- Full/default behavior comes from the configured profile and explicit posture flags, not from the executable name.
 - the benchmark harness stays in-repo while it is coupled to `--usage-json`, `omegon_context`, auth/provider behavior, and clean-room runtime mechanics.
 
 

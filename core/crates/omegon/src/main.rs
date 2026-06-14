@@ -244,7 +244,7 @@ struct Cli {
     #[arg(long)]
     slim: bool,
 
-    /// Force the full Omegon harness profile even when launched via `om`.
+    /// Force the default full/architect posture, overriding profile defaults and --slim.
     #[arg(long)]
     full: bool,
 
@@ -2215,6 +2215,7 @@ async fn run_embedded_command(
         cwd: &cwd,
         cli_posture: None,
         slim: false,
+        full: false,
         max_turns: 50,
         apply_profile_posture: false,
     });
@@ -3705,29 +3706,8 @@ fn apply_posture_to_settings(name: &str, settings: &mut settings::Settings, cwd:
     }
 }
 
-fn cli_binary_name() -> Option<String> {
-    std::env::args_os()
-        .next()
-        .and_then(|arg| {
-            std::path::Path::new(&arg)
-                .file_name()
-                .map(|name| name.to_os_string())
-        })
-        .and_then(|name| name.into_string().ok())
-}
-
-fn cli_prefers_slim_mode_with_name(cli: &Cli, binary_name: Option<&str>) -> bool {
-    if cli.full {
-        return false;
-    }
-    if cli.slim {
-        return true;
-    }
-    binary_name.is_some_and(|name| name == "om")
-}
-
 fn cli_prefers_slim_mode(cli: &Cli) -> bool {
-    cli_prefers_slim_mode_with_name(cli, cli_binary_name().as_deref())
+    cli.slim
 }
 
 async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
@@ -3746,6 +3726,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         cwd: &cli.cwd,
         cli_posture: resolve_cli_posture(cli).as_deref(),
         slim: cli_prefers_slim_mode(cli),
+        full: cli.full,
         max_turns: cli.max_turns,
         apply_profile_posture: true,
     });
@@ -6362,6 +6343,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
         cwd: &cli.cwd,
         cli_posture: resolve_cli_posture(cli).as_deref(),
         slim: cli_prefers_slim_mode(cli),
+        full: cli.full,
         max_turns: cli.max_turns,
         apply_profile_posture: true,
     });
@@ -7880,6 +7862,7 @@ async fn run_bounded_task(
         cwd,
         cli_posture: resolve_cli_posture(cli).as_deref(),
         slim: true,
+        full: cli.full,
         max_turns,
         apply_profile_posture: false, // run mode uses explicit config, not profile
     });
@@ -8834,15 +8817,22 @@ mod tests {
     }
 
     #[test]
-    fn cli_prefers_slim_when_invoked_as_om() {
+    fn om_invocation_does_not_imply_slim_mode() {
         let cli = Cli::parse_from(["om"]);
-        assert!(cli_prefers_slim_mode_with_name(&cli, Some("om")));
+        assert!(!cli_prefers_slim_mode(&cli));
     }
 
     #[test]
-    fn cli_full_overrides_om_slim_preference() {
-        let cli = Cli::parse_from(["om", "--full"]);
-        assert!(!cli_prefers_slim_mode_with_name(&cli, Some("om")));
+    fn explicit_slim_flag_enables_slim_mode() {
+        let cli = Cli::parse_from(["om", "--slim"]);
+        assert!(cli_prefers_slim_mode(&cli));
+    }
+
+    #[test]
+    fn full_flag_does_not_erase_explicit_slim_flag_at_parse_time() {
+        let cli = Cli::parse_from(["om", "--slim", "--full"]);
+        assert!(cli_prefers_slim_mode(&cli));
+        assert!(cli.full);
     }
 
     #[test]

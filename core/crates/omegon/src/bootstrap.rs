@@ -22,8 +22,10 @@ pub struct SettingsInit<'a> {
     pub cwd: &'a Path,
     /// CLI posture name (explorator, fabricator, etc.) — overrides profile default.
     pub cli_posture: Option<&'a str>,
-    /// Whether slim mode was requested (--slim flag or `om` binary name).
+    /// Whether slim/explorator compatibility mode was explicitly requested.
     pub slim: bool,
+    /// Whether full/default posture was explicitly requested, overriding `slim`.
+    pub full: bool,
     /// CLI max_turns value. Only applied if != the default (50).
     pub max_turns: u32,
     /// Whether to apply posture from the profile (uses `apply_to_with_posture`
@@ -50,7 +52,9 @@ pub fn initialize_shared_settings(init: &SettingsInit<'_>) -> SharedSettings {
             crate::apply_posture_to_settings(posture_name, &mut s, init.cwd);
         }
 
-        if init.slim || std::env::var("OMEGON_CHILD_SLIM").is_ok() {
+        if init.full {
+            s.set_posture(settings::PosturePreset::Architect);
+        } else if init.slim || std::env::var("OMEGON_CHILD_SLIM").is_ok() {
             s.set_posture(settings::PosturePreset::Explorator);
         }
 
@@ -242,6 +246,7 @@ mod tests {
             cwd: tmp.path(),
             cli_posture: None,
             slim: true,
+            full: false,
             max_turns: 50,
             apply_profile_posture: true,
         });
@@ -266,6 +271,7 @@ mod tests {
             cwd: tmp.path(),
             cli_posture: None,
             slim: false,
+            full: false,
             max_turns: 50,
             apply_profile_posture: true,
         });
@@ -284,6 +290,7 @@ mod tests {
             cwd: tmp.path(),
             cli_posture: Some("devastator"),
             slim: false,
+            full: false,
             max_turns: 50,
             apply_profile_posture: true,
         });
@@ -291,6 +298,29 @@ mod tests {
         let s = shared.lock().unwrap();
         assert_eq!(s.posture.effective, settings::PosturePreset::Devastator);
         assert_eq!(s.thinking, settings::ThinkingLevel::High);
+    }
+
+    #[test]
+    fn initialize_shared_settings_full_overrides_cli_posture_and_slim() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+
+        let shared = initialize_shared_settings(&SettingsInit {
+            model: "anthropic:claude-sonnet-4-6",
+            cwd: tmp.path(),
+            cli_posture: Some("devastator"),
+            slim: true,
+            full: true,
+            max_turns: 50,
+            apply_profile_posture: true,
+        });
+
+        let s = shared.lock().unwrap();
+        assert_eq!(s.posture.effective, settings::PosturePreset::Architect);
+        assert!(
+            !s.is_slim(),
+            "--full should force the non-slim default posture"
+        );
     }
 
     #[test]
@@ -304,6 +334,7 @@ mod tests {
             cwd: tmp.path(),
             cli_posture: None,
             slim: false,
+            full: false,
             max_turns: 50,
             apply_profile_posture: true,
         });
@@ -315,6 +346,7 @@ mod tests {
             cwd: tmp.path(),
             cli_posture: None,
             slim: false,
+            full: false,
             max_turns: 25,
             apply_profile_posture: true,
         });
