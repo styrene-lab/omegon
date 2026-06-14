@@ -110,4 +110,54 @@ Likely files:
 
 Validation should include prompt rendering in slim/full modes and a static scan over prompt/skill markdown.
 
+## Bundled skills audit — 2026-06-14
+
+Current bundled skills fall into four groups:
+
+| Group | Skills | Finding |
+|---|---|---|
+| Coding loop primitives | `code-act`, `git`, `security` | Good candidates for an always-available coding profile, but `code-act` must remain subordinate to canonical `edit`/`validate`. |
+| Language conventions | `rust`, `python`, `typescript` | Strong candidates for an `omegon-coding` extension that activates by project detection (`Cargo.toml`, `pyproject.toml`, `tsconfig.json`/`package.json`) and operator profile. |
+| Lifecycle/process | `openspec`, possibly future cleave/design skills | Should not be globally injected in lean sessions. This belongs behind lifecycle/profile activation and must be capability-aware because lifecycle tools can be hidden. |
+| Domain/output conventions | `oci`, `vault`, `style` | Useful, but not necessarily coding-default. `oci` should activate on container artifacts; `vault` on markdown/wiki work; `style` on diagrams/design output. |
+
+Low-risk stale guidance found and corrected in the first bundled-skill pass:
+
+- `skills/typescript/SKILL.md` used a legacy `@styrene-lab/pi-coding-agent` import in the SDK type example. This is now an illustrative Omegon-era package name plus a warning to import the project-local SDK dependency rather than cargo-culting legacy `pi-*` names.
+- `skills/openspec/SKILL.md` now starts with capability-aware activation guidance: use OpenSpec only when lifecycle tools are exposed or the operator explicitly asks to work from OpenSpec files; otherwise enable the tool group or state that tool-backed reconciliation was not performed.
+
+## `omegon-coding` extension sketch
+
+An `omegon-coding` extension/profile bundle should own coding-loop guidance and make skill activation data-driven instead of globally dumping every language convention into the prompt.
+
+### Proposed contents
+
+- Always-on inside coding profile:
+  - `git`
+  - `security`
+  - narrow `code-act` batch-mode guidance
+- Project-detected language modules:
+  - `rust` when `Cargo.toml` or Rust files dominate
+  - `python` when `pyproject.toml`, `setup.py`, or Python files dominate
+  - `typescript` when `tsconfig.json`, `package.json`, or TS/JS files dominate
+- Optional/domain modules:
+  - `oci` when `Containerfile`, `Dockerfile`, Compose files, Helm charts, or registry tasks appear
+  - `vault` when markdown wiki/docs work is active
+  - `style` when diagram/design surfaces are active
+- Excluded or separately gated:
+  - `openspec`, design-tree, cleave, and lifecycle-heavy guidance should remain lifecycle-profile/tool-group activated rather than coding-default.
+
+### Activation inputs
+
+- Operator profile/posture: lean coding, orchestrator, lifecycle/design, docs, infra.
+- Project signals: manifest files, dominant extensions, existing `.omegon/skills`, OpenSpec/design artifacts.
+- Tool surface: only inject guidance that references tools currently exposed, or phrase it as gated/optional.
+- Session intent: a Rust repo does not need Python packaging rules unless the task touches Python.
+
+### Drift controls
+
+- Prompt/skill lint should classify tool references as exposed, group-gated, internal-only, extension-owned, slash-command, or unknown.
+- Bundled skills should have tests for legacy namespace references (`pi-*` in examples), unconditional hidden-tool instructions, and conflicts with canonical mutation/validation flow.
+- `omegon skills install` should eventually report embedded-vs-installed checksums so stale installed skills are visible.
+
 ## Open Questions

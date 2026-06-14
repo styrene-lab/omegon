@@ -10,6 +10,8 @@ aliases = ["opsx"]
 
 > **Load this skill** when working with OpenSpec changes, writing specs, generating tasks, or verifying implementations against specifications.
 
+OpenSpec is a lifecycle-heavy skill. Use it only when the OpenSpec/lifecycle tool group is exposed or when the operator explicitly asks to work from OpenSpec files. If lifecycle tools are hidden, enable the relevant group with `manage_tools` before calling tool names such as `openspec_manage`, or operate directly on `openspec/changes/**` files and state that tool-backed lifecycle reconciliation was not performed.
+
 ## Overview
 
 OpenSpec is Omegon's specification layer for spec-and-test-driven development. It ensures that every non-trivial change follows the lifecycle:

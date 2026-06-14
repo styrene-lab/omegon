@@ -216,8 +216,10 @@ interface ToolResult {
   content: { type: string; text: string }[];
 }
 
-// ✅ Import from SDK
-import type { AgentToolResult } from "@styrene-lab/pi-coding-agent";
+// ✅ Import from the actual SDK crate/package used by the project
+import type { AgentToolResult } from "@styrene-lab/omegon-coding-agent";
 ```
+
+The package name above is illustrative. Use the project-local SDK dependency that owns the type; do not cargo-cult legacy `pi-*` package names into new code.
 
 **Directive:** Always import SDK types. Never redefine them locally. If an SDK type is not exported, file an issue or use module augmentation — don't copy the shape.

@@ -19,9 +19,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Changed
 - Made bundled prompt templates and dynamic prompt guidance capability-aware so hidden or mode-gated memory/lifecycle tools do not get presented as unconditional agent instructions.
 - Tightened the bundled `code-act` skill so batch scripting no longer overrides the canonical read → `edit` → `validate` loop for small source changes.
+- Updated bundled `typescript` and `openspec` skills to remove legacy `pi-*` SDK example drift and make lifecycle tool usage capability-aware.
 
 ### Added
-- Added prompt tests that guard bundled prompt templates and the `code-act` skill against drifting back to stale direct-tool instructions.
+- Added prompt/skill drift tests that guard bundled prompt templates and coding skills against stale direct-tool instructions, legacy `pi-*` SDK examples, and lifecycle-skill activation without capability-awareness.
 
 ### Fixed
 - **Startup provider credential race** — interactive launch now performs a refresh/adoption pass before emitting a missing or expired credential warning for the selected provider. This prevents a just-saved `openai-codex` OAuth entry from being reported as absent on the next rebuilt launch.

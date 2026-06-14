@@ -926,6 +926,21 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skills_avoid_legacy_sdk_and_hidden_lifecycle_drift() {
+        let typescript = include_str!("../../../../skills/typescript/SKILL.md");
+        assert!(
+            !typescript.contains("@styrene-lab/pi-coding-agent"),
+            "TypeScript skill examples must not point new code at legacy pi-era SDK names"
+        );
+        assert!(typescript.contains("project-local SDK dependency"));
+
+        let openspec = include_str!("../../../../skills/openspec/SKILL.md");
+        assert!(openspec.contains("lifecycle tool group is exposed"));
+        assert!(openspec.contains("manage_tools"));
+        assert!(openspec.contains("tool-backed lifecycle reconciliation was not performed"));
+    }
+
+    #[test]
     fn tool_token_budget_audit() {
         use omegon_traits::ToolProvider;
 
