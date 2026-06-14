@@ -123,7 +123,7 @@ fn split_frontmatter(content: &str) -> (Option<String>, &str) {
         Some(end) => {
             let fm = &rest[..end];
             let body = &rest[end + delimiter.len()..];
-            let body = body.strip_prefix('\n').unwrap_or(body);
+            let body = body.trim_start_matches(['\r', '\n']);
             (Some(fm.to_string()), body)
         }
         None => (None, content),
