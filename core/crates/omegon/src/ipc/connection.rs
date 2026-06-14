@@ -354,6 +354,63 @@ impl IpcConnection {
                     send_response(&out_tx, req_id, "get_graph", serde_json::to_value(graph)?).await;
                 }
 
+                "prompts_list" | "prompts_get" | "prompts_preview" | "prompts_resolve" => {
+                    let req = serde_json::from_value::<ControlRequest>(payload.clone())
+                        .unwrap_or_default();
+                    let caller_role = parse_caller_role(req.caller_role.as_deref());
+                    let required = crate::control_actions::classify_ipc_method(&method).role;
+                    if !crate::control_actions::is_role_sufficient(caller_role, required) {
+                        send_error(
+                            &out_tx,
+                            req_id,
+                            IpcErrorCode::InvalidPayload,
+                            &format!("caller role is insufficient for {method}"),
+                        )
+                        .await;
+                        continue;
+                    }
+                    let response = match method.as_str() {
+                        "prompts_list" => serde_json::json!({
+                            "prompts": crate::prompts::list_structured()?,
+                        }),
+                        "prompts_get" => {
+                            let name = payload
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .filter(|s| !s.is_empty())
+                                .ok_or_else(|| anyhow::anyhow!("missing name"))?;
+                            let (manifest, body, path) = crate::prompts::get_prompt(name)?;
+                            serde_json::json!({
+                                "name": name,
+                                "id": manifest.id,
+                                "title": manifest.title,
+                                "description": manifest.description,
+                                "tags": manifest.tags,
+                                "aliases": manifest.aliases,
+                                "safety": crate::prompts::safety_verdict(&body),
+                                "body": body,
+                                "path": path.display().to_string(),
+                            })
+                        }
+                        _ => {
+                            let name = payload
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .filter(|s| !s.is_empty())
+                                .ok_or_else(|| anyhow::anyhow!("missing name"))?;
+                            let (_manifest, body, path) = crate::prompts::get_prompt(name)?;
+                            serde_json::json!({
+                                "ok": true,
+                                "action": "preview",
+                                "safety": crate::prompts::safety_verdict(&body),
+                                "prompt": body,
+                                "path": path.display().to_string(),
+                            })
+                        }
+                    };
+                    send_response(&out_tx, req_id, &method, response).await;
+                }
+
                 "context_status"
                 | "context_compact"
                 | "context_clear"
@@ -362,6 +419,7 @@ impl IpcConnection {
                 | "model_view"
                 | "model_list"
                 | "skills_view"
+                | "skills_get"
                 | "skills_install"
                 | "plugin_view"
                 | "plugin_install"
@@ -428,6 +486,13 @@ impl IpcConnection {
                         "model_view" => Some(crate::control_runtime::ControlRequest::ModelView),
                         "model_list" => Some(crate::control_runtime::ControlRequest::ModelList),
                         "skills_view" => Some(crate::control_runtime::ControlRequest::SkillsView),
+                        "skills_get" => payload
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|name| crate::control_runtime::ControlRequest::SkillGet {
+                                name: name.to_string(),
+                            }),
                         "skills_install" => {
                             let name = payload
                                 .get("name")
