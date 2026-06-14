@@ -449,13 +449,13 @@ fn render_selected_segment_chrome(
     area: Rect,
     buf: &mut Buffer,
     theme: &dyn Theme,
-    detail_openable: bool,
+    _detail_openable: bool,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
-    let marker = if detail_openable { '◆' } else { '│' };
+    let marker = '│';
     let style = Style::default()
         .fg(theme.accent_bright())
         .bg(theme.surface_bg())
@@ -831,8 +831,8 @@ mod tests {
             "selected detail-openable segment should advertise the detail action: {rendered}"
         );
         assert!(
-            rendered.lines().any(|line| line.starts_with('◆')),
-            "detail-openable selection should use the openable marker: {rendered}"
+            rendered.lines().any(|line| line.starts_with('│')),
+            "detail-openable selection should use a stable focus rail: {rendered}"
         );
     }
 

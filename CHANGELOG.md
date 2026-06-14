@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 - **Startup provider credential race** — interactive launch now performs a refresh/adoption pass before emitting a missing or expired credential warning for the selected provider. This prevents a just-saved `openai-codex` OAuth entry from being reported as absent on the next rebuilt launch.
+- **Slim tool row affordance alignment** — completed and live slim tool rows now reuse the shared inline row renderer so `⌃O details` stays right-aligned consistently instead of drifting in the legacy compact path.
+- **Selected segment focus rail** — selected conversation segments now use a plain vertical focus rail instead of repeated diamond glyphs that could collide with narrow terminal content.
 
 ### Added
 

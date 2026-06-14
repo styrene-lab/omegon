@@ -616,7 +616,10 @@ fn slim_tool_detail_lines(width: u16, cells: &[String]) -> Vec<String> {
 }
 
 pub(crate) fn slim_tool_collapsed_line(width: u16, cells: &[String]) -> String {
-    let budget = width.saturating_sub(16);
+    slim_tool_collapsed_line_for_budget(width.saturating_sub(16), cells)
+}
+
+pub(crate) fn slim_tool_collapsed_line_for_budget(budget: u16, cells: &[String]) -> String {
     if cells.is_empty() {
         return String::new();
     }
@@ -2871,10 +2874,9 @@ mod tests {
         let text = buf_text(&buf, area);
         assert!(text.contains("diskutil"), "{text}");
         assert!(text.contains("diskutil list /dev/disk4"), "{text}");
-        assert!(
-            text.contains("3 lines · /dev/disk4 external physical"),
-            "{text}"
-        );
+        assert!(text.contains("3 lines"), "{text}");
+        assert!(text.contains("/dev/disk4 external physical"), "{text}");
+        assert!(text.trim_end().ends_with(DETAILS_HINT_LABEL), "{text}");
     }
 
     #[test]
@@ -2910,7 +2912,9 @@ mod tests {
         );
         assert!(text.contains("@40"), "{text}");
         assert!(text.contains("limit 20"), "{text}");
-        assert!(text.contains("3 lines · fn forge() {}"), "{text}");
+        assert!(text.contains("3 lines"), "{text}");
+        assert!(text.contains("fn forge() {}"), "{text}");
+        assert!(text.trim_end().ends_with(DETAILS_HINT_LABEL), "{text}");
     }
 
     #[test]

@@ -22,7 +22,10 @@ use super::super::segments::{
     try_highlight,
 };
 use super::super::theme::Theme;
-use crate::tui::inline_render::{DETAILS_HINT_LABEL, details_hint_cell, expand_hint_cell};
+use crate::surfaces::inline::{InlineCell, InlineCellRole, InlineRow};
+use crate::tui::inline_render::{
+    DETAILS_HINT_LABEL, details_hint_cell, expand_hint_cell, render_inline_text_row,
+};
 use crate::tui::widgets;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1078,6 +1081,41 @@ fn render_tool_card(
     }
 }
 
+fn slim_tool_prefix_width(status_icon: &str, display_name: &str, pinned: bool) -> u16 {
+    let label = if pinned {
+        format!("{status_icon} {display_name} · pinned · ")
+    } else {
+        format!("{status_icon} {display_name} · ")
+    };
+    unicode_width::UnicodeWidthStr::width(label.as_str()) as u16
+}
+
+fn detail_cells_from_rendered_row(row: &str) -> Vec<String> {
+    row.split(" · ")
+        .filter(|cell| !cell.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn first_slim_tool_detail_row(area_width: u16, prefix_width: u16, row: &str) -> String {
+    let budget = area_width.saturating_sub(prefix_width);
+    let cells = detail_cells_from_rendered_row(row);
+    let (left_cells, right_cells): (Vec<_>, Vec<_>) = cells
+        .into_iter()
+        .partition(|cell| !cell.contains(DETAILS_HINT_LABEL));
+    let inline = InlineRow::new(
+        left_cells
+            .into_iter()
+            .map(|cell| InlineCell::new(cell, InlineCellRole::Value))
+            .collect(),
+        right_cells
+            .into_iter()
+            .map(|cell| InlineCell::new(cell, InlineCellRole::Affordance))
+            .collect(),
+    );
+    render_inline_text_row(&inline, budget)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_slim_tool_summary_rows(
     area: Rect,
@@ -1122,7 +1160,14 @@ pub(crate) fn render_slim_tool_summary_rows(
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("· ", Style::default().fg(t.dim()).bg(row_bg)),
-                Span::styled(detail.clone(), Style::default().fg(t.muted()).bg(row_bg)),
+                Span::styled(
+                    first_slim_tool_detail_row(
+                        area.width,
+                        slim_tool_prefix_width(status_icon, display_name, pinned),
+                        detail,
+                    ),
+                    Style::default().fg(t.muted()).bg(row_bg),
+                ),
             ]));
         } else {
             lines.push(Line::from(vec![
@@ -1191,7 +1236,14 @@ pub(crate) fn render_slim_tool_live_rows(
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("· ", Style::default().fg(t.dim()).bg(row_bg)),
-                Span::styled(row.clone(), Style::default().fg(t.muted()).bg(row_bg)),
+                Span::styled(
+                    first_slim_tool_detail_row(
+                        area.width,
+                        slim_tool_prefix_width(status_icon, display_name, pinned),
+                        row,
+                    ),
+                    Style::default().fg(t.muted()).bg(row_bg),
+                ),
             ]));
         } else {
             lines.push(Line::from(Span::styled(
