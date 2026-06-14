@@ -132,10 +132,12 @@ fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) -> Color {
 fn slim_tool_header_cells(
     header: &SlimSegmentHeader<'_>,
     legacy_cells: Vec<String>,
+    include_detail_hint: bool,
 ) -> Vec<String> {
     let mut cells = Vec::new();
     cells.extend(legacy_cells);
-    if header.affordances.detail_available
+    if include_detail_hint
+        && header.affordances.detail_available
         && !cells.iter().any(|cell| cell.contains(DETAILS_HINT_LABEL))
     {
         cells.push(details_hint_cell().text);
@@ -804,7 +806,11 @@ fn render_tool_card(
                 live_partial,
                 started_at,
                 meta.duration_ms,
-            ),
+            )
+            .into_iter()
+            .filter(|cell| !cell.contains(DETAILS_HINT_LABEL))
+            .collect(),
+            false,
         );
         let detail_rows = segments::slim_tool_live_rows(area.width, &cells);
         render_slim_tool_live_rows(
@@ -843,6 +849,7 @@ fn render_tool_card(
                 started_at,
                 meta.duration_ms,
             ),
+            true,
         );
         let detail_rows = vec![segments::slim_tool_collapsed_line(area.width, &cells)];
         render_slim_tool_summary_rows(

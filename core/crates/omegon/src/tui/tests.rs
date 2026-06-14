@@ -178,8 +178,7 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     let mut app = test_app();
     let waiting = render_app_to_string(&mut app, 140, 18);
     assert!(
-        waiting.contains("waiting: provider request")
-            || waiting.contains("transcript live · PgUp/PgDn scroll · Ctrl+Shift+Y copy answer"),
+        waiting.contains("waiting: provider request") || waiting.contains("transcript live"),
         "{waiting}"
     );
 
@@ -188,8 +187,7 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     });
     let opening = render_app_to_string(&mut app, 140, 18);
     assert!(
-        opening.contains("waiting: stream open")
-            || opening.contains("transcript live · PgUp/PgDn scroll · Ctrl+Shift+Y copy answer"),
+        opening.contains("waiting: stream open") || opening.contains("transcript live"),
         "{opening}"
     );
 
@@ -198,8 +196,7 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     });
     let responding = render_app_to_string(&mut app, 140, 18);
     assert!(
-        responding.contains("streaming answer")
-            || responding.contains("transcript live · PgUp/PgDn scroll · Ctrl+Shift+Y copy answer"),
+        responding.contains("streaming answer") || responding.contains("transcript live"),
         "{responding}"
     );
 
@@ -1907,8 +1904,7 @@ fn normal_transcript_hint_advertises_scroll_and_answer_copy() {
         &super::workbench::SlimPlanContext::from_dashboard(false, &[], None),
     );
 
-    assert!(hint.contains("PgUp/PgDn scroll"), "{hint}");
-    assert!(hint.contains("Ctrl+Shift+Y copy answer"), "{hint}");
+    assert_eq!(hint, "transcript live");
 }
 
 #[test]

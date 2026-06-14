@@ -67,7 +67,21 @@ impl StatusLine {
     }
 
     pub fn preferred_height(width: u16) -> u16 {
-        if width < 20 { 0 } else { 2 }
+        if width < 20 { 0 } else { 1 }
+    }
+
+    pub fn preferred_height_for(&self, width: u16) -> u16 {
+        if width < 20 {
+            0
+        } else if self.engine_row_needed() {
+            2
+        } else {
+            1
+        }
+    }
+
+    fn engine_row_needed(&self) -> bool {
+        !self.provider_connected || self.drift.is_some()
     }
 
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
@@ -77,7 +91,7 @@ impl StatusLine {
         }
         let lifecycle_area = Rect::new(area.x, area.y, area.width, 1);
         self.render_lifecycle_row(lifecycle_area, frame, t);
-        if height > 1 {
+        if height > 1 && self.engine_row_needed() {
             let engine_area = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);
             self.render_engine_row(engine_area, frame, t);
         }
@@ -413,7 +427,25 @@ mod tests {
     fn preferred_height_matches_render_contract() {
         assert_eq!(StatusLine::preferred_height(0), 0);
         assert_eq!(StatusLine::preferred_height(19), 0);
-        assert_eq!(StatusLine::preferred_height(20), 2);
+        assert_eq!(StatusLine::preferred_height(20), 1);
+    }
+
+    #[test]
+    fn preferred_height_for_collapses_online_engine_row() {
+        let sl = StatusLine {
+            provider_connected: true,
+            ..Default::default()
+        };
+        assert_eq!(sl.preferred_height_for(80), 1);
+    }
+
+    #[test]
+    fn preferred_height_for_keeps_disconnected_engine_row() {
+        let sl = StatusLine {
+            provider_connected: false,
+            ..Default::default()
+        };
+        assert_eq!(sl.preferred_height_for(80), 2);
     }
 
     #[test]

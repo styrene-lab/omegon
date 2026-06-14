@@ -2802,7 +2802,7 @@ mod tests {
         assert!(text.contains("running"), "{text}");
         assert!(text.contains("├") || text.contains("└"), "{text}");
         assert!(text.contains("git -C /Users/wilson/workspace"), "{text}");
-        assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
+        assert!(!text.contains(DETAILS_HINT_LABEL), "{text}");
     }
 
     #[test]
@@ -3030,7 +3030,7 @@ mod tests {
         assert!(text.contains("11.4s"), "{text}");
         assert!(text.contains("bundle ready"), "{text}");
         assert!(text.contains("├") || text.contains("└"), "{text}");
-        assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
+        assert!(!text.contains(DETAILS_HINT_LABEL), "{text}");
     }
 
     #[test]

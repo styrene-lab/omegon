@@ -594,9 +594,7 @@ pub fn slim_operator_hint(
                 labels.join(" · ")
             }
             SlimPlanHintState::Complete => "plan complete · history available".to_string(),
-            SlimPlanHintState::None => {
-                "transcript live · PgUp/PgDn scroll · Ctrl+Shift+Y copy answer".to_string()
-            }
+            SlimPlanHintState::None => "transcript live".to_string(),
         }
     }
 }

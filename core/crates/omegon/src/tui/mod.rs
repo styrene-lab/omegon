@@ -3957,6 +3957,8 @@ impl App {
             segment_detail_index.and_then(|idx| self.conversation.segments().get(idx)),
             area.height,
         );
+        self.status_line.sync_from_footer(&self.footer_data);
+        let status_height = self.status_line.preferred_height_for(area.width);
         let layout_plan = plan_tui_layout(TuiLayoutInputs {
             area,
             surfaces: self.ui_surfaces,
@@ -3965,7 +3967,7 @@ impl App {
             editor_height,
             editor_info_height,
             instrument_footer_height: self.instrument_panel.preferred_height(),
-            status_height: statusline::StatusLine::preferred_height(area.width),
+            status_height,
             pending_permission: false,
             active_tool_stream_height: raw_active_tool_stream_height,
             workbench_height: raw_workbench_height,
@@ -4126,7 +4128,6 @@ impl App {
 
         // ── Status line (slim mode only) ────────────────────────
         if status_area.height > 0 {
-            self.status_line.sync_from_footer(&self.footer_data);
             self.status_line.viewport_hint = if self.conversation.conv_state.scroll_offset > 0 {
                 Some(format!(
                     "view detached ↑{} · End tail",
@@ -10159,7 +10160,7 @@ mod slash_command_parsing_tests {
         );
         assert_eq!(
             slim_operator_hint(false, false, false, SlimPlanHintState::None, &context),
-            "transcript live · PgUp/PgDn scroll · Ctrl+Shift+Y copy answer"
+            "transcript live"
         );
     }
 
