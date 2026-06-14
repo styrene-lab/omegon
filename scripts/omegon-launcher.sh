@@ -113,7 +113,7 @@ case "${1:-}" in
                         fi
                     fi
                     if [[ -n "${root:-}" && -d "$root/.git" ]] && command -v git >/dev/null 2>&1; then
-                        head_short="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
+                        head_short="$(git -C "$root" rev-parse --short=7 HEAD 2>/dev/null || true)"
                         if [[ -n "$head_short" ]]; then
                             printf 'checkout-head: %s
 ' "$head_short"
