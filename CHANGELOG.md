@@ -23,7 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
-- Added backend surface contracts for ACP/RPC skill and prompt definition management, covering list/get/create/update/delete plus skill install and prompt submit endpoints in the capability registry, and wired ACP dispatch for existing skill handlers plus honest prompt-store pending responses.
+- Added backend surface contracts for ACP/RPC skill and prompt definition management, covering list/get/create/update/delete plus skill install and prompt submit endpoints in the capability registry, wired ACP dispatch for existing skill handlers, and added reusable prompt definition storage for bundled/user/project-local prompts.
 - Added advisory activation metadata (`activation`, `profile`, `project_signals`) to bundled skill manifests and the skill builder schema so profile-aware skill loading can be implemented from declared intent instead of prose inference.
 - Added typed activation/profile diagnostics for skill manifests so future consumers can normalize advisory metadata and report unknown or unsafe user-skill values without crashing.
 - Added advisory project-signal matching helpers for skill activation metadata, including root-relative literal matching, root-only globs, recursive `**/` globs, ignored vendor/build directories, and invalid-pattern rejection.

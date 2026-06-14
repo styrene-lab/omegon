@@ -624,12 +624,20 @@ mod tests {
         assert_eq!(skill_update.domain, BackendDomain::Skills);
         assert_eq!(skill_update.mutability, BackendMutability::Write);
         assert_eq!(skill_update.permission, BackendPermission::Edit);
-        assert!(skill_update.side_effects.contains(&"skill_definition_write"));
+        assert!(
+            skill_update
+                .side_effects
+                .contains(&"skill_definition_write")
+        );
 
         let prompt_submit = find_by_acp_method("_prompts/submit").unwrap();
         assert_eq!(prompt_submit.domain, BackendDomain::Prompts);
         assert_eq!(prompt_submit.mutability, BackendMutability::Write);
         assert_eq!(prompt_submit.permission, BackendPermission::Edit);
-        assert!(prompt_submit.side_effects.contains(&"prompt_queue_mutation"));
+        assert!(
+            prompt_submit
+                .side_effects
+                .contains(&"prompt_queue_mutation")
+        );
     }
 }

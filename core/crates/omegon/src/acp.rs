@@ -3704,14 +3704,72 @@ impl OmegonAcpAgent {
             }
 
             // ── Prompt definitions ───────────────────────────────
-            "prompts/list" | "prompts/get" | "prompts/create" | "prompts/update"
-            | "prompts/delete" | "prompts/submit" => Ok(serde_json::json!({
-                "ok": false,
-                "error": "prompt_definition_store_not_implemented",
-                "method": method,
-                "contract": "registered",
-                "note": "Prompt definition ACP/RPC contracts are advertised, but reusable prompt storage and dispatch are not implemented yet."
-            })),
+            "prompts/list" => {
+                Ok(serde_json::json!({ "prompts": crate::prompts::list_structured()? }))
+            }
+            "prompts/get" => {
+                let name = params["name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let (manifest, body, path) = crate::prompts::get_prompt(name)?;
+                Ok(serde_json::json!({
+                    "name": name,
+                    "id": manifest.id,
+                    "title": manifest.title,
+                    "description": manifest.description,
+                    "tags": manifest.tags,
+                    "aliases": manifest.aliases,
+                    "body": body,
+                    "path": path.display().to_string(),
+                }))
+            }
+            "prompts/create" => {
+                let name = params["name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let content = params["content"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'content' field"))?;
+                let project_local = params
+                    .get("project_local")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let path = crate::prompts::write_prompt(name, content, project_local, false)?;
+                Ok(serde_json::json!({ "ok": true, "path": path.display().to_string() }))
+            }
+            "prompts/update" => {
+                let name = params["name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let content = params["content"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'content' field"))?;
+                let project_local = params
+                    .get("project_local")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let path = crate::prompts::write_prompt(name, content, project_local, true)?;
+                Ok(serde_json::json!({ "ok": true, "path": path.display().to_string() }))
+            }
+            "prompts/delete" => {
+                let name = params["name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let scope = crate::prompts::delete_prompt(name)?;
+                Ok(serde_json::json!({ "ok": true, "scope": scope }))
+            }
+            "prompts/submit" => {
+                let name = params["name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let (_manifest, body, path) = crate::prompts::get_prompt(name)?;
+                Ok(serde_json::json!({
+                    "ok": true,
+                    "prompt": body,
+                    "path": path.display().to_string(),
+                    "note": "Prompt returned for caller-side submission; direct ACP turn enqueue is not wired on this endpoint yet."
+                }))
+            }
 
             // ── Control requests (TUI parity) ────────────────────
             // Route through the worker thread which has access to
@@ -4403,9 +4461,69 @@ mod extension_metadata_tests {
         let prompt = handle_acp_request_result(agent, "_prompts/list", &serde_json::json!({}))
             .await
             .unwrap();
-        assert_eq!(prompt["ok"], false);
-        assert_eq!(prompt["error"], "prompt_definition_store_not_implemented");
-        assert_eq!(prompt["contract"], "registered");
+        assert!(prompt["prompts"].as_array().is_some());
+    }
+
+    #[tokio::test]
+    async fn acp_prompt_surfaces_crud_project_local_definitions() {
+        let home = tempfile::tempdir().unwrap();
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        *agent.session_cwd.borrow_mut() = Some(home.path().to_path_buf());
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe {
+            std::env::set_var("OMEGON_HOME", home.path());
+        }
+
+        let create = handle_acp_request_result(
+            agent.clone(),
+            "_prompts/create",
+            &serde_json::json!({
+                "name": "daily-review",
+                "project_local": true,
+                "content": "+++\ntitle = \"Daily Review\"\ndescription = \"Summarize the day\"\n+++\n\nReview today's work."
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(create["ok"], true);
+
+        let get = handle_acp_request_result(
+            agent.clone(),
+            "_prompts/get",
+            &serde_json::json!({ "name": "daily-review" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(get["title"], "Daily Review");
+        assert_eq!(get["body"], "Review today's work.");
+
+        let submit = handle_acp_request_result(
+            agent.clone(),
+            "_prompts/submit",
+            &serde_json::json!({ "name": "daily-review" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(submit["ok"], true);
+        assert_eq!(submit["prompt"], "Review today's work.");
+
+        let delete = handle_acp_request_result(
+            agent,
+            "_prompts/delete",
+            &serde_json::json!({ "name": "daily-review" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(delete["ok"], true);
+        assert_eq!(delete["scope"], "project");
+
+        unsafe {
+            if let Some(value) = previous_home {
+                std::env::set_var("OMEGON_HOME", value);
+            } else {
+                std::env::remove_var("OMEGON_HOME");
+            }
+        }
     }
 
     #[tokio::test]

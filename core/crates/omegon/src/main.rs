@@ -95,6 +95,7 @@ mod plugin_cli;
 mod plugins;
 mod project_rules;
 mod prompt;
+mod prompts;
 mod providers;
 mod route;
 pub mod routing;
