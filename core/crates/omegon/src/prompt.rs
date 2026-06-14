@@ -97,7 +97,7 @@ pub fn build_base_prompt_for_mode(
         let harness_surfaces = "\n## Harness surfaces and state\n\n- Treat Workbench/plan state as live operational state. Before reporting a task complete, reconcile visible plan/workbench state with validation and commit state; do not claim `nothing pending` while an active/todo plan remains unresolved.\n- Separate producer/provenance from content form. Assistant prose, peer-agent prose, and markdown returned by tools may share rendering paths while retaining different producers.\n- Prefer semantic projections and command registry paths over renderer-specific or surface-specific shortcuts.\n- TUI, CLI, ACP, and WebSocket/IPC should share command/projection sources where possible; avoid hidden per-surface allowlists.\n- Prompt templates and loops are executable instruction sources. Preserve provenance, preview/validate before execution, and require explicit safety handling for repeated `/loop` execution.\n";
         if has_delegate {
             format!(
-                "{base}\n## Delegation\n\n- When local models are available, use `delegate` for mechanical file edits, test runs, and pattern-application tasks. Specify `model` to route to a local or cheaper model. Reserve your own turns for planning, architecture, review, and decisions that require frontier reasoning.\n- Worker profiles: `scout` (read/search only), `patch` (small scoped edits), `verify` (run tests/checks).\n- Delegate tasks should be specific and self-contained. Include file paths in `scope` and relevant context in `facts`.\n- You are the orchestrator. Local models are your hands. Think, plan, and review — let them type.\n{harness_surfaces}{tool_surface}"
+                "{base}\n## Subagent operations\n\n- `delegate` is the default one-shot subagent path for bounded side quests: scout a file set, apply a mechanical scoped patch, run focused verification, or perform an adversarial review while you preserve your main context. Use local/cheaper models when available.\n- Worker profiles: `scout` (read/search only), `patch` (small scoped edits), `verify` (run tests/checks). Delegate tasks must be specific and self-contained; include file paths in `scope`, relevant context in `facts`, and the expected output.\n- `cleave_assess` is only a decomposition gate. If it says split and the task has 2+ independent/coordinated child scopes, follow through with `cleave_run`; if there is only one side quest, prefer `delegate` instead of a one-child cleave.\n- `cleave_run` is for coordinated multi-subagent work across isolated worktrees: dependency waves, parallel implementation tracks, merge governance, and cross-child synthesis. Do not use it for routine single-worker scouting or verification.\n- You are the orchestrator. Subagents are your hands. Retrieve/reconcile delegate or cleave results before claiming completion, and do not spawn duplicate delegates for the same task.\n{harness_surfaces}{tool_surface}"
             )
         } else {
             format!("{base}{harness_surfaces}{tool_surface}")
@@ -250,9 +250,7 @@ fn detect_lifecycle_context(cwd: &Path, tools: &[ToolDefinition]) -> String {
 
     if has_cleave_tools {
         sections.push(
-            "cleave: Task decomposition into parallel children. Use cleave_assess \
-             to check complexity (threshold 2.0). The loop auto-batches mutation calls \
-             atomically — you don't need to worry about partial state."
+            "subagent operations: `delegate` is the low-friction one-shot subagent path for bounded side quests (scout, patch, verify, adversarial review). `cleave_assess` is only the decomposition gate. Use `cleave_run` when the task genuinely has 2+ independent or coordinated child scopes that benefit from dependency waves, separate worktrees, merge governance, and cross-child synthesis; do not cleave a one-child side quest unless that isolation/merge machinery is explicitly needed."
                 .into(),
         );
     }
@@ -656,6 +654,86 @@ mod tests {
             "should instruct not to auto-push"
         );
         assert!(prompt.contains("next reversible step is justified"));
+    }
+
+    fn tool(name: &str) -> omegon_traits::ToolDefinition {
+        omegon_traits::ToolDefinition {
+            name: name.into(),
+            label: name.into(),
+            description: format!("{name} tool"),
+            parameters: serde_json::json!({}),
+            capabilities: vec![],
+        }
+    }
+
+    #[test]
+    fn base_prompt_when_delegate_available_defines_subagent_operations() {
+        let tools = vec![
+            tool(crate::tool_registry::delegate::DELEGATE),
+            tool(crate::tool_registry::cleave::CLEAVE_ASSESS),
+            tool(crate::tool_registry::cleave::CLEAVE_RUN),
+        ];
+        let prompt = build_base_prompt(Path::new("/tmp"), &tools);
+
+        assert!(prompt.contains("## Subagent operations"));
+        assert!(prompt.contains("`delegate` is the default one-shot subagent path"));
+        assert!(prompt.contains("`cleave_assess` is only a decomposition gate"));
+        assert!(
+            prompt.contains(
+                "If it says split and the task has 2+ independent/coordinated child scopes"
+            )
+        );
+        assert!(prompt.contains("prefer `delegate` instead of a one-child cleave"));
+        assert!(
+            prompt.contains("Do not use it for routine single-worker scouting or verification")
+        );
+        assert!(
+            prompt.contains(
+                "Retrieve/reconcile delegate or cleave results before claiming completion"
+            )
+        );
+    }
+
+    #[test]
+    fn base_prompt_without_delegate_does_not_inject_subagent_operations() {
+        let tools = vec![
+            tool(crate::tool_registry::cleave::CLEAVE_ASSESS),
+            tool(crate::tool_registry::cleave::CLEAVE_RUN),
+        ];
+        let prompt = build_base_prompt(Path::new("/tmp"), &tools);
+
+        assert!(!prompt.contains("## Subagent operations"));
+        assert!(!prompt.contains("default one-shot subagent path"));
+    }
+
+    #[test]
+    fn lifecycle_context_distinguishes_delegate_from_cleave() {
+        let tools = vec![
+            tool(crate::tool_registry::delegate::DELEGATE),
+            tool(crate::tool_registry::cleave::CLEAVE_ASSESS),
+            tool(crate::tool_registry::cleave::CLEAVE_RUN),
+            tool("design_tree"),
+        ];
+        let context = detect_lifecycle_context(Path::new("."), &tools);
+
+        assert!(context.contains("subagent operations:"));
+        assert!(context.contains("`delegate` is the low-friction one-shot subagent path"));
+        assert!(context.contains("`cleave_assess` is only the decomposition gate"));
+        assert!(context.contains("2+ independent or coordinated child scopes"));
+        assert!(context.contains("do not cleave a one-child side quest"));
+        assert!(context.contains("merge governance"));
+    }
+
+    #[test]
+    fn lifecycle_context_omits_subagent_operations_without_cleave_tools() {
+        let tools = vec![
+            tool(crate::tool_registry::delegate::DELEGATE),
+            tool("design_tree"),
+        ];
+        let context = detect_lifecycle_context(Path::new("."), &tools);
+
+        assert!(!context.contains("subagent operations:"));
+        assert!(!context.contains("do not cleave a one-child side quest"));
     }
 
     #[test]

@@ -325,7 +325,7 @@ This rewrite step is not optional polish — it is the primary authoring step fo
 ## When to Use OpenSpec
 
 **Use OpenSpec for:**
-- Multi-file changes, especially when `cleave_assess` is available and reports complexity ≥ 2.0
+- Multi-file changes, especially when `cleave_assess` is available and reports complexity ≥ 2.0 and the work naturally splits into 2+ coordinated child scopes
 - Any change affecting public APIs or data models
 - Cross-cutting concerns (auth, logging, error handling)
 - Changes that will be reviewed by others
@@ -344,7 +344,7 @@ Capability-aware workflow:
 2. Specify: write delta specs with Given/When/Then scenarios under specs/.
 3. Plan: write design.md and scenario-owned task groups in tasks.md.
 4. Register: if openspec_manage is exposed, register tasks and test files.
-5. Implement: work directly or use cleave/delegate only when those capabilities are exposed and suitable.
+5. Implement: work directly, use `delegate` for bounded one-shot side quests (scout/patch/verify), or use `cleave_run` when there are 2+ coordinated child scopes that benefit from worktree isolation and merge governance.
 6. Verify: assess implementation against scenarios; fix or amend specs with rationale.
 7. Archive: use lifecycle tooling when available, otherwise document remaining reconciliation.
 ```
