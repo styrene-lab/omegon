@@ -715,10 +715,9 @@ publish:
     popd >/dev/null
 
     # ── 4. Link the binary ────────────────────────────────────
-    # Do NOT call `just link` here — it uses a newest-wins heuristic between
-    # release and dev-release targets and may pick a dev build that was compiled
-    # after the release binary. Link $BINARY directly so we always install
-    # exactly what was built for this release.
+    # Release publishing installs the exact release artifact directly. Source
+    # checkout development uses `just link`, which installs the stable launcher
+    # and channel metadata instead of package-manager/release paths.
     echo ""
     if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
         DEST="/usr/local/bin/omegon"

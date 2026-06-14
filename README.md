@@ -354,7 +354,7 @@ just lint
 just link
 ```
 
-`just link` writes a sourceable dev alias file at `~/.omegon/dev-alias.sh` and wires the current shell profile so `omegon` and `om` point at the newest local build. It does not overwrite package-manager owned binaries.
+`just link` installs a stable launcher at `~/.local/bin/omegon` and `~/.local/bin/om`, registers the current checkout under `~/.omegon/channels/default`, and keeps `~/.omegon/bin/omegon` as a fallback copy. The launcher resolves explicit overrides first, then the nearest checkout, then the selected channel; use `omegon --which` to see the target binary.
 
 ---
 

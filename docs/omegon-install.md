@@ -28,7 +28,7 @@ Current install surfaces:
 - Homebrew: `brew tap styrene-lab/tap && brew install omegon`
 - direct GitHub release artifacts from `styrene-lab/omegon`
 
-Source checkouts use `just build` and `just link`. `just link` writes development aliases through `~/.omegon/dev-alias.sh`; it does not overwrite package-manager-owned binaries.
+Source checkouts use `just build` and `just link`. `just link` installs the stable development launcher into `~/.local/bin/omegon` and `~/.local/bin/om`, registers the checkout in `~/.omegon/channels/default`, and keeps a fallback copy in `~/.omegon/bin/omegon`. It does not use shell-profile aliases as the primary resolution mechanism; run `omegon --which` to inspect the resolved target.
 
 ## Linux runtime requirements
 
