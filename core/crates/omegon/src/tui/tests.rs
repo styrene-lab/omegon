@@ -2032,6 +2032,28 @@ fn focus_mode_disables_mouse_capture_and_restores_it() {
 }
 
 #[test]
+fn leaving_focus_mode_clears_focus_detail_pane() {
+    let mut app = test_app();
+    app.conversation.push_user("operator prompt");
+    app.conversation.append_streaming("assistant answer");
+    app.conversation.finalize_message();
+    app.set_focus_mode(true);
+    let idx = app
+        .conversation
+        .timeline_focused_segment()
+        .expect("focus mode selects a segment");
+
+    app.conversation.toggle_timeline_expanded_segment(idx);
+    assert_eq!(app.conversation.timeline_expanded_segment(), Some(idx));
+
+    app.set_focus_mode(false);
+
+    assert_eq!(app.conversation.timeline_expanded_segment(), None);
+    let rendered = render_app_to_string(&mut app, 120, 24);
+    assert!(!rendered.contains("detail · segment"), "{rendered}");
+}
+
+#[test]
 fn mouse_slash_command_toggles_interaction_mode() {
     let mut app = test_app();
     let tx = test_tx();
