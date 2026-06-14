@@ -27,6 +27,10 @@ Claude Code and Codex present slash command surfaces as command-first rows with 
 
 Current `/skills` TUI route passes through `canonical_slash_command("skills", args)` in `core/crates/omegon/src/tui/mod.rs`, then `control_runtime::skills_view_response()` renders a wide inventory dump. The renderer groups bundled/user/project-local skills but leads with long descriptions and places actionable commands only at the bottom. This is the first concrete target for a palette-style projection.
 
+### Current `/prompt` and user command surface
+
+`/prompt` is now registered through `features::prompt::PromptFeature` as a command-palette-native router with `CommandAvailability::ALL` and prompt-injection-sensitive safety metadata. Prompt IDs remain data: `/prompt <name>` is shorthand for preview, while direct slash invocation such as `/review` is provided by explicit user command aliases loaded from `.omegon/commands/*.toml` and `~/.omegon/commands/*.toml` via `features::user_commands::UserCommandFeature`. Prompt definition CRUD/read surfaces are backed by `prompts.rs`, and ACP/IPC/WebSocket expose read/preview projections with safety verdicts rather than silent queue execution.
+
 ## Decisions
 
 ### Start with palette-style text projections, not a new modal
@@ -41,18 +45,38 @@ Current `/skills` TUI route passes through `canonical_slash_command("skills", ar
 
 **Rationale:** Both are operator-facing CRUD/manage surfaces. `/skills` exposes bundled/user/project-local instruction artifacts; `/prompt` manages reusable prompt records. They exercise the common palette needs: action rows, object rows, scope/status indicators, detail-on-demand, and safe handling of destructive actions.
 
+### Prompt IDs are data; user commands are invocation surfaces
+
+**Status:** accepted
+
+**Rationale:** Prompt libraries should not pollute the global slash namespace or collide with built-ins such as `/model`, `/help`, or `/plan`. `/prompt <name>` is the canonical quick preview path. If an operator wants direct `/review` style invocation, they create an explicit user command alias targeting `prompt:<id>` with availability and safety metadata.
+
 ## Open Questions
 
 - [assumption] `/skills` and `/prompt` default outputs should be improved first as text projections before building a full interactive modal palette.
 - [assumption] The command registry has enough metadata to drive palette rows for command name, argument shape, availability, safety, and short description without duplicating a separate slash-menu allowlist.
 - How should palette rows represent object scope for skills and prompts: bundled/user/project-local, installed/not installed, editable/read-only, and safe/destructive actions?
+- How should `/skills` default output be refactored into the same compact action-row projection without losing detail-on-demand access to full skill bodies?
 
 ## Implementation Notes
 
 ### File Scope
 
-- `core/crates/omegon/src/control_runtime.rs` — 
-- `core/crates/omegon/src/tui/mod.rs` — 
-- `core/crates/omegon/src/skills.rs` — 
-- `core/crates/omegon/src/prompt.rs` — 
-- `core/crates/omegon-traits/src/lib.rs` —
+- `core/crates/omegon/src/control_runtime.rs` — existing `/skills` control response remains the main target for palette-style skill projection.
+- `core/crates/omegon/src/tui/mod.rs` — static help/completion should expose prompt/user-command surfaces through registry-backed command definitions rather than bespoke allowlists.
+- `core/crates/omegon/src/skills.rs` — skill inventory already provides bundled/user/project-local data needed for palette rows.
+- `core/crates/omegon/src/prompts.rs` — implemented reusable prompt definitions, storage lookup, safety verdicts, and bundled/user/project-local prompt inventory.
+- `core/crates/omegon/src/features/prompt.rs` — implemented `/prompt` as the registry-native prompt router with `<name>` shorthand preview.
+- `core/crates/omegon/src/features/user_commands.rs` — implemented explicit prompt-backed user command aliases for direct slash invocation.
+- `core/crates/omegon/src/backend.rs` — registered skill/prompt ACP/RPC surface contracts.
+- `core/crates/omegon/src/acp.rs` — wired ACP skill and prompt read/preview handling.
+- `core/crates/omegon/src/ipc/connection.rs` — exposed IPC prompt read/preview methods and skill get.
+- `core/crates/omegon/src/web/ws.rs` — exposed WebSocket prompt read/preview methods.
+- `core/crates/omegon/src/control_actions.rs` — classified skill and prompt actions for legacy IPC/Web safety gates.
+- `core/crates/omegon-traits/src/lib.rs` — command availability and safety metadata already exists and is the registry contract.
+
+## Remaining Work
+
+- Refactor `/skills` default output into a compact palette-style action/object projection.
+- Consider extracting a shared command-palette row DTO so `/skills`, `/prompt`, TUI palette, ACP, and CLI text output can consume one projection.
+- Add a stronger confirmation/trust flow before any prompt/user-command surface queues or executes prompt bodies directly.
