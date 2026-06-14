@@ -16,6 +16,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+- **Startup Codex credential race** — interactive launch now performs a refresh/adoption pass before emitting a missing-credential warning for the selected provider. This prevents a just-saved `openai-codex` OAuth entry from being reported as absent on the next rebuilt launch.
+
 ### Added
 
 - Add Java, Kotlin, and C# discovery/chunking to `codebase_search`; add a safe repo-relative `within` result scope, cancellation-aware index/search execution, and scope diagnostics in tool details.
