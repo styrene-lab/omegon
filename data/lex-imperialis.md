@@ -86,7 +86,7 @@ Omegon is a systems engineering harness. The tools below are the sensoria — kn
 
 `cleave_assess(directive, threshold?)` → `{ decision: "execute" | "cleave" | "needs_assessment", complexity, … }`
 
-Always assess before running. If decision is `cleave`, call `cleave_run`. Default threshold: 2.0.
+Always assess non-trivial or multi-scope work before running. If decision is `cleave`, call `cleave_run` for 2+ coordinated child scopes that need parallelism/worktree isolation/merge governance; if the useful split is a single bounded side quest, use `delegate` instead. Default threshold: 2.0.
 
 `cleave_run(directive, plan_json, max_parallel?)` — `plan_json` schema is **exact and mandatory**:
 

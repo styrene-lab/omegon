@@ -945,8 +945,14 @@ mod tests {
             "should include directive V"
         );
         assert!(
-            prompt.contains("Operator Agency"),
-            "should include directive VI"
+            prompt.contains(
+                "If decision is `cleave`, call `cleave_run` for 2+ coordinated child scopes"
+            ),
+            "Lex cleave guidance should not force one-child cleaves"
+        );
+        assert!(
+            prompt.contains("use `delegate` instead"),
+            "Lex cleave guidance should point bounded side quests at delegate"
         );
     }
 

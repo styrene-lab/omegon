@@ -46,7 +46,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
-- Clarified bundled prompt and OpenSpec guidance so `delegate` is the default one-shot subagent path while `cleave_run` is reserved for coordinated multi-child work.
+- Clarified bundled prompt, Lex, and OpenSpec guidance so `delegate` is the default one-shot subagent path while `cleave_run` is reserved for coordinated multi-child work.
 - Make `om` an exact synonym for `omegon`; launcher name no longer implicitly enables slim/explorator mode. Use explicit posture flags or profile defaults for runtime mode selection.
 - Update harness prompt/project directives for Workbench plan-state reconciliation, semantic surface discipline, registry-backed command surfaces, and prompt/loop provenance safety.
 - Interactive startup no longer silently falls back to `automation_safe_model()` when the selected provider is unavailable. Fallback is now opt-in via profile `fallbackProviders = ["provider-id"]`; otherwise startup enters an explicit disconnected state with remediation guidance. Operators who previously would have received a silent fallback now also get a one-time startup notice with the exact `fallbackProviders = [...]` snippet needed to opt back in.
