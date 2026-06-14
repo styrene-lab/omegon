@@ -215,4 +215,50 @@ Matching ignores vendor/build directories during glob traversal: `.git`, `target
 
 The helper returns `SkillSignalMatch` evidence containing the original signal, matched repo-relative path, and signal kind. Future activation logic must combine this evidence with profile and session intent; file matches alone are not sufficient for prompt injection.
 
+### Armory and installed skill constraint
+
+Future suggestion assembly must not assume the bundled skill set is the universe. Skills may come from:
+
+- bundled `BUNDLED` skills embedded in the binary,
+- user-installed `~/.omegon/skills/*/SKILL.md`, including Armory-installed assets,
+- project-local `<cwd>/.omegon/skills/*/SKILL.md` overrides.
+
+Implications:
+
+- Suggestion code should operate over parsed `SkillManifest`/body/path entries, not hardcoded bundled names.
+- Missing activation metadata remains valid for installed/Armory skills; it should produce an advisory `unspecified`/legacy classification or warning, not exclusion or failure.
+- Unknown activation/profile values in external skills should flow through `validate_activation_metadata` diagnostics and remain visible to settings/diagnostic surfaces.
+- Project-local skills must keep precedence over user-installed and bundled skills, matching the existing `PluginRegistry::load_skills` load-order semantics.
+- Bundled-only assertions belong in bundled tests; runtime suggestion code must be source-agnostic.
+
+### Suggestion assembly contract
+
+Skill suggestion assembly now has a source-agnostic helper over parsed skill records. It is still advisory and does not inject prompt content.
+
+Core types:
+
+- `SkillSource`: `Bundled`, `UserInstalled`, or `ProjectLocal`.
+- `ParsedSkill`: skill name, parsed manifest, source, and optional path.
+- `SkillSuggestion`: skill name/source, parsed activation/profile metadata, signal match evidence, and warnings.
+- `SkillSuggestionContext`: project root, requested profiles, and intent terms.
+
+Selection matrix:
+
+| Activation | Suggest when |
+|---|---|
+| `always` | requested profile intersects parsed skill profiles |
+| `intent_detected` | intent term matches skill name, alias, tag, or trigger text |
+| `project_detected` | requested profile intersects and at least one project signal matches |
+| `domain_detected` | requested profile or intent matches, and at least one project signal matches |
+| `lifecycle_gated` | lifecycle profile or lifecycle/OpenSpec intent is present, and at least one project signal matches |
+| unspecified legacy metadata | explicit intent matches; suggestion carries `activation metadata unspecified` warning |
+
+Diagnostics are preserved in suggestions:
+
+- unknown activation/profile values from `validate_activation_metadata`,
+- invalid `project_signals`,
+- unspecified legacy metadata when the skill is suggested by explicit intent.
+
+This keeps Armory/user/project-local skills visible without trusting malformed metadata or assuming every skill follows the bundled schema. Runtime prompt injection remains out of scope; suggestions are evidence for a future UI/operator decision path.
+
 ## Open Questions
