@@ -18,6 +18,8 @@ pub enum BackendDomain {
     Packages,
     Plans,
     Tasks,
+    Skills,
+    Prompts,
     ExternalTasks,
     Capabilities,
     AssistantRuns,
@@ -325,6 +327,82 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         BackendDomain::Tasks,
         "Task event projection."
     ),
+    acp_read_endpoint!(
+        "_skills/list",
+        BackendDomain::Skills,
+        "Bundled, user-installed, Armory-installed, and project-local skill inventory."
+    ),
+    acp_read_endpoint!(
+        "_skills/get",
+        BackendDomain::Skills,
+        "Single skill definition, manifest metadata, provenance, and content."
+    ),
+    acp_write_endpoint!(
+        "_skills/create",
+        BackendDomain::Skills,
+        BackendPermission::Edit,
+        &["skill_definition_write"],
+        "Create a user-global or project-local skill definition."
+    ),
+    acp_write_endpoint!(
+        "_skills/update",
+        BackendDomain::Skills,
+        BackendPermission::Edit,
+        &["skill_definition_write"],
+        "Replace an existing user-global or project-local skill definition."
+    ),
+    acp_write_endpoint!(
+        "_skills/delete",
+        BackendDomain::Skills,
+        BackendPermission::Edit,
+        &["skill_definition_delete"],
+        "Delete a user-global or project-local skill definition."
+    ),
+    acp_write_endpoint!(
+        "_skills/install",
+        BackendDomain::Skills,
+        BackendPermission::Edit,
+        &["armory_install", "skill_definition_write"],
+        "Install bundled or Armory-provided skill definitions."
+    ),
+    acp_read_endpoint!(
+        "_prompts/list",
+        BackendDomain::Prompts,
+        "Bundled, user-installed, and project-local reusable prompt inventory."
+    ),
+    acp_read_endpoint!(
+        "_prompts/get",
+        BackendDomain::Prompts,
+        "Single reusable prompt definition, metadata, provenance, and content."
+    ),
+    acp_write_endpoint!(
+        "_prompts/create",
+        BackendDomain::Prompts,
+        BackendPermission::Edit,
+        &["prompt_definition_write"],
+        "Create a user-global or project-local reusable prompt definition."
+    ),
+    acp_write_endpoint!(
+        "_prompts/update",
+        BackendDomain::Prompts,
+        BackendPermission::Edit,
+        &["prompt_definition_write"],
+        "Replace an existing user-global or project-local reusable prompt definition."
+    ),
+    acp_write_endpoint!(
+        "_prompts/delete",
+        BackendDomain::Prompts,
+        BackendPermission::Edit,
+        &["prompt_definition_delete"],
+        "Delete a user-global or project-local reusable prompt definition."
+    ),
+    acp_write_endpoint!(
+        "_prompts/submit",
+        BackendDomain::Prompts,
+        BackendPermission::Edit,
+        &["prompt_queue_mutation"],
+        "Submit or enqueue a reusable prompt definition for execution."
+    ),
     BackendEndpoint {
         id: "_assistant_runs/list",
         version: 1,
@@ -525,9 +603,33 @@ mod tests {
         let surfaces = acp_capability_surfaces_json();
         assert_eq!(surfaces["_runtime/status"]["version"], 1);
         assert_eq!(surfaces["_lifecycle/design/frontier"]["version"], 1);
+        assert_eq!(surfaces["_skills/list"]["version"], 1);
+        assert_eq!(surfaces["_skills/create"]["version"], 1);
+        assert_eq!(surfaces["_prompts/list"]["version"], 1);
+        assert_eq!(surfaces["_prompts/submit"]["version"], 1);
         assert_eq!(surfaces["_provider/retry"]["version"], 1);
         assert_eq!(surfaces["_provider/failure"]["version"], 1);
         assert_eq!(surfaces["_turn/cancelled"]["version"], 1);
         assert_eq!(surfaces["_external_tasks/import"]["version"], 1);
+    }
+
+    #[test]
+    fn skills_and_prompts_contracts_are_registered_for_acp() {
+        let skill_list = find_by_acp_method("_skills/list").unwrap();
+        assert_eq!(skill_list.domain, BackendDomain::Skills);
+        assert_eq!(skill_list.mutability, BackendMutability::Read);
+        assert_eq!(skill_list.permission, BackendPermission::Read);
+
+        let skill_update = find_by_acp_method("_skills/update").unwrap();
+        assert_eq!(skill_update.domain, BackendDomain::Skills);
+        assert_eq!(skill_update.mutability, BackendMutability::Write);
+        assert_eq!(skill_update.permission, BackendPermission::Edit);
+        assert!(skill_update.side_effects.contains(&"skill_definition_write"));
+
+        let prompt_submit = find_by_acp_method("_prompts/submit").unwrap();
+        assert_eq!(prompt_submit.domain, BackendDomain::Prompts);
+        assert_eq!(prompt_submit.mutability, BackendMutability::Write);
+        assert_eq!(prompt_submit.permission, BackendPermission::Edit);
+        assert!(prompt_submit.side_effects.contains(&"prompt_queue_mutation"));
     }
 }
