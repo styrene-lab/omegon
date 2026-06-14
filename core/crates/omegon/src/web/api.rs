@@ -280,7 +280,10 @@ fn capability_inventory_snapshot(
         roots,
         secret_inputs,
     )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    .map_err(|error| {
+        tracing::error!(?error, "capability inventory snapshot failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 /// GET /api/capabilities — assistant capability inventory snapshot.
@@ -1018,6 +1021,79 @@ required = ["MISSING_REQUIRED_TOKEN"]
         restore_env("OMEGON_HOME", previous_home);
 
         assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
+    }
+
+    #[tokio::test]
+    async fn capabilities_endpoints_skip_invalid_local_inventory_entries() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let ext_dir = home.path().join("extensions").join("valid-ext");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        std::fs::write(
+            ext_dir.join("manifest.toml"),
+            r#"[extension]
+name = "valid-ext"
+version = "0.1.0"
+description = "Valid extension"
+
+[runtime]
+type = "native"
+binary = "bin/valid-ext"
+"#,
+        )
+        .unwrap();
+        let broken_ext = home.path().join("extensions").join("broken-ext");
+        std::fs::create_dir_all(&broken_ext).unwrap();
+        std::fs::write(broken_ext.join("manifest.toml"), "not = [valid toml").unwrap();
+
+        write_blocked_agent(home.path());
+        let broken_agent = home.path().join("catalog").join("broken-agent");
+        std::fs::create_dir_all(&broken_agent).unwrap();
+        std::fs::write(
+            broken_agent.join("agent.toml"),
+            "[agent
+id = ",
+        )
+        .unwrap();
+
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let capabilities = get_capabilities(axum::extract::State(test_state()))
+            .await
+            .expect("capabilities should degrade bad local entries")
+            .0;
+        let assistants = get_capability_assistants(axum::extract::State(test_state()))
+            .await
+            .expect("assistant capabilities should degrade bad local entries")
+            .0;
+
+        restore_env("OMEGON_HOME", previous_home);
+
+        assert!(
+            capabilities
+                .installed_extensions
+                .iter()
+                .any(|ext| ext.name == "valid-ext")
+        );
+        assert!(
+            capabilities
+                .assistant_profiles
+                .iter()
+                .any(|profile| profile.id == "blocked-agent")
+        );
+        assert!(
+            assistants
+                .assistants
+                .iter()
+                .any(|assistant| assistant.id == "blocked-agent")
+        );
+        assert!(
+            !assistants
+                .assistants
+                .iter()
+                .any(|assistant| assistant.id == "broken-agent")
+        );
     }
 
     #[tokio::test]

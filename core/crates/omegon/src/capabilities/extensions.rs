@@ -91,7 +91,16 @@ pub fn list_installed_extension_capabilities_from_dir(
         if !resolved.join("manifest.toml").exists() {
             continue;
         }
-        summaries.push(extension_capability_summary_from_dir(&resolved)?);
+        match extension_capability_summary_from_dir(&resolved) {
+            Ok(summary) => summaries.push(summary),
+            Err(error) => {
+                tracing::warn!(
+                    error = ?error,
+                    path = %resolved.display(),
+                    "skipping invalid installed extension capability summary"
+                );
+            }
+        }
     }
     summaries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(summaries)
@@ -246,6 +255,35 @@ serve_subcommand = "serve"
         assert_eq!(summary.mcp.as_ref().unwrap().transport, "http");
         assert!(summary.capabilities.is_object());
         assert!(summary.permissions.is_object());
+    }
+
+    #[test]
+    fn skips_invalid_extension_manifest_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let valid_dir = temp.path().join("valid");
+        std::fs::create_dir_all(&valid_dir).unwrap();
+        std::fs::write(
+            valid_dir.join("manifest.toml"),
+            r#"
+[extension]
+name = "valid"
+version = "0.1.0"
+description = "Valid extension"
+
+[runtime]
+type = "native"
+binary = "target/release/valid"
+"#,
+        )
+        .unwrap();
+        let broken_dir = temp.path().join("broken");
+        std::fs::create_dir_all(&broken_dir).unwrap();
+        std::fs::write(broken_dir.join("manifest.toml"), "not = [valid toml").unwrap();
+
+        let summaries = list_installed_extension_capabilities_from_dir(temp.path()).unwrap();
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].name, "valid");
     }
 
     #[test]
