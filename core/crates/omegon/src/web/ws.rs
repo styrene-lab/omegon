@@ -350,6 +350,92 @@ async fn handle_client_command(
             };
             let _ = snapshot_tx.send(message).await;
         }
+
+        "prompts_list" | "prompts_get" | "prompts_preview" | "prompts_resolve" => {
+            let classified = crate::control_actions::classify_web_method(cmd_type);
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": format!("caller role is insufficient for {cmd_type}"),
+                    }))
+                    .await;
+                return;
+            }
+            let response = match cmd_type {
+                "prompts_list" => serde_json::json!({
+                    "type": "control_result",
+                    "method": cmd_type,
+                    "accepted": true,
+                    "prompts": crate::prompts::list_structured().unwrap_or_default(),
+                }),
+                "prompts_get" => match cmd
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    Some(name) => match crate::prompts::get_prompt(name) {
+                        Ok((manifest, body, path)) => serde_json::json!({
+                            "type": "control_result",
+                            "method": cmd_type,
+                            "accepted": true,
+                            "name": name,
+                            "id": manifest.id,
+                            "title": manifest.title,
+                            "description": manifest.description,
+                            "tags": manifest.tags,
+                            "aliases": manifest.aliases,
+                            "safety": crate::prompts::safety_verdict(&body),
+                            "body": body,
+                            "path": path.display().to_string(),
+                        }),
+                        Err(err) => serde_json::json!({
+                            "type": "control_result",
+                            "method": cmd_type,
+                            "accepted": false,
+                            "output": err.to_string(),
+                        }),
+                    },
+                    None => serde_json::json!({
+                        "type": "control_result",
+                        "method": cmd_type,
+                        "accepted": false,
+                        "output": "missing name",
+                    }),
+                },
+                _ => match cmd
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    Some(name) => match crate::prompts::get_prompt(name) {
+                        Ok((_manifest, body, path)) => serde_json::json!({
+                            "type": "control_result",
+                            "method": cmd_type,
+                            "accepted": true,
+                            "action": "preview",
+                            "safety": crate::prompts::safety_verdict(&body),
+                            "prompt": body,
+                            "path": path.display().to_string(),
+                        }),
+                        Err(err) => serde_json::json!({
+                            "type": "control_result",
+                            "method": cmd_type,
+                            "accepted": false,
+                            "output": err.to_string(),
+                        }),
+                    },
+                    None => serde_json::json!({
+                        "type": "control_result",
+                        "method": cmd_type,
+                        "accepted": false,
+                        "output": "missing name",
+                    }),
+                },
+            };
+            let _ = snapshot_tx.send(response).await;
+        }
         "plugin_view" => {
             let classified = crate::control_actions::classify_web_method("plugin_view");
             if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
