@@ -3758,16 +3758,22 @@ impl OmegonAcpAgent {
                 let scope = crate::prompts::delete_prompt(name)?;
                 Ok(serde_json::json!({ "ok": true, "scope": scope }))
             }
-            "prompts/submit" => {
+            "prompts/preview" | "prompts/resolve" | "prompts/submit" => {
                 let name = params["name"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
                 let (_manifest, body, path) = crate::prompts::get_prompt(name)?;
+                let action = if method.ends_with("/submit") {
+                    "preview_queue_boundary"
+                } else {
+                    "preview"
+                };
                 Ok(serde_json::json!({
                     "ok": true,
+                    "action": action,
                     "prompt": body,
                     "path": path.display().to_string(),
-                    "note": "Prompt returned for caller-side submission; direct ACP turn enqueue is not wired on this endpoint yet."
+                    "note": "Prompt resolved for preview; direct ACP turn enqueue requires a stronger confirmation/trust flow."
                 }))
             }
 
@@ -4332,6 +4338,7 @@ mod extension_metadata_tests {
         assert_eq!(response["surfaces"]["_prompts/create"]["version"], 1);
         assert_eq!(response["surfaces"]["_prompts/update"]["version"], 1);
         assert_eq!(response["surfaces"]["_prompts/delete"]["version"], 1);
+        assert_eq!(response["surfaces"]["_prompts/preview"]["version"], 1);
         assert_eq!(response["surfaces"]["_prompts/submit"]["version"], 1);
         assert_eq!(response["surfaces"]["_external_tasks/import"]["version"], 1);
         assert_eq!(response["features"]["extensions"], true);
@@ -4505,7 +4512,19 @@ mod extension_metadata_tests {
         .await
         .unwrap();
         assert_eq!(submit["ok"], true);
+        assert_eq!(submit["action"], "preview_queue_boundary");
         assert_eq!(submit["prompt"], "Review today's work.");
+
+        let preview = handle_acp_request_result(
+            agent.clone(),
+            "_prompts/preview",
+            &serde_json::json!({ "name": "daily-review" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(preview["ok"], true);
+        assert_eq!(preview["action"], "preview");
+        assert_eq!(preview["prompt"], "Review today's work.");
 
         let delete = handle_acp_request_result(
             agent,

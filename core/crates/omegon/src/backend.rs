@@ -396,12 +396,17 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         &["prompt_definition_delete"],
         "Delete a user-global or project-local reusable prompt definition."
     ),
+    acp_read_endpoint!(
+        "_prompts/preview",
+        BackendDomain::Prompts,
+        "Resolve a reusable prompt definition for preview without queueing or execution."
+    ),
     acp_write_endpoint!(
         "_prompts/submit",
         BackendDomain::Prompts,
         BackendPermission::Edit,
         &["prompt_queue_mutation"],
-        "Submit or enqueue a reusable prompt definition for execution."
+        "Resolve a reusable prompt at the preview/queue boundary; direct execution requires a stronger confirmation surface."
     ),
     BackendEndpoint {
         id: "_assistant_runs/list",
@@ -606,6 +611,7 @@ mod tests {
         assert_eq!(surfaces["_skills/list"]["version"], 1);
         assert_eq!(surfaces["_skills/create"]["version"], 1);
         assert_eq!(surfaces["_prompts/list"]["version"], 1);
+        assert_eq!(surfaces["_prompts/preview"]["version"], 1);
         assert_eq!(surfaces["_prompts/submit"]["version"], 1);
         assert_eq!(surfaces["_provider/retry"]["version"], 1);
         assert_eq!(surfaces["_provider/failure"]["version"], 1);
@@ -629,6 +635,11 @@ mod tests {
                 .side_effects
                 .contains(&"skill_definition_write")
         );
+
+        let prompt_preview = find_by_acp_method("_prompts/preview").unwrap();
+        assert_eq!(prompt_preview.domain, BackendDomain::Prompts);
+        assert_eq!(prompt_preview.mutability, BackendMutability::Read);
+        assert_eq!(prompt_preview.permission, BackendPermission::Read);
 
         let prompt_submit = find_by_acp_method("_prompts/submit").unwrap();
         assert_eq!(prompt_submit.domain, BackendDomain::Prompts);
