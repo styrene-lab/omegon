@@ -3703,6 +3703,16 @@ impl OmegonAcpAgent {
                 }
             }
 
+            // ── Prompt definitions ───────────────────────────────
+            "prompts/list" | "prompts/get" | "prompts/create" | "prompts/update"
+            | "prompts/delete" | "prompts/submit" => Ok(serde_json::json!({
+                "ok": false,
+                "error": "prompt_definition_store_not_implemented",
+                "method": method,
+                "contract": "registered",
+                "note": "Prompt definition ACP/RPC contracts are advertised, but reusable prompt storage and dispatch are not implemented yet."
+            })),
+
             // ── Control requests (TUI parity) ────────────────────
             // Route through the worker thread which has access to
             // conversation state, settings, and secrets.
@@ -4253,6 +4263,18 @@ mod extension_metadata_tests {
         assert_eq!(response["surfaces"]["_tasks/show"]["version"], 1);
         assert_eq!(response["surfaces"]["_tasks/bind"]["version"], 1);
         assert_eq!(response["surfaces"]["_tasks/events"]["version"], 1);
+        assert_eq!(response["surfaces"]["_skills/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_skills/get"]["version"], 1);
+        assert_eq!(response["surfaces"]["_skills/create"]["version"], 1);
+        assert_eq!(response["surfaces"]["_skills/update"]["version"], 1);
+        assert_eq!(response["surfaces"]["_skills/delete"]["version"], 1);
+        assert_eq!(response["surfaces"]["_skills/install"]["version"], 1);
+        assert_eq!(response["surfaces"]["_prompts/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_prompts/get"]["version"], 1);
+        assert_eq!(response["surfaces"]["_prompts/create"]["version"], 1);
+        assert_eq!(response["surfaces"]["_prompts/update"]["version"], 1);
+        assert_eq!(response["surfaces"]["_prompts/delete"]["version"], 1);
+        assert_eq!(response["surfaces"]["_prompts/submit"]["version"], 1);
         assert_eq!(response["surfaces"]["_external_tasks/import"]["version"], 1);
         assert_eq!(response["features"]["extensions"], true);
         assert_eq!(response["features"]["secrets"], true);
@@ -4357,6 +4379,33 @@ mod extension_metadata_tests {
 
         assert_eq!(snapshot["openspec"]["changes"][0]["name"], "demo");
         assert_eq!(snapshot["openspec"]["total_tasks"], 1);
+    }
+
+    #[tokio::test]
+    async fn acp_skill_surfaces_dispatch_existing_handlers() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+
+        let list = handle_acp_request_result(agent.clone(), "_skills/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert!(list["skills"].as_array().is_some());
+
+        let get = handle_acp_request_result(
+            agent.clone(),
+            "_skills/get",
+            &serde_json::json!({ "name": "rust" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(get["name"], "rust");
+        assert!(get["body"].as_str().unwrap_or_default().contains("Rust"));
+
+        let prompt = handle_acp_request_result(agent, "_prompts/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(prompt["ok"], false);
+        assert_eq!(prompt["error"], "prompt_definition_store_not_implemented");
+        assert_eq!(prompt["contract"], "registered");
     }
 
     #[tokio::test]
