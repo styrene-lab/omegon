@@ -938,6 +938,19 @@ mod tests {
         assert!(openspec.contains("lifecycle tool group is exposed"));
         assert!(openspec.contains("manage_tools"));
         assert!(openspec.contains("tool-backed lifecycle reconciliation was not performed"));
+        assert!(openspec.contains("Treat slash commands as operator-facing conveniences"));
+        assert!(openspec.contains("Capability-aware workflow"));
+        for stale_required_step in [
+            "| **proposed** | `proposal.md` | `/opsx:spec",
+            "continue work or `/cleave`",
+            "`/assess spec <change>` → `/opsx:archive`",
+            "with `openspec_change_path` updates task checkboxes",
+        ] {
+            assert!(
+                !openspec.contains(stale_required_step),
+                "OpenSpec skill must not present slash/tool-specific paths as mandatory: {stale_required_step}"
+            );
+        }
     }
 
     #[test]

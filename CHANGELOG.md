@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Made bundled prompt templates and dynamic prompt guidance capability-aware so hidden or mode-gated memory/lifecycle tools do not get presented as unconditional agent instructions.
 - Tightened the bundled `code-act` skill so batch scripting no longer overrides the canonical read → `edit` → `validate` loop for small source changes.
 - Updated bundled `typescript` and `openspec` skills to remove legacy `pi-*` SDK example drift and make lifecycle tool usage capability-aware.
+- Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
 - Added prompt/skill drift tests that guard bundled prompt templates and coding skills against stale direct-tool instructions, legacy `pi-*` SDK examples, and lifecycle-skill activation without capability-awareness.

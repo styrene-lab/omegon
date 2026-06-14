@@ -26,12 +26,12 @@ Specs define **what must be true** before code is written. They are the source o
 
 | Stage | Artifacts | Next Action |
 |-------|-----------|-------------|
-| **proposed** | `proposal.md` | `/opsx:spec <change>` — write specs |
+| **proposed** | `proposal.md` | Write specs with lifecycle tooling or by editing `specs/*.md` directly. |
 | **specced** | `specs/*.md` | write `design.md` + `tasks.md`, then `openspec_manage(register_tasks)` |
 | **planned** | `design.md`, `tasks.md` | register failing test stubs with `openspec_manage(register_test_file)` |
 | **testing** | registered test stubs | implement until tests can pass |
-| **implementing** | tasks in progress | continue work or `/cleave`, update `tasks.md`, then `register_tasks` |
-| **verifying** | all tasks done | `/assess spec <change>` → `/opsx:archive` |
+| **implementing** | tasks in progress | Continue work directly or with cleave when exposed; update `tasks.md`, then register task progress when lifecycle tooling is available. |
+| **verifying** | all tasks done | Assess scenarios against implementation, then archive with lifecycle tooling when available. |
 | **archived** | specs merged to baseline | complete |
 
 ## Lifecycle Reconciliation (required)
@@ -41,8 +41,8 @@ OpenSpec artifacts are not write-once planning docs. Treat them as runtime lifec
 At these checkpoints, reconcile the artifacts to match reality:
 
 1. **Implement / scaffold** — ensure the design-tree node is bound to the OpenSpec change and marked `implementing`
-2. **Post-plan / post-cleave** — ensure `tasks.md` reflects merged work, not just original intent, then call `openspec_manage` with `action: register_tasks`
-3. **Post-assess / post-fix** — after `/assess spec` or `/assess cleave`, reopen lifecycle state if review found remaining work, and append implementation-note deltas when fixes expanded file scope or constraints
+2. **Post-plan / post-cleave** — ensure `tasks.md` reflects merged work, not just original intent, then register task progress with `openspec_manage` when lifecycle tooling is available
+3. **Post-assess / post-fix** — after a spec or cleave assessment, reopen lifecycle state if review found remaining work, and append implementation-note deltas when fixes expanded file scope or constraints
 4. **Pre-archive** — ensure the bound design-tree node and `tasks.md` are current before closing the change
 
 Archive is expected to refuse obviously stale lifecycle state, especially:
@@ -58,7 +58,7 @@ openspec/
 │   └── <change-name>/
 │       ├── proposal.md      # Intent, scope, success criteria
 │       ├── design.md        # Architecture decisions, file changes
-│       ├── tasks.md         # Numbered task groups for /cleave
+│       ├── tasks.md         # Numbered task groups for implementation/decomposition
 │       └── specs/
 │           ├── <domain>.md  # Delta specs with Given/When/Then
 │           └── <domain>/
@@ -191,17 +191,21 @@ paths:
 
 The contract is the **source of truth for API shape** — code implements the contract. If implementation diverges, fix the code or amend the spec with rationale.
 
-## Commands
+## Operator Commands and Tooling
 
-| Command | Description |
-|---------|-------------|
-| `/opsx:propose <name> <title>` | Create a new change with proposal.md |
-| `/opsx:spec <change>` | Generate/add specs (triggers agent to write scenarios) |
-| `/opsx:ff <change>` | Fast-forward: scaffold design.md + tasks.md from specs, then register task progress |
-| `/opsx:status` | Show all active changes with lifecycle stage |
-| `/opsx:verify <change>` | Delegates to `/assess spec` for spec verification |
-| `/opsx:archive <change>` | Archive change, merge specs to baseline |
-| `/opsx:apply <change>` | Continue implementing (delegates to `/cleave`) |
+OpenSpec may be driven through slash commands, registry commands, or direct tool calls depending on the current surface. Treat slash commands as operator-facing conveniences, not as mandatory agent instructions. Before invoking command-shaped flows, confirm the relevant command/tool is exposed; otherwise edit the OpenSpec files directly and state what lifecycle reconciliation remains.
+
+Common operator command intents, when available:
+
+| Intent | Typical command | Description |
+|---------|-------------|-------------|
+| Propose | `/opsx:propose <name> <title>` | Create a new change with proposal.md |
+| Specify | `/opsx:spec <change>` | Generate/add specs |
+| Fast-forward | `/opsx:ff <change>` | Scaffold design.md + tasks.md from specs, then register task progress |
+| Status | `/opsx:status` | Show active changes with lifecycle stage |
+| Verify | `/opsx:verify <change>` | Assess spec scenarios against implementation |
+| Archive | `/opsx:archive <change>` | Archive change, merge specs to baseline |
+| Apply | `/opsx:apply <change>` | Continue implementing, optionally via cleave when exposed |
 
 ## Tool: `openspec_manage`
 
@@ -223,13 +227,13 @@ Agent-callable tool for programmatic lifecycle operations.
 
 ## Integration with Cleave
 
-OpenSpec and cleave work together:
+OpenSpec and cleave work together when both lifecycle and cleave capabilities are exposed:
 
-1. **`/opsx:ff`** or manual planning generates `tasks.md` in the format cleave expects (numbered groups with checkboxes)
-2. **`/cleave`** detects `openspec/changes/<name>/tasks.md` and uses it as the split plan
-3. **`cleave_run`** with `openspec_change_path` updates task checkboxes on completion
-4. **`openspec_manage(register_tasks)`** advances the FSM from the current `tasks.md`
-5. **`/assess spec`** verifies implementation against spec scenarios
+1. Fast-forward tooling or manual planning generates `tasks.md` in the format cleave expects (numbered groups with checkboxes).
+2. Cleave uses `openspec/changes/<name>/tasks.md` as a split plan when that integration is available.
+3. `cleave_run` may update task checkboxes on completion if its current schema exposes the OpenSpec change-path parameter.
+4. `openspec_manage(register_tasks)` advances the FSM from the current `tasks.md` when lifecycle tooling is available.
+5. A spec assessment verifies implementation against spec scenarios before archive.
 
 ### Scenario-First Task Grouping
 
@@ -265,7 +269,7 @@ Each task group header should include a `<!-- specs: domain/name -->` comment de
 - [ ] Add session lifecycle
 ```
 
-Cleave uses these annotations to deterministically map spec scenarios to child tasks as acceptance criteria. Groups without annotations fall back to heuristic matching.
+Cleave-capable workflows use these annotations to deterministically map spec scenarios to child tasks as acceptance criteria. Groups without annotations fall back to heuristic matching.
 
 ### tasks.md Format
 
@@ -317,8 +321,8 @@ This rewrite step is not optional polish — it is the primary authoring step fo
 
 ## When to Use OpenSpec
 
-**Always use** for:
-- Multi-file changes (complexity ≥ 2.0 in cleave_assess)
+**Use OpenSpec for:**
+- Multi-file changes, especially when `cleave_assess` is available and reports complexity ≥ 2.0
 - Any change affecting public APIs or data models
 - Cross-cutting concerns (auth, logging, error handling)
 - Changes that will be reviewed by others
@@ -330,22 +334,16 @@ This rewrite step is not optional polish — it is the primary authoring step fo
 
 ## Workflow Example
 
+Capability-aware workflow:
+
+```text
+1. Propose: create openspec/changes/jwt-auth/proposal.md with intent and success criteria.
+2. Specify: write delta specs with Given/When/Then scenarios under specs/.
+3. Plan: write design.md and scenario-owned task groups in tasks.md.
+4. Register: if openspec_manage is exposed, register tasks and test files.
+5. Implement: work directly or use cleave/delegate only when those capabilities are exposed and suitable.
+6. Verify: assess implementation against scenarios; fix or amend specs with rationale.
+7. Archive: use lifecycle tooling when available, otherwise document remaining reconciliation.
 ```
-# 1. Propose
-/opsx:propose jwt-auth "JWT Authentication"
 
-# 2. Write specs (agent generates Given/When/Then)
-/opsx:spec jwt-auth
-
-# 3. Generate implementation plan
-/opsx:ff jwt-auth
-
-# 4. Execute in parallel
-/cleave implement jwt-auth changes
-
-# 5. Verify against specs
-/assess spec jwt-auth
-
-# 6. Archive
-/opsx:archive jwt-auth
-```
+Slash commands such as `/opsx:propose`, `/opsx:spec`, `/cleave`, and `/assess spec` are examples of one operator surface. Do not assume they exist in every session or provider mode.

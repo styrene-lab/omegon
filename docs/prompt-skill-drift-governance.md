@@ -125,6 +125,7 @@ Low-risk stale guidance found and corrected in the first bundled-skill pass:
 
 - `skills/typescript/SKILL.md` used a legacy `@styrene-lab/pi-coding-agent` import in the SDK type example. This is now an illustrative Omegon-era package name plus a warning to import the project-local SDK dependency rather than cargo-culting legacy `pi-*` names.
 - `skills/openspec/SKILL.md` now starts with capability-aware activation guidance: use OpenSpec only when lifecycle tools are exposed or the operator explicitly asks to work from OpenSpec files; otherwise enable the tool group or state that tool-backed reconciliation was not performed.
+- `skills/openspec/SKILL.md` was further reworked so `/opsx`, `/cleave`, and `/assess` are presented as optional operator-surface examples rather than mandatory agent workflow steps. The canonical example is now a capability-aware file/tool workflow.
 
 ## `omegon-coding` extension sketch
 
