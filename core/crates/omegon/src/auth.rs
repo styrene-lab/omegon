@@ -881,6 +881,7 @@ pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Re
 
         let before_keys = auth_json_provider_keys(&auth);
         auth[provider] = serde_json::to_value(creds)?;
+        ensure_auth_json_key_invariants("write_credentials", provider, &before_keys, &auth)?;
         trace_auth_json_key_delta("write_credentials", provider, &before_keys, &auth);
         atomic_write_auth_json(&path, &auth)?;
         set_auth_file_permissions(&path)?;
@@ -1019,6 +1020,7 @@ pub fn logout_provider(provider: &str) -> anyhow::Result<()> {
         if let Some(obj) = auth.as_object_mut() {
             obj.remove(auth_key);
         }
+        ensure_auth_json_key_invariants("logout_provider", auth_key, &before_keys, &auth)?;
         trace_auth_json_key_delta("logout_provider", auth_key, &before_keys, &auth);
 
         // Write back
@@ -2037,6 +2039,12 @@ fn write_credentials_with_extra(
         }
         let before_keys = auth_json_provider_keys(&auth);
         auth[provider] = entry;
+        ensure_auth_json_key_invariants(
+            "write_credentials_with_extra",
+            provider,
+            &before_keys,
+            &auth,
+        )?;
         trace_auth_json_key_delta(
             "write_credentials_with_extra",
             provider,
@@ -2086,6 +2094,12 @@ fn write_refreshed_credentials(provider: &str, creds: &OAuthCredentials) -> anyh
         let refreshed_entry = refreshed_credential_entry(provider, creds, existing_entry)?;
         let before_keys = auth_json_provider_keys(&auth);
         auth[provider] = refreshed_entry;
+        ensure_auth_json_key_invariants(
+            "write_refreshed_credentials",
+            provider,
+            &before_keys,
+            &auth,
+        )?;
         trace_auth_json_key_delta("write_refreshed_credentials", provider, &before_keys, &auth);
         atomic_write_auth_json(&path, &auth)?;
         set_auth_file_permissions(&path)?;
@@ -2130,6 +2144,35 @@ fn auth_json_provider_keys(auth: &Value) -> Vec<String> {
         .unwrap_or_default();
     keys.sort();
     keys
+}
+
+fn ensure_auth_json_key_invariants(
+    operation: &'static str,
+    provider: &str,
+    before_keys: &[String],
+    after: &Value,
+) -> anyhow::Result<()> {
+    let after_keys = auth_json_provider_keys(after);
+    let removed: Vec<&str> = before_keys
+        .iter()
+        .filter(|key| !after_keys.contains(key))
+        .map(String::as_str)
+        .collect();
+    if !removed.is_empty() && operation != "logout_provider" {
+        anyhow::bail!(
+            "auth.json {operation} for {provider} unexpectedly removed provider entries: {}",
+            removed.join(", ")
+        );
+    }
+    if provider != "openai-codex"
+        && before_keys.iter().any(|key| key == "openai-codex")
+        && !after_keys.iter().any(|key| key == "openai-codex")
+    {
+        anyhow::bail!(
+            "auth.json {operation} for {provider} unexpectedly removed openai-codex credentials"
+        );
+    }
+    Ok(())
 }
 
 fn trace_auth_json_key_delta(
@@ -2817,6 +2860,49 @@ mod tests {
                 read_credential_extra("openai-codex", "accountId").as_deref(),
                 Some("acct_preserved")
             );
+        });
+    }
+
+    #[test]
+    fn credential_write_preserves_all_unrelated_provider_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("auth.json");
+        std::fs::write(
+            &override_path,
+            serde_json::to_string_pretty(&json!({
+                "openai-codex": {
+                    "type": "oauth",
+                    "access": "codex-access-token",
+                    "refresh": "codex-refresh-token",
+                    "expires": 9_999_999_999_999u64,
+                    "accountId": "acct_preserved"
+                },
+                "brave": {
+                    "type": "api-key",
+                    "access": "brave-key",
+                    "expires": 18_446_744_073_709_551_615u64
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let anthropic = OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "anthropic-access-token".into(),
+            refresh: "anthropic-refresh-token".into(),
+            expires: 9_999_999_999_999,
+        };
+
+        with_auth_json_path_env(Some(&override_path), || {
+            write_credentials("anthropic", &anthropic).expect("write anthropic auth");
+
+            let auth: Value =
+                serde_json::from_str(&std::fs::read_to_string(&override_path).expect("auth json"))
+                    .expect("valid auth json");
+            assert_eq!(auth["openai-codex"]["access"], "codex-access-token");
+            assert_eq!(auth["openai-codex"]["accountId"], "acct_preserved");
+            assert_eq!(auth["brave"]["access"], "brave-key");
+            assert_eq!(auth["anthropic"]["access"], "anthropic-access-token");
         });
     }
 
