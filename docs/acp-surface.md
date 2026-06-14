@@ -204,10 +204,17 @@ cargo test -p omegon toggle_pin_prefers_latest_running_tool_card
 cargo check -p omegon --bin omegon
 ```
 
-Before linking a Zed/Flynt-consumed binary:
+Before linking a Zed/Flynt-consumed binary, register the checkout through the stable launcher instead of writing direct symlinks:
 
 ```bash
 cargo build --profile dev-release -p omegon
-ln -sf /Users/wilson/bravo/omegon/target/dev-release/omegon ~/.local/bin/omegon
-ln -sf /Users/wilson/bravo/omegon/target/dev-release/omegon ~/.local/bin/om
+just link
+omegon --which
+```
+
+For multi-checkout machines, use named channels instead of overwriting `~/.local/bin/omegon`:
+
+```bash
+just link acp
+OMEGON_CHANNEL=acp omegon --which
 ```

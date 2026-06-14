@@ -275,6 +275,43 @@ link channel="default":
     just install-skills
     just install-catalog
 
+
+# Diagnose Omegon launcher/channel resolution for this machine.
+link-doctor:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "PATH entries for omegon:"
+    which -a omegon 2>/dev/null || true
+    echo ""
+    echo "Shell resolution:"
+    type -a omegon 2>/dev/null || true
+    echo ""
+    echo "Launcher diagnosis:"
+    if command -v omegon >/dev/null 2>&1; then
+        omegon --which || true
+    else
+        echo "omegon not found on PATH"
+    fi
+    echo ""
+    echo "Channels:"
+    if [ -d "$HOME/.omegon/channels" ]; then
+        for channel in "$HOME/.omegon/channels"/*; do
+            [ -e "$channel" ] || continue
+            echo "  $(basename "$channel") -> $(cat "$channel")"
+        done
+    else
+        echo "  none ($HOME/.omegon/channels missing)"
+    fi
+    echo ""
+    echo "Fallback binary:"
+    if [ -x "$HOME/.omegon/bin/omegon" ]; then
+        echo "  $HOME/.omegon/bin/omegon"
+        printf '  '
+        "$HOME/.omegon/bin/omegon" --version || true
+    else
+        echo "  missing: $HOME/.omegon/bin/omegon"
+    fi
+
 # Install bundled skills to ~/.omegon/skills/ so they are available to all projects.
 # Uses the binary itself (embedded assets) so this works for both source and brew installs.
 # Project-local skills go in .omegon/skills/ inside each repo.

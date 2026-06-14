@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Added `just link-doctor` to inspect launcher PATH resolution, selected target, channel files, and fallback binary state.
 - Added fixture coverage for the stable launcher resolution policy, including env overrides, nearest checkout selection, channels, fallback binaries, paths with spaces, dev-release fallback, and self-recursion rejection.
 - Added a stable `omegon`/`om` launcher installed by `just link`, with deterministic multi-checkout resolution via explicit env overrides, nearest checkout builds, named `~/.omegon/channels`, and a fallback installed binary.
 - Added backend surface contracts for ACP/RPC skill and prompt definition management, covering list/get/create/update/delete plus skill install and prompt preview/submit endpoints in the capability registry, wired ACP/IPC/WebSocket dispatch for existing skill and prompt read/preview handlers, added reusable prompt definition storage and safety verdicts for bundled/user/project-local prompts, registered `/prompt` as the command-palette-native prompt routing surface, and documented prompt/user-command authoring.
@@ -32,6 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a source-agnostic skill suggestion helper that evaluates parsed bundled, user-installed, Armory-installed, or project-local skills against profile, intent, and project-signal evidence without performing runtime injection, preserving external metadata diagnostics instead of silently dropping malformed activation hints.
 
 ### Fixed
+- Replaced active ACP binary-linking guidance that recommended direct `~/.local/bin` symlinks with the stable launcher/channel workflow.
 - **Startup provider credential race** — interactive launch now performs a refresh/adoption pass before emitting a missing or expired credential warning for the selected provider. This prevents a just-saved `openai-codex` OAuth entry from being reported as absent on the next rebuilt launch.
 - **Slim tool row affordance alignment** — completed and live slim tool rows now reuse the shared inline row renderer so `⌃O details` stays right-aligned consistently instead of drifting in the legacy compact path.
 - **Selected segment focus rail** — selected conversation segments now use a plain vertical focus rail instead of repeated diamond glyphs that could collide with narrow terminal content.
