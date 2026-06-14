@@ -243,11 +243,7 @@ fn detect_lifecycle_context(cwd: &Path, tools: &[ToolDefinition]) -> String {
 
     if has_openspec && has_openspec_tools {
         sections.push(
-            "openspec: Spec-driven implementation lifecycle. The full cycle is: \
-             design_tree_update(implement) → add_spec → write tasks.md → \
-             openspec_manage(register_tasks) → openspec_manage(register_test_file) → \
-             /cleave or implement → /assess spec → archive. Specs define what must be true \
-             BEFORE code is written; editing tasks.md alone does not advance FSM state."
+            "openspec: Spec-driven implementation lifecycle. Use lifecycle tools only when they are exposed in the current tool surface; otherwise enable the lifecycle group with manage_tools or work from the files directly. The full cycle is: design_tree_update(implement) when a decided node exists → add_spec → write tasks.md → openspec_manage(register_tasks) → openspec_manage(register_test_file) → cleave or implement → assess spec → archive. Specs define what must be true BEFORE code is written; editing tasks.md alone does not advance FSM state."
                 .into(),
         );
     }
@@ -899,6 +895,36 @@ mod tests {
     /// Audit: measure token budget consumed by all registered tools.
     /// This test doesn't assert — it prints a budget report.
     /// Run with: cargo test -p omegon -- tool_token_budget_audit --nocapture
+    #[test]
+    fn bundled_prompts_are_capability_aware() {
+        let prompt_files = [
+            ("prompts/init.md", include_str!("../../../../prompts/init.md")),
+            ("prompts/status.md", include_str!("../../../../prompts/status.md")),
+        ];
+
+        for (path, content) in prompt_files {
+            assert!(
+                !content.contains("Use `memory_query` to check"),
+                "{path} must not require a broad memory tool that may be hidden"
+            );
+            assert!(
+                !content.contains("Use `design_tree` action"),
+                "{path} must not require direct lifecycle tool syntax that may be hidden"
+            );
+            assert!(
+                content.contains("available") || content.contains("exposed"),
+                "{path} should describe capability-aware fallbacks"
+            );
+        }
+    }
+
+    #[test]
+    fn code_act_skill_preserves_canonical_edit_validate_loop() {
+        let content = include_str!("../../../../skills/code-act/SKILL.md");
+        assert!(content.contains("Do **not** use code-act to bypass"));
+        assert!(content.contains("`edit` + `validate` loop"));
+    }
+
     #[test]
     fn tool_token_budget_audit() {
         use omegon_traits::ToolProvider;

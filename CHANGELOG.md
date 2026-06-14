@@ -16,6 +16,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Changed
+- Made bundled prompt templates and dynamic prompt guidance capability-aware so hidden or mode-gated memory/lifecycle tools do not get presented as unconditional agent instructions.
+- Tightened the bundled `code-act` skill so batch scripting no longer overrides the canonical read → `edit` → `validate` loop for small source changes.
+
+### Added
+- Added prompt tests that guard bundled prompt templates and the `code-act` skill against drifting back to stale direct-tool instructions.
+
 ### Fixed
 - **Startup provider credential race** — interactive launch now performs a refresh/adoption pass before emitting a missing or expired credential warning for the selected provider. This prevents a just-saved `openai-codex` OAuth entry from being reported as absent on the next rebuilt launch.
 - **Slim tool row affordance alignment** — completed and live slim tool rows now reuse the shared inline row renderer so `⌃O details` stays right-aligned consistently instead of drifting in the legacy compact path.

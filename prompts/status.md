@@ -15,12 +15,11 @@ Quick session orientation. Load state from all subsystems and present a dashboar
 
 ## 1. Load State (parallel)
 
-Do all of these in parallel — they are independent:
+Do all exposed/read-only checks in parallel — they are independent. Use capability-aware fallbacks rather than assuming a fixed tool surface:
 
-- `memory_query` — get project memory (skim for recent sessions, open issues)
-- `design_tree` action `list` — get design nodes
-- `design_tree` action `frontier` — get open questions
-- Check OpenSpec: `ls openspec/changes/ 2>/dev/null`
+- Memory: prefer `memory_recall` for recent project/session facts. Use `memory_query` only if it is exposed and a broad inventory is needed.
+- Design/lifecycle: if design-tree tools are exposed, list active nodes and open questions. If hidden, either enable the lifecycle group with `manage_tools` when requested or mark design state as "not checked".
+- OpenSpec: check `openspec/changes/` with shell/file tools when present; if `openspec_manage` is exposed, use it for authoritative lifecycle state.
 - Git state: `git branch --show-current && git status --short | head -10`
 
 ## 2. Parse and Summarize

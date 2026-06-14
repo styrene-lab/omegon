@@ -29,19 +29,23 @@ git log --oneline -5 2>/dev/null
 
 Detect project type (look for key files):
 ```bash
-ls package.json pyproject.toml Cargo.toml go.mod Makefile Dockerfile *.sln 2>/dev/null
+ls package.json pyproject.toml Cargo.toml go.mod Makefile Containerfile Dockerfile *.sln 2>/dev/null
 ```
 
 ## 2. Initialize Memory
 
-Use `memory_query` to check if project memory already exists.
+If memory tools are available, use the narrowest current memory read surface first:
 
-- If **no facts exist**: this is truly a first session. Read key files (README, config files, project manifests) to understand the project. Use `memory_store` to persist 3-5 foundational facts about the project (language, structure, key abstractions).
-- If **facts exist**: this project has prior context. Skim the facts and skip to step 3.
+- Prefer `memory_recall` with a project-orientation query when available.
+- Use `memory_query` only when it is actually exposed in the current tool list and a broad inventory is needed.
+- If no facts are found: this is truly a first session. Read key files (README, config files, project manifests) to understand the project. If `memory_store` is available, persist 3-5 foundational facts about the project (language, structure, key abstractions).
+- If facts exist: this project has prior context. Skim the facts and skip to step 3.
+
+Do not claim memory is absent merely because a memory tool is hidden. If needed, use `manage_tools` to enable the relevant memory group or report that memory was not checked.
 
 ## 3. Check Tooling State
 
-Use `design_tree` action `list` to see if any design explorations exist.
+If lifecycle tools are exposed, use the current design-tree/list surface to see if any design explorations exist. If lifecycle tools are hidden, do not invent counts; report lifecycle as "not checked" or enable the relevant tool group with `manage_tools` when the operator asked for lifecycle state.
 
 Check for design doc migration needs:
 ```bash

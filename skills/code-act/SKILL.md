@@ -9,8 +9,11 @@ triggers = ["write a script", "batch process", "run a pipeline", "code-act mode"
 
 # Code-Act Execution Mode
 
-When this skill is active, accomplish tasks by generating complete Python scripts
-and executing them, rather than making sequential tool calls.
+When this skill is active, prefer a complete Python script for batch, loop-heavy,
+or deterministic read/transform/report work. Do **not** use code-act to bypass the
+harness's canonical mutation and validation flow: for small targeted source edits,
+read the file first, use the `edit` tool for exact-text changes, then run
+`validate` when available.
 
 ## When to use code-act
 
@@ -18,6 +21,11 @@ and executing them, rather than making sequential tool calls.
 - Data transformation pipelines (read → transform → write)
 - Tasks requiring loops, conditionals, or parallel operations
 - Tasks where the full plan is known upfront
+
+Stay with normal harness tools when the task is a narrow code edit, requires
+interactive judgment after each read, or benefits from built-in tool semantics
+such as workspace boundary checks, exact-text replacement, validation, or commit
+handling.
 
 ## Execution pattern
 
@@ -53,3 +61,5 @@ files = sorted(glob.glob("src/**/*.rs", recursive=True))
 - For parallel work, use `concurrent.futures.ThreadPoolExecutor`
 - Clean up temp files after execution
 - Never use `input()` or interactive prompts
+- Keep scripts inside the workspace unless the operator has explicitly approved external paths
+- Do not use scripts to replace the `edit` + `validate` loop for small source changes

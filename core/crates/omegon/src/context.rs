@@ -334,9 +334,10 @@ impl ContextManager {
                 | "memory_archive" | "memory_focus" | "memory_episodes" | "memory_connect" => (
                     "memory",
                     "Memory guidelines:\n\
-                     - Use memory_recall(query) for targeted retrieval — cheaper than memory_query\n\
+                     - Use memory_recall(query) for targeted retrieval when available.\n\
+                     - Use broad memory inventory tools only when they are exposed and the task needs them.\n\
                      - Store conclusions, not investigation steps. Current state, not transitions.\n\
-                     - Before storing, check if an existing fact covers it — use memory_supersede\n\
+                     - Before storing, check if an existing fact covers it — use memory_supersede when available.\n\
                      - Prefer pointer facts ('X does Y. See path/to/file') over inlining details",
                 ),
 
@@ -355,19 +356,19 @@ impl ContextManager {
                     "cleave",
                     "Cleave guidelines:\n\
                      - cleave_assess determines complexity. Score ≥ 2.0 suggests decomposition.\n\
-                     - When using OpenSpec, pass openspec_change_path to cleave_run.\n\
-                     - After cleave_run, update tasks.md, then call openspec_manage(register_tasks) so the FSM reflects task progress.",
+                     - When using OpenSpec, pass the current OpenSpec change path only if the cleave API exposes that parameter.\n\
+                     - After cleave_run, reconcile tasks.md and register task progress when OpenSpec lifecycle tools are available.",
                 ),
 
                 // OpenSpec — inject lifecycle guidance
                 "openspec_manage" => (
                     "openspec",
                     "OpenSpec guidelines:\n\
-                     - The lifecycle: propose → add_spec → write tasks.md → register_tasks → register_test_file → /cleave or implement → /assess spec → archive\n\
+                     - The lifecycle is propose → add_spec → write tasks.md → register_tasks → register_test_file → cleave or implement → assess spec → archive.\n\
                      - Specs define what must be true BEFORE code is written.\n\
-                     - Editing tasks.md alone does not advance lifecycle state; call register_tasks after task changes.\n\
+                     - Editing tasks.md alone does not advance lifecycle state; call register_tasks after task changes when the lifecycle tool is available.\n\
                      - Register test files before implementation so the FSM can enter implementing.\n\
-                     - For tracked changes, use design_tree_update(implement) from a decided node.",
+                     - For tracked changes, bind to a decided design node when design-tree tools are available.",
                 ),
 
                 // Local inference — inject model guidance
