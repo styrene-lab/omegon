@@ -401,12 +401,10 @@ pub const BACKEND_ENDPOINTS: &[BackendEndpoint] = &[
         BackendDomain::Prompts,
         "Resolve a reusable prompt definition for preview without queueing or execution."
     ),
-    acp_write_endpoint!(
+    acp_read_endpoint!(
         "_prompts/submit",
         BackendDomain::Prompts,
-        BackendPermission::Edit,
-        &["prompt_queue_mutation"],
-        "Resolve a reusable prompt at the preview/queue boundary; direct execution requires a stronger confirmation surface."
+        "Deprecated compatibility alias for `_prompts/preview`; does not submit, queue, or execute."
     ),
     BackendEndpoint {
         id: "_assistant_runs/list",
@@ -643,12 +641,8 @@ mod tests {
 
         let prompt_submit = find_by_acp_method("_prompts/submit").unwrap();
         assert_eq!(prompt_submit.domain, BackendDomain::Prompts);
-        assert_eq!(prompt_submit.mutability, BackendMutability::Write);
-        assert_eq!(prompt_submit.permission, BackendPermission::Edit);
-        assert!(
-            prompt_submit
-                .side_effects
-                .contains(&"prompt_queue_mutation")
-        );
+        assert_eq!(prompt_submit.mutability, BackendMutability::Read);
+        assert_eq!(prompt_submit.permission, BackendPermission::Read);
+        assert!(prompt_submit.side_effects.is_empty());
     }
 }

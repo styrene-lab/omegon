@@ -62,7 +62,7 @@ The current guardrails are deliberately conservative:
 - instruction-override phrases are suspicious;
 - blocked prompts are not returned through `/prompt run` or `/prompt submit`.
 
-Direct execution/queueing over ACP/RPC is not silently enabled. `_prompts/preview` and `_prompts/resolve` are read surfaces. `_prompts/submit` currently resolves at the preview/queue boundary and requires a stronger confirmation/trust flow before it should enqueue turns directly.
+Direct execution/queueing over ACP/RPC is not silently enabled. `_prompts/preview`, `_prompts/resolve`, and deprecated `_prompts/submit` are read/preview surfaces. `_prompts/submit` is retained as a compatibility alias for `_prompts/preview` and reports `execution_performed = false`; a future queueing endpoint needs a stronger confirmation/trust flow before it should enqueue turns directly.
 
 ## User-defined command aliases
 

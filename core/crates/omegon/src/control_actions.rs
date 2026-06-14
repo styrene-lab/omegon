@@ -127,7 +127,7 @@ pub fn classify_ipc_method(method: &str) -> ClassifiedAction {
         "prompts_create" => (CanonicalAction::PromptsCreate, ControlRole::Edit, false),
         "prompts_update" => (CanonicalAction::PromptsUpdate, ControlRole::Edit, false),
         "prompts_delete" => (CanonicalAction::PromptsDelete, ControlRole::Edit, false),
-        "prompts_submit" => (CanonicalAction::PromptsSubmit, ControlRole::Edit, false),
+        "prompts_submit" => (CanonicalAction::PromptsSubmit, ControlRole::Read, true),
         "_skills/list" => (CanonicalAction::SkillsView, ControlRole::Read, true),
         "_skills/get" => (CanonicalAction::SkillsGet, ControlRole::Read, true),
         "_skills/create" => (CanonicalAction::SkillsCreate, ControlRole::Edit, false),
@@ -142,7 +142,7 @@ pub fn classify_ipc_method(method: &str) -> ClassifiedAction {
         "_prompts/create" => (CanonicalAction::PromptsCreate, ControlRole::Edit, false),
         "_prompts/update" => (CanonicalAction::PromptsUpdate, ControlRole::Edit, false),
         "_prompts/delete" => (CanonicalAction::PromptsDelete, ControlRole::Edit, false),
-        "_prompts/submit" => (CanonicalAction::PromptsSubmit, ControlRole::Edit, false),
+        "_prompts/submit" => (CanonicalAction::PromptsSubmit, ControlRole::Read, true),
         "plugin_view" => (CanonicalAction::PluginView, ControlRole::Read, true),
         "plugin_install" => (CanonicalAction::PluginInstall, ControlRole::Edit, false),
         "plugin_remove" => (CanonicalAction::PluginRemove, ControlRole::Edit, false),
@@ -273,7 +273,7 @@ pub fn classify_web_method(method: &str) -> ClassifiedAction {
         "prompts_create" => (CanonicalAction::PromptsCreate, ControlRole::Edit, false),
         "prompts_update" => (CanonicalAction::PromptsUpdate, ControlRole::Edit, false),
         "prompts_delete" => (CanonicalAction::PromptsDelete, ControlRole::Edit, false),
-        "prompts_submit" => (CanonicalAction::PromptsSubmit, ControlRole::Edit, false),
+        "prompts_submit" => (CanonicalAction::PromptsSubmit, ControlRole::Read, true),
         "plugin_view" => (CanonicalAction::PluginView, ControlRole::Read, true),
         "plugin_install" => (CanonicalAction::PluginInstall, ControlRole::Edit, false),
         "plugin_remove" => (CanonicalAction::PluginRemove, ControlRole::Edit, false),
@@ -555,8 +555,8 @@ mod tests {
 
         let submit = classify_ipc_method("_prompts/submit");
         assert_eq!(submit.action, CanonicalAction::PromptsSubmit);
-        assert_eq!(submit.role, ControlRole::Edit);
-        assert!(!submit.remote_safe);
+        assert_eq!(submit.role, ControlRole::Read);
+        assert!(submit.remote_safe);
     }
 
     #[test]

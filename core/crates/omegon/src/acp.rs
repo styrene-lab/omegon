@@ -3764,18 +3764,21 @@ impl OmegonAcpAgent {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
                 let (_manifest, body, path) = crate::prompts::get_prompt(name)?;
-                let action = if method.ends_with("/submit") {
-                    "preview_queue_boundary"
-                } else {
-                    "preview"
-                };
+                let deprecated = method.ends_with("/submit");
                 Ok(serde_json::json!({
                     "ok": true,
-                    "action": action,
+                    "action": "preview",
+                    "deprecated": deprecated,
+                    "replacement": if deprecated { Some("_prompts/preview") } else { None },
+                    "execution_performed": false,
                     "safety": crate::prompts::safety_verdict(&body),
                     "prompt": body,
                     "path": path.display().to_string(),
-                    "note": "Prompt resolved for preview; direct ACP turn enqueue requires a stronger confirmation/trust flow."
+                    "note": if deprecated {
+                        "Deprecated compatibility alias for preview; no submit, queue, or execution was performed."
+                    } else {
+                        "Prompt resolved for preview; direct ACP turn enqueue requires a stronger confirmation/trust flow."
+                    }
                 }))
             }
 
@@ -4514,7 +4517,10 @@ mod extension_metadata_tests {
         .await
         .unwrap();
         assert_eq!(submit["ok"], true);
-        assert_eq!(submit["action"], "preview_queue_boundary");
+        assert_eq!(submit["action"], "preview");
+        assert_eq!(submit["deprecated"], true);
+        assert_eq!(submit["replacement"], "_prompts/preview");
+        assert_eq!(submit["execution_performed"], false);
         assert_eq!(submit["prompt"], "Review today's work.");
 
         let preview = handle_acp_request_result(
