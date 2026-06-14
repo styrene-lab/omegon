@@ -187,4 +187,32 @@ Implementation notes:
 - All bundled skills declare activation metadata, and tests validate bundled activation/profile values plus required signals for project/domain-detected skills through the same diagnostic helper used by future runtime code.
 - Armory-generated skill frontmatter remains metadata-optional so external skills are not forced into the bundled lifecycle prematurely.
 
+### Project signal matching contract
+
+Project-signal matching now has a tested advisory helper, but it still returns evidence only; it does not inject or activate skills at runtime.
+
+Supported signal forms:
+
+| Form | Meaning |
+|---|---|
+| `Cargo.toml` | root-relative literal file or directory exists |
+| `openspec/changes` | root-relative literal directory exists |
+| `*.rs` | root-only glob; nested files such as `src/lib.rs` do not match |
+| `docs/**/*.md` | recursive glob below the literal prefix before `**/` |
+
+Invalid signals are rejected before matching:
+
+- empty strings,
+- absolute paths,
+- `..` traversal,
+- backslashes,
+- null bytes,
+- empty path components such as `docs//*.md`,
+- malformed recursive patterns such as multiple `**` segments,
+- non-recursive globs containing `/` such as `src/*.rs`.
+
+Matching ignores vendor/build directories during glob traversal: `.git`, `target`, `node_modules`, `.venv`, `dist`, and `build`.
+
+The helper returns `SkillSignalMatch` evidence containing the original signal, matched repo-relative path, and signal kind. Future activation logic must combine this evidence with profile and session intent; file matches alone are not sufficient for prompt injection.
+
 ## Open Questions

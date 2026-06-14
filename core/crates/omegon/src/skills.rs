@@ -198,6 +198,135 @@ pub fn validate_activation_metadata(manifest: &SkillManifest) -> SkillActivation
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillSignalKind {
+    Literal,
+    RootGlob,
+    RecursiveGlob,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillSignalMatch {
+    pub signal: String,
+    pub matched_path: String,
+    pub kind: SkillSignalKind,
+}
+
+const IGNORED_SIGNAL_DIRS: &[&str] = &[".git", "target", "node_modules", ".venv", "dist", "build"];
+
+pub fn validate_project_signal(signal: &str) -> anyhow::Result<SkillSignalKind> {
+    if signal.is_empty()
+        || signal.starts_with('/')
+        || signal.contains('\\')
+        || signal.contains('\0')
+        || signal.split('/').any(|part| part.is_empty() || part == "..")
+    {
+        anyhow::bail!("invalid project signal '{signal}'");
+    }
+
+    if signal.contains("**") {
+        if !signal.contains("**/") || signal.matches("**").count() > 1 {
+            anyhow::bail!("invalid recursive project signal '{signal}'");
+        }
+        Ok(SkillSignalKind::RecursiveGlob)
+    } else if signal.contains('*') {
+        if signal.contains('/') {
+            anyhow::bail!("root glob project signal must not contain '/': '{signal}'");
+        }
+        Ok(SkillSignalKind::RootGlob)
+    } else {
+        Ok(SkillSignalKind::Literal)
+    }
+}
+
+pub fn match_project_signal(
+    root: &std::path::Path,
+    signal: &str,
+) -> anyhow::Result<Option<SkillSignalMatch>> {
+    let kind = validate_project_signal(signal)?;
+    let matched = match kind {
+        SkillSignalKind::Literal => {
+            let candidate = root.join(signal);
+            candidate.exists().then_some(signal.to_string())
+        }
+        SkillSignalKind::RootGlob => std::fs::read_dir(root).ok().and_then(|entries| {
+            entries.filter_map(|entry| entry.ok()).find_map(|entry| {
+                let name = entry.file_name().to_string_lossy().to_string();
+                (glob_component_matches(signal, &name) && !is_ignored_signal_dir(&name))
+                    .then_some(name)
+            })
+        }),
+        SkillSignalKind::RecursiveGlob => match_recursive_signal(root, signal)?,
+    };
+
+    Ok(matched.map(|matched_path| SkillSignalMatch {
+        signal: signal.to_string(),
+        matched_path,
+        kind,
+    }))
+}
+
+fn match_recursive_signal(root: &std::path::Path, signal: &str) -> anyhow::Result<Option<String>> {
+    let Some((prefix, suffix)) = signal.split_once("**/") else {
+        return Ok(None);
+    };
+    let prefix = prefix.trim_end_matches('/');
+    let search_root = if prefix.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(prefix)
+    };
+    if !search_root.exists() {
+        return Ok(None);
+    }
+    find_recursive_signal_match(root, &search_root, suffix)
+}
+
+fn find_recursive_signal_match(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    suffix_pattern: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries.filter_map(|entry| entry.ok()).collect::<Vec<_>>(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    entries.sort_by_key(|entry| entry.path());
+
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if path.is_dir() {
+            if is_ignored_signal_dir(&name) {
+                continue;
+            }
+            if let Some(found) = find_recursive_signal_match(root, &path, suffix_pattern)? {
+                return Ok(Some(found));
+            }
+        } else if glob_component_matches(suffix_pattern, &name) {
+            if let Ok(relative) = path.strip_prefix(root) {
+                return Ok(Some(relative.to_string_lossy().replace('\\', "/")));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn is_ignored_signal_dir(name: &str) -> bool {
+    IGNORED_SIGNAL_DIRS.contains(&name)
+}
+
+fn glob_component_matches(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    let Some((prefix, suffix)) = pattern.split_once('*') else {
+        return pattern == value;
+    };
+    value.starts_with(prefix) && value.ends_with(suffix)
+}
+
 impl SkillManifest {
     /// Render this manifest as TOML frontmatter for a SKILL.md file.
     pub fn to_frontmatter(&self) -> String {
@@ -1141,6 +1270,69 @@ mod tests {
         assert_eq!(rust.activation.as_deref(), Some("project_detected"));
         assert!(rust.profile.iter().any(|p| p == "coding"));
         assert!(rust.project_signals.iter().any(|s| s == "Cargo.toml"));
+    }
+
+    #[test]
+    fn project_signal_matches_literal_file_and_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("Cargo.toml"), "[package]\n").unwrap();
+        std::fs::create_dir_all(root.join("openspec/changes")).unwrap();
+
+        let cargo = match_project_signal(root, "Cargo.toml").unwrap().unwrap();
+        assert_eq!(cargo.kind, SkillSignalKind::Literal);
+        assert_eq!(cargo.matched_path, "Cargo.toml");
+
+        let openspec = match_project_signal(root, "openspec/changes").unwrap().unwrap();
+        assert_eq!(openspec.kind, SkillSignalKind::Literal);
+        assert_eq!(openspec.matched_path, "openspec/changes");
+    }
+
+    #[test]
+    fn project_signal_matches_root_glob_only_at_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "").unwrap();
+        assert!(match_project_signal(root, "*.rs").unwrap().is_none());
+
+        std::fs::write(root.join("main.rs"), "").unwrap();
+        let matched = match_project_signal(root, "*.rs").unwrap().unwrap();
+        assert_eq!(matched.kind, SkillSignalKind::RootGlob);
+        assert_eq!(matched.matched_path, "main.rs");
+    }
+
+    #[test]
+    fn project_signal_matches_recursive_glob_and_ignores_vendor_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("docs/nested")).unwrap();
+        std::fs::create_dir_all(root.join("docs/target")).unwrap();
+        std::fs::write(root.join("docs/target/ignored.md"), "").unwrap();
+        assert!(match_project_signal(root, "docs/**/*.md").unwrap().is_none());
+
+        std::fs::write(root.join("docs/nested/guide.md"), "").unwrap();
+        let matched = match_project_signal(root, "docs/**/*.md").unwrap().unwrap();
+        assert_eq!(matched.kind, SkillSignalKind::RecursiveGlob);
+        assert_eq!(matched.matched_path, "docs/nested/guide.md");
+    }
+
+    #[test]
+    fn project_signal_rejects_invalid_patterns() {
+        for signal in [
+            "",
+            "/Cargo.toml",
+            "../Cargo.toml",
+            "docs//*.md",
+            "docs\\*.md",
+            "docs/**/**/*.md",
+            "src/*.rs",
+        ] {
+            assert!(
+                validate_project_signal(signal).is_err(),
+                "signal should be rejected: {signal}"
+            );
+        }
     }
 
     #[test]

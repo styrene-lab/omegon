@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 - Added advisory activation metadata (`activation`, `profile`, `project_signals`) to bundled skill manifests and the skill builder schema so profile-aware skill loading can be implemented from declared intent instead of prose inference.
 - Added typed activation/profile diagnostics for skill manifests so future consumers can normalize advisory metadata and report unknown or unsafe user-skill values without crashing.
+- Added advisory project-signal matching helpers for skill activation metadata, including root-relative literal matching, root-only globs, recursive `**/` globs, ignored vendor/build directories, and invalid-pattern rejection.
 
 ### Fixed
 - **Startup provider credential race** — interactive launch now performs a refresh/adoption pass before emitting a missing or expired credential warning for the selected provider. This prevents a just-saved `openai-codex` OAuth entry from being reported as absent on the next rebuilt launch.
