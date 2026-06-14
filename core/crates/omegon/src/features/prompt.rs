@@ -21,6 +21,7 @@ impl PromptFeature {
             "",
             "Usage:",
             "  /prompt list",
+            "  /prompt <name>          # shorthand for preview",
             "  /prompt get <name>",
             "  /prompt preview <name>",
             "  /prompt run <name>",
@@ -108,9 +109,11 @@ impl Feature for PromptFeature {
             description: "List, preview, and resolve reusable prompt definitions".into(),
             subcommands: vec![
                 "list".into(),
+                "<name>".into(),
                 "get".into(),
                 "preview".into(),
                 "run".into(),
+                "submit".into(),
                 "delete".into(),
             ],
             availability: omegon_traits::CommandAvailability::ALL,
@@ -138,7 +141,7 @@ impl Feature for PromptFeature {
                 "get" | "preview" | "run" | "submit" | "delete" => Err(anyhow::anyhow!(
                     "/prompt {subcommand} requires a prompt name"
                 )),
-                _ => Ok(Self::help()),
+                name => Self::get(name, true),
             }
         };
 
@@ -179,7 +182,24 @@ mod tests {
         let mut feature = PromptFeature::new();
         let result = feature.handle_command("prompt", "help");
         match result {
-            CommandResult::Display(text) => assert!(text.contains("Prompt IDs are data")),
+            CommandResult::Display(text) => {
+                assert!(text.contains("/prompt <name>"));
+                assert!(text.contains("Prompt IDs are data"));
+            }
+            other => panic!("unexpected command result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prompt_name_shorthand_previews_prompt() {
+        let mut feature = PromptFeature::new();
+        let result = feature.handle_command("prompt", "init");
+        match result {
+            CommandResult::Display(text) => {
+                assert!(text.contains("Prompt:"));
+                assert!(text.contains("Project Init"));
+                assert!(text.contains("Safety:"));
+            }
             other => panic!("unexpected command result: {other:?}"),
         }
     }
