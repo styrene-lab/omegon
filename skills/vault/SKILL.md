@@ -4,6 +4,9 @@ name = "vault"
 description = "Interlinked markdown conventions for wikis and knowledge bases"
 tags = []
 aliases = []
+activation = "domain_detected"
+profile = ["docs"]
+project_signals = ["*.md", "docs/**/*.md"]
 +++
 
 # Vault Skill — Interlinked Markdown Conventions

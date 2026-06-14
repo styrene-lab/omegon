@@ -161,4 +161,29 @@ An `omegon-coding` extension/profile bundle should own coding-loop guidance and 
 - Bundled skills should have tests for legacy namespace references (`pi-*` in examples), unconditional hidden-tool instructions, and conflicts with canonical mutation/validation flow.
 - `omegon skills install` should eventually report embedded-vs-installed checksums so stale installed skills are visible.
 
+## Activation metadata slice — 2026-06-14
+
+Bundled skills now declare advisory activation metadata in TOML frontmatter:
+
+```toml
+activation = "project_detected"   # always | intent_detected | project_detected | domain_detected | lifecycle_gated
+profile = ["coding"]              # coding | lifecycle | docs | infra | design
+project_signals = ["Cargo.toml"]  # advisory files/globs/directories
+```
+
+This is a maturity step toward `omegon-coding` and profile-aware skill loading. The metadata is intentionally **advisory only** in this slice:
+
+- No runtime activation engine consumes `project_signals` yet.
+- Legacy/user/project-local skills may omit all activation fields; absence means unspecified, not invalid.
+- `activation = "always"` is intended as "always within the matching profile", not globally always across every Omegon session.
+- `project_signals` currently mixes literal files, directories, and glob-like patterns; matching semantics must be specified before runtime use.
+- Broad signals such as `*.md` must be combined with operator profile/session intent to avoid over-activating docs/domain skills in ordinary coding sessions.
+
+Implementation notes:
+
+- `SkillManifest` now parses and emits `activation`, `profile`, and `project_signals`.
+- `SkillEntry` structured listing preserves those fields while omitting absent/empty metadata for legacy skills.
+- All bundled skills declare activation metadata, and tests validate bundled activation/profile values plus required signals for project/domain-detected skills.
+- Armory-generated skill frontmatter remains metadata-optional so external skills are not forced into the bundled lifecycle prematurely.
+
 ## Open Questions

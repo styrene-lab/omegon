@@ -29,6 +29,9 @@
 //!   "evaluate this opportunity",
 //!   "assess this solicitation",
 //! ]
+//! activation = "intent_detected"       # always | intent_detected | project_detected | domain_detected | lifecycle_gated
+//! profile = ["coding"]                 # coding | lifecycle | docs | infra | design
+//! project_signals = ["Cargo.toml"]     # files/globs that suggest activation
 //!
 //! # ── Access ───────────────────────────────────────────
 //! trusted_paths = [                    # auto-trusted on load
@@ -74,6 +77,16 @@ pub struct SkillManifest {
     /// Phrases that trigger this skill (e.g., "evaluate this opportunity").
     #[serde(default)]
     pub triggers: Vec<String>,
+    /// Activation policy hint: always, intent_detected, project_detected,
+    /// domain_detected, or lifecycle_gated.
+    #[serde(default)]
+    pub activation: Option<String>,
+    /// Profile buckets where this skill is relevant (e.g., coding, docs).
+    #[serde(default)]
+    pub profile: Vec<String>,
+    /// Files/globs that suggest this skill should be active.
+    #[serde(default)]
+    pub project_signals: Vec<String>,
     /// Paths outside the workspace this skill needs access to.
     /// Auto-trusted on session startup and persisted to settings.
     #[serde(default)]
@@ -117,6 +130,21 @@ impl SkillManifest {
         if !self.triggers.is_empty() {
             let triggers: Vec<String> = self.triggers.iter().map(|t| format!("\"{t}\"")).collect();
             lines.push(format!("triggers = [{}]", triggers.join(", ")));
+        }
+        if let Some(ref activation) = self.activation {
+            lines.push(format!("activation = \"{activation}\""));
+        }
+        if !self.profile.is_empty() {
+            let profiles: Vec<String> = self.profile.iter().map(|p| format!("\"{p}\"")).collect();
+            lines.push(format!("profile = [{}]", profiles.join(", ")));
+        }
+        if !self.project_signals.is_empty() {
+            let signals: Vec<String> = self
+                .project_signals
+                .iter()
+                .map(|s| format!("\"{s}\""))
+                .collect();
+            lines.push(format!("project_signals = [{}]", signals.join(", ")));
         }
         if !self.trusted_paths.is_empty() {
             let paths: Vec<String> = self
@@ -174,11 +202,18 @@ version = "1.0.0"
 tags = ["<domain>"]
 aliases = ["<shortname>"]
 triggers = ["<phrase1>", "<phrase2>"]
+activation = "intent_detected"
+profile = ["coding"]
+project_signals = ["<file-or-glob>"]
 trusted_paths = ["<path1>", "<path2>"]
 output_path = "<where results go>"
 output_format = "markdown"
 +++
 ```
+
+- `activation`: one of `always`, `intent_detected`, `project_detected`, `domain_detected`, or `lifecycle_gated`
+- `profile`: relevant profile buckets such as `coding`, `lifecycle`, `docs`, `infra`, or `design`
+- `project_signals`: files/globs that suggest activation; include this for project/domain detected skills
 
 Only include fields that have values — omit any that are empty or not applicable.
 The `id` field should be a freshly generated UUID.
@@ -524,6 +559,12 @@ pub struct SkillEntry {
     pub aliases: Vec<String>,
     pub triggers: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub profile: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub project_signals: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub posture: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
@@ -592,6 +633,9 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
             tags: manifest.tags.clone(),
             aliases: manifest.aliases.clone(),
             triggers: manifest.triggers.clone(),
+            activation: manifest.activation.clone(),
+            profile: manifest.profile.clone(),
+            project_signals: manifest.project_signals.clone(),
             posture: manifest.posture.clone(),
             max_turns: manifest.max_turns,
             installed,
@@ -625,6 +669,9 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
                 tags: manifest.tags.clone(),
                 aliases: manifest.aliases.clone(),
                 triggers: manifest.triggers.clone(),
+                activation: manifest.activation.clone(),
+                profile: manifest.profile.clone(),
+                project_signals: manifest.project_signals.clone(),
                 posture: manifest.posture.clone(),
                 max_turns: manifest.max_turns,
                 installed: true,
@@ -658,6 +705,9 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
                     tags: manifest.tags.clone(),
                     aliases: manifest.aliases.clone(),
                     triggers: manifest.triggers.clone(),
+                    activation: manifest.activation.clone(),
+                    profile: manifest.profile.clone(),
+                    project_signals: manifest.project_signals.clone(),
                     posture: manifest.posture.clone(),
                     max_turns: manifest.max_turns,
                     installed: true,
@@ -895,6 +945,9 @@ mod tests {
             tags: vec!["govcon".into()],
             aliases: vec!["eval".into()],
             triggers: vec!["evaluate this".into()],
+            activation: Some("intent_detected".into()),
+            profile: vec!["coding".into()],
+            project_signals: vec!["solicitation/*.md".into()],
             trusted_paths: vec!["~/Documents/data/".into()],
             output_path: Some("~/output/".into()),
             output_format: Some("markdown".into()),
@@ -906,6 +959,9 @@ mod tests {
         assert!(fm.contains("version = \"1.0.0\""));
         assert!(fm.contains("tags = [\"govcon\"]"));
         assert!(fm.contains("triggers = [\"evaluate this\"]"));
+        assert!(fm.contains("activation = \"intent_detected\""));
+        assert!(fm.contains("profile = [\"coding\"]"));
+        assert!(fm.contains("project_signals = [\"solicitation/*.md\"]"));
         assert!(fm.contains("trusted_paths = [\"~/Documents/data/\"]"));
         assert!(fm.contains("output_path = \"~/output/\""));
         assert!(fm.contains("max_turns = 100"));
@@ -933,11 +989,14 @@ mod tests {
 
     #[test]
     fn parse_skill_file_toml() {
-        let content = "+++\nname = \"test\"\ndescription = \"A test\"\nversion = \"1.0.0\"\n+++\n\n# Body\n\nDo things.\n";
+        let content = "+++\nname = \"test\"\ndescription = \"A test\"\nversion = \"1.0.0\"\nactivation = \"project_detected\"\nprofile = [\"coding\"]\nproject_signals = [\"Cargo.toml\"]\n+++\n\n# Body\n\nDo things.\n";
         let (manifest, body) = parse_skill_file(content);
         assert_eq!(manifest.name, "test");
         assert_eq!(manifest.description, "A test");
         assert_eq!(manifest.version, Some("1.0.0".into()));
+        assert_eq!(manifest.activation, Some("project_detected".into()));
+        assert_eq!(manifest.profile, vec!["coding"]);
+        assert_eq!(manifest.project_signals, vec!["Cargo.toml"]);
         assert!(body.contains("# Body"));
         assert!(body.contains("Do things."));
     }
@@ -979,9 +1038,67 @@ mod tests {
     #[test]
     fn list_structured_includes_bundled() {
         let entries = list_structured().unwrap();
-        assert!(entries.iter().any(|e| e.name == "rust" && e.bundled));
         assert!(entries.iter().any(|e| e.name == "git" && e.bundled));
         assert!(entries.iter().any(|e| e.name == "security" && e.bundled));
+
+        let rust = entries
+            .iter()
+            .find(|e| e.name == "rust" && e.bundled)
+            .expect("bundled rust skill should be listed");
+        assert_eq!(rust.activation.as_deref(), Some("project_detected"));
+        assert!(rust.profile.iter().any(|p| p == "coding"));
+        assert!(rust.project_signals.iter().any(|s| s == "Cargo.toml"));
+    }
+
+    #[test]
+    fn bundled_skills_declare_activation_metadata() {
+        let valid_activation: std::collections::HashSet<&str> = [
+            "always",
+            "intent_detected",
+            "project_detected",
+            "domain_detected",
+            "lifecycle_gated",
+        ]
+        .into_iter()
+        .collect();
+        let valid_profiles: std::collections::HashSet<&str> =
+            ["coding", "lifecycle", "docs", "infra", "design"]
+                .into_iter()
+                .collect();
+
+        for (name, content) in BUNDLED {
+            let (manifest, _) = parse_skill_file(content);
+            let activation = manifest
+                .activation
+                .as_deref()
+                .unwrap_or_else(|| panic!("bundled skill {name} must declare activation"));
+            assert!(
+                valid_activation.contains(activation),
+                "bundled skill {name} has invalid activation: {activation}"
+            );
+            assert!(
+                !manifest.profile.is_empty(),
+                "bundled skill {name} must declare at least one profile"
+            );
+            for profile in &manifest.profile {
+                assert!(
+                    valid_profiles.contains(profile.as_str()),
+                    "bundled skill {name} has invalid profile: {profile}"
+                );
+            }
+            if matches!(activation, "project_detected" | "domain_detected") {
+                assert!(
+                    !manifest.project_signals.is_empty(),
+                    "bundled skill {name} with {activation} activation must declare project_signals"
+                );
+            }
+            if activation == "lifecycle_gated" {
+                assert!(
+                    manifest.profile.iter().any(|p| p == "lifecycle"),
+                    "lifecycle-gated bundled skill {name} must include lifecycle profile"
+                );
+            }
+        }
     }
 
     #[test]

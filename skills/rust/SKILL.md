@@ -4,6 +4,9 @@ name = "rust"
 description = "Conventions for Rust development and Cargo workflows"
 tags = ["lang"]
 aliases = ["rs"]
+activation = "project_detected"
+profile = ["coding"]
+project_signals = ["Cargo.toml", "*.rs"]
 +++
 
 # Rust Development Skill

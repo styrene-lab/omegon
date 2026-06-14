@@ -4,6 +4,9 @@ name = "python"
 description = "Conventions, tooling, and patterns for Python development"
 tags = ["lang"]
 aliases = ["py"]
+activation = "project_detected"
+profile = ["coding"]
+project_signals = ["pyproject.toml", "setup.py", "*.py"]
 +++
 
 # Python Development Skill

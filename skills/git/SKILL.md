@@ -4,6 +4,8 @@ name = "git"
 description = "Conventions for git operations, commit messages, versioning, branching, and changelogs"
 tags = []
 aliases = []
+activation = "always"
+profile = ["coding"]
 +++
 
 # Git Skill

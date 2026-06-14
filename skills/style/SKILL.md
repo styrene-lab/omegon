@@ -4,6 +4,9 @@ name = "style"
 description = "Canonical design system tokens for visual output, themes, and diagrams"
 tags = []
 aliases = []
+activation = "domain_detected"
+profile = ["design", "docs"]
+project_signals = ["drawings/*.excalidraw", "diagrams/*.d2", "*.board"]
 +++
 
 # Style Guide

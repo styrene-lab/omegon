@@ -4,6 +4,9 @@ name = "oci"
 description = "Conventions for container images, OCI artifacts, and registry operations"
 tags = []
 aliases = []
+activation = "domain_detected"
+profile = ["infra"]
+project_signals = ["Containerfile", "Dockerfile", "compose.yaml", "Chart.yaml"]
 +++
 
 # OCI Skill

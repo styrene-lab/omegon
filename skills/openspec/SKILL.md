@@ -4,6 +4,9 @@ name = "openspec"
 description = "Spec-driven development lifecycle for non-trivial changes"
 tags = []
 aliases = ["opsx"]
+activation = "lifecycle_gated"
+profile = ["lifecycle"]
+project_signals = ["openspec/changes", "openspec/baseline"]
 +++
 
 # OpenSpec — Spec-Driven Development Lifecycle

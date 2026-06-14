@@ -4,6 +4,8 @@ name = "security"
 description = "Defensive coding practices for implementation and review"
 tags = []
 aliases = ["sec"]
+activation = "always"
+profile = ["coding"]
 +++
 
 # Security Skill

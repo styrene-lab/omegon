@@ -4,6 +4,9 @@ name = "typescript"
 description = "Conventions for TypeScript code and tooling"
 tags = ["lang"]
 aliases = ["ts"]
+activation = "project_detected"
+profile = ["coding"]
+project_signals = ["tsconfig.json", "package.json", "*.ts", "*.tsx"]
 +++
 
 # TypeScript Development Skill

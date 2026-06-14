@@ -5,6 +5,8 @@ description = "Generate and execute Python scripts instead of sequential tool ca
 tags = ["automation", "scripting", "batch"]
 aliases = ["script", "codeact"]
 triggers = ["write a script", "batch process", "run a pipeline", "code-act mode"]
+activation = "intent_detected"
+profile = ["coding"]
 +++
 
 # Code-Act Execution Mode
