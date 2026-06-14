@@ -121,6 +121,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Keep capability inventory endpoints available when one installed extension or catalog agent has invalid metadata by skipping the bad entry with a warning instead of failing the entire snapshot.
 - Scope ACP plan-task durable binding capability metadata to repo-backed tasks with explicit stable IDs so clients do not over-trust guarded `_tasks/bind` support.
 - Prefer fresh persisted/external OAuth credentials over stale OAuth environment variables during synchronous provider resolution so `/login openai-codex` immediately unblocks the selected Codex route.
 - Clear the release lint gate by grouping active-tool tail rendering style parameters and keeping the persisted OAuth precedence regression test's process-wide auth environment lock out of async execution.

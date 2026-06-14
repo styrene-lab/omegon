@@ -90,7 +90,16 @@ pub fn list_agent_bundle_summaries_from_dir(
         if !path.join("agent.toml").exists() && !path.join("agent.pkl").exists() {
             continue;
         }
-        summaries.push(agent_bundle_summary_from_dir(&path)?);
+        match agent_bundle_summary_from_dir(&path) {
+            Ok(summary) => summaries.push(summary),
+            Err(error) => {
+                tracing::warn!(
+                    error = ?error,
+                    path = %path.display(),
+                    "skipping invalid catalog agent bundle summary"
+                );
+            }
+        }
     }
     summaries.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(summaries)
@@ -286,6 +295,37 @@ template = "Review the project status and summarize blockers for the operator."
         );
         assert_eq!(summary.secrets.required, vec!["ANTHROPIC_API_KEY"]);
         assert_eq!(summary.triggers[0].name, "daily-review");
+    }
+
+    #[test]
+    fn skips_invalid_agent_bundle_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let valid_dir = temp.path().join("valid-agent");
+        std::fs::create_dir_all(&valid_dir).unwrap();
+        std::fs::write(
+            valid_dir.join("agent.toml"),
+            r#"[agent]
+id = "valid-agent"
+name = "Valid Agent"
+version = "0.1.0"
+description = "Valid catalog agent"
+domain = "test"
+"#,
+        )
+        .unwrap();
+        let broken_dir = temp.path().join("broken-agent");
+        std::fs::create_dir_all(&broken_dir).unwrap();
+        std::fs::write(
+            broken_dir.join("agent.toml"),
+            "[agent
+id = ",
+        )
+        .unwrap();
+
+        let summaries = list_agent_bundle_summaries_from_dir(temp.path()).unwrap();
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, "valid-agent");
     }
 
     #[test]
