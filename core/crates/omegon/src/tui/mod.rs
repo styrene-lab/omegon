@@ -1776,6 +1776,7 @@ impl App {
                 ratatui_toaster::ToastType::Info,
             );
         } else {
+            self.conversation.set_timeline_expanded_segment(None);
             self.set_mouse_capture(true);
             self.show_toast(
                 "Focus mode disabled — Shift+click-drag to select text",
