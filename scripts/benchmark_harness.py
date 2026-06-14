@@ -475,10 +475,23 @@ def benchmark_process_env(
 class OmegonAdapter(HarnessAdapter):
     harness_name = "omegon"
 
+    def manifest_path(self) -> Path:
+        candidates = [
+            self.clean_repo_path / "Cargo.toml",
+            self.clean_repo_path / "core" / "Cargo.toml",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate.resolve()
+        return candidates[0].resolve()
+
     def validate_environment(self) -> None:
-        cargo_toml = self.clean_repo_path / "core" / "Cargo.toml"
+        cargo_toml = self.manifest_path()
         if not cargo_toml.exists():
-            raise AdapterError(f"omegon adapter requires {cargo_toml}")
+            raise AdapterError(
+                "omegon adapter requires a Cargo.toml at repo root or legacy core/Cargo.toml; "
+                f"checked {self.clean_repo_path / 'Cargo.toml'} and {self.clean_repo_path / 'core' / 'Cargo.toml'}"
+            )
         if which("cargo") is None:
             raise AdapterError("omegon adapter requires cargo in PATH")
 
@@ -489,7 +502,7 @@ class OmegonAdapter(HarnessAdapter):
             "cargo",
             "run",
             "--manifest-path",
-            str((self.clean_repo_path / "core" / "Cargo.toml").resolve()),
+            str(self.manifest_path()),
             "-p",
             "omegon",
             "--",

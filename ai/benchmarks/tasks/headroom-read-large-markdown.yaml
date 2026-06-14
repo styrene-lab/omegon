@@ -1,7 +1,7 @@
 id: headroom-read-large-markdown
 kind: evaluation
 repo: .
-base_ref: main
+base_ref: HEAD
 model: anthropic:claude-sonnet-4-6
 slim: false
 prompt: |
