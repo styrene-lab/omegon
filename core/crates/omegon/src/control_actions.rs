@@ -24,7 +24,18 @@ pub enum CanonicalAction {
     ContextRequest,
     ContextSetClass,
     SkillsView,
+    SkillsGet,
+    SkillsCreate,
+    SkillsUpdate,
+    SkillsDelete,
     SkillsInstall,
+    PromptsList,
+    PromptsGet,
+    PromptsCreate,
+    PromptsUpdate,
+    PromptsDelete,
+    PromptsPreview,
+    PromptsSubmit,
     ModelView,
     ModelList,
     ModelSetSameProvider,
@@ -103,7 +114,35 @@ pub fn classify_ipc_method(method: &str) -> ClassifiedAction {
         "model_view" => (CanonicalAction::ModelView, ControlRole::Read, true),
         "model_list" => (CanonicalAction::ModelList, ControlRole::Read, true),
         "skills_view" => (CanonicalAction::SkillsView, ControlRole::Read, true),
+        "skills_get" => (CanonicalAction::SkillsGet, ControlRole::Read, true),
+        "skills_create" => (CanonicalAction::SkillsCreate, ControlRole::Edit, false),
+        "skills_update" => (CanonicalAction::SkillsUpdate, ControlRole::Edit, false),
+        "skills_delete" => (CanonicalAction::SkillsDelete, ControlRole::Edit, false),
         "skills_install" => (CanonicalAction::SkillsInstall, ControlRole::Edit, false),
+        "prompts_list" => (CanonicalAction::PromptsList, ControlRole::Read, true),
+        "prompts_get" => (CanonicalAction::PromptsGet, ControlRole::Read, true),
+        "prompts_preview" | "prompts_resolve" => {
+            (CanonicalAction::PromptsPreview, ControlRole::Read, true)
+        }
+        "prompts_create" => (CanonicalAction::PromptsCreate, ControlRole::Edit, false),
+        "prompts_update" => (CanonicalAction::PromptsUpdate, ControlRole::Edit, false),
+        "prompts_delete" => (CanonicalAction::PromptsDelete, ControlRole::Edit, false),
+        "prompts_submit" => (CanonicalAction::PromptsSubmit, ControlRole::Edit, false),
+        "_skills/list" => (CanonicalAction::SkillsView, ControlRole::Read, true),
+        "_skills/get" => (CanonicalAction::SkillsGet, ControlRole::Read, true),
+        "_skills/create" => (CanonicalAction::SkillsCreate, ControlRole::Edit, false),
+        "_skills/update" => (CanonicalAction::SkillsUpdate, ControlRole::Edit, false),
+        "_skills/delete" => (CanonicalAction::SkillsDelete, ControlRole::Edit, false),
+        "_skills/install" => (CanonicalAction::SkillsInstall, ControlRole::Edit, false),
+        "_prompts/list" => (CanonicalAction::PromptsList, ControlRole::Read, true),
+        "_prompts/get" => (CanonicalAction::PromptsGet, ControlRole::Read, true),
+        "_prompts/preview" | "_prompts/resolve" => {
+            (CanonicalAction::PromptsPreview, ControlRole::Read, true)
+        }
+        "_prompts/create" => (CanonicalAction::PromptsCreate, ControlRole::Edit, false),
+        "_prompts/update" => (CanonicalAction::PromptsUpdate, ControlRole::Edit, false),
+        "_prompts/delete" => (CanonicalAction::PromptsDelete, ControlRole::Edit, false),
+        "_prompts/submit" => (CanonicalAction::PromptsSubmit, ControlRole::Edit, false),
         "plugin_view" => (CanonicalAction::PluginView, ControlRole::Read, true),
         "plugin_install" => (CanonicalAction::PluginInstall, ControlRole::Edit, false),
         "plugin_remove" => (CanonicalAction::PluginRemove, ControlRole::Edit, false),
@@ -221,7 +260,20 @@ pub fn classify_web_method(method: &str) -> ClassifiedAction {
         "persona_list" => (CanonicalAction::PersonaList, ControlRole::Read, true),
         "persona_switch" => (CanonicalAction::PersonaSwitch, ControlRole::Edit, true),
         "skills_view" => (CanonicalAction::SkillsView, ControlRole::Read, true),
+        "skills_get" => (CanonicalAction::SkillsGet, ControlRole::Read, true),
+        "skills_create" => (CanonicalAction::SkillsCreate, ControlRole::Edit, false),
+        "skills_update" => (CanonicalAction::SkillsUpdate, ControlRole::Edit, false),
+        "skills_delete" => (CanonicalAction::SkillsDelete, ControlRole::Edit, false),
         "skills_install" => (CanonicalAction::SkillsInstall, ControlRole::Edit, false),
+        "prompts_list" => (CanonicalAction::PromptsList, ControlRole::Read, true),
+        "prompts_get" => (CanonicalAction::PromptsGet, ControlRole::Read, true),
+        "prompts_preview" | "prompts_resolve" => {
+            (CanonicalAction::PromptsPreview, ControlRole::Read, true)
+        }
+        "prompts_create" => (CanonicalAction::PromptsCreate, ControlRole::Edit, false),
+        "prompts_update" => (CanonicalAction::PromptsUpdate, ControlRole::Edit, false),
+        "prompts_delete" => (CanonicalAction::PromptsDelete, ControlRole::Edit, false),
+        "prompts_submit" => (CanonicalAction::PromptsSubmit, ControlRole::Edit, false),
         "plugin_view" => (CanonicalAction::PluginView, ControlRole::Read, true),
         "plugin_install" => (CanonicalAction::PluginInstall, ControlRole::Edit, false),
         "plugin_remove" => (CanonicalAction::PluginRemove, ControlRole::Edit, false),
@@ -281,11 +333,40 @@ pub fn classify_daemon_trigger(trigger_kind: &str) -> ClassifiedAction {
 
 pub fn classify_slash_command(name: &str, args: &str) -> ClassifiedAction {
     let classified = match name {
-        "skills" => match args.trim() {
-            "" | "list" => (CanonicalAction::SkillsView, ControlRole::Read, true),
-            "install" => (CanonicalAction::SkillsInstall, ControlRole::Edit, false),
-            _ => (CanonicalAction::Unknown, ControlRole::Admin, false),
-        },
+        "skills" | "skill" => {
+            let trimmed = args.trim();
+            if trimmed.is_empty() || trimmed == "list" {
+                (CanonicalAction::SkillsView, ControlRole::Read, true)
+            } else if trimmed.starts_with("get ") {
+                (CanonicalAction::SkillsGet, ControlRole::Read, true)
+            } else if trimmed == "install" || trimmed.starts_with("install ") {
+                (CanonicalAction::SkillsInstall, ControlRole::Edit, false)
+            } else if trimmed == "create" || trimmed == "new" {
+                (CanonicalAction::SkillsCreate, ControlRole::Edit, false)
+            } else if trimmed.starts_with("delete ") {
+                (CanonicalAction::SkillsDelete, ControlRole::Edit, false)
+            } else {
+                (CanonicalAction::Unknown, ControlRole::Admin, false)
+            }
+        }
+        "prompt" | "prompts" => {
+            let trimmed = args.trim();
+            if trimmed.is_empty() || trimmed == "list" {
+                (CanonicalAction::PromptsList, ControlRole::Read, true)
+            } else if trimmed.starts_with("get ") {
+                (CanonicalAction::PromptsGet, ControlRole::Read, true)
+            } else if trimmed.starts_with("preview ") || trimmed.starts_with("resolve ") {
+                (CanonicalAction::PromptsPreview, ControlRole::Read, true)
+            } else if trimmed.starts_with("create ") || trimmed.starts_with("update ") {
+                (CanonicalAction::Unknown, ControlRole::Edit, false)
+            } else if trimmed.starts_with("delete ") {
+                (CanonicalAction::PromptsDelete, ControlRole::Edit, false)
+            } else if trimmed.starts_with("run ") || trimmed.starts_with("submit ") {
+                (CanonicalAction::PromptsSubmit, ControlRole::Edit, false)
+            } else {
+                (CanonicalAction::Unknown, ControlRole::Admin, false)
+            }
+        }
         "model" => {
             let trimmed = args.trim();
             if trimmed.is_empty() {
@@ -439,6 +520,43 @@ mod tests {
         assert_eq!(action.action, CanonicalAction::SkillsInstall);
         assert_eq!(action.role, ControlRole::Edit);
         assert!(!action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_remote_skills_get_as_remote_safe_read() {
+        let action = classify_remote_slash_command("skills", "get rust");
+        assert_eq!(action.action, CanonicalAction::SkillsGet);
+        assert_eq!(action.role, ControlRole::Read);
+        assert!(action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_remote_prompt_preview_as_remote_safe_read() {
+        let action = classify_remote_slash_command("prompt", "preview init");
+        assert_eq!(action.action, CanonicalAction::PromptsPreview);
+        assert_eq!(action.role, ControlRole::Read);
+        assert!(action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_remote_prompt_submit_as_local_only_edit() {
+        let action = classify_remote_slash_command("prompt", "submit init");
+        assert_eq!(action.action, CanonicalAction::PromptsSubmit);
+        assert_eq!(action.role, ControlRole::Edit);
+        assert!(!action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_prompt_backend_methods() {
+        let preview = classify_ipc_method("_prompts/preview");
+        assert_eq!(preview.action, CanonicalAction::PromptsPreview);
+        assert_eq!(preview.role, ControlRole::Read);
+        assert!(preview.remote_safe);
+
+        let submit = classify_ipc_method("_prompts/submit");
+        assert_eq!(submit.action, CanonicalAction::PromptsSubmit);
+        assert_eq!(submit.role, ControlRole::Edit);
+        assert!(!submit.remote_safe);
     }
 
     #[test]
