@@ -59,8 +59,12 @@ impl PromptFeature {
 
     fn get(name: &str, include_body: bool) -> anyhow::Result<String> {
         let (manifest, body, path) = crate::prompts::get_prompt(name)?;
+        let safety = crate::prompts::safety_verdict(&body);
         let title = manifest.title.as_deref().unwrap_or(name);
-        let mut out = format!("Prompt: {title}\nPath: {}\n", path.display());
+        let mut out = format!(
+            "Prompt: {title}\nPath: {}\nSafety: {safety:?}\n",
+            path.display()
+        );
         if let Some(description) = manifest.description.as_deref() {
             out.push_str(&format!("Description: {description}\n"));
         }
@@ -79,9 +83,14 @@ impl PromptFeature {
 
     fn run(name: &str) -> anyhow::Result<String> {
         let (_manifest, body, path) = crate::prompts::get_prompt(name)?;
+        let safety = crate::prompts::safety_verdict(&body);
+        if safety.is_blocked() {
+            anyhow::bail!("prompt is blocked by safety verdict: {safety:?}");
+        }
         Ok(format!(
-            "Prompt resolved for preview/queue boundary.\nPath: {}\n\n{}",
+            "Prompt resolved for preview/queue boundary.\nPath: {}\nSafety: {:?}\n\n{}",
             path.display(),
+            safety,
             body
         ))
     }

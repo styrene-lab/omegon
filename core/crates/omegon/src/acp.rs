@@ -3719,6 +3719,7 @@ impl OmegonAcpAgent {
                     "description": manifest.description,
                     "tags": manifest.tags,
                     "aliases": manifest.aliases,
+                    "safety": crate::prompts::safety_verdict(&body),
                     "body": body,
                     "path": path.display().to_string(),
                 }))
@@ -3771,6 +3772,7 @@ impl OmegonAcpAgent {
                 Ok(serde_json::json!({
                     "ok": true,
                     "action": action,
+                    "safety": crate::prompts::safety_verdict(&body),
                     "prompt": body,
                     "path": path.display().to_string(),
                     "note": "Prompt resolved for preview; direct ACP turn enqueue requires a stronger confirmation/trust flow."
