@@ -1327,4 +1327,30 @@ mod command_safety_tests {
         assert!(response.contains("not available over ACP"), "{response}");
         assert!(!handled.load(Ordering::SeqCst));
     }
+
+    #[test]
+    fn acp_registered_prompt_command_dispatches_through_command_registry() {
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::features::prompt::PromptFeature::new()));
+        bus.finalize();
+
+        let response = handle_registered_acp_command(&mut bus, "prompt", "list", false)
+            .expect("registered prompt command response");
+
+        assert!(response.contains("Prompt library"), "{response}");
+        assert!(response.contains("init"), "{response}");
+    }
+
+    #[test]
+    fn acp_registered_prompt_command_preview_uses_safety_boundary() {
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::features::prompt::PromptFeature::new()));
+        bus.finalize();
+
+        let response = handle_registered_acp_command(&mut bus, "prompt", "preview init", false)
+            .expect("registered prompt preview response");
+
+        assert!(response.contains("Safety:"), "{response}");
+        assert!(response.contains("Prompt:"), "{response}");
+    }
 }
