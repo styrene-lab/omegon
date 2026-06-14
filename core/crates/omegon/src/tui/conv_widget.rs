@@ -27,6 +27,8 @@ pub struct ConvState {
     cached_mode: Option<SegmentRenderMode>,
     /// Number of segments when heights were last computed.
     cached_count: usize,
+    /// Selected segment when heights were last computed.
+    cached_selected_segment: Option<usize>,
     /// Total rendered height from the previous frame.
     /// Used to preserve a detached viewport when streaming grows content.
     last_total_height: u16,
@@ -41,6 +43,7 @@ impl ConvState {
             cached_width: 0,
             cached_mode: None,
             cached_count: 0,
+            cached_selected_segment: None,
             last_total_height: 0,
         }
     }
@@ -82,7 +85,7 @@ impl ConvState {
         mode: SegmentRenderMode,
     ) {
         let ctx = SegmentRenderContext::new(t, mode);
-        self.ensure_heights_with_scroll_state(segments, width, &ctx, self.user_scrolled);
+        self.ensure_heights_with_scroll_state(segments, width, &ctx, self.user_scrolled, None);
     }
 
     fn ensure_heights_with_scroll_state(
@@ -91,12 +94,17 @@ impl ConvState {
         width: u16,
         ctx: &SegmentRenderContext<'_>,
         user_scrolled: bool,
+        selected_segment: Option<usize>,
     ) {
         // Full recompute if width changed
-        if width != self.cached_width || self.cached_mode != Some(ctx.mode) {
+        if width != self.cached_width
+            || self.cached_mode != Some(ctx.mode)
+            || self.cached_selected_segment != selected_segment
+        {
             self.heights.clear();
             self.cached_width = width;
             self.cached_mode = Some(ctx.mode);
+            self.cached_selected_segment = selected_segment;
             self.cached_count = 0;
         }
 
@@ -120,12 +128,22 @@ impl ConvState {
             && (!user_scrolled || !last_is_live)
         {
             let last = segments.len() - 1;
-            self.heights[last] = segments[last].height_in_context(width, ctx);
+            self.heights[last] = measured_segment_height(
+                &segments[last],
+                width,
+                ctx,
+                selected_segment == Some(last),
+            );
         }
 
         // Compute any new segments
         while self.cached_count < segments.len() {
-            let h = segments[self.cached_count].height_in_context(width, ctx);
+            let h = measured_segment_height(
+                &segments[self.cached_count],
+                width,
+                ctx,
+                selected_segment == Some(self.cached_count),
+            );
             if self.cached_count < self.heights.len() {
                 self.heights[self.cached_count] = h;
             } else {
@@ -179,16 +197,30 @@ impl ConvState {
 
             if segment.is_image_render_segment() && seg_top >= top_offset {
                 let render_y = viewport.y + (seg_top - top_offset);
+                let segment_area = Rect {
+                    x: viewport.x,
+                    y: render_y,
+                    width: viewport.width,
+                    height: seg_height,
+                };
+                let content_area = SelectedSegmentFrame::new(
+                    self.cached_selected_segment == Some(i),
+                    segment.capabilities().detail_openable,
+                )
+                .content_area(segment_area);
                 let available_height = viewport.bottom().saturating_sub(render_y);
                 if available_height > 3 {
-                    // Leave a one-cell blue edge and the bottom caption row.
+                    // Leave the image placeholder's one-cell border and bottom caption row.
                     result.push((
                         i,
                         Rect {
-                            x: viewport.x.saturating_add(1),
-                            y: render_y.saturating_add(1),
-                            width: viewport.width.saturating_sub(2),
-                            height: seg_height.saturating_sub(3).min(available_height - 3),
+                            x: content_area.x.saturating_add(1),
+                            y: content_area.y.saturating_add(1),
+                            width: content_area.width.saturating_sub(2),
+                            height: content_area
+                                .height
+                                .saturating_sub(3)
+                                .min(available_height - 3),
                         },
                     ));
                 }
@@ -278,7 +310,16 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
         }
 
         // Ensure all segment heights are computed
-        state.ensure_heights(self.segments, area.width, self.theme, self.mode);
+        let measure_ctx = SegmentRenderContext::new(self.theme, self.mode)
+            .with_density(self.density)
+            .with_selected(false);
+        state.ensure_heights_with_scroll_state(
+            self.segments,
+            area.width,
+            &measure_ctx,
+            state.user_scrolled,
+            self.selected_segment,
+        );
 
         let viewport_height = area.height;
         let total_height = state.total_height();
@@ -337,19 +378,19 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     width: area.width,
                     height: seg_height.min(available_height),
                 };
+                let selected = self.selected_segment == Some(i);
                 let render_ctx = SegmentRenderContext::new(self.theme, self.mode)
                     .with_density(self.density)
                     .with_pinned(self.pinned_segment == Some(i))
-                    .with_selected(self.selected_segment == Some(i));
-                segment.render_in_context(seg_area, buf, &render_ctx);
-                if self.selected_segment == Some(i) {
-                    render_selected_segment_chrome(
-                        seg_area,
-                        buf,
-                        self.theme,
-                        segment.capabilities().detail_openable,
-                    );
-                }
+                    .with_selected(selected);
+                SelectedSegmentFrame::new(selected, segment.capabilities().detail_openable).render(
+                    seg_area,
+                    buf,
+                    self.theme,
+                    |content_area, buf| {
+                        segment.render_in_context(content_area, buf, &render_ctx);
+                    },
+                );
             } else {
                 // Segment starts ABOVE the viewport — partially visible.
                 // Render into a temp buffer at full size, then copy the
@@ -373,19 +414,19 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                         cell.set_fg(fg);
                     }
                 }
+                let selected = self.selected_segment == Some(i);
                 let render_ctx = SegmentRenderContext::new(self.theme, self.mode)
                     .with_density(self.density)
                     .with_pinned(self.pinned_segment == Some(i))
-                    .with_selected(self.selected_segment == Some(i));
-                segment.render_in_context(temp_area, &mut temp_buf, &render_ctx);
-                if self.selected_segment == Some(i) {
-                    render_selected_segment_chrome(
-                        temp_area,
-                        &mut temp_buf,
-                        self.theme,
-                        segment.capabilities().detail_openable,
-                    );
-                }
+                    .with_selected(selected);
+                SelectedSegmentFrame::new(selected, segment.capabilities().detail_openable).render(
+                    temp_area,
+                    &mut temp_buf,
+                    self.theme,
+                    |content_area, buf| {
+                        segment.render_in_context(content_area, buf, &render_ctx);
+                    },
+                );
 
                 // Copy the visible portion from temp_buf to main buf
                 for row in 0..visible_rows {
@@ -445,25 +486,76 @@ fn render_detail_affordance_hint(area: Rect, buf: &mut Buffer, theme: &dyn Theme
     }
 }
 
-fn render_selected_segment_chrome(
-    area: Rect,
-    buf: &mut Buffer,
-    theme: &dyn Theme,
-    _detail_openable: bool,
-) {
-    if area.width == 0 || area.height == 0 {
-        return;
+fn measured_segment_height(
+    segment: &Segment,
+    width: u16,
+    ctx: &SegmentRenderContext<'_>,
+    selected: bool,
+) -> u16 {
+    let content_width = SelectedSegmentFrame::new(selected, segment.capabilities().detail_openable)
+        .content_area(Rect::new(0, 0, width, 1))
+        .width;
+    segment.height_in_context(content_width, ctx)
+}
+
+struct SelectedSegmentFrame {
+    selected: bool,
+    detail_openable: bool,
+}
+
+impl SelectedSegmentFrame {
+    fn new(selected: bool, detail_openable: bool) -> Self {
+        Self {
+            selected,
+            detail_openable,
+        }
     }
 
-    let marker = '│';
-    let style = Style::default()
-        .fg(theme.accent_bright())
-        .bg(theme.surface_bg())
-        .add_modifier(Modifier::BOLD);
-    for y in area.top()..area.bottom() {
-        if let Some(cell) = buf.cell_mut((area.x, y)) {
-            cell.set_char(marker);
-            cell.set_style(style);
+    fn render(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        theme: &dyn Theme,
+        render_content: impl FnOnce(Rect, &mut Buffer),
+    ) {
+        let content_area = self.content_area(area);
+        render_content(content_area, buf);
+        if self.selected {
+            self.render_chrome(area, buf, theme);
+        }
+    }
+
+    fn content_area(&self, area: Rect) -> Rect {
+        if self.selected && area.width > 1 {
+            Rect {
+                x: area.x.saturating_add(1),
+                y: area.y,
+                width: area.width.saturating_sub(1),
+                height: area.height,
+            }
+        } else {
+            area
+        }
+    }
+
+    fn render_chrome(&self, area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let style = Style::default()
+            .fg(theme.accent_bright())
+            .bg(theme.surface_bg())
+            .add_modifier(Modifier::BOLD);
+        for (row, y) in (area.top()..area.bottom()).enumerate() {
+            let marker = match (self.detail_openable, row == 0) {
+                (true, true) => '◆',
+                _ => '│',
+            };
+            if let Some(cell) = buf.cell_mut((area.x, y)) {
+                cell.set_char(marker);
+                cell.set_style(style);
+            }
         }
     }
 }
@@ -618,7 +710,7 @@ mod tests {
         state.user_scrolled = true;
 
         let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Full);
-        state.ensure_heights_with_scroll_state(&segments, 40, &ctx, true);
+        state.ensure_heights_with_scroll_state(&segments, 40, &ctx, true, None);
         assert_eq!(
             state.heights[0], 7,
             "detached viewport should preserve cached tail height instead of remeasuring it"
@@ -644,7 +736,7 @@ mod tests {
         state.user_scrolled = true;
 
         let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Slim);
-        state.ensure_heights_with_scroll_state(&segments, 20, &ctx, true);
+        state.ensure_heights_with_scroll_state(&segments, 20, &ctx, true, None);
         assert!(
             state.heights[0] > 1,
             "completed detached tail must be remeasured so it cannot look truncated"
@@ -814,6 +906,72 @@ mod tests {
     }
 
     #[test]
+    fn selected_segment_height_uses_gutter_content_width() {
+        let segments = vec![Segment {
+            meta: Default::default(),
+            content: SegmentContent::AssistantText {
+                text: "abcd efgh".into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        }];
+        let mut state = ConvState::new();
+        let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Slim);
+
+        state.ensure_heights_with_scroll_state(&segments, 9, &ctx, false, None);
+        assert_eq!(state.heights, vec![1]);
+
+        state.ensure_heights_with_scroll_state(&segments, 9, &ctx, false, Some(0));
+        assert_eq!(state.heights, vec![2]);
+    }
+
+    #[test]
+    fn selected_plain_prose_segment_preserves_first_character() {
+        let segments = vec![Segment {
+            meta: Default::default(),
+            content: SegmentContent::AssistantText {
+                text: "inspect me".into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        }];
+        let area = Rect::new(0, 0, 40, 4);
+        let mut buf = Buffer::empty(area);
+        let mut state = ConvState::new();
+
+        ConversationWidget::new(&segments, &Alpharius)
+            .with_mode(SegmentRenderMode::Slim)
+            .with_selected_segment(Some(0))
+            .render(area, &mut buf, &mut state);
+
+        let rendered = buffer_text(&buf, area);
+        assert!(
+            rendered.lines().any(|line| line.starts_with("◆inspect me")),
+            "selection frame should wrap plain prose instead of replacing the first character: {rendered}"
+        );
+    }
+
+    #[test]
+    fn selected_image_area_respects_selection_gutter() {
+        let segments = vec![Segment::image("/tmp/example.png".into(), "example")];
+        let viewport = Rect::new(10, 0, 20, 14);
+        let mut state = ConvState::new();
+        let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Full);
+        state.ensure_heights_with_scroll_state(&segments, viewport.width, &ctx, false, None);
+
+        let unselected = state.visible_image_areas(&segments, viewport);
+        assert_eq!(unselected.len(), 1);
+        assert_eq!(unselected[0].1.x, 11);
+        assert_eq!(unselected[0].1.width, 18);
+
+        state.ensure_heights_with_scroll_state(&segments, viewport.width, &ctx, false, Some(0));
+        let selected = state.visible_image_areas(&segments, viewport);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].1.x, 12);
+        assert_eq!(selected[0].1.width, 17);
+    }
+
+    #[test]
     fn selected_detail_openable_segment_shows_detail_hint_and_marker() {
         let segments = vec![Segment::user_prompt("inspect me")];
         let area = Rect::new(0, 0, 60, 6);
@@ -831,8 +989,15 @@ mod tests {
             "selected detail-openable segment should advertise the detail action: {rendered}"
         );
         assert!(
-            rendered.lines().any(|line| line.starts_with('│')),
-            "detail-openable selection should use a stable focus rail: {rendered}"
+            rendered
+                .lines()
+                .next()
+                .is_some_and(|line| line.starts_with('◆')),
+            "detail-openable selection should mark the segment start: {rendered}"
+        );
+        assert!(
+            rendered.contains("││ inspect me"),
+            "selection rail should not replace the first content character: {rendered}"
         );
     }
 
@@ -850,8 +1015,10 @@ mod tests {
         let rendered = buffer_text(&buf, area);
         assert!(!rendered.contains("Enter: details"), "{rendered}");
         assert!(
-            rendered.lines().any(|line| line.starts_with('│')),
-            "selected non-openable segment should still show focus: {rendered}"
+            rendered
+                .lines()
+                .any(|line| line.starts_with("│ ") || line.starts_with("│─")),
+            "selected non-openable segment should still show focus without replacing content: {rendered}"
         );
     }
 
