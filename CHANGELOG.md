@@ -35,6 +35,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added the Modern Command Palettes design node for palette-style `/skills` and `/prompt` operator surfaces.
 - Add Java, Kotlin, and C# discovery/chunking to `codebase_search`; add a safe repo-relative `within` result scope, cancellation-aware index/search execution, and scope diagnostics in tool details.
 - Trace auth.json provider key-set deltas on credential writes, refreshes, and logout so future OpenAI/Codex credential disappearance incidents identify the mutating operation and whether `openai-codex` was dropped. Auth updates now also refuse to replace an unparsable existing auth store with a partial credential file.
 - Add redacted provider-auth and route-state diagnostic tracing for auth.json path selection, credential source/probe decisions, OAuth refresh/write-back, login outcomes, and fallback/disconnected route causes so relaunch login regressions leave an attributable trail.
