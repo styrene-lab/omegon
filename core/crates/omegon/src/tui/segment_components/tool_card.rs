@@ -22,6 +22,7 @@ use super::super::segments::{
     try_highlight,
 };
 use super::super::theme::Theme;
+use crate::tui::inline_render::{DETAILS_HINT_LABEL, details_hint_cell, expand_hint_cell};
 use crate::tui::widgets;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,9 +136,9 @@ fn slim_tool_header_cells(
     let mut cells = Vec::new();
     cells.extend(legacy_cells);
     if header.affordances.detail_available
-        && !cells.iter().any(|cell| cell.contains("Ctrl+O details"))
+        && !cells.iter().any(|cell| cell.contains(DETAILS_HINT_LABEL))
     {
-        cells.push("Ctrl+O details".to_string());
+        cells.push(details_hint_cell().text);
     }
     cells
 }
@@ -456,8 +457,9 @@ pub(crate) fn append_generic_result_section(
                 format!("  ── {} lines ── Tab to collapse", result_lines.len())
             } else {
                 format!(
-                    "  ── {} more lines ── Ctrl+O to expand",
-                    result_lines.len() - show
+                    "  ── {} more lines ── {}",
+                    result_lines.len() - show,
+                    expand_hint_cell().text
                 )
             };
             lines.push(Line::from(Span::styled(
@@ -615,7 +617,7 @@ pub(crate) fn append_tool_args_section(
     if matches!(effective, crate::settings::ToolDetail::Lean) && complete && !is_error {
         if detail_result.is_some() || detail_args.is_some() {
             lines.push(Line::from(Span::styled(
-                "  Ctrl+O to expand",
+                format!("  {}", expand_hint_cell().text),
                 Style::default()
                     .fg(theme.dim())
                     .bg(bg)
@@ -1265,7 +1267,7 @@ mod tests {
             .map(|span| span.content.as_ref())
             .collect();
         assert!(
-            rendered.contains("Ctrl+O to expand"),
+            rendered.contains("⌃O expand"),
             "lean hint should render: {rendered}"
         );
     }
