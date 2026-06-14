@@ -26,6 +26,13 @@ def same_target(stdout: str, expected: Path) -> bool:
     return os.path.samefile(target_from(stdout), expected)
 
 
+def fix_root_from(stdout: str) -> Path:
+    for line in stdout.splitlines():
+        if line.startswith("fix: cd ") and line.endswith(" && just link"):
+            return Path(line.removeprefix("fix: cd ").removesuffix(" && just link"))
+    raise AssertionError(f"no fix line in {stdout!r}")
+
+
 def run(args, cwd, home, env=None):
     e = os.environ.copy()
     e.pop("OMEGON_BIN", None)
@@ -149,6 +156,28 @@ def test_launcher_rejects_self_as_omegon_bin():
         res = run(["--which"], cwd, home, {"OMEGON_BIN": str(LAUNCHER)})
         assert res.returncode != 0
         assert "OMEGON_BIN is not executable or points to launcher" in res.stderr
+
+
+def test_which_reports_stale_checkout_build():
+    with tempfile.TemporaryDirectory() as td:
+        base = Path(td); home = base / "home"; home.mkdir()
+        checkout = base / "checkout"; checkout.mkdir()
+        subprocess.run(["git", "init"], cwd=checkout, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=checkout, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=checkout, check=True)
+        (checkout / "core/crates/omegon").mkdir(parents=True)
+        (checkout / "Cargo.toml").write_text("[workspace]\n")
+        (checkout / "file").write_text("one\n")
+        subprocess.run(["git", "add", "."], cwd=checkout, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=checkout, check=True, capture_output=True)
+        head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=checkout, text=True).strip()
+        make_bin(checkout / "target/release/omegon", "oldhash")
+
+        res = run(["--which"], checkout, home)
+        assert res.returncode == 0, res.stderr
+        assert f"checkout-head: {head}" in res.stdout
+        assert "stale: yes" in res.stdout
+        assert os.path.samefile(fix_root_from(res.stdout), checkout)
 
 
 if __name__ == "__main__":

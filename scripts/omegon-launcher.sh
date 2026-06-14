@@ -97,8 +97,39 @@ case "${1:-}" in
         printf 'reason: %s\n' "$reason"
         printf 'target: %s\n' "$target"
         if [[ -x "$target" ]]; then
-            printf 'version: '
-            "$target" --version || true
+            version_output="$($target --version 2>/dev/null || true)"
+            printf 'version: %s
+' "$version_output"
+            case "$reason" in
+                nearest-checkout|channel:*)
+                    if [[ "$reason" == "nearest-checkout" ]]; then
+                        root="$(repo_root_from "$PWD" 2>/dev/null || true)"
+                    else
+                        channel="${reason#channel:}"
+                        channel_file="$HOME/.omegon/channels/$channel"
+                        root=""
+                        if [[ -f "$channel_file" ]]; then
+                            root="$(grep -v '^[[:space:]]*$' "$channel_file" | head -n 1)"
+                        fi
+                    fi
+                    if [[ -n "${root:-}" && -d "$root/.git" ]] && command -v git >/dev/null 2>&1; then
+                        head_short="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
+                        if [[ -n "$head_short" ]]; then
+                            printf 'checkout-head: %s
+' "$head_short"
+                            if [[ "$version_output" == *"$head_short"* ]]; then
+                                printf 'stale: no
+'
+                            else
+                                printf 'stale: yes
+'
+                                printf 'fix: cd %s && just link
+' "$root"
+                            fi
+                        fi
+                    fi
+                    ;;
+            esac
         fi
         exit 0
         ;;
