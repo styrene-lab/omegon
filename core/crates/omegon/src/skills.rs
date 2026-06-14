@@ -105,6 +105,99 @@ pub struct SkillManifest {
     pub posture: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillActivation {
+    Always,
+    IntentDetected,
+    ProjectDetected,
+    DomainDetected,
+    LifecycleGated,
+}
+
+impl SkillActivation {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "always" => Some(Self::Always),
+            "intent_detected" => Some(Self::IntentDetected),
+            "project_detected" => Some(Self::ProjectDetected),
+            "domain_detected" => Some(Self::DomainDetected),
+            "lifecycle_gated" => Some(Self::LifecycleGated),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillProfile {
+    Coding,
+    Lifecycle,
+    Docs,
+    Infra,
+    Design,
+}
+
+impl SkillProfile {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "coding" => Some(Self::Coding),
+            "lifecycle" => Some(Self::Lifecycle),
+            "docs" => Some(Self::Docs),
+            "infra" => Some(Self::Infra),
+            "design" => Some(Self::Design),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillActivationDiagnostics {
+    pub activation: Option<SkillActivation>,
+    pub profiles: Vec<SkillProfile>,
+    pub warnings: Vec<String>,
+}
+
+pub fn validate_activation_metadata(manifest: &SkillManifest) -> SkillActivationDiagnostics {
+    let mut warnings = Vec::new();
+    let activation = manifest.activation.as_deref().and_then(|value| {
+        let parsed = SkillActivation::parse(value);
+        if parsed.is_none() {
+            warnings.push(format!("unknown activation '{value}'"));
+        }
+        parsed
+    });
+
+    let mut profiles = Vec::new();
+    for profile in &manifest.profile {
+        if let Some(parsed) = SkillProfile::parse(profile) {
+            profiles.push(parsed);
+        } else {
+            warnings.push(format!("unknown profile '{profile}'"));
+        }
+    }
+
+    if matches!(
+        activation,
+        Some(SkillActivation::ProjectDetected | SkillActivation::DomainDetected)
+    ) && manifest.project_signals.is_empty()
+    {
+        warnings.push("project/domain detected skill has no project_signals".into());
+    }
+    if activation == Some(SkillActivation::LifecycleGated)
+        && !profiles.iter().any(|p| *p == SkillProfile::Lifecycle)
+    {
+        warnings.push("lifecycle-gated skill does not include lifecycle profile".into());
+    }
+    if activation == Some(SkillActivation::Always) && manifest.profile.is_empty() {
+        warnings.push("always activation is profile-scoped but no profile is declared".into());
+    }
+
+    SkillActivationDiagnostics {
+        activation,
+        profiles,
+        warnings,
+    }
+}
+
 impl SkillManifest {
     /// Render this manifest as TOML frontmatter for a SKILL.md file.
     pub fn to_frontmatter(&self) -> String {
@@ -1051,53 +1144,94 @@ mod tests {
     }
 
     #[test]
-    fn bundled_skills_declare_activation_metadata() {
-        let valid_activation: std::collections::HashSet<&str> = [
-            "always",
-            "intent_detected",
-            "project_detected",
-            "domain_detected",
-            "lifecycle_gated",
-        ]
-        .into_iter()
-        .collect();
-        let valid_profiles: std::collections::HashSet<&str> =
-            ["coding", "lifecycle", "docs", "infra", "design"]
-                .into_iter()
-                .collect();
+    fn activation_metadata_diagnostics_flag_unknown_user_values() {
+        let manifest = SkillManifest {
+            name: "custom".into(),
+            description: "Custom skill".into(),
+            activation: Some("projectish".into()),
+            profile: vec!["codign".into()],
+            ..Default::default()
+        };
 
+        let diagnostics = validate_activation_metadata(&manifest);
+        assert!(diagnostics.activation.is_none());
+        assert!(diagnostics.profiles.is_empty());
+        assert!(
+            diagnostics
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("unknown activation 'projectish'")),
+            "warnings: {:?}",
+            diagnostics.warnings
+        );
+        assert!(
+            diagnostics
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("unknown profile 'codign'")),
+            "warnings: {:?}",
+            diagnostics.warnings
+        );
+    }
+
+    #[test]
+    fn activation_metadata_diagnostics_flag_unsafe_policy_shapes() {
+        let project_without_signals = SkillManifest {
+            name: "custom".into(),
+            description: "Custom skill".into(),
+            activation: Some("project_detected".into()),
+            profile: vec!["coding".into()],
+            ..Default::default()
+        };
+        let diagnostics = validate_activation_metadata(&project_without_signals);
+        assert_eq!(diagnostics.activation, Some(SkillActivation::ProjectDetected));
+        assert!(diagnostics.profiles.contains(&SkillProfile::Coding));
+        assert!(
+            diagnostics
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("no project_signals")),
+            "warnings: {:?}",
+            diagnostics.warnings
+        );
+
+        let global_always = SkillManifest {
+            name: "custom".into(),
+            description: "Custom skill".into(),
+            activation: Some("always".into()),
+            ..Default::default()
+        };
+        let diagnostics = validate_activation_metadata(&global_always);
+        assert_eq!(diagnostics.activation, Some(SkillActivation::Always));
+        assert!(
+            diagnostics
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("profile-scoped")),
+            "warnings: {:?}",
+            diagnostics.warnings
+        );
+    }
+
+    #[test]
+    fn bundled_skills_declare_activation_metadata() {
         for (name, content) in BUNDLED {
             let (manifest, _) = parse_skill_file(content);
-            let activation = manifest
-                .activation
-                .as_deref()
-                .unwrap_or_else(|| panic!("bundled skill {name} must declare activation"));
             assert!(
-                valid_activation.contains(activation),
-                "bundled skill {name} has invalid activation: {activation}"
+                manifest.activation.is_some(),
+                "bundled skill {name} must declare activation"
             );
             assert!(
                 !manifest.profile.is_empty(),
                 "bundled skill {name} must declare at least one profile"
             );
-            for profile in &manifest.profile {
-                assert!(
-                    valid_profiles.contains(profile.as_str()),
-                    "bundled skill {name} has invalid profile: {profile}"
-                );
-            }
-            if matches!(activation, "project_detected" | "domain_detected") {
-                assert!(
-                    !manifest.project_signals.is_empty(),
-                    "bundled skill {name} with {activation} activation must declare project_signals"
-                );
-            }
-            if activation == "lifecycle_gated" {
-                assert!(
-                    manifest.profile.iter().any(|p| p == "lifecycle"),
-                    "lifecycle-gated bundled skill {name} must include lifecycle profile"
-                );
-            }
+
+            let diagnostics = validate_activation_metadata(&manifest);
+            assert!(
+                diagnostics.warnings.is_empty(),
+                "bundled skill {name} has activation metadata warnings: {:?}",
+                diagnostics.warnings
+            );
         }
     }
 

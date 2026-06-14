@@ -183,7 +183,8 @@ Implementation notes:
 
 - `SkillManifest` now parses and emits `activation`, `profile`, and `project_signals`.
 - `SkillEntry` structured listing preserves those fields while omitting absent/empty metadata for legacy skills.
-- All bundled skills declare activation metadata, and tests validate bundled activation/profile values plus required signals for project/domain-detected skills.
+- `validate_activation_metadata` provides the typed normalization seam for future consumers: it parses known activation/profile values and returns advisory warnings for unknown values or unsafe shapes rather than crashing.
+- All bundled skills declare activation metadata, and tests validate bundled activation/profile values plus required signals for project/domain-detected skills through the same diagnostic helper used by future runtime code.
 - Armory-generated skill frontmatter remains metadata-optional so external skills are not forced into the bundled lifecycle prematurely.
 
 ## Open Questions
