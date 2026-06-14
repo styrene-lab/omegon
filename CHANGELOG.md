@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Added fixture coverage for the stable launcher resolution policy, including env overrides, nearest checkout selection, channels, fallback binaries, paths with spaces, dev-release fallback, and self-recursion rejection.
 - Added a stable `omegon`/`om` launcher installed by `just link`, with deterministic multi-checkout resolution via explicit env overrides, nearest checkout builds, named `~/.omegon/channels`, and a fallback installed binary.
 - Added backend surface contracts for ACP/RPC skill and prompt definition management, covering list/get/create/update/delete plus skill install and prompt preview/submit endpoints in the capability registry, wired ACP/IPC/WebSocket dispatch for existing skill and prompt read/preview handlers, added reusable prompt definition storage and safety verdicts for bundled/user/project-local prompts, registered `/prompt` as the command-palette-native prompt routing surface, and documented prompt/user-command authoring.
 - Added advisory activation metadata (`activation`, `profile`, `project_signals`) to bundled skill manifests and the skill builder schema so profile-aware skill loading can be implemented from declared intent instead of prose inference.
