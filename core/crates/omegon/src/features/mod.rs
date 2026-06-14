@@ -38,4 +38,5 @@ pub mod prompt;
 pub mod session_log;
 pub mod terminal_title;
 pub mod usage;
+pub mod user_commands;
 pub mod version_check;
