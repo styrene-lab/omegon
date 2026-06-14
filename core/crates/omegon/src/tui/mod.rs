@@ -5065,8 +5065,7 @@ impl App {
             "context",
             "context lifecycle and budget management",
             &[
-                "status", "compact", "reset", "clear", "request", "compact", "standard",
-                "extended", "massive",
+                "status", "compact", "reset", "clear", "request", "standard", "extended", "massive",
             ],
         ),
         (
@@ -10711,12 +10710,36 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn commands_array_persona_includes_list_and_create() {
-        let persona = App::COMMANDS
+    fn commands_array_context_palette_metadata_is_action_oriented() {
+        let context = App::COMMANDS
             .iter()
-            .find(|(name, _, _)| *name == "persona")
-            .expect("/persona must be in COMMANDS");
-        assert!(persona.2.contains(&"list"));
-        assert!(persona.2.contains(&"create"));
+            .find(|(name, _, _)| *name == "context")
+            .expect("/context must be in COMMANDS");
+        assert!(context.1.contains("context"));
+        for expected in [
+            "status", "compact", "reset", "clear", "request", "standard", "extended", "massive",
+        ] {
+            assert!(context.2.contains(&expected), "missing /context {expected}");
+        }
+        let compact_count = context.2.iter().filter(|sub| **sub == "compact").count();
+        assert_eq!(
+            compact_count, 1,
+            "/context compact should not be duplicated"
+        );
+    }
+
+    #[test]
+    fn commands_array_think_palette_metadata_matches_supported_levels() {
+        let think = App::COMMANDS
+            .iter()
+            .find(|(name, _, _)| *name == "think")
+            .expect("/think must be in COMMANDS");
+        for expected in ["off", "minimal", "low", "medium", "high"] {
+            assert!(think.2.contains(&expected), "missing /think {expected}");
+        }
+        assert!(
+            !think.2.contains(&"max"),
+            "/think max should not be advertised unless ThinkingLevel supports it"
+        );
     }
 }

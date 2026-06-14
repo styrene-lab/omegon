@@ -141,6 +141,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Cleaned `/context` and `/think` command-palette metadata so context actions are not duplicated and thinking suggestions match supported levels.
 - Selected conversation segment chrome now renders through an explicit frame component with selection-aware measurement, reserving a gutter instead of overwriting or clipping content.
 - Leaving focus mode now clears focus-owned segment detail panes so tool detail panels do not remain pinned in the normal Slim layout.
 - Keep capability inventory endpoints available when one installed extension or catalog agent has invalid metadata by skipping the bad entry with a warning instead of failing the entire snapshot.

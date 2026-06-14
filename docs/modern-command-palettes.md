@@ -77,6 +77,7 @@ Current `/skills` TUI route passes through `canonical_slash_command("skills", ar
 
 ## Remaining Work
 
+- Integrate `/context` and `/think` into the modern palette track without breaking their existing bare-command selector behavior. Their static TUI metadata now exposes action-oriented subcommands, but they still need shared state/action projections for CLI/ACP/text surfaces.
 - Refactor `/skills` default output into a compact palette-style action/object projection.
 - Consider extracting a shared command-palette row DTO so `/skills`, `/prompt`, TUI palette, ACP, and CLI text output can consume one projection.
 - Add a stronger confirmation/trust flow before any prompt/user-command surface queues or executes prompt bodies directly.
