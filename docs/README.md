@@ -31,6 +31,7 @@ For user-facing docs, edit `site/src/pages/docs/` and the command snippets in `s
 - `docs/armory-discovery.md`: unified discovery model for browsing upstream extensions, plugins, skills, and catalog agents.
 - `docs/project-memory.md`: project memory behavior.
 - `docs/openapi-tools.md`: project-local OpenAPI specs compiled into agent tools.
+- `docs/prompt-and-user-command-surfaces.md`: reusable prompt definitions, `/prompt` routing, safety verdicts, and user-defined command aliases.
 
 ## Directory Boundaries
 

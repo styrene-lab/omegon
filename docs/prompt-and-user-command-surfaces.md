@@ -1,3 +1,8 @@
+---
+title: Prompt and User Command Surfaces
+tags: [prompts, commands, operator-surface]
+---
+
 # Prompt and User Command Surfaces
 
 Reusable prompts are content. Slash commands are invocation surfaces. Keep those concepts separate so prompt libraries can grow without polluting the command namespace.
