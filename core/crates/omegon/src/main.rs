@@ -3831,19 +3831,26 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         &route_ledger,
     )
     .await;
-    if let route::ProviderRoute::Disconnected {
-        reason:
-            route::DisconnectedReason::MissingCredentials {
-                provider,
-                ..
-            },
-        ..
-    } = &startup_route
-    {
+    let refreshable_startup_provider = match &startup_route {
+        route::ProviderRoute::Disconnected {
+            reason:
+                route::DisconnectedReason::MissingCredentials {
+                    provider,
+                    ..
+                }
+                | route::DisconnectedReason::ExpiredCredentials {
+                    provider,
+                    ..
+                },
+            ..
+        } => Some(provider.as_str()),
+        _ => None,
+    };
+    if let Some(provider) = refreshable_startup_provider {
         // Startup can begin before a just-completed browser login has been
         // flushed through every auth surface. Do one refresh/adoption pass
-        // before emitting the operator-facing missing-credentials banner so a
-        // valid auth.json entry is not reported as absent on relaunch.
+        // before emitting the operator-facing credential warning so a valid or
+        // refreshable auth.json entry is not reported as absent/stale on relaunch.
         if crate::auth::resolve_with_refresh(provider).await.is_some() {
             startup_route = route::RouteController::resolve_startup(
                 resolved_cli_model.clone(),
