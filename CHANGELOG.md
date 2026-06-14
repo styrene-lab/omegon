@@ -143,6 +143,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Prefer refreshable persisted OAuth credentials over hydrated OAuth env vars so stale `CHATGPT_OAUTH_TOKEN` session values cannot shadow `auth.json` refresh for OpenAI/Codex.
 - The TUI footer/model card now renders the model actually served by the runtime bridge when startup installed a fallback bridge (selected provider had no credentials), with a warning line naming the unavailable operator-selected model. Previously the footer showed the profile-selected model (e.g. `gpt-5.5`) even while every request was being served by the fallback provider, making it look like the wrong provider was active.
 
+### Fixed
+
+- Treat malformed provider entries in `auth.json` as unreadable credentials instead of missing credentials during startup route probing, so OpenAI/Codex relaunch failures no longer misreport a valid-but-unparseable auth store as needing `/login`.
+
 ## [0.27.0] - 2026-06-11
 
 0.27.0 is a hardening and surface-coherence line. It makes provider/auth routing explicit instead of implicit, gives operators truthful TUI status when credentials or fallbacks are involved, expands the backend capability substrate for future console clients, and continues extracting lifecycle/TUI surfaces behind shared semantic boundaries.

@@ -72,6 +72,10 @@ pub enum CredentialState {
         source: CredentialSource,
         refreshable: bool,
     },
+    Unreadable {
+        source: CredentialSource,
+        detail: String,
+    },
     Missing {
         probed_sources: Vec<String>,
     },
@@ -119,6 +123,9 @@ impl CredentialState {
                     source.label()
                 )
             }
+            CredentialState::Unreadable { source, detail } => {
+                format!("unreadable credentials from {}: {detail}", source.label())
+            }
             CredentialState::Missing { probed_sources } => {
                 format!("missing credentials; probed {}", probed_sources.join(", "))
             }
@@ -162,9 +169,18 @@ impl DisconnectedReason {
                     crate::providers::infer_provider_id(selected)
                 )
             }
-            DisconnectedReason::ProviderUnavailable { provider, detail } => format!(
-                "Provider {provider} is unavailable for selected model {selected}: {detail}. Remediation: run `/login {provider}` or check provider configuration."
-            ),
+            DisconnectedReason::ProviderUnavailable { provider, detail } => {
+                let remediation = if detail.contains("credential") {
+                    "check or remove the unreadable provider entry from auth.json, then run `/login ".to_string()
+                        + provider
+                        + "` if the entry cannot be repaired"
+                } else {
+                    "run `/login ".to_string() + provider + "` or check provider configuration"
+                };
+                format!(
+                    "Provider {provider} is unavailable for selected model {selected}: {detail}. Remediation: {remediation}."
+                )
+            }
         }
     }
 }
@@ -555,6 +571,13 @@ fn disconnected_for_provider_state(provider: String, state: CredentialState) -> 
             provider,
             refreshable,
         },
+        CredentialState::Unreadable { source, detail } => DisconnectedReason::ProviderUnavailable {
+            provider,
+            detail: format!(
+                "{} credential entry is unreadable: {detail}",
+                source.label()
+            ),
+        },
         CredentialState::Missing { probed_sources } => DisconnectedReason::MissingCredentials {
             provider,
             probed_sources,
@@ -566,6 +589,13 @@ fn fallback_reason_for_state(provider: String, state: CredentialState) -> Fallba
     match state {
         CredentialState::Expired { .. } => FallbackReason::ExpiredCredentials { provider },
         CredentialState::Missing { .. } => FallbackReason::MissingCredentials { provider },
+        CredentialState::Unreadable { source, detail } => FallbackReason::ProviderUnavailable {
+            provider,
+            detail: format!(
+                "{} credential entry is unreadable: {detail}",
+                source.label()
+            ),
+        },
         CredentialState::Valid { .. } => FallbackReason::ProviderUnavailable {
             provider,
             detail: "selected provider had credentials but no usable bridge".to_string(),
@@ -588,17 +618,41 @@ fn probe_provider_credentials(provider: &str) -> CredentialState {
 
     crate::auth::trace_auth_store_probe(auth_key, "route_credential_ledger");
 
-    if let Some(creds) = crate::auth::read_credentials(auth_key) {
-        if creds.cred_type == "oauth" && creds.is_expired() {
-            return CredentialState::Expired {
-                source: CredentialSource::AuthJson,
-                refreshable: !creds.refresh.is_empty(),
-            };
+    if let Some(path) = crate::auth::auth_json_path()
+        && let Ok(content) = std::fs::read_to_string(&path)
+    {
+        match serde_json::from_str::<serde_json::Value>(&content) {
+            Ok(auth) => {
+                if let Some(entry) = auth.get(auth_key) {
+                    match serde_json::from_value::<crate::auth::OAuthCredentials>(entry.clone()) {
+                        Ok(creds) => {
+                            if creds.cred_type == "oauth" && creds.is_expired() {
+                                return CredentialState::Expired {
+                                    source: CredentialSource::AuthJson,
+                                    refreshable: !creds.refresh.is_empty(),
+                                };
+                            }
+                            return CredentialState::Valid {
+                                source: CredentialSource::AuthJson,
+                                oauth: creds.cred_type == "oauth",
+                            };
+                        }
+                        Err(error) => {
+                            return CredentialState::Unreadable {
+                                source: CredentialSource::AuthJson,
+                                detail: error.to_string(),
+                            };
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                return CredentialState::Unreadable {
+                    source: CredentialSource::AuthJson,
+                    detail: format!("{}: {error}", path.display()),
+                };
+            }
         }
-        return CredentialState::Valid {
-            source: CredentialSource::AuthJson,
-            oauth: creds.cred_type == "oauth",
-        };
     }
 
     probed_sources.push("external".to_string());
@@ -638,6 +692,9 @@ impl Default for RouteController {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::fs;
+    use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[derive(Default)]
     struct StubLedger(HashMap<String, CredentialState>);
@@ -671,6 +728,41 @@ mod tests {
         CredentialState::Missing {
             probed_sources: vec!["stub".to_string()],
         }
+    }
+
+    fn unreadable() -> CredentialState {
+        CredentialState::Unreadable {
+            source: CredentialSource::AuthJson,
+            detail: "invalid provider entry".to_string(),
+        }
+    }
+
+    fn temp_auth_path(label: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("omegon-{label}-{nanos}-auth.json"))
+    }
+
+    fn with_auth_path<T>(path: &Path, f: impl FnOnce() -> T) -> T {
+        let _guard = crate::auth::TEST_AUTH_ENV_LOCK.lock().unwrap();
+        let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+        // SAFETY: Tests serialize auth environment mutations with TEST_AUTH_ENV_LOCK,
+        // and restore the original value before releasing the lock.
+        unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", path) };
+        let result = f();
+        match original {
+            Some(value) => {
+                // SAFETY: Protected by TEST_AUTH_ENV_LOCK as above.
+                unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", value) };
+            }
+            None => {
+                // SAFETY: Protected by TEST_AUTH_ENV_LOCK as above.
+                unsafe { std::env::remove_var("OMEGON_AUTH_JSON_PATH") };
+            }
+        }
+        result
     }
 
     fn ledger(entries: &[(&str, CredentialState)]) -> StubLedger {
@@ -915,6 +1007,48 @@ mod tests {
         assert!(message.contains("fallbackProviders exhausted"), "{message}");
         assert!(message.contains("anthropic: expired OAuth"), "{message}");
         assert!(message.contains("google: missing credentials"), "{message}");
+    }
+
+    #[test]
+    fn auth_json_bad_provider_entry_is_unreadable_not_missing() {
+        let auth_path = temp_auth_path("bad-codex-entry");
+        fs::write(
+            &auth_path,
+            r#"{"openai-codex":{"type":"oauth","access":"token","refresh":"refresh"}}"#,
+        )
+        .unwrap();
+
+        let state = with_auth_path(&auth_path, || probe_provider_credentials("openai-codex"));
+        let _ = fs::remove_file(&auth_path);
+
+        match state {
+            CredentialState::Unreadable {
+                source: CredentialSource::AuthJson,
+                detail,
+            } => assert!(detail.contains("missing field `expires`"), "{detail}"),
+            other => panic!("expected unreadable auth.json entry, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn startup_unreadable_selected_credentials_do_not_report_missing_login() {
+        let route = RouteController::resolve_startup(
+            "openai-codex:gpt-5.5".into(),
+            &[],
+            &ledger(&[("openai-codex", unreadable())]),
+        )
+        .await;
+
+        match route {
+            ProviderRoute::Disconnected { selected, reason } => {
+                assert_eq!(selected, "openai-codex:gpt-5.5");
+                let message = reason.operator_message(&selected);
+                assert!(message.contains("unreadable"), "{message}");
+                assert!(!message.contains("No credentials"), "{message}");
+                assert!(message.contains("auth.json"), "{message}");
+            }
+            other => panic!("expected disconnected route, got {other:?}"),
+        }
     }
 
     #[tokio::test]
