@@ -898,8 +898,14 @@ mod tests {
     #[test]
     fn bundled_prompts_are_capability_aware() {
         let prompt_files = [
-            ("prompts/init.md", include_str!("../../../../prompts/init.md")),
-            ("prompts/status.md", include_str!("../../../../prompts/status.md")),
+            (
+                "prompts/init.md",
+                include_str!("../../../../prompts/init.md"),
+            ),
+            (
+                "prompts/status.md",
+                include_str!("../../../../prompts/status.md"),
+            ),
         ];
 
         for (path, content) in prompt_files {
