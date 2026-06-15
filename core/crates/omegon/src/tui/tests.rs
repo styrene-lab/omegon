@@ -3579,6 +3579,7 @@ fn draw_routes_active_cleave_to_workbench_without_instruments() {
         children: vec![crate::features::cleave::ChildProgress {
             label: "ui".into(),
             status: "running".into(),
+            failure_kind: None,
             duration_secs: None,
             supervision_mode: None,
             pid: None,

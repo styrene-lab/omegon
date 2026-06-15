@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Mapped typed cleave child failure causes into the shared operation/workbench projection, including upstream exhaustion, merge conflicts, scope violations, timeouts, validation failures, and legacy upstream-exhausted compatibility.
 - Routed delegate/cleave transcript lifecycle milestones through the shared operation projection so Workbench and transcript rendering share operation semantics.
 - Replaced emoji-style status icons in Rust runtime/TUI strings with text-oriented Unicode glyphs for consistent terminal alignment.
 - Added explicit delegate child execution-boundary prompt sections so scoped workers see their readable/writable scope, enabled/unavailable tools, sandbox profile, and blocker-reporting guidance before acting.

@@ -313,10 +313,23 @@ pub enum ChildSupervisionMode {
     Lost,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleaveChildFailureKind {
+    ChildProcessExit,
+    IdleTimeout,
+    WallTimeout,
+    MergeConflict,
+    ScopeViolation,
+    UpstreamExhausted,
+    ValidationFailed,
+    Unknown,
+}
+
 #[derive(Clone)]
 pub struct ChildProgress {
     pub label: String,
     pub status: String, // "pending", "running", "completed", "failed", "merged_after_failure", "upstream_exhausted"
+    pub failure_kind: Option<CleaveChildFailureKind>,
     pub duration_secs: Option<f64>,
     /// Current supervision continuity for this child runtime.
     pub supervision_mode: Option<ChildSupervisionMode>,
@@ -388,6 +401,7 @@ pub(crate) fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &
                 progress.children.push(ChildProgress {
                     label: child.clone(),
                     status: "running".into(),
+                    failure_kind: None,
                     duration_secs: None,
                     supervision_mode: Some(ChildSupervisionMode::Attached),
                     pid: Some(*pid),
@@ -479,6 +493,7 @@ pub(crate) fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &
                 progress.children.push(ChildProgress {
                     label: child.clone(),
                     status: status_text.into(),
+                    failure_kind: None,
                     duration_secs: *duration_secs,
                     supervision_mode: None,
                     pid: None,
@@ -684,6 +699,13 @@ impl CleaveFeature {
                         ChildStatus::UpstreamExhausted => "upstream_exhausted".into(),
                         ChildStatus::Running => "running".into(),
                         ChildStatus::Pending => "pending".into(),
+                    },
+                    failure_kind: match c.status {
+                        ChildStatus::UpstreamExhausted => {
+                            Some(CleaveChildFailureKind::UpstreamExhausted)
+                        }
+                        ChildStatus::Failed => Some(CleaveChildFailureKind::Unknown),
+                        _ => None,
                     },
                     duration_secs: c.duration_secs,
                     supervision_mode: if c.status == ChildStatus::Running {
@@ -909,6 +931,7 @@ impl CleaveFeature {
                 .map(|c| ChildProgress {
                     label: c.label.clone(),
                     status: "pending".into(),
+                    failure_kind: None,
                     duration_secs: None,
                     supervision_mode: None,
                     pid: None,
@@ -1572,6 +1595,7 @@ mod tests {
             ChildProgress {
                 label: "alpha".into(),
                 status: "completed".into(),
+                failure_kind: None,
                 duration_secs: Some(12.5),
                 supervision_mode: None,
                 pid: None,
@@ -1588,6 +1612,7 @@ mod tests {
             ChildProgress {
                 label: "beta".into(),
                 status: "running".into(),
+                failure_kind: None,
                 duration_secs: None,
                 supervision_mode: None,
                 pid: Some(42_u32),
@@ -1604,6 +1629,7 @@ mod tests {
             ChildProgress {
                 label: "gamma".into(),
                 status: "pending".into(),
+                failure_kind: None,
                 duration_secs: None,
                 supervision_mode: None,
                 pid: None,
@@ -2002,6 +2028,7 @@ mod tests {
             children: vec![ChildProgress {
                 label: "alpha".into(),
                 status: "pending".into(),
+                failure_kind: None,
                 duration_secs: None,
                 supervision_mode: None,
                 pid: None,
@@ -2069,6 +2096,7 @@ mod tests {
             children: vec![ChildProgress {
                 label: "alpha".into(),
                 status: "failed".into(),
+                failure_kind: None,
                 duration_secs: None,
                 supervision_mode: None,
                 pid: None,
@@ -2114,6 +2142,7 @@ mod tests {
             children: vec![ChildProgress {
                 label: "alpha".into(),
                 status: "running".into(),
+                failure_kind: None,
                 duration_secs: None,
                 supervision_mode: None,
                 pid: Some(42),
@@ -2159,6 +2188,7 @@ mod tests {
             children: vec![ChildProgress {
                 label: "alpha".into(),
                 status: "pending".into(),
+                failure_kind: None,
                 duration_secs: None,
                 supervision_mode: None,
                 pid: None,
@@ -2507,6 +2537,7 @@ mod assessment_tests {
             children: vec![ChildProgress {
                 label: "alpha".into(),
                 status: "running".into(),
+                failure_kind: None,
                 duration_secs: Some(12.0),
                 supervision_mode: Some(ChildSupervisionMode::Attached),
                 pid: Some(1234),

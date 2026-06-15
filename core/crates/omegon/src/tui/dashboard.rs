@@ -1205,6 +1205,7 @@ mod tests {
             children: vec![ChildProgress {
                 label: "task-a".into(),
                 status: "completed".into(),
+                failure_kind: None,
                 duration_secs: Some(12.0),
                 supervision_mode: None,
                 pid: None,
@@ -1670,6 +1671,7 @@ mod tests {
             children: vec![ChildProgress {
                 label: "task-1".into(),
                 status: "completed".into(),
+                failure_kind: None,
                 duration_secs: Some(5.0),
                 supervision_mode: None,
                 pid: None,

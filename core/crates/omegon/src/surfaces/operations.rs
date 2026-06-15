@@ -5,7 +5,7 @@
 //! projections instead of inferring status from raw tool-call or decomposition
 //! event text.
 
-use crate::features::cleave::CleaveProgress;
+use crate::features::cleave::{CleaveChildFailureKind, CleaveProgress};
 use crate::features::delegate::{DelegateChildFailureKind, DelegateProgress};
 use omegon_traits::{OperationKind, OperationRef};
 
@@ -140,10 +140,23 @@ impl OperationChildRow {
             }),
             failure: match status {
                 OperationChildStatus::Failed | OperationChildStatus::TimedOut => {
+                    let kind = child
+                        .failure_kind
+                        .map(OperationFailureKind::from_cleave_child_failure_kind)
+                        .unwrap_or_else(|| match child.status.as_str() {
+                            "upstream_exhausted" => OperationFailureKind::ModelError,
+                            _ => OperationFailureKind::Unknown,
+                        });
                     Some(OperationFailure {
-                        kind: OperationFailureKind::Unknown,
+                        kind,
                         message: None,
-                        recoverable: false,
+                        recoverable: matches!(
+                            kind,
+                            OperationFailureKind::IdleTimeout
+                                | OperationFailureKind::TimedOut
+                                | OperationFailureKind::ModelError
+                                | OperationFailureKind::ToolExecutionFailed
+                        ),
                     })
                 }
                 _ => None,
@@ -319,6 +332,19 @@ pub enum OperationFailureKind {
 }
 
 impl OperationFailureKind {
+    fn from_cleave_child_failure_kind(kind: CleaveChildFailureKind) -> Self {
+        match kind {
+            CleaveChildFailureKind::ChildProcessExit => Self::ProcessExit,
+            CleaveChildFailureKind::IdleTimeout => Self::IdleTimeout,
+            CleaveChildFailureKind::WallTimeout => Self::TimedOut,
+            CleaveChildFailureKind::MergeConflict => Self::MergeConflict,
+            CleaveChildFailureKind::ScopeViolation => Self::SandboxViolation,
+            CleaveChildFailureKind::UpstreamExhausted => Self::ModelError,
+            CleaveChildFailureKind::ValidationFailed => Self::ToolExecutionFailed,
+            CleaveChildFailureKind::Unknown => Self::Unknown,
+        }
+    }
+
     fn from_delegate_child_failure_kind(kind: DelegateChildFailureKind) -> Self {
         match kind {
             DelegateChildFailureKind::MissingLocalModel
@@ -521,6 +547,7 @@ mod tests {
         crate::features::cleave::ChildProgress {
             label: label.into(),
             status: status.into(),
+            failure_kind: None,
             duration_secs: None,
             supervision_mode: None,
             pid: None,
@@ -648,6 +675,71 @@ mod tests {
         let milestone = OperationMilestoneProjection::completed(&OperationRef::cleave(None), true);
         assert_eq!(milestone.icon, "↯");
         assert_eq!(milestone.text, "Cleave merged");
+    }
+
+    #[test]
+    fn cleave_typed_failure_kind_maps_to_operation_failure() {
+        for (source, expected, recoverable) in [
+            (
+                CleaveChildFailureKind::UpstreamExhausted,
+                OperationFailureKind::ModelError,
+                true,
+            ),
+            (
+                CleaveChildFailureKind::MergeConflict,
+                OperationFailureKind::MergeConflict,
+                false,
+            ),
+            (
+                CleaveChildFailureKind::ScopeViolation,
+                OperationFailureKind::SandboxViolation,
+                false,
+            ),
+            (
+                CleaveChildFailureKind::IdleTimeout,
+                OperationFailureKind::IdleTimeout,
+                true,
+            ),
+            (
+                CleaveChildFailureKind::WallTimeout,
+                OperationFailureKind::TimedOut,
+                true,
+            ),
+        ] {
+            let mut child = cleave_child("alpha", "failed");
+            child.failure_kind = Some(source);
+            let projection = OperationWorkbenchProjection::from_cleave(&CleaveProgress {
+                active: true,
+                run_id: "run-typed".into(),
+                total_children: 1,
+                completed: 0,
+                failed: 1,
+                children: vec![child],
+                total_tokens_in: 0,
+                total_tokens_out: 0,
+            });
+            let failure = projection.children[0].failure.as_ref().expect("failure");
+            assert_eq!(failure.kind, expected);
+            assert_eq!(failure.recoverable, recoverable, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn cleave_legacy_upstream_exhausted_status_maps_to_model_failure() {
+        let child = cleave_child("alpha", "upstream_exhausted");
+        let projection = OperationWorkbenchProjection::from_cleave(&CleaveProgress {
+            active: true,
+            run_id: "run-legacy".into(),
+            total_children: 1,
+            completed: 0,
+            failed: 1,
+            children: vec![child],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        });
+        let failure = projection.children[0].failure.as_ref().expect("failure");
+        assert_eq!(failure.kind, OperationFailureKind::ModelError);
+        assert!(failure.recoverable);
     }
 
     #[test]

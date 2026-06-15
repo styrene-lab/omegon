@@ -2251,6 +2251,7 @@ mod tests {
             children: vec![crate::features::cleave::ChildProgress {
                 label: "alpha".into(),
                 status: "merged_after_failure".into(),
+                failure_kind: None,
                 duration_secs: Some(12.4),
                 supervision_mode: None,
                 pid: None,
@@ -2302,6 +2303,7 @@ mod tests {
                 crate::features::cleave::ChildProgress {
                     label: "alpha".into(),
                     status: "running".into(),
+                    failure_kind: None,
                     duration_secs: Some(3.2),
                     supervision_mode: None,
                     pid: None,
@@ -2318,6 +2320,7 @@ mod tests {
                 crate::features::cleave::ChildProgress {
                     label: "beta".into(),
                     status: "completed".into(),
+                    failure_kind: None,
                     duration_secs: Some(12.4),
                     supervision_mode: None,
                     pid: None,
@@ -2905,6 +2908,7 @@ mod tests {
             children: vec![crate::features::cleave::ChildProgress {
                 label: "32".into(),
                 status: "running".into(),
+                failure_kind: None,
                 duration_secs: Some(3.4),
                 supervision_mode: None,
                 pid: None,

@@ -1074,6 +1074,7 @@ mod tests {
                         children: vec![crate::features::cleave::ChildProgress {
                             label: "child-1".into(),
                             status: "running".into(),
+                            failure_kind: None,
                             supervision_mode: Some(
                                 crate::features::cleave::ChildSupervisionMode::RecoveredDegraded,
                             ),

@@ -1383,6 +1383,7 @@ required = ["BRAVE_API_KEY"]
                     children: vec![crate::features::cleave::ChildProgress {
                         label: "child-1".into(),
                         status: "running".into(),
+                        failure_kind: None,
                         duration_secs: None,
                         supervision_mode: None,
                         pid: None,
