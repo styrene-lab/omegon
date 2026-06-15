@@ -329,6 +329,26 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_delegate_child_maps_to_terminal_non_failure_status() {
+        let mut child = delegate_child("cancelled");
+        child.result_summary = Some("operator stopped task".into());
+        let progress = DelegateProgress {
+            active: false,
+            running: 0,
+            completed: 0,
+            failed: 0,
+            children: vec![child],
+        };
+
+        let projection = OperationWorkbenchProjection::from_delegate(&progress);
+        let row = &projection.children[0];
+        assert_eq!(row.status, OperationChildStatus::Cancelled);
+        assert!(row.status.is_terminal());
+        assert!(!row.status.is_failure());
+        assert!(row.failure.is_none());
+    }
+
+    #[test]
     fn delegate_progress_maps_to_operation_projection_counts() {
         let progress = DelegateProgress {
             active: true,

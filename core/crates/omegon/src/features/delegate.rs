@@ -74,6 +74,9 @@ pub enum DelegateTaskStatus {
         error: String,
         kind: DelegateChildFailureKind,
     },
+    Cancelled {
+        reason: Option<String>,
+    },
 }
 
 /// A delegate task entry in the result store
@@ -144,7 +147,9 @@ impl DelegateResultStore {
             task.result = result;
             if matches!(
                 task.status,
-                DelegateTaskStatus::Completed { .. } | DelegateTaskStatus::Failed { .. }
+                DelegateTaskStatus::Completed { .. }
+                    | DelegateTaskStatus::Failed { .. }
+                    | DelegateTaskStatus::Cancelled { .. }
             ) {
                 task.completed_at = Some(SystemTime::now());
             }
@@ -219,6 +224,7 @@ impl DelegateResultStore {
                     DelegateTaskStatus::Completed { success: true } => "completed",
                     DelegateTaskStatus::Completed { success: false } => "failed",
                     DelegateTaskStatus::Failed { .. } => "failed",
+                    DelegateTaskStatus::Cancelled { .. } => "cancelled",
                 };
                 Some((t.task_id.clone(), status_label))
             } else {
@@ -264,6 +270,7 @@ impl DelegateResultStore {
                     progress.failed += 1;
                     "failed"
                 }
+                DelegateTaskStatus::Cancelled { .. } => "cancelled",
             };
             progress.children.push(DelegateProgressChild {
                 task_id: task.task_id.clone(),
@@ -282,6 +289,7 @@ impl DelegateResultStore {
                     DelegateTaskStatus::Completed { success: false } => {
                         Some(DelegateChildFailureKind::Unknown)
                     }
+                    DelegateTaskStatus::Cancelled { .. } => None,
                     _ => None,
                 },
                 tasks: task.tasks.clone(),
@@ -1094,6 +1102,15 @@ If blocked, say the blocker plainly.\n",
                     DelegateTaskStatus::Failed { error, .. } => {
                         return Err(anyhow::anyhow!("Task failed: {}", error));
                     }
+                    DelegateTaskStatus::Cancelled { reason } => {
+                        return Err(anyhow::anyhow!(
+                            "Task cancelled{}",
+                            reason
+                                .as_deref()
+                                .map(|r| format!(": {r}"))
+                                .unwrap_or_default()
+                        ));
+                    }
                     DelegateTaskStatus::Running => {
                         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     }
@@ -1645,6 +1662,15 @@ impl Feature for DelegateFeature {
                             }],
                             details: json!({ "status": "failed", "error": error, "task_id": task_id }),
                         }),
+                        DelegateTaskStatus::Cancelled { reason } => Ok(ToolResult {
+                            content: vec![ContentBlock::Text {
+                                text: reason
+                                    .as_ref()
+                                    .map(|reason| format!("Task cancelled: {reason}"))
+                                    .unwrap_or_else(|| "Task cancelled".to_string()),
+                            }],
+                            details: json!({ "status": "cancelled", "reason": reason, "task_id": task_id }),
+                        }),
                     },
                     None => Err(anyhow::anyhow!("Task not found: {}", task_id)),
                 }
@@ -1771,6 +1797,7 @@ No delegate tasks found.
                                 DelegateTaskStatus::Completed { success: true } => "✅ Completed",
                                 DelegateTaskStatus::Completed { success: false } => "❌ Failed",
                                 DelegateTaskStatus::Failed { .. } => "❌ Error",
+                                DelegateTaskStatus::Cancelled { .. } => "⊘ Cancelled",
                             };
                             let agent = task.agent_name.as_deref().unwrap_or("default");
 
@@ -2447,6 +2474,39 @@ This agent runs in write mode and can modify files.
                 "should not be disabled after reset: {e}"
             );
         }
+    }
+
+    #[test]
+    fn progress_snapshot_exposes_cancelled_delegate_state_without_failure_count() {
+        let store = DelegateResultStore::new();
+        let now = SystemTime::now();
+        store.store_task(DelegateTask {
+            task_id: "delegate_cancelled".into(),
+            agent_name: Some("verify".into()),
+            task_description: "Verify cancellation".into(),
+            status: DelegateTaskStatus::Cancelled {
+                reason: Some("operator stopped task".into()),
+            },
+            result: Some("operator stopped task".into()),
+            started_at: now,
+            completed_at: Some(now),
+            last_tool: Some("bash".into()),
+            last_turn: Some(1),
+            tasks: Vec::new(),
+        });
+
+        let snapshot = store.progress_snapshot();
+        assert!(!snapshot.active);
+        assert_eq!(snapshot.running, 0);
+        assert_eq!(snapshot.completed, 0);
+        assert_eq!(snapshot.failed, 0);
+        assert_eq!(snapshot.children.len(), 1);
+        assert_eq!(snapshot.children[0].status, "cancelled");
+        assert_eq!(snapshot.children[0].failure_kind, None);
+        assert_eq!(
+            snapshot.children[0].result_summary.as_deref(),
+            Some("operator stopped task")
+        );
     }
 
     #[test]

@@ -116,7 +116,7 @@ actual cleave operation emits/renders cleave milestone
 
 ### Phase 4 — Cancellation/failure parity follow-up
 
-- [ ] Decide whether `DelegateTaskStatus::Cancelled` is required.
+- [x] Add `DelegateTaskStatus::Cancelled { reason }` so cancellation is represented as terminal non-failure state rather than failure.
 - [ ] Define delegate cancellation control action if still absent.
 - [x] Map delegate and cleave failures to shared operator-facing failure taxonomy.
 
@@ -145,9 +145,10 @@ Completed follow-up slices:
 - mapped `DelegateProgress` and `CleaveProgress` into `OperationWorkbenchProjection`;
 - routed delegate and cleave Workbench panels through the shared operation projection renderer;
 - canonicalized child status labels so renderers do not leak engine-specific status strings by default;
-- surfaced delegate failure summaries through shared operation child rows.
+- surfaced delegate failure summaries through shared operation child rows;
+- added first-class delegate cancelled status that projects as terminal non-failure operation state.
 
-Next narrow patch target: decide whether transcript milestone rendering should consume operation projection helpers instead of bespoke event strings, and whether delegate cancellation needs a typed control action/status beyond failure-summary classification.
+Next narrow patch target: define the delegate cancellation control action, then decide whether transcript milestone rendering should consume operation projection helpers instead of bespoke event strings.
 
 ## Validation plan
 
