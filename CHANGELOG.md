@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Fixed subagent/delegate review findings by keeping background delegate startup responses machine-readable, marking delegate/subagent status commands read-only, narrowing the plural `/subagents` alias, and avoiding cleave tool names in base prompts when only `delegate` is exposed.
 - Clarified subagent/delegate/cleave design guidance so requests like “use subagents to merge these branches into main” still route through `cleave_assess`/`cleave_run` when the task shape requires coordinated merge work.
 - Clarified subagent prompt guidance so operator requests to "use subagents" are classified by task shape and may still route to `cleave_assess`/`cleave_run` for coordinated multi-branch or multi-scope work.
 - Added ACP command-registry coverage for the `subagent` alias and clearer background subagent start messages with status/result retrieval guidance.

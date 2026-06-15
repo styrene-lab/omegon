@@ -4174,19 +4174,16 @@ fn slash_subagent_status_alias_enqueues_delegate_status_control() {
 }
 
 #[test]
-fn slash_subagents_status_alias_enqueues_delegate_status_control() {
+fn slash_subagents_plural_alias_is_not_supported() {
     let mut app = test_app();
-    let (tx, mut rx) = test_tx_with_rx();
+    let (tx, _rx) = test_tx_with_rx();
 
     let result = app.handle_slash_command("/subagents status", &tx);
-    assert!(matches!(result, SlashResult::Handled));
-
-    match rx.try_recv().expect("queued command") {
-        TuiCommand::ExecuteControl {
-            request: crate::control_runtime::ControlRequest::DelegateStatus,
-            ..
-        } => {}
-        other => panic!("expected delegate status control request, got: {other:?}"),
+    match result {
+        SlashResult::Display(message) => {
+            assert!(message.contains("Use the explicit singular command: /subagent status"));
+        }
+        other => panic!("expected explicit singular guidance, got: {other:?}"),
     }
 }
 

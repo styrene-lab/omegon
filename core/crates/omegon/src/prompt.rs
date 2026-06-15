@@ -91,13 +91,25 @@ pub fn build_base_prompt_for_mode(
     let project_conventions = detect_project_conventions(cwd);
 
     let has_delegate = tools.iter().any(|t| t.name == "delegate");
+    let has_cleave_assess = tools
+        .iter()
+        .any(|t| t.name == crate::tool_registry::cleave::CLEAVE_ASSESS);
+    let has_cleave_run = tools
+        .iter()
+        .any(|t| t.name == crate::tool_registry::cleave::CLEAVE_RUN);
+    let has_cleave_tools = has_cleave_assess && has_cleave_run;
     let full_behavior = {
         let base = "# Behavior\n\nThese are harness defaults. Project directives (AGENTS.md) and direct operator requests override these defaults — but never the Core Directives, which are immutable.\n\n- Always respond to the user. After calling tools, synthesize what you found into a direct response.\n- Be direct — act, don't narrate intent. If a task requires a tool call, emit the tool call immediately — do not respond with text saying you will do it on the next turn. Never ask whether to proceed after the operator says continue, proceed, yes, make it so, get it done, or otherwise gives approval. Combine information-gathering and action tool calls in a single response when possible. Disagree when you see a better path.\n- Operator frustration is a control signal, not content to mirror. Do not quote it, match its profanity, apologize, self-criticize, or explain your process. Correct course by taking the next concrete action; if blocked, state the blocker and the exact next operator decision needed.\n- Stop exploring once the next reversible step is justified. You do not need certainty; you need a named target, a plausible mechanism, and a bounded next action.\n- Archaeology is allowed only while it is still increasing actionable evidence or resolving a concrete blocker. Do not reopen the search space after the target is already local.\n- Read files before editing. Use `edit` as the canonical mutation tool: anchor on exact current text and make the smallest justified replacement. Use `validate` as the canonical validation tool for narrow checks after edits. The harness may batch coordinated edits internally when needed.\n- Ground claims in evidence — cite files and lines. Don't assert about unread code.\n- Every non-trivial change needs tests. Commit when done. Do not push automatically after committing — but if the operator asks you to push, do it.\n- Prefer `request_context` before making multiple exploratory tool calls when you need session orientation or recent runtime evidence. Use direct read/search tools first only when you already know the exact target.\n- When giving the operator URLs intended to be opened, especially localhost/server/viewer URLs, format them as explicit Markdown links such as `[http://127.0.0.1:7820](http://127.0.0.1:7820)` or `[Open viewer](http://127.0.0.1:5173)`. Do not leave operator-clickable URLs as bare prose.\n";
         let tool_surface = "\n## Tool surface\n\nSome situational tools (persona, model-budget, lifecycle management, advanced memory) are hidden by default to reduce context overhead. If the task requires them, use `manage_tools` with `list_groups` to discover available groups and `enable_group` to activate them.\n";
         let harness_surfaces = "\n## Harness surfaces and state\n\n- Treat Workbench/plan state as live operational state. Before reporting a task complete, reconcile visible plan/workbench state with validation and commit state; do not claim `nothing pending` while an active/todo plan remains unresolved.\n- Separate producer/provenance from content form. Assistant prose, peer-agent prose, and markdown returned by tools may share rendering paths while retaining different producers.\n- Prefer semantic projections and command registry paths over renderer-specific or surface-specific shortcuts.\n- TUI, CLI, ACP, and WebSocket/IPC should share command/projection sources where possible; avoid hidden per-surface allowlists.\n- Prompt templates and loops are executable instruction sources. Preserve provenance, preview/validate before execution, and require explicit safety handling for repeated `/loop` execution.\n";
         if has_delegate {
+            let cleave_guidance = if has_cleave_tools {
+                "\n- Treat operator words like \"subagent\" and \"use subagents\" as an intent to use subordinate work, not as a mandate to choose `delegate` specifically. First classify the work: bounded side quest → `delegate`; coordinated multi-branch/multi-scope execution → `cleave_assess` and, if it splits, `cleave_run`.\n- `cleave_assess` is the decomposition gate for non-trivial coordinated work. If it says split and the task has 2+ independent/coordinated child scopes, follow through with `cleave_run`; if there is only one side quest, prefer `delegate` instead of a one-child cleave.\n- `cleave_run` is for coordinated multi-subagent work across isolated worktrees: dependency waves, parallel implementation tracks, merge governance, and cross-child synthesis. Do not use it for routine single-worker scouting or verification."
+            } else {
+                "\n- Treat operator words like \"subagent\" and \"use subagents\" as an intent to use subordinate work. With only `delegate` available, use it for bounded side quests and do not name unavailable orchestration tools as callable."
+            };
             format!(
-                "{base}\n## Subagent operations\n\n- `delegate` is the default one-shot subagent path for bounded side quests: scout a file set, apply a mechanical scoped patch, run focused verification, or perform an adversarial review while you preserve your main context. Omit `model` for same-provider delegation; local/cheaper model routing is an optimization only when reliability is known.\n- Worker profiles: `scout` (read/search only), `patch` (small scoped edits), `verify` (run tests/checks). Delegate tasks must be specific and self-contained; include file paths in `scope`, relevant context in `facts`, and the expected output.\n- Treat operator words like \"subagent\" and \"use subagents\" as an intent to use subordinate work, not as a mandate to choose `delegate` specifically. First classify the work: bounded side quest → `delegate`; coordinated multi-branch/multi-scope execution → `cleave_assess` and, if it splits, `cleave_run`.\n- `cleave_assess` is the decomposition gate for non-trivial coordinated work. If it says split and the task has 2+ independent/coordinated child scopes, follow through with `cleave_run`; if there is only one side quest, prefer `delegate` instead of a one-child cleave.\n- `cleave_run` is for coordinated multi-subagent work across isolated worktrees: dependency waves, parallel implementation tracks, merge governance, and cross-child synthesis. Do not use it for routine single-worker scouting or verification.\n- You are the orchestrator. Subagents are your hands. Retrieve/reconcile delegate or cleave results before claiming completion, and do not spawn duplicate delegates for the same task.\n{harness_surfaces}{tool_surface}"
+                "{base}\n## Subagent operations\n\n- `delegate` is the default one-shot subagent path for bounded side quests: scout a file set, apply a mechanical scoped patch, run focused verification, or perform an adversarial review while you preserve your main context. Omit `model` for same-provider delegation; local/cheaper model routing is an optimization only when reliability is known.\n- Worker profiles: `scout` (read/search only), `patch` (small scoped edits), `verify` (run tests/checks). Delegate tasks must be specific and self-contained; include file paths in `scope`, relevant context in `facts`, and the expected output.{cleave_guidance}\n- You are the orchestrator. Subagents are your hands. Retrieve/reconcile delegate or cleave results before claiming completion, and do not spawn duplicate delegates for the same task.\n{harness_surfaces}{tool_surface}"
             )
         } else {
             format!("{base}{harness_surfaces}{tool_surface}")
@@ -190,6 +202,7 @@ fn detect_lifecycle_context(cwd: &Path, tools: &[ToolDefinition]) -> String {
 
     let has_design_tools = tool_names.contains("design_tree");
     let has_openspec_tools = tool_names.contains("openspec_manage");
+    let has_delegate = tool_names.contains("delegate");
     let has_cleave_tools =
         tool_names.contains("cleave_assess") || tool_names.contains("cleave_run");
 
@@ -248,7 +261,7 @@ fn detect_lifecycle_context(cwd: &Path, tools: &[ToolDefinition]) -> String {
         );
     }
 
-    if has_cleave_tools {
+    if has_delegate && has_cleave_tools {
         sections.push(
             "subagent operations: `delegate` is the low-friction one-shot subagent path for bounded side quests (scout, patch, verify, adversarial review). Operator requests to use subagents should still be classified by shape: bounded side quest → `delegate`; coordinated multi-branch/multi-scope execution → `cleave_assess` and, when split-worthy, `cleave_run`. Use `cleave_run` when the task genuinely has 2+ independent or coordinated child scopes that benefit from dependency waves, separate worktrees, merge governance, and cross-child synthesis; do not cleave a one-child side quest unless that isolation/merge machinery is explicitly needed."
                 .into(),
@@ -694,6 +707,24 @@ mod tests {
                 "Retrieve/reconcile delegate or cleave results before claiming completion"
             )
         );
+    }
+
+    #[test]
+    fn base_prompt_with_delegate_only_does_not_name_unavailable_cleave_tools() {
+        let tools = vec![tool(crate::tool_registry::delegate::DELEGATE)];
+        let prompt = build_base_prompt(Path::new("/tmp"), &tools);
+
+        assert!(prompt.contains("## Subagent operations"));
+        let subagent_section = prompt
+            .split("## Subagent operations")
+            .nth(1)
+            .unwrap()
+            .split("## Harness surfaces and state")
+            .next()
+            .unwrap();
+        assert!(subagent_section.contains("With only `delegate` available"));
+        assert!(!subagent_section.contains("`cleave_assess`"));
+        assert!(!subagent_section.contains("`cleave_run`"));
     }
 
     #[test]

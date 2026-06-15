@@ -1355,7 +1355,7 @@ mod command_safety_tests {
         let response = handle_registered_acp_command(&mut bus, "subagent", "status", false)
             .expect("registered subagent command response");
 
-        assert!(response.contains("Delegate Tasks"), "{response}");
+        assert!(response.contains("Subagent / Delegate Tasks"), "{response}");
     }
 
     #[test]

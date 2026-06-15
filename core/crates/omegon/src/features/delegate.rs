@@ -1723,24 +1723,25 @@ No delegate tasks found.
                 description: "subagent/delegate task management; same-provider is the default when no model is specified".to_string(),
                 subcommands: vec!["status".to_string()],
                 availability: omegon_traits::CommandAvailability::ALL,
-                safety: omegon_traits::CommandSafety::STATE_CHANGING,
+                safety: omegon_traits::CommandSafety::READ_ONLY,
             },
             CommandDefinition {
                 name: "subagent".to_string(),
                 description: "alias for delegate subagent task management".to_string(),
                 subcommands: vec!["status".to_string()],
                 availability: omegon_traits::CommandAvailability::ALL,
-                safety: omegon_traits::CommandSafety::STATE_CHANGING,
+                safety: omegon_traits::CommandSafety::READ_ONLY,
             },
         ]
     }
 
     fn handle_command(&mut self, name: &str, args: &str) -> CommandResult {
-        if name == "delegate" || name == "subagent" || name == "subagents" {
+        if name == "delegate" || name == "subagent" {
             match args.trim() {
                 "status" | "" => {
                     let tasks = self.result_store.list_all_tasks();
-                    let mut result = format!("Delegate Tasks ({} total):\n\n", tasks.len());
+                    let mut result =
+                        format!("Subagent / Delegate Tasks ({} total):\n\n", tasks.len());
 
                     if tasks.is_empty() {
                         result.push_str("No delegate tasks found.\n");
@@ -1941,9 +1942,13 @@ pub fn scan_agents(cwd: &Path) -> Vec<AgentSpec> {
 }
 
 fn format_background_delegate_started(task_id: &str) -> String {
-    format!(
-        "Subagent started in background.\n\nTask ID: `{task_id}`\nCheck status: `/subagent status`\nRetrieve result: call `delegate_result` with `task_id: \"{task_id}\"`"
-    )
+    serde_json::json!({
+        "task_id": task_id,
+        "background": true,
+        "status_hint": "/subagent status",
+        "result_tool": "delegate_result"
+    })
+    .to_string()
 }
 
 /// Parse agent specification from markdown content
@@ -2068,12 +2073,13 @@ mod tests {
     }
 
     #[test]
-    fn background_delegate_started_message_bridges_subagent_status_and_result() {
+    fn background_delegate_started_message_preserves_machine_readable_result() {
         let rendered = format_background_delegate_started("delegate_42");
-        assert!(rendered.contains("Subagent started in background"));
-        assert!(rendered.contains("/subagent status"));
-        assert!(rendered.contains("delegate_result"));
-        assert!(rendered.contains("delegate_42"));
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        assert_eq!(parsed["task_id"], "delegate_42");
+        assert_eq!(parsed["background"], true);
+        assert_eq!(parsed["status_hint"], "/subagent status");
+        assert_eq!(parsed["result_tool"], "delegate_result");
     }
 
     #[test]
@@ -2112,6 +2118,23 @@ mod tests {
         assert!(tools.iter().any(|t| t.name == "delegate"));
         assert!(tools.iter().any(|t| t.name == "delegate_result"));
         assert!(tools.iter().any(|t| t.name == "delegate_status"));
+    }
+
+    #[test]
+    fn delegate_status_commands_are_read_only() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
+        let commands = feature.commands();
+        let delegate = commands
+            .iter()
+            .find(|command| command.name == "delegate")
+            .unwrap();
+        let subagent = commands
+            .iter()
+            .find(|command| command.name == "subagent")
+            .unwrap();
+        assert_eq!(delegate.safety, omegon_traits::CommandSafety::READ_ONLY);
+        assert_eq!(subagent.safety, omegon_traits::CommandSafety::READ_ONLY);
     }
 
     #[test]

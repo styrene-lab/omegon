@@ -1102,7 +1102,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 None
             }
         }
-        "delegate" | "subagent" | "subagents" => match args {
+        "delegate" | "subagent" => match args {
             "" | "status" => Some(CanonicalSlashCommand::DelegateStatus),
             _ => None,
         },
@@ -6210,7 +6210,7 @@ Scroll transcript:
                 SlashResult::Handled
             }
 
-            "delegate" | "subagent" | "subagents" => {
+            "delegate" | "subagent" => {
                 if let Some(command) = canonical_slash_command(cmd, args) {
                     if let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
@@ -6232,6 +6232,10 @@ Scroll transcript:
                             .into(),
                     )
                 }
+            }
+
+            "subagents" => {
+                SlashResult::Display("Use the explicit singular command: /subagent status".into())
             }
 
             "focus" => {
