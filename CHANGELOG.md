@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 - Added a conservative subagent autonomy policy layer that now drives prompt guidance for delegate/cleave operations, keeping `cleave_run` approval-oriented by default while allowing bounded scout/verify delegates.
+- Gated over-limit `cleave_run` requests behind structured approval details under the conservative subagent autonomy policy before creating cleave workspaces or spawning children.
 - Added CLI parser coverage for the `--oci` alias, OCI image/runtime overrides, and conflict handling with `--dangerously-bypass-permissions`.
 - Marked host-shim OCI launches with `OMEGON_RUNTIME_CONTEXT=host-shim-oci`/`OMEGON_OCI_LAUNCHER=omegon` and made recursive `--oci` requests inside an OCI container fail closed.
 - Added an orchestrated OCI runtime design for Kubernetes/CRI deployments where Omegon is launched by the orchestrator rather than by the native `--oci` host shim.

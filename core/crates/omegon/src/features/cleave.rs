@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+use crate::autonomy::{DecisionPolicy, SubagentPolicy};
 use crate::surfaces::operations::OperationWorkbenchProjection;
 
 use omegon_traits::{
@@ -907,6 +908,9 @@ impl CleaveFeature {
         let max_parallel = args["max_parallel"].as_u64().unwrap_or(4) as usize;
 
         let plan = CleavePlan::from_json(plan_json)?;
+        if let Some(result) = enforce_cleave_run_policy(&plan, max_parallel) {
+            return Ok(result);
+        }
 
         // Internal tool invocations should start from a fresh workspace.
         // Reusing a stale state.json from a previous run can mismatch the new
@@ -1411,6 +1415,49 @@ impl Feature for CleaveFeature {
     }
 }
 
+fn enforce_cleave_run_policy(plan: &CleavePlan, max_parallel: usize) -> Option<ToolResult> {
+    let policy = SubagentPolicy::conservative_default();
+    if policy.cleave_run == DecisionPolicy::Allow {
+        return None;
+    }
+
+    let requested_children = plan.children.len();
+    let over_child_limit = requested_children > policy.max_children;
+    let over_parallel_limit = max_parallel > policy.max_parallel;
+    if !over_child_limit && !over_parallel_limit {
+        return None;
+    }
+
+    let reason = match (over_child_limit, over_parallel_limit) {
+        (true, true) => "cleave_run exceeds conservative child and parallelism limits",
+        (true, false) => "cleave_run exceeds conservative child limit",
+        (false, true) => "cleave_run exceeds conservative parallelism limit",
+        (false, false) => unreachable!(),
+    };
+    Some(ToolResult {
+        content: vec![ContentBlock::Text {
+            text: format!(
+                "Structured approval required: {reason}. Requested {requested_children} child(ren) with max_parallel={max_parallel}; conservative policy allows at most {} child(ren) and max_parallel={}.",
+                policy.max_children, policy.max_parallel
+            ),
+        }],
+        details: json!({
+            "approval_required": true,
+            "operation": "cleave_run",
+            "autonomy": policy.level.as_str(),
+            "reason": reason,
+            "requested": {
+                "children": requested_children,
+                "max_parallel": max_parallel,
+            },
+            "allowed": {
+                "children": policy.max_children,
+                "max_parallel": policy.max_parallel,
+            },
+        }),
+    })
+}
+
 fn text_result(text: &str) -> ToolResult {
     ToolResult {
         content: vec![ContentBlock::Text {
@@ -1513,6 +1560,43 @@ mod tests {
 
     use super::*;
     use omegon_traits::OperationKind;
+
+    #[test]
+    fn cleave_run_policy_requires_approval_when_over_conservative_limits() {
+        let plan = CleavePlan::from_json(
+            r#"{
+                "children": [
+                    {"label":"one","description":"first","scope":["a.rs"]},
+                    {"label":"two","description":"second","scope":["b.rs"]},
+                    {"label":"three","description":"third","scope":["c.rs"]}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let result = enforce_cleave_run_policy(&plan, 2).expect("over-limit cleave must gate");
+        assert_eq!(result.details["approval_required"], true);
+        assert_eq!(result.details["operation"], "cleave_run");
+        assert_eq!(result.details["autonomy"], "conservative");
+        assert_eq!(result.details["requested"]["children"], 3);
+        assert_eq!(result.details["requested"]["max_parallel"], 2);
+        assert_eq!(result.details["allowed"]["children"], 2);
+        assert_eq!(result.details["allowed"]["max_parallel"], 1);
+    }
+
+    #[test]
+    fn cleave_run_policy_allows_within_conservative_limits() {
+        let plan = CleavePlan::from_json(
+            r#"{
+                "children": [
+                    {"label":"one","description":"first","scope":["a.rs"]}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert!(enforce_cleave_run_policy(&plan, 1).is_none());
+    }
 
     #[test]
     fn assess_simple_directive() {
