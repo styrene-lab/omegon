@@ -97,7 +97,7 @@ pub fn build_base_prompt_for_mode(
         let harness_surfaces = "\n## Harness surfaces and state\n\n- Treat Workbench/plan state as live operational state. Before reporting a task complete, reconcile visible plan/workbench state with validation and commit state; do not claim `nothing pending` while an active/todo plan remains unresolved.\n- Separate producer/provenance from content form. Assistant prose, peer-agent prose, and markdown returned by tools may share rendering paths while retaining different producers.\n- Prefer semantic projections and command registry paths over renderer-specific or surface-specific shortcuts.\n- TUI, CLI, ACP, and WebSocket/IPC should share command/projection sources where possible; avoid hidden per-surface allowlists.\n- Prompt templates and loops are executable instruction sources. Preserve provenance, preview/validate before execution, and require explicit safety handling for repeated `/loop` execution.\n";
         if has_delegate {
             format!(
-                "{base}\n## Subagent operations\n\n- `delegate` is the default one-shot subagent path for bounded side quests: scout a file set, apply a mechanical scoped patch, run focused verification, or perform an adversarial review while you preserve your main context. Use local/cheaper models when available.\n- Worker profiles: `scout` (read/search only), `patch` (small scoped edits), `verify` (run tests/checks). Delegate tasks must be specific and self-contained; include file paths in `scope`, relevant context in `facts`, and the expected output.\n- `cleave_assess` is only a decomposition gate. If it says split and the task has 2+ independent/coordinated child scopes, follow through with `cleave_run`; if there is only one side quest, prefer `delegate` instead of a one-child cleave.\n- `cleave_run` is for coordinated multi-subagent work across isolated worktrees: dependency waves, parallel implementation tracks, merge governance, and cross-child synthesis. Do not use it for routine single-worker scouting or verification.\n- You are the orchestrator. Subagents are your hands. Retrieve/reconcile delegate or cleave results before claiming completion, and do not spawn duplicate delegates for the same task.\n{harness_surfaces}{tool_surface}"
+                "{base}\n## Subagent operations\n\n- `delegate` is the default one-shot subagent path for bounded side quests: scout a file set, apply a mechanical scoped patch, run focused verification, or perform an adversarial review while you preserve your main context. Omit `model` for same-provider delegation; local/cheaper model routing is an optimization only when reliability is known.\n- Worker profiles: `scout` (read/search only), `patch` (small scoped edits), `verify` (run tests/checks). Delegate tasks must be specific and self-contained; include file paths in `scope`, relevant context in `facts`, and the expected output.\n- Treat operator words like \"subagent\" and \"use subagents\" as an intent to use subordinate work, not as a mandate to choose `delegate` specifically. First classify the work: bounded side quest → `delegate`; coordinated multi-branch/multi-scope execution → `cleave_assess` and, if it splits, `cleave_run`.\n- `cleave_assess` is the decomposition gate for non-trivial coordinated work. If it says split and the task has 2+ independent/coordinated child scopes, follow through with `cleave_run`; if there is only one side quest, prefer `delegate` instead of a one-child cleave.\n- `cleave_run` is for coordinated multi-subagent work across isolated worktrees: dependency waves, parallel implementation tracks, merge governance, and cross-child synthesis. Do not use it for routine single-worker scouting or verification.\n- You are the orchestrator. Subagents are your hands. Retrieve/reconcile delegate or cleave results before claiming completion, and do not spawn duplicate delegates for the same task.\n{harness_surfaces}{tool_surface}"
             )
         } else {
             format!("{base}{harness_surfaces}{tool_surface}")
@@ -250,7 +250,7 @@ fn detect_lifecycle_context(cwd: &Path, tools: &[ToolDefinition]) -> String {
 
     if has_cleave_tools {
         sections.push(
-            "subagent operations: `delegate` is the low-friction one-shot subagent path for bounded side quests (scout, patch, verify, adversarial review). `cleave_assess` is only the decomposition gate. Use `cleave_run` when the task genuinely has 2+ independent or coordinated child scopes that benefit from dependency waves, separate worktrees, merge governance, and cross-child synthesis; do not cleave a one-child side quest unless that isolation/merge machinery is explicitly needed."
+            "subagent operations: `delegate` is the low-friction one-shot subagent path for bounded side quests (scout, patch, verify, adversarial review). Operator requests to use subagents should still be classified by shape: bounded side quest → `delegate`; coordinated multi-branch/multi-scope execution → `cleave_assess` and, when split-worthy, `cleave_run`. Use `cleave_run` when the task genuinely has 2+ independent or coordinated child scopes that benefit from dependency waves, separate worktrees, merge governance, and cross-child synthesis; do not cleave a one-child side quest unless that isolation/merge machinery is explicitly needed."
                 .into(),
         );
     }
@@ -677,7 +677,9 @@ mod tests {
 
         assert!(prompt.contains("## Subagent operations"));
         assert!(prompt.contains("`delegate` is the default one-shot subagent path"));
-        assert!(prompt.contains("`cleave_assess` is only a decomposition gate"));
+        assert!(prompt.contains("`cleave_assess` is the decomposition gate"));
+        assert!(prompt.contains("Treat operator words like \"subagent\" and \"use subagents\""));
+        assert!(prompt.contains("coordinated multi-branch/multi-scope execution"));
         assert!(
             prompt.contains(
                 "If it says split and the task has 2+ independent/coordinated child scopes"
@@ -718,7 +720,11 @@ mod tests {
 
         assert!(context.contains("subagent operations:"));
         assert!(context.contains("`delegate` is the low-friction one-shot subagent path"));
-        assert!(context.contains("`cleave_assess` is only the decomposition gate"));
+        assert!(
+            context
+                .contains("Operator requests to use subagents should still be classified by shape")
+        );
+        assert!(context.contains("coordinated multi-branch/multi-scope execution"));
         assert!(context.contains("2+ independent or coordinated child scopes"));
         assert!(context.contains("do not cleave a one-child side quest"));
         assert!(context.contains("merge governance"));

@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Clarified subagent prompt guidance so operator requests to "use subagents" are classified by task shape and may still route to `cleave_assess`/`cleave_run` for coordinated multi-branch or multi-scope work.
 - Added ACP command-registry coverage for the `subagent` alias and clearer background subagent start messages with status/result retrieval guidance.
 - Added `/subagent` and `/subagents` as operator-facing aliases for delegate status, and updated delegate metadata to describe same-provider subagents as the default path.
 - Added `just link-doctor` to inspect launcher PATH resolution, selected target, channel files, and fallback binary state.
