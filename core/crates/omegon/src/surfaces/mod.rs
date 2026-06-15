@@ -7,3 +7,4 @@ pub mod footer;
 pub mod inline;
 pub mod instruments;
 pub mod layout;
+pub mod operations;

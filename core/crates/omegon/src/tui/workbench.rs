@@ -8,6 +8,9 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 use super::{dashboard, theme};
 use crate::features::cleave::CleaveProgress;
 use crate::features::delegate::DelegateProgress;
+use crate::surfaces::operations::{
+    OperationChildRow, OperationChildStatus, OperationWorkbenchProjection,
+};
 
 pub fn workbench_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 {
     if width == 0 || snapshot.items.is_empty() {
@@ -715,39 +718,84 @@ fn render_delegate_workbench_panel(
     t: &dyn theme::Theme,
     progress: &DelegateProgress,
 ) {
+    let projection = OperationWorkbenchProjection::from_delegate(progress);
+    render_operation_workbench_panel(area, frame, t, &projection);
+}
+
+fn render_operation_workbench_panel(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    projection: &OperationWorkbenchProjection,
+) {
     let bg = t.surface_bg();
+    let kind = match projection.operation.kind {
+        omegon_traits::OperationKind::Delegate => "delegate",
+        omegon_traits::OperationKind::Cleave => "cleave",
+    };
     let mut lines = vec![workbench_rule_line(
         t,
         bg,
         format!(
-            "delegate running {} · done {} · failed {}",
-            progress.running, progress.completed, progress.failed
+            "{kind} running {} · done {} · failed {}",
+            projection.running, projection.completed, projection.failed
         ),
         area.width,
     )];
     let max_rows = area.height.saturating_sub(1) as usize;
-    for child in progress.children.iter().take(max_rows) {
-        let task_progress = if child.tasks.is_empty() {
-            String::new()
-        } else {
-            format!(" · tasks {}/{}", child.tasks_done, child.tasks.len())
-        };
-        let text = worker_chrome_line(
-            &child.label,
-            &child.status,
-            child.last_tool.as_deref(),
-            &task_progress,
-            area.width,
-        );
+    for child in projection.children.iter().take(max_rows) {
+        let text = operation_worker_chrome_line(child, area.width);
         lines.push(Line::from(Span::styled(
             text,
-            worker_status_style(&child.status, t, bg),
+            operation_worker_status_style(child.status, t, bg),
         )));
     }
     Paragraph::new(lines)
         .style(Style::default().bg(bg))
         .wrap(Wrap { trim: false })
         .render(area, frame.buffer_mut());
+}
+
+fn operation_worker_chrome_line(child: &OperationChildRow, width: u16) -> String {
+    let task_progress = child
+        .progress
+        .as_ref()
+        .map(|progress| format!(" · tasks {}/{}", progress.done, progress.total))
+        .unwrap_or_default();
+    let failure = child
+        .failure
+        .as_ref()
+        .and_then(|failure| failure.message.as_deref())
+        .map(|message| format!(" · {message}"))
+        .unwrap_or_default();
+    let last_tool = child
+        .last_activity
+        .as_ref()
+        .map(|activity| activity.label.as_str());
+    worker_chrome_line(
+        &child.label,
+        &child.status_label,
+        last_tool,
+        &format!("{task_progress}{failure}"),
+        width,
+    )
+}
+
+fn operation_worker_status_style(
+    status: OperationChildStatus,
+    t: &dyn theme::Theme,
+    bg: ratatui::style::Color,
+) -> Style {
+    match status {
+        OperationChildStatus::Succeeded => Style::default().fg(t.success()).bg(bg),
+        OperationChildStatus::Running | OperationChildStatus::Starting => {
+            Style::default().fg(t.warning()).bg(bg)
+        }
+        OperationChildStatus::Failed | OperationChildStatus::TimedOut => {
+            Style::default().fg(t.error()).bg(bg)
+        }
+        _ => Style::default().fg(t.accent_muted()).bg(bg),
+    }
 }
 
 fn worker_chrome_line(

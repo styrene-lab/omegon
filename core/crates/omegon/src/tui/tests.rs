@@ -3635,6 +3635,72 @@ fn draw_routes_active_delegate_to_workbench_without_instruments() {
 }
 
 #[test]
+fn draw_routes_failed_delegate_summary_to_workbench_without_instruments() {
+    let mut app = test_app();
+    app.ui_surfaces.footer = true;
+    app.ui_surfaces.instruments = false;
+    app.dashboard.delegate = Some(crate::features::delegate::DelegateProgress {
+        active: true,
+        running: 0,
+        completed: 0,
+        failed: 1,
+        children: vec![crate::features::delegate::DelegateProgressChild {
+            task_id: "delegate_2".into(),
+            label: "delegate_2".into(),
+            status: "failed".into(),
+            last_tool: Some("bash".into()),
+            last_turn: Some(3),
+            started_at: None,
+            completed_at: None,
+            result_summary: Some("idle timeout — no output for 120s".into()),
+            tasks: vec![],
+            tasks_done: 0,
+        }],
+    });
+
+    let rendered = render_app_to_string(&mut app, 140, 36);
+
+    assert!(
+        rendered.contains("delegate running 0 · done 0 · failed 1"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("delegate_2 failed"), "{rendered}");
+    assert!(rendered.contains("idle timeout"), "{rendered}");
+    assert!(rendered.contains("bash"), "{rendered}");
+}
+
+#[test]
+fn draw_truncates_failed_delegate_summary_in_workbench() {
+    let mut app = test_app();
+    app.ui_surfaces.footer = true;
+    app.ui_surfaces.instruments = false;
+    app.dashboard.delegate = Some(crate::features::delegate::DelegateProgress {
+        active: true,
+        running: 0,
+        completed: 0,
+        failed: 1,
+        children: vec![crate::features::delegate::DelegateProgressChild {
+            task_id: "delegate_2".into(),
+            label: "delegate_2".into(),
+            status: "failed".into(),
+            last_tool: Some("bash".into()),
+            last_turn: Some(3),
+            started_at: None,
+            completed_at: None,
+            result_summary: Some("idle timeout — no output for 120s while validating renderer-neutral operation projection rows".into()),
+            tasks: vec![],
+            tasks_done: 0,
+        }],
+    });
+
+    let rendered = render_app_to_string(&mut app, 70, 28);
+
+    assert!(rendered.contains("delegate_2 failed"), "{rendered}");
+    assert!(rendered.contains("idle"), "{rendered}");
+    assert!(rendered.contains('…'), "{rendered}");
+}
+
+#[test]
 fn draw_clears_stale_completed_cleave_snapshot_from_tools_panel() {
     let mut app = test_app();
     app.ui_surfaces.footer = true;
