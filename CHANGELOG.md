@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Added `/subagent` and `/subagents` as operator-facing aliases for delegate status, and updated delegate metadata to describe same-provider subagents as the default path.
 - Added `just link-doctor` to inspect launcher PATH resolution, selected target, channel files, and fallback binary state.
 - Added fixture coverage for the stable launcher resolution policy, including env overrides, nearest checkout selection, channels, fallback binaries, paths with spaces, dev-release fallback, and self-recursion rejection.
 - Added a stable `omegon`/`om` launcher installed by `just link`, with deterministic multi-checkout resolution via explicit env overrides, nearest checkout builds, named `~/.omegon/channels`, and a fallback installed binary.

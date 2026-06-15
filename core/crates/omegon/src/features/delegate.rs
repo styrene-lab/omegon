@@ -1294,8 +1294,8 @@ impl Feature for DelegateFeature {
         vec![
             ToolDefinition {
                 name: crate::tool_registry::delegate::DELEGATE.to_string(),
-                label: "Delegate Task".to_string(),
-                description: "Spawn a subagent to handle a specific task. Use `model` to route to a local or cheaper model (e.g., `ollama:qwen3:32b`) for mechanical work like file edits and test runs. Worker profiles: scout (read/search only), patch (small scoped edits), verify (run tests/checks).".to_string(),
+                label: "Delegate Subagent Task".to_string(),
+                description: "Spawn a subagent/delegate to handle a specific task. Omit `model` for the safest same-provider default; only set `model` to route to a known-good local or cheaper model after reliability is established. Worker profiles: scout (read/search only), patch (small scoped edits), verify (run tests/checks).".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -1717,17 +1717,26 @@ No delegate tasks found.
     }
 
     fn commands(&self) -> Vec<CommandDefinition> {
-        vec![CommandDefinition {
-            name: crate::tool_registry::delegate::DELEGATE.to_string(),
-            description: "delegate task management".to_string(),
-            subcommands: vec!["status".to_string()],
-            availability: omegon_traits::CommandAvailability::ALL,
-            safety: omegon_traits::CommandSafety::STATE_CHANGING,
-        }]
+        vec![
+            CommandDefinition {
+                name: crate::tool_registry::delegate::DELEGATE.to_string(),
+                description: "subagent/delegate task management; same-provider is the default when no model is specified".to_string(),
+                subcommands: vec!["status".to_string()],
+                availability: omegon_traits::CommandAvailability::ALL,
+                safety: omegon_traits::CommandSafety::STATE_CHANGING,
+            },
+            CommandDefinition {
+                name: "subagent".to_string(),
+                description: "alias for delegate subagent task management".to_string(),
+                subcommands: vec!["status".to_string()],
+                availability: omegon_traits::CommandAvailability::ALL,
+                safety: omegon_traits::CommandSafety::STATE_CHANGING,
+            },
+        ]
     }
 
     fn handle_command(&mut self, name: &str, args: &str) -> CommandResult {
-        if name == "delegate" {
+        if name == "delegate" || name == "subagent" || name == "subagents" {
             match args.trim() {
                 "status" | "" => {
                     let tasks = self.result_store.list_all_tasks();

@@ -1102,7 +1102,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 None
             }
         }
-        "delegate" => match args {
+        "delegate" | "subagent" | "subagents" => match args {
             "" | "status" => Some(CanonicalSlashCommand::DelegateStatus),
             _ => None,
         },
@@ -5168,7 +5168,12 @@ impl App {
             &["list", "create", "off"],
         ),
         ("tone", "switch tone (or 'off' to deactivate)", &["off"]),
-        ("delegate", "delegate task management", &["status"]),
+        ("delegate", "subagent/delegate task management", &["status"]),
+        (
+            "subagent",
+            "alias for /delegate; inspect subagent tasks",
+            &["status"],
+        ),
         (
             "status",
             "show harness status (providers, MCP, secrets, routing)",
@@ -6205,8 +6210,8 @@ Scroll transcript:
                 SlashResult::Handled
             }
 
-            "delegate" => {
-                if let Some(command) = canonical_slash_command("delegate", args) {
+            "delegate" | "subagent" | "subagents" => {
+                if let Some(command) = canonical_slash_command(cmd, args) {
                     if let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
                     {
@@ -6217,13 +6222,13 @@ Scroll transcript:
                         SlashResult::Handled
                     } else {
                         SlashResult::Display(
-                            "Usage: /delegate status\n\nTo invoke a delegate, use the delegate agent tool."
+                            "Usage: /delegate status or /subagent status\n\nTo invoke a delegate/subagent, use the delegate agent tool."
                                 .into(),
                         )
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /delegate status\n\nTo invoke a delegate, use the delegate agent tool."
+                        "Usage: /delegate status or /subagent status\n\nTo invoke a delegate/subagent, use the delegate agent tool."
                             .into(),
                     )
                 }

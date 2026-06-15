@@ -4157,6 +4157,40 @@ fn slash_delegate_status_enqueues_execute_control() {
 }
 
 #[test]
+fn slash_subagent_status_alias_enqueues_delegate_status_control() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/subagent status", &tx);
+    assert!(matches!(result, SlashResult::Handled));
+
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::DelegateStatus,
+            ..
+        } => {}
+        other => panic!("expected delegate status control request, got: {other:?}"),
+    }
+}
+
+#[test]
+fn slash_subagents_status_alias_enqueues_delegate_status_control() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/subagents status", &tx);
+    assert!(matches!(result, SlashResult::Handled));
+
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::DelegateStatus,
+            ..
+        } => {}
+        other => panic!("expected delegate status control request, got: {other:?}"),
+    }
+}
+
+#[test]
 fn slash_cleave_run_still_uses_bus_path() {
     let mut app = test_app();
     app.bus_commands.push(omegon_traits::CommandDefinition {
