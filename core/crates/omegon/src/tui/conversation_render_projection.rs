@@ -47,7 +47,7 @@ pub fn segment_chrome(
             (category.label(), "⚙", tool_category_color(category, t))
         }
         SegmentRole::System => ("system", "ℹ", t.dim()),
-        SegmentRole::Lifecycle => ("event", "⚡", t.dim()),
+        SegmentRole::Lifecycle => ("event", "↯", t.dim()),
         SegmentRole::Media => ("media", "◈", t.accent_muted()),
         SegmentRole::Separator => ("separator", "", t.dim()),
     };

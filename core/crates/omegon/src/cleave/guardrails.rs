@@ -158,9 +158,9 @@ pub fn run_guardrails(cwd: &Path, checks: &[GuardrailCheck]) -> String {
     }
 
     if all_passed {
-        format!("✅ All deterministic checks passed\n{}", lines.join("\n"))
+        format!("✓ All deterministic checks passed\n{}", lines.join("\n"))
     } else {
-        format!("❌ Some checks failed\n{}", lines.join("\n"))
+        format!("✗ Some checks failed\n{}", lines.join("\n"))
     }
 }
 

@@ -613,7 +613,7 @@ pub fn presentation_for_role(
         },
         SegmentRole::Lifecycle => SegmentPresentation {
             role,
-            sigil: "⚡",
+            sigil: "↯",
             emphasis: SegmentEmphasis::Muted,
             tool_category: None,
         },

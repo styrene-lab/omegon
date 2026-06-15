@@ -505,7 +505,7 @@ pub fn tool_card_detailed<'a>(
 /// Lifecycle event card — phase change, decomposition, etc.
 ///
 /// `◈ Phase → implement`
-/// `⚡ Cleave: 3 children dispatched`
+/// `↯ Cleave: 3 children dispatched`
 pub fn lifecycle_event<'a>(icon: &str, text: &str, t: &dyn Theme) -> Line<'a> {
     Line::from(vec![
         Span::styled("│ ", Style::default().fg(t.border_dim())),
@@ -869,7 +869,7 @@ mod tests {
     #[test]
     fn tool_header_args_summary_handles_emoji_boundary() {
         let t = Alpharius;
-        let args = format!("{}✅tail", "x".repeat(49));
+        let args = format!("{}✓tail", "x".repeat(49));
         let line = tool_card("read", false, false, Some(&args), None, &t);
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(text.contains('…'));

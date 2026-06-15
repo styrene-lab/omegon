@@ -6133,7 +6133,7 @@ Scroll transcript:
                 let sub = if args.is_empty() { "week" } else { args };
                 match crate::tools::chronos::execute(sub, None, None, None) {
                     Ok(text) => SlashResult::Display(text),
-                    Err(e) => SlashResult::Display(format!("❌ {e}")),
+                    Err(e) => SlashResult::Display(format!("✗ {e}")),
                 }
             }
 
@@ -7419,7 +7419,7 @@ Scroll transcript:
             } => match operation.kind {
                 OperationKind::Cleave => {
                     self.conversation.push_lifecycle(
-                        "⚡",
+                        "↯",
                         &format!("Cleave: {} children dispatched", children.len()),
                     );
                 }
@@ -7456,7 +7456,7 @@ Scroll transcript:
                     OperationKind::Delegate => "Delegate",
                 };
                 self.conversation
-                    .push_lifecycle("⚡", &format!("{label} {status}"));
+                    .push_lifecycle("↯", &format!("{label} {status}"));
             }
             AgentEvent::WebDashboardStarted { startup_json } => {
                 if let Ok(startup) =
@@ -7502,7 +7502,7 @@ Scroll transcript:
                     || message.contains("— retrying")
                 {
                     self.show_toast(&message, ratatui_toaster::ToastType::Warning);
-                } else if message.starts_with('⚡') {
+                } else if message.starts_with('↯') {
                     self.show_toast(&message, ratatui_toaster::ToastType::Info);
                 } else {
                     self.conversation.push_system(&message);

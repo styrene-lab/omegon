@@ -1899,7 +1899,7 @@ async fn maybe_warmup_ollama(
         Ok(WarmupResult::WasLoaded) => {
             tracing::info!(model_name, "Ollama model warmed up successfully");
             let _ = events.send(AgentEvent::SystemNotification {
-                message: format!("⚡ {model_name} loaded"),
+                message: format!("↯ {model_name} loaded"),
             });
         }
         Err(e) => {

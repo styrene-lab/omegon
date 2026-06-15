@@ -40,10 +40,10 @@ mod tests {
     #[test]
     fn lifecycle_props_preserve_render_inputs() {
         let props = LifecycleRenderProps {
-            icon: "⚡",
+            icon: "↯",
             text: "event",
         };
-        assert_eq!(props.icon, "⚡");
+        assert_eq!(props.icon, "↯");
         assert_eq!(props.text, "event");
     }
 
@@ -53,7 +53,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         render(
             LifecycleRenderProps {
-                icon: "⚡",
+                icon: "↯",
                 text: "event",
             },
             area,
@@ -61,7 +61,7 @@ mod tests {
             &SegmentRenderContext::new(&Alpharius, crate::tui::segments::SegmentRenderMode::Full),
         );
         let text: String = (0..area.width).map(|x| buf[(x, 0)].symbol()).collect();
-        assert!(text.contains("⚡"), "icon should render: {text:?}");
+        assert!(text.contains("↯"), "icon should render: {text:?}");
         assert!(text.contains("event"), "text should render: {text:?}");
     }
 }

@@ -469,7 +469,7 @@ fn build_finalization_section(submodules: &[String]) -> String {
     section.push_str(
         "Return your completion summary in your normal final response instead of modifying the prompt file.\n",
     );
-    section.push_str("\n> ⚠️ Uncommitted work will be lost. The orchestrator merges from your branch's commits.\n");
+    section.push_str("\n> ⚠ Uncommitted work will be lost. The orchestrator merges from your branch's commits.\n");
 
     section
 }

@@ -1362,9 +1362,9 @@ fn tail_chars_handles_emoji_at_tail_boundary() {
     let text = "Done. Seed is empty:\n\n\
 | Stack | Containers | Status |\n\
 |-------|-----------|--------|\n\
-| komodo + traefik | komodo-core, periphery, ferretdb, postgres, traefik | ✅ Down |\n\
-| netbox | netbox, postgres, redis, redis-cache | ✅ Down |\n\
-| rustdesk | hbbs, hbbr | ✅ Down |\n";
+| komodo + traefik | komodo-core, periphery, ferretdb, postgres, traefik | ✓ Down |\n\
+| netbox | netbox, postgres, redis, redis-cache | ✓ Down |\n\
+| rustdesk | hbbs, hbbr | ✓ Down |\n";
 
     for n in 0..text.len() {
         let tail = App::tail_chars(text, n);

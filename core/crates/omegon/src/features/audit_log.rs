@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn str_preview_handles_emoji_at_limit() {
         let prefix = "a".repeat(199);
-        let text = format!("{prefix}✅ trailing text");
+        let text = format!("{prefix}✓ trailing text");
 
         let preview = AuditLog::str_preview(&text, 200);
 
@@ -341,11 +341,11 @@ mod tests {
         let text = "Jellyfin is now scheduled and pulling its image. Here's the current status:\n\n\
 | Service | Status | Notes |\n\
 |---|---|---|\n\
-| **Sonarr** | ✅ Running | |\n\
-| **Radarr** | ✅ Running | |\n\
-| **Prowlarr** | ✅ Running | |\n\
-| **Jellyseerr** | ✅ Running | |\n\
-| **Jellyfin** | ✅ Pulling | |";
+| **Sonarr** | ✓ Running | |\n\
+| **Radarr** | ✓ Running | |\n\
+| **Prowlarr** | ✓ Running | |\n\
+| **Jellyseerr** | ✓ Running | |\n\
+| **Jellyfin** | ✓ Pulling | |";
 
         let preview = AuditLog::str_preview(text, 200);
 

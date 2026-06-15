@@ -411,7 +411,7 @@ mod tests {
             std::env::temp_dir().join(format!("omegon-test-read-emoji-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("emoji-large.txt");
-        let content = format!("{}✅tail", "x".repeat(MAX_BYTES - 1));
+        let content = format!("{}✓tail", "x".repeat(MAX_BYTES - 1));
         std::fs::write(&file, content).unwrap();
 
         let result = execute(&file, None, None).await.unwrap();

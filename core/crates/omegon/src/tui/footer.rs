@@ -580,7 +580,7 @@ impl FooterData {
             .map(|p| p.display_name)
             .unwrap_or(self.model_provider.as_str());
         let source_icon = if self.model_provider == "ollama" {
-            "⚡"
+            "↯"
         } else {
             "☁"
         };

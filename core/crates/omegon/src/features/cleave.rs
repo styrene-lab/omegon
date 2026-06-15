@@ -1146,7 +1146,7 @@ impl CleaveFeature {
                     }
                 }
                 ChildStatus::Failed => "✗",
-                ChildStatus::UpstreamExhausted => "⚡",
+                ChildStatus::UpstreamExhausted => "↯",
                 ChildStatus::Running => "⏳",
                 ChildStatus::Pending => "○",
             };
@@ -1166,7 +1166,7 @@ impl CleaveFeature {
             if child.error.as_deref() == Some("merged after salvaging work from a failed child") {
                 report.push_str("    ↺ Worktree changes were salvaged and merged after the child hit a terminal execution failure.\n");
             } else if child.status == ChildStatus::UpstreamExhausted {
-                report.push_str("    ⚡ Provider upstream exhausted — check inventory for available fallbacks.\n");
+                report.push_str("    ↯ Provider upstream exhausted — check inventory for available fallbacks.\n");
             }
             if let Some(err) = &child.error {
                 // Truncate long error details (stderr tails can be long)

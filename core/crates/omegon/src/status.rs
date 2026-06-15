@@ -925,7 +925,7 @@ mod tests {
 
     #[test]
     fn truncate_name_handles_emoji_boundary() {
-        let name = format!("{}✅tail", "x".repeat(9));
+        let name = format!("{}✓tail", "x".repeat(9));
         let truncated = truncate_name(&name, 10);
         assert_eq!(truncated, format!("{}…", "x".repeat(9)));
         assert!(truncated.is_char_boundary(truncated.len()));

@@ -1794,9 +1794,9 @@ impl Feature for DelegateFeature {
                         })
                         .unwrap_or_else(|| child.label.clone());
                     let status = match child.status.as_str() {
-                        "running" => "🔄 Running",
-                        "completed" => "✅ Completed",
-                        "failed" => "❌ Failed",
+                        "running" => "⟳ Running",
+                        "completed" => "✓ Completed",
+                        "failed" => "✗ Failed",
                         "cancelled" => "⊘ Cancelled",
                         other => other,
                     };
@@ -1885,10 +1885,10 @@ No delegate tasks found.
                     } else {
                         for task in tasks {
                             let status = match task.status {
-                                DelegateTaskStatus::Running => "🔄 Running",
-                                DelegateTaskStatus::Completed { success: true } => "✅ Completed",
-                                DelegateTaskStatus::Completed { success: false } => "❌ Failed",
-                                DelegateTaskStatus::Failed { .. } => "❌ Error",
+                                DelegateTaskStatus::Running => "⟳ Running",
+                                DelegateTaskStatus::Completed { success: true } => "✓ Completed",
+                                DelegateTaskStatus::Completed { success: false } => "✗ Failed",
+                                DelegateTaskStatus::Failed { .. } => "✗ Error",
                                 DelegateTaskStatus::Cancelled { .. } => "⊘ Cancelled",
                             };
                             let agent = task.agent_name.as_deref().unwrap_or("default");
@@ -2017,12 +2017,12 @@ No delegate tasks found.
                             self.emit_delegate_family_vitals();
                             let message = if success {
                                 format!(
-                                    "✅ Delegate {} completed: {}",
+                                    "✓ Delegate {} completed: {}",
                                     task.task_id, task.task_description
                                 )
                             } else {
                                 format!(
-                                    "❌ Delegate {} failed: {}",
+                                    "✗ Delegate {} failed: {}",
                                     task.task_id, task.task_description
                                 )
                             };

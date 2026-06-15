@@ -1503,7 +1503,7 @@ impl InstrumentPanel {
 
             // ── Status indicator ──
             // Same emoji-safety constraint as `tool_short_name`. The
-            // previous "▶" running glyph (U+25B6) and "⚡" upstream-
+            // previous "▶" running glyph (U+25B6) and "↯" upstream-
             // exhausted glyph (U+26A1) are both in the Unicode emoji
             // set. Replaced with `▷` (U+25B7) and `↯` (U+21AF), both
             // single-cell, neither in the emoji set. The other glyphs
@@ -2278,7 +2278,7 @@ mod tests {
         let buf = terminal.backend().buffer().clone();
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
         assert!(
-            text.contains("↺") || text.contains("⚡"),
+            text.contains("↺") || text.contains("↯"),
             "expected non-red reconciled indicator: {text}"
         );
         assert!(

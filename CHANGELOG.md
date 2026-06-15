@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Replaced emoji-style status icons in Rust runtime/TUI strings with text-oriented Unicode glyphs for consistent terminal alignment.
 - Added explicit delegate child execution-boundary prompt sections so scoped workers see their readable/writable scope, enabled/unavailable tools, sandbox profile, and blocker-reporting guidance before acting.
 - Hardened the shared operation failure taxonomy used by delegate/cleave Workbench projections, including distinct wall-clock timeout vs idle-timeout classification and sandbox-policy classification before generic permission failures.
 - Routed delegate and cleave Workbench rows through a shared renderer-neutral operation projection with canonical child statuses and failure summaries.

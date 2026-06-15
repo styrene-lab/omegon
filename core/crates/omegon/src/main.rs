@@ -3052,7 +3052,7 @@ pub(crate) fn format_cleave_merge_result(
             if let Some(child) = child {
                 match child.status {
                     cleave::state::ChildStatus::UpstreamExhausted => {
-                        format!("  ⚡ {label} upstream exhausted (no repo changes to merge)")
+                        format!("  ↯ {label} upstream exhausted (no repo changes to merge)")
                     }
                     cleave::state::ChildStatus::Failed => {
                         format!("  ✗ {label} failed (no repo changes to merge)")
@@ -3160,7 +3160,7 @@ async fn run_cleave_command(
         let icon = match child.status {
             cleave::state::ChildStatus::Completed => "✓",
             cleave::state::ChildStatus::Failed => "✗",
-            cleave::state::ChildStatus::UpstreamExhausted => "⚡",
+            cleave::state::ChildStatus::UpstreamExhausted => "↯",
             cleave::state::ChildStatus::Running => "⏳",
             cleave::state::ChildStatus::Pending => "○",
         };
@@ -5081,7 +5081,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                         Ok(_) => {
                                             format!("✓ Successfully logged in to {provider_label}")
                                         }
-                                        Err(e) => format!("❌ Login failed: {}", e),
+                                        Err(e) => format!("✗ Login failed: {}", e),
                                     };
                                     let _ = events_tx_clone
                                         .send(AgentEvent::SystemNotification { message });
@@ -5176,7 +5176,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                                 !auth::provider_env_vars(provider).is_empty(),
                                             )
                                         }
-                                        Err(e) => format!("❌ Logout failed: {}", e),
+                                        Err(e) => format!("✗ Logout failed: {}", e),
                                     }
                                 };
                                 let _ = events_tx.send(AgentEvent::SystemNotification { message });

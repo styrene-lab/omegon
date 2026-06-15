@@ -51,7 +51,7 @@ impl ModelTier {
         match self {
             Self::Local => "🤖",
             Self::Retribution => "💨",
-            Self::Victory => "⚡",
+            Self::Victory => "↯",
             Self::Gloriana => "🧠",
         }
     }

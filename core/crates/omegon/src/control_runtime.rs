@@ -1546,7 +1546,7 @@ pub async fn note_add_response(agent: &InteractiveAgentHost, text: &str) -> Slas
     {
         return SlashCommandResponse {
             accepted: false,
-            output: Some(format!("❌ Can't create .omegon/: {e}")),
+            output: Some(format!("✗ Can't create .omegon/: {e}")),
         };
     }
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
@@ -1566,7 +1566,7 @@ pub async fn note_add_response(agent: &InteractiveAgentHost, text: &str) -> Slas
         },
         Err(e) => SlashCommandResponse {
             accepted: false,
-            output: Some(format!("❌ Failed to save note: {e}")),
+            output: Some(format!("✗ Failed to save note: {e}")),
         },
     }
 }
@@ -2166,7 +2166,7 @@ pub async fn auth_login_response(
         };
         let message = match &result {
             Ok(_) => format!("✓ Successfully logged in to {provider_label}"),
-            Err(e) => format!("❌ Login failed: {}", e),
+            Err(e) => format!("✗ Login failed: {}", e),
         };
         let _ = events_tx_clone.send(AgentEvent::SystemNotification { message });
         if let Some(conflict) = env_conflict {
@@ -2221,7 +2221,7 @@ pub async fn auth_logout_response(provider: &str) -> SlashCommandResponse {
         return SlashCommandResponse {
             accepted: false,
             output: Some(format!(
-                "❌ {}",
+                "✗ {}",
                 auth::operator_auth_unknown_provider_message(provider)
             )),
         };
@@ -2241,7 +2241,7 @@ pub async fn auth_logout_response(provider: &str) -> SlashCommandResponse {
         }
         Err(e) => SlashCommandResponse {
             accepted: false,
-            output: Some(format!("❌ Logout failed for {provider_label}: {}", e)),
+            output: Some(format!("✗ Logout failed for {provider_label}: {}", e)),
         },
     }
 }
@@ -2261,7 +2261,7 @@ pub async fn auth_login_daemon_response(provider: &str) -> SlashCommandResponse 
         return SlashCommandResponse {
             accepted: false,
             output: Some(format!(
-                "❌ {}",
+                "✗ {}",
                 auth::operator_auth_unknown_provider_message(provider)
             )),
         };
