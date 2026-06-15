@@ -31,6 +31,7 @@ mod acp;
 mod acp_plan_tasks;
 mod acp_worker;
 mod auth;
+mod autonomy;
 mod backend;
 mod behavior;
 mod bootstrap;

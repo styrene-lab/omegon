@@ -16,6 +16,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+use crate::surfaces::operations::OperationWorkbenchProjection;
+
 use omegon_traits::{
     AgentEvent, BusEvent, BusRequest, BusRequestSink, CommandDefinition, CommandResult,
     ContentBlock, Feature, OperationRef, ToolDefinition, ToolResult,
@@ -1355,31 +1357,37 @@ impl Feature for CleaveFeature {
                     if !prog.active && prog.total_children == 0 {
                         return CommandResult::Display("No active cleave run.".into());
                     }
+                    let projection = OperationWorkbenchProjection::from_cleave(&prog);
                     let mut lines = Vec::new();
                     if prog.active {
                         lines.push(format!(
                             "Cleave active: {}/{} children",
-                            prog.completed + prog.failed,
+                            projection.completed + projection.failed,
                             prog.total_children
                         ));
                     } else {
                         lines.push(format!(
                             "Last cleave: {} completed, {} failed of {}",
-                            prog.completed, prog.failed, prog.total_children
+                            projection.completed, projection.failed, prog.total_children
                         ));
                     }
-                    for child in &prog.children {
+                    for (child, raw_child) in projection.children.iter().zip(&prog.children) {
                         let icon = match child.status.as_str() {
                             "completed" => "✓",
                             "failed" => "✗",
                             "running" => "⏳",
                             _ => "○",
                         };
-                        let dur = child
+                        let dur = raw_child
                             .duration_secs
                             .map(|d| format!(" ({:.0}s)", d))
                             .unwrap_or_default();
-                        lines.push(format!("  {} {}{}", icon, child.label, dur));
+                        let failure = child
+                            .failure
+                            .as_ref()
+                            .map(|failure| format!(" — {}", failure.kind.as_str()))
+                            .unwrap_or_default();
+                        lines.push(format!("  {} {}{}{}", icon, child.label, dur, failure));
                     }
                     CommandResult::Display(lines.join("\n"))
                 } else if let Some(label) = sub.strip_prefix("cancel ").map(str::trim) {

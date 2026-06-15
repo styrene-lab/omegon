@@ -17,6 +17,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Routed `/cleave status` display rows through the shared operation projection so cleave command status uses the same canonical child status and failure-kind semantics as Workbench.
+- Routed `delegate_status` structured details through the shared operation projection so delegate command/API status output now carries operation kind/id, canonical child statuses, and projected failure payloads.
 - Updated the `omegon-full` substrate profile seed to separate container home from the mounted workspace and align optional auth/config mounts with `/data/home` for orchestrated OCI deployments.
 - Mapped typed cleave child failure causes into the shared operation/workbench projection, including upstream exhaustion, merge conflicts, scope violations, timeouts, validation failures, and legacy upstream-exhausted compatibility.
 - Routed delegate/cleave transcript lifecycle milestones through the shared operation projection so Workbench and transcript rendering share operation semantics.
@@ -31,6 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Added a conservative subagent autonomy policy layer that now drives prompt guidance for delegate/cleave operations, keeping `cleave_run` approval-oriented by default while allowing bounded scout/verify delegates.
 - Added CLI parser coverage for the `--oci` alias, OCI image/runtime overrides, and conflict handling with `--dangerously-bypass-permissions`.
 - Marked host-shim OCI launches with `OMEGON_RUNTIME_CONTEXT=host-shim-oci`/`OMEGON_OCI_LAUNCHER=omegon` and made recursive `--oci` requests inside an OCI container fail closed.
 - Added an orchestrated OCI runtime design for Kubernetes/CRI deployments where Omegon is launched by the orchestrator rather than by the native `--oci` host shim.

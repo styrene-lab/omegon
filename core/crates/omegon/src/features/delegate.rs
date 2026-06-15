@@ -19,6 +19,7 @@ use crate::child_agent::{
     ChildAgentBoundary, ChildAgentRuntimeProfile, ChildAgentSpawnConfig,
     spawn_headless_child_agent, write_child_prompt_file,
 };
+use crate::surfaces::operations::OperationWorkbenchProjection;
 use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -1769,6 +1770,7 @@ impl Feature for DelegateFeature {
 
             crate::tool_registry::delegate::DELEGATE_STATUS => {
                 let snapshot = self.result_store.progress_snapshot();
+                let projection = OperationWorkbenchProjection::from_delegate(&snapshot);
                 let mut status_text = String::from(
                     "# Delegate Tasks
 
@@ -1777,8 +1779,8 @@ impl Feature for DelegateFeature {
 ",
                 );
 
-                for child in &snapshot.children {
-                    let task = self.result_store.get_task(&child.task_id);
+                for child in &projection.children {
+                    let task = self.result_store.get_task(&child.id);
                     let agent = task
                         .as_ref()
                         .and_then(|t| t.agent_name.as_deref())
@@ -1793,25 +1795,28 @@ impl Feature for DelegateFeature {
                             }
                         })
                         .unwrap_or_else(|| child.label.clone());
-                    let status = match child.status.as_str() {
-                        "running" => "⟳ Running",
-                        "completed" => "✓ Completed",
-                        "failed" => "✗ Failed",
-                        "cancelled" => "⊘ Cancelled",
-                        other => other,
-                    };
-                    let last_tool = child.last_tool.as_deref().unwrap_or("-");
+                    let last_tool = child
+                        .last_activity
+                        .as_ref()
+                        .map(|activity| activity.label.as_str())
+                        .unwrap_or("-");
                     let last_turn = child
-                        .last_turn
+                        .last_activity
+                        .as_ref()
+                        .and_then(|activity| activity.turn)
                         .map(|turn| turn.to_string())
                         .unwrap_or_else(|| "-".to_string());
-                    let task_progress = format!("{}/{}", child.tasks_done, child.tasks.len());
+                    let task_progress = child
+                        .progress
+                        .as_ref()
+                        .map(|progress| format!("{}/{}", progress.done, progress.total))
+                        .unwrap_or_else(|| "0/0".to_string());
                     status_text.push_str(&format!(
                         "| {} | {} | {} | {} | {} | {} | {} |
 ",
-                        child.task_id,
+                        child.id,
                         agent,
-                        status,
+                        child.status_label,
                         last_tool,
                         last_turn,
                         task_progress,
@@ -1819,7 +1824,7 @@ impl Feature for DelegateFeature {
                     ));
                 }
 
-                if snapshot.children.is_empty() {
+                if projection.children.is_empty() {
                     status_text.push_str(
                         "
 No delegate tasks found.
@@ -1829,23 +1834,7 @@ No delegate tasks found.
 
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: status_text }],
-                    details: json!({
-                        "active": snapshot.active,
-                        "running": snapshot.running,
-                        "completed": snapshot.completed,
-                        "failed": snapshot.failed,
-                        "task_count": snapshot.children.len(),
-                        "children": snapshot.children.iter().map(|child| json!({
-                            "task_id": child.task_id,
-                            "label": child.label,
-                            "status": child.status,
-                            "last_tool": child.last_tool,
-                            "last_turn": child.last_turn,
-                            "result_summary": child.result_summary,
-                            "tasks_done": child.tasks_done,
-                            "tasks_total": child.tasks.len(),
-                        })).collect::<Vec<_>>(),
-                    }),
+                    details: projection.to_status_details(snapshot.active),
                 })
             }
 
@@ -2277,10 +2266,11 @@ mod tests {
         let feature = DelegateFeature::new(temp_dir.path(), agents, false);
         let tools = feature.tools();
 
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
         assert!(tools.iter().any(|t| t.name == "delegate"));
         assert!(tools.iter().any(|t| t.name == "delegate_result"));
         assert!(tools.iter().any(|t| t.name == "delegate_status"));
+        assert!(tools.iter().any(|t| t.name == "delegate_cancel"));
     }
 
     #[test]

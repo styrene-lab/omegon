@@ -3,6 +3,7 @@
 //! Phase 0: static base prompt + tool definitions + project directives.
 //! Phase 0+: ContextManager provides dynamic injection.
 
+use crate::autonomy::SubagentPolicy;
 use omegon_traits::{PromptComposition, PromptSectionMetric, ToolDefinition};
 use std::path::{Path, PathBuf};
 
@@ -103,14 +104,12 @@ pub fn build_base_prompt_for_mode(
         let tool_surface = "\n## Tool surface\n\nSome situational tools (persona, model-budget, lifecycle management, advanced memory) are hidden by default to reduce context overhead. If the task requires them, use `manage_tools` with `list_groups` to discover available groups and `enable_group` to activate them.\n";
         let harness_surfaces = "\n## Harness surfaces and state\n\n- Treat Workbench/plan state as live operational state. Before reporting a task complete, reconcile visible plan/workbench state with validation and commit state; do not claim `nothing pending` while an active/todo plan remains unresolved.\n- Separate producer/provenance from content form. Assistant prose, peer-agent prose, and markdown returned by tools may share rendering paths while retaining different producers.\n- Prefer semantic projections and command registry paths over renderer-specific or surface-specific shortcuts.\n- TUI, CLI, ACP, and WebSocket/IPC should share command/projection sources where possible; avoid hidden per-surface allowlists.\n- Prompt templates and loops are executable instruction sources. Preserve provenance, preview/validate before execution, and require explicit safety handling for repeated `/loop` execution.\n";
         if has_delegate {
-            let cleave_guidance = if has_cleave_tools {
-                "\n- Treat operator words like \"subagent\" and \"use subagents\" as an intent to use subordinate work, not as a mandate to choose `delegate` specifically. First classify the work: bounded side quest → `delegate`; coordinated multi-branch/multi-scope execution → `cleave_assess` and, if it splits, `cleave_run`.\n- `cleave_assess` is the decomposition gate for non-trivial coordinated work. If it says split and the task has 2+ independent/coordinated child scopes, follow through with `cleave_run`; if there is only one side quest, prefer `delegate` instead of a one-child cleave.\n- `cleave_run` is for coordinated multi-subagent work across isolated worktrees: dependency waves, parallel implementation tracks, merge governance, and cross-child synthesis. Do not use it for routine single-worker scouting or verification."
-            } else {
-                "\n- Treat operator words like \"subagent\" and \"use subagents\" as an intent to use subordinate work. With only `delegate` available, use it for bounded side quests and do not name unavailable orchestration tools as callable."
-            };
-            format!(
-                "{base}\n## Subagent operations\n\n- `delegate` is the default one-shot subagent path for bounded side quests: scout a file set, apply a mechanical scoped patch, run focused verification, or perform an adversarial review while you preserve your main context. Omit `model` for same-provider delegation; local/cheaper model routing is an optimization only when reliability is known.\n- Worker profiles: `scout` (read/search only), `patch` (small scoped edits), `verify` (run tests/checks). Delegate tasks must be specific and self-contained; include file paths in `scope`, relevant context in `facts`, and the expected output.{cleave_guidance}\n- You are the orchestrator. Subagents are your hands. Retrieve/reconcile delegate or cleave results before claiming completion, and do not spawn duplicate delegates for the same task.\n{harness_surfaces}{tool_surface}"
-            )
+            let subagent_policy = SubagentPolicy::conservative_default();
+            let subagent_operations = render_subagent_operations_prompt(
+                &subagent_policy,
+                has_cleave_tools,
+            );
+            format!("{base}{subagent_operations}{harness_surfaces}{tool_surface}")
         } else {
             format!("{base}{harness_surfaces}{tool_surface}")
         }
@@ -479,6 +478,28 @@ struct PromptSection<'a> {
     content: String,
 }
 
+fn render_subagent_operations_prompt(policy: &SubagentPolicy, has_cleave_tools: bool) -> String {
+    let cleave_guidance = if has_cleave_tools {
+        format!(
+            "\n- Treat operator words like \"subagent\" and \"use subagents\" as an intent to use subordinate work, not as a mandate to choose `delegate` specifically. First classify the work: bounded side quest → `delegate`; coordinated multi-branch/multi-scope execution → `cleave_assess` and, if it splits, `cleave_run`.\n- `cleave_assess` is the decomposition gate for non-trivial coordinated work and is {} under the active autonomy policy.\n- `cleave_run` is for coordinated multi-subagent work across isolated worktrees: dependency waves, parallel implementation tracks, merge governance, and cross-child synthesis. It {} under the active autonomy policy; if approval is required, use the structured command/permission flow rather than asking conversationally. Do not use it for routine single-worker scouting or verification.\n- Cleave limits for this policy: max_children={}, max_parallel={}. If there is only one side quest, prefer `delegate` instead of a one-child cleave.",
+            policy.cleave_assess.prompt_label(),
+            policy.cleave_run.prompt_label(),
+            policy.max_children,
+            policy.max_parallel,
+        )
+    } else {
+        "\n- Treat operator words like \"subagent\" and \"use subagents\" as an intent to use subordinate work. With only `delegate` available, use it for bounded side quests and do not name unavailable orchestration tools as callable.".to_string()
+    };
+
+    format!(
+        "\n## Subagent operations\n\nAutonomy: `{}`. Tool availability is not permission; follow the active authority policy.\n\n- `delegate` is the default one-shot subagent path for bounded side quests: scout a file set, apply a mechanical scoped patch, run focused verification, or perform an adversarial review while you preserve your main context. Omit `model` for same-provider delegation; local/cheaper model routing is an optimization only when reliability is known.\n- Worker profiles: `scout` (read/search only: {}), `patch` (small scoped edits: {}), `verify` (run tests/checks: {}). Delegate tasks must be specific and self-contained; include file paths in `scope`, relevant context in `facts`, and the expected output.{cleave_guidance}\n- You are the orchestrator, but runtime policy owns authority. Retrieve/reconcile delegate or cleave results before claiming completion, and do not spawn duplicate delegates for the same task.\n",
+        policy.level.as_str(),
+        policy.delegate_scout.prompt_label(),
+        policy.delegate_patch.prompt_label(),
+        policy.delegate_verify.prompt_label(),
+    )
+}
+
 fn prompt_section<'a>(key: &'a str, label: &'a str, content: &str) -> PromptSection<'a> {
     PromptSection {
         key,
@@ -693,11 +714,9 @@ mod tests {
         assert!(prompt.contains("`cleave_assess` is the decomposition gate"));
         assert!(prompt.contains("Treat operator words like \"subagent\" and \"use subagents\""));
         assert!(prompt.contains("coordinated multi-branch/multi-scope execution"));
-        assert!(
-            prompt.contains(
-                "If it says split and the task has 2+ independent/coordinated child scopes"
-            )
-        );
+        assert!(prompt.contains("Autonomy: `conservative`"));
+        assert!(prompt.contains("requires structured approval"));
+        assert!(prompt.contains("max_children=2, max_parallel=1"));
         assert!(prompt.contains("prefer `delegate` instead of a one-child cleave"));
         assert!(
             prompt.contains("Do not use it for routine single-worker scouting or verification")

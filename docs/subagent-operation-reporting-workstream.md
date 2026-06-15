@@ -148,7 +148,14 @@ Completed follow-up slices:
 - surfaced delegate failure summaries through shared operation child rows;
 - added first-class delegate cancelled status that projects as terminal non-failure operation state.
 
-Next narrow patch target: decide whether transcript milestone rendering should consume operation projection helpers instead of bespoke event strings, then add typed cleave child failure causes.
+Completed additional slice:
+
+- routed `delegate_status` structured output through `OperationWorkbenchProjection::from_delegate`;
+- routed `/cleave status` display rows through `OperationWorkbenchProjection::from_cleave`;
+- added stable string serializers for `OperationChildStatus` and `OperationFailureKind` so command/API surfaces do not leak Rust debug formatting;
+- preserved legacy delegate/cleave status text while adding operation kind/id and projected failure payloads where structured details are available.
+
+Next narrow patch target: extract a shared operation status serializer for command/API details so delegate and future cleave structured outputs do not hand-roll JSON shapes independently.
 
 ## Validation plan
 

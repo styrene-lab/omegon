@@ -8,6 +8,7 @@
 use crate::features::cleave::{CleaveChildFailureKind, CleaveProgress};
 use crate::features::delegate::{DelegateChildFailureKind, DelegateProgress};
 use omegon_traits::{OperationKind, OperationRef};
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationMilestoneProjection {
@@ -73,6 +74,25 @@ pub struct OperationWorkbenchProjection {
 }
 
 impl OperationWorkbenchProjection {
+    pub fn to_status_details(&self, active: bool) -> Value {
+        json!({
+            "active": active,
+            "running": self.running,
+            "completed": self.completed,
+            "failed": self.failed,
+            "task_count": self.children.len(),
+            "child_count": self.children.len(),
+            "operation": {
+                "kind": match self.operation.kind {
+                    OperationKind::Delegate => "delegate",
+                    OperationKind::Cleave => "cleave",
+                },
+                "id": self.operation.id.as_deref(),
+            },
+            "children": self.children.iter().map(OperationChildRow::to_status_details).collect::<Vec<_>>(),
+        })
+    }
+
     pub fn from_delegate(progress: &DelegateProgress) -> Self {
         Self {
             operation: OperationRef::delegate("delegate"),
@@ -117,10 +137,30 @@ pub struct OperationChildRow {
     pub status_label: String,
     pub last_activity: Option<OperationActivity>,
     pub progress: Option<OperationChildProgress>,
+    pub result_summary: Option<String>,
     pub failure: Option<OperationFailure>,
 }
 
 impl OperationChildRow {
+    pub fn to_status_details(&self) -> Value {
+        json!({
+            "task_id": self.id,
+            "label": self.label,
+            "status": self.status.as_str(),
+            "status_label": self.status_label,
+            "last_tool": self.last_activity.as_ref().map(|activity| activity.label.as_str()),
+            "last_turn": self.last_activity.as_ref().and_then(|activity| activity.turn),
+            "result_summary": self.result_summary.as_deref(),
+            "tasks_done": self.progress.as_ref().map(|progress| progress.done).unwrap_or(0),
+            "tasks_total": self.progress.as_ref().map(|progress| progress.total).unwrap_or(0),
+            "failure": self.failure.as_ref().map(|failure| json!({
+                "kind": failure.kind.as_str(),
+                "message": failure.message.as_deref(),
+                "recoverable": failure.recoverable,
+            })),
+        })
+    }
+
     fn from_cleave_child(child: &crate::features::cleave::ChildProgress) -> Self {
         let status = OperationChildStatus::from_cleave_status(&child.status);
         Self {
@@ -138,6 +178,7 @@ impl OperationChildRow {
                 done: child.tasks_done,
                 total: child.tasks.len(),
             }),
+            result_summary: None,
             failure: match status {
                 OperationChildStatus::Failed | OperationChildStatus::TimedOut => {
                     let kind = child
@@ -190,6 +231,7 @@ impl OperationChildRow {
                 done: child.tasks_done,
                 total: child.tasks.len(),
             }),
+            result_summary: child.result_summary.clone(),
             failure,
         }
     }
@@ -245,6 +287,20 @@ impl OperationChildStatus {
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
             Self::TimedOut => "timed out",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Starting => "starting",
+            Self::Running => "running",
+            Self::Waiting => "waiting",
+            Self::Succeeded => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::TimedOut => "timed_out",
             Self::Unknown => "unknown",
         }
     }
@@ -332,6 +388,22 @@ pub enum OperationFailureKind {
 }
 
 impl OperationFailureKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::IdleTimeout => "idle_timeout",
+            Self::TimedOut => "timed_out",
+            Self::ProcessExit => "process_exit",
+            Self::ModelError => "model_error",
+            Self::ToolPermissionDenied => "tool_permission_denied",
+            Self::ToolExecutionFailed => "tool_execution_failed",
+            Self::SandboxViolation => "sandbox_violation",
+            Self::MergeConflict => "merge_conflict",
+            Self::CancelledByOperator => "cancelled_by_operator",
+            Self::DuplicateTask => "duplicate_task",
+            Self::Unknown => "unknown",
+        }
+    }
+
     fn from_cleave_child_failure_kind(kind: CleaveChildFailureKind) -> Self {
         match kind {
             CleaveChildFailureKind::ChildProcessExit => Self::ProcessExit,
@@ -642,6 +714,48 @@ mod tests {
             OperationFailureKind::IdleTimeout
         );
         assert!(projection.children[1].failure.as_ref().unwrap().recoverable);
+    }
+
+    #[test]
+    fn delegate_success_result_summary_survives_status_details() {
+        let mut child = delegate_child("completed");
+        child.result_summary = Some("patched two files".into());
+        let progress = DelegateProgress {
+            active: false,
+            running: 0,
+            completed: 1,
+            failed: 0,
+            children: vec![child],
+        };
+
+        let projection = OperationWorkbenchProjection::from_delegate(&progress);
+        let details = projection.to_status_details(false);
+        assert_eq!(details["child_count"], 1);
+        assert_eq!(details["task_count"], 1);
+        assert_eq!(details["children"][0]["status"], "completed");
+        assert_eq!(details["children"][0]["result_summary"], "patched two files");
+        assert!(details["children"][0]["failure"].is_null());
+    }
+
+    #[test]
+    fn delegate_failure_details_keep_summary_and_failure_separate() {
+        let mut child = delegate_child("failed");
+        child.failure_kind = Some(DelegateChildFailureKind::MissingCredential);
+        child.result_summary = Some("provider auth unavailable".into());
+        let progress = DelegateProgress {
+            active: false,
+            running: 0,
+            completed: 0,
+            failed: 1,
+            children: vec![child],
+        };
+
+        let projection = OperationWorkbenchProjection::from_delegate(&progress);
+        let details = projection.to_status_details(false);
+        assert_eq!(details["children"][0]["result_summary"], "provider auth unavailable");
+        assert_eq!(details["children"][0]["failure"]["kind"], "model_error");
+        assert_eq!(details["children"][0]["failure"]["message"], "provider auth unavailable");
+        assert_eq!(details["children"][0]["failure"]["recoverable"], true);
     }
 
     #[test]

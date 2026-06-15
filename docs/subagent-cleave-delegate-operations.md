@@ -133,6 +133,55 @@ Cleave's strongest value is worktree/scope/merge isolation. Delegate has scope i
 - Which delegate modes require worktree isolation by default: read-only scout, patch, verify, or only write-capable agents?
 - What durable provenance is required for a completed delegate: prompt file, model, cwd, scope, tool transcript, diff, final result?
 
+## Autonomy and authority target
+
+Subagent autonomy is an operator-selected authority profile, not prompt style. The user-facing knob may be named `manual`, `conservative`, `autonomous`, `orchestrator`, or `batch`, but runtime behavior must derive from an explicit policy that controls whether the harness may spawn child agents, mutate through children, create worktrees, spend model budget, use OCI/sandboxed substrates, and commit/reconcile without asking.
+
+Core invariant:
+
+> If the agent asks, the harness asks structurally. If the harness allows, the policy allowed it. If the policy denies, prompt text cannot override it.
+
+### Target authority flow
+
+```text
+operator intent
+  -> autonomy / authority policy
+  -> prompt pressure + tool availability + command safety
+  -> approval / modal / required-input system
+  -> execution
+  -> Workbench / operation projection / audit trail
+```
+
+### Policy presets
+
+| Preset | Delegate | Cleave | Approval posture |
+|---|---|---|---|
+| `manual` | Never unless explicitly requested. | Never unless explicitly requested. | Ask before any subagent execution. |
+| `conservative` | Bounded scout/verify allowed; mutating patch may ask. | `cleave_assess` may be used, but `cleave_run` asks. | Default interactive posture. |
+| `autonomous` | Bounded scout/patch/verify allowed within scope. | Run when assessment justifies 2+ concrete child scopes. | Ask for budget/cloud/secrets/destructive escalations. |
+| `orchestrator` | Proactive side quests, review, verification. | Proactive decomposition, dispatch, merge, verification, reconciliation. | Ask only for strategic/high-risk decisions. |
+| `batch` | Queue/task-policy governed. | Queue/task-policy governed. | Non-interactive policy grants only; no conversational consent. |
+
+### Runtime enforcement target
+
+Prompt assembly must describe the active autonomy profile, but tool handlers and command surfaces must enforce it. `cleave_run` in conservative mode should return a structured approval requirement, not rely on the assistant writing “should I proceed?” in prose. The approval payload should include child count, max parallelism, scopes, mutation rights, worktree effects, model/runtime budget risk, OCI/sandbox posture, and choices such as approve once, approve class for session, or deny.
+
+This policy should reuse existing surfaces rather than invent a separate prompt exchange:
+
+- command registry `CommandSafety` / confirmation metadata;
+- TUI command modal / command surface rendering;
+- ACP required-confirmation path;
+- required-input kinds such as approval and permission;
+- Workbench operation projection for approved/running/completed subagent work.
+
+### Second-order design constraints
+
+- Tool availability is not permission. The prompt must not imply that `delegate`/`cleave` should be used aggressively merely because they are in the tool schema.
+- Higher autonomy should generally imply stronger execution boundaries: OCI child execution should be preferred or required for orchestrator/batch modes once the substrate is production-ready.
+- Delegate is the normal accelerator for one bounded side quest. Cleave remains the coordinated multi-child/worktree orchestration primitive.
+- Budget and model routing are part of autonomy. Fanout to paid/cloud children should require policy approval unless the profile explicitly grants it.
+- Approval grants should be scoped and expiring, e.g. “approve cleave up to 3 children for this session,” not global “always allow everything.”
+
 ## Proposed Workstream Plan
 
 1. **Surface map**

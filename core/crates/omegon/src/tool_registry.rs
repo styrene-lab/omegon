@@ -170,7 +170,7 @@ pub mod mutation {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 67;
+pub const TOOL_COUNT: usize = 68;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
