@@ -39,6 +39,7 @@ pub struct HarnessStatus {
 
     // ── Container runtime ────────────────────────────────────
     pub container_runtime: Option<ContainerRuntimeStatus>,
+    pub execution_substrate: omegon_traits::ExecutionSubstrate,
 
     // ── Context routing (three-axis model) ───────────────────
     pub context_class: String, // "Compact" / "Standard" / "Extended" / "Massive"
@@ -815,6 +816,7 @@ impl Default for HarnessStatus {
             web_auth_source: None,
             inference_backends: vec![],
             container_runtime: None,
+            execution_substrate: crate::execution_substrate::detect(),
             context_class: "Compact".into(),
             thinking_level: "Medium".into(),
             capability_tier: "victory".into(),
@@ -880,6 +882,8 @@ mod tests {
         assert!(!status.memory_available);
         assert!(!status.cleave_available);
         assert!(status.memory_warning.is_none());
+        assert!(!status.execution_substrate.paths.workspace.is_empty());
+        assert!(!status.execution_substrate.paths.omegon_home.is_empty());
     }
 
     #[test]

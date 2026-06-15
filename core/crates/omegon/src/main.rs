@@ -51,6 +51,7 @@ mod control_runtime;
 mod control_tls;
 mod embedding;
 pub mod extensions;
+mod execution_substrate;
 pub mod features;
 pub(crate) mod filelock;
 mod first_run;
