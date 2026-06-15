@@ -216,6 +216,7 @@ Operator assessment: most quick side quests should use `delegate` as a one-shot 
 | Focused mechanical edit | `delegate` with `worker_profile: patch` | Good when decision is already made and file scope is tight. |
 | Focused validation/check run | `delegate` with `worker_profile: verify` | Lets checks run while parent assesses next step. |
 | Multi-track implementation | `cleave_run` | Coordinates multiple children across worktrees and merges. |
+| Branch integration/merge work, even if phrased as “use subagents” | `cleave_assess`, then `cleave_run` if split-worthy | The operator is asking for subordinate work, but merge sequencing, conflict isolation, and cross-branch synthesis are cleave-shaped. |
 | Work requiring dependency ordering | `cleave_run` | Plan JSON can express `depends_on` and wave execution. |
 | One child only | Usually `delegate`, not cleave | Cleave adds orchestration overhead without coordination benefit. |
 | Architectural judgment or unresolved design choice | Parent agent directly | Delegation should execute bounded tasks, not outsource ownership. |
@@ -226,10 +227,11 @@ The current agent behavior overuses `cleave_assess` because it is visible as a s
 
 The skill/prompt layer should teach this hierarchy:
 
-1. `cleave_assess` is a gate for whether decomposition is warranted.
-2. `delegate` is the default side-quest/subagent operation.
-3. `cleave_run` is for coordinated multi-subagent execution, not routine one-off help.
-4. The parent remains accountable for synthesis, validation, and final claims.
+1. Operator wording such as “use subagents” means “use subordinate execution”; it does not force the `delegate` tool.
+2. `cleave_assess` is a gate for whether decomposition is warranted.
+3. `delegate` is the default side-quest/subagent operation.
+4. `cleave_run` is for coordinated multi-subagent execution, not routine one-off help.
+5. The parent remains accountable for synthesis, validation, and final claims.
 
 ### Bundled skill / prompt surface recommendation
 
@@ -240,8 +242,9 @@ Add a “Subagent Operations” section to bundled skills and prompt guidance. I
   - `cleave` = coordinated multi-subagent work across isolated worktrees.
   - `cleave_assess` = decomposition gate, not execution.
 - Trigger rules:
+  - treat “use subagents” as subordinate-execution intent, then choose the primitive by task shape;
   - use delegate scout/patch/verify for bounded side quests;
-  - use cleave only when there are 2+ independent/coordinated child tasks;
+  - use cleave for branch integration, dependency ordering, merge governance, or any 2+ independent/coordinated child tasks;
   - do not cleave a one-child task unless worktree/merge isolation is explicitly needed.
 - Anti-patterns:
   - calling `cleave_assess` repeatedly without acting on its result;
