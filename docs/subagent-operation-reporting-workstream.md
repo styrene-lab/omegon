@@ -118,7 +118,7 @@ actual cleave operation emits/renders cleave milestone
 
 - [ ] Decide whether `DelegateTaskStatus::Cancelled` is required.
 - [ ] Define delegate cancellation control action if still absent.
-- [ ] Map delegate and cleave failures to shared operator-facing failure taxonomy.
+- [x] Map delegate and cleave failures to shared operator-facing failure taxonomy.
 
 Acceptance:
 
@@ -147,7 +147,7 @@ Completed follow-up slices:
 - canonicalized child status labels so renderers do not leak engine-specific status strings by default;
 - surfaced delegate failure summaries through shared operation child rows.
 
-Next narrow patch target: adversarially harden operation failure/detail affordances and decide whether transcript milestone rendering should consume the same operation projection rather than bespoke event strings.
+Next narrow patch target: decide whether transcript milestone rendering should consume operation projection helpers instead of bespoke event strings, and whether delegate cancellation needs a typed control action/status beyond failure-summary classification.
 
 ## Validation plan
 

@@ -17,6 +17,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Added explicit delegate child execution-boundary prompt sections so scoped workers see their readable/writable scope, enabled/unavailable tools, sandbox profile, and blocker-reporting guidance before acting.
+- Hardened the shared operation failure taxonomy used by delegate/cleave Workbench projections, including distinct wall-clock timeout vs idle-timeout classification and sandbox-policy classification before generic permission failures.
 - Routed delegate and cleave Workbench rows through a shared renderer-neutral operation projection with canonical child statuses and failure summaries.
 - Decomposition lifecycle events now carry operation provenance so delegate-originated child work no longer renders or publishes as cleave activity.
 - Made bundled prompt templates and dynamic prompt guidance capability-aware so hidden or mode-gated memory/lifecycle tools do not get presented as unconditional agent instructions.

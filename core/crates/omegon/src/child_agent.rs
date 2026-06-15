@@ -24,6 +24,63 @@ pub struct ChildAgentRuntimeProfile {
     pub nex_profile: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChildAgentBoundary {
+    pub cwd: PathBuf,
+    pub readable_paths: Vec<String>,
+    pub writable_paths: Vec<String>,
+    pub disabled_tools: Vec<String>,
+    pub enabled_tools: Vec<String>,
+    pub sandbox_profile: Option<String>,
+    pub notes: Vec<String>,
+}
+
+impl ChildAgentBoundary {
+    pub fn from_runtime(cwd: &Path, runtime: &ChildAgentRuntimeProfile) -> Self {
+        let scope = runtime.preloaded_files.clone();
+        Self {
+            cwd: std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()),
+            readable_paths: scope.clone(),
+            writable_paths: scope,
+            disabled_tools: runtime.disabled_tools.clone(),
+            enabled_tools: runtime.enabled_tools.clone(),
+            sandbox_profile: runtime.nex_profile.clone(),
+            notes: Vec::new(),
+        }
+    }
+
+    pub fn to_prompt_section(&self) -> String {
+        fn list_or_none(items: &[String]) -> String {
+            if items.is_empty() {
+                "- none declared\n".to_string()
+            } else {
+                items.iter().map(|item| format!("- {item}\n")).collect()
+            }
+        }
+
+        let mut out = String::from("## Execution Boundary\n");
+        out.push_str(&format!("- Working directory: {}\n", self.cwd.display()));
+        out.push_str("- Treat this boundary as authoritative. If a required read/write/tool is outside it, stop and report the blocker instead of guessing or broadening scope.\n");
+        out.push_str("\nReadable paths/scope:\n");
+        out.push_str(&list_or_none(&self.readable_paths));
+        out.push_str("\nWritable paths/scope:\n");
+        out.push_str(&list_or_none(&self.writable_paths));
+        out.push_str("\nEnabled tools:\n");
+        out.push_str(&list_or_none(&self.enabled_tools));
+        out.push_str("\nUnavailable tools/resources:\n");
+        out.push_str(&list_or_none(&self.disabled_tools));
+        if let Some(profile) = &self.sandbox_profile {
+            out.push_str(&format!("\nSandbox profile: {profile}\n"));
+        }
+        if !self.notes.is_empty() {
+            out.push_str("\nBoundary notes:\n");
+            out.push_str(&list_or_none(&self.notes));
+        }
+        out.push('\n');
+        out
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ChildAgentSpawnConfig {
     pub agent_binary: PathBuf,
@@ -142,4 +199,30 @@ pub fn spawn_headless_child_agent(
         .context("Failed to spawn headless child agent")?;
     let pid = child.id().unwrap_or(0);
     Ok((child, pid))
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    #[test]
+    fn child_agent_boundary_prompt_section_lists_scope_tools_and_blocker_guidance() {
+        let runtime = ChildAgentRuntimeProfile {
+            preloaded_files: vec!["src/lib.rs".into()],
+            enabled_tools: vec!["read".into(), "bash".into()],
+            disabled_tools: vec!["delegate".into(), "cleave_run".into()],
+            nex_profile: Some("delegate-sandbox".into()),
+            ..Default::default()
+        };
+        let boundary = ChildAgentBoundary::from_runtime(Path::new("/workspace/project"), &runtime);
+        let prompt = boundary.to_prompt_section();
+
+        assert!(prompt.contains("## Execution Boundary"));
+        assert!(prompt.contains("src/lib.rs"));
+        assert!(prompt.contains("read"));
+        assert!(prompt.contains("delegate"));
+        assert!(prompt.contains("cleave_run"));
+        assert!(prompt.contains("Sandbox profile: delegate-sandbox"));
+        assert!(prompt.contains("stop and report the blocker"));
+    }
 }

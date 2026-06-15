@@ -16,8 +16,8 @@ pub type DelegateEventSlot = Arc<Mutex<Option<BusRequestSink>>>;
 use std::time::SystemTime;
 
 use crate::child_agent::{
-    ChildAgentRuntimeProfile, ChildAgentSpawnConfig, spawn_headless_child_agent,
-    write_child_prompt_file,
+    ChildAgentBoundary, ChildAgentRuntimeProfile, ChildAgentSpawnConfig,
+    spawn_headless_child_agent, write_child_prompt_file,
 };
 use anyhow::Context;
 use async_trait::async_trait;
@@ -741,6 +741,10 @@ impl DelegateRunner {
             prompt.push_str(field_kit_context);
             prompt.push('\n');
         }
+        let runtime = worker_profile.runtime_profile(scope, None, None);
+        let boundary = ChildAgentBoundary::from_runtime(&self.cwd, &runtime);
+        prompt.push('\n');
+        prompt.push_str(&boundary.to_prompt_section());
         prompt.push_str(
             "\n## Constraints\n- Stay within the declared scope.\n- Do not broaden into design/lifecycle/spec work.\n- Do not delegate further.\n- Prefer concise output over process narration.\n- Return a single final answer that ends the task cleanly; do not leave a trailing assistant prefill stub.\n",
         );
@@ -2039,6 +2043,30 @@ mod tests {
         assert!(runtime.disabled_tools.iter().any(|t| t == "delegate"));
         assert!(runtime.disabled_tools.iter().any(|t| t == "cleave_run"));
         assert!(runtime.disabled_tools.iter().any(|t| t == "memory_store"));
+    }
+
+    #[test]
+    fn delegate_prompt_includes_execution_boundary() {
+        let temp_dir = TempDir::new().unwrap();
+        let runner = DelegateRunner::new(
+            temp_dir.path().to_path_buf(),
+            std::sync::Arc::new(DelegateResultStore::new()),
+            false,
+        );
+        let prompt = runner.build_delegate_prompt(
+            DelegateWorkerProfile::Scout,
+            "Inspect the file",
+            Some(&["src/lib.rs".into()]),
+            None,
+            "",
+        );
+
+        assert!(prompt.contains("## Execution Boundary"));
+        assert!(prompt.contains("src/lib.rs"));
+        assert!(prompt.contains("Unavailable tools/resources"));
+        assert!(prompt.contains("delegate"));
+        assert!(prompt.contains("cleave_run"));
+        assert!(prompt.contains("stop and report the blocker"));
     }
 
     #[test]

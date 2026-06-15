@@ -229,7 +229,9 @@ impl OperationFailure {
             message: summary,
             recoverable: matches!(
                 kind,
-                OperationFailureKind::IdleTimeout | OperationFailureKind::ToolExecutionFailed
+                OperationFailureKind::IdleTimeout
+                    | OperationFailureKind::TimedOut
+                    | OperationFailureKind::ToolExecutionFailed
             ),
         }
     }
@@ -238,6 +240,7 @@ impl OperationFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationFailureKind {
     IdleTimeout,
+    TimedOut,
     ProcessExit,
     ModelError,
     ToolPermissionDenied,
@@ -254,12 +257,17 @@ impl OperationFailureKind {
         let lower = message.to_ascii_lowercase();
         if lower.contains("idle timeout") || lower.contains("no output") {
             Self::IdleTimeout
+        } else if lower.contains("wall-clock timeout")
+            || lower.contains("timed out")
+            || lower.contains("timeout")
+        {
+            Self::TimedOut
+        } else if lower.contains("sandbox") {
+            Self::SandboxViolation
         } else if lower.contains("permission") || lower.contains("denied") {
             Self::ToolPermissionDenied
         } else if lower.contains("model") || lower.contains("provider") {
             Self::ModelError
-        } else if lower.contains("sandbox") {
-            Self::SandboxViolation
         } else if lower.contains("merge conflict") {
             Self::MergeConflict
         } else if lower.contains("cancel") {
@@ -389,6 +397,87 @@ mod tests {
             tokens_out: 0,
             runtime: None,
         }
+    }
+
+    #[test]
+    fn operation_failure_kind_classifies_delegate_timeout_and_policy_messages() {
+        let cases = [
+            (
+                "Delegate wall-clock timeout after 1s",
+                OperationFailureKind::TimedOut,
+            ),
+            (
+                "Delegate idle timeout — no output for 120s",
+                OperationFailureKind::IdleTimeout,
+            ),
+            (
+                "tool permission denied by operator",
+                OperationFailureKind::ToolPermissionDenied,
+            ),
+            (
+                "provider model overloaded",
+                OperationFailureKind::ModelError,
+            ),
+            (
+                "sandbox violation: path denied",
+                OperationFailureKind::SandboxViolation,
+            ),
+            (
+                "merge conflict in child worktree",
+                OperationFailureKind::MergeConflict,
+            ),
+            (
+                "Delegate task cancelled",
+                OperationFailureKind::CancelledByOperator,
+            ),
+            (
+                "duplicate delegate task rejected",
+                OperationFailureKind::DuplicateTask,
+            ),
+            (
+                "child process exited with status 1",
+                OperationFailureKind::ProcessExit,
+            ),
+            (
+                "tool execution failed",
+                OperationFailureKind::ToolExecutionFailed,
+            ),
+        ];
+
+        for (message, expected) in cases {
+            assert_eq!(
+                OperationFailureKind::from_message(message),
+                expected,
+                "message: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn delegate_timeout_failures_map_to_recoverable_projection_failures() {
+        let mut wall = delegate_child("failed");
+        wall.result_summary = Some("Delegate wall-clock timeout after 1s".into());
+        let mut idle = delegate_child("failed");
+        idle.result_summary = Some("Delegate idle timeout — no output for 120s".into());
+        let progress = DelegateProgress {
+            active: false,
+            running: 0,
+            completed: 0,
+            failed: 2,
+            children: vec![wall, idle],
+        };
+
+        let projection = OperationWorkbenchProjection::from_delegate(&progress);
+        assert_eq!(
+            projection.children[0].failure.as_ref().unwrap().kind,
+            OperationFailureKind::TimedOut
+        );
+        assert!(projection.children[0].failure.as_ref().unwrap().recoverable);
+        assert_eq!(
+            projection.children[1].failure.as_ref().unwrap().kind,
+            OperationFailureKind::IdleTimeout
+        );
+        assert!(projection.children[1].failure.as_ref().unwrap().recoverable);
     }
 
     #[test]
