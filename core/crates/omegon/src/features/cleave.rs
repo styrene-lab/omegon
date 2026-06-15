@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 
 use omegon_traits::{
     AgentEvent, BusEvent, BusRequest, BusRequestSink, CommandDefinition, CommandResult,
-    ContentBlock, Feature, ToolDefinition, ToolResult,
+    ContentBlock, Feature, OperationRef, ToolDefinition, ToolResult,
 };
 
 /// Shared slot for the runtime-supplied [`BusRequestSink`].
@@ -933,6 +933,7 @@ impl CleaveFeature {
         // can render placeholder rows immediately.
         self.emit_decomposition_event(AgentEvent::DecompositionStarted {
             children: plan.children.iter().map(|c| c.label.clone()).collect(),
+            operation: OperationRef::cleave(None),
         });
 
         let progress_sink = {
@@ -968,6 +969,7 @@ impl CleaveFeature {
                         event: Box::new(AgentEvent::DecompositionChildCompleted {
                             label: child.clone(),
                             success,
+                            operation: OperationRef::cleave(None),
                         }),
                     });
                 }
@@ -1042,7 +1044,10 @@ impl CleaveFeature {
             .merge_results
             .iter()
             .any(|(_, outcome)| matches!(outcome, cleave::orchestrator::MergeOutcome::Success));
-        self.emit_decomposition_event(AgentEvent::DecompositionCompleted { merged });
+        self.emit_decomposition_event(AgentEvent::DecompositionCompleted {
+            merged,
+            operation: OperationRef::cleave(None),
+        });
 
         if should_cleanup_workspace(&result) {
             cleanup_workspace_dir(&workspace)?;
@@ -1476,6 +1481,7 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
 
     use super::*;
+    use omegon_traits::OperationKind;
 
     #[test]
     fn assess_simple_directive() {
@@ -1540,6 +1546,7 @@ mod tests {
         let feature = CleaveFeature::new(dir.path(), vec![], false);
         feature.emit_decomposition_event(AgentEvent::DecompositionStarted {
             children: vec!["a".into(), "b".into()],
+            operation: OperationRef::cleave(None),
         });
         assert!(
             feature.event_sender_slot().lock().unwrap().is_none(),
@@ -1711,29 +1718,45 @@ mod tests {
 
         feature.emit_decomposition_event(AgentEvent::DecompositionStarted {
             children: vec!["alpha".into(), "beta".into()],
+            operation: OperationRef::cleave(None),
         });
         feature.emit_decomposition_event(AgentEvent::DecompositionChildCompleted {
             label: "alpha".into(),
             success: true,
+            operation: OperationRef::cleave(None),
         });
-        feature.emit_decomposition_event(AgentEvent::DecompositionCompleted { merged: true });
+        feature.emit_decomposition_event(AgentEvent::DecompositionCompleted {
+            merged: true,
+            operation: OperationRef::cleave(None),
+        });
 
         match rx.recv().await.unwrap() {
-            AgentEvent::DecompositionStarted { children } => {
+            AgentEvent::DecompositionStarted {
+                children,
+                operation,
+            } => {
                 assert_eq!(children, vec!["alpha".to_string(), "beta".to_string()]);
+                assert_eq!(operation.kind, OperationKind::Cleave);
             }
             other => panic!("expected DecompositionStarted, got {other:?}"),
         }
         match rx.recv().await.unwrap() {
-            AgentEvent::DecompositionChildCompleted { label, success } => {
+            AgentEvent::DecompositionChildCompleted {
+                label,
+                success,
+                operation,
+            } => {
                 assert_eq!(label, "alpha");
                 assert!(success);
+                assert_eq!(operation.kind, OperationKind::Cleave);
             }
             other => panic!("expected DecompositionChildCompleted, got {other:?}"),
         }
         match rx.recv().await.unwrap() {
-            AgentEvent::DecompositionCompleted { merged } => {
+            AgentEvent::DecompositionCompleted { merged, operation } => {
                 assert!(merged);
+                assert_eq!(operation.kind, OperationKind::Cleave);
+                assert_eq!(operation.id, None);
             }
             other => panic!("expected DecompositionCompleted, got {other:?}"),
         }

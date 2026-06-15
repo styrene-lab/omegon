@@ -174,6 +174,42 @@ fn editor_inline_attachment_tokens_submit_as_multimodal_prompt() {
 }
 
 #[test]
+fn delegate_decomposition_event_renders_delegate_not_cleave() {
+    let mut app = test_app();
+
+    app.handle_agent_event(AgentEvent::DecompositionStarted {
+        children: vec!["delegate_1".into()],
+        operation: omegon_traits::OperationRef::delegate("delegate_1"),
+    });
+
+    let rendered = render_app_to_string(&mut app, 100, 16);
+    assert!(
+        rendered.contains("Delegate: delegate_1 started"),
+        "{rendered}"
+    );
+    assert!(
+        !rendered.contains("Cleave: 1 children dispatched"),
+        "delegate-originated child work must not render as cleave: {rendered}"
+    );
+}
+
+#[test]
+fn cleave_decomposition_event_still_renders_cleave() {
+    let mut app = test_app();
+
+    app.handle_agent_event(AgentEvent::DecompositionStarted {
+        children: vec!["a".into(), "b".into()],
+        operation: omegon_traits::OperationRef::cleave(None),
+    });
+
+    let rendered = render_app_to_string(&mut app, 100, 16);
+    assert!(
+        rendered.contains("Cleave: 2 children dispatched"),
+        "{rendered}"
+    );
+}
+
+#[test]
 fn session_reset_clears_instrument_panel_tool_activity() {
     let mut app = test_app();
     let waiting = render_app_to_string(&mut app, 140, 18);

@@ -79,7 +79,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use omegon_traits::AgentEvent;
+use omegon_traits::{AgentEvent, OperationKind};
 
 use self::active_tool_stream::{ActiveToolStream, render_active_tool_stream_panel};
 use self::command_surfaces::{
@@ -7413,25 +7413,50 @@ Scroll transcript:
                 self.conversation
                     .push_lifecycle("◈", &format!("Phase → {phase:?}"));
             }
-            AgentEvent::DecompositionStarted { children } => {
-                self.conversation.push_lifecycle(
-                    "⚡",
-                    &format!("Cleave: {} children dispatched", children.len()),
-                );
-            }
-            AgentEvent::DecompositionChildCompleted { label, success } => {
-                let icon = if success { "✓" } else { "✗" };
-                self.conversation
-                    .push_lifecycle(icon, &format!("Child '{label}' completed"));
-            }
-            AgentEvent::DecompositionCompleted { merged } => {
+            AgentEvent::DecompositionStarted {
+                children,
+                operation,
+            } => match operation.kind {
+                OperationKind::Cleave => {
+                    self.conversation.push_lifecycle(
+                        "⚡",
+                        &format!("Cleave: {} children dispatched", children.len()),
+                    );
+                }
+                OperationKind::Delegate => {
+                    let label = operation.id.as_deref().unwrap_or("subagent");
+                    self.conversation
+                        .push_lifecycle("⇉", &format!("Delegate: {label} started"));
+                }
+            },
+            AgentEvent::DecompositionChildCompleted {
+                label,
+                success,
+                operation,
+            } => match operation.kind {
+                OperationKind::Cleave => {
+                    let icon = if success { "✓" } else { "✗" };
+                    self.conversation
+                        .push_lifecycle(icon, &format!("Child '{label}' completed"));
+                }
+                OperationKind::Delegate => {
+                    let icon = if success { "✓" } else { "✗" };
+                    self.conversation
+                        .push_lifecycle(icon, &format!("Delegate: {label} completed"));
+                }
+            },
+            AgentEvent::DecompositionCompleted { merged, operation } => {
                 let status = if merged {
                     "merged"
                 } else {
                     "completed (no merge)"
                 };
+                let label = match operation.kind {
+                    OperationKind::Cleave => "Cleave",
+                    OperationKind::Delegate => "Delegate",
+                };
                 self.conversation
-                    .push_lifecycle("⚡", &format!("Cleave {status}"));
+                    .push_lifecycle("⚡", &format!("{label} {status}"));
             }
             AgentEvent::WebDashboardStarted { startup_json } => {
                 if let Ok(startup) =

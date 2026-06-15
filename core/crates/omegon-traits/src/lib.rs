@@ -36,6 +36,39 @@ use std::sync::Arc;
 // Security:   filesystem permissions on socket path (same-user, mode 0600)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// User-facing kind of child-agent operation that produced progress events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationKind {
+    Delegate,
+    Cleave,
+}
+
+/// Provenance for child-agent/decomposition events. Runtime events require this
+/// so renderers do not infer delegate vs cleave from generic child activity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationRef {
+    pub kind: OperationKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+}
+
+impl OperationRef {
+    pub fn delegate(id: impl Into<String>) -> Self {
+        Self {
+            kind: OperationKind::Delegate,
+            id: Some(id.into()),
+        }
+    }
+
+    pub fn cleave(id: Option<String>) -> Self {
+        Self {
+            kind: OperationKind::Cleave,
+            id,
+        }
+    }
+}
+
 pub const IPC_PROTOCOL_VERSION: u16 = 1;
 /// Maximum allowed encoded frame size (8 MiB).
 pub const IPC_MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
@@ -899,13 +932,26 @@ pub enum IpcEventPayload {
 
     // ── Decomposition ─────────────────────────────────────────────────────
     #[serde(rename = "decomposition.started")]
-    DecompositionStarted { children: Vec<String> },
+    DecompositionStarted {
+        children: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation: Option<OperationRef>,
+    },
 
     #[serde(rename = "decomposition.child_completed")]
-    DecompositionChildCompleted { label: String, success: bool },
+    DecompositionChildCompleted {
+        label: String,
+        success: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation: Option<OperationRef>,
+    },
 
     #[serde(rename = "decomposition.completed")]
-    DecompositionCompleted { merged: bool },
+    DecompositionCompleted {
+        merged: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation: Option<OperationRef>,
+    },
 
     /// Periodic family-tree rollup carrying the cleave run's current
     /// shape + per-child digest. See [`FamilyVitalSigns`] for the field
@@ -1395,13 +1441,16 @@ pub enum BusEvent {
     },
     DecompositionStarted {
         children: Vec<String>,
+        operation: OperationRef,
     },
     DecompositionChildCompleted {
         label: String,
         success: bool,
+        operation: OperationRef,
     },
     DecompositionCompleted {
         merged: bool,
+        operation: OperationRef,
     },
 
     // ── Context ─────────────────────────────────────────────────────
@@ -2134,13 +2183,16 @@ pub enum AgentEvent {
     },
     DecompositionStarted {
         children: Vec<String>,
+        operation: OperationRef,
     },
     DecompositionChildCompleted {
         label: String,
         success: bool,
+        operation: OperationRef,
     },
     DecompositionCompleted {
         merged: bool,
+        operation: OperationRef,
     },
     /// Periodic family-tree rollup. See [`FamilyVitalSigns`] for the full
     /// shape and emission semantics. Fired by the cleave orchestrator on

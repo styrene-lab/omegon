@@ -27,8 +27,8 @@ use tokio_util::sync::CancellationToken;
 
 use omegon_traits::{
     AgentEvent, BusEvent, BusRequest, BusRequestSink, CommandDefinition, CommandResult,
-    ContentBlock, ContextInjection, ContextSignals, Feature, NotifyLevel, ToolDefinition,
-    ToolResult,
+    ContentBlock, ContextInjection, ContextSignals, Feature, NotifyLevel, OperationRef,
+    ToolDefinition, ToolResult,
 };
 
 /// Agent specification loaded from .omegon/agents/*.md
@@ -1572,6 +1572,7 @@ impl Feature for DelegateFeature {
                 }
                 self.emit_delegate_event(AgentEvent::DecompositionStarted {
                     children: vec![task_id.clone()],
+                    operation: OperationRef::delegate(task_id.clone()),
                 });
                 self.emit_delegate_family_vitals();
 
@@ -1874,6 +1875,7 @@ No delegate tasks found.
                             self.emit_delegate_event(AgentEvent::DecompositionChildCompleted {
                                 label: task.task_id.clone(),
                                 success,
+                                operation: OperationRef::delegate(task.task_id.clone()),
                             });
                             self.emit_delegate_family_vitals();
                             let message = if success {

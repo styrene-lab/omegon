@@ -342,7 +342,9 @@ async fn worker_loop(
                                     })
                                 }
                             }
-                            omegon_traits::AgentEvent::DecompositionStarted { children } => {
+                            omegon_traits::AgentEvent::DecompositionStarted {
+                                children, ..
+                            } => {
                                 let entries = children
                                     .iter()
                                     .map(|label| PlanEntryData {
@@ -355,6 +357,7 @@ async fn worker_loop(
                             omegon_traits::AgentEvent::DecompositionChildCompleted {
                                 label,
                                 success,
+                                operation: _,
                             } => {
                                 // Emit a single-entry update; the ACP forwarder
                                 // merges it into the running plan state.

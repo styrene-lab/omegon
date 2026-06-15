@@ -2186,21 +2186,34 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "event_name": "phase.changed",
             "phase": format!("{phase:?}"),
         }),
-        AgentEvent::DecompositionStarted { children } => json!({
+        AgentEvent::DecompositionStarted {
+            children,
+            operation,
+        } => json!({
             "type": "decomposition_started",
             "event_name": "decomposition.started",
             "children": children,
+            "operation_kind": serde_json::to_value(operation.kind).unwrap_or(serde_json::Value::Null),
+            "operation_id": operation.id,
         }),
-        AgentEvent::DecompositionChildCompleted { label, success } => json!({
+        AgentEvent::DecompositionChildCompleted {
+            label,
+            success,
+            operation,
+        } => json!({
             "type": "decomposition_child_completed",
             "event_name": "decomposition.child_completed",
             "label": escape_html(label),
             "success": success,
+            "operation_kind": serde_json::to_value(operation.kind).unwrap_or(serde_json::Value::Null),
+            "operation_id": operation.id,
         }),
-        AgentEvent::DecompositionCompleted { merged } => json!({
+        AgentEvent::DecompositionCompleted { merged, operation } => json!({
             "type": "decomposition_completed",
             "event_name": "decomposition.completed",
             "merged": merged,
+            "operation_kind": serde_json::to_value(operation.kind).unwrap_or(serde_json::Value::Null),
+            "operation_id": operation.id,
         }),
         AgentEvent::FamilyVitalSignsUpdated { signs } => json!({
             "type": "family_vital_signs",
@@ -2693,6 +2706,19 @@ mod tests {
     }
 
     #[test]
+    fn serialize_decomposition_started_includes_operation_provenance() {
+        let event = AgentEvent::DecompositionStarted {
+            children: vec!["delegate_1".into()],
+            operation: omegon_traits::OperationRef::delegate("delegate_1"),
+        };
+        let json = serialize_agent_event(&event);
+        assert_eq!(json["type"], "decomposition_started");
+        assert_eq!(json["event_name"], "decomposition.started");
+        assert_eq!(json["operation_kind"], "delegate");
+        assert_eq!(json["operation_id"], "delegate_1");
+    }
+
+    #[test]
     fn serialize_message_chunk_escapes_html() {
         let event = AgentEvent::MessageChunk {
             text: "<script>alert(1)</script>".into(),
@@ -2923,12 +2949,17 @@ mod tests {
             },
             AgentEvent::DecompositionStarted {
                 children: vec!["a".into()],
+                operation: omegon_traits::OperationRef::cleave(None),
             },
             AgentEvent::DecompositionChildCompleted {
                 label: "a".into(),
                 success: true,
+                operation: omegon_traits::OperationRef::cleave(None),
             },
-            AgentEvent::DecompositionCompleted { merged: true },
+            AgentEvent::DecompositionCompleted {
+                merged: true,
+                operation: omegon_traits::OperationRef::cleave(None),
+            },
             AgentEvent::FamilyVitalSignsUpdated {
                 signs: omegon_traits::FamilyVitalSigns {
                     run_id: "test-run".into(),

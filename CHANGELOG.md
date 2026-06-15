@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Decomposition lifecycle events now carry operation provenance so delegate-originated child work no longer renders or publishes as cleave activity.
 - Made bundled prompt templates and dynamic prompt guidance capability-aware so hidden or mode-gated memory/lifecycle tools do not get presented as unconditional agent instructions.
 - Tightened the bundled `code-act` skill so batch scripting no longer overrides the canonical read → `edit` → `validate` loop for small source changes.
 - Updated bundled `typescript` and `openspec` skills to remove legacy `pi-*` SDK example drift and make lifecycle tool usage capability-aware.

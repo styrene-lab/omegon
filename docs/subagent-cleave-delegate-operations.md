@@ -264,3 +264,227 @@ Delegate and cleave should remain separate operator concepts even if they share 
 - **Cleave** optimizes for coordination, isolation, and merge governance across multiple subagents.
 
 The unification target should be projection/progress/failure/cancellation semantics, not necessarily one execution engine.
+
+## Operation Reporting Paradigm — Parent/Child Boundary Skeleton
+
+### Core claim
+
+Subagent reporting should be modeled as an explicit operation protocol between a parent Omegon runtime and one or more child Omegon runtimes. The child is another Omegon binary, so the interface does not need to be inferred from prose, tool-call transcript text, or generic lifecycle events. The parent should receive structured operation reports, reduce them into canonical operation state, and project that state into transcript, Workbench, statusline, and detail panes.
+
+### Layer model
+
+1. **Child Omegon runtime** — actual child process: model loop, tools, cwd, environment, sandbox/worktree.
+2. **Child operation event stream** — structured events such as operation started, child started, tool activity, progress, failure, result.
+3. **Parent operation state reducer** — canonical `OperationState`, `ChildState`, `FailureState`, result refs, counts, timestamps.
+4. **Semantic display projections** — transcript milestones, Workbench live rows, detail-pane model, statusline summary.
+5. **Renderers** — TUI/CLI/ACP/Web convert projections into glyphs, colors, wrapping, and actions.
+
+The current failure mode comes from bypassing layers 2–4: low-level child/decomposition events are rendered directly as TUI text, causing delegate operations to leak `Cleave: 1 children dispatched`.
+
+### Operation is the primary display unit
+
+The display model should start with operation identity, not tool-call identity.
+
+```rust
+enum OperationKind {
+    Delegate,
+    Cleave,
+}
+
+struct OperationState {
+    id: OperationId,
+    kind: OperationKind,
+    label: String,
+    intent: String,
+    status: OperationStatus,
+    started_at: DateTime,
+    updated_at: DateTime,
+    children: Vec<ChildState>,
+    result: Option<OperationResult>,
+    failure: Option<OperationFailure>,
+}
+```
+
+A `delegate` is an operation created by a tool call. A `cleave` is also an operation created by a tool call. The tool call is not the durable status model.
+
+### Shared child row contract
+
+Delegate and cleave may keep separate execution engines, but their live rows should reduce to a shared child shape:
+
+```rust
+struct ChildState {
+    id: ChildId,
+    operation_id: OperationId,
+    operation_kind: OperationKind,
+    label: String,
+    role: Option<WorkerRole>,
+    model: Option<String>,
+    cwd: Option<PathBuf>,
+    status: ChildStatus,
+    last_activity: Option<ChildActivity>,
+    progress: Option<ChildProgress>,
+    failure: Option<OperationFailure>,
+    result_ref: Option<ResultRef>,
+}
+
+enum ChildStatus {
+    Queued,
+    Starting,
+    Running,
+    Waiting,
+    Succeeded,
+    Failed,
+    Cancelled,
+    TimedOut,
+}
+```
+
+Workbench headers can remain operation-specific, but rows should use this common projection. This prevents delegate and cleave from drifting in glyphs, failure wording, details affordances, and last-activity display.
+
+### Child operation event protocol
+
+Because the child binary is ours, the parent/child boundary should be structured JSONL or IPC, not parsed prose. A minimal protocol can be introduced behind the current runner first:
+
+```json
+{"type":"operation.started","operation_id":"delegate_3","kind":"delegate","intent":"prove subagent surfaces","cwd":"/repo","model":"gpt-5.5"}
+{"type":"child.started","operation_id":"delegate_3","child_id":"delegate_3","role":"scout"}
+{"type":"child.activity","child_id":"delegate_3","activity":{"kind":"tool","name":"bash","summary":"cargo test -p omegon delegate"}}
+{"type":"child.progress","child_id":"delegate_3","message":"inspecting TUI workbench projection","tasks_done":1,"tasks_total":3}
+{"type":"child.failed","child_id":"delegate_3","failure":{"kind":"idle_timeout","message":"no output for 120s","recoverable":true}}
+{"type":"operation.completed","operation_id":"delegate_3","status":"failed"}
+```
+
+Cleave emits the same vocabulary with `kind: "cleave"`, multiple children, wave metadata, and merge/result metadata.
+
+Control events and prose output must not share the same stream. The child should write operation events to a dedicated pipe/fd or IPC channel; normal stdout/stderr remain logs/tool output and are summarized, not treated as state.
+
+### Projection responsibilities
+
+- **Transcript projection:** durable milestones only — operation started, child failed, result ready, operation completed. It should not mirror every live Workbench row.
+- **Workbench projection:** live state — running/done/failed counts, child rows, last tool/activity, failure reason, detail affordance.
+- **Detail projection:** forensic view — prompt path, cwd, model, tool transcript, result text, failure payload, merge/worktree data.
+- **Statusline projection:** compact aggregate — `running delegate · 2 active · 1 failed` or `running cleave · wave 2/3 · 4 active`.
+
+### Failure taxonomy
+
+Delegate and cleave failures should map to shared operator-facing kinds:
+
+```rust
+enum OperationFailureKind {
+    IdleTimeout,
+    ProcessExit,
+    ModelError,
+    ToolPermissionDenied,
+    ToolExecutionFailed,
+    SandboxViolation,
+    MergeConflict,
+    CancelledByOperator,
+    DuplicateTask,
+    Unknown,
+}
+```
+
+The screenshot failure `Delegate idle timeout — no output for 120s` should render consistently as:
+
+- Transcript: `✗ delegate_2 failed · idle timeout — no output for 120s`
+- Workbench: `✗ delegate_2 · idle timeout 120s · ⌃O details`
+- Detail: full failure payload and remediation.
+
+### First implementation slice
+
+1. Add a renderer-neutral operations projection module, e.g. `core/crates/omegon/src/surfaces/operations.rs`.
+2. Map `DelegateProgress` into an `OperationWorkbenchProjection`.
+3. Map cleave progress/state into the same row projection.
+4. Make Workbench render operation projections rather than bespoke delegate/cleave rows.
+5. Stop delegate-originated child dispatch from rendering as `Cleave: 1 children dispatched` in transcript.
+6. Later, formalize child→parent JSONL/IPC event streaming.
+
+### Design decision candidate
+
+Unify projection/state semantics before unifying execution engines. Delegate and cleave may remain separate tools and runners; the shared contract should be operation identity, child row state, failure taxonomy, cancellation semantics, and result provenance.
+
+## Reality Check — Current Codebase Assessment
+
+### Evidence: delegate emits cleave/decomposition events today
+
+Search shows `core/crates/omegon/src/features/delegate.rs` emits:
+
+- `AgentEvent::FamilyVitalSignsUpdated` around delegate progress (`features/delegate.rs` near current search hit line ~1283).
+- `AgentEvent::DecompositionStarted` from delegate execution (`features/delegate.rs` near current search hit line ~1573).
+- `AgentEvent::DecompositionChildCompleted` on delegate completion (`features/delegate.rs` near current search hit line ~1864).
+
+Cleave also emits the same `AgentEvent::Decomposition*` variants from `core/crates/omegon/src/features/cleave.rs`.
+
+This directly explains the screenshot: delegate uses decomposition event variants, and the TUI interprets those as cleave.
+
+### Evidence: TUI hardcodes decomposition as cleave
+
+`core/crates/omegon/src/tui/mod.rs` handles:
+
+```rust
+AgentEvent::DecompositionStarted { children } => {
+    self.conversation.push_lifecycle(
+        "⚡",
+        &format!("Cleave: {} children dispatched", children.len()),
+    );
+}
+```
+
+That is structurally wrong once delegate emits `DecompositionStarted`. The event name lacks operation provenance, and the renderer compensates by assuming cleave.
+
+### Evidence: Workbench has separate delegate/cleave render paths
+
+`core/crates/omegon/src/tui/workbench.rs` has separate paths such as `render_delegate_workbench_panel(...)`, while `WorkbenchState` carries `delegate: Option<DelegateProgress>`. This is acceptable as an intermediate state, but it confirms the lack of a shared child-operation projection.
+
+Current delegate Workbench rows are built from `DelegateProgressChild` and can show running/failed counts, but failure reason/detail affordance is not obviously present in the row contract. That matches the screenshot where Workbench says `delegate_2 failed` while the useful reason appears elsewhere.
+
+### Evidence: event vocabulary is already externalized elsewhere
+
+`core/crates/omegon/src/mqtt_bridge.rs` maps `AgentEvent::DecompositionStarted` to `IpcEventPayload::DecompositionStarted`. ACP/Web/MQTT consumers can therefore inherit the same semantic conflation if the event is reused for delegate.
+
+This means a TUI-only string replacement would be insufficient. The durable fix is provenance-bearing operation events/projections.
+
+## Adversarial Assessment
+
+### Finding 1: `AgentEvent::DecompositionStarted` cannot remain the user-facing event for delegate
+
+If delegate continues to emit `DecompositionStarted`, every downstream consumer must guess whether it means cleave or delegate. The code already proves at least one consumer guesses wrong.
+
+**Required correction:** either add operation provenance to the event or introduce distinct operation events. A local TUI guard based on the active tool would be a tactical patch only.
+
+### Finding 2: Workbench projection should be unified before JSONL child protocol
+
+The JSONL child protocol is architecturally cleaner, but the immediate codebase already has enough state to fix the display seam:
+
+- `DelegateProgress` exists.
+- Cleave progress/state exists.
+- Workbench is already a semantic surface.
+
+Implementing `surfaces::operations` as an adapter layer is lower risk than changing child process protocol first.
+
+### Finding 3: transcript and Workbench must have different responsibilities
+
+The current transcript receives lifecycle spam (`Cleave: 1 children dispatched`) while Workbench also reports live delegate state. This duplicates and conflicts. Transcript should record milestones; Workbench should own live aggregate state.
+
+**Required correction:** operation projections should include both milestone events and live rows, and TUI should route them to the correct surface.
+
+### Finding 4: failure reason is currently not first-class in the Workbench row
+
+The screenshot proves failure reason is visible in a transcript/tool row but not in the Workbench summary. A shared `OperationFailure` on child rows would fix this and improve both delegate and cleave.
+
+### Finding 5: IPC/Web surfaces are likely affected
+
+Because `mqtt_bridge.rs` exports decomposition payloads, any ACP/Web/MQTT dashboard consuming those events may also mislabel delegate-originated child work. The projection design must be shared outside TUI.
+
+### Finding 6: one-child cleave wording should be treated as a smell, not just a string
+
+If `kind=Delegate`, one child is normal. If `kind=Cleave`, one child should be rare and should only appear when isolation/merge governance was explicitly requested. Projection tests should catch `delegate -> Cleave: 1 children dispatched` as invalid.
+
+## New Open Questions
+
+- [assumption] Delegate and cleave can remain separate execution engines while sharing operation projections.
+- [assumption] Existing `DelegateProgress` and cleave state are sufficient for the first projection adapter without changing child process protocol.
+- Should `AgentEvent::DecompositionStarted` be deprecated in favor of `AgentEvent::OperationStarted { kind, operation_id, children }`, or kept for cleave-only compatibility?
+- What is the minimum failure payload currently available from `DelegateProgressChild` and cleave state, and where should missing failure reasons be captured?
+- Which non-TUI consumers currently treat `DecompositionStarted` as cleave, especially ACP, MQTT, and dashboard paths?
+- Should the first implementation suppress delegate decomposition transcript rows, or should it introduce the operation projection and migrate Workbench/transcript together?

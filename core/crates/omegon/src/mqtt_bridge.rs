@@ -186,19 +186,27 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
         AgentEvent::PhaseChanged { phase } => Some(IpcEventPayload::PhaseChanged {
             phase: format!("{phase:?}"),
         }),
-        AgentEvent::DecompositionStarted { children } => {
-            Some(IpcEventPayload::DecompositionStarted {
-                children: children.clone(),
+        AgentEvent::DecompositionStarted {
+            children,
+            operation,
+        } => Some(IpcEventPayload::DecompositionStarted {
+            children: children.clone(),
+            operation: Some(operation.clone()),
+        }),
+        AgentEvent::DecompositionChildCompleted {
+            label,
+            success,
+            operation,
+        } => Some(IpcEventPayload::DecompositionChildCompleted {
+            label: label.clone(),
+            success: *success,
+            operation: Some(operation.clone()),
+        }),
+        AgentEvent::DecompositionCompleted { merged, operation } => {
+            Some(IpcEventPayload::DecompositionCompleted {
+                merged: *merged,
+                operation: Some(operation.clone()),
             })
-        }
-        AgentEvent::DecompositionChildCompleted { label, success } => {
-            Some(IpcEventPayload::DecompositionChildCompleted {
-                label: label.clone(),
-                success: *success,
-            })
-        }
-        AgentEvent::DecompositionCompleted { merged } => {
-            Some(IpcEventPayload::DecompositionCompleted { merged: *merged })
         }
         AgentEvent::SystemNotification { message } => Some(IpcEventPayload::SystemNotification {
             message: message.clone(),
@@ -289,5 +297,32 @@ fn event_name(ev: &IpcEventPayload) -> &'static str {
         IpcEventPayload::StateChanged { .. } => "state.changed",
         IpcEventPayload::SystemNotification { .. } => "system.notification",
         IpcEventPayload::SessionReset => "session.reset",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omegon_traits::{AgentEvent, OperationKind, OperationRef};
+
+    #[test]
+    fn projects_decomposition_operation_provenance() {
+        let payload = project_event(&AgentEvent::DecompositionStarted {
+            children: vec!["delegate_1".into()],
+            operation: OperationRef::delegate("delegate_1"),
+        })
+        .expect("projected payload");
+
+        match payload {
+            IpcEventPayload::DecompositionStarted {
+                children,
+                operation: Some(operation),
+            } => {
+                assert_eq!(children, vec!["delegate_1"]);
+                assert_eq!(operation.kind, OperationKind::Delegate);
+                assert_eq!(operation.id.as_deref(), Some("delegate_1"));
+            }
+            other => panic!("expected decomposition payload with operation, got {other:?}"),
+        }
     }
 }
