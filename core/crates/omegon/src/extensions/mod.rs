@@ -827,6 +827,17 @@ pub async fn spawn_from_manifest(
         }
     }
 
+    let substrate = crate::execution_substrate::detect();
+    if substrate.kind != omegon_traits::ExecutionSubstrateKind::HostNative
+        && matches!(&manifest.runtime, RuntimeConfig::Native { .. })
+    {
+        return Err(anyhow!(
+            "native extension '{}' is disabled under {:?} execution substrate; use an OCI/image-bundled extension build or run Omegon host-native",
+            manifest.extension.name,
+            substrate.kind
+        ));
+    }
+
     let state = ExtensionState::load(ext_dir)?;
     let widgets: Vec<WidgetDeclaration> = manifest
         .widgets
@@ -2044,6 +2055,36 @@ binary = "sdk-extension.sh"
         )
         .unwrap();
         script
+    }
+
+    #[tokio::test]
+    async fn spawn_rejects_native_extension_under_host_shim_oci() {
+        let _env_guard = crate::test_support::env::lock_async().await;
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
+        unsafe {
+            std::env::set_var("OMEGON_RUNTIME_CONTEXT", "host-shim-oci");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        write_sdk_extension(
+            temp.path(),
+            Some(sdk_compat::SUPPORTED_SDK_CONTRACT_VERSION),
+        );
+        let err = match spawn_from_manifest(temp.path(), &[]).await {
+            Ok(_) => panic!("native extension should be disabled under host-shim OCI"),
+            Err(err) => err,
+        };
+        let message = err.to_string();
+        assert!(
+            message.contains("native extension 'sdk-test' is disabled"),
+            "{message}"
+        );
+        assert!(message.contains("HostShimOci"), "{message}");
+
+        unsafe {
+            std::env::remove_var("OMEGON_RUNTIME_CONTEXT");
+        }
     }
 
     #[tokio::test]
