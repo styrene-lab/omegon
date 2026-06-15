@@ -45,7 +45,7 @@ See [[subagent-cleave-delegate-operations]] for the parent/child operation-repor
 
 - [x] Add/locate a TUI regression proving delegate-originated child dispatch does not render `Cleave: 1 children dispatched`.
 - [x] Add/locate a cleave regression proving actual cleave dispatch still renders cleave wording.
-- [ ] Add/locate Workbench test proving failed delegate rows expose failure reason or details affordance.
+- [x] Add/locate Workbench test proving failed delegate rows expose failure reason or details affordance.
 
 Acceptance:
 
@@ -75,8 +75,8 @@ Initial DTOs:
 
 Adapters:
 
-- [ ] `DelegateProgress -> OperationWorkbenchProjection`
-- [ ] cleave progress/state -> `OperationWorkbenchProjection` where current data permits
+- [x] `DelegateProgress -> OperationWorkbenchProjection`
+- [x] cleave progress/state -> `OperationWorkbenchProjection` where current data permits
 
 Acceptance:
 
@@ -86,10 +86,10 @@ unit tests prove delegate and cleave map to the same child-row shape
 
 ### Phase 2 — Workbench consumes operation projections
 
-- [ ] Route delegate Workbench panel through operation projection rows.
-- [ ] Route cleave Workbench panel through operation projection rows where practical.
-- [ ] Preserve operation-specific headers while sharing row rendering.
-- [ ] Include failed delegate reason/detail affordance if available.
+- [x] Route delegate Workbench panel through operation projection rows.
+- [x] Route cleave Workbench panel through operation projection rows where practical.
+- [x] Preserve operation-specific headers while sharing row rendering.
+- [x] Include failed delegate reason/detail affordance if available.
 
 Acceptance:
 
@@ -139,7 +139,15 @@ Completed in the first slice:
 - WebSocket, IPC, and MQTT projections carry operation provenance;
 - focused tests cover delegate, cleave, WebSocket, IPC, and MQTT provenance.
 
-Next narrow patch target: add renderer-neutral operation projection DTOs and map delegate progress into shared child rows.
+Completed follow-up slices:
+
+- added renderer-neutral operation projection DTOs in `core/crates/omegon/src/surfaces/operations.rs`;
+- mapped `DelegateProgress` and `CleaveProgress` into `OperationWorkbenchProjection`;
+- routed delegate and cleave Workbench panels through the shared operation projection renderer;
+- canonicalized child status labels so renderers do not leak engine-specific status strings by default;
+- surfaced delegate failure summaries through shared operation child rows.
+
+Next narrow patch target: adversarially harden operation failure/detail affordances and decide whether transcript milestone rendering should consume the same operation projection rather than bespoke event strings.
 
 ## Validation plan
 
