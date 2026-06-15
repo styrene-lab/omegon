@@ -6,7 +6,7 @@
 //! event text.
 
 use crate::features::cleave::CleaveProgress;
-use crate::features::delegate::DelegateProgress;
+use crate::features::delegate::{DelegateChildFailureKind, DelegateProgress};
 use omegon_traits::{OperationKind, OperationRef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,9 +100,12 @@ impl OperationChildRow {
     fn from_delegate_child(child: &crate::features::delegate::DelegateProgressChild) -> Self {
         let status = OperationChildStatus::from_delegate_status(&child.status);
         let failure = match status {
-            OperationChildStatus::Failed | OperationChildStatus::TimedOut => Some(
-                OperationFailure::from_delegate_summary(child.result_summary.clone()),
-            ),
+            OperationChildStatus::Failed | OperationChildStatus::TimedOut => {
+                Some(OperationFailure::from_delegate_failure(
+                    child.failure_kind,
+                    child.result_summary.clone(),
+                ))
+            }
             _ => None,
         };
         Self {
@@ -219,10 +222,18 @@ pub struct OperationFailure {
 }
 
 impl OperationFailure {
-    fn from_delegate_summary(summary: Option<String>) -> Self {
-        let kind = summary
-            .as_deref()
-            .map(OperationFailureKind::from_message)
+    fn from_delegate_failure(
+        source_kind: Option<DelegateChildFailureKind>,
+        summary: Option<String>,
+    ) -> Self {
+        let kind = source_kind
+            .and_then(|kind| match kind {
+                DelegateChildFailureKind::Unknown => None,
+                known => Some(OperationFailureKind::from_delegate_child_failure_kind(
+                    known,
+                )),
+            })
+            .or_else(|| summary.as_deref().map(OperationFailureKind::from_message))
             .unwrap_or(OperationFailureKind::Unknown);
         Self {
             kind,
@@ -232,6 +243,7 @@ impl OperationFailure {
                 OperationFailureKind::IdleTimeout
                     | OperationFailureKind::TimedOut
                     | OperationFailureKind::ToolExecutionFailed
+                    | OperationFailureKind::ModelError
             ),
         }
     }
@@ -253,6 +265,16 @@ pub enum OperationFailureKind {
 }
 
 impl OperationFailureKind {
+    fn from_delegate_child_failure_kind(kind: DelegateChildFailureKind) -> Self {
+        match kind {
+            DelegateChildFailureKind::MissingLocalModel
+            | DelegateChildFailureKind::MissingCredential
+            | DelegateChildFailureKind::ProviderStartup => Self::ModelError,
+            DelegateChildFailureKind::WorkspaceStartup => Self::ProcessExit,
+            DelegateChildFailureKind::Unknown => Self::Unknown,
+        }
+    }
+
     fn from_message(message: &str) -> Self {
         let lower = message.to_ascii_lowercase();
         if lower.contains("idle timeout") || lower.contains("no output") {
@@ -300,6 +322,7 @@ mod tests {
             started_at: None,
             completed_at: None,
             result_summary: None,
+            failure_kind: None,
             tasks: Vec::new(),
             tasks_done: 0,
         }
@@ -354,6 +377,46 @@ mod tests {
         assert_eq!(row.last_activity.as_ref().unwrap().turn, Some(3));
         assert_eq!(row.progress.as_ref().unwrap().done, 1);
         assert_eq!(row.progress.as_ref().unwrap().total, 2);
+    }
+
+    #[test]
+    fn delegate_unknown_failure_kind_falls_back_to_summary_classification() {
+        let mut child = delegate_child("failed");
+        child.failure_kind = Some(DelegateChildFailureKind::Unknown);
+        child.result_summary = Some("Delegate idle timeout — no output for 120s".into());
+        let progress = DelegateProgress {
+            active: false,
+            running: 0,
+            completed: 0,
+            failed: 1,
+            children: vec![child],
+        };
+
+        let projection = OperationWorkbenchProjection::from_delegate(&progress);
+        assert_eq!(
+            projection.children[0].failure.as_ref().unwrap().kind,
+            OperationFailureKind::IdleTimeout
+        );
+    }
+
+    #[test]
+    fn delegate_typed_failure_kind_overrides_summary_classification() {
+        let mut child = delegate_child("failed");
+        child.failure_kind = Some(DelegateChildFailureKind::MissingCredential);
+        child.result_summary = Some("Delegate idle timeout — no output for 120s".into());
+        let progress = DelegateProgress {
+            active: false,
+            running: 0,
+            completed: 0,
+            failed: 1,
+            children: vec![child],
+        };
+
+        let projection = OperationWorkbenchProjection::from_delegate(&progress);
+        assert_eq!(
+            projection.children[0].failure.as_ref().unwrap().kind,
+            OperationFailureKind::ModelError
+        );
     }
 
     #[test]

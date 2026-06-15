@@ -49,6 +49,7 @@ pub struct DelegateProgressChild {
     pub started_at: Option<std::time::SystemTime>,
     pub completed_at: Option<std::time::SystemTime>,
     pub result_summary: Option<String>,
+    pub failure_kind: Option<DelegateChildFailureKind>,
     pub tasks: Vec<crate::cleave::progress::ChildTaskItem>,
     pub tasks_done: usize,
 }
@@ -66,8 +67,13 @@ pub struct DelegateProgress {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DelegateTaskStatus {
     Running,
-    Completed { success: bool },
-    Failed { error: String },
+    Completed {
+        success: bool,
+    },
+    Failed {
+        error: String,
+        kind: DelegateChildFailureKind,
+    },
 }
 
 /// A delegate task entry in the result store
@@ -271,6 +277,13 @@ impl DelegateResultStore {
                 started_at: Some(task.started_at),
                 completed_at: task.completed_at,
                 result_summary: task.result.as_ref().map(|r| crate::util::truncate(r, 40)),
+                failure_kind: match &task.status {
+                    DelegateTaskStatus::Failed { kind, .. } => Some(*kind),
+                    DelegateTaskStatus::Completed { success: false } => {
+                        Some(DelegateChildFailureKind::Unknown)
+                    }
+                    _ => None,
+                },
                 tasks: task.tasks.clone(),
                 tasks_done: task.tasks.iter().filter(|t| t.done).count(),
             });
@@ -404,8 +417,8 @@ pub struct DelegateRunner {
     idle_timeout_secs: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DelegateChildFailureKind {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DelegateChildFailureKind {
     MissingLocalModel,
     MissingCredential,
     ProviderStartup,
@@ -1046,6 +1059,7 @@ If blocked, say the blocker plainly.\n",
                         &task_id,
                         DelegateTaskStatus::Failed {
                             error: err.to_string(),
+                            kind: DelegateChildFailureKind::Unknown,
                         },
                         None,
                     );
@@ -1077,7 +1091,7 @@ If blocked, say the blocker plainly.\n",
                     DelegateTaskStatus::Completed { success: false } => {
                         return Err(anyhow::anyhow!("Task failed"));
                     }
-                    DelegateTaskStatus::Failed { error } => {
+                    DelegateTaskStatus::Failed { error, .. } => {
                         return Err(anyhow::anyhow!("Task failed: {}", error));
                     }
                     DelegateTaskStatus::Running => {
@@ -1625,7 +1639,7 @@ impl Feature for DelegateFeature {
                             }],
                             details: json!({ "status": "completed", "success": false, "task_id": task_id }),
                         }),
-                        DelegateTaskStatus::Failed { error } => Ok(ToolResult {
+                        DelegateTaskStatus::Failed { error, .. } => Ok(ToolResult {
                             content: vec![ContentBlock::Text {
                                 text: format!("Task failed: {}", error),
                             }],
@@ -2381,6 +2395,7 @@ This agent runs in write mode and can modify files.
             task_description: "Fix the login bug".into(),
             status: DelegateTaskStatus::Failed {
                 error: "timeout".into(),
+                kind: DelegateChildFailureKind::Unknown,
             },
             result: None,
             started_at: SystemTime::now(),
@@ -2471,6 +2486,7 @@ This agent runs in write mode and can modify files.
             task_description: "Patch bug".into(),
             status: DelegateTaskStatus::Failed {
                 error: "child exited".into(),
+                kind: DelegateChildFailureKind::Unknown,
             },
             result: None,
             started_at: now,
@@ -2652,7 +2668,10 @@ This agent runs in write mode and can modify files.
         );
         store.update_task_status(
             "delegate_timeout",
-            DelegateTaskStatus::Failed { error: err.clone() },
+            DelegateTaskStatus::Failed {
+                error: err.clone(),
+                kind: DelegateChildFailureKind::Unknown,
+            },
             Some(err),
         );
         let progress = store.progress_snapshot();
@@ -2726,7 +2745,10 @@ exec sleep 10
         assert!(err.contains("no output for 1s"), "{err}");
         store.update_task_status(
             "delegate_idle_timeout",
-            DelegateTaskStatus::Failed { error: err.clone() },
+            DelegateTaskStatus::Failed {
+                error: err.clone(),
+                kind: DelegateChildFailureKind::Unknown,
+            },
             Some(err),
         );
         let progress = store.progress_snapshot();
