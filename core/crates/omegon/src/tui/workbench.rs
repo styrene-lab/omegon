@@ -616,7 +616,12 @@ pub fn render_workbench_panel(
     if let Some(snapshot) = state.active.as_ref() {
         render_active_workbench_panel(area, frame, t, snapshot, state.workstreams.len());
     } else if let Some(cleave) = state.cleave.as_ref().filter(|p| p.active) {
-        render_cleave_workbench_panel(area, frame, t, cleave);
+        render_operation_workbench_panel(
+            area,
+            frame,
+            t,
+            &OperationWorkbenchProjection::from_cleave(cleave),
+        );
     } else if let Some(delegate) = state
         .delegate
         .as_ref()
@@ -665,47 +670,6 @@ fn render_active_workbench_panel(
         lines.push(Line::from(Span::styled(row.text, style)));
     }
 
-    Paragraph::new(lines)
-        .style(Style::default().bg(bg))
-        .wrap(Wrap { trim: false })
-        .render(area, frame.buffer_mut());
-}
-
-fn render_cleave_workbench_panel(
-    area: Rect,
-    frame: &mut Frame,
-    t: &dyn theme::Theme,
-    progress: &CleaveProgress,
-) {
-    let bg = t.surface_bg();
-    let mut lines = vec![workbench_rule_line(
-        t,
-        bg,
-        format!(
-            "cleave {}/{} · failed {}",
-            progress.completed, progress.total_children, progress.failed
-        ),
-        area.width,
-    )];
-    let max_rows = area.height.saturating_sub(1) as usize;
-    for child in progress.children.iter().take(max_rows) {
-        let task_progress = if child.tasks.is_empty() {
-            String::new()
-        } else {
-            format!(" · tasks {}/{}", child.tasks_done, child.tasks.len())
-        };
-        let text = worker_chrome_line(
-            &child.label,
-            &child.status,
-            child.last_tool.as_deref(),
-            &task_progress,
-            area.width,
-        );
-        lines.push(Line::from(Span::styled(
-            text,
-            worker_status_style(&child.status, t, bg),
-        )));
-    }
     Paragraph::new(lines)
         .style(Style::default().bg(bg))
         .wrap(Wrap { trim: false })
@@ -774,7 +738,7 @@ fn operation_worker_chrome_line(child: &OperationChildRow, width: u16) -> String
         .map(|activity| activity.label.as_str());
     worker_chrome_line(
         &child.label,
-        &child.status_label,
+        child.status.label(),
         last_tool,
         &format!("{task_progress}{failure}"),
         width,

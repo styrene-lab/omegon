@@ -3598,7 +3598,10 @@ fn draw_routes_active_cleave_to_workbench_without_instruments() {
 
     let rendered = render_app_to_string(&mut app, 140, 36);
 
-    assert!(rendered.contains("cleave 1/2"), "{rendered}");
+    assert!(
+        rendered.contains("cleave running 1 · done 1 · failed 0"),
+        "{rendered}"
+    );
     assert!(rendered.contains("ui running"), "{rendered}");
     assert!(rendered.contains("bash"), "{rendered}");
 }

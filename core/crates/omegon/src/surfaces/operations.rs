@@ -5,6 +5,7 @@
 //! projections instead of inferring status from raw tool-call or decomposition
 //! event text.
 
+use crate::features::cleave::CleaveProgress;
 use crate::features::delegate::DelegateProgress;
 use omegon_traits::{OperationKind, OperationRef};
 
@@ -31,6 +32,26 @@ impl OperationWorkbenchProjection {
                 .collect(),
         }
     }
+
+    pub fn from_cleave(progress: &CleaveProgress) -> Self {
+        Self {
+            operation: OperationRef::cleave(
+                (!progress.run_id.is_empty()).then_some(progress.run_id.clone()),
+            ),
+            running: progress
+                .children
+                .iter()
+                .filter(|child| matches!(child.status.as_str(), "running" | "pending"))
+                .count(),
+            completed: progress.completed,
+            failed: progress.failed,
+            children: progress
+                .children
+                .iter()
+                .map(OperationChildRow::from_cleave_child)
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +67,36 @@ pub struct OperationChildRow {
 }
 
 impl OperationChildRow {
+    fn from_cleave_child(child: &crate::features::cleave::ChildProgress) -> Self {
+        let status = OperationChildStatus::from_cleave_status(&child.status);
+        Self {
+            operation_kind: OperationKind::Cleave,
+            id: child.label.clone(),
+            label: child.label.clone(),
+            status,
+            status_label: child.status.clone(),
+            last_activity: child.last_tool.as_ref().map(|tool| OperationActivity {
+                kind: OperationActivityKind::Tool,
+                label: tool.clone(),
+                turn: child.last_turn,
+            }),
+            progress: (!child.tasks.is_empty()).then_some(OperationChildProgress {
+                done: child.tasks_done,
+                total: child.tasks.len(),
+            }),
+            failure: match status {
+                OperationChildStatus::Failed | OperationChildStatus::TimedOut => {
+                    Some(OperationFailure {
+                        kind: OperationFailureKind::Unknown,
+                        message: None,
+                        recoverable: false,
+                    })
+                }
+                _ => None,
+            },
+        }
+    }
+
     fn from_delegate_child(child: &crate::features::delegate::DelegateProgressChild) -> Self {
         let status = OperationChildStatus::from_delegate_status(&child.status);
         let failure = match status {
@@ -88,7 +139,19 @@ pub enum OperationChildStatus {
 }
 
 impl OperationChildStatus {
-    fn from_delegate_status(status: &str) -> Self {
+    pub fn from_cleave_status(status: &str) -> Self {
+        match status {
+            "pending" => Self::Queued,
+            "running" => Self::Running,
+            "completed" | "merged_after_failure" => Self::Succeeded,
+            "failed" | "upstream_exhausted" => Self::Failed,
+            "cancelled" => Self::Cancelled,
+            "timed_out" | "timeout" | "idle_timeout" => Self::TimedOut,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn from_delegate_status(status: &str) -> Self {
         match status {
             "running" => Self::Running,
             "completed" => Self::Succeeded,
@@ -100,6 +163,31 @@ impl OperationChildStatus {
             "waiting" => Self::Waiting,
             _ => Self::Unknown,
         }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Starting => "starting",
+            Self::Running => "running",
+            Self::Waiting => "waiting",
+            Self::Succeeded => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::TimedOut => "timed out",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Succeeded | Self::Failed | Self::Cancelled | Self::TimedOut
+        )
+    }
+
+    pub fn is_failure(self) -> bool {
+        matches!(self, Self::Failed | Self::TimedOut)
     }
 }
 
@@ -283,5 +371,78 @@ mod tests {
             Some("Delegate idle timeout — no output for 120s")
         );
         assert!(failure.recoverable);
+    }
+    fn cleave_child(label: &str, status: &str) -> crate::features::cleave::ChildProgress {
+        crate::features::cleave::ChildProgress {
+            label: label.into(),
+            status: status.into(),
+            duration_secs: None,
+            supervision_mode: None,
+            pid: None,
+            last_tool: None,
+            last_turn: None,
+            tasks: Vec::new(),
+            tasks_done: 0,
+            started_at: None,
+            last_activity_at: None,
+            tokens_in: 0,
+            tokens_out: 0,
+            runtime: None,
+        }
+    }
+
+    #[test]
+    fn operation_child_status_exposes_canonical_labels() {
+        assert_eq!(OperationChildStatus::Queued.label(), "queued");
+        assert_eq!(OperationChildStatus::Running.label(), "running");
+        assert_eq!(OperationChildStatus::Succeeded.label(), "completed");
+        assert_eq!(OperationChildStatus::TimedOut.label(), "timed out");
+        assert!(OperationChildStatus::Succeeded.is_terminal());
+        assert!(OperationChildStatus::Failed.is_terminal());
+        assert!(!OperationChildStatus::Running.is_terminal());
+        assert!(OperationChildStatus::Failed.is_failure());
+        assert!(OperationChildStatus::TimedOut.is_failure());
+        assert!(!OperationChildStatus::Cancelled.is_failure());
+    }
+
+    #[test]
+    fn cleave_progress_maps_to_operation_projection() {
+        let mut alpha = cleave_child("alpha", "completed");
+        alpha.last_tool = Some("bash".into());
+        alpha.last_turn = Some(2);
+        alpha.tasks_done = 1;
+        alpha.tasks = vec![ChildTaskItem {
+            description: "validate".into(),
+            done: true,
+        }];
+        let beta = cleave_child("beta", "failed");
+
+        let projection = OperationWorkbenchProjection::from_cleave(&CleaveProgress {
+            active: true,
+            run_id: "run-1".into(),
+            total_children: 2,
+            completed: 1,
+            failed: 1,
+            children: vec![alpha, beta],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        });
+
+        assert_eq!(projection.operation.kind, OperationKind::Cleave);
+        assert_eq!(projection.operation.id.as_deref(), Some("run-1"));
+        assert_eq!(projection.running, 0);
+        assert_eq!(projection.completed, 1);
+        assert_eq!(projection.failed, 1);
+        assert_eq!(
+            projection.children[0].status,
+            OperationChildStatus::Succeeded
+        );
+        assert_eq!(
+            projection.children[0].last_activity.as_ref().unwrap().label,
+            "bash"
+        );
+        assert_eq!(projection.children[0].progress.as_ref().unwrap().done, 1);
+        assert_eq!(projection.children[1].status, OperationChildStatus::Failed);
+        assert!(projection.children[1].failure.is_some());
     }
 }
