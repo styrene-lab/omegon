@@ -232,13 +232,9 @@ mod tests {
 
     #[tokio::test]
     async fn initializes_tool_and_returns_degraded_report_without_delegation_or_nex() {
-        static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let original_path = {
-            let _guard = PATH_LOCK.lock().unwrap();
-            let original_path = std::env::var_os("PATH");
-            unsafe { std::env::set_var("PATH", "") };
-            original_path
-        };
+        let _env_guard = crate::test_support::env::lock_async().await;
+        let original_path = std::env::var_os("PATH");
+        unsafe { std::env::set_var("PATH", "") };
 
         let dir = tempfile::tempdir().unwrap();
         let provider = NexSubstrateProvider::new(dir.path().to_path_buf());
@@ -253,12 +249,10 @@ mod tests {
             )
             .await;
 
-        let _guard = PATH_LOCK.lock().unwrap();
         match original_path {
             Some(path) => unsafe { std::env::set_var("PATH", path) },
             None => unsafe { std::env::remove_var("PATH") },
         }
-        drop(_guard);
 
         let result = result.expect("missing Nex should degrade, not fail the tool call");
         assert!(

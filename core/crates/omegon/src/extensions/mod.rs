@@ -2048,6 +2048,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_accepts_current_sdk_contract() {
+        let _env_guard = crate::test_support::env::lock_async().await;
         let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(
@@ -2063,6 +2064,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_allows_older_compatible_sdk_contract_with_warning() {
+        let _env_guard = crate::test_support::env::lock_async().await;
         let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(
@@ -2079,6 +2081,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_rejects_newer_unknown_sdk_contract() {
+        let _env_guard = crate::test_support::env::lock_async().await;
         let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(temp.path(), Some("0.26"));

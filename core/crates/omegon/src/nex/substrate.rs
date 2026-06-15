@@ -644,23 +644,17 @@ mod tests {
 
     #[tokio::test]
     async fn missing_nex_returns_advisory_degraded_report() {
-        static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let original_path = {
-            let _guard = PATH_LOCK.lock().unwrap();
-            let original_path = std::env::var_os("PATH");
-            unsafe { std::env::set_var("PATH", "") };
-            original_path
-        };
+        let _env_guard = crate::test_support::env::lock_async().await;
+        let original_path = std::env::var_os("PATH");
+        unsafe { std::env::set_var("PATH", "") };
 
         let dir = tempfile::tempdir().unwrap();
         let report = inspect_devenv(dir.path()).await;
 
-        let _guard = PATH_LOCK.lock().unwrap();
         match original_path {
             Some(path) => unsafe { std::env::set_var("PATH", path) },
             None => unsafe { std::env::remove_var("PATH") },
         }
-        drop(_guard);
 
         assert_eq!(report.schema, REPORT_SCHEMA);
         assert_eq!(report.source, "nex");

@@ -548,6 +548,7 @@ directive_extend = ["PERSONA.personal.md"]
 
     #[test]
     fn load_pkl_manifest() {
+        let _env_guard = crate::test_support::env::lock();
         if !has_pkl() {
             eprintln!("skipping: pkl binary not found");
             return;

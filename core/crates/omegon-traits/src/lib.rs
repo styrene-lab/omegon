@@ -69,6 +69,268 @@ impl OperationRef {
     }
 }
 
+
+/// Stable renderer/client-facing status for child operations such as delegate
+/// tasks and cleave children. This is intentionally broader than any single
+/// engine's internal state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationChildStatus {
+    Queued,
+    Starting,
+    Running,
+    Waiting,
+    Completed,
+    Failed,
+    Cancelled,
+    TimedOut,
+    Unknown,
+}
+
+/// Stable operator-facing failure taxonomy shared by delegate, cleave, ACP,
+/// TUI, and Web projections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationFailureKind {
+    IdleTimeout,
+    TimedOut,
+    ProcessExit,
+    ModelError,
+    ToolPermissionDenied,
+    ToolExecutionFailed,
+    SandboxViolation,
+    MergeConflict,
+    CancelledByOperator,
+    DuplicateTask,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationActivity {
+    pub kind: OperationActivityKind,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationActivityKind {
+    Tool,
+    Message,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationChildProgress {
+    pub done: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationFailure {
+    pub kind: OperationFailureKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    pub recoverable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationChildProjection {
+    pub id: String,
+    pub label: String,
+    pub status: OperationChildStatus,
+    pub status_label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_activity: Option<OperationActivity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<OperationChildProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<OperationFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationProjection {
+    pub operation: OperationRef,
+    pub active: bool,
+    pub running: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub child_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<OperationChildProjection>,
+}
+
+/// Operator authority levels used by prompt generation, command safety, and
+/// tool approval gates. These are policy labels, not mere prose tone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutonomyLevel {
+    Manual,
+    Conservative,
+    Autonomous,
+    Orchestrator,
+    Batch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionPolicy {
+    Deny,
+    RequireApproval,
+    Allow,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentAuthorityPolicy {
+    pub level: AutonomyLevel,
+    pub delegate_scout: DecisionPolicy,
+    pub delegate_patch: DecisionPolicy,
+    pub delegate_verify: DecisionPolicy,
+    pub cleave_assess: DecisionPolicy,
+    pub cleave_run: DecisionPolicy,
+    pub max_children: usize,
+    pub max_parallel: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequiredApproval {
+    pub kind: RequiredApprovalKind,
+    pub operation: String,
+    pub reason: String,
+    pub autonomy: AutonomyLevel,
+    #[serde(default)]
+    pub requested: Value,
+    #[serde(default)]
+    pub allowed: Value,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<ApprovalChoice>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequiredApprovalKind {
+    ApprovalRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalChoice {
+    pub id: String,
+    pub label: String,
+    pub scope: ApprovalScope,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grants: Vec<AuthorityGrant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalScope {
+    Once,
+    Session,
+    Project,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AuthorityGrant {
+    CleaveRun { max_children: usize, max_parallel: usize },
+    DelegatePatch { max_tasks: Option<usize> },
+    OciExecution { image: Option<String> },
+    CloudModelBudget { max_usd: Option<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChildExecutionMode {
+    Inherited,
+    Oci {
+        image: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pull_policy: Option<OciPullPolicy>,
+    },
+    Orchestrated { substrate: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OciPullPolicy {
+    Missing,
+    Always,
+    Never,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionSubstrate {
+    pub kind: ExecutionSubstrateKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container: Option<ContainerSubstrate>,
+    pub paths: ExecutionSubstratePaths,
+    pub capabilities: ExecutionSubstrateCapabilities,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionSubstrateKind {
+    HostNative,
+    HostShimOci,
+    OrchestratedContainer,
+    Kubernetes,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContainerSubstrate {
+    pub detected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<ContainerRuntimeKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_digest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orchestrator: Option<ContainerOrchestratorKind>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContainerRuntimeKind {
+    Podman,
+    Docker,
+    Containerd,
+    CriO,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContainerOrchestratorKind {
+    Kubernetes,
+    Nomad,
+    Systemd,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionSubstratePaths {
+    pub workspace: String,
+    pub omegon_home: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub home: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionSubstrateCapabilities {
+    pub can_launch_sibling_containers: bool,
+    pub can_mount_host_paths: bool,
+    pub can_write_workspace: bool,
+    pub has_host_runtime: bool,
+    pub has_kubernetes_service_account: bool,
+}
+
 pub const IPC_PROTOCOL_VERSION: u16 = 1;
 /// Maximum allowed encoded frame size (8 MiB).
 pub const IPC_MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;

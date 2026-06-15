@@ -35,6 +35,7 @@ mod autonomy;
 mod backend;
 mod behavior;
 mod bootstrap;
+mod test_support;
 mod bridge;
 pub mod bus;
 mod cleave;
