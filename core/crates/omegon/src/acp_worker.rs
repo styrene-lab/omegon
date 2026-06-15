@@ -1342,6 +1342,23 @@ mod command_safety_tests {
     }
 
     #[test]
+    fn acp_registered_subagent_command_dispatches_through_command_registry() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::features::delegate::DelegateFeature::new(
+            temp_dir.path(),
+            vec![],
+            false,
+        )));
+        bus.finalize();
+
+        let response = handle_registered_acp_command(&mut bus, "subagent", "status", false)
+            .expect("registered subagent command response");
+
+        assert!(response.contains("Delegate Tasks"), "{response}");
+    }
+
+    #[test]
     fn acp_registered_prompt_command_preview_uses_safety_boundary() {
         let mut bus = crate::bus::EventBus::new();
         bus.register(Box::new(crate::features::prompt::PromptFeature::new()));

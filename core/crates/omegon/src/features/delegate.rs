@@ -1579,7 +1579,7 @@ impl Feature for DelegateFeature {
                     // Return task ID for background execution
                     Ok(ToolResult {
                         content: vec![ContentBlock::Text {
-                            text: format!("{{\"task_id\": \"{}\"}}", task_id),
+                            text: format_background_delegate_started(&task_id),
                         }],
                         details: json!({ "task_id": task_id, "background": true }),
                     })
@@ -1940,6 +1940,12 @@ pub fn scan_agents(cwd: &Path) -> Vec<AgentSpec> {
     agents
 }
 
+fn format_background_delegate_started(task_id: &str) -> String {
+    format!(
+        "Subagent started in background.\n\nTask ID: `{task_id}`\nCheck status: `/subagent status`\nRetrieve result: call `delegate_result` with `task_id: \"{task_id}\"`"
+    )
+}
+
 /// Parse agent specification from markdown content
 fn parse_agent_spec(content: &str) -> Option<AgentSpec> {
     let lines: Vec<&str> = content.lines().collect();
@@ -2062,6 +2068,15 @@ mod tests {
     }
 
     #[test]
+    fn background_delegate_started_message_bridges_subagent_status_and_result() {
+        let rendered = format_background_delegate_started("delegate_42");
+        assert!(rendered.contains("Subagent started in background"));
+        assert!(rendered.contains("/subagent status"));
+        assert!(rendered.contains("delegate_result"));
+        assert!(rendered.contains("delegate_42"));
+    }
+
+    #[test]
     fn delegate_tool_schema_exposes_worker_profile() {
         let temp_dir = TempDir::new().unwrap();
         let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
@@ -2097,6 +2112,15 @@ mod tests {
         assert!(tools.iter().any(|t| t.name == "delegate"));
         assert!(tools.iter().any(|t| t.name == "delegate_result"));
         assert!(tools.iter().any(|t| t.name == "delegate_status"));
+    }
+
+    #[test]
+    fn delegate_commands_expose_subagent_alias_for_registered_surfaces() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
+        let commands = feature.commands();
+        assert!(commands.iter().any(|command| command.name == "delegate"));
+        assert!(commands.iter().any(|command| command.name == "subagent"));
     }
 
     #[tokio::test]

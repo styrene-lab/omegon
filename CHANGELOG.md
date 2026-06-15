@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Added ACP command-registry coverage for the `subagent` alias and clearer background subagent start messages with status/result retrieval guidance.
 - Added `/subagent` and `/subagents` as operator-facing aliases for delegate status, and updated delegate metadata to describe same-provider subagents as the default path.
 - Added `just link-doctor` to inspect launcher PATH resolution, selected target, channel files, and fallback binary state.
 - Added fixture coverage for the stable launcher resolution policy, including env overrides, nearest checkout selection, channels, fallback binaries, paths with spaces, dev-release fallback, and self-recursion rejection.
