@@ -299,7 +299,7 @@ struct Cli {
     /// Disable all filesystem boundary checks. The agent can read/write
     /// anywhere on the host filesystem without permission prompts.
     /// Use for quick untethered work when you trust the model and want
-    /// zero friction. Incompatible with --sandboxed.
+    /// zero friction. Incompatible with --sandboxed/--oci.
     #[arg(long, conflicts_with = "sandboxed")]
     dangerously_bypass_permissions: bool,
 
@@ -307,8 +307,16 @@ struct Cli {
     /// directory is mounted at /work, everything else is kernel-isolated.
     /// Use for adversarial testing or when you want hard enforcement even
     /// in interactive mode. Requires podman or docker.
-    #[arg(long, conflicts_with = "dangerously_bypass_permissions")]
+    #[arg(long, alias = "oci", conflicts_with = "dangerously_bypass_permissions")]
     sandboxed: bool,
+
+    /// OCI image to use with --oci/--sandboxed.
+    #[arg(long, global = true)]
+    oci_image: Option<String>,
+
+    /// OCI runtime to use with --oci/--sandboxed (podman or docker).
+    #[arg(long, global = true)]
+    oci_runtime: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -1198,10 +1206,17 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // If --sandboxed is set and we're NOT already inside a container,
+    // If --sandboxed/--oci is set and we're NOT already inside a container,
     // re-exec the entire omegon session inside an OCI container.
-    if cli.sandboxed && std::env::var("OMEGON_INSIDE_SANDBOX").is_err() {
+    if cli.sandboxed
+        && std::env::var("OMEGON_INSIDE_SANDBOX").is_err()
+        && std::env::var("OMEGON_INSIDE_OCI").is_err()
+    {
         return run_sandboxed(&cli).await;
+    } else if cli.sandboxed {
+        anyhow::bail!(
+            "--oci/--sandboxed was requested while already running inside an OCI container"
+        );
     }
 
     // When launched via `ollama launch omegon`, the --ollama-model flag
@@ -1890,6 +1905,8 @@ async fn main() -> anyhow::Result<()> {
                     devastator: false,
                     dangerously_bypass_permissions: cli.dangerously_bypass_permissions,
                     sandboxed: false,
+                    oci_image: cli.oci_image.clone(),
+                    oci_runtime: cli.oci_runtime.clone(),
                 };
                 bench_cli.prompt_file = None;
                 run_agent_command(&bench_cli, Some(usage_json.clone())).await
@@ -8384,20 +8401,30 @@ spec:
 // filesystem isolation.
 
 async fn run_sandboxed(cli: &Cli) -> anyhow::Result<()> {
-    let runtime = nex::spawn::detect_container_runtime_public().ok_or_else(|| {
-        anyhow::anyhow!(
-            "--sandboxed requires a container runtime.\n\
+    let runtime = cli
+        .oci_runtime
+        .clone()
+        .or_else(|| std::env::var("OMEGON_OCI_RUNTIME").ok())
+        .or_else(nex::spawn::detect_container_runtime_public)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "--oci/--sandboxed requires a container runtime.\n\
              Install podman (recommended) or docker:\n  \
              macOS:  brew install podman\n  \
              Linux:  apt install podman\n  \
              NixOS:  nix-env -i podman"
-        )
-    })?;
+            )
+        })?;
 
     let version = env!("CARGO_PKG_VERSION");
-    // Allow image override for local/custom builds
-    let image = std::env::var("OMEGON_SANDBOX_IMAGE")
-        .unwrap_or_else(|_| format!("ghcr.io/styrene-lab/omegon:{version}"));
+    // Allow CLI/env image override for local/custom builds. The OCI alias uses
+    // the full substrate by default because that is the validated image family.
+    let image = cli
+        .oci_image
+        .clone()
+        .or_else(|| std::env::var("OMEGON_OCI_IMAGE").ok())
+        .or_else(|| std::env::var("OMEGON_SANDBOX_IMAGE").ok())
+        .unwrap_or_else(|| format!("ghcr.io/styrene-lab/omegon-full:{version}"));
     let cwd = std::fs::canonicalize(&cli.cwd)?;
 
     eprintln!("🔒 Running in sandboxed mode ({runtime} → {image})");
@@ -8561,6 +8588,12 @@ async fn run_sandboxed(cli: &Cli) -> anyhow::Result<()> {
     // Mark that we're inside the sandbox (prevents infinite re-exec)
     cmd.arg("-e");
     cmd.arg("OMEGON_INSIDE_SANDBOX=1");
+    cmd.arg("-e");
+    cmd.arg("OMEGON_INSIDE_OCI=1");
+    cmd.arg("-e");
+    cmd.arg("OMEGON_RUNTIME_CONTEXT=host-shim-oci");
+    cmd.arg("-e");
+    cmd.arg("OMEGON_OCI_LAUNCHER=omegon");
 
     // Labels
     cmd.arg("--label=sh.styrene.omegon.sandboxed=true");
@@ -9922,6 +9955,46 @@ mod tests {
             }
             _ => panic!("Expected Serve command"),
         }
+    }
+
+    #[test]
+    fn oci_alias_sets_sandboxed_and_accepts_overrides() {
+        let cli = Cli::try_parse_from(vec![
+            "omegon",
+            "--oci",
+            "--oci-image",
+            "ghcr.io/styrene-lab/omegon-full:0.27.0-local",
+            "--oci-runtime",
+            "podman",
+            "--prompt",
+            "hello",
+        ])
+        .expect("--oci alias and override flags should parse");
+
+        assert!(cli.sandboxed);
+        assert_eq!(
+            cli.oci_image.as_deref(),
+            Some("ghcr.io/styrene-lab/omegon-full:0.27.0-local")
+        );
+        assert_eq!(cli.oci_runtime.as_deref(), Some("podman"));
+    }
+
+    #[test]
+    fn oci_conflicts_with_dangerous_host_bypass() {
+        let err = match Cli::try_parse_from(vec![
+            "omegon",
+            "--oci",
+            "--dangerously-bypass-permissions",
+        ]) {
+            Ok(_) => panic!("OCI boundary must conflict with host permission bypass"),
+            Err(err) => err,
+        };
+
+        let message = err.to_string();
+        assert!(
+            message.contains("dangerously-bypass-permissions") || message.contains("oci"),
+            "unexpected clap error: {message}"
+        );
     }
 
     #[test]

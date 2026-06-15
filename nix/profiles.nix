@@ -45,6 +45,7 @@ let
       gitMinimal
       diffutils
       patch
+      just
     ];
   };
 

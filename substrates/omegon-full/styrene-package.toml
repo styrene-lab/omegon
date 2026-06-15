@@ -1,0 +1,24 @@
+[package]
+name = "styrene.omegon.substrate.full"
+version = "0.1.0"
+description = "Full-first Omegon OCI substrate for subagent/delegate/cleave dogfood."
+
+[nex]
+profile = "./profile.toml"
+
+[image]
+name = "ghcr.io/styrene-lab/omegon-full"
+tag = "0.27.0"
+entrypoint = "/bin/omegon"
+cmd = ["serve", "--control-port", "7842"]
+ports = [7842]
+
+[agent]
+role = "subagent-substrate"
+mode = "daemon"
+posture = "worker-capable"
+
+[labels]
+"sh.styrene.omegon.substrate" = "full-first"
+"sh.styrene.omegon.execution_boundary" = "inherited-parent-by-default"
+"sh.styrene.omegon.packaging_backend" = "nix-oci-until-nex-build-image"

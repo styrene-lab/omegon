@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Updated the `omegon-full` substrate profile seed to separate container home from the mounted workspace and align optional auth/config mounts with `/data/home` for orchestrated OCI deployments.
 - Mapped typed cleave child failure causes into the shared operation/workbench projection, including upstream exhaustion, merge conflicts, scope violations, timeouts, validation failures, and legacy upstream-exhausted compatibility.
 - Routed delegate/cleave transcript lifecycle milestones through the shared operation projection so Workbench and transcript rendering share operation semantics.
 - Replaced emoji-style status icons in Rust runtime/TUI strings with text-oriented Unicode glyphs for consistent terminal alignment.
@@ -30,6 +31,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Added CLI parser coverage for the `--oci` alias, OCI image/runtime overrides, and conflict handling with `--dangerously-bypass-permissions`.
+- Marked host-shim OCI launches with `OMEGON_RUNTIME_CONTEXT=host-shim-oci`/`OMEGON_OCI_LAUNCHER=omegon` and made recursive `--oci` requests inside an OCI container fail closed.
+- Added an orchestrated OCI runtime design for Kubernetes/CRI deployments where Omegon is launched by the orchestrator rather than by the native `--oci` host shim.
+- Added `--oci` as an alias for the existing OCI-backed `--sandboxed` launcher path, plus CLI/env image and runtime overrides that default the containerized substrate to `ghcr.io/styrene-lab/omegon-full:<version>`.
+- Added an OCI CLI execution-boundary design for a host-shim `omegon --oci` mode, covering image/runtime resolution, raw argv forwarding, mount/auth policy, daemon port mapping, extension isolation, and phased integration.
+- Documented the validated containerized daemon/control-port probe for the local `omegon-full` OCI image, including current provider-auth, host-extension, and IPC limitations.
+- Documented the validated Nix/Lima/nix2container/Podman smoke path for the local `omegon-full` OCI substrate and added local export/load recipes for pre-publication testing.
+- Added architecture-aware local OCI build guidance/target and made `oci-smoke` platform selection explicit via `OCI_PLATFORM` instead of forcing amd64 on Apple Silicon.
+- Added an initial Nex-facing `substrates/omegon-full` package/profile seed for the full-first subagent OCI substrate.
+- Expanded the subagent OCI substrate design around a full-first trim-down strategy, Armory/extension layer composition, mount policy, and Ratatui dogfooding constraints.
+- Documented the inherited-default subagent execution boundary and added a Podman-first OCI smoke target for the explicit isolated subagent substrate.
 - Added first-class delegate cancellation status so cancelled delegate children project as terminal non-failure operation rows instead of failed tasks.
 - Added `delegate_cancel` so running delegate tasks can be marked cancelled explicitly, preserving terminal non-failure state in delegate status and Workbench operation rows.
 - Fixed subagent/delegate review findings by keeping background delegate startup responses machine-readable, marking delegate/subagent status commands read-only, narrowing the plural `/subagents` alias, and avoiding cleave tool names in base prompts when only `delegate` is exposed.

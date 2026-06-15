@@ -42,31 +42,36 @@ let
     text = ''
       OMEGON_HOME="''${OMEGON_HOME:-/data/omegon}"
       SECRETS_JSON="$OMEGON_HOME/secrets.json"
-      mkdir -p "$OMEGON_HOME"
 
-      # Bootstrap secrets from environment variables.
-      # Writes env: recipes — omegon resolves them at runtime.
-      if [ ! -f "$SECRETS_JSON" ]; then
-        echo "{}" > "$SECRETS_JSON"
-        chmod 600 "$SECRETS_JSON"
-      fi
+      # Let toolchain/debug smoke commands behave like ordinary OCI images.
+      # Normal runs remain omegon-first via the final `exec omegon "$@"`.
+      case "''${1:-}" in
+        bash|sh|/bin/bash|/bin/sh)
+          exec "$@"
+          ;;
+      esac
 
-      # Build recipes JSON from well-known env vars
+      # Bootstrap secrets from environment variables. Writes env: recipes —
+      # omegon resolves them at runtime. If no known secret env vars are set,
+      # do not write secrets.json; this lets read-only OMEGON_HOME mounts work
+      # for smoke tests and config-only runs.
       RECIPES="{"
       FIRST=true
-      for VAR in ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY \
-                 VOX_DISCORD_BOT_TOKEN VOX_SLACK_BOT_TOKEN VOX_SLACK_APP_TOKEN \
-                 VOX_SIGNAL_PASSWORD VOX_EMAIL_PASSWORD VOX_MATRIX_PASSWORD \
-                 VOX_LXMF_IDENTITY GITHUB_TOKEN; do
+      for VAR in ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY                  VOX_DISCORD_BOT_TOKEN VOX_SLACK_BOT_TOKEN VOX_SLACK_APP_TOKEN                  VOX_SIGNAL_PASSWORD VOX_EMAIL_PASSWORD VOX_MATRIX_PASSWORD                  VOX_LXMF_IDENTITY GITHUB_TOKEN; do
         VAL="$(printenv "$VAR" 2>/dev/null || true)"
         if [ -n "$VAL" ]; then
           if [ "$FIRST" = true ]; then FIRST=false; else RECIPES="$RECIPES,"; fi
-          RECIPES="$RECIPES \"$VAR\": \"env:$VAR\""
+          RECIPES="$RECIPES \\"$VAR\\": \\"env:$VAR\\""
         fi
       done
       RECIPES="$RECIPES }"
-      echo "$RECIPES" > "$SECRETS_JSON"
-      chmod 600 "$SECRETS_JSON"
+      if [ "$FIRST" = false ]; then
+        mkdir -p "$OMEGON_HOME"
+        echo "$RECIPES" > "$SECRETS_JSON"
+        chmod 600 "$SECRETS_JSON"
+      elif [ ! -e "$OMEGON_HOME" ]; then
+        mkdir -p "$OMEGON_HOME"
+      fi
 
       # ── Egress filter ──────────────────────────────────────────────
       # When OMEGON_EGRESS_FILTER is set (JSON), restrict outbound traffic.

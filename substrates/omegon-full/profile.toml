@@ -1,0 +1,96 @@
+# Nex profile for the canonical full-first Omegon subagent substrate.
+# This is intent/source material for Nex image/profile composition; the current
+# packaging backend remains nix/oci.nix until Nex build-image is wired in.
+
+[profile]
+name = "omegon-full"
+description = "Full-first Omegon subagent substrate for delegate/cleave dogfood. Trim down after workflow proof."
+kind = "process-container"
+
+[capabilities]
+shell = true
+vcs = true
+search = true
+http = true
+archive = true
+python = true
+node = true
+rust = true
+infra = true
+
+[tools]
+required = [
+  "bash",
+  "coreutils",
+  "git",
+  "just",
+  "rg",
+  "fd",
+  "jq",
+  "curl",
+  "python",
+  "node",
+  "rustc",
+  "cargo",
+  "kubectl",
+  "helm",
+]
+
+[omegon]
+default_execution_boundary = "inherited-parent"
+advanced_execution_mode = "oci"
+entrypoint = "omegon"
+cmd = ["serve", "--control-port", "7842"]
+runtime_context = "orchestrated-container"
+workspace = "/workspace"
+home = "/data/home"
+extension_policy = "image-only"
+
+[mounts.workspace]
+path = "/workspace"
+mode = "rw"
+required = true
+
+[mounts.omegon_home]
+host = "~/.omegon"
+path = "/data/omegon"
+mode = "ro"
+required = true
+
+[mounts.container_home]
+path = "/data/home"
+mode = "rw"
+required = true
+notes = "Container HOME must be separate from /workspace so provider/config probes do not pollute the mounted project."
+
+[mounts.codex]
+host = "~/.codex"
+path = "/data/home/.codex"
+mode = "ro"
+required = false
+
+[mounts.git_config]
+host = "~/.gitconfig"
+path = "/data/home/.gitconfig"
+mode = "ro"
+required = false
+
+[mounts.ssh]
+host = "~/.ssh"
+path = "/data/home/.ssh"
+mode = "ro"
+required = false
+
+[secrets]
+embed_values = false
+contracts_only = true
+optional = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GITHUB_TOKEN",
+  "VOX_DISCORD_BOT_TOKEN",
+]
+
+[network]
+default = "operator-runtime-policy"
+notes = "Use runtime network policy; do not bake network assumptions into the image."

@@ -312,6 +312,89 @@ link-doctor:
         echo "  missing: $HOME/.omegon/bin/omegon"
     fi
 
+
+
+# Build the full Omegon OCI substrate for the local Linux architecture.
+# Defaults to aarch64-linux on Apple Silicon and x86_64-linux on x86_64 hosts.
+oci-build-local image="oci-full":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system="${OCI_SYSTEM:-}"
+    if [ -z "$system" ]; then
+        case "$(uname -m)" in
+            arm64|aarch64) system="aarch64-linux" ;;
+            x86_64|amd64) system="x86_64-linux" ;;
+            *) echo "✗ Cannot infer OCI_SYSTEM from $(uname -m); set OCI_SYSTEM=aarch64-linux or x86_64-linux"; exit 1 ;;
+        esac
+    fi
+    echo "── Building {{image}} for $system ──"
+    nix build ".#{{image}}" --accept-flake-config --system "$system" -o "result-{{image}}-$system"
+    echo "✓ result-{{image}}-$system"
+    echo "  If this host is not trusted for --system, configure a Linux builder for $system and rerun."
+
+# Export a nix2container image result to a Docker archive for local runtime loading.
+# Defaults to the local build symlink produced by `just oci-build-local`.
+oci-export-local image="oci-full" tag="ghcr.io/styrene-lab/omegon-full:0.27.0-local":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system="${OCI_SYSTEM:-}"
+    if [ -z "$system" ]; then
+        case "$(uname -m)" in
+            arm64|aarch64) system="aarch64-linux" ;;
+            x86_64|amd64) system="x86_64-linux" ;;
+            *) echo "✗ Cannot infer OCI_SYSTEM from $(uname -m); set OCI_SYSTEM=aarch64-linux or x86_64-linux"; exit 1 ;;
+        esac
+    fi
+    archive="${OCI_ARCHIVE:-result-{{image}}-$system.tar}"
+    echo "── Exporting {{image}} for $system to $archive ──"
+    nix build ".#{{image}}.copyTo" --accept-flake-config -o "result-{{image}}-copy"
+    "result-{{image}}-copy/bin/copy-to" "docker-archive:$archive:{{tag}}"
+    echo "✓ $archive"
+
+# Load a Docker archive produced by `just oci-export-local` into Podman or Docker.
+oci-load-local archive="result-oci-full-aarch64-linux.tar":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    runtime="${OCI_RUNTIME:-podman}"
+    if ! command -v "$runtime" >/dev/null 2>&1; then
+        echo "✗ OCI runtime not found: $runtime"
+        echo "  Install podman, or run with OCI_RUNTIME=docker if Docker is available."
+        exit 1
+    fi
+    "$runtime" load -i "{{archive}}"
+
+# Smoke-test an Omegon OCI image as an explicit subagent substrate.
+# Podman is canonical; set OCI_RUNTIME=docker for Docker-compatible hosts.
+oci-smoke image="ghcr.io/styrene-lab/omegon-full":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    runtime="${OCI_RUNTIME:-podman}"
+    if ! command -v "$runtime" >/dev/null 2>&1; then
+        echo "✗ OCI runtime not found: $runtime"
+        echo "  Install podman, or run with OCI_RUNTIME=docker if Docker is available."
+        exit 1
+    fi
+    omegon_mount="ro"
+    if [ "${OCI_OMEGON_HOME_RW:-0}" = "1" ]; then
+        omegon_mount="rw"
+    fi
+    workspace_opts=":Z"
+    omegon_home_opts=":${omegon_mount},Z"
+    platform_args=()
+    if [ "$runtime" = "docker" ]; then
+        workspace_opts=""
+        omegon_home_opts=":${omegon_mount}"
+    fi
+    if [ -n "${OCI_PLATFORM:-}" ]; then
+        platform_args=(--platform "$OCI_PLATFORM")
+    fi
+    "$runtime" run --rm "${platform_args[@]}" \
+        -v "$(pwd):/workspace${workspace_opts}" \
+        -v "$HOME/.omegon:/data/omegon${omegon_home_opts}" \
+        -w /workspace \
+        "{{image}}" \
+        bash -lc 'omegon --version && git --version && just --version && rg --version && jq --version && python --version && node --version && rustc --version && cargo --version && kubectl version --client=true && helm version --short'
+
 # Install bundled skills to ~/.omegon/skills/ so they are available to all projects.
 # Uses the binary itself (embedded assets) so this works for both source and brew installs.
 # Project-local skills go in .omegon/skills/ inside each repo.
