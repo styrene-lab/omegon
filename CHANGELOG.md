@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 - Added a conservative subagent autonomy policy layer that now drives prompt guidance for delegate/cleave operations, keeping `cleave_run` approval-oriented by default while allowing bounded scout/verify delegates.
+- Gated mutating `delegate` patch workers behind structured approval details under the conservative subagent autonomy policy before allocating delegate tasks or spawning child workers.
 - Gated over-limit `cleave_run` requests behind structured approval details under the conservative subagent autonomy policy before creating cleave workspaces or spawning children.
 - Added CLI parser coverage for the `--oci` alias, OCI image/runtime overrides, and conflict handling with `--dangerously-bypass-permissions`.
 - Marked host-shim OCI launches with `OMEGON_RUNTIME_CONTEXT=host-shim-oci`/`OMEGON_OCI_LAUNCHER=omegon` and made recursive `--oci` requests inside an OCI container fail closed.
@@ -63,6 +64,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a source-agnostic skill suggestion helper that evaluates parsed bundled, user-installed, Armory-installed, or project-local skills against profile, intent, and project-signal evidence without performing runtime injection, preserving external metadata diagnostics instead of silently dropping malformed activation hints.
 
 ### Fixed
+- Avoid caching Pkl binary availability so env-mutating tests or runtime PATH changes cannot poison agent manifest loading for the rest of the process.
 - `omegon --which` now reports checkout `HEAD` freshness for launcher-selected checkout/channel binaries and suggests `cd <root> && just link` when a local build is stale.
 - Replaced active ACP binary-linking guidance that recommended direct `~/.local/bin` symlinks with the stable launcher/channel workflow.
 - **Startup provider credential race** — interactive launch now performs a refresh/adoption pass before emitting a missing or expired credential warning for the selected provider. This prevents a just-saved `openai-codex` OAuth entry from being reported as absent on the next rebuilt launch.
