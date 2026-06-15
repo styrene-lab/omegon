@@ -117,7 +117,7 @@ actual cleave operation emits/renders cleave milestone
 ### Phase 4 — Cancellation/failure parity follow-up
 
 - [x] Add `DelegateTaskStatus::Cancelled { reason }` so cancellation is represented as terminal non-failure state rather than failure.
-- [ ] Define delegate cancellation control action if still absent.
+- [x] Define delegate cancellation control action via `delegate_cancel`.
 - [x] Map delegate and cleave failures to shared operator-facing failure taxonomy.
 
 Acceptance:
@@ -148,7 +148,7 @@ Completed follow-up slices:
 - surfaced delegate failure summaries through shared operation child rows;
 - added first-class delegate cancelled status that projects as terminal non-failure operation state.
 
-Next narrow patch target: define the delegate cancellation control action, then decide whether transcript milestone rendering should consume operation projection helpers instead of bespoke event strings.
+Next narrow patch target: decide whether transcript milestone rendering should consume operation projection helpers instead of bespoke event strings, then add typed cleave child failure causes.
 
 ## Validation plan
 

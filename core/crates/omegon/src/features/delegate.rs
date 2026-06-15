@@ -156,6 +156,31 @@ impl DelegateResultStore {
         }
     }
 
+    pub fn cancel_task(
+        &self,
+        task_id: &str,
+        reason: Option<String>,
+    ) -> anyhow::Result<DelegateTaskStatus> {
+        let mut tasks = self.tasks.lock().unwrap();
+        let task = tasks
+            .get_mut(task_id)
+            .ok_or_else(|| anyhow::anyhow!("Task not found: {}", task_id))?;
+        match &task.status {
+            DelegateTaskStatus::Running => {
+                let status = DelegateTaskStatus::Cancelled {
+                    reason: reason.clone(),
+                };
+                task.status = status.clone();
+                task.result = reason;
+                task.completed_at = Some(SystemTime::now());
+                Ok(status)
+            }
+            status @ (DelegateTaskStatus::Completed { .. }
+            | DelegateTaskStatus::Failed { .. }
+            | DelegateTaskStatus::Cancelled { .. }) => Ok(status.clone()),
+        }
+    }
+
     pub fn list_all_tasks(&self) -> Vec<DelegateTask> {
         let tasks = self.tasks.lock().unwrap();
         tasks.values().cloned().collect()
@@ -361,6 +386,7 @@ impl DelegateWorkerProfile {
                 "delegate".into(),
                 "delegate_result".into(),
                 "delegate_status".into(),
+                "delegate_cancel".into(),
                 "request_context".into(),
                 "context_compact".into(),
                 "context_clear".into(),
@@ -1384,6 +1410,23 @@ impl Feature for DelegateFeature {
                 }),
                 capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
+            ToolDefinition {
+                name: crate::tool_registry::delegate::DELEGATE_CANCEL.to_string(),
+                label: "Cancel Delegate Task".to_string(),
+                description: "Mark a running delegate task as cancelled. This records terminal non-failure state; process termination is best-effort and may already have completed.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "task_id": { "type": "string", "description": "The delegate task ID to cancel" },
+                        "reason": { "type": "string", "description": "Optional cancellation reason" }
+                    },
+                    "required": ["task_id"]
+                }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::StateChanging,
+                    omegon_traits::ToolCapability::ProgressBoundary,
+                ],
+            },
         ]
     }
 
@@ -1676,6 +1719,54 @@ impl Feature for DelegateFeature {
                 }
             }
 
+            crate::tool_registry::delegate::DELEGATE_CANCEL => {
+                let task_id: String = args
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("task_id parameter is required"))?
+                    .to_string();
+                let reason = args
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                let status = self.result_store.cancel_task(&task_id, reason.clone())?;
+                if let Ok(mut handle) = self.progress_handle.lock() {
+                    *handle = self.result_store.progress_snapshot();
+                }
+                let text = match status {
+                    DelegateTaskStatus::Cancelled { ref reason } => reason
+                        .as_ref()
+                        .map(|reason| format!("Delegate task {task_id} cancelled: {reason}"))
+                        .unwrap_or_else(|| format!("Delegate task {task_id} cancelled")),
+                    DelegateTaskStatus::Running => {
+                        format!("Delegate task {task_id} is still running")
+                    }
+                    DelegateTaskStatus::Completed { success: true } => {
+                        format!("Delegate task {task_id} already completed")
+                    }
+                    DelegateTaskStatus::Completed { success: false } => {
+                        format!("Delegate task {task_id} already completed with failure")
+                    }
+                    DelegateTaskStatus::Failed { ref error, .. } => {
+                        format!("Delegate task {task_id} already failed: {error}")
+                    }
+                };
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text { text }],
+                    details: json!({
+                        "task_id": task_id,
+                        "status": match status {
+                            DelegateTaskStatus::Cancelled { .. } => "cancelled",
+                            DelegateTaskStatus::Running => "running",
+                            DelegateTaskStatus::Completed { success: true } => "completed",
+                            DelegateTaskStatus::Completed { success: false } => "completed_failed",
+                            DelegateTaskStatus::Failed { .. } => "failed",
+                        },
+                        "reason": reason,
+                    }),
+                })
+            }
+
             crate::tool_registry::delegate::DELEGATE_STATUS => {
                 let snapshot = self.result_store.progress_snapshot();
                 let mut status_text = String::from(
@@ -1706,6 +1797,7 @@ impl Feature for DelegateFeature {
                         "running" => "🔄 Running",
                         "completed" => "✅ Completed",
                         "failed" => "❌ Failed",
+                        "cancelled" => "⊘ Cancelled",
                         other => other,
                     };
                     let last_tool = child.last_tool.as_deref().unwrap_or("-");
@@ -2474,6 +2566,60 @@ This agent runs in write mode and can modify files.
                 "should not be disabled after reset: {e}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn delegate_cancel_tool_reports_cancelled_status() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
+        let now = SystemTime::now();
+        feature.result_store.store_task(DelegateTask {
+            task_id: "delegate_1".into(),
+            agent_name: Some("verify".into()),
+            task_description: "Verify cancellation".into(),
+            status: DelegateTaskStatus::Running,
+            result: None,
+            started_at: now,
+            completed_at: None,
+            last_tool: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+
+        let result = feature
+            .execute(
+                "delegate_cancel",
+                "cancel_call",
+                json!({ "task_id": "delegate_1", "reason": "operator stopped it" }),
+                CancellationToken::new(),
+            )
+            .await
+            .expect("cancel tool result");
+
+        let text = result
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(
+                "
+",
+            );
+        assert!(
+            text.contains("Delegate task delegate_1 cancelled: operator stopped it"),
+            "{text}"
+        );
+        assert_eq!(result.details["task_id"], "delegate_1");
+        assert_eq!(result.details["status"], "cancelled");
+        assert_eq!(result.details["reason"], "operator stopped it");
+
+        let snapshot = feature.result_store.progress_snapshot();
+        assert_eq!(snapshot.running, 0);
+        assert_eq!(snapshot.failed, 0);
+        assert_eq!(snapshot.children[0].status, "cancelled");
     }
 
     #[test]

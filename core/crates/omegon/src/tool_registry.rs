@@ -94,6 +94,7 @@ pub mod delegate {
     pub const DELEGATE: &str = "delegate";
     pub const DELEGATE_RESULT: &str = "delegate_result";
     pub const DELEGATE_STATUS: &str = "delegate_status";
+    pub const DELEGATE_CANCEL: &str = "delegate_cancel";
 }
 
 /// Agent journal — owned by `features::session_log`
@@ -226,6 +227,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         delegate::DELEGATE,
         delegate::DELEGATE_RESULT,
         delegate::DELEGATE_STATUS,
+        delegate::DELEGATE_CANCEL,
         // session_log (1)
         session_log::SESSION_LOG,
         // model_budget (3)
