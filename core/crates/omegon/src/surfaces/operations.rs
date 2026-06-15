@@ -10,6 +10,60 @@ use crate::features::delegate::{DelegateChildFailureKind, DelegateProgress};
 use omegon_traits::{OperationKind, OperationRef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationMilestoneProjection {
+    pub icon: &'static str,
+    pub text: String,
+}
+
+impl OperationMilestoneProjection {
+    pub fn started(operation: &OperationRef, child_count: usize) -> Self {
+        match operation.kind {
+            OperationKind::Cleave => Self {
+                icon: "↯",
+                text: format!("Cleave: {child_count} children dispatched"),
+            },
+            OperationKind::Delegate => {
+                let label = operation.id.as_deref().unwrap_or("subagent");
+                Self {
+                    icon: "⇉",
+                    text: format!("Delegate: {label} started"),
+                }
+            }
+        }
+    }
+
+    pub fn child_completed(operation: &OperationRef, label: &str, success: bool) -> Self {
+        let icon = if success { "✓" } else { "✗" };
+        match operation.kind {
+            OperationKind::Cleave => Self {
+                icon,
+                text: format!("Child '{label}' completed"),
+            },
+            OperationKind::Delegate => Self {
+                icon,
+                text: format!("Delegate: {label} completed"),
+            },
+        }
+    }
+
+    pub fn completed(operation: &OperationRef, merged: bool) -> Self {
+        let status = if merged {
+            "merged"
+        } else {
+            "completed (no merge)"
+        };
+        let label = match operation.kind {
+            OperationKind::Cleave => "Cleave",
+            OperationKind::Delegate => "Delegate",
+        };
+        Self {
+            icon: "↯",
+            text: format!("{label} {status}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationWorkbenchProjection {
     pub operation: OperationRef,
     pub running: usize,
@@ -561,6 +615,39 @@ mod tests {
             OperationFailureKind::IdleTimeout
         );
         assert!(projection.children[1].failure.as_ref().unwrap().recoverable);
+    }
+
+    #[test]
+    fn operation_milestone_delegate_started() {
+        let milestone =
+            OperationMilestoneProjection::started(&OperationRef::delegate("delegate_1"), 1);
+        assert_eq!(milestone.icon, "⇉");
+        assert_eq!(milestone.text, "Delegate: delegate_1 started");
+    }
+
+    #[test]
+    fn operation_milestone_cleave_started() {
+        let milestone = OperationMilestoneProjection::started(&OperationRef::cleave(None), 2);
+        assert_eq!(milestone.icon, "↯");
+        assert_eq!(milestone.text, "Cleave: 2 children dispatched");
+    }
+
+    #[test]
+    fn operation_milestone_delegate_child_completed() {
+        let milestone = OperationMilestoneProjection::child_completed(
+            &OperationRef::delegate("delegate_1"),
+            "delegate_1",
+            true,
+        );
+        assert_eq!(milestone.icon, "✓");
+        assert_eq!(milestone.text, "Delegate: delegate_1 completed");
+    }
+
+    #[test]
+    fn operation_milestone_cleave_completed_preserves_merge_status() {
+        let milestone = OperationMilestoneProjection::completed(&OperationRef::cleave(None), true);
+        assert_eq!(milestone.icon, "↯");
+        assert_eq!(milestone.text, "Cleave merged");
     }
 
     #[test]

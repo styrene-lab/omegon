@@ -79,7 +79,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use omegon_traits::{AgentEvent, OperationKind};
+use omegon_traits::AgentEvent;
 
 use self::active_tool_stream::{ActiveToolStream, render_active_tool_stream_panel};
 use self::command_surfaces::{
@@ -99,6 +99,7 @@ use self::workbench::{
     slim_operator_hint, upstream_retry_hint, workbench_preferred_height,
 };
 use crate::surfaces::layout::UiSurfaces;
+use crate::surfaces::operations::OperationMilestoneProjection;
 use crate::ui_runtime::actions::{
     ConversationSegmentRef, OpenConversationSegmentDetailAction, OperatorWaitAction,
     PermissionAction, PromptSource, SelectConversationSegmentAction, SetSurfaceVisibleAction,
@@ -7416,47 +7417,25 @@ Scroll transcript:
             AgentEvent::DecompositionStarted {
                 children,
                 operation,
-            } => match operation.kind {
-                OperationKind::Cleave => {
-                    self.conversation.push_lifecycle(
-                        "↯",
-                        &format!("Cleave: {} children dispatched", children.len()),
-                    );
-                }
-                OperationKind::Delegate => {
-                    let label = operation.id.as_deref().unwrap_or("subagent");
-                    self.conversation
-                        .push_lifecycle("⇉", &format!("Delegate: {label} started"));
-                }
-            },
+            } => {
+                let milestone = OperationMilestoneProjection::started(&operation, children.len());
+                self.conversation
+                    .push_lifecycle(milestone.icon, &milestone.text);
+            }
             AgentEvent::DecompositionChildCompleted {
                 label,
                 success,
                 operation,
-            } => match operation.kind {
-                OperationKind::Cleave => {
-                    let icon = if success { "✓" } else { "✗" };
-                    self.conversation
-                        .push_lifecycle(icon, &format!("Child '{label}' completed"));
-                }
-                OperationKind::Delegate => {
-                    let icon = if success { "✓" } else { "✗" };
-                    self.conversation
-                        .push_lifecycle(icon, &format!("Delegate: {label} completed"));
-                }
-            },
-            AgentEvent::DecompositionCompleted { merged, operation } => {
-                let status = if merged {
-                    "merged"
-                } else {
-                    "completed (no merge)"
-                };
-                let label = match operation.kind {
-                    OperationKind::Cleave => "Cleave",
-                    OperationKind::Delegate => "Delegate",
-                };
+            } => {
+                let milestone =
+                    OperationMilestoneProjection::child_completed(&operation, &label, success);
                 self.conversation
-                    .push_lifecycle("↯", &format!("{label} {status}"));
+                    .push_lifecycle(milestone.icon, &milestone.text);
+            }
+            AgentEvent::DecompositionCompleted { merged, operation } => {
+                let milestone = OperationMilestoneProjection::completed(&operation, merged);
+                self.conversation
+                    .push_lifecycle(milestone.icon, &milestone.text);
             }
             AgentEvent::WebDashboardStarted { startup_json } => {
                 if let Ok(startup) =
