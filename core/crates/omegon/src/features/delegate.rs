@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 pub type DelegateEventSlot = Arc<Mutex<Option<BusRequestSink>>>;
 use std::time::SystemTime;
 
+use crate::autonomy::{DecisionPolicy, SubagentPolicy};
 use crate::child_agent::{
     ChildAgentBoundary, ChildAgentRuntimeProfile, ChildAgentSpawnConfig,
     spawn_headless_child_agent, write_child_prompt_file,
@@ -1627,6 +1628,10 @@ impl Feature for DelegateFeature {
                     scope
                 };
 
+                if let Some(result) = enforce_delegate_policy(worker_profile, &task) {
+                    return Ok(result);
+                }
+
                 let task_id = self.result_store.generate_task_id();
 
                 // Spawn the delegate
@@ -2069,6 +2074,42 @@ pub fn scan_agents(cwd: &Path) -> Vec<AgentSpec> {
     agents
 }
 
+fn enforce_delegate_policy(
+    worker_profile: DelegateWorkerProfile,
+    task: &str,
+) -> Option<ToolResult> {
+    let policy = SubagentPolicy::conservative_default();
+    if worker_profile != DelegateWorkerProfile::Patch
+        || policy.delegate_patch == DecisionPolicy::Allow
+    {
+        return None;
+    }
+
+    let reason = "delegate patch worker requires structured approval under conservative autonomy";
+    Some(ToolResult {
+        content: vec![ContentBlock::Text {
+            text: format!(
+                "Structured approval required: {reason}. Use scout/verify delegates for bounded non-mutating side quests, or approve mutating delegate patch work explicitly."
+            ),
+        }],
+        details: json!({
+            "approval_required": true,
+            "operation": "delegate",
+            "autonomy": policy.level.as_str(),
+            "reason": reason,
+            "requested": {
+                "worker_profile": worker_profile.as_str(),
+                "task": task,
+            },
+            "allowed": {
+                "delegate_scout": policy.delegate_scout == DecisionPolicy::Allow,
+                "delegate_verify": policy.delegate_verify == DecisionPolicy::Allow,
+                "delegate_patch": policy.delegate_patch == DecisionPolicy::Allow,
+            },
+        }),
+    })
+}
+
 fn format_background_delegate_started(task_id: &str) -> String {
     serde_json::json!({
         "task_id": task_id,
@@ -2112,6 +2153,27 @@ fn parse_agent_spec(content: &str) -> Option<AgentSpec> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn delegate_policy_requires_approval_for_patch_worker() {
+        let result = enforce_delegate_policy(DelegateWorkerProfile::Patch, "edit the file")
+            .expect("patch delegates require approval under conservative autonomy");
+
+        assert_eq!(result.details["approval_required"], true);
+        assert_eq!(result.details["operation"], "delegate");
+        assert_eq!(result.details["autonomy"], "conservative");
+        assert_eq!(result.details["requested"]["worker_profile"], "patch");
+        assert_eq!(result.details["requested"]["task"], "edit the file");
+        assert_eq!(result.details["allowed"]["delegate_scout"], true);
+        assert_eq!(result.details["allowed"]["delegate_verify"], true);
+        assert_eq!(result.details["allowed"]["delegate_patch"], false);
+    }
+
+    #[test]
+    fn delegate_policy_allows_scout_and_verify_workers() {
+        assert!(enforce_delegate_policy(DelegateWorkerProfile::Scout, "inspect").is_none());
+        assert!(enforce_delegate_policy(DelegateWorkerProfile::Verify, "test").is_none());
+    }
 
     #[test]
     fn delegate_failure_formatter_surfaces_provider_and_runtime_context() {

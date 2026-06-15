@@ -173,16 +173,12 @@ pub struct ResolvedManifest {
 // ── Loading ──────────────────────────────────────────────────────────────
 
 fn pkl_available() -> bool {
-    use std::sync::OnceLock;
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        std::process::Command::new("pkl")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
-    })
+    std::process::Command::new("pkl")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// Load an agent manifest from a bundle directory.
