@@ -3,7 +3,7 @@
 //! Phase 0: static base prompt + tool definitions + project directives.
 //! Phase 0+: ContextManager provides dynamic injection.
 
-use crate::autonomy::SubagentPolicy;
+use crate::autonomy::{SubagentPolicy, active_subagent_policy};
 use omegon_traits::{PromptComposition, PromptSectionMetric, ToolDefinition};
 use std::path::{Path, PathBuf};
 
@@ -104,11 +104,9 @@ pub fn build_base_prompt_for_mode(
         let tool_surface = "\n## Tool surface\n\nSome situational tools (persona, model-budget, lifecycle management, advanced memory) are hidden by default to reduce context overhead. If the task requires them, use `manage_tools` with `list_groups` to discover available groups and `enable_group` to activate them.\n";
         let harness_surfaces = "\n## Harness surfaces and state\n\n- Treat Workbench/plan state as live operational state. Before reporting a task complete, reconcile visible plan/workbench state with validation and commit state; do not claim `nothing pending` while an active/todo plan remains unresolved.\n- Separate producer/provenance from content form. Assistant prose, peer-agent prose, and markdown returned by tools may share rendering paths while retaining different producers.\n- Prefer semantic projections and command registry paths over renderer-specific or surface-specific shortcuts.\n- TUI, CLI, ACP, and WebSocket/IPC should share command/projection sources where possible; avoid hidden per-surface allowlists.\n- Prompt templates and loops are executable instruction sources. Preserve provenance, preview/validate before execution, and require explicit safety handling for repeated `/loop` execution.\n";
         if has_delegate {
-            let subagent_policy = SubagentPolicy::conservative_default();
-            let subagent_operations = render_subagent_operations_prompt(
-                &subagent_policy,
-                has_cleave_tools,
-            );
+            let subagent_policy = active_subagent_policy();
+            let subagent_operations =
+                render_subagent_operations_prompt(&subagent_policy, has_cleave_tools);
             format!("{base}{subagent_operations}{harness_surfaces}{tool_surface}")
         } else {
             format!("{base}{harness_surfaces}{tool_surface}")

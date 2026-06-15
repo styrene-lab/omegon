@@ -15,7 +15,9 @@ use std::sync::{Arc, Mutex};
 pub type DelegateEventSlot = Arc<Mutex<Option<BusRequestSink>>>;
 use std::time::SystemTime;
 
-use crate::autonomy::{DecisionPolicy, SubagentPolicy};
+use crate::autonomy::{
+    ApprovalRequest, DecisionPolicy, active_subagent_policy, required_approval_details,
+};
 use crate::child_agent::{
     ChildAgentBoundary, ChildAgentRuntimeProfile, ChildAgentSpawnConfig,
     spawn_headless_child_agent, write_child_prompt_file,
@@ -2078,7 +2080,7 @@ fn enforce_delegate_policy(
     worker_profile: DelegateWorkerProfile,
     task: &str,
 ) -> Option<ToolResult> {
-    let policy = SubagentPolicy::conservative_default();
+    let policy = active_subagent_policy();
     if worker_profile != DelegateWorkerProfile::Patch
         || policy.delegate_patch == DecisionPolicy::Allow
     {
@@ -2092,21 +2094,23 @@ fn enforce_delegate_policy(
                 "Structured approval required: {reason}. Use scout/verify delegates for bounded non-mutating side quests, or approve mutating delegate patch work explicitly."
             ),
         }],
-        details: json!({
-            "approval_required": true,
-            "operation": "delegate",
-            "autonomy": policy.level.as_str(),
-            "reason": reason,
-            "requested": {
-                "worker_profile": worker_profile.as_str(),
-                "task": task,
+        details: required_approval_details(
+            &policy,
+            ApprovalRequest {
+                operation: "delegate",
+                reason,
+                requested: json!({
+                    "worker_profile": worker_profile.as_str(),
+                    "task": task,
+                }),
+                allowed: json!({
+                    "delegate_scout": policy.delegate_scout == DecisionPolicy::Allow,
+                    "delegate_verify": policy.delegate_verify == DecisionPolicy::Allow,
+                    "delegate_patch": policy.delegate_patch == DecisionPolicy::Allow,
+                }),
+                grants: vec![omegon_traits::AuthorityGrant::DelegatePatch { max_tasks: Some(1) }],
             },
-            "allowed": {
-                "delegate_scout": policy.delegate_scout == DecisionPolicy::Allow,
-                "delegate_verify": policy.delegate_verify == DecisionPolicy::Allow,
-                "delegate_patch": policy.delegate_patch == DecisionPolicy::Allow,
-            },
-        }),
+        ),
     })
 }
 
@@ -2167,6 +2171,19 @@ mod tests {
         assert_eq!(result.details["allowed"]["delegate_scout"], true);
         assert_eq!(result.details["allowed"]["delegate_verify"], true);
         assert_eq!(result.details["allowed"]["delegate_patch"], false);
+        assert_eq!(
+            result.details["required_approval"]["kind"],
+            "approval_required"
+        );
+        assert_eq!(result.details["required_approval"]["operation"], "delegate");
+        assert_eq!(
+            result.details["required_approval"]["autonomy"],
+            "conservative"
+        );
+        assert_eq!(
+            result.details["required_approval"]["choices"][0]["grants"][0]["kind"],
+            "delegate_patch"
+        );
     }
 
     #[test]

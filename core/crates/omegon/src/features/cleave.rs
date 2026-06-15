@@ -16,7 +16,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use crate::autonomy::{DecisionPolicy, SubagentPolicy};
+use crate::autonomy::{
+    ApprovalRequest, DecisionPolicy, active_subagent_policy, required_approval_details,
+};
 use crate::surfaces::operations::OperationWorkbenchProjection;
 
 use omegon_traits::{
@@ -1416,7 +1418,7 @@ impl Feature for CleaveFeature {
 }
 
 fn enforce_cleave_run_policy(plan: &CleavePlan, max_parallel: usize) -> Option<ToolResult> {
-    let policy = SubagentPolicy::conservative_default();
+    let policy = active_subagent_policy();
     if policy.cleave_run == DecisionPolicy::Allow {
         return None;
     }
@@ -1441,20 +1443,25 @@ fn enforce_cleave_run_policy(plan: &CleavePlan, max_parallel: usize) -> Option<T
                 policy.max_children, policy.max_parallel
             ),
         }],
-        details: json!({
-            "approval_required": true,
-            "operation": "cleave_run",
-            "autonomy": policy.level.as_str(),
-            "reason": reason,
-            "requested": {
-                "children": requested_children,
-                "max_parallel": max_parallel,
+        details: required_approval_details(
+            &policy,
+            ApprovalRequest {
+                operation: "cleave_run",
+                reason,
+                requested: json!({
+                    "children": requested_children,
+                    "max_parallel": max_parallel,
+                }),
+                allowed: json!({
+                    "children": policy.max_children,
+                    "max_parallel": policy.max_parallel,
+                }),
+                grants: vec![omegon_traits::AuthorityGrant::CleaveRun {
+                    max_children: requested_children,
+                    max_parallel,
+                }],
             },
-            "allowed": {
-                "children": policy.max_children,
-                "max_parallel": policy.max_parallel,
-            },
-        }),
+        ),
     })
 }
 
@@ -1582,6 +1589,22 @@ mod tests {
         assert_eq!(result.details["requested"]["max_parallel"], 2);
         assert_eq!(result.details["allowed"]["children"], 2);
         assert_eq!(result.details["allowed"]["max_parallel"], 1);
+        assert_eq!(
+            result.details["required_approval"]["kind"],
+            "approval_required"
+        );
+        assert_eq!(
+            result.details["required_approval"]["operation"],
+            "cleave_run"
+        );
+        assert_eq!(
+            result.details["required_approval"]["autonomy"],
+            "conservative"
+        );
+        assert_eq!(
+            result.details["required_approval"]["choices"][0]["grants"][0]["kind"],
+            "cleave_run"
+        );
     }
 
     #[test]
