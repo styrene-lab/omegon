@@ -1734,6 +1734,11 @@ voice = true
     #[cfg(unix)]
     #[tokio::test]
     async fn voice_capable_extension_notification_reaches_daemon_queue_through_bridge() {
+        let _env_guard = crate::test_support::env::lock_async().await;
+        unsafe {
+            std::env::remove_var("OMEGON_RUNTIME_CONTEXT");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
         use std::os::unix::fs::PermissionsExt;
 
         let temp = tempfile::tempdir().unwrap();
