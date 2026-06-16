@@ -2125,6 +2125,10 @@ fn write_refreshed_credentials(provider: &str, creds: &OAuthCredentials) -> anyh
 fn assert_test_auth_json_override_for_write(path: &Path) -> anyhow::Result<()> {
     #[cfg(test)]
     {
+        // Test builds must never mutate the operator's real auth store.
+        // Credential tests are required to mount an explicit fixture via
+        // OMEGON_AUTH_JSON_PATH so full-suite runs cannot delete live OAuth
+        // grants such as openai-codex.
         let override_path = std::env::var("OMEGON_AUTH_JSON_PATH")
             .map(|value| !value.trim().is_empty())
             .unwrap_or(false);

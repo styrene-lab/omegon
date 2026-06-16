@@ -53,6 +53,8 @@ Patterns: glob matching on tool arguments.
 
 Runtime invariant: permission-required operations are not recoverable tool failures. They suspend the agent run until explicit operator allow, explicit deny, explicit run cancellation, or an upstream preapproval/bypass such as a trusted directory or `--dangerously-bypass-permissions`. A passive timeout must not convert a permission prompt into denial.
 
+Bash mediation is static and advisory for common shell forms (redirects, `tee`, `cp`/`mv`/`install`, `mkdir`, `rm`). It unifies detected bash boundary hits with the permission prompt surface, but hard filesystem containment for shell variable indirection, subprocesses, and programmatic I/O belongs to the sandbox layer.
+
 The key improvement over OpenCode: our permissions compose with personas. The tutor persona says "no bash" — that's a persona-level deny that the operator can't accidentally override with a session sticky. The Lex Imperialis could define absolute denies (e.g. never allow `rm -rf /`).
 
 ## Open Questions

@@ -75,6 +75,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a source-agnostic skill suggestion helper that evaluates parsed bundled, user-installed, Armory-installed, or project-local skills against profile, intent, and project-signal evidence without performing runtime injection, preserving external metadata diagnostics instead of silently dropping malformed activation hints.
 
 ### Fixed
+- Documented that bash permission mediation is static/advisory for common shell forms and that hard filesystem containment belongs to the sandbox layer.
 - Guarded auth.json writes and logout mutations in test builds so credential mutation paths fail fast unless `OMEGON_AUTH_JSON_PATH` points at an explicit fixture, preventing test-suite runs from mutating the operator's real `~/.config/omegon/auth.json`.
 - Routed bash workspace-boundary hits through the same typed permission mediation as read/write/edit so approved outside-workspace shell writes retry instead of remaining bash-local blocks.
 - Made outside-workspace permission prompts wait for an explicit operator allow/deny decision instead of timing out as a denial after 120 seconds; explicit run cancellation still unblocks the wait as a denial/cancelled decision, and `--dangerously-bypass-permissions` still bypasses the prompt before it is raised.

@@ -9369,12 +9369,35 @@ mod tests {
         );
     }
 
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set_path(key: &'static str, value: &std::path::Path) -> Self {
+            let original = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.original {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn remote_slash_logout_accepts_openai_codex_provider() {
         let dir = tempfile::tempdir().unwrap();
         let auth_path = dir.path().join("auth.json");
-        let original_auth = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
-        unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path) };
+        let _auth_env = EnvVarGuard::set_path("OMEGON_AUTH_JSON_PATH", &auth_path);
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let agent = test_agent_setup();
@@ -9414,12 +9437,6 @@ mod tests {
             "got: {output}"
         );
 
-        unsafe {
-            match original_auth {
-                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
-                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
-            }
-        }
     }
 
     #[test]
