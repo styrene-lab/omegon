@@ -1665,6 +1665,32 @@ mod tests {
     }
 
     #[test]
+    fn cleave_feature_resolves_live_settings_policy() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+        settings.lock().unwrap().automation_level = crate::settings::AutomationLevel::Autonomous;
+        let feature = CleaveFeature::new(dir.path(), vec![], false).with_settings(settings);
+
+        let policy = feature.subagent_policy();
+        assert_eq!(policy.level, crate::autonomy::AutonomyLevel::Orchestrator);
+        assert_eq!(policy.cleave_run, DecisionPolicy::Allow);
+        assert_eq!(policy.max_children, 8);
+        assert_eq!(policy.max_parallel, 4);
+    }
+
+    #[test]
+    fn cleave_feature_falls_back_to_conservative_policy_without_settings() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![], false);
+
+        let policy = feature.subagent_policy();
+        assert_eq!(policy.level, crate::autonomy::AutonomyLevel::Conservative);
+        assert_eq!(policy.cleave_run, DecisionPolicy::RequireApproval);
+        assert_eq!(policy.max_children, 2);
+        assert_eq!(policy.max_parallel, 1);
+    }
+
+    #[test]
     fn assess_simple_directive() {
         let result = assess_directive("Refactor the utils module to extract helpers", 2.0);
         assert_eq!(

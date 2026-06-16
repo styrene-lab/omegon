@@ -2225,6 +2225,28 @@ mod tests {
     }
 
     #[test]
+    fn delegate_feature_resolves_live_settings_policy() {
+        let temp_dir = TempDir::new().unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+        settings.lock().unwrap().automation_level = crate::settings::AutomationLevel::Autonomous;
+        let feature = DelegateFeature::new(temp_dir.path(), vec![], false).with_settings(settings);
+
+        let policy = feature.subagent_policy();
+        assert_eq!(policy.level, crate::autonomy::AutonomyLevel::Orchestrator);
+        assert_eq!(policy.delegate_patch, DecisionPolicy::Allow);
+    }
+
+    #[test]
+    fn delegate_feature_falls_back_to_conservative_policy_without_settings() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
+
+        let policy = feature.subagent_policy();
+        assert_eq!(policy.level, crate::autonomy::AutonomyLevel::Conservative);
+        assert_eq!(policy.delegate_patch, DecisionPolicy::RequireApproval);
+    }
+
+    #[test]
     fn delegate_policy_allows_scout_and_verify_workers() {
         assert!(enforce_delegate_policy(DelegateWorkerProfile::Scout, "inspect").is_none());
         assert!(enforce_delegate_policy(DelegateWorkerProfile::Verify, "test").is_none());
