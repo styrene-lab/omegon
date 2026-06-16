@@ -96,7 +96,19 @@ const PROVIDER_ERROR_RULES: &[ErrorRule] = &[
         providers: &["anthropic"],
         class: UpstreamErrorClass::ProviderOverloaded,
         substrings: &["overloaded_error"],
+        word_tokens: &["529"],
+    },
+    ErrorRule {
+        providers: &["google", "google-antigravity"],
+        class: UpstreamErrorClass::AuthInvalid,
+        substrings: &["failed_precondition", "permission_denied"],
         word_tokens: &[],
+    },
+    ErrorRule {
+        providers: &["groq"],
+        class: UpstreamErrorClass::ProviderOverloaded,
+        substrings: &["flex tier", "model is at capacity"],
+        word_tokens: &["423", "498"],
     },
     ErrorRule {
         providers: &["openai-codex"],
@@ -141,9 +153,28 @@ const PROVIDER_ERROR_RULES: &[ErrorRule] = &[
         substrings: &[
             "invalid_request_error",
             "unsupported_parameter",
+            "model_not_found",
+            "not_found_error",
+            "unprocessable entity",
+            "validation error",
             "bad request",
         ],
-        word_tokens: &["400"],
+        word_tokens: &["400", "404", "422"],
+    },
+];
+
+const GLOBAL_PRECEDENCE_ERROR_RULES: &[ErrorRule] = &[
+    ErrorRule {
+        providers: &[],
+        class: UpstreamErrorClass::QuotaExceeded,
+        substrings: &[
+            "insufficient credits",
+            "insufficient quota",
+            "exceeded your current quota",
+            "quota exceeded",
+            "payment required",
+        ],
+        word_tokens: &["402"],
     },
 ];
 
@@ -174,7 +205,15 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
     ErrorRule {
         providers: &[],
         class: UpstreamErrorClass::QuotaExceeded,
-        substrings: &["quota", "insufficient credits", "billing", "usage limit"],
+        substrings: &[
+            "insufficient credits",
+            "insufficient quota",
+            "billing hard limit",
+            "billing quota",
+            "usage limit exceeded",
+            "exceeded your current quota",
+            "quota exceeded",
+        ],
         word_tokens: &[],
     },
     ErrorRule {
@@ -183,7 +222,9 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
         substrings: &[
             "rate limit",
             "rate_limit",
+            "rate_limit_exceeded",
             "too many requests",
+            "resource_exhausted",
             "retry-after",
             "requests per min",
             "tokens per min",
@@ -197,8 +238,9 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
         class: UpstreamErrorClass::ProviderOverloaded,
         substrings: &[
             "overloaded",
-            "capacity",
+            "overloaded_error",
             "at capacity",
+            "model is at capacity",
             "server is busy",
             "high demand",
             "currently unavailable due to load",
@@ -209,6 +251,7 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
         providers: &[],
         class: UpstreamErrorClass::Upstream5xx,
         substrings: &[
+            "failed_dependency",
             "error code: 520",
             "origin error",
             "origin unreachable",
@@ -289,8 +332,15 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
     ErrorRule {
         providers: &[],
         class: UpstreamErrorClass::BadRequest,
-        substrings: &["invalid request", "bad request"],
-        word_tokens: &["400"],
+        substrings: &[
+            "invalid request",
+            "bad request",
+            "invalid_argument",
+            "model not found",
+            "unprocessable entity",
+            "validation error",
+        ],
+        word_tokens: &["400", "404", "422"],
     },
     ErrorRule {
         providers: &[],
@@ -307,8 +357,8 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
     ErrorRule {
         providers: &[],
         class: UpstreamErrorClass::ResponseCancelled,
-        substrings: &["response cancelled", "cancelled by server"],
-        word_tokens: &[],
+        substrings: &["response cancelled", "cancelled by server", "client closed request"],
+        word_tokens: &["499"],
     },
     ErrorRule {
         providers: &[],
@@ -466,10 +516,32 @@ pub(crate) fn classify_upstream_error_for_provider(
     msg: &str,
 ) -> UpstreamErrorClass {
     let lower = msg.to_lowercase();
+    if is_context_overflow(&lower) {
+        return UpstreamErrorClass::ContextOverflow;
+    }
+    if is_malformed_history(&lower) {
+        return UpstreamErrorClass::MalformedHistory;
+    }
+    if let Some(class) = apply_error_rules(GLOBAL_PRECEDENCE_ERROR_RULES, None, &lower) {
+        return class;
+    }
+    if matches!(provider, "google" | "google-antigravity")
+        && lower.contains("failed_precondition")
+        && (lower.contains("invalid")
+            || lower.contains("unsupported")
+            || lower.contains("model")
+            || lower.contains("request"))
+        && !(lower.contains("api key")
+            || lower.contains("permission")
+            || lower.contains("billing")
+            || lower.contains("project"))
+    {
+        return UpstreamErrorClass::BadRequest;
+    }
     if let Some(class) = apply_error_rules(PROVIDER_ERROR_RULES, Some(provider), &lower) {
         return class;
     }
-    classify_upstream_error(msg)
+    apply_error_rules(GLOBAL_ERROR_RULES, None, &lower).unwrap_or(UpstreamErrorClass::Unknown)
 }
 
 pub(crate) fn classify_upstream_error(msg: &str) -> UpstreamErrorClass {
@@ -843,6 +915,223 @@ mod tests {
         assert_eq!(
             classify_upstream_error("server is busy due to high demand"),
             UpstreamErrorClass::ProviderOverloaded,
+        );
+    }
+
+    #[test]
+    fn generic_not_found_does_not_become_bad_request() {
+        assert_eq!(
+            classify_upstream_error("provider metadata file not found while handling stream"),
+            UpstreamErrorClass::Unknown,
+        );
+        assert_eq!(
+            classify_upstream_error("HTTP 404 model not found"),
+            UpstreamErrorClass::BadRequest,
+        );
+        assert_eq!(
+            classify_upstream_error("HTTP 404 model_not_found"),
+            UpstreamErrorClass::BadRequest,
+        );
+    }
+
+    #[test]
+    fn provider_failure_matrix_rows_classify_as_documented() {
+        let cases = [
+            (
+                "anthropic",
+                "HTTP 400 invalid_request_error: bad request",
+                UpstreamErrorClass::BadRequest,
+            ),
+            (
+                "anthropic",
+                "HTTP 401 authentication_error: invalid API key",
+                UpstreamErrorClass::AuthInvalid,
+            ),
+            (
+                "anthropic",
+                "HTTP 413 request too large: maximum context length exceeded",
+                UpstreamErrorClass::ContextOverflow,
+            ),
+            (
+                "anthropic",
+                "HTTP 429 rate_limit_error: too many requests",
+                UpstreamErrorClass::RateLimited,
+            ),
+            (
+                "anthropic",
+                "HTTP 529 overloaded_error: provider overloaded",
+                UpstreamErrorClass::ProviderOverloaded,
+            ),
+            (
+                "openai",
+                "HTTP 400 invalid_request_error: unsupported_parameter",
+                UpstreamErrorClass::BadRequest,
+            ),
+            (
+                "openai",
+                "HTTP 401 invalid api key",
+                UpstreamErrorClass::AuthInvalid,
+            ),
+            (
+                "openai",
+                "HTTP 404 model_not_found",
+                UpstreamErrorClass::BadRequest,
+            ),
+            (
+                "openai",
+                "HTTP 429 rate_limit_exceeded: requests per min exceeded",
+                UpstreamErrorClass::RateLimited,
+            ),
+            (
+                "openai",
+                "HTTP 429 insufficient_quota: exceeded your current quota",
+                UpstreamErrorClass::QuotaExceeded,
+            ),
+            (
+                "openai",
+                "HTTP 500 server_error",
+                UpstreamErrorClass::Upstream5xx,
+            ),
+            (
+                "openai-codex",
+                "Codex 401 Unauthorized: token expired, please log in again",
+                UpstreamErrorClass::SessionExpired,
+            ),
+            (
+                "openai-codex",
+                "Codex error: Rate limit reached for responses (code: rate_limit_exceeded; type: requests)",
+                UpstreamErrorClass::RateLimited,
+            ),
+            (
+                "openai-codex",
+                "Codex: response incomplete (max_output_tokens) — output was truncated",
+                UpstreamErrorClass::ResponseIncomplete,
+            ),
+            (
+                "openai-codex",
+                "Codex: response cancelled by server",
+                UpstreamErrorClass::ResponseCancelled,
+            ),
+            (
+                "google",
+                "INVALID_ARGUMENT: request contains an invalid_argument",
+                UpstreamErrorClass::BadRequest,
+            ),
+            (
+                "google",
+                "FAILED_PRECONDITION: API key not configured",
+                UpstreamErrorClass::AuthInvalid,
+            ),
+            (
+                "google",
+                "FAILED_PRECONDITION: invalid request for unsupported model option",
+                UpstreamErrorClass::BadRequest,
+            ),
+            (
+                "google",
+                "RESOURCE_EXHAUSTED: rate limit exceeded",
+                UpstreamErrorClass::RateLimited,
+            ),
+            (
+                "google",
+                "RESOURCE_EXHAUSTED: quota exceeded for project",
+                UpstreamErrorClass::QuotaExceeded,
+            ),
+            (
+                "google",
+                "UNAVAILABLE: service unavailable",
+                UpstreamErrorClass::Upstream5xx,
+            ),
+            (
+                "groq",
+                "HTTP 423 model is at capacity",
+                UpstreamErrorClass::ProviderOverloaded,
+            ),
+            (
+                "groq",
+                "HTTP 429 rate limit reached",
+                UpstreamErrorClass::RateLimited,
+            ),
+            (
+                "groq",
+                "HTTP 498 flex tier capacity exceeded",
+                UpstreamErrorClass::ProviderOverloaded,
+            ),
+            (
+                "groq",
+                "HTTP 424 failed_dependency",
+                UpstreamErrorClass::Upstream5xx,
+            ),
+            (
+                "mistral",
+                "HTTP 422 unprocessable entity: validation error",
+                UpstreamErrorClass::BadRequest,
+            ),
+            (
+                "mistral",
+                "HTTP 429 too many requests",
+                UpstreamErrorClass::RateLimited,
+            ),
+            (
+                "openrouter",
+                "HTTP 402 insufficient credits",
+                UpstreamErrorClass::QuotaExceeded,
+            ),
+            (
+                "openrouter",
+                "HTTP 429 rate limit",
+                UpstreamErrorClass::RateLimited,
+            ),
+            (
+                "xai",
+                "HTTP 503 service unavailable",
+                UpstreamErrorClass::Upstream5xx,
+            ),
+            (
+                "cerebras",
+                "HTTP 504 gateway timeout",
+                UpstreamErrorClass::Upstream5xx,
+            ),
+        ];
+
+        for (provider, message, expected) in cases {
+            assert_eq!(
+                classify_upstream_error_for_provider(provider, message),
+                expected,
+                "provider={provider} message={message}",
+            );
+        }
+    }
+
+    #[test]
+    fn generic_quota_and_capacity_words_do_not_overclassify() {
+        assert_eq!(
+            classify_upstream_error("quota information endpoint returned metadata"),
+            UpstreamErrorClass::Unknown,
+        );
+        assert_eq!(
+            classify_upstream_error("provider capacity planning metadata refreshed"),
+            UpstreamErrorClass::Unknown,
+        );
+        assert_eq!(
+            classify_upstream_error("usage limit exceeded for project"),
+            UpstreamErrorClass::QuotaExceeded,
+        );
+        assert_eq!(
+            classify_upstream_error("selected model is at capacity"),
+            UpstreamErrorClass::ProviderOverloaded,
+        );
+    }
+
+    #[test]
+    fn quota_language_takes_precedence_over_rate_limit_status() {
+        assert_eq!(
+            classify_upstream_error("429 insufficient_quota: exceeded your current quota"),
+            UpstreamErrorClass::QuotaExceeded,
+        );
+        assert_eq!(
+            classify_upstream_error("429 rate_limit_exceeded: requests per min exceeded"),
+            UpstreamErrorClass::RateLimited,
         );
     }
 

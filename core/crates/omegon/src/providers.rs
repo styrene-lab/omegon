@@ -18,7 +18,7 @@ use crate::bridge::{LlmBridge, LlmEvent, LlmMessage, StreamOptions};
 /// Claude Code CLI version for OAuth user-agent header.
 /// Must match what Anthropic expects for subscription recognition.
 /// Update when upstream Claude Code advances.
-const CLAUDE_CODE_UA: &str = "claude-cli/2.1.173";
+const CLAUDE_CODE_UA: &str = "claude-cli/2.1.179";
 use omegon_traits::ToolDefinition;
 
 /// Anthropic credential mode — records what credential source is active.
@@ -2019,6 +2019,55 @@ fn is_codex_retryable(status: u16) -> bool {
     matches!(status, 429 | 500 | 502 | 503 | 504 | 520)
 }
 
+fn extract_codex_error_detail(event: &Value) -> String {
+    let first_string = [
+        "/message",
+        "/error/message",
+        "/response/error/message",
+        "/detail",
+        "/response/incomplete_details/reason",
+        "/error/code",
+        "/error/type",
+        "/code",
+        "/type",
+    ]
+    .into_iter()
+    .filter_map(|pointer| event.pointer(pointer).and_then(Value::as_str))
+    .find(|value| !value.trim().is_empty());
+
+    if let Some(message) = first_string {
+        let mut detail = message.to_string();
+        let code = event
+            .pointer("/error/code")
+            .or_else(|| event.pointer("/code"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty());
+        let kind = event
+            .pointer("/error/type")
+            .or_else(|| event.pointer("/type"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty());
+        if let Some(code) = code
+            && !detail.contains(code)
+        {
+            detail.push_str(&format!(" (code: {code})"));
+        }
+        if let Some(kind) = kind
+            && !detail.contains(kind)
+        {
+            detail.push_str(&format!("; type: {kind}"));
+        }
+        return detail;
+    }
+
+    let compact = event.to_string();
+    if compact == "{}" || compact == "null" {
+        "Codex returned an error event without details".to_string()
+    } else {
+        format!("Codex returned an unrecognized error event: {}", crate::util::truncate_str(&compact, 300))
+    }
+}
+
 #[async_trait]
 impl LlmBridge for CodexClient {
     async fn stream(
@@ -2319,19 +2368,12 @@ async fn parse_codex_stream(
                 return false;
             }
             "response.failed" => {
-                let msg = event["response"]["error"]["message"]
-                    .as_str()
-                    .or(event["response"]["incomplete_details"]["reason"].as_str())
-                    .unwrap_or("Codex response failed")
-                    .to_string();
+                let msg = extract_codex_error_detail(&event);
                 terminal = Some(TerminalEvent::Error(format!("Codex: {msg}")));
                 return false;
             }
             "error" => {
-                let msg = event["message"]
-                    .as_str()
-                    .unwrap_or("unknown error")
-                    .to_string();
+                let msg = extract_codex_error_detail(&event);
                 terminal = Some(TerminalEvent::Error(format!("Codex error: {msg}")));
                 return false;
             }
@@ -4680,6 +4722,40 @@ mod tests {
             .or_else(|| bare.strip_prefix("openai:"))
             .unwrap_or("gpt-5.5");
         assert_eq!(stripped, "gpt-5.5"); // fallback
+    }
+
+    #[test]
+    fn codex_error_detail_extracts_nested_openai_error_shape() {
+        let detail = extract_codex_error_detail(&json!({
+            "type": "error",
+            "error": {
+                "message": "Rate limit reached for responses",
+                "code": "rate_limit_exceeded",
+                "type": "requests"
+            }
+        }));
+        assert!(detail.contains("Rate limit reached for responses"), "{detail}");
+        assert!(detail.contains("rate_limit_exceeded"), "{detail}");
+        assert!(detail.contains("requests"), "{detail}");
+        assert!(!detail.contains("unknown error"), "{detail}");
+    }
+
+    #[test]
+    fn codex_error_detail_extracts_response_failed_shape() {
+        let detail = extract_codex_error_detail(&json!({
+            "type": "response.failed",
+            "response": {
+                "error": { "message": "Your session expired" }
+            }
+        }));
+        assert_eq!(detail, "Your session expired; type: response.failed");
+    }
+
+    #[test]
+    fn codex_error_detail_uses_explicit_empty_payload_message() {
+        let detail = extract_codex_error_detail(&json!({}));
+        assert_eq!(detail, "Codex returned an error event without details");
+        assert!(!detail.contains("unknown error"));
     }
 
     #[test]
