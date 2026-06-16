@@ -19,6 +19,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
+### Fixed
+- Cleared Clippy warnings that blocked `just lint`, including derivable defaults, single-character string pushes, manual contains checks, collapsible conditionals, bool assert comparisons, and explicit allowances for intentionally broad dispatcher signatures.
+
 ### Changed
 - Propagated `--dangerously-bypass-permissions` into delegate and cleave child Omegon processes so higher-order workers inherit parent permission bypass authority.
 - Clarified that policy prompts are allow-once until durable policy grants exist, and documented default-open unknown-tool behavior plus lexical permission-pattern matching.

@@ -2,9 +2,10 @@
 
 use serde_json::{Value, json};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AutonomyLevel {
     Manual,
+    #[default]
     Conservative,
     Autonomous,
     Orchestrator,
@@ -20,12 +21,6 @@ impl AutonomyLevel {
             Self::Orchestrator => "orchestrator",
             Self::Batch => "batch",
         }
-    }
-}
-
-impl Default for AutonomyLevel {
-    fn default() -> Self {
-        Self::Conservative
     }
 }
 

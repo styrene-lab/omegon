@@ -76,7 +76,7 @@ impl PromptFeature {
             out.push_str(&format!("Aliases: {}\n", manifest.aliases.join(", ")));
         }
         if include_body {
-            out.push_str("\n");
+            out.push('\n');
             out.push_str(&body);
         }
         Ok(out)

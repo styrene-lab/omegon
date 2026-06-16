@@ -77,6 +77,7 @@ pub struct PermissionDecision {
     pub reason: PermissionDecisionReason,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermissionDecisionReason {
     NoRule,
@@ -124,18 +125,19 @@ impl PermissionPolicy {
             ToolPermissionRule::Action(_) => PermissionDecisionReason::ToolRule {
                 tool: tool.to_string(),
             },
-            ToolPermissionRule::Patterned { otherwise: Some(_), .. } => {
-                PermissionDecisionReason::ToolRule {
-                    tool: tool.to_string(),
-                }
-            }
-            ToolPermissionRule::Patterned { otherwise: None, .. } => PermissionDecisionReason::NoRule,
+            ToolPermissionRule::Patterned {
+                otherwise: Some(_), ..
+            } => PermissionDecisionReason::ToolRule {
+                tool: tool.to_string(),
+            },
+            ToolPermissionRule::Patterned {
+                otherwise: None, ..
+            } => PermissionDecisionReason::NoRule,
         };
 
         PermissionDecision { action, reason }
     }
 }
-
 
 /// Normalized subject extracted from a tool call for policy matching.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -254,8 +256,6 @@ fn subject(tool: &str, value: &str, kind: PermissionSubjectKind) -> PermissionSu
     }
 }
 
-
-
 /// Permission layer provenance. Ordering is intentional and mirrors the
 /// Styrene RBAC posture: immutable framework constraints first, then persona,
 /// project policy, and finally session/operator grants.
@@ -266,7 +266,6 @@ pub enum PermissionLayer {
     Project = 2,
     Session = 3,
 }
-
 
 impl PermissionLayer {
     pub fn as_str(self) -> &'static str {
@@ -308,7 +307,10 @@ impl LayeredPermissionPolicy {
         let mut best = LayeredPermissionDecision {
             action: PermissionAction::Allow,
             layer: None,
-            decision: PermissionDecision { action: PermissionAction::Allow, reason: PermissionDecisionReason::NoRule },
+            decision: PermissionDecision {
+                action: PermissionAction::Allow,
+                reason: PermissionDecisionReason::NoRule,
+            },
         };
         for (layer, policy) in [
             (PermissionLayer::Lex, &self.lex),
@@ -318,9 +320,15 @@ impl LayeredPermissionPolicy {
         ] {
             let decision = policy.evaluate_subjects(tool, subjects.iter().copied());
             if decision.action.strength() > best.action.strength()
-                || (decision.action == best.action && decision.action != PermissionAction::Allow && best.layer.is_none())
+                || (decision.action == best.action
+                    && decision.action != PermissionAction::Allow
+                    && best.layer.is_none())
             {
-                best = LayeredPermissionDecision { action: decision.action, layer: Some(layer), decision };
+                best = LayeredPermissionDecision {
+                    action: decision.action,
+                    layer: Some(layer),
+                    decision,
+                };
             }
             if best.action == PermissionAction::Deny {
                 break;
@@ -347,7 +355,8 @@ pub fn styrene_capability_for_tool(tool: &str) -> Option<&'static str> {
         | crate::tool_registry::core::EDIT
         | crate::tool_registry::core::CHANGE => Some(styrene_rbac::Capability::WEB_WRITE),
         crate::tool_registry::core::VALIDATE => Some(styrene_rbac::Capability::RPC_STATUS),
-        crate::tool_registry::secrets::SECRET_SET | crate::tool_registry::secrets::SECRET_DELETE => {
+        crate::tool_registry::secrets::SECRET_SET
+        | crate::tool_registry::secrets::SECRET_DELETE => {
             Some(styrene_rbac::Capability::RPC_CONFIG_UPDATE)
         }
         _ => None,
@@ -356,23 +365,29 @@ pub fn styrene_capability_for_tool(tool: &str) -> Option<&'static str> {
 
 pub fn styrene_role_allows_tool(role: styrene_rbac::Role, tool: &str) -> bool {
     styrene_capability_for_tool(tool)
-        .map(|cap| styrene_rbac::RosterEntry::new("00000000000000000000000000000000", role).has_capability(cap))
+        .map(|cap| {
+            styrene_rbac::RosterEntry::new("00000000000000000000000000000000", role)
+                .has_capability(cap)
+        })
         .unwrap_or(true)
 }
-
 
 /// Build the runtime permission policy snapshot from settings.
 pub fn layered_policy_from_settings(
     settings: &crate::settings::Settings,
 ) -> LayeredPermissionPolicy {
     LayeredPermissionPolicy {
-        project: PermissionPolicy { tools: settings.permissions.tools.clone() },
+        project: PermissionPolicy {
+            tools: settings.permissions.tools.clone(),
+        },
         ..Default::default()
     }
 }
 
 /// Optional Styrene RBAC role configured for the active runtime.
-pub fn styrene_role_from_settings(settings: &crate::settings::Settings) -> Option<styrene_rbac::Role> {
+pub fn styrene_role_from_settings(
+    settings: &crate::settings::Settings,
+) -> Option<styrene_rbac::Role> {
     settings
         .permissions
         .role
@@ -562,7 +577,11 @@ mod tests {
             &serde_json::json!({"paths":["src/a.rs", "tests/a.rs"]}),
         );
         assert_eq!(validate.len(), 2);
-        assert!(validate.iter().all(|s| s.kind == PermissionSubjectKind::Path));
+        assert!(
+            validate
+                .iter()
+                .all(|s| s.kind == PermissionSubjectKind::Path)
+        );
     }
 
     #[test]
@@ -582,7 +601,6 @@ mod tests {
         let decision = p.evaluate_subjects("change", &subjects);
         assert_eq!(decision.action, PermissionAction::Prompt);
     }
-
 
     #[test]
     fn layered_policy_is_monotonic_and_session_deny_can_tighten_lex_allow() {

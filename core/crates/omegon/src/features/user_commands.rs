@@ -290,9 +290,9 @@ mode = "preview"
         let commands = feature.commands();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].name, "start");
-        assert_eq!(commands[0].availability.tui, true);
-        assert_eq!(commands[0].availability.cli, true);
-        assert_eq!(commands[0].availability.acp, false);
+        assert!(commands[0].availability.tui);
+        assert!(commands[0].availability.cli);
+        assert!(!commands[0].availability.acp);
         assert_eq!(commands[0].safety.class, CommandSafetyClass::QueueMutation);
     }
 

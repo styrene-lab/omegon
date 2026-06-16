@@ -2418,6 +2418,7 @@ struct DispatchResult {
     permission_decisions: Vec<PermissionRecord>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_tools(
     bus: &crate::bus::EventBus,
     tool_calls: &[ToolCall],
@@ -2744,6 +2745,7 @@ fn enrich_plan_list_tool_results(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_single_tool(
     bus: &crate::bus::EventBus,
     call: &ToolCall,
@@ -2806,7 +2808,6 @@ async fn wait_for_permission_response(
     }
 }
 
-
 fn format_policy_permission_subject(
     tool: &str,
     subject: Option<&crate::permissions::PermissionSubject>,
@@ -2820,6 +2821,7 @@ fn format_policy_permission_subject(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_tool_invocation(
     bus: &crate::bus::EventBus,
     visible_call_id: &str,
@@ -2924,7 +2926,8 @@ async fn execute_tool_invocation(
                 );
             }
             crate::permissions::PermissionAction::Prompt => {
-                let requested = format_policy_permission_subject(visible_tool_name, subjects.first());
+                let requested =
+                    format_policy_permission_subject(visible_tool_name, subjects.first());
                 let response = if let Some(ctx) = host_context {
                     match ctx
                         .proxy
@@ -2935,12 +2938,16 @@ async fn execute_tool_invocation(
                         )
                         .await
                     {
-                        Ok(agent_client_protocol::schema::RequestPermissionOutcome::Selected(sel)) => {
+                        Ok(agent_client_protocol::schema::RequestPermissionOutcome::Selected(
+                            sel,
+                        )) => {
                             match sel.option_id.0.as_ref() {
                                 // Policy prompts do not yet have a durable/session grant target.
                                 // Treat host "allow always" selections as allow-once so the
                                 // permission surface does not imply persistence we cannot honor.
-                                "allow_always" | "allow_once" => omegon_traits::PermissionResponse::Allow,
+                                "allow_always" | "allow_once" => {
+                                    omegon_traits::PermissionResponse::Allow
+                                }
                                 _ => omegon_traits::PermissionResponse::Deny,
                             }
                         }
@@ -4823,8 +4830,18 @@ mod tests {
             },
         ];
 
-        let dispatch =
-            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None, None, None).await;
+        let dispatch = dispatch_tools(
+            &bus,
+            &calls,
+            &events_tx,
+            cancel,
+            dir.path(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
         let results = dispatch.results;
 
         // The second edit should have failed
@@ -4896,8 +4913,18 @@ mod tests {
             arguments: serde_json::json!({"path": "/tmp/fake.rs", "oldText": "a", "newText": "b"}),
         }];
 
-        let dispatch =
-            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None, None, None).await;
+        let dispatch = dispatch_tools(
+            &bus,
+            &calls,
+            &events_tx,
+            cancel,
+            dir.path(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
         assert!(!dispatch.results[0].is_error);
         let text = dispatch.results[0].content[0].as_text().unwrap();
         assert!(
@@ -4920,7 +4947,9 @@ mod tests {
         let mut policy = crate::permissions::LayeredPermissionPolicy::default();
         policy.project.tools.insert(
             crate::tool_registry::core::BASH.to_string(),
-            crate::permissions::ToolPermissionRule::Action(crate::permissions::PermissionAction::Deny),
+            crate::permissions::ToolPermissionRule::Action(
+                crate::permissions::PermissionAction::Deny,
+            ),
         );
         let calls = vec![ToolCall {
             id: "deny-bash".into(),
@@ -4958,7 +4987,9 @@ mod tests {
         let mut policy = crate::permissions::LayeredPermissionPolicy::default();
         policy.project.tools.insert(
             crate::tool_registry::core::BASH.to_string(),
-            crate::permissions::ToolPermissionRule::Action(crate::permissions::PermissionAction::Prompt),
+            crate::permissions::ToolPermissionRule::Action(
+                crate::permissions::PermissionAction::Prompt,
+            ),
         );
         let calls = vec![ToolCall {
             id: "prompt-bash".into(),
@@ -5002,7 +5033,14 @@ mod tests {
         let dispatch = dispatch_fut.await;
         assert_eq!(dispatch.results.len(), 1);
         assert!(!dispatch.results[0].is_error);
-        assert!(dispatch.results[0].content[0].as_text().unwrap().contains("prompt-created"), "dispatch result: {:?}", dispatch.results[0].content);
+        assert!(
+            dispatch.results[0].content[0]
+                .as_text()
+                .unwrap()
+                .contains("prompt-created"),
+            "dispatch result: {:?}",
+            dispatch.results[0].content
+        );
         assert_eq!(dispatch.permission_decisions.len(), 1);
         assert_eq!(dispatch.permission_decisions[0].decision, "allow");
     }
@@ -5021,7 +5059,9 @@ mod tests {
         let mut policy = crate::permissions::LayeredPermissionPolicy::default();
         policy.project.tools.insert(
             crate::tool_registry::core::BASH.to_string(),
-            crate::permissions::ToolPermissionRule::Action(crate::permissions::PermissionAction::Prompt),
+            crate::permissions::ToolPermissionRule::Action(
+                crate::permissions::PermissionAction::Prompt,
+            ),
         );
         let calls = vec![ToolCall {
             id: "prompt-deny-bash".into(),
@@ -5135,8 +5175,18 @@ mod tests {
         ];
 
         let start = Instant::now();
-        let dispatch =
-            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None, None, None).await;
+        let dispatch = dispatch_tools(
+            &bus,
+            &calls,
+            &events_tx,
+            cancel,
+            dir.path(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
         let elapsed = start.elapsed();
 
         assert_eq!(dispatch.results.len(), 2);

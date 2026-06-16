@@ -183,7 +183,7 @@ pub fn validate_activation_metadata(manifest: &SkillManifest) -> SkillActivation
         warnings.push("project/domain detected skill has no project_signals".into());
     }
     if activation == Some(SkillActivation::LifecycleGated)
-        && !profiles.iter().any(|p| *p == SkillProfile::Lifecycle)
+        && !profiles.contains(&SkillProfile::Lifecycle)
     {
         warnings.push("lifecycle-gated skill does not include lifecycle profile".into());
     }
@@ -306,10 +306,10 @@ fn find_recursive_signal_match(
             if let Some(found) = find_recursive_signal_match(root, &path, suffix_pattern)? {
                 return Ok(Some(found));
             }
-        } else if glob_component_matches(suffix_pattern, &name) {
-            if let Ok(relative) = path.strip_prefix(root) {
-                return Ok(Some(relative.to_string_lossy().replace('\\', "/")));
-            }
+        } else if glob_component_matches(suffix_pattern, &name)
+            && let Ok(relative) = path.strip_prefix(root)
+        {
+            return Ok(Some(relative.to_string_lossy().replace('\\', "/")));
         }
     }
     Ok(None)

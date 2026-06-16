@@ -123,7 +123,7 @@ mod tests {
             substrate.kind,
             omegon_traits::ExecutionSubstrateKind::HostShimOci
         );
-        assert_eq!(substrate.container.as_ref().unwrap().detected, true);
+        assert!(substrate.container.as_ref().unwrap().detected);
         assert!(!substrate.capabilities.can_mount_host_paths);
 
         unsafe {
