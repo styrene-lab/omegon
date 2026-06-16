@@ -1655,6 +1655,11 @@ binary = "flaky-extension.sh"
     #[cfg(unix)]
     #[tokio::test]
     async fn voice_capable_extension_notification_does_not_break_get_tools_response_matching() {
+        let _env_guard = crate::test_support::env::lock_async().await;
+        unsafe {
+            std::env::remove_var("OMEGON_RUNTIME_CONTEXT");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
         use std::os::unix::fs::PermissionsExt;
 
         let temp = tempfile::tempdir().unwrap();
@@ -1811,6 +1816,11 @@ voice = true
     #[cfg(unix)]
     #[tokio::test]
     async fn non_voice_extension_does_not_get_voice_notification_receiver() {
+        let _env_guard = crate::test_support::env::lock_async().await;
+        unsafe {
+            std::env::remove_var("OMEGON_RUNTIME_CONTEXT");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
         use std::os::unix::fs::PermissionsExt;
 
         let temp = tempfile::tempdir().unwrap();
