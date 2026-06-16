@@ -2121,7 +2121,6 @@ fn write_refreshed_credentials(provider: &str, creds: &OAuthCredentials) -> anyh
     })
 }
 
-
 fn assert_test_auth_json_override_for_write(path: &Path) -> anyhow::Result<()> {
     #[cfg(test)]
     {

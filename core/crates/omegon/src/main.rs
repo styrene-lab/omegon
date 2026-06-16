@@ -9436,7 +9436,6 @@ mod tests {
             output.contains("cleared this session's cached auth env"),
             "got: {output}"
         );
-
     }
 
     #[test]
