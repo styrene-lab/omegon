@@ -989,7 +989,7 @@ If blocked, say the blocker plainly.\n",
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn spawn_delegate(
+    fn spawn_delegate(
         &self,
         task_id: String,
         agent_name: Option<String>,
@@ -1647,7 +1647,9 @@ impl Feature for DelegateFeature {
                 };
 
                 let policy = self.subagent_policy();
-                if let Some(result) = enforce_delegate_policy_with_policy(&policy, worker_profile, &task) {
+                if let Some(result) =
+                    enforce_delegate_policy_with_policy(&policy, worker_profile, &task)
+                {
                     return Ok(result);
                 }
 
@@ -1655,21 +1657,19 @@ impl Feature for DelegateFeature {
 
                 // Spawn the delegate
                 let parent_model = self.session_model.lock().ok().and_then(|s| s.clone());
-                self.runner
-                    .spawn_delegate(
-                        task_id.clone(),
-                        agent,
-                        task,
-                        scope,
-                        model,
-                        thinking_level,
-                        worker_profile,
-                        facts,
-                        mind,
-                        parent_model,
-                        self.consecutive_failures.clone(),
-                    )
-                    .await?;
+                self.runner.spawn_delegate(
+                    task_id.clone(),
+                    agent,
+                    task,
+                    scope,
+                    model,
+                    thinking_level,
+                    worker_profile,
+                    facts,
+                    mind,
+                    parent_model,
+                    self.consecutive_failures.clone(),
+                )?;
                 if let Ok(mut handle) = self.progress_handle.lock() {
                     *handle = self.result_store.progress_snapshot();
                 }
@@ -2104,7 +2104,8 @@ fn enforce_delegate_policy_with_policy(
         return None;
     }
 
-    let reason = "delegate patch worker requires structured approval under the active autonomy policy";
+    let reason =
+        "delegate patch worker requires structured approval under the active autonomy policy";
     Some(ToolResult {
         content: vec![ContentBlock::Text {
             text: format!(
@@ -2213,7 +2214,9 @@ mod tests {
 
     #[test]
     fn delegate_policy_allows_patch_worker_under_orchestrator_policy() {
-        let policy = crate::autonomy::SubagentPolicy::for_level(crate::autonomy::AutonomyLevel::Orchestrator);
+        let policy = crate::autonomy::SubagentPolicy::for_level(
+            crate::autonomy::AutonomyLevel::Orchestrator,
+        );
         assert!(
             enforce_delegate_policy_with_policy(
                 &policy,
