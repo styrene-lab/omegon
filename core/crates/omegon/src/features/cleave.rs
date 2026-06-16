@@ -532,6 +532,7 @@ pub(crate) fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &
 // Feature implementation
 // ═══════════════════════════════════════════════════════════════════════════
 
+#[derive(Clone)]
 pub struct CleaveFeature {
     repo_path: PathBuf,
     /// Shared progress state — updated by the spawned orchestrator task,
@@ -914,6 +915,110 @@ impl CleaveFeature {
     }
 
     async fn execute_run(
+        &self,
+        args: &Value,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> anyhow::Result<ToolResult> {
+        let background = args
+            .get("background")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        if !background {
+            return self.execute_run_attached(args, cancel).await;
+        }
+
+        let _directive = args["directive"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("directive required"))?
+            .to_string();
+        let plan_json = args["plan_json"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("plan_json required"))?
+            .to_string();
+        let max_parallel = args["max_parallel"].as_u64().unwrap_or(4) as usize;
+        let plan = CleavePlan::from_json(&plan_json)?;
+        let policy = self.subagent_policy();
+        if let Some(result) = enforce_cleave_run_policy_with_policy(&policy, &plan, max_parallel) {
+            return Ok(result);
+        }
+
+        let run_id = format!(
+            "cleave-bg-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
+        {
+            let mut prog = self.progress.lock().unwrap();
+            prog.run_id = run_id.clone();
+            prog.active = true;
+            prog.total_children = plan.children.len();
+            prog.completed = 0;
+            prog.failed = 0;
+            prog.children = plan
+                .children
+                .iter()
+                .map(|c| ChildProgress {
+                    label: c.label.clone(),
+                    status: "pending".into(),
+                    failure_kind: None,
+                    duration_secs: None,
+                    supervision_mode: None,
+                    pid: None,
+                    last_tool: None,
+                    last_turn: None,
+                    tasks: Vec::new(),
+                    tasks_done: 0,
+                    started_at: None,
+                    last_activity_at: None,
+                    tokens_in: 0,
+                    tokens_out: 0,
+                    runtime: c.runtime.as_ref().map(child_runtime_summary),
+                })
+                .collect();
+            prog.total_tokens_in = 0;
+            prog.total_tokens_out = 0;
+        }
+        self.emit_decomposition_event(AgentEvent::DecompositionStarted {
+            children: plan.children.iter().map(|c| c.label.clone()).collect(),
+            operation: OperationRef::cleave(Some(run_id.clone())),
+        });
+
+        let feature = self.clone();
+        let task_args = args.clone();
+        let background_run_id = run_id.clone();
+        crate::task_spawn::spawn_best_effort_result("cleave-background-run", async move {
+            if let Err(err) = feature.execute_run_attached(&task_args, cancel).await {
+                tracing::warn!(error = %err, "background cleave run failed");
+                if let Ok(mut prog) = feature.progress.lock() {
+                    prog.active = false;
+                    if prog.failed == 0 {
+                        prog.failed = prog.total_children.saturating_sub(prog.completed);
+                    }
+                }
+                feature.emit_decomposition_event(AgentEvent::DecompositionCompleted {
+                    merged: false,
+                    operation: OperationRef::cleave(Some(background_run_id)),
+                });
+            }
+            Ok(())
+        });
+
+        Ok(ToolResult {
+            content: vec![ContentBlock::Text {
+                text: serde_json::json!({
+                    "run_id": run_id,
+                    "background": true,
+                    "status_hint": "/cleave status",
+                })
+                .to_string(),
+            }],
+            details: json!({ "run_id": run_id, "background": true }),
+        })
+    }
+
+    async fn execute_run_attached(
         &self,
         args: &Value,
         cancel: tokio_util::sync::CancellationToken,
@@ -1336,6 +1441,11 @@ impl Feature for CleaveFeature {
                         "max_parallel": {
                             "type": "number",
                             "description": "Maximum parallel children (default: 4)"
+                        },
+                        "background": {
+                            "type": "boolean",
+                            "description": "Run cleave in the background and return immediately (default: true)",
+                            "default": true
                         }
                     },
                     "required": ["directive", "plan_json"]
@@ -1659,7 +1769,9 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let policy = crate::autonomy::SubagentPolicy::for_level(crate::autonomy::AutonomyLevel::Orchestrator);
+        let policy = crate::autonomy::SubagentPolicy::for_level(
+            crate::autonomy::AutonomyLevel::Orchestrator,
+        );
 
         assert!(enforce_cleave_run_policy_with_policy(&policy, &plan, 2).is_none());
     }

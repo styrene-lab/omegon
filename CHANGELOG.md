@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Made `cleave_run` default to background execution so child-agent orchestration returns an operation id immediately and leaves the main agent/operator control path free; pass `background: false` for the previous attached wait behavior.
 - Routed `/cleave status` display rows through the shared operation projection so cleave command status uses the same canonical child status and failure-kind semantics as Workbench.
 - Routed `delegate_status` structured details through the shared operation projection so delegate command/API status output now carries operation kind/id, canonical child statuses, and projected failure payloads.
 - Updated the `omegon-full` substrate profile seed to separate container home from the mounted workspace and align optional auth/config mounts with `/data/home` for orchestrated OCI deployments.
