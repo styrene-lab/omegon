@@ -965,7 +965,7 @@ async fn handshake(
     // 1. Optional initialize handshake metadata. Older extensions may not
     // implement this method; absence must not prevent startup.
     let metadata = match tokio::time::timeout(
-        std::time::Duration::from_millis(500),
+        std::time::Duration::from_secs(2),
         handles.rpc_call_with_notifications("initialize", json!({}), notification_sink),
     )
     .await
@@ -1529,6 +1529,11 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn extension_tool_call_respawns_after_child_exits() {
+        let _env_guard = crate::test_support::env::lock_async().await;
+        unsafe {
+            std::env::remove_var("OMEGON_RUNTIME_CONTEXT");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
         use std::os::unix::fs::PermissionsExt;
 
         let temp = tempfile::tempdir().unwrap();
@@ -1537,7 +1542,7 @@ mod tests {
         let script_body = r#"#!/bin/sh
 marker=__MARKER__
 while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([^,}}]*\).*/\1/p')
   case "$line" in
     *initialize*)
       printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
@@ -1658,7 +1663,7 @@ binary = "flaky-extension.sh"
             &script,
             r#"#!/bin/sh
 while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([^,}}]*\).*/\1/p')
   case "$line" in
     *initialize*)
       printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
@@ -1732,7 +1737,7 @@ voice = true
             &script,
             r#"#!/bin/sh
 while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([^,}}]*\).*/\1/p')
   case "$line" in
     *initialize*)
       printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
@@ -1814,7 +1819,7 @@ voice = true
             &script,
             r#"#!/bin/sh
 while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([^,}}]*\).*/\1/p')
   case "$line" in
     *initialize*)
       printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
@@ -2018,19 +2023,20 @@ mod sdk_compat_spawn_tests {
         let script = dir.join("sdk-extension.sh");
         let initialize = match sdk_version {
             Some(version) => format!(
-                "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"protocol_version\":2,\"extension_info\":{{\"name\":\"sdk-test\",\"version\":\"0.1.0\",\"sdk_version\":\"{version}\"}},\"capabilities\":{{\"tools\":true}},\"tools\":[]}}}}'"
+                "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":'$id',\"result\":{{\"protocol_version\":2,\"extension_info\":{{\"name\":\"sdk-test\",\"version\":\"0.1.0\",\"sdk_version\":\"{version}\"}},\"capabilities\":{{\"tools\":true}},\"tools\":[]}}}}'"
             ),
-            None => "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}'".to_string(),
+            None => "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":'$id',\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}'".to_string(),
         };
         let body = format!(
             r#"#!/bin/sh
 while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([^,}}]*\).*/\1/p')
   case "$line" in
     *initialize*)
       {initialize}
       ;;
     *get_tools*)
-      printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":[{{"name":"status","description":"Status","inputSchema":{{"type":"object","properties":{{}}}}}}]}}'
+      printf '%s\n' '{{"jsonrpc":"2.0","id":'$id',"result":[{{"name":"status","description":"Status","inputSchema":{{"type":"object","properties":{{}}}}}}]}}'
       ;;
   esac
 done
@@ -2091,6 +2097,10 @@ binary = "sdk-extension.sh"
     async fn spawn_accepts_current_sdk_contract() {
         let _env_guard = crate::test_support::env::lock_async().await;
         let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
+        unsafe {
+            std::env::remove_var("OMEGON_RUNTIME_CONTEXT");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(
             temp.path(),
@@ -2107,6 +2117,10 @@ binary = "sdk-extension.sh"
     async fn spawn_allows_older_compatible_sdk_contract_with_warning() {
         let _env_guard = crate::test_support::env::lock_async().await;
         let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
+        unsafe {
+            std::env::remove_var("OMEGON_RUNTIME_CONTEXT");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(
             temp.path(),
@@ -2137,7 +2151,12 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_rejects_malformed_sdk_contract() {
+        let _env_guard = crate::test_support::env::lock_async().await;
         let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
+        unsafe {
+            std::env::remove_var("OMEGON_RUNTIME_CONTEXT");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(temp.path(), Some("banana"));
         let err = match spawn_from_manifest(temp.path(), &[]).await {
@@ -2150,7 +2169,12 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_allows_missing_initialize_as_legacy_warning() {
+        let _env_guard = crate::test_support::env::lock_async().await;
         let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
+        unsafe {
+            std::env::remove_var("OMEGON_RUNTIME_CONTEXT");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(temp.path(), None);
         match spawn_from_manifest(temp.path(), &[]).await {

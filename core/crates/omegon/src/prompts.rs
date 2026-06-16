@@ -162,7 +162,11 @@ fn user_prompts_dir() -> anyhow::Result<std::path::PathBuf> {
 }
 
 fn project_prompts_dir() -> anyhow::Result<std::path::PathBuf> {
-    Ok(std::env::current_dir()?.join(".omegon/prompts"))
+    Ok(project_prompts_dir_for(&std::env::current_dir()?))
+}
+
+fn project_prompts_dir_for(project_cwd: &std::path::Path) -> std::path::PathBuf {
+    project_cwd.join(".omegon/prompts")
 }
 
 fn prompt_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
@@ -170,8 +174,13 @@ fn prompt_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
 }
 
 pub fn list_structured() -> anyhow::Result<Vec<PromptEntry>> {
+    let project_cwd = std::env::current_dir()?;
+    list_structured_for_project(&project_cwd)
+}
+
+pub fn list_structured_for_project(project_cwd: &std::path::Path) -> anyhow::Result<Vec<PromptEntry>> {
     let user_dir = user_prompts_dir()?;
-    let project_dir = project_prompts_dir()?;
+    let project_dir = project_prompts_dir_for(project_cwd);
     let mut entries = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
@@ -238,8 +247,16 @@ pub fn list_structured() -> anyhow::Result<Vec<PromptEntry>> {
 }
 
 pub fn get_prompt(name: &str) -> anyhow::Result<(PromptManifest, String, std::path::PathBuf)> {
+    let project_cwd = std::env::current_dir()?;
+    get_prompt_for_project(&project_cwd, name)
+}
+
+pub fn get_prompt_for_project(
+    project_cwd: &std::path::Path,
+    name: &str,
+) -> anyhow::Result<(PromptManifest, String, std::path::PathBuf)> {
     validate_name(name)?;
-    let project = prompt_path(&project_prompts_dir()?, name);
+    let project = prompt_path(&project_prompts_dir_for(project_cwd), name);
     if project.exists() {
         let content = std::fs::read_to_string(&project)?;
         let (manifest, body) = parse_prompt_file(&content);
@@ -266,9 +283,20 @@ pub fn write_prompt(
     project_local: bool,
     overwrite: bool,
 ) -> anyhow::Result<std::path::PathBuf> {
+    let project_cwd = std::env::current_dir()?;
+    write_prompt_for_project(&project_cwd, name, content, project_local, overwrite)
+}
+
+pub fn write_prompt_for_project(
+    project_cwd: &std::path::Path,
+    name: &str,
+    content: &str,
+    project_local: bool,
+    overwrite: bool,
+) -> anyhow::Result<std::path::PathBuf> {
     let slug = slugify(name)?;
     let dir = if project_local {
-        project_prompts_dir()?
+        project_prompts_dir_for(project_cwd)
     } else {
         user_prompts_dir()?
     };
@@ -282,8 +310,16 @@ pub fn write_prompt(
 }
 
 pub fn delete_prompt(name: &str) -> anyhow::Result<&'static str> {
+    let project_cwd = std::env::current_dir()?;
+    delete_prompt_for_project(&project_cwd, name)
+}
+
+pub fn delete_prompt_for_project(
+    project_cwd: &std::path::Path,
+    name: &str,
+) -> anyhow::Result<&'static str> {
     validate_name(name)?;
-    let project = prompt_path(&project_prompts_dir()?, name);
+    let project = prompt_path(&project_prompts_dir_for(project_cwd), name);
     if project.exists() {
         std::fs::remove_file(project)?;
         return Ok("project");

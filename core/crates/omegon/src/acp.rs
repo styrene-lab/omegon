@@ -3705,13 +3705,19 @@ impl OmegonAcpAgent {
 
             // ── Prompt definitions ───────────────────────────────
             "prompts/list" => {
-                Ok(serde_json::json!({ "prompts": crate::prompts::list_structured()? }))
+                let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+                Ok(serde_json::json!({ "prompts": crate::prompts::list_structured_for_project(&cwd)? }))
             }
             "prompts/get" => {
                 let name = params["name"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
-                let (manifest, body, path) = crate::prompts::get_prompt(name)?;
+                let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+                let (manifest, body, path) = crate::prompts::get_prompt_for_project(&cwd, name)?;
                 Ok(serde_json::json!({
                     "name": name,
                     "id": manifest.id,
@@ -3735,7 +3741,16 @@ impl OmegonAcpAgent {
                     .get("project_local")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let path = crate::prompts::write_prompt(name, content, project_local, false)?;
+                let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+                let path = crate::prompts::write_prompt_for_project(
+                    &cwd,
+                    name,
+                    content,
+                    project_local,
+                    false,
+                )?;
                 Ok(serde_json::json!({ "ok": true, "path": path.display().to_string() }))
             }
             "prompts/update" => {
@@ -3749,21 +3764,36 @@ impl OmegonAcpAgent {
                     .get("project_local")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let path = crate::prompts::write_prompt(name, content, project_local, true)?;
+                let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+                let path = crate::prompts::write_prompt_for_project(
+                    &cwd,
+                    name,
+                    content,
+                    project_local,
+                    true,
+                )?;
                 Ok(serde_json::json!({ "ok": true, "path": path.display().to_string() }))
             }
             "prompts/delete" => {
                 let name = params["name"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
-                let scope = crate::prompts::delete_prompt(name)?;
+                let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+                let scope = crate::prompts::delete_prompt_for_project(&cwd, name)?;
                 Ok(serde_json::json!({ "ok": true, "scope": scope }))
             }
             "prompts/preview" | "prompts/resolve" | "prompts/submit" => {
                 let name = params["name"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
-                let (_manifest, body, path) = crate::prompts::get_prompt(name)?;
+                let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+                let (_manifest, body, path) = crate::prompts::get_prompt_for_project(&cwd, name)?;
                 let deprecated = method.ends_with("/submit");
                 Ok(serde_json::json!({
                     "ok": true,
