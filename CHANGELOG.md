@@ -27,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Routed engine status and operation workbench worker rows through inline row projections instead of ad hoc separator/truncation composition.
 - Documented that memory sync and multi-checkout federation workflows are context-gated so one-off and non-Git tasks remain task-local.
 - Scoped the first federation/memory-sync implementation pass to a read-only context projection over Git-tracked JSONL fact files before any synchronization or artifact writes.
+- Added the renderer-neutral memory/federation status projection that classifies one-off, Git, lifecycle, and federation contexts while treating Git-tracked JSONL facts as the cross-checkout memory authority.
 - Made `delegate` background startup register and detach without awaiting an async boundary before returning the task id.
 - Made `cleave_run` default to background execution so child-agent orchestration returns an operation id immediately and leaves the main agent/operator control path free; pass `background: false` for the previous attached wait behavior.
 - Routed `/cleave status` display rows through the shared operation projection so cleave command status uses the same canonical child status and failure-kind semantics as Workbench.

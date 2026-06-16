@@ -7,4 +7,5 @@ pub mod footer;
 pub mod inline;
 pub mod instruments;
 pub mod layout;
+pub mod memory_status;
 pub mod operations;
