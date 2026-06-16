@@ -512,6 +512,23 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
         return Some(crate::util::truncate(&line, 96));
     }
 
+    if matches!(tool_name, "memory_recall" | "memory_query") {
+        let fact_count = lines
+            .iter()
+            .filter(|line| {
+                let trimmed = line.trim_start();
+                trimmed.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+                    && trimmed.contains(". [")
+            })
+            .count();
+        if fact_count > 0 {
+            return Some(format!(
+                "{fact_count} fact{}",
+                if fact_count == 1 { "" } else { "s" }
+            ));
+        }
+    }
+
     match (line_count, first_non_empty) {
         (0, _) => Some("ok".to_string()),
         (1, Some(line)) => Some(crate::util::truncate(&line, 96)),
@@ -2653,6 +2670,17 @@ mod tests {
         .expect("summary");
 
         assert_eq!(summary, "**2 result(s)** (scope: `code`)");
+    }
+
+    #[test]
+    fn summarize_memory_result_counts_recalled_facts() {
+        let summary = summarize_tool_result(
+            "memory_recall",
+            Some("1. [abc123] (Architecture, 120%) First fact\n2. [def456] (Decisions, 90%) Second fact"),
+        )
+        .expect("summary");
+
+        assert_eq!(summary, "2 facts");
     }
 
     #[test]
