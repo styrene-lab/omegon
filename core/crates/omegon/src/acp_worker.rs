@@ -222,25 +222,31 @@ async fn worker_loop(
         }
     }
 
-    let agent_setup =
-        match crate::setup::AgentSetup::new(&cwd, None, Some(shared_settings.clone())).await {
-            Ok(mut setup) => {
-                let setup_instance_id = setup.instance_id.clone();
-                setup.instance_id = crate::paths::instance_id("acp");
-                setup.workspace_state.lease.owner_agent_id = Some("omegon-acp".into());
-                let _ = crate::workspace::runtime::write_workspace_lease(
-                    &cwd,
-                    &setup.instance_id,
-                    &setup.workspace_state.lease,
-                );
-                crate::workspace::runtime::cleanup_instance(&cwd, &setup_instance_id);
-                setup
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "worker setup failed");
-                return;
-            }
-        };
+    let agent_setup = match crate::setup::AgentSetup::new_with_safety(
+        &cwd,
+        None,
+        Some(shared_settings.clone()),
+        dangerously_bypass_permissions,
+    )
+    .await
+    {
+        Ok(mut setup) => {
+            let setup_instance_id = setup.instance_id.clone();
+            setup.instance_id = crate::paths::instance_id("acp");
+            setup.workspace_state.lease.owner_agent_id = Some("omegon-acp".into());
+            let _ = crate::workspace::runtime::write_workspace_lease(
+                &cwd,
+                &setup.instance_id,
+                &setup.workspace_state.lease,
+            );
+            crate::workspace::runtime::cleanup_instance(&cwd, &setup_instance_id);
+            setup
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "worker setup failed");
+            return;
+        }
+    };
 
     let session_id = agent_setup.session_id.clone();
     let instance_id = agent_setup.instance_id.clone();

@@ -454,6 +454,7 @@ pub struct DelegateRunner {
     child_agent_binary: Option<PathBuf>,
     wall_timeout_secs: u64,
     idle_timeout_secs: u64,
+    dangerously_bypass_permissions: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -694,6 +695,20 @@ fn format_delegate_child_failure(
 
 impl DelegateRunner {
     pub fn new(cwd: PathBuf, result_store: Arc<DelegateResultStore>, sandbox: bool) -> Self {
+        Self::new_with_safety(
+            cwd,
+            result_store,
+            sandbox,
+            std::env::var("OMEGON_BYPASS_PERMISSIONS").is_ok(),
+        )
+    }
+
+    pub fn new_with_safety(
+        cwd: PathBuf,
+        result_store: Arc<DelegateResultStore>,
+        sandbox: bool,
+        dangerously_bypass_permissions: bool,
+    ) -> Self {
         Self {
             cwd,
             result_store,
@@ -701,6 +716,7 @@ impl DelegateRunner {
             child_agent_binary: None,
             wall_timeout_secs: 300,
             idle_timeout_secs: 120,
+            dangerously_bypass_permissions,
         }
     }
 
@@ -794,7 +810,11 @@ impl DelegateRunner {
             prompt.push('\n');
         }
         let runtime = worker_profile.runtime_profile(scope, None, None);
-        let boundary = ChildAgentBoundary::from_runtime(&self.cwd, &runtime);
+        let boundary = ChildAgentBoundary::from_runtime_with_safety(
+            &self.cwd,
+            &runtime,
+            self.dangerously_bypass_permissions,
+        );
         prompt.push('\n');
         prompt.push_str(&boundary.to_prompt_section());
         prompt.push_str(
@@ -846,6 +866,7 @@ If blocked, say the blocker plainly.\n",
                 runtime.thinking_level.as_deref(),
                 mind,
             ),
+            dangerously_bypass_permissions: self.dangerously_bypass_permissions,
         };
         let (mut child, _pid) = if self.sandbox {
             match self.spawn_sandboxed(&child_config, &prompt_path) {
@@ -1187,11 +1208,26 @@ pub struct DelegateFeature {
 
 impl DelegateFeature {
     pub fn new(cwd: &Path, agents: Vec<AgentSpec>, sandbox: bool) -> Self {
+        Self::new_with_safety(
+            cwd,
+            agents,
+            sandbox,
+            std::env::var("OMEGON_BYPASS_PERMISSIONS").is_ok(),
+        )
+    }
+
+    pub fn new_with_safety(
+        cwd: &Path,
+        agents: Vec<AgentSpec>,
+        sandbox: bool,
+        dangerously_bypass_permissions: bool,
+    ) -> Self {
         let result_store = Arc::new(DelegateResultStore::new());
-        let runner = Arc::new(DelegateRunner::new(
+        let runner = Arc::new(DelegateRunner::new_with_safety(
             cwd.to_path_buf(),
             result_store.clone(),
             sandbox,
+            dangerously_bypass_permissions,
         ));
 
         // Seed session model from env so delegates on the first turn

@@ -92,8 +92,8 @@ mod mqtt_bridge;
 mod ollama;
 mod packages;
 mod paths;
-mod pkl_modules;
 mod permissions;
+mod pkl_modules;
 mod plan;
 mod plugin_cli;
 mod plugins;
@@ -2254,7 +2254,13 @@ async fn run_embedded_command(
         None
     };
 
-    let mut agent = setup::AgentSetup::new(&cwd, None, Some(shared_settings.clone())).await?;
+    let mut agent = setup::AgentSetup::new_with_safety(
+        &cwd,
+        None,
+        Some(shared_settings.clone()),
+        dangerously_bypass_permissions,
+    )
+    .await?;
     agent.instance_id = paths::instance_id("embedded");
     bootstrap::apply_runtime_posture(
         &mut agent,
@@ -3126,7 +3132,13 @@ async fn run_cleave_command(
 
     // Resolve self binary path for spawning children
     let agent_binary = std::env::current_exe()?;
-    let mut agent_setup = setup::AgentSetup::new(&repo_path, None, None).await?;
+    let mut agent_setup = setup::AgentSetup::new_with_safety(
+        &repo_path,
+        None,
+        None,
+        cli.dangerously_bypass_permissions,
+    )
+    .await?;
     agent_setup.instance_id = paths::instance_id("cleave");
 
     let config = cleave::orchestrator::CleaveConfig {
@@ -3145,6 +3157,7 @@ async fn run_cleave_command(
         progress_sink: cleave::progress::stdout_progress_sink(),
         workflow: workflow::discover_workflow(&cli.cwd),
         sandbox: false, // CLI cleave — no settings context, sandbox opt-in via TUI only
+        dangerously_bypass_permissions: cli.dangerously_bypass_permissions,
     };
 
     let cancel = CancellationToken::new();
@@ -3787,7 +3800,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     // Fresh by default. --resume opts into session restore; --resume with no value
     // means "most recent" and --fresh forces a clean start.
     let resume = interactive_resume_mode(cli);
-    let mut agent = setup::AgentSetup::new(&cli.cwd, resume, Some(shared_settings.clone())).await?;
+    let mut agent = setup::AgentSetup::new_with_safety(&cli.cwd, resume, Some(shared_settings.clone()), cli.dangerously_bypass_permissions).await?;
     agent.instance_id = paths::instance_id("tui");
     bootstrap::apply_runtime_posture(
         &mut agent,
@@ -6409,7 +6422,13 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     }
 
     let resume = cli.resume.as_ref().map(|r| r.as_deref());
-    let mut agent = setup::AgentSetup::new(&cli.cwd, resume, Some(shared_settings.clone())).await?;
+    let mut agent = setup::AgentSetup::new_with_safety(
+        &cli.cwd,
+        resume,
+        Some(shared_settings.clone()),
+        cli.dangerously_bypass_permissions,
+    )
+    .await?;
     agent.instance_id = paths::instance_id("run");
     bootstrap::apply_runtime_posture(
         &mut agent,
@@ -6685,8 +6704,13 @@ async fn maybe_run_injected_cleave_smoke_child(
                     s.set_requested_context_class(class);
                 }
             }
-            let mut agent =
-                setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await?;
+            let mut agent = setup::AgentSetup::new_with_safety(
+                cwd,
+                None,
+                Some(shared_settings.clone()),
+                std::env::var("OMEGON_BYPASS_PERMISSIONS").is_ok(),
+            )
+            .await?;
             agent.instance_id = paths::instance_id("cleave");
             let status = agent.initial_harness_status.clone();
             let tool_names: Vec<String> = agent
@@ -7921,7 +7945,13 @@ async fn run_bounded_task(
         s.set_model(model);
     }
 
-    let mut agent = setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await?;
+    let mut agent = setup::AgentSetup::new_with_safety(
+        cwd,
+        None,
+        Some(shared_settings.clone()),
+        cli.dangerously_bypass_permissions,
+    )
+    .await?;
     agent.instance_id = paths::instance_id("run");
     bootstrap::apply_runtime_posture(
         &mut agent,

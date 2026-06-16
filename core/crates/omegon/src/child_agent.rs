@@ -32,11 +32,24 @@ pub struct ChildAgentBoundary {
     pub disabled_tools: Vec<String>,
     pub enabled_tools: Vec<String>,
     pub sandbox_profile: Option<String>,
+    pub dangerously_bypass_permissions: bool,
     pub notes: Vec<String>,
 }
 
 impl ChildAgentBoundary {
     pub fn from_runtime(cwd: &Path, runtime: &ChildAgentRuntimeProfile) -> Self {
+        Self::from_runtime_with_safety(
+            cwd,
+            runtime,
+            std::env::var("OMEGON_BYPASS_PERMISSIONS").is_ok(),
+        )
+    }
+
+    pub fn from_runtime_with_safety(
+        cwd: &Path,
+        runtime: &ChildAgentRuntimeProfile,
+        dangerously_bypass_permissions: bool,
+    ) -> Self {
         let scope = runtime.preloaded_files.clone();
         Self {
             cwd: std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()),
@@ -45,6 +58,7 @@ impl ChildAgentBoundary {
             disabled_tools: runtime.disabled_tools.clone(),
             enabled_tools: runtime.enabled_tools.clone(),
             sandbox_profile: runtime.nex_profile.clone(),
+            dangerously_bypass_permissions,
             notes: Vec::new(),
         }
     }
@@ -72,6 +86,12 @@ impl ChildAgentBoundary {
         if let Some(profile) = &self.sandbox_profile {
             out.push_str(&format!("\nSandbox profile: {profile}\n"));
         }
+        let permission_mode = if self.dangerously_bypass_permissions {
+            "dangerously_bypass_permissions inherited from parent"
+        } else {
+            "normal workspace boundary checks"
+        };
+        out.push_str(&format!("\nPermission mode: {permission_mode}\n"));
         if !self.notes.is_empty() {
             out.push_str("\nBoundary notes:\n");
             out.push_str(&list_or_none(&self.notes));
@@ -89,6 +109,8 @@ pub struct ChildAgentSpawnConfig {
     pub inherited_env: Vec<(String, String)>,
     pub injected_env: Vec<(String, String)>,
     pub runtime: ChildAgentRuntimeProfile,
+    /// Propagate parent --dangerously-bypass-permissions into child Omegon processes.
+    pub dangerously_bypass_permissions: bool,
 }
 
 pub fn write_child_prompt_file(
@@ -132,6 +154,9 @@ pub fn spawn_headless_child_agent(
     ];
     if let Some(ref context_class) = config.runtime.context_class {
         args.extend(["--context-class", context_class.as_str()]);
+    }
+    if config.dangerously_bypass_permissions {
+        args.push("--dangerously-bypass-permissions");
     }
 
     let mut child = Command::new(&config.agent_binary);
@@ -194,6 +219,9 @@ pub fn spawn_headless_child_agent(
     if config.runtime.slim {
         child.env("OMEGON_CHILD_SLIM", "1");
     }
+    if config.dangerously_bypass_permissions {
+        child.env("OMEGON_BYPASS_PERMISSIONS", "1");
+    }
     let child = child
         .spawn()
         .context("Failed to spawn headless child agent")?;
@@ -214,7 +242,11 @@ mod boundary_tests {
             nex_profile: Some("delegate-sandbox".into()),
             ..Default::default()
         };
-        let boundary = ChildAgentBoundary::from_runtime(Path::new("/workspace/project"), &runtime);
+        let boundary = ChildAgentBoundary::from_runtime_with_safety(
+            Path::new("/workspace/project"),
+            &runtime,
+            false,
+        );
         let prompt = boundary.to_prompt_section();
 
         assert!(prompt.contains("## Execution Boundary"));
@@ -223,6 +255,71 @@ mod boundary_tests {
         assert!(prompt.contains("delegate"));
         assert!(prompt.contains("cleave_run"));
         assert!(prompt.contains("Sandbox profile: delegate-sandbox"));
+        assert!(prompt.contains("Permission mode: normal workspace boundary checks"));
         assert!(prompt.contains("stop and report the blocker"));
+    }
+
+    #[test]
+    fn child_agent_boundary_prompt_discloses_inherited_bypass() {
+        let runtime = ChildAgentRuntimeProfile::default();
+        let boundary = ChildAgentBoundary::from_runtime_with_safety(
+            Path::new("/workspace/project"),
+            &runtime,
+            true,
+        );
+        let prompt = boundary.to_prompt_section();
+        assert!(
+            prompt
+                .contains("Permission mode: dangerously_bypass_permissions inherited from parent")
+        );
+    }
+
+    #[tokio::test]
+    async fn headless_child_spawn_propagates_bypass_flag_and_env() {
+        let captured = run_fake_child_with_bypass(true).await;
+        assert!(captured.contains("--dangerously-bypass-permissions"));
+        assert!(captured.contains("bypass:1"));
+    }
+
+    #[tokio::test]
+    async fn headless_child_spawn_omits_bypass_flag_and_env_when_disabled() {
+        let captured = run_fake_child_with_bypass(false).await;
+        assert!(!captured.contains("--dangerously-bypass-permissions"));
+        assert!(captured.contains("bypass:\n"));
+    }
+
+    async fn run_fake_child_with_bypass(dangerously_bypass_permissions: bool) -> String {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("fake-child.sh");
+        let output = temp.path().join("child-output.txt");
+        let prompt = temp.path().join("prompt.md");
+        std::fs::write(&prompt, "test prompt").unwrap();
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf 'args:%s\\n' \"$*\" > \"$OUTPUT_PATH\"\nprintf 'bypass:%s\\n' \"${OMEGON_BYPASS_PERMISSIONS:-}\" >> \"$OUTPUT_PATH\"\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script, perms).unwrap();
+        }
+
+        let config = ChildAgentSpawnConfig {
+            agent_binary: script,
+            model: "test:model".into(),
+            max_turns: 1,
+            inherited_env: vec![("OUTPUT_PATH".into(), output.to_string_lossy().to_string())],
+            injected_env: Vec::new(),
+            runtime: ChildAgentRuntimeProfile::default(),
+            dangerously_bypass_permissions,
+        };
+
+        let (mut child, _) = spawn_headless_child_agent(&config, temp.path(), &prompt).unwrap();
+        let status = child.wait().await.unwrap();
+        assert!(status.success());
+        std::fs::read_to_string(output).unwrap()
     }
 }

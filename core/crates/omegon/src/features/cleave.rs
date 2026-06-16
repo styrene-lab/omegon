@@ -551,6 +551,7 @@ pub struct CleaveFeature {
     /// Live runtime settings used to resolve the selected subagent autonomy policy.
     settings: Option<crate::settings::SharedSettings>,
     sandbox: bool,
+    dangerously_bypass_permissions: bool,
 }
 
 impl CleaveFeature {
@@ -558,6 +559,20 @@ impl CleaveFeature {
         repo_path: &std::path::Path,
         session_secret_env: Vec<(String, String)>,
         sandbox: bool,
+    ) -> Self {
+        Self::new_with_safety(
+            repo_path,
+            session_secret_env,
+            sandbox,
+            std::env::var("OMEGON_BYPASS_PERMISSIONS").is_ok(),
+        )
+    }
+
+    pub fn new_with_safety(
+        repo_path: &std::path::Path,
+        session_secret_env: Vec<(String, String)>,
+        sandbox: bool,
+        dangerously_bypass_permissions: bool,
     ) -> Self {
         let progress = Arc::new(Mutex::new(CleaveProgress::default()));
         let feature = Self {
@@ -569,6 +584,7 @@ impl CleaveFeature {
             bus_request_sink: Arc::new(Mutex::new(None)),
             settings: None,
             sandbox,
+            dangerously_bypass_permissions,
         };
         feature.refresh_progress_from_workspace_state();
         feature
@@ -1180,6 +1196,7 @@ impl CleaveFeature {
             progress_sink,
             workflow: crate::workflow::discover_workflow(&self.repo_path),
             sandbox: self.sandbox,
+            dangerously_bypass_permissions: self.dangerously_bypass_permissions,
         };
 
         let result = cleave::run_cleave(

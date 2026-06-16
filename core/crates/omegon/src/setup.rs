@@ -171,6 +171,21 @@ impl AgentSetup {
         resume: Option<Option<&str>>,
         settings: Option<crate::settings::SharedSettings>,
     ) -> anyhow::Result<Self> {
+        Self::new_with_safety(
+            cwd,
+            resume,
+            settings,
+            std::env::var("OMEGON_BYPASS_PERMISSIONS").is_ok(),
+        )
+        .await
+    }
+
+    pub async fn new_with_safety(
+        cwd: &Path,
+        resume: Option<Option<&str>>,
+        settings: Option<crate::settings::SharedSettings>,
+        dangerously_bypass_permissions: bool,
+    ) -> anyhow::Result<Self> {
         let instance_id = crate::paths::instance_id("agent");
         let cwd = std::fs::canonicalize(cwd)?;
         // Canonical project root — extensions read this instead of
@@ -559,8 +574,12 @@ impl AgentSetup {
             .unwrap_or(false);
 
         // ─── Cleave (decomposition + dispatch) ─────────────────────────
-        let mut cleave_feature =
-            features::cleave::CleaveFeature::new(&cwd, session_secret_env.clone(), sandbox);
+        let mut cleave_feature = features::cleave::CleaveFeature::new_with_safety(
+            &cwd,
+            session_secret_env.clone(),
+            sandbox,
+            dangerously_bypass_permissions,
+        );
         if let Some(settings) = settings.as_ref() {
             cleave_feature = cleave_feature.with_settings(settings.clone());
         }
@@ -582,7 +601,12 @@ impl AgentSetup {
 
         // ─── Delegate (subagent system) ─────────────────────────────────
         let agents = crate::features::delegate::scan_agents(&cwd);
-        let mut delegate_feature = features::delegate::DelegateFeature::new(&cwd, agents, sandbox);
+        let mut delegate_feature = features::delegate::DelegateFeature::new_with_safety(
+            &cwd,
+            agents,
+            sandbox,
+            dangerously_bypass_permissions,
+        );
         if let Some(settings) = settings.as_ref() {
             delegate_feature = delegate_feature.with_settings(settings.clone());
         }

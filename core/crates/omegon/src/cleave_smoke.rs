@@ -316,6 +316,7 @@ async fn run_scenario(cli: &Cli, scenario: &SmokeScenario) -> anyhow::Result<()>
         progress_sink: cleave::progress::stdout_progress_sink(),
         workflow: None,
         sandbox: false,
+        dangerously_bypass_permissions: cli.dangerously_bypass_permissions,
     };
     if let Some(profile) = &scenario.runtime_profile {
         config.child_runtime = profile.clone();

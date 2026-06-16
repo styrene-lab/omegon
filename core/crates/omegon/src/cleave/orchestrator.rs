@@ -68,6 +68,8 @@ pub struct CleaveConfig {
     pub workflow: Option<crate::workflow::WorkflowTemplate>,
     /// When true, spawn children inside OCI containers via Nex profiles.
     pub sandbox: bool,
+    /// Propagate parent --dangerously-bypass-permissions into child Omegon processes.
+    pub dangerously_bypass_permissions: bool,
 }
 
 /// Result of a cleave run.
@@ -303,6 +305,11 @@ pub async fn run_cleave(
                             .unwrap_or_else(|| effective_model.clone())
                     };
 
+                    let task_content = prepend_execution_boundary(
+                        task_content,
+                        config.dangerously_bypass_permissions,
+                    );
+
                     to_dispatch.push(ChildDispatchInfo {
                         child_idx,
                         wt_path,
@@ -373,6 +380,7 @@ pub async fn run_cleave(
                 runtime: child_runtime,
                 progress_sink,
                 sandbox: config.sandbox,
+                dangerously_bypass_permissions: config.dangerously_bypass_permissions,
             };
 
             let (child_process, pid) =
@@ -511,6 +519,8 @@ pub async fn run_cleave(
                                     runtime: fb_runtime,
                                     progress_sink: config.progress_sink.clone(),
                                     sandbox: config.sandbox,
+                                    dangerously_bypass_permissions: config
+                                        .dangerously_bypass_permissions,
                                 };
 
                                 let fallback_result = match spawn_child_process(
@@ -799,6 +809,7 @@ struct ChildDispatchConfig {
     progress_sink: SharedProgressSink,
     /// When true, spawn children inside OCI containers via Nex profile.
     sandbox: bool,
+    pub dangerously_bypass_permissions: bool,
 }
 
 /// Resolve a Nex profile and spawn the child inside a container.
@@ -910,6 +921,7 @@ fn spawn_child_process(
         inherited_env: config.inherited_env.clone(),
         injected_env: config.injected_env.clone(),
         runtime: child_runtime_profile(&config.runtime),
+        dangerously_bypass_permissions: config.dangerously_bypass_permissions,
     };
     tracing::info!(child = %label, inherited_env = config.inherited_env.len(), injected_env = config.injected_env.len(), inherited_env_names = ?config.inherited_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), injected_env_names = ?config.injected_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), "child env inheritance");
     let (child, pid) = if config.sandbox {
@@ -1162,6 +1174,18 @@ fn auto_commit_worktree(wt_path: &Path, label: &str, scope: &[String]) -> usize 
     }
 }
 
+fn prepend_execution_boundary(
+    task_content: String,
+    dangerously_bypass_permissions: bool,
+) -> String {
+    let permission_mode = if dangerously_bypass_permissions {
+        "dangerously_bypass_permissions inherited from parent"
+    } else {
+        "normal workspace boundary checks"
+    };
+    format!("## Execution Boundary\n\nPermission mode: {permission_mode}\n\n{task_content}")
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_task_file(
     child_idx: usize,
@@ -1343,6 +1367,7 @@ mod tests {
             progress_sink: crate::cleave::progress::stdout_progress_sink(),
             workflow: None,
             sandbox: false,
+            dangerously_bypass_permissions: false,
         };
         assert_eq!(config.idle_timeout_secs, 300);
         assert_eq!(config.timeout_secs, 900);
@@ -1430,6 +1455,25 @@ mod tests {
         assert!(task.contains("siblings: [0:alpha]"));
         assert!(task.contains("**alpha**: Do alpha work"));
         assert!(!task.contains("1:"));
+    }
+
+    #[test]
+    fn prepend_execution_boundary_discloses_inherited_bypass_mode() {
+        let prompt = prepend_execution_boundary("# Task\n".to_string(), true);
+        assert!(prompt.starts_with("## Execution Boundary"));
+        assert!(
+            prompt
+                .contains("Permission mode: dangerously_bypass_permissions inherited from parent")
+        );
+        assert!(prompt.contains("# Task"));
+    }
+
+    #[test]
+    fn prepend_execution_boundary_discloses_normal_mode() {
+        let prompt = prepend_execution_boundary("# Task\n".to_string(), false);
+        assert!(prompt.starts_with("## Execution Boundary"));
+        assert!(prompt.contains("Permission mode: normal workspace boundary checks"));
+        assert!(prompt.contains("# Task"));
     }
 
     #[test]
@@ -1755,6 +1799,7 @@ fn test_config(
         }),
         workflow: None,
         sandbox: false,
+        dangerously_bypass_permissions: false,
     }
 }
 

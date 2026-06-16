@@ -429,12 +429,14 @@ async fn execute_task_with_retry(
             "executing sentry task"
         );
 
+        let dangerously_bypass_permissions = std::env::var("OMEGON_BYPASS_PERMISSIONS").is_ok();
         let task_result = if is_code_act {
             run_code_act_task(
                 &spec.prompt,
                 &effective_model,
                 effective_cwd,
                 timeout_secs,
+                dangerously_bypass_permissions,
                 cancel,
             )
             .await
@@ -446,6 +448,7 @@ async fn execute_task_with_retry(
                 max_turns,
                 timeout_secs,
                 spec.token_budget,
+                dangerously_bypass_permissions,
                 cancel,
             )
             .await
@@ -747,6 +750,7 @@ async fn run_code_act_task(
     model: &str,
     cwd: &Path,
     timeout_secs: u64,
+    dangerously_bypass_permissions: bool,
     cancel: &CancellationToken,
 ) -> anyhow::Result<TaskResult> {
     let start = Instant::now();
@@ -763,6 +767,7 @@ async fn run_code_act_task(
         model,
         cwd,
         timeout_secs,
+        dangerously_bypass_permissions,
         cancel,
         proxy_prelude,
         proxy_socket_path,
@@ -778,17 +783,23 @@ async fn run_code_act_task(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_code_act_inner(
     prompt: &str,
     model: &str,
     cwd: &Path,
     timeout_secs: u64,
+    dangerously_bypass_permissions: bool,
     cancel: &CancellationToken,
     proxy_prelude: String,
     proxy_socket_path: PathBuf,
 ) -> anyhow::Result<TaskResult> {
-    let executor = crate::code_act::CodeActExecutor::permitted(cwd.to_path_buf())
-        .with_proxy(proxy_prelude, proxy_socket_path);
+    let executor = if dangerously_bypass_permissions {
+        crate::code_act::CodeActExecutor::permitted(cwd.to_path_buf())
+    } else {
+        crate::code_act::CodeActExecutor::new(cwd.to_path_buf())
+    }
+    .with_proxy(proxy_prelude, proxy_socket_path);
     let mut total_tokens = 0u64;
     let mut gen_prompt = executor.build_prompt(prompt, None);
 
@@ -854,6 +865,7 @@ async fn run_code_act_inner(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_agent_task(
     prompt: &str,
     model: &str,
@@ -861,6 +873,7 @@ async fn run_agent_task(
     max_turns: u32,
     timeout_secs: u64,
     token_budget: Option<u64>,
+    dangerously_bypass_permissions: bool,
     global_cancel: &CancellationToken,
 ) -> anyhow::Result<TaskResult> {
     use omegon_traits::AgentEvent;
@@ -881,7 +894,13 @@ async fn run_agent_task(
         s.set_model(model);
     }
 
-    let mut agent = crate::setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await?;
+    let mut agent = crate::setup::AgentSetup::new_with_safety(
+        cwd,
+        None,
+        Some(shared_settings.clone()),
+        dangerously_bypass_permissions,
+    )
+    .await?;
     agent.instance_id = crate::paths::instance_id("sentry");
     crate::bootstrap::apply_runtime_posture(
         &mut agent,

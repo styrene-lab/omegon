@@ -5395,9 +5395,14 @@ pub async fn run(
     let extension_metadata = if let Some(id) = agent_id {
         let shared_settings = crate::settings::shared(model);
         crate::apply_agent_manifest_pre_setup(id, cwd, &shared_settings)?;
-        crate::setup::AgentSetup::new(cwd, None, Some(shared_settings))
-            .await?
-            .extension_metadata
+        crate::setup::AgentSetup::new_with_safety(
+            cwd,
+            None,
+            Some(shared_settings),
+            dangerously_bypass_permissions,
+        )
+        .await?
+        .extension_metadata
     } else {
         Default::default()
     };
