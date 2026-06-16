@@ -769,6 +769,16 @@ fn worker_chrome_line(
     task_progress: &str,
     width: u16,
 ) -> String {
+    let row = project_worker_chrome_row(label, status, last_tool, task_progress);
+    crate::tui::inline_render::render_inline_text_row(&row, width.saturating_sub(1))
+}
+
+fn project_worker_chrome_row(
+    label: &str,
+    status: &str,
+    last_tool: Option<&str>,
+    task_progress: &str,
+) -> crate::surfaces::inline::InlineRow<String> {
     let glyphs = crate::tui::glyphs::glyphs();
     let state = glyphs.tool_state(crate::tui::glyphs::tool_state_role_for_status(status));
     let category = last_tool
@@ -778,7 +788,7 @@ fn worker_chrome_line(
         Some(category) => format!("{category} {tool}"),
         None => tool.to_string(),
     });
-    let row = crate::surfaces::inline::InlineRow::new(
+    crate::surfaces::inline::InlineRow::new(
         vec![
             crate::surfaces::inline::InlineCell::new(
                 format!("{state} {label}"),
@@ -801,8 +811,7 @@ fn worker_chrome_line(
                 )
             })
             .collect(),
-    );
-    crate::tui::inline_render::render_inline_text_row(&row, width.saturating_sub(1))
+    )
 }
 
 fn workbench_rule_line<'a>(
@@ -855,4 +864,34 @@ fn render_workstream_summary(
     )))
     .style(Style::default().bg(bg))
     .render(area, frame.buffer_mut());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worker_chrome_projection_separates_identity_from_metadata() {
+        let row = project_worker_chrome_row("delegate-1", "running", Some("bash"), " · tasks 1/3");
+
+        assert_eq!(row.left.len(), 2);
+        assert!(row.left[0].text.contains("delegate-1"));
+        assert_eq!(row.left[1].text, "running");
+        assert_eq!(row.right.len(), 2);
+        assert!(row.right[0].text.contains("bash"));
+        assert_eq!(row.right[1].text, "tasks 1/3");
+    }
+
+    #[test]
+    fn worker_chrome_line_preserves_right_metadata_when_truncated() {
+        let rendered = worker_chrome_line(
+            "very-long-worker-label-that-will-overflow",
+            "running",
+            Some("bash"),
+            " · tasks 1/3",
+            42,
+        );
+
+        assert!(rendered.contains("tasks 1/3"), "{rendered}");
+    }
 }
