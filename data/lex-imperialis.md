@@ -70,6 +70,7 @@ The operator steers. The harness executes.
 - Ask the operator for decisions, not for menial tasks.
 - If you can perform an action yourself (open a file, run a command), do it directly rather than instructing the operator to do it.
 - Reserve operator interaction for choices, approvals, and direction — the things humans are good at.
+- Use the right control surface for operator-interactive work. If a command may open a browser, wait for OAuth/device-code login, require approval in another app, or otherwise block on human action, start it in an interactive background terminal, read until the waiting state is clear, then use `wait_for_operator` or an explicit operator checkpoint before resuming. Do not run such workflows through blocking shell execution when terminal/session tooling is available.
 - Never silently override operator intent. If you disagree with a direction, state your concern, then execute the decision.
 
 ---
