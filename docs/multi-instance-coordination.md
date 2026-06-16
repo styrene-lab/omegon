@@ -312,7 +312,44 @@ The infrastructure is built but not wired. The gap is in the memory extension's 
 4. Add `deleteMind` to the directive-abandon flow
 5. The delegate worktree still symlinks `facts.db` for physical access, but operates in its own logical mind partition
 
+### Context-gated memory and federation sync — avoid project overfit
+
+The multi-instance model should not make every Omegon invocation behave like a long-running repository coordinator. Memory continuity has different costs depending on the current surface:
+
+| Mode | Activation signal | Memory behavior | Project/federation behavior |
+|---|---|---|---|
+| One-off / non-Git | no `.git`, no project directives, ad hoc file/task | lightweight recall/store only when useful | no fetch/status, changelog, design docs, handoff, or sibling-checkout scan unless requested |
+| Ordinary Git repo | `.git` exists, no Omegon lifecycle signals | use Git status/fetch only when relevant to the task | no Omegon-specific lifecycle artifacts unless project policy asks for them |
+| Known lifecycle project | project directives, design tree, OpenSpec, changelog, or Omegon repo signals | store durable decisions and recall project facts at task boundaries | reconcile with docs/OpenSpec/changelog when behavior or decisions change |
+| Multi-checkout / federation | explicit operator request or declared sibling-checkout topology | compare memory backend/mind state across checkouts | read-only status first; sync/merge only after explicit decision |
+
+This keeps the memory system useful for small tasks without turning every one-off edit into a Git/lifecycle operation. Federation status must degrade to “not applicable” outside repositories instead of creating files or failing.
+
+**First implementation pass:** add a read-only context projection that classifies the current directory into these modes and reports why. Do not perform synchronization, write handoff artifacts, or mutate memory backends in the first pass.
+
 ## Decisions
+
+### Decision: Federation and memory-sync status starts as a read-only context projection
+
+**Status:** decided
+**Rationale:** The safe first implementation is detection, not synchronization. A read-only projection can answer “what context am I in, and what memory/project synchronization rules apply?” without risking overfit or unexpected writes. This projection becomes the shared input for future CLI/TUI/Workbench surfaces and can degrade cleanly for non-Git one-off tasks.
+
+**Initial fields:**
+
+- `cwd`
+- `mode`: `one_off`, `ordinary_git`, `lifecycle_project`, or `federation`
+- `signals`: detected reasons such as `.git`, `AGENTS.md`, `openspec/`, design docs, changelog, sibling checkouts
+- `git`: optional branch/head/ahead-behind/dirty summary when applicable
+- `memory`: backend identity if cheaply knowable; otherwise `unknown`
+- `recommended_behavior`: short human-readable policy
+
+**Non-goals for first pass:**
+
+- automatic memory import/export
+- sibling checkout mutation
+- handoff document creation
+- changelog/design/OpenSpec writes
+- background daemon coordination
 
 ### Decision: implement should auto-checkout the directive branch (Mode C foundation)
 
