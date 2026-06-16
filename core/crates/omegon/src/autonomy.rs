@@ -209,6 +209,19 @@ impl SubagentPolicy {
     }
 }
 
+pub fn subagent_level_for_automation(level: crate::settings::AutomationLevel) -> AutonomyLevel {
+    match level {
+        crate::settings::AutomationLevel::Ask => AutonomyLevel::Manual,
+        crate::settings::AutomationLevel::Guarded => AutonomyLevel::Conservative,
+        crate::settings::AutomationLevel::Flow => AutonomyLevel::Autonomous,
+        crate::settings::AutomationLevel::Autonomous => AutonomyLevel::Orchestrator,
+    }
+}
+
+pub fn subagent_policy_for_automation(level: crate::settings::AutomationLevel) -> SubagentPolicy {
+    SubagentPolicy::for_level(subagent_level_for_automation(level))
+}
+
 /// Resolve the active subagent authority policy for the current runtime.
 ///
 /// This is intentionally centralized even while it returns the conservative
@@ -329,6 +342,37 @@ mod tests {
         let resolved = resolve_autonomy_envelope([&session, &loop_envelope, &approval]);
         assert_eq!(resolved.source, AutonomySource::ExplicitApproval);
         assert_eq!(resolved.level, AutonomyLevel::Orchestrator);
+    }
+
+    #[test]
+    fn automation_levels_map_to_subagent_autonomy_levels() {
+        assert_eq!(
+            subagent_level_for_automation(crate::settings::AutomationLevel::Ask),
+            AutonomyLevel::Manual
+        );
+        assert_eq!(
+            subagent_level_for_automation(crate::settings::AutomationLevel::Guarded),
+            AutonomyLevel::Conservative
+        );
+        assert_eq!(
+            subagent_level_for_automation(crate::settings::AutomationLevel::Flow),
+            AutonomyLevel::Autonomous
+        );
+        assert_eq!(
+            subagent_level_for_automation(crate::settings::AutomationLevel::Autonomous),
+            AutonomyLevel::Orchestrator
+        );
+    }
+
+    #[test]
+    fn automation_policy_mapping_preserves_conservative_default() {
+        let policy = subagent_policy_for_automation(crate::settings::AutomationLevel::Guarded);
+        assert_eq!(policy.level, AutonomyLevel::Conservative);
+        assert_eq!(policy.delegate_scout, DecisionPolicy::Allow);
+        assert_eq!(policy.delegate_patch, DecisionPolicy::RequireApproval);
+        assert_eq!(policy.cleave_run, DecisionPolicy::RequireApproval);
+        assert_eq!(policy.max_children, 2);
+        assert_eq!(policy.max_parallel, 1);
     }
 
     #[test]

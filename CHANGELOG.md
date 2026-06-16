@@ -33,6 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Added a mapping from the existing `/autonomy` automation levels to subagent autonomy policy levels so future prompt/gate wiring can use one operator-facing knob.
 - Added an internal autonomy envelope model for session, loop, scheduled-job, and explicit-approval policy precedence without changing loop execution behavior yet.
 - Added execution substrate projection to IPC/web runtime snapshots so attached clients can see the detected host/container substrate alongside harness status.
 - Added a conservative subagent autonomy policy layer that now drives prompt guidance for delegate/cleave operations, keeping `cleave_run` approval-oriented by default while allowing bounded scout/verify delegates.
