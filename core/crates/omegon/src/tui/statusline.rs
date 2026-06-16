@@ -278,63 +278,69 @@ impl StatusLine {
     }
 
     fn render_engine_row(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
-        let w = area.width as usize;
-        if w < 20 {
+        if area.width < 20 {
             return;
         }
 
-        let sep = Span::styled(" · ", Style::default().fg(t.dim()));
+        let text = crate::tui::inline_render::render_inline_text_row(
+            &self.project_engine_row(),
+            area.width,
+        );
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                text,
+                Style::default().fg(t.muted()).bg(t.surface_bg()),
+            )))
+            .style(Style::default().bg(t.surface_bg())),
+            area,
+        );
+    }
+
+    fn project_engine_row(&self) -> crate::surfaces::inline::InlineRow<String> {
         let connection = if self.provider_connected {
             "online"
         } else {
             "offline"
         };
-        let mut spans: Vec<Span<'static>> = vec![
-            Span::styled(" engine ", Style::default().fg(t.accent())),
-            Span::styled(self.runtime_brand.clone(), Style::default().fg(t.muted())),
-        ];
-
-        let mut used: usize = spans.iter().map(|s| s.width()).sum();
-        for (field, style) in [
-            (
-                format!("posture {}", self.posture),
-                Style::default().fg(t.muted()),
-            ),
-            (
-                format!("provider {} {connection}", self.model_provider),
-                Style::default().fg(t.dim()),
-            ),
-            (
-                format!("who {}", self.principal_id),
-                Style::default().fg(t.dim()),
-            ),
-            (
-                format!("authz {}", self.authorization),
-                Style::default().fg(t.dim()),
-            ),
-            (
-                format!("tier {}", self.model_tier),
-                Style::default().fg(t.dim()),
-            ),
-            (
-                format!("think {}", self.thinking_level),
-                Style::default().fg(t.dim()),
-            ),
-        ] {
-            let span = Span::styled(field, style);
-            let cost = sep.width() + span.width();
-            if used + cost < w {
-                spans.push(sep.clone());
-                spans.push(span);
-                used += cost;
-            }
-        }
-
-        frame.render_widget(Clear, area);
-        frame.render_widget(
-            Paragraph::new(Line::from(spans)).style(Style::default().bg(t.surface_bg())),
-            area,
-        );
+        crate::surfaces::inline::InlineRow::new(
+            vec![
+                crate::surfaces::inline::InlineCell::new(
+                    "engine".to_string(),
+                    crate::surfaces::inline::InlineCellRole::Label,
+                ),
+                crate::surfaces::inline::InlineCell::new(
+                    self.runtime_brand.clone(),
+                    crate::surfaces::inline::InlineCellRole::Value,
+                ),
+                crate::surfaces::inline::InlineCell::new(
+                    format!("posture {}", self.posture),
+                    crate::surfaces::inline::InlineCellRole::Metadata,
+                ),
+                crate::surfaces::inline::InlineCell::new(
+                    format!("provider {} {connection}", self.model_provider),
+                    crate::surfaces::inline::InlineCellRole::Metadata,
+                ),
+            ],
+            vec![
+                crate::surfaces::inline::InlineCell::new(
+                    format!("who {}", self.principal_id),
+                    crate::surfaces::inline::InlineCellRole::Metadata,
+                ),
+                crate::surfaces::inline::InlineCell::new(
+                    format!("authz {}", self.authorization),
+                    crate::surfaces::inline::InlineCellRole::Metadata,
+                ),
+                crate::surfaces::inline::InlineCell::new(
+                    format!("tier {}", self.model_tier),
+                    crate::surfaces::inline::InlineCellRole::Metadata,
+                ),
+                crate::surfaces::inline::InlineCell::new(
+                    format!("think {}", self.thinking_level),
+                    crate::surfaces::inline::InlineCellRole::Metadata,
+                ),
+            ],
+        )
     }
 }
 
@@ -516,5 +522,31 @@ mod tests {
             "files: 16 touched · 4 changed"
         );
         assert_eq!(file_activity_label(12, 0, 90), "files: 12 read");
+    }
+
+    #[test]
+    fn engine_row_projection_preserves_left_identity_and_right_metadata() {
+        let sl = StatusLine {
+            runtime_brand: "omegon".into(),
+            posture: "agent".into(),
+            model_provider: "anthropic".into(),
+            provider_connected: false,
+            principal_id: "operator".into(),
+            authorization: "local".into(),
+            model_tier: "balanced".into(),
+            thinking_level: "minimal".into(),
+            ..Default::default()
+        };
+
+        let row = sl.project_engine_row();
+        assert_eq!(row.left[0].text, "engine");
+        assert_eq!(row.left[1].text, "omegon");
+        assert!(
+            row.left
+                .iter()
+                .any(|cell| cell.text == "provider anthropic offline")
+        );
+        assert!(row.right.iter().any(|cell| cell.text == "authz local"));
+        assert!(row.right.iter().any(|cell| cell.text == "think minimal"));
     }
 }

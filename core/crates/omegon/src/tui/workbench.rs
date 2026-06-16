@@ -774,16 +774,35 @@ fn worker_chrome_line(
     let category = last_tool
         .map(crate::tui::glyphs::tool_category_role_for_name)
         .map(|role| glyphs.tool_category(role));
-    let tool = last_tool
-        .map(|tool| match category {
-            Some(category) => format!(" · {category} {tool}"),
-            None => format!(" · {tool}"),
-        })
-        .unwrap_or_default();
-    crate::util::truncate(
-        &format!("{state} {label} {status:<10}{task_progress}{tool}"),
-        width.saturating_sub(1) as usize,
-    )
+    let tool = last_tool.map(|tool| match category {
+        Some(category) => format!("{category} {tool}"),
+        None => tool.to_string(),
+    });
+    let row = crate::surfaces::inline::InlineRow::new(
+        vec![
+            crate::surfaces::inline::InlineCell::new(
+                format!("{state} {label}"),
+                crate::surfaces::inline::InlineCellRole::Status,
+            ),
+            crate::surfaces::inline::InlineCell::new(
+                status.to_string(),
+                crate::surfaces::inline::InlineCellRole::Value,
+            ),
+        ],
+        tool.into_iter()
+            .chain(
+                (!task_progress.is_empty())
+                    .then(|| task_progress.trim_start_matches(" · ").to_string()),
+            )
+            .map(|cell| {
+                crate::surfaces::inline::InlineCell::new(
+                    cell,
+                    crate::surfaces::inline::InlineCellRole::Metadata,
+                )
+            })
+            .collect(),
+    );
+    crate::tui::inline_render::render_inline_text_row(&row, width.saturating_sub(1))
 }
 
 fn workbench_rule_line<'a>(
