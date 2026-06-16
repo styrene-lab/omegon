@@ -3708,7 +3708,9 @@ impl OmegonAcpAgent {
                 let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
                     std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
                 });
-                Ok(serde_json::json!({ "prompts": crate::prompts::list_structured_for_project(&cwd)? }))
+                Ok(
+                    serde_json::json!({ "prompts": crate::prompts::list_structured_for_project(&cwd)? }),
+                )
             }
             "prompts/get" => {
                 let name = params["name"]

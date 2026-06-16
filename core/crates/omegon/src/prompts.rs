@@ -178,7 +178,9 @@ pub fn list_structured() -> anyhow::Result<Vec<PromptEntry>> {
     list_structured_for_project(&project_cwd)
 }
 
-pub fn list_structured_for_project(project_cwd: &std::path::Path) -> anyhow::Result<Vec<PromptEntry>> {
+pub fn list_structured_for_project(
+    project_cwd: &std::path::Path,
+) -> anyhow::Result<Vec<PromptEntry>> {
     let user_dir = user_prompts_dir()?;
     let project_dir = project_prompts_dir_for(project_cwd);
     let mut entries = Vec::new();

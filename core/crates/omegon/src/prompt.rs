@@ -746,7 +746,9 @@ mod tests {
             Path::new("/tmp"),
             &tools,
             PromptMode::Full,
-            crate::autonomy::subagent_policy_for_automation(crate::settings::AutomationLevel::Autonomous),
+            crate::autonomy::subagent_policy_for_automation(
+                crate::settings::AutomationLevel::Autonomous,
+            ),
         )
         .prompt;
 

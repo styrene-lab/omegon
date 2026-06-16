@@ -313,7 +313,10 @@ mod tests {
         assert_eq!(resolved.source, AutonomySource::Loop);
         assert_eq!(resolved.level, AutonomyLevel::Conservative);
         assert_eq!(resolved.max_turns, Some(5));
-        assert_eq!(resolved.denied_operations, vec![AuthorityOperation::CleaveRun]);
+        assert_eq!(
+            resolved.denied_operations,
+            vec![AuthorityOperation::CleaveRun]
+        );
     }
 
     #[test]
@@ -321,15 +324,24 @@ mod tests {
         let session = AutonomyEnvelope::session(AutonomyLevel::Orchestrator);
         let mut job = AutonomyEnvelope::scheduled_job(AutonomyLevel::Manual);
         job.allowed_operations = vec![AuthorityOperation::DelegateVerify];
-        job.denied_operations = vec![AuthorityOperation::DelegatePatch, AuthorityOperation::CleaveRun];
+        job.denied_operations = vec![
+            AuthorityOperation::DelegatePatch,
+            AuthorityOperation::CleaveRun,
+        ];
 
         let resolved = resolve_autonomy_envelope([&session, &job]);
         assert_eq!(resolved.source, AutonomySource::ScheduledJob);
         assert_eq!(resolved.level, AutonomyLevel::Manual);
-        assert_eq!(resolved.allowed_operations, vec![AuthorityOperation::DelegateVerify]);
+        assert_eq!(
+            resolved.allowed_operations,
+            vec![AuthorityOperation::DelegateVerify]
+        );
         assert_eq!(
             resolved.denied_operations,
-            vec![AuthorityOperation::DelegatePatch, AuthorityOperation::CleaveRun]
+            vec![
+                AuthorityOperation::DelegatePatch,
+                AuthorityOperation::CleaveRun
+            ]
         );
     }
 

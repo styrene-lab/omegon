@@ -69,7 +69,6 @@ impl OperationRef {
     }
 }
 
-
 /// Stable renderer/client-facing status for child operations such as delegate
 /// tasks and cleave children. This is intentionally broader than any single
 /// engine's internal state machine.
@@ -235,10 +234,19 @@ pub enum ApprovalScope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuthorityGrant {
-    CleaveRun { max_children: usize, max_parallel: usize },
-    DelegatePatch { max_tasks: Option<usize> },
-    OciExecution { image: Option<String> },
-    CloudModelBudget { max_usd: Option<String> },
+    CleaveRun {
+        max_children: usize,
+        max_parallel: usize,
+    },
+    DelegatePatch {
+        max_tasks: Option<usize>,
+    },
+    OciExecution {
+        image: Option<String>,
+    },
+    CloudModelBudget {
+        max_usd: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,7 +258,9 @@ pub enum ChildExecutionMode {
         #[serde(skip_serializing_if = "Option::is_none")]
         pull_policy: Option<OciPullPolicy>,
     },
-    Orchestrated { substrate: String },
+    Orchestrated {
+        substrate: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

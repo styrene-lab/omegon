@@ -979,7 +979,9 @@ impl AgentSetup {
                 )
                 .prompt
             })
-            .unwrap_or_else(|| prompt::build_base_prompt_for_mode(&cwd, &tool_defs, prompt_mode).prompt);
+            .unwrap_or_else(|| {
+                prompt::build_base_prompt_for_mode(&cwd, &tool_defs, prompt_mode).prompt
+            });
         let prompt_tokens = base_prompt.len() / 4;
 
         tracing::info!(

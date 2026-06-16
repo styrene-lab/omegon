@@ -35,7 +35,8 @@ pub fn detect() -> omegon_traits::ExecutionSubstrate {
             image: std::env::var("OMEGON_OCI_IMAGE").ok(),
             image_digest: std::env::var("OMEGON_OCI_IMAGE_DIGEST").ok(),
             container_id: std::env::var("HOSTNAME").ok(),
-            orchestrator: kubernetes.then_some(omegon_traits::ContainerOrchestratorKind::Kubernetes),
+            orchestrator: kubernetes
+                .then_some(omegon_traits::ContainerOrchestratorKind::Kubernetes),
         }),
         paths: omegon_traits::ExecutionSubstratePaths {
             workspace,

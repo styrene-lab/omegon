@@ -733,7 +733,10 @@ mod tests {
         assert_eq!(details["child_count"], 1);
         assert_eq!(details["task_count"], 1);
         assert_eq!(details["children"][0]["status"], "completed");
-        assert_eq!(details["children"][0]["result_summary"], "patched two files");
+        assert_eq!(
+            details["children"][0]["result_summary"],
+            "patched two files"
+        );
         assert!(details["children"][0]["failure"].is_null());
     }
 
@@ -752,9 +755,15 @@ mod tests {
 
         let projection = OperationWorkbenchProjection::from_delegate(&progress);
         let details = projection.to_status_details(false);
-        assert_eq!(details["children"][0]["result_summary"], "provider auth unavailable");
+        assert_eq!(
+            details["children"][0]["result_summary"],
+            "provider auth unavailable"
+        );
         assert_eq!(details["children"][0]["failure"]["kind"], "model_error");
-        assert_eq!(details["children"][0]["failure"]["message"], "provider auth unavailable");
+        assert_eq!(
+            details["children"][0]["failure"]["message"],
+            "provider auth unavailable"
+        );
         assert_eq!(details["children"][0]["failure"]["recoverable"], true);
     }
 
