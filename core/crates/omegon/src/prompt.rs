@@ -53,6 +53,16 @@ pub fn build_base_prompt_for_mode(
     tools: &[ToolDefinition],
     mode: PromptMode,
 ) -> PromptAssembly {
+    build_base_prompt_for_mode_with_subagent_policy(cwd, tools, mode, active_subagent_policy())
+}
+
+/// Build the base system prompt with an explicit subagent policy.
+pub fn build_base_prompt_for_mode_with_subagent_policy(
+    cwd: &Path,
+    tools: &[ToolDefinition],
+    mode: PromptMode,
+    subagent_policy: SubagentPolicy,
+) -> PromptAssembly {
     let slim = matches!(mode, PromptMode::Slim | PromptMode::Constrained);
     let date = utc_date();
     let tool_list = format_tool_list(tools);
@@ -104,7 +114,6 @@ pub fn build_base_prompt_for_mode(
         let tool_surface = "\n## Tool surface\n\nSome situational tools (persona, model-budget, lifecycle management, advanced memory) are hidden by default to reduce context overhead. If the task requires them, use `manage_tools` with `list_groups` to discover available groups and `enable_group` to activate them.\n";
         let harness_surfaces = "\n## Harness surfaces and state\n\n- Treat Workbench/plan state as live operational state. Before reporting a task complete, reconcile visible plan/workbench state with validation and commit state; do not claim `nothing pending` while an active/todo plan remains unresolved.\n- Separate producer/provenance from content form. Assistant prose, peer-agent prose, and markdown returned by tools may share rendering paths while retaining different producers.\n- Prefer semantic projections and command registry paths over renderer-specific or surface-specific shortcuts.\n- TUI, CLI, ACP, and WebSocket/IPC should share command/projection sources where possible; avoid hidden per-surface allowlists.\n- Prompt templates and loops are executable instruction sources. Preserve provenance, preview/validate before execution, and require explicit safety handling for repeated `/loop` execution.\n";
         if has_delegate {
-            let subagent_policy = active_subagent_policy();
             let subagent_operations =
                 render_subagent_operations_prompt(&subagent_policy, has_cleave_tools);
             format!("{base}{subagent_operations}{harness_surfaces}{tool_surface}")
@@ -724,6 +733,27 @@ mod tests {
                 "Retrieve/reconcile delegate or cleave results before claiming completion"
             )
         );
+    }
+
+    #[test]
+    fn base_prompt_can_render_operator_selected_subagent_policy() {
+        let tools = vec![
+            tool(crate::tool_registry::delegate::DELEGATE),
+            tool(crate::tool_registry::cleave::CLEAVE_ASSESS),
+            tool(crate::tool_registry::cleave::CLEAVE_RUN),
+        ];
+        let prompt = build_base_prompt_for_mode_with_subagent_policy(
+            Path::new("/tmp"),
+            &tools,
+            PromptMode::Full,
+            crate::autonomy::subagent_policy_for_automation(crate::settings::AutomationLevel::Autonomous),
+        )
+        .prompt;
+
+        assert!(prompt.contains("Autonomy: `orchestrator`"));
+        assert!(prompt.contains("`cleave_run` is for coordinated multi-subagent work"));
+        assert!(prompt.contains("It allowed when justified under the active autonomy policy"));
+        assert!(prompt.contains("max_children=8, max_parallel=4"));
     }
 
     #[test]

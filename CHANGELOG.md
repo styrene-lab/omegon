@@ -33,6 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Wired base prompt assembly to accept the operator-selected subagent policy so future `/autonomy autonomous` sessions can render orchestrator guidance instead of the conservative default.
 - Exposed the mapped subagent autonomy policy in `/automation status` so the operator can see delegate/cleave posture, limits, and the loop/scheduled-job non-escalation note.
 - Mapped `/autonomy flow` to the conservative subagent policy so flow continuation does not implicitly make `cleave_run` a normal operation; `/autonomy autonomous` remains the power-user orchestration posture.
 - Added a mapping from the existing `/autonomy` automation levels to subagent autonomy policy levels so future prompt/gate wiring can use one operator-facing knob.
