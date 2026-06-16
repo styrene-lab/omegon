@@ -503,6 +503,20 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
         return Some(crate::util::truncate(&line, 96));
     }
 
+    if matches!(tool_name, "bash")
+        && let Some(line) = lines
+            .iter()
+            .map(|line| clean_inline_text(line.trim()))
+            .find(|line| {
+                line.starts_with("To ")
+                    || line.contains(" -> ")
+                    || line.contains("forced update")
+                    || line.contains("set up to track")
+            })
+    {
+        return Some(crate::util::truncate(&line, 96));
+    }
+
     if matches!(tool_name, "codebase_search" | "search_documents")
         && let Some(line) = lines
             .iter()
@@ -805,8 +819,50 @@ fn detect_links(text: &str) -> Vec<RenderedLink> {
     const SCHEMES: [&str; 3] = ["https://", "http://", "file://"];
 
     let mut links = Vec::new();
+    let mut markdown_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut cursor = 0usize;
+
+    while cursor < text.len() {
+        let Some(open_rel) = text[cursor..].find('[') else {
+            break;
+        };
+        let open = cursor + open_rel;
+        let Some(close_rel) = text[open + 1..].find("](") else {
+            cursor = open + 1;
+            continue;
+        };
+        let close = open + 1 + close_rel;
+        let url_start = close + 2;
+        let Some(url_end_rel) = text[url_start..].find(')') else {
+            cursor = url_start;
+            continue;
+        };
+        let url_end = url_start + url_end_rel;
+        let url = text[url_start..url_end].trim();
+        if SCHEMES.iter().any(|scheme| url.starts_with(scheme)) {
+            let label = text[open + 1..close].trim();
+            if !label.is_empty() {
+                links.push(RenderedLink {
+                    start_col: UnicodeWidthStr::width(&text[..open]) as u16,
+                    label: label.to_string(),
+                    url: url.to_string(),
+                });
+                markdown_ranges.push((open, url_end + 1));
+            }
+        }
+        cursor = url_end + 1;
+    }
+
     let mut cursor = 0usize;
     while cursor < text.len() {
+        if let Some((_, range_end)) = markdown_ranges
+            .iter()
+            .find(|(range_start, range_end)| cursor >= *range_start && cursor < *range_end)
+        {
+            cursor = *range_end;
+            continue;
+        }
+
         let rest = &text[cursor..];
         let Some((rel_start, scheme)) = SCHEMES
             .iter()
@@ -817,6 +873,18 @@ fn detect_links(text: &str) -> Vec<RenderedLink> {
         };
 
         let start = cursor + rel_start;
+        if markdown_ranges
+            .iter()
+            .any(|(range_start, range_end)| start >= *range_start && start < *range_end)
+        {
+            cursor = markdown_ranges
+                .iter()
+                .find(|(range_start, range_end)| start >= *range_start && start < *range_end)
+                .map(|(_, range_end)| *range_end)
+                .unwrap_or(start + scheme.len());
+            continue;
+        }
+
         let after_scheme = start + scheme.len();
         let mut end = text.len();
         for (idx, ch) in text[after_scheme..].char_indices() {
@@ -848,6 +916,7 @@ fn detect_links(text: &str) -> Vec<RenderedLink> {
         cursor = end.max(after_scheme);
     }
 
+    links.sort_by_key(|link| link.start_col);
     links
 }
 
@@ -2662,6 +2731,17 @@ mod tests {
     }
 
     #[test]
+    fn summarize_shell_result_promotes_git_push_outcome_over_remote_noise() {
+        let summary = summarize_tool_result(
+            "bash",
+            Some("remote:\nremote: Create a pull request for 'branch' on GitHub by visiting:\nTo https://github.com/styrene-lab/omegon.git\n * [new branch]      workstream/foo -> workstream/foo\nbranch 'workstream/foo' set up to track 'origin/workstream/foo'."),
+        )
+        .expect("summary");
+
+        assert_eq!(summary, "To https://github.com/styrene-lab/omegon.git");
+    }
+
+    #[test]
     fn summarize_search_result_promotes_result_count() {
         let summary = summarize_tool_result(
             "codebase_search",
@@ -2681,6 +2761,20 @@ mod tests {
         .expect("summary");
 
         assert_eq!(summary, "2 facts");
+    }
+
+    #[test]
+    fn detects_markdown_links_as_single_click_target() {
+        let links = detect_links("Create the PR here: [https://github.com/styrene-lab/omegon/pull/new/workstream/upstream-provider-failures](https://github.com/styrene-lab/omegon/pull/new/workstream/upstream-provider-failures)");
+        assert_eq!(links.len(), 1);
+        assert_eq!(
+            links[0].label,
+            "https://github.com/styrene-lab/omegon/pull/new/workstream/upstream-provider-failures"
+        );
+        assert_eq!(
+            links[0].url,
+            "https://github.com/styrene-lab/omegon/pull/new/workstream/upstream-provider-failures"
+        );
     }
 
     #[test]

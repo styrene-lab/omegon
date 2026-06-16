@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Cleared Clippy warnings that blocked `just lint`, including derivable defaults, single-character string pushes, manual contains checks, collapsible conditionals, bool assert comparisons, and explicit allowances for intentionally broad dispatcher signatures.
 
 ### Changed
+- Improved slim TUI summaries for shell-based git pushes so remote boilerplate no longer leaves command rows looking empty when a branch is pushed or tracking is set up.
 - Propagated `--dangerously-bypass-permissions` into delegate and cleave child Omegon processes so higher-order workers inherit parent permission bypass authority.
 - Clarified that policy prompts are allow-once until durable policy grants exist, and documented default-open unknown-tool behavior plus lexical permission-pattern matching.
 - Strengthened Lex Imperialis operator-agency guidance to require interactive background terminal/session handling for OAuth, browser, device-code, approval, and other human-blocking workflows when that tooling is available.
