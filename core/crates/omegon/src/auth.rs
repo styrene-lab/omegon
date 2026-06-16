@@ -881,6 +881,7 @@ pub fn read_credential_extra(provider: &str, field: &str) -> Option<String> {
 pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Result<()> {
     let path =
         auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    assert_test_auth_json_override_for_write(&path)?;
     let _ = std::fs::create_dir_all(path.parent().unwrap());
 
     with_auth_json_lock(&path, || {
@@ -1009,6 +1010,7 @@ pub fn logout_provider(provider: &str) -> anyhow::Result<()> {
 
     let path =
         auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    assert_test_auth_json_override_for_write(&path)?;
 
     if !path.exists() {
         return Ok(());
@@ -2038,6 +2040,7 @@ fn write_credentials_with_extra(
 ) -> anyhow::Result<()> {
     let path =
         auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    assert_test_auth_json_override_for_write(&path)?;
     let _ = std::fs::create_dir_all(path.parent().unwrap());
     with_auth_json_lock(&path, || {
         let mut auth = read_auth_json_for_update(&path, "write_credentials_with_extra", provider)?;
@@ -2095,6 +2098,7 @@ fn refreshed_credential_entry(
 fn write_refreshed_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Result<()> {
     let path =
         auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    assert_test_auth_json_override_for_write(&path)?;
     let _ = std::fs::create_dir_all(path.parent().unwrap());
     with_auth_json_lock(&path, || {
         let mut auth = read_auth_json_for_update(&path, "write_refreshed_credentials", provider)?;
@@ -2115,6 +2119,27 @@ fn write_refreshed_credentials(provider: &str, creds: &OAuthCredentials) -> anyh
         tracing::info!(provider, auth_path = %auth_path, auth_path_source, expires = creds.expires, "persisted refreshed provider credentials to auth.json");
         Ok(())
     })
+}
+
+
+fn assert_test_auth_json_override_for_write(path: &Path) -> anyhow::Result<()> {
+    #[cfg(test)]
+    {
+        let override_path = std::env::var("OMEGON_AUTH_JSON_PATH")
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+        if !override_path {
+            anyhow::bail!(
+                "test attempted to write default auth.json path without OMEGON_AUTH_JSON_PATH override: {}",
+                path.display()
+            );
+        }
+    }
+    #[cfg(not(test))]
+    {
+        let _ = path;
+    }
+    Ok(())
 }
 
 fn read_auth_json_for_update(
@@ -2789,10 +2814,16 @@ mod tests {
             assert_eq!(auth_json_path().as_deref(), Some(override_path.as_path()));
         });
 
-        with_auth_json_path_env(None, || {
-            let path = auth_json_path().expect("default auth path");
-            assert!(path.ends_with(".config/omegon/auth.json"));
-        });
+        let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+        unsafe { std::env::remove_var("OMEGON_AUTH_JSON_PATH") };
+        let path = auth_json_path().expect("default auth path");
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
+                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+            }
+        }
+        assert!(path.ends_with(".config/omegon/auth.json"));
     }
 
     #[test]

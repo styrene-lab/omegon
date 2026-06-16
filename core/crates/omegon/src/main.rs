@@ -9371,6 +9371,11 @@ mod tests {
 
     #[test]
     fn remote_slash_logout_accepts_openai_codex_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth_path = dir.path().join("auth.json");
+        let original_auth = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+        unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path) };
+
         let rt = tokio::runtime::Runtime::new().unwrap();
         let agent = test_agent_setup();
         let (events_tx, _) = broadcast::channel(16);
@@ -9408,6 +9413,13 @@ mod tests {
             output.contains("cleared this session's cached auth env"),
             "got: {output}"
         );
+
+        unsafe {
+            match original_auth {
+                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
+                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+            }
+        }
     }
 
     #[test]
