@@ -93,6 +93,7 @@ mod ollama;
 mod packages;
 mod paths;
 mod pkl_modules;
+mod permissions;
 mod plan;
 mod plugin_cli;
 mod plugins;

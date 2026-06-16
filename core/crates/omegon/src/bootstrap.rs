@@ -229,6 +229,8 @@ pub fn build_loop_config(
         ollama_manager: overrides.ollama_manager,
         skill_phases: Vec::new(), // populated by caller after skill loading
         host_context: None,
+        permission_policy: None,
+        permission_role: None,
     }
 }
 

@@ -16,7 +16,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+- Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
+
 ### Changed
+- Clarified that policy prompts are allow-once until durable policy grants exist, and documented default-open unknown-tool behavior plus lexical permission-pattern matching.
 - Strengthened Lex Imperialis operator-agency guidance to require interactive background terminal/session handling for OAuth, browser, device-code, approval, and other human-blocking workflows when that tooling is available.
 - Improved slim TUI tool-row summaries so skipped validation, shell errors, edit/commit outcomes, search result counts, and memory recall counts surface as concise row outcomes instead of generic first-line result text.
 - Shortened common compound tool names in slim TUI rows, including search, memory, context, wait, and browser tools.
