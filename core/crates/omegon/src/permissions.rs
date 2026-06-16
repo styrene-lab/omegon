@@ -437,6 +437,15 @@ mod tests {
     }
 
     #[test]
+    fn unknown_tool_defaults_to_allow_for_extension_compatibility() {
+        let layered = LayeredPermissionPolicy::default();
+        let decision = layered.evaluate_subjects("extension_future_tool", std::iter::empty());
+        assert_eq!(decision.action, PermissionAction::Allow);
+        assert_eq!(decision.layer, None);
+        assert_eq!(decision.decision.reason, PermissionDecisionReason::NoRule);
+    }
+
+    #[test]
     fn exact_tool_rule_can_deny() {
         let p = policy(&[("bash", ToolPermissionRule::Action(PermissionAction::Deny))]);
         let decision = p.evaluate("bash", "echo ok");
@@ -576,6 +585,50 @@ mod tests {
 
 
     #[test]
+    fn layered_policy_is_monotonic_and_session_deny_can_tighten_lex_allow() {
+        let layered = LayeredPermissionPolicy {
+            lex: policy(&[(
+                crate::tool_registry::core::BASH,
+                ToolPermissionRule::Action(PermissionAction::Allow),
+            )]),
+            session: policy(&[(
+                crate::tool_registry::core::BASH,
+                ToolPermissionRule::Action(PermissionAction::Deny),
+            )]),
+            ..Default::default()
+        };
+        let subjects = subjects_from_tool_args(
+            crate::tool_registry::core::BASH,
+            &serde_json::json!({"command":"echo ok"}),
+        );
+        let decision = layered.evaluate_subjects(crate::tool_registry::core::BASH, &subjects);
+        assert_eq!(decision.action, PermissionAction::Deny);
+        assert_eq!(decision.layer, Some(PermissionLayer::Session));
+    }
+
+    #[test]
+    fn layered_policy_session_allow_cannot_loosen_project_prompt() {
+        let layered = LayeredPermissionPolicy {
+            project: policy(&[(
+                crate::tool_registry::core::BASH,
+                ToolPermissionRule::Action(PermissionAction::Prompt),
+            )]),
+            session: policy(&[(
+                crate::tool_registry::core::BASH,
+                ToolPermissionRule::Action(PermissionAction::Allow),
+            )]),
+            ..Default::default()
+        };
+        let subjects = subjects_from_tool_args(
+            crate::tool_registry::core::BASH,
+            &serde_json::json!({"command":"echo ok"}),
+        );
+        let decision = layered.evaluate_subjects(crate::tool_registry::core::BASH, &subjects);
+        assert_eq!(decision.action, PermissionAction::Prompt);
+        assert_eq!(decision.layer, Some(PermissionLayer::Project));
+    }
+
+    #[test]
     fn layered_policy_denies_override_lower_allows() {
         let layered = LayeredPermissionPolicy {
             lex: policy(&[(
@@ -642,6 +695,7 @@ mod tests {
         ));
     }
 
+    #[test]
     fn settings_snapshot_carries_project_tools_and_role() {
         let mut settings = crate::settings::Settings::default();
         settings.permissions.tools.insert(

@@ -57,6 +57,8 @@ Patterns: glob matching on tool arguments.
 Runtime invariant: permission-required operations are not recoverable tool failures. They suspend the agent run until explicit operator allow, explicit deny, explicit run cancellation, or an upstream preapproval/bypass such as a trusted directory or `--dangerously-bypass-permissions`. A passive timeout must not convert a permission prompt into denial.
 
 
+Policy prompts are allow-once in this slice: host/TUI `allow always` selections are normalized to the same one-shot `allow` decision because there is not yet a durable policy grant target. Persistent directory trust remains limited to workspace-boundary prompts.
+
 Subject extraction contract for the initial engine slice:
 
 | Tool | Matched subject | Sensitive values matched? |
@@ -68,7 +70,11 @@ Subject extraction contract for the initial engine slice:
 | `secret_set`, `secret_delete` | secret `name` | never secret values |
 | `web_fetch` | `url` | URL only |
 
-Multi-subject tools aggregate to the strongest decision: `deny > prompt > allow`.
+Multi-subject tools aggregate to the strongest decision: `deny > prompt > allow`. Layering is a monotonic tightening lattice, not last-writer-wins: Lex, persona, project, and session policies are all evaluated, and lower layers may tighten an invocation but cannot loosen a higher-layer prompt or deny. A session `allow` therefore cannot bypass a project/persona/Lex `prompt` or `deny`.
+
+Unknown tools and tools without extracted subjects are currently default-open unless a tool-level rule exists. This preserves extension compatibility for the first enforcement slice, but it is not a security boundary; restrictive deployments should add explicit tool rules until a configurable unknown-tool default exists.
+
+Pattern matching is lexical and glob-like (`*` any sequence, `?` one character). Path patterns are matched against extracted argument strings, not canonicalized filesystem paths; normalization/canonical path policy belongs to a later path-aware matcher.
 
 Bash mediation is static and advisory for common shell forms (redirects, `tee`, `cp`/`mv`/`install`, `mkdir`, `rm`). It unifies detected bash boundary hits with the permission prompt surface, but hard filesystem containment for shell variable indirection, subprocesses, and programmatic I/O belongs to the sandbox layer.
 

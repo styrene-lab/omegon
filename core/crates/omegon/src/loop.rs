@@ -2937,8 +2937,10 @@ async fn execute_tool_invocation(
                     {
                         Ok(agent_client_protocol::schema::RequestPermissionOutcome::Selected(sel)) => {
                             match sel.option_id.0.as_ref() {
-                                "allow_always" => omegon_traits::PermissionResponse::AlwaysAllow,
-                                "allow_once" => omegon_traits::PermissionResponse::Allow,
+                                // Policy prompts do not yet have a durable/session grant target.
+                                // Treat host "allow always" selections as allow-once so the
+                                // permission surface does not imply persistence we cannot honor.
+                                "allow_always" | "allow_once" => omegon_traits::PermissionResponse::Allow,
                                 _ => omegon_traits::PermissionResponse::Deny,
                             }
                         }
@@ -2958,15 +2960,10 @@ async fn execute_tool_invocation(
                 match response {
                     omegon_traits::PermissionResponse::Allow
                     | omegon_traits::PermissionResponse::AlwaysAllow => {
-                        let decision_text = match response {
-                            omegon_traits::PermissionResponse::Allow => "allow",
-                            omegon_traits::PermissionResponse::AlwaysAllow => "always_allow",
-                            omegon_traits::PermissionResponse::Deny => unreachable!(),
-                        };
                         permission_log.push(PermissionRecord {
                             tool_name: visible_tool_name.to_string(),
                             path: requested.clone(),
-                            decision: decision_text.into(),
+                            decision: "allow".into(),
                         });
                     }
                     omegon_traits::PermissionResponse::Deny => {
