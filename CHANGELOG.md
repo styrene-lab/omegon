@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Changed
 - Strengthened Lex Imperialis operator-agency guidance to require interactive background terminal/session handling for OAuth, browser, device-code, approval, and other human-blocking workflows when that tooling is available.
 - Improved slim TUI tool-row summaries so skipped validation, shell errors, edit/commit outcomes, search result counts, and memory recall counts surface as concise row outcomes instead of generic first-line result text.
+- Shortened common compound tool names in slim TUI rows, including search, memory, context, wait, and browser tools.
 - Made `delegate` background startup register and detach without awaiting an async boundary before returning the task id.
 - Made `cleave_run` default to background execution so child-agent orchestration returns an operation id immediately and leaves the main agent/operator control path free; pass `background: false` for the previous attached wait behavior.
 - Routed `/cleave status` display rows through the shared operation projection so cleave command status uses the same canonical child status and failure-kind semantics as Workbench.
