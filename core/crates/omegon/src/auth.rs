@@ -679,11 +679,18 @@ pub fn any_oauth_token_exists() -> bool {
 }
 
 /// Read credentials for a provider from auth.json.
+///
+/// Provider ids, aliases, and auth.json storage keys are normalized here so
+/// every caller uses the same lookup semantics. In particular, the OpenAI API
+/// provider (`openai`) and Codex/ChatGPT OAuth provider (`openai-codex`) must
+/// not drift across startup probes, selected-model validation, and streaming
+/// client construction.
 pub fn read_credentials(provider: &str) -> Option<OAuthCredentials> {
     let path = auth_json_path()?;
     let content = std::fs::read_to_string(&path).ok()?;
     let auth: Value = serde_json::from_str(&content).ok()?;
-    let entry = auth.get(provider)?;
+    let auth_key = auth_json_key(provider);
+    let entry = auth.get(auth_key)?;
     serde_json::from_value(entry.clone()).ok()
 }
 
@@ -880,9 +887,10 @@ pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Re
         let mut auth = read_auth_json_for_update(&path, "write_credentials", provider)?;
 
         let before_keys = auth_json_provider_keys(&auth);
-        auth[provider] = serde_json::to_value(creds)?;
-        ensure_auth_json_key_invariants("write_credentials", provider, &before_keys, &auth)?;
-        trace_auth_json_key_delta("write_credentials", provider, &before_keys, &auth);
+        let auth_key = auth_json_key(provider);
+        auth[auth_key] = serde_json::to_value(creds)?;
+        ensure_auth_json_key_invariants("write_credentials", auth_key, &before_keys, &auth)?;
+        trace_auth_json_key_delta("write_credentials", auth_key, &before_keys, &auth);
         atomic_write_auth_json(&path, &auth)?;
         set_auth_file_permissions(&path)?;
         let (auth_path, auth_path_source) = auth_path_trace_fields();
@@ -2560,6 +2568,31 @@ mod tests {
         assert_eq!(openai.auth_method, AuthMethod::ApiKey);
         assert_eq!(codex.auth_key, "openai-codex");
         assert_eq!(codex.auth_method, AuthMethod::OAuth);
+    }
+
+    #[test]
+    fn read_credentials_normalizes_provider_alias_to_auth_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("auth.json");
+        let creds = OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "codex-oauth-token".into(),
+            refresh: "codex-refresh-token".into(),
+            expires: 9_999_999_999_999,
+        };
+
+        with_auth_json_path_env(Some(&override_path), || {
+            write_credentials("chatgpt", &creds).expect("write codex alias auth");
+
+            let chatgpt = read_credentials("chatgpt").expect("chatgpt alias credentials");
+            let codex = read_credentials("codex").expect("codex alias credentials");
+            let openai_codex =
+                read_credentials("openai-codex").expect("canonical codex credentials");
+
+            assert_eq!(chatgpt.access, "codex-oauth-token");
+            assert_eq!(codex.access, "codex-oauth-token");
+            assert_eq!(openai_codex.access, "codex-oauth-token");
+        });
     }
 
     #[tokio::test]

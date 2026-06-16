@@ -74,6 +74,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a source-agnostic skill suggestion helper that evaluates parsed bundled, user-installed, Armory-installed, or project-local skills against profile, intent, and project-signal evidence without performing runtime injection, preserving external metadata diagnostics instead of silently dropping malformed activation hints.
 
 ### Fixed
+- Unified provider credential reads through canonical auth.json keys so OpenAI Codex OAuth aliases resolve the persisted `openai-codex` grant instead of forcing reauthentication after rebuilds.
 - Isolated the voice bridge extension fixture from ambient Kubernetes substrate environment so full-suite runs do not reject the native test extension.
 - Avoid caching Pkl binary availability so env-mutating tests or runtime PATH changes cannot poison agent manifest loading for the rest of the process.
 - `omegon --which` now reports checkout `HEAD` freshness for launcher-selected checkout/channel binaries and suggests `cd <root> && just link` when a local build is stale.
