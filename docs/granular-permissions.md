@@ -51,6 +51,8 @@ external_directory = { action = "deny", allow = ["/usr/local/include"] }
 Actions: `allow` (silent), `prompt` (ask operator), `deny` (block).
 Patterns: glob matching on tool arguments.
 
+Runtime invariant: permission-required operations are not recoverable tool failures. They suspend the agent run until explicit operator allow, explicit deny, explicit run cancellation, or an upstream preapproval/bypass such as a trusted directory or `--dangerously-bypass-permissions`. A passive timeout must not convert a permission prompt into denial.
+
 The key improvement over OpenCode: our permissions compose with personas. The tutor persona says "no bash" — that's a persona-level deny that the operator can't accidentally override with a session sticky. The Lex Imperialis could define absolute denies (e.g. never allow `rm -rf /`).
 
 ## Open Questions

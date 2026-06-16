@@ -94,33 +94,30 @@ pub async fn execute_streaming(
     }
 
     // ─── Workspace boundary heuristic scan ─────────────────────────
-    // Best-effort scan for filesystem write patterns targeting paths
-    // outside the workspace boundary. This is NOT a security boundary —
-    // shell variable expansion, subshells, and programmatic I/O bypass
-    // it trivially. It exists to catch the common accidental case.
-    // The Nex container sandbox is the real enforcement layer.
+    // Best-effort scan for filesystem write patterns targeting paths outside
+    // the workspace boundary. This is not a complete shell sandbox — shell
+    // variable expansion, subshells, and programmatic I/O require the Nex
+    // container boundary — but detected violations must flow through the same
+    // typed permission mediation path as read/write/edit instead of becoming
+    // ad hoc bash-local blocks that the agent can route around.
     if let Some(ref boundary) = boundary {
         let violations = scan_boundary_violations(trimmed, boundary, cwd);
-        if !violations.is_empty() {
-            return Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: format!(
-                        "BLOCKED: command targets paths outside the workspace boundary:\n{}",
-                        violations
-                            .iter()
-                            .map(|v| format!("  - {v}"))
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    ),
-                }],
-                details: serde_json::json!({
-                    "exitCode": -1,
-                    "durationMs": 0,
-                    "blocked": true,
-                    "reason": "workspace_boundary_violation",
-                    "paths": violations,
-                }),
-            });
+        if let Some(path) = violations.first() {
+            let resolved = if path.starts_with('/') || path.starts_with('~') {
+                super::expand_tilde(path)
+            } else {
+                cwd.join(path)
+            };
+            let directory = resolved
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            return Err(super::PathPermissionError {
+                requested_path: path.clone(),
+                directory,
+                workspace: boundary.cwd().display().to_string(),
+            }
+            .into());
         }
     }
 
@@ -583,7 +580,8 @@ const ALLOWED_PATHS: &[&str] = &[
 ];
 
 /// Scan a bash command for filesystem write patterns targeting paths
-/// outside the workspace boundary. Returns a list of violating paths.
+/// outside the workspace boundary. Returns a list of paths that need
+/// permission mediation before bash may execute.
 pub(crate) fn scan_boundary_violations(
     command: &str,
     boundary: &super::WorkspaceBoundary,
@@ -1107,6 +1105,27 @@ mod tests {
         );
         assert!(!v.is_empty(), "should catch redirect to /etc/evil.txt");
         assert!(v.iter().any(|p| p.contains("/etc/evil.txt")));
+    }
+
+    #[tokio::test]
+    async fn bash_boundary_hit_returns_typed_permission_error() {
+        let b = test_boundary("/tmp/workspace");
+        let err = execute_streaming(
+            "echo secret > /etc/evil.txt",
+            Path::new("/tmp/workspace"),
+            Some(1),
+            CancellationToken::new(),
+            ToolProgressSink::noop(),
+            Some(b),
+        )
+        .await
+        .expect_err("outside-workspace bash writes should request permission");
+
+        let permission = err
+            .downcast_ref::<crate::tools::PathPermissionError>()
+            .expect("bash boundary hits must use PathPermissionError");
+        assert_eq!(permission.requested_path, "/etc/evil.txt");
+        assert_eq!(permission.directory, "/etc");
     }
 
     #[test]
