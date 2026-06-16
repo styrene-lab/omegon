@@ -4800,6 +4800,7 @@ fn auspex_attach_payload_carries_startup_and_instance_metadata() {
                 context_class: Some("Compact".into()),
                 thinking_level: Some("Medium".into()),
                 capability_tier: Some("victory".into()),
+                execution_substrate: None,
             },
         }),
     };

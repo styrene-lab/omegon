@@ -127,6 +127,7 @@ fn project_web_instance(
             active_persona: h.active_persona.as_ref().map(|p| p.name.clone()),
             active_tone: h.active_tone.as_ref().map(|t| t.name.clone()),
             active_delegate_count: h.active_delegates.len(),
+            execution_substrate: Some(h.execution_substrate.clone()),
         })
         .unwrap_or(IpcHarnessSnapshot {
             context_class: "Compact".into(),
@@ -160,6 +161,7 @@ fn project_web_instance(
             active_persona: None,
             active_tone: None,
             active_delegate_count: 0,
+            execution_substrate: Some(crate::execution_substrate::detect()),
         });
 
     let (git_branch, git_detached) = handles

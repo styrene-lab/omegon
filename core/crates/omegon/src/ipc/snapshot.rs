@@ -340,6 +340,7 @@ pub fn project_instance_descriptor(
             context_class: Some(harness.context_class.clone()),
             thinking_level: Some(harness.thinking_level.clone()),
             capability_tier: Some(harness.capability_tier.clone()),
+            execution_substrate: harness.execution_substrate.clone(),
         },
     }
 }
@@ -406,6 +407,7 @@ fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
             active_persona: None,
             active_tone: None,
             active_delegate_count: 0,
+            execution_substrate: Some(crate::execution_substrate::detect()),
         };
     };
     let Ok(h) = h_lock.lock() else {
@@ -441,6 +443,7 @@ fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
             active_persona: None,
             active_tone: None,
             active_delegate_count: 0,
+            execution_substrate: Some(crate::execution_substrate::detect()),
         };
     };
 
@@ -491,6 +494,7 @@ fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
         active_persona: h.active_persona.as_ref().map(|p| p.name.clone()),
         active_tone: h.active_tone.as_ref().map(|t| t.name.clone()),
         active_delegate_count: h.active_delegates.len(),
+        execution_substrate: Some(h.execution_substrate.clone()),
     }
 }
 
@@ -595,6 +599,11 @@ mod tests {
         assert_eq!(
             snap.instance.runtime.thinking_level.as_deref(),
             Some("high")
+        );
+        assert!(snap.harness.execution_substrate.is_some());
+        assert_eq!(
+            snap.instance.runtime.execution_substrate,
+            snap.harness.execution_substrate
         );
     }
 }

@@ -807,6 +807,8 @@ pub struct OmegonRuntime {
     pub thinking_level: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capability_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_substrate: Option<ExecutionSubstrate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -989,6 +991,8 @@ pub struct IpcHarnessSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_tone: Option<String>,
     pub active_delegate_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_substrate: Option<ExecutionSubstrate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2655,6 +2659,7 @@ mod tests {
                     context_class: Some("Squad".into()),
                     thinking_level: Some("Medium".into()),
                     capability_tier: Some("victory".into()),
+                    execution_substrate: None,
                 },
             },
             session: IpcSessionSnapshot {
@@ -2738,6 +2743,7 @@ mod tests {
                 active_persona: None,
                 active_tone: None,
                 active_delegate_count: 0,
+                execution_substrate: None,
             },
             health: IpcHealthSnapshot {
                 state: IpcHealthState::Ready,

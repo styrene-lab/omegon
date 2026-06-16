@@ -771,6 +771,10 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                     .as_ref()
                     .map(|h| h.active_delegates.len())
                     .unwrap_or(0),
+                execution_substrate: harness
+                    .as_ref()
+                    .map(|h| h.execution_substrate.clone())
+                    .or_else(|| Some(crate::execution_substrate::detect())),
             };
             let health = omegon_traits::IpcHealthSnapshot {
                 state: omegon_traits::IpcHealthState::Ready,
@@ -1184,6 +1188,11 @@ required = ["BRAVE_API_KEY"]
         assert_eq!(harness.capability_tier, "victory");
         assert!(harness.memory_available);
         assert!(harness.cleave_available);
+        assert!(!harness.execution_substrate.paths.workspace.is_empty());
+        assert_eq!(
+            snap.instance.runtime.execution_substrate,
+            Some(harness.execution_substrate)
+        );
     }
 
     #[tokio::test]
