@@ -2755,6 +2755,8 @@ pub async fn automation_view_response(
         .map(|s| s.automation_level)
         .unwrap_or_default();
     let profile_level = profile.automation.level.unwrap_or_default();
+    let live_subagent_policy = crate::autonomy::subagent_policy_for_automation(live_level);
+    let profile_subagent_policy = crate::autonomy::subagent_policy_for_automation(profile_level);
     SlashCommandResponse {
         accepted: true,
         output: Some(
@@ -2764,6 +2766,22 @@ pub async fn automation_view_response(
                     "liveSummary": live_level.summary(),
                     "profileLevel": profile_level.as_str(),
                     "profileSummary": profile_level.summary(),
+                    "subagents": {
+                        "liveLevel": live_subagent_policy.level.as_str(),
+                        "profileLevel": profile_subagent_policy.level.as_str(),
+                        "delegate": {
+                            "scout": live_subagent_policy.delegate_scout.prompt_label(),
+                            "patch": live_subagent_policy.delegate_patch.prompt_label(),
+                            "verify": live_subagent_policy.delegate_verify.prompt_label()
+                        },
+                        "cleave": {
+                            "assess": live_subagent_policy.cleave_assess.prompt_label(),
+                            "run": live_subagent_policy.cleave_run.prompt_label(),
+                            "maxChildren": live_subagent_policy.max_children,
+                            "maxParallel": live_subagent_policy.max_parallel
+                        },
+                        "note": "automation is the operator-facing knob; loop and scheduled-job envelopes may further constrain this policy but do not grant extra authority by being schedulers"
+                    },
                     "commands": [
                         "/automation ask",
                         "/automation guarded",
@@ -2806,7 +2824,7 @@ pub async fn automation_set_response(
         profile,
         &format!(
             "Automation → {} ({})\n\
-             This tunes continuation behavior only; permissions and plan gates remain hard boundaries.",
+             This tunes continuation and subagent posture only; permissions, loop/job envelopes, and plan gates remain hard boundaries.",
             level.as_str(),
             level.summary()
         ),
@@ -4012,6 +4030,10 @@ mod tests {
         let view = automation_view_response(&settings, tmp.path()).await;
         let output = view.output.unwrap_or_default();
         assert!(output.contains("\"liveLevel\":\"flow\""));
+        assert!(output.contains("\"subagents\""));
+        assert!(output.contains("\"liveLevel\":\"conservative\""));
+        assert!(output.contains("\"maxChildren\":2"));
+        assert!(output.contains("loop and scheduled-job envelopes"));
     }
 
     #[test]

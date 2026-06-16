@@ -213,7 +213,7 @@ pub fn subagent_level_for_automation(level: crate::settings::AutomationLevel) ->
     match level {
         crate::settings::AutomationLevel::Ask => AutonomyLevel::Manual,
         crate::settings::AutomationLevel::Guarded => AutonomyLevel::Conservative,
-        crate::settings::AutomationLevel::Flow => AutonomyLevel::Autonomous,
+        crate::settings::AutomationLevel::Flow => AutonomyLevel::Conservative,
         crate::settings::AutomationLevel::Autonomous => AutonomyLevel::Orchestrator,
     }
 }
@@ -356,7 +356,7 @@ mod tests {
         );
         assert_eq!(
             subagent_level_for_automation(crate::settings::AutomationLevel::Flow),
-            AutonomyLevel::Autonomous
+            AutonomyLevel::Conservative
         );
         assert_eq!(
             subagent_level_for_automation(crate::settings::AutomationLevel::Autonomous),
