@@ -3083,8 +3083,13 @@ async fn execute_tool_invocation(
                 });
 
                 tokio::task::spawn_blocking(move || {
-                    rx.recv_timeout(std::time::Duration::from_secs(120))
-                        .unwrap_or(omegon_traits::PermissionResponse::Deny)
+                    // Permission prompts are an operator control boundary, not a
+                    // soft failure. Match Claude Code semantics: once a tool
+                    // needs outside-workspace access, the run waits here until
+                    // the operator allows or denies it. The bypass door remains
+                    // `--dangerously-bypass-permissions`, which prevents this
+                    // prompt from being raised in the first place.
+                    rx.recv().unwrap_or(omegon_traits::PermissionResponse::Deny)
                 })
                 .await
                 .unwrap_or(omegon_traits::PermissionResponse::Deny)
