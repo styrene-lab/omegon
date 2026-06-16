@@ -48,6 +48,17 @@ Do not bake user credentials or per-project state into images. Do bake executabl
 
 Armory should become the packaging guide for image layers. The target shape is not “one hand-written container per extension”; it is “compose image layers from declared extension prerequisites.”
 
+Rust extension SDK artifacts are substrate-specific compiled artifacts. Unlike interpreted TypeScript/Python extensions, a Rust native extension binary must be built for the execution substrate that will run it: host macOS, native Linux, or a particular OCI image architecture/libc/toolchain envelope. Install flow should therefore query Armory for the artifact version matching the detected `ExecutionSubstrate` instead of assuming the host artifact can run everywhere.
+
+The desired declarative model is:
+
+```text
+artifact = resolve(extension = vox, version = 1.2.3, substrate = detected-or-target)
+image = compose(base = omegon-full, artifacts = [artifact], profile = research-reporter)
+```
+
+That lets arbitrary extension/substrate combinations be built into OCI images without hand-authoring a bespoke container file for each extension.
+
 Example task:
 
 ```text
