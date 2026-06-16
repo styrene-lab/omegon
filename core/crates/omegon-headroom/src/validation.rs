@@ -106,6 +106,8 @@ pub struct ValidationSuiteReport {
     pub evaluated_estimated_tokens_after: usize,
     pub token_counter: String,
     pub token_counter_kind: String,
+    pub restored_fact_count: usize,
+    pub restored_fact_bytes: usize,
     pub evaluated_token_savings_percent: u8,
     pub evaluated_savings_percent: u8,
 }
@@ -335,6 +337,14 @@ pub fn validate_suite_with_counter(
         percent_saved(total_original_bytes, total_evaluated_compressed_bytes);
     let evaluated_token_savings_percent =
         percent_saved(estimated_tokens_before, evaluated_estimated_tokens_after);
+    let restored_fact_count: usize = reports
+        .iter()
+        .map(|report| report.restored_fact_count)
+        .sum();
+    let restored_fact_bytes: usize = reports
+        .iter()
+        .map(|report| report.restored_fact_bytes)
+        .sum();
 
     ValidationSuiteReport {
         passed: reports.iter().all(|report| report.passed),
@@ -348,6 +358,8 @@ pub fn validate_suite_with_counter(
         evaluated_estimated_tokens_after,
         token_counter: token_counter.name().to_string(),
         token_counter_kind: token_counter.kind().to_string(),
+        restored_fact_count,
+        restored_fact_bytes,
         evaluated_token_savings_percent,
         evaluated_savings_percent,
     }

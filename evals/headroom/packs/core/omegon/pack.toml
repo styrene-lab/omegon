@@ -1,0 +1,13 @@
+name = "omegon-core"
+status = "core"
+owners = ["omegon-core"]
+description = "Core native headroom dogfood pack covering Omegon-adjacent Rust, markdown, logs, diffs, and public prose/document text."
+corpus_manifest = "docs/evals/headroom-corpus-large.example.json"
+required_for_release = false
+required_for_default_on = false
+
+[policy]
+max_restored_facts = 75
+strict_max_restored_facts = 0
+min_evaluated_savings_percent = 80
+token_counter = "bytes_div_4"

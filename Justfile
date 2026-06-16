@@ -134,6 +134,14 @@ headroom-corpus-eval manifest:
     python3 scripts/headroom_dogfood.py "{{manifest}}"
     {{cargo}} run -p omegon-headroom --bin headroom-eval -- --text --fixtures .tmp/headroom/fixtures --max-restored-facts 0
 
+# Evaluate a headroom eval pack using its policy.
+headroom-pack-eval pack:
+    python3 scripts/headroom_pack_eval.py "{{pack}}"
+
+# Evaluate a headroom eval pack using its strict/default-on policy.
+headroom-pack-eval-strict pack:
+    python3 scripts/headroom_pack_eval.py "{{pack}}" --strict
+
 # Run a quick token-efficiency benchmark. Writes per-turn snapshots to .tmp/bench/.
 # Usage: just bench "read Cargo.toml and summarize the dependencies"
 bench prompt:
