@@ -17,6 +17,7 @@ use std::time::SystemTime;
 
 use crate::autonomy::{
     ApprovalRequest, DecisionPolicy, active_subagent_policy, required_approval_details,
+    subagent_policy_for_automation,
 };
 use crate::child_agent::{
     ChildAgentBoundary, ChildAgentRuntimeProfile, ChildAgentSpawnConfig,
@@ -1179,7 +1180,8 @@ pub struct DelegateFeature {
     /// Recent files the parent agent has read/edited — bounded LRU for
     /// auto-populating delegate scope. Capped at 30 entries.
     recent_parent_files: std::collections::VecDeque<String>,
-    /// Sandbox mode — spawn delegates in containers.
+    /// Live runtime settings used to resolve the selected subagent autonomy policy.
+    settings: Option<crate::settings::SharedSettings>,
     sandbox: bool,
 }
 
@@ -1209,8 +1211,22 @@ impl DelegateFeature {
             provider_inventory: None,
             recent_user_prompts: std::collections::VecDeque::with_capacity(50),
             recent_parent_files: std::collections::VecDeque::with_capacity(30),
+            settings: None,
             sandbox,
         }
+    }
+
+    pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
+        self.settings = Some(settings);
+        self
+    }
+
+    fn subagent_policy(&self) -> crate::autonomy::SubagentPolicy {
+        self.settings
+            .as_ref()
+            .and_then(|settings| settings.lock().ok().map(|guard| guard.automation_level))
+            .map(subagent_policy_for_automation)
+            .unwrap_or_else(active_subagent_policy)
     }
 
     /// Return the most recent substantive user prompt (>10 chars) that
@@ -1630,7 +1646,8 @@ impl Feature for DelegateFeature {
                     scope
                 };
 
-                if let Some(result) = enforce_delegate_policy(worker_profile, &task) {
+                let policy = self.subagent_policy();
+                if let Some(result) = enforce_delegate_policy_with_policy(&policy, worker_profile, &task) {
                     return Ok(result);
                 }
 

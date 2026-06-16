@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 
 use crate::autonomy::{
     ApprovalRequest, DecisionPolicy, active_subagent_policy, required_approval_details,
+    subagent_policy_for_automation,
 };
 use crate::surfaces::operations::OperationWorkbenchProjection;
 
@@ -546,6 +547,8 @@ pub struct CleaveFeature {
     /// runtime has constructed it. See [`CleaveEventSlot`] for the
     /// rationale.
     bus_request_sink: CleaveEventSlot,
+    /// Live runtime settings used to resolve the selected subagent autonomy policy.
+    settings: Option<crate::settings::SharedSettings>,
     sandbox: bool,
 }
 
@@ -563,10 +566,24 @@ impl CleaveFeature {
             inventory: None,
             session_secret_env,
             bus_request_sink: Arc::new(Mutex::new(None)),
+            settings: None,
             sandbox,
         };
         feature.refresh_progress_from_workspace_state();
         feature
+    }
+
+    pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
+        self.settings = Some(settings);
+        self
+    }
+
+    fn subagent_policy(&self) -> crate::autonomy::SubagentPolicy {
+        self.settings
+            .as_ref()
+            .and_then(|settings| settings.lock().ok().map(|guard| guard.automation_level))
+            .map(subagent_policy_for_automation)
+            .unwrap_or_else(active_subagent_policy)
     }
 
     /// Hand out a clone of the bus-request slot so the runtime can install
@@ -910,7 +927,8 @@ impl CleaveFeature {
         let max_parallel = args["max_parallel"].as_u64().unwrap_or(4) as usize;
 
         let plan = CleavePlan::from_json(plan_json)?;
-        if let Some(result) = enforce_cleave_run_policy(&plan, max_parallel) {
+        let policy = self.subagent_policy();
+        if let Some(result) = enforce_cleave_run_policy_with_policy(&policy, &plan, max_parallel) {
             return Ok(result);
         }
 

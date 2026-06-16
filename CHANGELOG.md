@@ -33,6 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
 
 ### Added
+- Wired live settings into delegate and cleave features so `/autonomy` changes resolve the same subagent policy for prompt/status and tool gate enforcement while preserving conservative fallback.
 - Made delegate and cleave autonomy gates policy-injectable so tests can prove higher-autonomy policies allow operations that conservative defaults gate, reducing prompt/status/tool policy drift.
 - Wired base prompt assembly to accept the operator-selected subagent policy so future `/autonomy autonomous` sessions can render orchestrator guidance instead of the conservative default.
 - Exposed the mapped subagent autonomy policy in `/automation status` so the operator can see delegate/cleave posture, limits, and the loop/scheduled-job non-escalation note.

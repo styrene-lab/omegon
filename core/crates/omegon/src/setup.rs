@@ -559,8 +559,11 @@ impl AgentSetup {
             .unwrap_or(false);
 
         // ─── Cleave (decomposition + dispatch) ─────────────────────────
-        let cleave_feature =
+        let mut cleave_feature =
             features::cleave::CleaveFeature::new(&cwd, session_secret_env.clone(), sandbox);
+        if let Some(settings) = settings.as_ref() {
+            cleave_feature = cleave_feature.with_settings(settings.clone());
+        }
         let cleave_handle = cleave_feature.shared_progress();
         // Capture the event-sender slot before bus.register consumes the
         // typed feature. main.rs writes the AgentEvent broadcast sender
@@ -580,6 +583,9 @@ impl AgentSetup {
         // ─── Delegate (subagent system) ─────────────────────────────────
         let agents = crate::features::delegate::scan_agents(&cwd);
         let mut delegate_feature = features::delegate::DelegateFeature::new(&cwd, agents, sandbox);
+        if let Some(settings) = settings.as_ref() {
+            delegate_feature = delegate_feature.with_settings(settings.clone());
+        }
 
         // Probe provider inventory so the delegate catalog is available
         // for context injection (lets the orchestrator see available models).
