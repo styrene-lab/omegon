@@ -206,11 +206,11 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
         providers: &[],
         class: UpstreamErrorClass::QuotaExceeded,
         substrings: &[
-            "quota",
             "insufficient credits",
             "insufficient quota",
-            "billing",
-            "usage limit",
+            "billing hard limit",
+            "billing quota",
+            "usage limit exceeded",
             "exceeded your current quota",
             "quota exceeded",
         ],
@@ -239,8 +239,8 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
         substrings: &[
             "overloaded",
             "overloaded_error",
-            "capacity",
             "at capacity",
+            "model is at capacity",
             "server is busy",
             "high demand",
             "currently unavailable due to load",
@@ -336,7 +336,6 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
             "invalid request",
             "bad request",
             "invalid_argument",
-            "not found",
             "model not found",
             "unprocessable entity",
             "validation error",
@@ -920,6 +919,22 @@ mod tests {
     }
 
     #[test]
+    fn generic_not_found_does_not_become_bad_request() {
+        assert_eq!(
+            classify_upstream_error("provider metadata file not found while handling stream"),
+            UpstreamErrorClass::Unknown,
+        );
+        assert_eq!(
+            classify_upstream_error("HTTP 404 model not found"),
+            UpstreamErrorClass::BadRequest,
+        );
+        assert_eq!(
+            classify_upstream_error("HTTP 404 model_not_found"),
+            UpstreamErrorClass::BadRequest,
+        );
+    }
+
+    #[test]
     fn provider_failure_matrix_rows_classify_as_documented() {
         let cases = [
             (
@@ -1086,6 +1101,26 @@ mod tests {
                 "provider={provider} message={message}",
             );
         }
+    }
+
+    #[test]
+    fn generic_quota_and_capacity_words_do_not_overclassify() {
+        assert_eq!(
+            classify_upstream_error("quota information endpoint returned metadata"),
+            UpstreamErrorClass::Unknown,
+        );
+        assert_eq!(
+            classify_upstream_error("provider capacity planning metadata refreshed"),
+            UpstreamErrorClass::Unknown,
+        );
+        assert_eq!(
+            classify_upstream_error("usage limit exceeded for project"),
+            UpstreamErrorClass::QuotaExceeded,
+        );
+        assert_eq!(
+            classify_upstream_error("selected model is at capacity"),
+            UpstreamErrorClass::ProviderOverloaded,
+        );
     }
 
     #[test]
