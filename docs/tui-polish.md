@@ -60,6 +60,24 @@ This node now subsumes [[release-0.27.0-workstream-ui-polish|0.27.0 workstream â
 
 **Rationale:** Single-line rows that combine content with keyboard affordances should model left content and right affordance groups separately, with an elastic spacer and display-width-aware truncation. This avoids left-flow `Ctrl+O`/`Ctrl+S` prose drifting across tool headers, slim rows, and footer/status chrome. Styled surfaces may keep local Ratatui helpers when shared text rendering would lose label/value styling, but they should preserve the same layout contract.
 
+### Slim tool rows use semantic zones instead of flat prose cells
+
+**Status:** accepted
+
+**Rationale:** Compact tool rows should scan as state / tool / target / outcome / affordance, not as a repeated log-style concatenation of arbitrary strings. The first implementation pass should stay low-risk by improving the existing slim summary cells and tool-specific result summaries before introducing a larger `SlimToolProjection` type.
+
+**First-pass scope:**
+
+- Distinguish engineering no-op/degraded outcomes such as skipped validation from ordinary success in the visible summary text.
+- Add stronger tool-specific result summaries for high-volume rows (`edit`, `read`/`view`, `validate`, shell commands, `commit`, search/memory tools).
+- Keep full args/results in the details pane; the slim row answers only what ran, what target it touched, and the visible outcome.
+- Preserve the existing inline/flex row affordance contract so the right-side details hint remains stable while the left side truncates.
+
+**Deferred:**
+
+- Group adjacent tool rows under reasoning/action section labels. This is likely the largest visual win, but it touches transcript segmentation rather than only row projection.
+- Replace string cells with a dedicated `SlimToolProjection` DTO once the first-pass summaries prove the row grammar.
+
 ## Current operating rules
 
 - Prefer semantic projections and shared row contracts over renderer-specific string concatenation.

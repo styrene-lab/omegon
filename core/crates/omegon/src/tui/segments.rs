@@ -459,6 +459,59 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
         .map(|line| clean_inline_text(line.trim()))
         .find(|line| !line.is_empty());
 
+    if matches!(tool_name, "validate")
+        && let Some(line) = lines
+            .iter()
+            .map(|line| clean_inline_text(line.trim()))
+            .find(|line| line.to_ascii_lowercase().contains("validation skipped"))
+    {
+        return Some(format!("⚠ {}", crate::util::truncate(&line, 88)));
+    }
+
+    if matches!(tool_name, "edit")
+        && let Some(line) = lines
+            .iter()
+            .map(|line| clean_inline_text(line.trim()))
+            .find(|line| {
+                line.to_ascii_lowercase()
+                    .contains("successfully replaced text")
+            })
+    {
+        return Some(crate::util::truncate(&line, 96));
+    }
+
+    if matches!(tool_name, "commit")
+        && let Some(line) = lines
+            .iter()
+            .map(|line| clean_inline_text(line.trim()))
+            .find(|line| line.to_ascii_lowercase().contains("committed"))
+    {
+        return Some(crate::util::truncate(&line, 96));
+    }
+
+    if matches!(tool_name, "bash" | "cargo")
+        && let Some(line) = lines
+            .iter()
+            .map(|line| clean_inline_text(line.trim()))
+            .find(|line| {
+                let lower = line.to_ascii_lowercase();
+                lower.starts_with("error:")
+                    || lower.contains("command failed")
+                    || lower.contains("exit status")
+            })
+    {
+        return Some(crate::util::truncate(&line, 96));
+    }
+
+    if matches!(tool_name, "codebase_search" | "search_documents")
+        && let Some(line) = lines
+            .iter()
+            .map(|line| clean_inline_text(line.trim()))
+            .find(|line| line.contains("result(s)"))
+    {
+        return Some(crate::util::truncate(&line, 96));
+    }
+
     match (line_count, first_non_empty) {
         (0, _) => Some("ok".to_string()),
         (1, Some(line)) => Some(crate::util::truncate(&line, 96)),
@@ -2561,6 +2614,45 @@ mod tests {
         assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 28);
         assert!(rendered.contains('…'), "{rendered:?}");
         assert!(rendered.ends_with(DETAILS_HINT_LABEL), "{rendered:?}");
+    }
+
+    #[test]
+    fn summarize_validate_result_marks_skipped_validation_as_degraded() {
+        let summary = summarize_tool_result(
+            "validate",
+            Some(
+                "Validation skipped: no applicable validator was available for the supplied paths",
+            ),
+        )
+        .expect("summary");
+
+        assert!(summary.starts_with('⚠'), "{summary}");
+        assert!(summary.contains("Validation skipped"), "{summary}");
+    }
+
+    #[test]
+    fn summarize_shell_result_promotes_errors_over_first_line() {
+        let summary = summarize_tool_result(
+            "bash",
+            Some("running tests\nerror: unexpected argument 'plugin_registry' found\nmore tail"),
+        )
+        .expect("summary");
+
+        assert_eq!(
+            summary,
+            "error: unexpected argument 'plugin_registry' found"
+        );
+    }
+
+    #[test]
+    fn summarize_search_result_promotes_result_count() {
+        let summary = summarize_tool_result(
+            "codebase_search",
+            Some("## codebase_search: `foo`\n\n**2 result(s)** (scope: `code`)\nother detail"),
+        )
+        .expect("summary");
+
+        assert_eq!(summary, "**2 result(s)** (scope: `code`)");
     }
 
     #[test]
