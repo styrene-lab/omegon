@@ -33,6 +33,18 @@ parent = "dual-lifecycle-openspec"
 
 ## Decisions
 
+### Decision: Memory sync workflows are context-gated, not universal startup behavior
+
+**Status:** decided
+**Rationale:** Multi-checkout project memory sync is valuable for long-running repo work, but it must not overfit Omegon's own development workflow onto one-off tasks. Lightweight memory recall/store remains generally useful, while Git reconciliation, changelog/design/handoff artifacts, and sibling-checkout federation checks activate only when project/repo signals exist or the operator explicitly asks. Non-Git one-off work should stay task-local: read/edit/report without assuming Git, OpenSpec, design docs, or handoff files.
+
+**Operating modes:**
+
+- **One-off / non-Git:** no Git assumptions; no changelog, design-node, handoff, or federation artifacts unless requested.
+- **Ordinary Git repo:** use Git status/fetch only when relevant to the task; do not impose Omegon lifecycle conventions unless project directives require them.
+- **Known lifecycle project:** reconcile memory with project artifacts such as design docs, OpenSpec, tasks, and changelog when behavior or decisions change.
+- **Multi-checkout / federation:** explicitly compare sibling checkouts and memory backend state only when the operator asks for cross-checkout continuity or the project declares that topology.
+
 ### Decision: Option D — Live sync for presence, memory fact required for closure
 
 **Status:** decided
