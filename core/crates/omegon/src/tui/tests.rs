@@ -682,7 +682,7 @@ async fn ui_action_insert_composer_text_collapses_large_paste() {
 
     let outcome = app
         .handle_ui_action(
-            UiAction::InsertComposerText(InsertComposerTextAction { text: text.into() }),
+            UiAction::InsertComposerText(InsertComposerTextAction { text }),
             &tx,
         )
         .await;

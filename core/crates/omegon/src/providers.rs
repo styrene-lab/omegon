@@ -2064,7 +2064,10 @@ fn extract_codex_error_detail(event: &Value) -> String {
     if compact == "{}" || compact == "null" {
         "Codex returned an error event without details".to_string()
     } else {
-        format!("Codex returned an unrecognized error event: {}", crate::util::truncate_str(&compact, 300))
+        format!(
+            "Codex returned an unrecognized error event: {}",
+            crate::util::truncate_str(&compact, 300)
+        )
     }
 }
 
@@ -4734,7 +4737,10 @@ mod tests {
                 "type": "requests"
             }
         }));
-        assert!(detail.contains("Rate limit reached for responses"), "{detail}");
+        assert!(
+            detail.contains("Rate limit reached for responses"),
+            "{detail}"
+        );
         assert!(detail.contains("rate_limit_exceeded"), "{detail}");
         assert!(detail.contains("requests"), "{detail}");
         assert!(!detail.contains("unknown error"), "{detail}");

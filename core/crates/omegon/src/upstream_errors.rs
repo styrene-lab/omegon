@@ -163,20 +163,18 @@ const PROVIDER_ERROR_RULES: &[ErrorRule] = &[
     },
 ];
 
-const GLOBAL_PRECEDENCE_ERROR_RULES: &[ErrorRule] = &[
-    ErrorRule {
-        providers: &[],
-        class: UpstreamErrorClass::QuotaExceeded,
-        substrings: &[
-            "insufficient credits",
-            "insufficient quota",
-            "exceeded your current quota",
-            "quota exceeded",
-            "payment required",
-        ],
-        word_tokens: &["402"],
-    },
-];
+const GLOBAL_PRECEDENCE_ERROR_RULES: &[ErrorRule] = &[ErrorRule {
+    providers: &[],
+    class: UpstreamErrorClass::QuotaExceeded,
+    substrings: &[
+        "insufficient credits",
+        "insufficient quota",
+        "exceeded your current quota",
+        "quota exceeded",
+        "payment required",
+    ],
+    word_tokens: &["402"],
+}];
 
 const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
     ErrorRule {
@@ -357,7 +355,11 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
     ErrorRule {
         providers: &[],
         class: UpstreamErrorClass::ResponseCancelled,
-        substrings: &["response cancelled", "cancelled by server", "client closed request"],
+        substrings: &[
+            "response cancelled",
+            "cancelled by server",
+            "client closed request",
+        ],
         word_tokens: &["499"],
     },
     ErrorRule {
