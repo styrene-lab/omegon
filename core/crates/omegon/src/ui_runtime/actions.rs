@@ -30,6 +30,18 @@ pub enum UiAction {
     SelectConversationSegment(SelectConversationSegmentAction),
     /// Open/toggle a conversation segment detail affordance.
     OpenConversationSegmentDetail(OpenConversationSegmentDetailAction),
+    /// Replace the current composer draft with frontend-provided text.
+    ReplaceComposerDraft(ReplaceComposerDraftAction),
+    /// Clear the current composer draft without submitting it.
+    ClearComposerDraft,
+    /// Attach a path to the composer draft at the current insertion point.
+    AttachComposerPath(AttachComposerPathAction),
+    /// Move the composer cursor semantically without exposing frontend key events.
+    MoveComposerCursor(MoveComposerCursorAction),
+    /// Apply a semantic composer editing operation.
+    EditComposer(EditComposerAction),
+    /// Insert frontend-provided text at the current composer insertion point.
+    InsertComposerText(InsertComposerTextAction),
 }
 
 /// Prompt submission intent independent of a concrete editor widget.
@@ -119,6 +131,57 @@ pub struct SelectConversationSegmentAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenConversationSegmentDetailAction {
     pub segment: ConversationSegmentRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplaceComposerDraftAction {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachComposerPathAction {
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MoveComposerCursorAction {
+    pub direction: ComposerCursorDirection,
+    pub unit: ComposerCursorUnit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposerCursorDirection {
+    Backward,
+    Forward,
+    Home,
+    End,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposerCursorUnit {
+    Character,
+    Word,
+    Line,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditComposerAction {
+    pub operation: ComposerEditOperation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposerEditOperation {
+    DeleteBackward,
+    DeleteWordBackward,
+    DeleteWordForward,
+    ClearLine,
+    KillToEnd,
+    InsertNewline,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InsertComposerTextAction {
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
