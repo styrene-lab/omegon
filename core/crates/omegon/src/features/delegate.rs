@@ -2076,18 +2076,18 @@ pub fn scan_agents(cwd: &Path) -> Vec<AgentSpec> {
     agents
 }
 
-fn enforce_delegate_policy(
+fn enforce_delegate_policy_with_policy(
+    policy: &crate::autonomy::SubagentPolicy,
     worker_profile: DelegateWorkerProfile,
     task: &str,
 ) -> Option<ToolResult> {
-    let policy = active_subagent_policy();
     if worker_profile != DelegateWorkerProfile::Patch
         || policy.delegate_patch == DecisionPolicy::Allow
     {
         return None;
     }
 
-    let reason = "delegate patch worker requires structured approval under conservative autonomy";
+    let reason = "delegate patch worker requires structured approval under the active autonomy policy";
     Some(ToolResult {
         content: vec![ContentBlock::Text {
             text: format!(
@@ -2095,7 +2095,7 @@ fn enforce_delegate_policy(
             ),
         }],
         details: required_approval_details(
-            &policy,
+            policy,
             ApprovalRequest {
                 operation: "delegate",
                 reason,
@@ -2112,6 +2112,14 @@ fn enforce_delegate_policy(
             },
         ),
     })
+}
+
+fn enforce_delegate_policy(
+    worker_profile: DelegateWorkerProfile,
+    task: &str,
+) -> Option<ToolResult> {
+    let policy = active_subagent_policy();
+    enforce_delegate_policy_with_policy(&policy, worker_profile, task)
 }
 
 fn format_background_delegate_started(task_id: &str) -> String {
@@ -2183,6 +2191,19 @@ mod tests {
         assert_eq!(
             result.details["required_approval"]["choices"][0]["grants"][0]["kind"],
             "delegate_patch"
+        );
+    }
+
+    #[test]
+    fn delegate_policy_allows_patch_worker_under_orchestrator_policy() {
+        let policy = crate::autonomy::SubagentPolicy::for_level(crate::autonomy::AutonomyLevel::Orchestrator);
+        assert!(
+            enforce_delegate_policy_with_policy(
+                &policy,
+                DelegateWorkerProfile::Patch,
+                "edit the file"
+            )
+            .is_none()
         );
     }
 

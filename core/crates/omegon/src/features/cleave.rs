@@ -1417,8 +1417,11 @@ impl Feature for CleaveFeature {
     }
 }
 
-fn enforce_cleave_run_policy(plan: &CleavePlan, max_parallel: usize) -> Option<ToolResult> {
-    let policy = active_subagent_policy();
+fn enforce_cleave_run_policy_with_policy(
+    policy: &crate::autonomy::SubagentPolicy,
+    plan: &CleavePlan,
+    max_parallel: usize,
+) -> Option<ToolResult> {
     if policy.cleave_run == DecisionPolicy::Allow {
         return None;
     }
@@ -1431,20 +1434,20 @@ fn enforce_cleave_run_policy(plan: &CleavePlan, max_parallel: usize) -> Option<T
     }
 
     let reason = match (over_child_limit, over_parallel_limit) {
-        (true, true) => "cleave_run exceeds conservative child and parallelism limits",
-        (true, false) => "cleave_run exceeds conservative child limit",
-        (false, true) => "cleave_run exceeds conservative parallelism limit",
+        (true, true) => "cleave_run exceeds active child and parallelism limits",
+        (true, false) => "cleave_run exceeds active child limit",
+        (false, true) => "cleave_run exceeds active parallelism limit",
         (false, false) => unreachable!(),
     };
     Some(ToolResult {
         content: vec![ContentBlock::Text {
             text: format!(
-                "Structured approval required: {reason}. Requested {requested_children} child(ren) with max_parallel={max_parallel}; conservative policy allows at most {} child(ren) and max_parallel={}.",
+                "Structured approval required: {reason}. Requested {requested_children} child(ren) with max_parallel={max_parallel}; active policy allows at most {} child(ren) and max_parallel={}.",
                 policy.max_children, policy.max_parallel
             ),
         }],
         details: required_approval_details(
-            &policy,
+            policy,
             ApprovalRequest {
                 operation: "cleave_run",
                 reason,
@@ -1463,6 +1466,11 @@ fn enforce_cleave_run_policy(plan: &CleavePlan, max_parallel: usize) -> Option<T
             },
         ),
     })
+}
+
+fn enforce_cleave_run_policy(plan: &CleavePlan, max_parallel: usize) -> Option<ToolResult> {
+    let policy = active_subagent_policy();
+    enforce_cleave_run_policy_with_policy(&policy, plan, max_parallel)
 }
 
 fn text_result(text: &str) -> ToolResult {
@@ -1619,6 +1627,23 @@ mod tests {
         .unwrap();
 
         assert!(enforce_cleave_run_policy(&plan, 1).is_none());
+    }
+
+    #[test]
+    fn cleave_run_policy_allows_orchestrator_policy_with_larger_fanout() {
+        let plan = CleavePlan::from_json(
+            r#"{
+                "children": [
+                    {"label":"one","description":"first","scope":["a.rs"]},
+                    {"label":"two","description":"second","scope":["b.rs"]},
+                    {"label":"three","description":"third","scope":["c.rs"]}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let policy = crate::autonomy::SubagentPolicy::for_level(crate::autonomy::AutonomyLevel::Orchestrator);
+
+        assert!(enforce_cleave_run_policy_with_policy(&policy, &plan, 2).is_none());
     }
 
     #[test]
