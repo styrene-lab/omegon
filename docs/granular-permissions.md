@@ -40,18 +40,35 @@ Lex Imperialis (non-overridable)
 
 Proposed permission schema for plugin.toml and project config:
 ```toml
-[permissions]
+[permissions.tools]
 bash = { action = "prompt", patterns = ["rm *", "sudo *"] }
 edit = "allow"
 write = { action = "prompt", patterns = ["*.env", "*.key", "*.pem"] }
 read = "allow"
-external_directory = { action = "deny", allow = ["/usr/local/include"] }
+
+[permissions.external_directory]
+action = "deny"
+allow = ["/usr/local/include"]
 ```
 
 Actions: `allow` (silent), `prompt` (ask operator), `deny` (block).
 Patterns: glob matching on tool arguments.
 
 Runtime invariant: permission-required operations are not recoverable tool failures. They suspend the agent run until explicit operator allow, explicit deny, explicit run cancellation, or an upstream preapproval/bypass such as a trusted directory or `--dangerously-bypass-permissions`. A passive timeout must not convert a permission prompt into denial.
+
+
+Subject extraction contract for the initial engine slice:
+
+| Tool | Matched subject | Sensitive values matched? |
+|---|---|---|
+| `bash`, `terminal` | `command` | command text only |
+| `read`, `write`, `edit` | `path` | no file contents |
+| `change` | each `edits[].file` | no old/new content |
+| `validate` | each `paths[]` | no validation output |
+| `secret_set`, `secret_delete` | secret `name` | never secret values |
+| `web_fetch` | `url` | URL only |
+
+Multi-subject tools aggregate to the strongest decision: `deny > prompt > allow`.
 
 Bash mediation is static and advisory for common shell forms (redirects, `tee`, `cp`/`mv`/`install`, `mkdir`, `rm`). It unifies detected bash boundary hits with the permission prompt surface, but hard filesystem containment for shell variable indirection, subprocesses, and programmatic I/O belongs to the sandbox layer.
 

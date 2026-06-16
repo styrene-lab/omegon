@@ -459,6 +459,8 @@ async fn worker_loop(
                     ollama_manager: None,
                     skill_phases: Vec::new(),
                     host_context: host_ctx_arc.clone(),
+                    permission_policy: None,
+                    permission_role: None,
                 };
 
                 let result = crate::r#loop::run(

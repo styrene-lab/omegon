@@ -13,6 +13,7 @@
 //! - **Context class**: Compact (128k) / Standard (272k) / Extended (400k) / Massive (1M+)
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 /// Posture preset — behavioral stance for the harness.
@@ -356,6 +357,10 @@ pub struct Settings {
     #[serde(default)]
     pub trusted_directories: Vec<String>,
 
+    /// Unified permission policy for this runtime.
+    #[serde(default)]
+    pub permissions: ProfilePermissions,
+
     /// Whether a live LLM provider is connected. Set to false when NullBridge
     /// is active (no credentials available). The TUI uses this to show
     /// "no provider" instead of a model name that can't actually be used.
@@ -680,6 +685,7 @@ impl Default for Settings {
             update_channel: default_update_channel(),
             auto_update: false,
             trusted_directories: Vec::new(),
+            permissions: ProfilePermissions::default(),
             provider_connected: true, // optimistic default — set false when NullBridge
             provider_is_oauth: false,
             mouse: true,
@@ -1163,11 +1169,19 @@ pub struct ProfilePermissions {
     /// per-operation confirmation. Paths are expanded at runtime (~ → $HOME).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trusted_directories: Vec<String>,
+    /// Per-tool permission policy. Keys are tool names such as `bash`, `write`,
+    /// or `edit`; values are allow/prompt/deny rules with optional patterns.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tools: BTreeMap<String, crate::permissions::ToolPermissionRule>,
+    /// Optional Styrene RBAC role for this local operator/runtime. Stored as a
+    /// string to keep profile parsing independent of styrene-rbac serde features.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 impl ProfilePermissions {
     pub fn is_empty(&self) -> bool {
-        self.trusted_directories.is_empty()
+        self.trusted_directories.is_empty() && self.tools.is_empty() && self.role.is_none()
     }
 }
 

@@ -78,6 +78,10 @@ pub struct LoopConfig {
     /// Host context for ACP client delegation (file I/O, terminal, permissions).
     /// None when running under Flynt or the TUI (local execution only).
     pub host_context: Option<std::sync::Arc<crate::host_context::HostContext>>,
+    /// Runtime permission policy snapshot for this turn.
+    pub permission_policy: Option<crate::permissions::LayeredPermissionPolicy>,
+    /// Optional Styrene RBAC role gate for this runtime.
+    pub permission_role: Option<styrene_rbac::Role>,
 }
 
 impl Default for LoopConfig {
@@ -100,6 +104,8 @@ impl Default for LoopConfig {
             ollama_manager: None,
             skill_phases: Vec::new(),
             host_context: None,
+            permission_policy: None,
+            permission_role: None,
         }
     }
 }
@@ -1273,6 +1279,18 @@ pub async fn run(
 
         // Auto-delegation is disabled — the agent always executes its
         // own tool calls directly. See classify_auto_delegate_plan().
+        let settings_permission_snapshot = config.settings.as_ref().and_then(|settings| {
+            settings.lock().ok().map(|settings| {
+                (
+                    crate::permissions::layered_policy_from_settings(&settings),
+                    crate::permissions::styrene_role_from_settings(&settings),
+                )
+            })
+        });
+        let (permission_policy, permission_role) = settings_permission_snapshot
+            .as_ref()
+            .map(|(policy, role)| (Some(policy), *role))
+            .unwrap_or_else(|| (config.permission_policy.as_ref(), config.permission_role));
         let dispatch_calls = tool_calls;
         let dispatch = dispatch_tools(
             bus,
@@ -1282,6 +1300,8 @@ pub async fn run(
             &config.cwd,
             config.secrets.as_deref(),
             config.host_context.as_ref().map(|c| c.as_ref()),
+            permission_policy,
+            permission_role,
         )
         .await;
         let results = dispatch.results;
@@ -2406,6 +2426,8 @@ async fn dispatch_tools(
     cwd: &std::path::Path,
     secrets: Option<&omegon_secrets::SecretsManager>,
     host_context: Option<&crate::host_context::HostContext>,
+    permission_policy: Option<&crate::permissions::LayeredPermissionPolicy>,
+    permission_role: Option<styrene_rbac::Role>,
 ) -> DispatchResult {
     let tool_catalog = ToolCapabilityCatalog::from_tool_defs(&bus.all_tool_definitions());
     let mut permission_decisions: Vec<PermissionRecord> = Vec::new();
@@ -2480,6 +2502,8 @@ async fn dispatch_tools(
                     None,
                     host_context,
                     &mut perm_log,
+                    permission_policy,
+                    permission_role,
                 )
                 .await;
                 (idx, result)
@@ -2557,6 +2581,8 @@ async fn dispatch_tools(
             secrets,
             host_context,
             &mut permission_decisions,
+            permission_policy,
+            permission_role,
         )
         .await;
 
@@ -2726,6 +2752,8 @@ async fn dispatch_single_tool(
     secrets: Option<&omegon_secrets::SecretsManager>,
     host_context: Option<&crate::host_context::HostContext>,
     permission_log: &mut Vec<PermissionRecord>,
+    permission_policy: Option<&crate::permissions::LayeredPermissionPolicy>,
+    permission_role: Option<styrene_rbac::Role>,
 ) -> ToolResultEntry {
     let (result, is_error) = execute_tool_invocation(
         bus,
@@ -2740,6 +2768,8 @@ async fn dispatch_single_tool(
         permission_log,
         true,
         host_context,
+        permission_policy,
+        permission_role,
     )
     .await;
 
@@ -2776,6 +2806,20 @@ async fn wait_for_permission_response(
     }
 }
 
+
+fn format_policy_permission_subject(
+    tool: &str,
+    subject: Option<&crate::permissions::PermissionSubject>,
+) -> String {
+    match subject {
+        Some(subject) if subject.kind == crate::permissions::PermissionSubjectKind::Path => {
+            subject.value.clone()
+        }
+        Some(subject) => format!("policy:{}:{}", tool, subject.value),
+        None => format!("policy:{tool}"),
+    }
+}
+
 async fn execute_tool_invocation(
     bus: &crate::bus::EventBus,
     visible_call_id: &str,
@@ -2789,6 +2833,8 @@ async fn execute_tool_invocation(
     permission_log: &mut Vec<PermissionRecord>,
     emit_agent_events: bool,
     host_context: Option<&crate::host_context::HostContext>,
+    permission_policy: Option<&crate::permissions::LayeredPermissionPolicy>,
+    permission_role: Option<styrene_rbac::Role>,
 ) -> (omegon_traits::ToolResult, bool) {
     if let Some(sm) = secrets
         && let Some(decision) = sm.check_guard(visible_tool_name, visible_args)
@@ -2827,6 +2873,130 @@ async fn execute_tool_invocation(
             name: visible_tool_name.to_string(),
             args: visible_args.clone(),
         });
+    }
+
+    if let Some(role) = permission_role
+        && !crate::permissions::styrene_role_allows_tool(role, visible_tool_name)
+    {
+        let text = format!(
+            "BLOCKED: `{}` requires Styrene capability `{}` not held by role `{}`.",
+            visible_tool_name,
+            crate::permissions::styrene_capability_for_tool(visible_tool_name)
+                .unwrap_or("<unknown>"),
+            role.as_str()
+        );
+        return (
+            omegon_traits::ToolResult {
+                content: vec![ContentBlock::Text { text }],
+                details: serde_json::json!({
+                    "is_error": true,
+                    "blocked": true,
+                    "reason": "styrene_rbac_denied",
+                    "role": role.as_str(),
+                    "capability": crate::permissions::styrene_capability_for_tool(visible_tool_name),
+                }),
+            },
+            true,
+        );
+    }
+
+    if let Some(policy) = permission_policy {
+        let subjects = crate::permissions::subjects_from_tool_args(visible_tool_name, visible_args);
+        let decision = policy.evaluate_subjects(visible_tool_name, &subjects);
+        match decision.action {
+            crate::permissions::PermissionAction::Deny => {
+                let text = format!(
+                    "BLOCKED: `{}` denied by permission policy layer {:?}.",
+                    visible_tool_name, decision.layer
+                );
+                return (
+                    omegon_traits::ToolResult {
+                        content: vec![ContentBlock::Text { text }],
+                        details: serde_json::json!({
+                            "is_error": true,
+                            "blocked": true,
+                            "reason": "permission_policy_denied",
+                            "layer": decision.layer.map(|layer| layer.as_str()).unwrap_or("none").to_string(),
+                            "action": decision.action.as_str(),
+                        }),
+                    },
+                    true,
+                );
+            }
+            crate::permissions::PermissionAction::Prompt => {
+                let requested = format_policy_permission_subject(visible_tool_name, subjects.first());
+                let response = if let Some(ctx) = host_context {
+                    match ctx
+                        .proxy
+                        .request_permission(
+                            visible_call_id.to_string(),
+                            visible_tool_name.to_string(),
+                            requested.clone(),
+                        )
+                        .await
+                    {
+                        Ok(agent_client_protocol::schema::RequestPermissionOutcome::Selected(sel)) => {
+                            match sel.option_id.0.as_ref() {
+                                "allow_always" => omegon_traits::PermissionResponse::AlwaysAllow,
+                                "allow_once" => omegon_traits::PermissionResponse::Allow,
+                                _ => omegon_traits::PermissionResponse::Deny,
+                            }
+                        }
+                        _ => omegon_traits::PermissionResponse::Deny,
+                    }
+                } else {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+                    let _ = events.send(AgentEvent::PermissionRequest {
+                        tool_name: visible_tool_name.to_string(),
+                        path: requested.clone(),
+                        respond,
+                    });
+                    wait_for_permission_response(rx, cancel.clone()).await
+                };
+
+                match response {
+                    omegon_traits::PermissionResponse::Allow
+                    | omegon_traits::PermissionResponse::AlwaysAllow => {
+                        let decision_text = match response {
+                            omegon_traits::PermissionResponse::Allow => "allow",
+                            omegon_traits::PermissionResponse::AlwaysAllow => "always_allow",
+                            omegon_traits::PermissionResponse::Deny => unreachable!(),
+                        };
+                        permission_log.push(PermissionRecord {
+                            tool_name: visible_tool_name.to_string(),
+                            path: requested.clone(),
+                            decision: decision_text.into(),
+                        });
+                    }
+                    omegon_traits::PermissionResponse::Deny => {
+                        permission_log.push(PermissionRecord {
+                            tool_name: visible_tool_name.to_string(),
+                            path: requested.clone(),
+                            decision: "deny".into(),
+                        });
+                        let text = format!(
+                            "BLOCKED: `{}` denied by operator after permission-policy prompt.",
+                            visible_tool_name
+                        );
+                        return (
+                            omegon_traits::ToolResult {
+                                content: vec![ContentBlock::Text { text }],
+                                details: serde_json::json!({
+                                    "is_error": true,
+                                    "blocked": true,
+                                    "reason": "permission_policy_prompt_denied",
+                                    "layer": decision.layer.map(|layer| layer.as_str()).unwrap_or("none").to_string(),
+                                    "action": decision.action.as_str(),
+                                }),
+                            },
+                            true,
+                        );
+                    }
+                }
+            }
+            crate::permissions::PermissionAction::Allow => {}
+        }
     }
 
     let sink_events = events.clone();
@@ -3323,6 +3493,8 @@ async fn dispatch_edit_batch(
         permission_log,
         false,
         None, // batch changes always run locally
+        None,
+        None,
     )
     .await;
 
@@ -4655,7 +4827,7 @@ mod tests {
         ];
 
         let dispatch =
-            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
+            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None, None, None).await;
         let results = dispatch.results;
 
         // The second edit should have failed
@@ -4728,13 +4900,175 @@ mod tests {
         }];
 
         let dispatch =
-            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
+            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None, None, None).await;
         assert!(!dispatch.results[0].is_error);
         let text = dispatch.results[0].content[0].as_text().unwrap();
         assert!(
             !text.contains("rollback"),
             "single edit should have no batch overhead"
         );
+    }
+
+    #[tokio::test]
+    async fn permission_policy_deny_blocks_dispatch_before_execution() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::features::adapter::ToolAdapter::new(
+            "core-tools",
+            Box::new(crate::tools::CoreTools::new(dir.path().to_path_buf())),
+        )));
+        bus.finalize();
+        let (events_tx, _) = broadcast::channel(16);
+        let cancel = CancellationToken::new();
+        let mut policy = crate::permissions::LayeredPermissionPolicy::default();
+        policy.project.tools.insert(
+            crate::tool_registry::core::BASH.to_string(),
+            crate::permissions::ToolPermissionRule::Action(crate::permissions::PermissionAction::Deny),
+        );
+        let calls = vec![ToolCall {
+            id: "deny-bash".into(),
+            name: crate::tool_registry::core::BASH.into(),
+            arguments: serde_json::json!({"command":"touch should-not-exist"}),
+        }];
+        let dispatch = dispatch_tools(
+            &bus,
+            &calls,
+            &events_tx,
+            cancel,
+            dir.path(),
+            None,
+            None,
+            Some(&policy),
+            None,
+        )
+        .await;
+        assert_eq!(dispatch.results.len(), 1);
+        assert!(dispatch.results[0].is_error);
+        assert!(!dir.path().join("should-not-exist").exists());
+    }
+
+    #[tokio::test]
+    async fn permission_policy_prompt_allows_dispatch_after_operator_approval() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::features::adapter::ToolAdapter::new(
+            "core-tools",
+            Box::new(crate::tools::CoreTools::new(dir.path().to_path_buf())),
+        )));
+        bus.finalize();
+        let (events_tx, mut events_rx) = broadcast::channel(16);
+        let cancel = CancellationToken::new();
+        let mut policy = crate::permissions::LayeredPermissionPolicy::default();
+        policy.project.tools.insert(
+            crate::tool_registry::core::BASH.to_string(),
+            crate::permissions::ToolPermissionRule::Action(crate::permissions::PermissionAction::Prompt),
+        );
+        let calls = vec![ToolCall {
+            id: "prompt-bash".into(),
+            name: crate::tool_registry::core::BASH.into(),
+            arguments: serde_json::json!({"command":"printf prompt-created"}),
+        }];
+
+        let dispatch_fut = dispatch_tools(
+            &bus,
+            &calls,
+            &events_tx,
+            cancel,
+            dir.path(),
+            None,
+            None,
+            Some(&policy),
+            None,
+        );
+        tokio::pin!(dispatch_fut);
+
+        loop {
+            tokio::select! {
+                event = events_rx.recv() => {
+                    if let Ok(AgentEvent::PermissionRequest { tool_name, path, respond }) = event {
+                        assert_eq!(tool_name, crate::tool_registry::core::BASH);
+                        assert!(path.contains("printf prompt-created"), "prompt subject should include command: {path}");
+                        let tx = respond.lock().unwrap().take().expect("permission response sender");
+                        tx.send(omegon_traits::PermissionResponse::Allow).expect("send allow");
+                        break;
+                    }
+                }
+                dispatch = &mut dispatch_fut => {
+                    panic!("dispatch completed before permission prompt: {:?}", dispatch.results.first().map(|r| &r.content));
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                    panic!("timed out waiting for permission prompt");
+                }
+            }
+        }
+
+        let dispatch = dispatch_fut.await;
+        assert_eq!(dispatch.results.len(), 1);
+        assert!(!dispatch.results[0].is_error);
+        assert!(dispatch.results[0].content[0].as_text().unwrap().contains("prompt-created"), "dispatch result: {:?}", dispatch.results[0].content);
+        assert_eq!(dispatch.permission_decisions.len(), 1);
+        assert_eq!(dispatch.permission_decisions[0].decision, "allow");
+    }
+
+    #[tokio::test]
+    async fn permission_policy_prompt_blocks_dispatch_after_operator_denial() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::features::adapter::ToolAdapter::new(
+            "core-tools",
+            Box::new(crate::tools::CoreTools::new(dir.path().to_path_buf())),
+        )));
+        bus.finalize();
+        let (events_tx, mut events_rx) = broadcast::channel(16);
+        let cancel = CancellationToken::new();
+        let mut policy = crate::permissions::LayeredPermissionPolicy::default();
+        policy.project.tools.insert(
+            crate::tool_registry::core::BASH.to_string(),
+            crate::permissions::ToolPermissionRule::Action(crate::permissions::PermissionAction::Prompt),
+        );
+        let calls = vec![ToolCall {
+            id: "prompt-deny-bash".into(),
+            name: crate::tool_registry::core::BASH.into(),
+            arguments: serde_json::json!({"command":"touch prompt-denied"}),
+        }];
+
+        let dispatch_fut = dispatch_tools(
+            &bus,
+            &calls,
+            &events_tx,
+            cancel,
+            dir.path(),
+            None,
+            None,
+            Some(&policy),
+            None,
+        );
+        tokio::pin!(dispatch_fut);
+
+        loop {
+            tokio::select! {
+                event = events_rx.recv() => {
+                    if let Ok(AgentEvent::PermissionRequest { respond, .. }) = event {
+                        let tx = respond.lock().unwrap().take().expect("permission response sender");
+                        tx.send(omegon_traits::PermissionResponse::Deny).expect("send deny");
+                        break;
+                    }
+                }
+                dispatch = &mut dispatch_fut => {
+                    panic!("dispatch completed before permission prompt: {:?}", dispatch.results.first().map(|r| &r.content));
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                    panic!("timed out waiting for permission prompt");
+                }
+            }
+        }
+
+        let dispatch = dispatch_fut.await;
+        assert_eq!(dispatch.results.len(), 1);
+        assert!(dispatch.results[0].is_error);
+        assert!(!dir.path().join("prompt-denied").exists());
+        assert_eq!(dispatch.permission_decisions.len(), 1);
+        assert_eq!(dispatch.permission_decisions[0].decision, "deny");
     }
 
     #[tokio::test]
@@ -4805,7 +5139,7 @@ mod tests {
 
         let start = Instant::now();
         let dispatch =
-            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
+            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None, None, None).await;
         let elapsed = start.elapsed();
 
         assert_eq!(dispatch.results.len(), 2);
@@ -4845,6 +5179,8 @@ mod tests {
             ollama_manager: None,
             skill_phases: Vec::new(),
             host_context: None,
+            permission_policy: None,
+            permission_role: None,
         };
         // soft_limit_turns=0 → loop should compute 2/3 of max_turns (40)
         assert_eq!(config.soft_limit_turns, 0, "0 = auto-calculate in run()");
