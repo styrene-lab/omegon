@@ -48,6 +48,15 @@ pub struct MemoryFederationStatusProjection {
     pub recommended_behavior: String,
 }
 
+impl MemoryFederationStatusProjection {
+    pub fn git_root_or_cwd(&self) -> &Path {
+        self.git
+            .as_ref()
+            .map(|summary| summary.root.as_path())
+            .unwrap_or(self.cwd.as_path())
+    }
+}
+
 pub fn project_memory_federation_status(cwd: impl AsRef<Path>) -> MemoryFederationStatusProjection {
     let cwd = cwd.as_ref().to_path_buf();
     let git = git_summary(&cwd);

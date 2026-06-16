@@ -332,34 +332,37 @@ fn probe_hardware() -> ProbeResult {
 }
 
 fn probe_memory(cwd: &str) -> ProbeResult {
-    // Check for facts.jsonl
-    let facts_paths = [
-        Path::new(cwd).join("ai/memory/facts.jsonl"),
-        Path::new(cwd).join(".omegon/memory/facts.jsonl"),
-    ];
-
-    for path in &facts_paths {
-        if path.exists()
-            && let Ok(content) = std::fs::read_to_string(path)
-        {
-            let count = content
-                .lines()
-                .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
-                .count();
+    let projection = crate::surfaces::memory_status::project_memory_federation_status(cwd);
+    let summary = match projection.memory_authority {
+        crate::surfaces::memory_status::MemoryAuthority::GitJsonl { ref paths } => {
+            let count = paths
+                .iter()
+                .filter_map(|path| {
+                    std::fs::read_to_string(projection.git_root_or_cwd().join(path)).ok()
+                })
+                .map(|content| {
+                    content
+                        .lines()
+                        .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+                        .count()
+                })
+                .sum::<usize>();
             if count > 0 {
-                return ProbeResult {
-                    label: "memory",
-                    state: ProbeState::Done,
-                    summary: format!("{count} facts"),
-                };
+                format!("git-jsonl {count} facts")
+            } else {
+                "git-jsonl empty".to_string()
             }
         }
-    }
+        crate::surfaces::memory_status::MemoryAuthority::LocalIndexOnly => {
+            "local index only".to_string()
+        }
+        crate::surfaces::memory_status::MemoryAuthority::None => "empty".to_string(),
+    };
 
     ProbeResult {
         label: "memory",
         state: ProbeState::Done,
-        summary: "empty".into(),
+        summary,
     }
 }
 
@@ -522,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn probe_memory_with_facts() {
+    fn probe_memory_with_tracked_jsonl_facts() {
         let tmp = tempfile::TempDir::new().unwrap();
         let pi_dir = tmp.path().join("ai/memory");
         std::fs::create_dir_all(&pi_dir).unwrap();
@@ -531,8 +534,33 @@ mod tests {
             "{\"id\":\"1\"}\n{\"id\":\"2\"}\n",
         )
         .unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(tmp.path())
+                .status()
+                .unwrap();
+            assert!(status.success());
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["add", "ai/memory/facts.jsonl"]);
+        git(&["commit", "-m", "seed memory"]);
+
         let result = probe_memory(tmp.path().to_str().unwrap());
-        assert_eq!(result.summary, "2 facts");
+        assert_eq!(result.summary, "git-jsonl 2 facts");
+    }
+
+    #[test]
+    fn probe_memory_with_untracked_jsonl_is_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pi_dir = tmp.path().join("ai/memory");
+        std::fs::create_dir_all(&pi_dir).unwrap();
+        std::fs::write(pi_dir.join("facts.jsonl"), "{\"id\":\"1\"}\n").unwrap();
+
+        let result = probe_memory(tmp.path().to_str().unwrap());
+        assert_eq!(result.summary, "empty");
     }
 
     #[test]
