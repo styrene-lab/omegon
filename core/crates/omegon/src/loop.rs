@@ -2753,6 +2753,29 @@ async fn dispatch_single_tool(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn wait_for_permission_response(
+    rx: std::sync::mpsc::Receiver<omegon_traits::PermissionResponse>,
+    cancel: CancellationToken,
+) -> omegon_traits::PermissionResponse {
+    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::task::spawn_blocking(move || {
+        let _ = notify_tx.send(rx.recv());
+    });
+
+    // Permission prompts are an operator control boundary, not a soft failure.
+    // Match Claude Code semantics: once a tool needs outside-workspace access,
+    // the run waits until the operator allows or denies it. There is no passive
+    // timeout. Explicit run cancellation still unblocks as a denial/cancelled
+    // decision, and pre-approved paths or --dangerously-bypass-permissions avoid
+    // this branch upstream.
+    tokio::select! {
+        _ = cancel.cancelled() => omegon_traits::PermissionResponse::Deny,
+        response = notify_rx.recv() => response
+            .and_then(Result::ok)
+            .unwrap_or(omegon_traits::PermissionResponse::Deny),
+    }
+}
+
 async fn execute_tool_invocation(
     bus: &crate::bus::EventBus,
     visible_call_id: &str,
@@ -3082,12 +3105,7 @@ async fn execute_tool_invocation(
                     respond,
                 });
 
-                tokio::task::spawn_blocking(move || {
-                    rx.recv_timeout(std::time::Duration::from_secs(120))
-                        .unwrap_or(omegon_traits::PermissionResponse::Deny)
-                })
-                .await
-                .unwrap_or(omegon_traits::PermissionResponse::Deny)
+                wait_for_permission_response(rx, cancel.clone()).await
             };
 
             match response {
@@ -4000,6 +4018,56 @@ mod tests {
     use super::*;
     use crate::behavior::{EvidenceAssessment, EvidenceSufficiency, ProgressSignal};
     use omegon_traits::{OodaPhase, ToolCapability, ToolDefinition, ToolProvider};
+
+    #[tokio::test]
+    async fn permission_wait_remains_pending_without_operator_response() {
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let cancel = CancellationToken::new();
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            wait_for_permission_response(rx, cancel),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "permission wait must not auto-deny on a passive timeout"
+        );
+    }
+
+    #[tokio::test]
+    async fn permission_wait_cancellation_unblocks_as_deny() {
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let cancel = CancellationToken::new();
+        let child = cancel.child_token();
+
+        let task = tokio::spawn(wait_for_permission_response(rx, child));
+        cancel.cancel();
+
+        let response = tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            .await
+            .expect("permission wait should observe cancellation")
+            .expect("permission wait task should not panic");
+        assert_eq!(response, omegon_traits::PermissionResponse::Deny);
+    }
+
+    #[tokio::test]
+    async fn permission_wait_returns_explicit_operator_response() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = CancellationToken::new();
+
+        tx.send(omegon_traits::PermissionResponse::Allow)
+            .expect("send permission response");
+
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            wait_for_permission_response(rx, cancel),
+        )
+        .await
+        .expect("permission wait should complete after explicit response");
+        assert_eq!(response, omegon_traits::PermissionResponse::Allow);
+    }
 
     fn test_tool_catalog() -> ToolCapabilityCatalog {
         ToolCapabilityCatalog::from_tool_defs(&[
