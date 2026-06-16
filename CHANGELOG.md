@@ -22,7 +22,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Shortened common compound tool names in slim TUI rows, including search, memory, context, wait, and browser tools.
 - Routed engine status and operation workbench worker rows through inline row projections instead of ad hoc separator/truncation composition.
 - Documented that memory sync and multi-checkout federation workflows are context-gated so one-off and non-Git tasks remain task-local.
-- Scoped the first federation/memory-sync implementation pass to a read-only context projection before any synchronization or artifact writes.
+- Scoped the first federation/memory-sync implementation pass to a read-only context projection over Git-tracked JSONL fact files before any synchronization or artifact writes.
 - Made `delegate` background startup register and detach without awaiting an async boundary before returning the task id.
 - Made `cleave_run` default to background execution so child-agent orchestration returns an operation id immediately and leaves the main agent/operator control path free; pass `background: false` for the previous attached wait behavior.
 - Routed `/cleave status` display rows through the shared operation projection so cleave command status uses the same canonical child status and failure-kind semantics as Workbench.

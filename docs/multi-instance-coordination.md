@@ -321,31 +321,40 @@ The multi-instance model should not make every Omegon invocation behave like a l
 | One-off / non-Git | no `.git`, no project directives, ad hoc file/task | lightweight recall/store only when useful | no fetch/status, changelog, design docs, handoff, or sibling-checkout scan unless requested |
 | Ordinary Git repo | `.git` exists, no Omegon lifecycle signals | use Git status/fetch only when relevant to the task | no Omegon-specific lifecycle artifacts unless project policy asks for them |
 | Known lifecycle project | project directives, design tree, OpenSpec, changelog, or Omegon repo signals | store durable decisions and recall project facts at task boundaries | reconcile with docs/OpenSpec/changelog when behavior or decisions change |
-| Multi-checkout / federation | explicit operator request or declared sibling-checkout topology | compare memory backend/mind state across checkouts | read-only status first; sync/merge only after explicit decision |
+| Multi-checkout / federation | explicit operator request or declared sibling-checkout topology | use Git-tracked JSONL fact files as the authority; rebuild local indexes as needed | read-only Git/status/index freshness first; sync is ordinary Git reconciliation |
 
-This keeps the memory system useful for small tasks without turning every one-off edit into a Git/lifecycle operation. Federation status must degrade to “not applicable” outside repositories instead of creating files or failing.
+This keeps the memory system useful for small tasks without turning every one-off edit into a Git/lifecycle operation. Federation status must degrade to “not applicable” outside repositories instead of creating files or failing. In repositories, cross-checkout memory continuity should remain boring: fact JSONL moves through Git with the branch, while SQLite/vector stores stay disposable local projections.
 
-**First implementation pass:** add a read-only context projection that classifies the current directory into these modes and reports why. Do not perform synchronization, write handoff artifacts, or mutate memory backends in the first pass.
+**First implementation pass:** add a read-only context projection that classifies the current directory into these modes, detects Git-tracked JSONL memory authority, and reports why. Do not perform synchronization, write handoff artifacts, or mutate memory backends in the first pass.
 
 ## Decisions
 
-### Decision: Federation and memory-sync status starts as a read-only context projection
+### Decision: Git-tracked JSONL is the cross-checkout memory substrate
 
 **Status:** decided
-**Rationale:** The safe first implementation is detection, not synchronization. A read-only projection can answer “what context am I in, and what memory/project synchronization rules apply?” without risking overfit or unexpected writes. This projection becomes the shared input for future CLI/TUI/Workbench surfaces and can degrade cleanly for non-Git one-off tasks.
+**Rationale:** Durable memory facts are plaintext JSONL tracked by Git, so multi-checkout memory does not need a bespoke federation protocol. Git already provides the synchronization, branch isolation, review, conflict surfacing, revert, and merge semantics. SQLite/vector stores should be treated as local rebuildable indexes over those JSONL facts, not as the authority that must be shared or symlinked between checkouts.
 
-**Initial fields:**
+**Implications:**
 
-- `cwd`
-- `mode`: `one_off`, `ordinary_git`, `lifecycle_project`, or `federation`
-- `signals`: detected reasons such as `.git`, `AGENTS.md`, `openspec/`, design docs, changelog, sibling checkouts
-- `git`: optional branch/head/ahead-behind/dirty summary when applicable
-- `memory`: backend identity if cheaply knowable; otherwise `unknown`
-- `recommended_behavior`: short human-readable policy
+- Cross-checkout memory sync is ordinary Git fetch/merge/rebase of tracked JSONL fact files.
+- Worktrees isolate memory additions naturally because fact files live in the branch/worktree alongside code, docs, tasks, and OpenSpec artifacts.
+- Branch merge is the memory merge. If two branches append different fact lines, the correct conflict resolution is usually to keep both JSONL lines.
+- Local SQLite/vector stores may cache/search facts, but must be rebuildable from JSONL and should not be shared as the coordination boundary.
+- Federation status should report Git-tracked fact-file state and index freshness, not compare live backend internals across checkouts.
+
+**First implementation pass:**
+
+- Detect whether the current project has Git-tracked JSONL memory fact files.
+- Report `memory_authority: git_jsonl | local_index_only | none`.
+- Report local index freshness as `fresh | stale | missing | unknown` when cheaply knowable.
+- Recommend ordinary Git reconciliation for cross-checkout continuity.
 
 **Non-goals for first pass:**
 
+- cross-checkout SQLite/vector backend synchronization
+- symlinked shared memory databases
 - automatic memory import/export
+- custom conflict-resolution machinery beyond preserving valid JSONL lines
 - sibling checkout mutation
 - handoff document creation
 - changelog/design/OpenSpec writes
