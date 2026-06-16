@@ -46,6 +46,96 @@ impl DecisionPolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutonomySource {
+    Session,
+    Loop,
+    ScheduledJob,
+    ExplicitApproval,
+}
+
+impl AutonomySource {
+    pub fn precedence(self) -> u8 {
+        match self {
+            Self::Session => 10,
+            Self::Loop => 20,
+            Self::ScheduledJob => 20,
+            Self::ExplicitApproval => 30,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthorityOperation {
+    DelegateScout,
+    DelegatePatch,
+    DelegateVerify,
+    CleaveAssess,
+    CleaveRun,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutonomyEnvelope {
+    pub source: AutonomySource,
+    pub level: AutonomyLevel,
+    pub allowed_operations: Vec<AuthorityOperation>,
+    pub denied_operations: Vec<AuthorityOperation>,
+    pub max_turns: Option<usize>,
+    pub max_wall_time_secs: Option<u64>,
+    pub max_delegate_tasks: Option<usize>,
+    pub max_cleave_children: Option<usize>,
+    pub max_parallel: Option<usize>,
+    pub execution_substrate: Option<String>,
+}
+
+impl AutonomyEnvelope {
+    pub fn session(level: AutonomyLevel) -> Self {
+        Self {
+            source: AutonomySource::Session,
+            level,
+            allowed_operations: Vec::new(),
+            denied_operations: Vec::new(),
+            max_turns: None,
+            max_wall_time_secs: None,
+            max_delegate_tasks: None,
+            max_cleave_children: None,
+            max_parallel: None,
+            execution_substrate: None,
+        }
+    }
+
+    pub fn loop_run(level: AutonomyLevel) -> Self {
+        Self {
+            source: AutonomySource::Loop,
+            ..Self::session(level)
+        }
+    }
+
+    pub fn scheduled_job(level: AutonomyLevel) -> Self {
+        Self {
+            source: AutonomySource::ScheduledJob,
+            ..Self::session(level)
+        }
+    }
+
+    pub fn explicit_approval(level: AutonomyLevel) -> Self {
+        Self {
+            source: AutonomySource::ExplicitApproval,
+            ..Self::session(level)
+        }
+    }
+}
+
+pub fn resolve_autonomy_envelope<'a>(
+    envelopes: impl IntoIterator<Item = &'a AutonomyEnvelope>,
+) -> AutonomyEnvelope {
+    envelopes
+        .into_iter()
+        .max_by_key(|envelope| envelope.source.precedence())
+        .cloned()
+        .unwrap_or_else(|| AutonomyEnvelope::session(AutonomyLevel::Conservative))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubagentPolicy {
     pub level: AutonomyLevel,
@@ -190,6 +280,55 @@ mod tests {
         assert_eq!(policy.cleave_run, DecisionPolicy::RequireApproval);
         assert_eq!(policy.max_children, 2);
         assert_eq!(policy.max_parallel, 1);
+    }
+
+    #[test]
+    fn autonomy_envelope_resolution_defaults_to_conservative_session() {
+        let resolved = resolve_autonomy_envelope(std::iter::empty());
+        assert_eq!(resolved.source, AutonomySource::Session);
+        assert_eq!(resolved.level, AutonomyLevel::Conservative);
+    }
+
+    #[test]
+    fn loop_envelope_overrides_session_without_increasing_by_trigger_alone() {
+        let session = AutonomyEnvelope::session(AutonomyLevel::Orchestrator);
+        let mut loop_envelope = AutonomyEnvelope::loop_run(AutonomyLevel::Conservative);
+        loop_envelope.max_turns = Some(5);
+        loop_envelope.denied_operations = vec![AuthorityOperation::CleaveRun];
+
+        let resolved = resolve_autonomy_envelope([&session, &loop_envelope]);
+        assert_eq!(resolved.source, AutonomySource::Loop);
+        assert_eq!(resolved.level, AutonomyLevel::Conservative);
+        assert_eq!(resolved.max_turns, Some(5));
+        assert_eq!(resolved.denied_operations, vec![AuthorityOperation::CleaveRun]);
+    }
+
+    #[test]
+    fn scheduled_job_envelope_overrides_session_policy() {
+        let session = AutonomyEnvelope::session(AutonomyLevel::Orchestrator);
+        let mut job = AutonomyEnvelope::scheduled_job(AutonomyLevel::Manual);
+        job.allowed_operations = vec![AuthorityOperation::DelegateVerify];
+        job.denied_operations = vec![AuthorityOperation::DelegatePatch, AuthorityOperation::CleaveRun];
+
+        let resolved = resolve_autonomy_envelope([&session, &job]);
+        assert_eq!(resolved.source, AutonomySource::ScheduledJob);
+        assert_eq!(resolved.level, AutonomyLevel::Manual);
+        assert_eq!(resolved.allowed_operations, vec![AuthorityOperation::DelegateVerify]);
+        assert_eq!(
+            resolved.denied_operations,
+            vec![AuthorityOperation::DelegatePatch, AuthorityOperation::CleaveRun]
+        );
+    }
+
+    #[test]
+    fn explicit_approval_has_highest_precedence() {
+        let session = AutonomyEnvelope::session(AutonomyLevel::Manual);
+        let loop_envelope = AutonomyEnvelope::loop_run(AutonomyLevel::Conservative);
+        let approval = AutonomyEnvelope::explicit_approval(AutonomyLevel::Orchestrator);
+
+        let resolved = resolve_autonomy_envelope([&session, &loop_envelope, &approval]);
+        assert_eq!(resolved.source, AutonomySource::ExplicitApproval);
+        assert_eq!(resolved.level, AutonomyLevel::Orchestrator);
     }
 
     #[test]
