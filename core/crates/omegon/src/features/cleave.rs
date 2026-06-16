@@ -924,7 +924,7 @@ impl CleaveFeature {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
         if !background {
-            return self.execute_run_attached(args, cancel).await;
+            return self.execute_run_attached(args, cancel, None).await;
         }
 
         let _directive = args["directive"]
@@ -989,7 +989,15 @@ impl CleaveFeature {
         let task_args = args.clone();
         let background_run_id = run_id.clone();
         crate::task_spawn::spawn_best_effort_result("cleave-background-run", async move {
-            if let Err(err) = feature.execute_run_attached(&task_args, cancel).await {
+            let background_cancel = tokio_util::sync::CancellationToken::new();
+            if let Err(err) = feature
+                .execute_run_attached(
+                    &task_args,
+                    background_cancel,
+                    Some(background_run_id.clone()),
+                )
+                .await
+            {
                 tracing::warn!(error = %err, "background cleave run failed");
                 if let Ok(mut prog) = feature.progress.lock() {
                     prog.active = false;
@@ -999,7 +1007,7 @@ impl CleaveFeature {
                 }
                 feature.emit_decomposition_event(AgentEvent::DecompositionCompleted {
                     merged: false,
-                    operation: OperationRef::cleave(Some(background_run_id)),
+                    operation: OperationRef::cleave(Some(background_run_id.clone())),
                 });
             }
             Ok(())
@@ -1022,6 +1030,7 @@ impl CleaveFeature {
         &self,
         args: &Value,
         cancel: tokio_util::sync::CancellationToken,
+        operation_id: Option<String>,
     ) -> anyhow::Result<ToolResult> {
         let directive = args["directive"]
             .as_str()
@@ -1087,12 +1096,13 @@ impl CleaveFeature {
         // can render placeholder rows immediately.
         self.emit_decomposition_event(AgentEvent::DecompositionStarted {
             children: plan.children.iter().map(|c| c.label.clone()).collect(),
-            operation: OperationRef::cleave(None),
+            operation: OperationRef::cleave(operation_id.clone()),
         });
 
         let progress_sink = {
             let shared = self.shared_progress();
             let event_slot = self.event_sender_slot();
+            let progress_operation_id = operation_id.clone();
             progress::callback_progress_sink(move |event| {
                 // Update internal cleave progress state first.
                 apply_progress_event(&shared, event);
@@ -1123,7 +1133,7 @@ impl CleaveFeature {
                         event: Box::new(AgentEvent::DecompositionChildCompleted {
                             label: child.clone(),
                             success,
-                            operation: OperationRef::cleave(None),
+                            operation: OperationRef::cleave(progress_operation_id.clone()),
                         }),
                     });
                 }
@@ -1200,7 +1210,7 @@ impl CleaveFeature {
             .any(|(_, outcome)| matches!(outcome, cleave::orchestrator::MergeOutcome::Success));
         self.emit_decomposition_event(AgentEvent::DecompositionCompleted {
             merged,
-            operation: OperationRef::cleave(None),
+            operation: OperationRef::cleave(operation_id.clone()),
         });
 
         if should_cleanup_workspace(&result) {
