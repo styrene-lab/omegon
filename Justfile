@@ -542,13 +542,11 @@ link-tag tag:
 build-release:
     {{cargo}} build --release -p omegon
 
-# Run this workspace's dev-release binary directly, building only if missing
+# Run this workspace's dev-release binary directly after rebuilding it from current source
 run *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ ! -x ./target/dev-release/omegon ]; then
-        {{cargo}} build --profile dev-release -p omegon
-    fi
+    {{cargo}} build --profile dev-release -p omegon
     exec ./target/dev-release/omegon {{args}}
 
 # ─── Release ─────────────────────────────────────────────────

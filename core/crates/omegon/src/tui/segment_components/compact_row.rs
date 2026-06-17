@@ -121,12 +121,41 @@ fn wrapped_visual_rows(text: &str, width: u16) -> u16 {
     ((display_width + width.saturating_sub(1)) / width).max(1) as u16
 }
 
+pub(crate) fn truncate_to_width(text: &str, max_width: usize) -> String {
+    const ELLIPSIS: &str = "…";
+    let text_width = unicode_width::UnicodeWidthStr::width(text);
+    if text_width <= max_width {
+        return text.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    let ellipsis_width = unicode_width::UnicodeWidthStr::width(ELLIPSIS);
+    if max_width <= ellipsis_width {
+        return ELLIPSIS.to_string();
+    }
+
+    let body_budget = max_width.saturating_sub(ellipsis_width);
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + ch_width > body_budget {
+            break;
+        }
+        out.push(ch);
+        used += ch_width;
+    }
+    out.push_str(ELLIPSIS);
+    out
+}
+
 fn rendered_child_detail(row: &CompactRows<'_>, detail: &str, width: u16) -> String {
     let child_width = width
         .saturating_sub(unicode_width::UnicodeWidthStr::width(row.child_indent) as u16)
         .max(1);
     let child_budget = child_width.saturating_sub(2) as usize;
-    crate::util::truncate(detail, child_budget)
+    truncate_to_width(detail, child_budget)
 }
 
 pub(crate) fn measured_height(width: u16, rows: &CompactRows<'_>) -> u16 {

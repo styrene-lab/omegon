@@ -929,7 +929,12 @@ pub(crate) fn slim_tool_live_rows(width: u16, cells: &[String]) -> Vec<String> {
         .iter()
         .position(|cell| cell.contains("running") || cell.contains("idle") || cell.contains('%'))
         .unwrap_or_else(|| cells.len().saturating_sub(1));
-    rows.push(crate::util::truncate(&cells[progress_idx], row_budget));
+    rows.push(
+        crate::tui::segment_components::compact_row::truncate_to_width(
+            &cells[progress_idx],
+            row_budget,
+        ),
+    );
 
     let detail_cells = cells
         .iter()
@@ -946,7 +951,10 @@ pub(crate) fn slim_tool_live_rows(width: u16, cells: &[String]) -> Vec<String> {
         };
         rows.push(format!(
             "{marker}{}",
-            crate::util::truncate(cell, row_budget.saturating_sub(marker.len()))
+            crate::tui::segment_components::compact_row::truncate_to_width(
+                cell,
+                row_budget.saturating_sub(marker.len())
+            )
         ));
     }
 
@@ -2834,6 +2842,17 @@ mod tests {
         text
     }
 
+    fn row_widths(buf: &Buffer, area: Rect) -> Vec<usize> {
+        (area.top()..area.bottom())
+            .map(|y| {
+                let row = (area.left()..area.right())
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>();
+                unicode_width::UnicodeWidthStr::width(row.trim_end())
+            })
+            .collect()
+    }
+
     fn find_row_containing(buf: &Buffer, area: Rect, needle: &str) -> Option<u16> {
         for y in area.top()..area.bottom() {
             let mut row = String::new();
@@ -3272,6 +3291,44 @@ mod tests {
         assert!(
             text.contains('…'),
             "long reasoning line should truncate safely: {text}"
+        );
+        assert!(
+            row_widths(&buf, area).into_iter().all(|width| width <= 64),
+            "reasoning rows must fit viewport: {text}"
+        );
+    }
+
+    #[test]
+    fn slim_completed_memory_tool_rows_fit_view_width() {
+        let mut seg = Segment::tool_card("tool-1", "memory_recall");
+        if let SegmentContent::ToolCard {
+            detail_args,
+            detail_result,
+            complete,
+            ..
+        } = &mut seg.content
+        {
+            *detail_args = Some(
+                r#"{"query":"this is a deliberately long memory query that should not bleed past the right edge"}"#
+                    .into(),
+            );
+            *detail_result = Some("1. [20693784140a] (Architecture, 1428%) The reasoning compact header/detail row layout breaks under current constraints, with the details affordance being squeezed/wrapped/clipped at the right edge resulting in stacked fragments".into());
+            *complete = true;
+        }
+
+        let (area, mut buf) = make_buf(64, 4);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("memory"), "{text}");
+        assert!(
+            row_widths(&buf, area).into_iter().all(|width| width <= 64),
+            "memory tool rows must fit viewport: {text}"
         );
     }
 
