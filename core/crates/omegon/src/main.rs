@@ -4847,7 +4847,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         });
                         // Spawn a task to forward web commands into the main TUI command channel
                         let cmd_tx_clone = web_command_tx.clone();
-                        let cancel_clone = shared_cancel.clone();
                         tokio::spawn(async move {
                             let mut rx = web_cmd_rx;
                             while let Some(web_cmd) = rx.recv().await {
@@ -4873,14 +4872,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             respond_to,
                                         }
                                     }
-                                    web::WebCommand::Cancel => {
-                                        if let Ok(guard) = cancel_clone.lock()
-                                            && let Some(ref cancel) = *guard
-                                        {
-                                            cancel.cancel();
-                                        }
-                                        continue;
-                                    }
+                                    web::WebCommand::Cancel => tui::TuiCommand::CancelActiveTurn {
+                                        submitted_by: "web-dashboard".to_string(),
+                                        via: "websocket",
+                                    },
                                     web::WebCommand::ExecuteControl { request, respond_to } => {
                                         if cmd_tx_clone.send(tui::TuiCommand::ExecuteControl { request, respond_to }).await.is_err() {
                                             break;
@@ -5319,17 +5314,19 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 };
                 let via = control_surface_from_via(prompt.via);
 
-                runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via, prompt.metadata, Some(match prompt.queue_mode {
+                let prompt_id = runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via, prompt.metadata, Some(match prompt.queue_mode {
                         crate::tui::PromptQueueMode::InterruptAfterTurn => QueueMode::InterruptAfterTurn,
                         crate::tui::PromptQueueMode::UntilReady => QueueMode::UntilReady,
                         crate::tui::PromptQueueMode::Immediate => QueueMode::Immediate,
                     }));
 
                 if runtime.is_busy() {
+                    emit_runtime_queue_notification(&runtime, &events_tx, prompt_id);
                     continue;
                 }
 
                 while let Some(active) = runtime.maybe_start_next_turn() {
+                    emit_runtime_queue_snapshot(&runtime, &events_tx);
                     stop_voice_session_if_requested(&active.prompt, &runtime_state.bus, &events_tx)
                         .await;
                     mark_interactive_session_busy(&agent.dashboard_handles, true);
@@ -5400,6 +5397,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             crate::tui::PromptQueueMode::UntilReady => QueueMode::UntilReady,
                                             crate::tui::PromptQueueMode::Immediate => QueueMode::Immediate,
                                         }));
+                                        emit_runtime_queue_notification(&runtime, &events_tx, prompt_id);
                                         if let Some(queued_prompt) = runtime.queue.iter().find(|queued| queued.id == prompt_id)
                                             && queued_prompt.requests_voice_close()
                                         {
@@ -5407,6 +5405,15 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                                 message: "Voice requested shutdown after this prompt; it will be stopped when the active turn completes.".to_string(),
                                             });
                                         }
+                                    }
+                                    tui::TuiCommand::CancelActiveTurn { submitted_by, via } => {
+                                        handle_runtime_cancel_command(
+                                            &mut runtime,
+                                            &shared_cancel,
+                                            &events_tx,
+                                            submitted_by,
+                                            via,
+                                        );
                                     }
                                     tui::TuiCommand::Quit => {
                                         quit_after_turn = true;
@@ -5423,12 +5430,22 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     }
 
                     runtime.complete_active_turn();
+                    emit_runtime_queue_snapshot(&runtime, &events_tx);
                     mark_interactive_session_busy(&agent.dashboard_handles, runtime.is_busy());
 
                     if quit_after_turn {
                         break 'interactive;
                     }
                 }
+            }
+            tui::TuiCommand::CancelActiveTurn { submitted_by, via } => {
+                handle_runtime_cancel_command(
+                    &mut runtime,
+                    &shared_cancel,
+                    &events_tx,
+                    submitted_by,
+                    via,
+                );
             }
             tui::TuiCommand::VoicePrompt { .. } => unreachable!("VoicePrompt is normalized above"),
         }
@@ -5678,6 +5695,21 @@ struct RuntimeActor {
 }
 
 impl RuntimeActor {
+    fn display_label(&self) -> &str {
+        if self.label.is_empty() {
+            match self.kind {
+                RuntimeActorKind::Tui => "tui",
+                RuntimeActorKind::Auspex => "auspex",
+                RuntimeActorKind::IpcClient => "ipc-client",
+                RuntimeActorKind::WebClient => "web-client",
+                RuntimeActorKind::DaemonEvent => "daemon-event",
+                RuntimeActorKind::System => "system",
+            }
+        } else {
+            &self.label
+        }
+    }
+
     fn tui() -> Self {
         Self {
             kind: RuntimeActorKind::Tui,
@@ -5700,6 +5732,18 @@ enum ControlSurface {
     WebSocket,
     HttpEventIngress,
     Internal,
+}
+
+impl ControlSurface {
+    fn label(&self) -> &'static str {
+        match self {
+            ControlSurface::Tui => "tui",
+            ControlSurface::Ipc => "ipc",
+            ControlSurface::WebSocket => "websocket",
+            ControlSurface::HttpEventIngress => "http-event-ingress",
+            ControlSurface::Internal => "internal",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -5762,6 +5806,58 @@ fn control_surface_from_via(via: &str) -> ControlSurface {
         "websocket" => ControlSurface::WebSocket,
         _ => ControlSurface::Internal,
     }
+}
+
+fn handle_runtime_cancel_command(
+    runtime: &mut InteractiveRuntimeSupervisor,
+    shared_cancel: &tui::SharedCancel,
+    events_tx: &broadcast::Sender<AgentEvent>,
+    submitted_by: String,
+    via: &'static str,
+) {
+    let actor = RuntimeActor {
+        kind: runtime_actor_kind_from_via(via),
+        label: submitted_by,
+    };
+    let surface = control_surface_from_via(via);
+    let active = runtime.request_cancel(actor, surface);
+    if active.is_none() {
+        let _ = events_tx.send(AgentEvent::SystemNotification {
+            message: "Cancel requested, but no active turn is running.".to_string(),
+        });
+    }
+    if let Ok(guard) = shared_cancel.lock()
+        && let Some(ref cancel) = *guard
+    {
+        cancel.cancel();
+    }
+}
+
+fn emit_runtime_queue_notification(
+    runtime: &InteractiveRuntimeSupervisor,
+    events_tx: &broadcast::Sender<AgentEvent>,
+    prompt_id: u64,
+) {
+    if let Some(prompt) = runtime.queue.iter().find(|prompt| prompt.id == prompt_id) {
+        emit_runtime_queue_snapshot(runtime, events_tx);
+        let _ = events_tx.send(AgentEvent::SystemNotification {
+            message: format!(
+                "Queued prompt #{} from {} via {}; queue depth {}.",
+                prompt.id,
+                prompt.submitted_by.display_label(),
+                prompt.via.label(),
+                runtime.queue_depth()
+            ),
+        });
+    }
+}
+
+fn emit_runtime_queue_snapshot(
+    runtime: &InteractiveRuntimeSupervisor,
+    events_tx: &broadcast::Sender<AgentEvent>,
+) {
+    let snapshot_json = runtime.queue_snapshot_json();
+    let _ = events_tx.send(AgentEvent::RuntimeQueueUpdated { snapshot_json });
 }
 
 pub(crate) struct InteractiveAgentState {
@@ -6119,6 +6215,36 @@ impl InteractiveRuntimeSupervisor {
                 format!("#{} {mode}: {}{}", prompt.id, preview, attachment_summary)
             })
             .collect()
+    }
+
+    fn queue_snapshot_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "depth": self.queue_depth(),
+            "active": self.active_turn.as_ref().map(|active| serde_json::json!({
+                "turn_id": active.runtime_turn_id,
+                "prompt_id": active.prompt.id,
+                "submitted_by": active.prompt.submitted_by.display_label(),
+                "via": active.prompt.via.label(),
+                "phase": match &active.phase {
+                    ActiveTurnPhase::Running => "running",
+                    ActiveTurnPhase::Cancelling { .. } => "cancelling",
+                },
+            })),
+            "items": self.queue.iter().map(|prompt| serde_json::json!({
+                "id": prompt.id,
+                "submitted_by": prompt.submitted_by.display_label(),
+                "via": prompt.via.label(),
+                "queue_mode": match prompt.queue_mode {
+                    QueueMode::InterruptAfterTurn => "interrupt_after_turn",
+                    QueueMode::UntilReady => "until_ready",
+                    QueueMode::Immediate => "immediate",
+                },
+                "preview": prompt.text.chars().take(80).collect::<String>(),
+                "attachments": prompt.image_paths.len(),
+                "voice": prompt.metadata.voice.is_some(),
+            })).collect::<Vec<_>>(),
+            "previews": self.queue_preview(),
+        })
     }
 
     fn is_busy(&self) -> bool {
@@ -9152,6 +9278,42 @@ mod tests {
     }
 
     #[test]
+    fn interactive_runtime_supervisor_queue_notification_reports_authoritative_depth() {
+        let mut supervisor = InteractiveRuntimeSupervisor::default();
+        let (events_tx, mut events_rx) = broadcast::channel(4);
+        let prompt_id = supervisor.enqueue_prompt(
+            "follow up".to_string(),
+            Vec::new(),
+            RuntimeActor::tui(),
+            ControlSurface::Tui,
+            tui::PromptMetadata::default(),
+            None,
+        );
+
+        emit_runtime_queue_notification(&supervisor, &events_tx, prompt_id);
+
+        match events_rx.try_recv().expect("queue snapshot") {
+            AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
+                assert_eq!(snapshot_json["depth"], 1);
+                assert_eq!(snapshot_json["items"][0]["id"], 1);
+                assert_eq!(snapshot_json["items"][0]["submitted_by"], "local-tui");
+                assert_eq!(snapshot_json["items"][0]["via"], "tui");
+            }
+            other => panic!("expected runtime queue update, got {other:?}"),
+        }
+
+        match events_rx.try_recv().expect("queue notification") {
+            AgentEvent::SystemNotification { message } => {
+                assert!(message.contains("Queued prompt #1"), "{message}");
+                assert!(message.contains("local-tui"), "{message}");
+                assert!(message.contains("tui"), "{message}");
+                assert!(message.contains("queue depth 1"), "{message}");
+            }
+            other => panic!("expected system notification, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn interactive_runtime_supervisor_quit_semantics_map_to_cancel_then_stop() {
         let mut supervisor = InteractiveRuntimeSupervisor::default();
         supervisor.enqueue_prompt(
@@ -9187,6 +9349,45 @@ mod tests {
             supervisor.is_busy(),
             "quit requests cancellation but active turn remains busy until completion"
         );
+    }
+
+    #[test]
+    fn runtime_queue_snapshot_updates_on_start_and_completion() {
+        let mut supervisor = InteractiveRuntimeSupervisor::default();
+        supervisor.enqueue_prompt(
+            "first".to_string(),
+            Vec::new(),
+            RuntimeActor::tui(),
+            ControlSurface::Tui,
+            tui::PromptMetadata::default(),
+            None,
+        );
+        supervisor.enqueue_prompt(
+            "second".to_string(),
+            Vec::new(),
+            RuntimeActor::auspex(),
+            ControlSurface::Ipc,
+            tui::PromptMetadata::default(),
+            None,
+        );
+
+        let active = supervisor.maybe_start_next_turn().expect("active turn");
+        assert_eq!(active.prompt.text, "first");
+        let snapshot = supervisor.queue_snapshot_json();
+        assert_eq!(snapshot["depth"], 1);
+        assert_eq!(snapshot["active"]["phase"], "running");
+        assert_eq!(snapshot["items"][0]["preview"], "second");
+
+        supervisor.complete_active_turn().expect("completed turn");
+        let snapshot = supervisor.queue_snapshot_json();
+        assert_eq!(snapshot["depth"], 1);
+        assert!(snapshot["active"].is_null());
+
+        let active = supervisor.maybe_start_next_turn().expect("second turn");
+        assert_eq!(active.prompt.text, "second");
+        let snapshot = supervisor.queue_snapshot_json();
+        assert_eq!(snapshot["depth"], 0);
+        assert_eq!(snapshot["active"]["prompt_id"], 2);
     }
 
     #[tokio::test]

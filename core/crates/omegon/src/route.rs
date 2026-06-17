@@ -745,13 +745,15 @@ mod tests {
         std::env::temp_dir().join(format!("omegon-{label}-{nanos}-auth.json"))
     }
 
-    fn with_auth_path<T>(path: &Path, f: impl FnOnce() -> T) -> T {
-        let _guard = crate::auth::TEST_AUTH_ENV_LOCK.lock().unwrap();
+    fn with_auth_path<T>(path: &Path, f: impl FnOnce() -> T + std::panic::UnwindSafe) -> T {
+        let _guard = crate::auth::TEST_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
         // SAFETY: Tests serialize auth environment mutations with TEST_AUTH_ENV_LOCK,
         // and restore the original value before releasing the lock.
         unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", path) };
-        let result = f();
+        let result = std::panic::catch_unwind(f);
         match original {
             Some(value) => {
                 // SAFETY: Protected by TEST_AUTH_ENV_LOCK as above.
@@ -762,7 +764,10 @@ mod tests {
                 unsafe { std::env::remove_var("OMEGON_AUTH_JSON_PATH") };
             }
         }
-        result
+        match result {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     }
 
     fn ledger(entries: &[(&str, CredentialState)]) -> StubLedger {

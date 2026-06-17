@@ -23,6 +23,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Cleared Clippy warnings that blocked `just lint`, including derivable defaults, single-character string pushes, manual contains checks, collapsible conditionals, bool assert comparisons, and explicit allowances for intentionally broad dispatcher signatures.
 
 ### Changed
+- Made `just run` exec this workspace's dev-release Omegon binary directly, building it only when missing, so UI smoke checks cannot accidentally use an installed launcher or another checkout.
+- Unified Slim TUI tool inspection around concrete transcript tool cards so live tools and Ctrl+O-pinned details share the same inspection renderer, with success glyphs aligned before tool identity/category glyphs and delegate/cleave rows classified as subagent tool calls.
+- Routed TUI, web dashboard, startup, tutorial, skill-builder, persona-builder, voice, and active-turn prompt/cancel paths through actor-tagged runtime supervisor ingress instead of TUI/web-local queue or cancellation side channels.
 - Improved slim TUI summaries for shell-based git pushes so remote boilerplate no longer leaves command rows looking empty when a branch is pushed or tracking is set up.
 - Propagated `--dangerously-bypass-permissions` into delegate and cleave child Omegon processes so higher-order workers inherit parent permission bypass authority.
 - Clarified that policy prompts are allow-once until durable policy grants exist, and documented default-open unknown-tool behavior plus lexical permission-pattern matching.

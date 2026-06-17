@@ -1,6 +1,7 @@
 //! Component renderers for individual conversation segment kinds.
 
 pub mod assistant;
+pub(crate) mod compact_row;
 pub mod image;
 pub mod lifecycle;
 pub mod separator;

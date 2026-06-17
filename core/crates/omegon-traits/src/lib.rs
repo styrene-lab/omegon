@@ -1257,6 +1257,11 @@ pub enum IpcEventPayload {
         message: String,
     },
 
+    // ── Runtime queue ──────────────────────────────────────────────────────
+    /// Authoritative interactive runtime prompt queue snapshot.
+    #[serde(rename = "runtime.queue_updated")]
+    RuntimeQueueUpdated { snapshot: Value },
+
     // ── Harness ────────────────────────────────────────────────────────────
     /// Harness state changed. Call `get_state` to refresh the `harness` section.
     #[serde(rename = "harness.changed")]
@@ -2528,6 +2533,11 @@ pub enum AgentEvent {
     /// human-readable notifications.
     WebDashboardStarted {
         startup_json: Value,
+    },
+    /// Runtime prompt queue changed. Consumers should treat this as the authoritative
+    /// queue snapshot instead of maintaining per-surface shadow queues.
+    RuntimeQueueUpdated {
+        snapshot_json: Value,
     },
     /// Context updated — authoritative snapshot after compaction, clear, or turn completion.
     /// TUI + web consumers should use this as the canonical context status source.

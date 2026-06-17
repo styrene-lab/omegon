@@ -22,10 +22,8 @@ use super::super::segments::{
     try_highlight,
 };
 use super::super::theme::Theme;
-use crate::surfaces::inline::{InlineCell, InlineCellRole, InlineRow};
-use crate::tui::inline_render::{
-    DETAILS_HINT_LABEL, details_hint_cell, expand_hint_cell, render_inline_text_row,
-};
+use super::compact_row;
+use crate::tui::inline_render::{DETAILS_HINT_LABEL, details_hint_cell, expand_hint_cell};
 use crate::tui::widgets;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,19 +107,6 @@ impl<'a> SlimSegmentHeader<'a> {
     }
 }
 
-fn state_icon_for_segment_state(state: SegmentState) -> &'static str {
-    let glyphs = crate::tui::glyphs::glyphs();
-    let role = match state {
-        SegmentState::Pending => crate::tui::glyphs::ToolStateGlyphRole::Waiting,
-        SegmentState::Running => crate::tui::glyphs::ToolStateGlyphRole::Running,
-        SegmentState::Completed => crate::tui::glyphs::ToolStateGlyphRole::Completed,
-        SegmentState::Failed => crate::tui::glyphs::ToolStateGlyphRole::Failed,
-        SegmentState::Cancelled => crate::tui::glyphs::ToolStateGlyphRole::Cancelled,
-        SegmentState::Informational => crate::tui::glyphs::ToolStateGlyphRole::Detail,
-    };
-    glyphs.tool_state(role)
-}
-
 fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) -> Color {
     match state {
         SegmentState::Pending | SegmentState::Informational => t.dim(),
@@ -130,6 +115,23 @@ fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) -> Color {
         SegmentState::Failed => t.error(),
         SegmentState::Cancelled => t.muted(),
     }
+}
+
+fn category_icon_for_segment_producer(producer: SegmentProducer<'_>) -> &'static str {
+    let role = match producer {
+        SegmentProducer::Tool { name, category } => match category {
+            ToolCategory::CommandExec => crate::tui::glyphs::ToolCategoryGlyphRole::Shell,
+            ToolCategory::FileRead => crate::tui::glyphs::ToolCategoryGlyphRole::Read,
+            ToolCategory::FileMutation => crate::tui::glyphs::ToolCategoryGlyphRole::Write,
+            ToolCategory::DesignTree => crate::tui::glyphs::ToolCategoryGlyphRole::Design,
+            ToolCategory::Memory => crate::tui::glyphs::ToolCategoryGlyphRole::Memory,
+            ToolCategory::Search => crate::tui::glyphs::ToolCategoryGlyphRole::Search,
+            ToolCategory::Subagent => crate::tui::glyphs::ToolCategoryGlyphRole::Subagent,
+            ToolCategory::Generic => crate::tui::glyphs::tool_category_role_for_name(name),
+        },
+        _ => crate::tui::glyphs::ToolCategoryGlyphRole::Generic,
+    };
+    crate::tui::glyphs::glyphs().tool_category(role)
 }
 
 fn slim_tool_header_cells(
@@ -821,7 +823,7 @@ fn render_tool_card(
             buf,
             t,
             bg,
-            state_icon_for_segment_state(header.state),
+            category_icon_for_segment_producer(header.producer),
             state_color_for_segment_state(header.state, t),
             &header.display_name,
             &detail_rows,
@@ -860,7 +862,7 @@ fn render_tool_card(
             buf,
             t,
             bg,
-            state_icon_for_segment_state(header.state),
+            category_icon_for_segment_producer(header.producer),
             state_color_for_segment_state(header.state, t),
             &header.display_name,
             &detail_rows,
@@ -1081,114 +1083,31 @@ fn render_tool_card(
     }
 }
 
-fn slim_tool_prefix_width(status_icon: &str, display_name: &str, pinned: bool) -> u16 {
-    let label = if pinned {
-        format!("{status_icon} {display_name} · pinned · ")
-    } else {
-        format!("{status_icon} {display_name} · ")
-    };
-    unicode_width::UnicodeWidthStr::width(label.as_str()) as u16
-}
-
-fn detail_cells_from_rendered_row(row: &str) -> Vec<String> {
-    row.split(" · ")
-        .filter(|cell| !cell.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-fn first_slim_tool_detail_row(area_width: u16, prefix_width: u16, row: &str) -> String {
-    let budget = area_width.saturating_sub(prefix_width);
-    let cells = detail_cells_from_rendered_row(row);
-    let (left_cells, right_cells): (Vec<_>, Vec<_>) = cells
-        .into_iter()
-        .partition(|cell| !cell.contains(DETAILS_HINT_LABEL));
-    let inline = InlineRow::new(
-        left_cells
-            .into_iter()
-            .map(|cell| InlineCell::new(cell, InlineCellRole::Value))
-            .collect(),
-        right_cells
-            .into_iter()
-            .map(|cell| InlineCell::new(cell, InlineCellRole::Affordance))
-            .collect(),
-    );
-    render_inline_text_row(&inline, budget)
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_slim_tool_summary_rows(
     area: Rect,
     buf: &mut Buffer,
     t: &dyn Theme,
     bg: Color,
-    status_icon: &str,
+    category_icon: &str,
     status_color: Color,
     display_name: &str,
     detail_rows: &[String],
     pinned: bool,
 ) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-
-    let child_bg = subtle_tool_row_bg(bg);
-    let visible_rows = detail_rows.len().min(area.height as usize);
-    let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible_rows.max(1));
-
-    for (idx, detail) in detail_rows.iter().take(visible_rows).enumerate() {
-        let row_bg = if idx == 0 { bg } else { child_bg };
-        apply_rows_bg(area, idx as u16, 1, row_bg, buf);
-        if idx == 0 {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{status_icon} "),
-                    Style::default()
-                        .fg(status_color)
-                        .bg(row_bg)
-                        .add_modifier(Modifier::DIM),
-                ),
-                Span::styled(
-                    if pinned {
-                        format!("{display_name} · pinned ")
-                    } else {
-                        format!("{display_name} ")
-                    },
-                    Style::default()
-                        .fg(status_color)
-                        .bg(row_bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("· ", Style::default().fg(t.dim()).bg(row_bg)),
-                Span::styled(
-                    first_slim_tool_detail_row(
-                        area.width,
-                        slim_tool_prefix_width(status_icon, display_name, pinned),
-                        detail,
-                    ),
-                    Style::default().fg(t.muted()).bg(row_bg),
-                ),
-            ]));
-        } else {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default().fg(t.dim()).bg(row_bg)),
-                Span::styled(detail.clone(), Style::default().fg(t.dim()).bg(row_bg)),
-            ]));
-        }
-    }
-
-    Paragraph::new(lines.clone())
-        .style(Style::default().bg(bg))
-        .render(area, buf);
-    apply_rendered_links(
+    compact_row::render(
         area,
-        &lines,
         buf,
-        Style::default()
-            .fg(t.accent_muted())
-            .bg(bg)
-            .add_modifier(Modifier::UNDERLINED),
-        area.height,
+        t,
+        bg,
+        subtle_tool_row_bg(bg),
+        compact_row::CompactRows::tool(
+            category_icon,
+            display_name,
+            status_color,
+            detail_rows,
+            pinned,
+        ),
     );
 }
 
@@ -1198,73 +1117,19 @@ pub(crate) fn render_slim_tool_live_rows(
     buf: &mut Buffer,
     t: &dyn Theme,
     bg: Color,
-    status_icon: &str,
+    category_icon: &str,
     status_color: Color,
     display_name: &str,
     rows: &[String],
     pinned: bool,
 ) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-
-    let child_bg = subtle_tool_row_bg(bg);
-    let visible_rows = rows.len().min(area.height as usize);
-    let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible_rows.max(1));
-
-    for (idx, row) in rows.iter().take(visible_rows).enumerate() {
-        let row_bg = if idx == 0 { bg } else { child_bg };
-        apply_rows_bg(area, idx as u16, 1, row_bg, buf);
-        if idx == 0 {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{status_icon} "),
-                    Style::default()
-                        .fg(status_color)
-                        .bg(row_bg)
-                        .add_modifier(Modifier::DIM),
-                ),
-                Span::styled(
-                    if pinned {
-                        format!("{display_name} · pinned ")
-                    } else {
-                        format!("{display_name} ")
-                    },
-                    Style::default()
-                        .fg(status_color)
-                        .bg(row_bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("· ", Style::default().fg(t.dim()).bg(row_bg)),
-                Span::styled(
-                    first_slim_tool_detail_row(
-                        area.width,
-                        slim_tool_prefix_width(status_icon, display_name, pinned),
-                        row,
-                    ),
-                    Style::default().fg(t.muted()).bg(row_bg),
-                ),
-            ]));
-        } else {
-            lines.push(Line::from(Span::styled(
-                row.clone(),
-                Style::default().fg(t.dim()).bg(row_bg),
-            )));
-        }
-    }
-
-    Paragraph::new(lines.clone())
-        .style(Style::default().bg(bg))
-        .render(area, buf);
-    apply_rendered_links(
+    compact_row::render(
         area,
-        &lines,
         buf,
-        Style::default()
-            .fg(t.accent_muted())
-            .bg(bg)
-            .add_modifier(Modifier::UNDERLINED),
-        area.height,
+        t,
+        bg,
+        subtle_tool_row_bg(bg),
+        compact_row::CompactRows::tool(category_icon, display_name, status_color, rows, pinned),
     );
 }
 

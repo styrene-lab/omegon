@@ -9,10 +9,11 @@ use crate::surfaces::conversation::SegmentPresentation;
 
 use super::super::conversation_render_projection::SegmentRenderContext;
 use super::super::segments::{
-    SegmentMeta, SegmentRenderMode, TableState, apply_rendered_links, apply_rows_bg,
-    build_meta_tag, clean_inline_text, compute_table_widths, is_table_separator, render_table_line,
+    SegmentMeta, SegmentRenderMode, TableState, apply_rendered_links, build_meta_tag,
+    clean_inline_text, compute_table_widths, is_table_separator, render_table_line,
     split_trimmed_trailing_empty_lines, subtle_tool_row_bg, top_right_timestamp,
 };
+use super::compact_row;
 
 pub struct AssistantRenderProps<'a> {
     pub text: &'a str,
@@ -41,7 +42,7 @@ pub struct AssistantChrome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssistantReasoning {
     Hidden,
-    SlimSummary,
+    SlimExpanded { max_completed_lines: usize },
     Expanded { max_completed_lines: usize },
 }
 
@@ -62,7 +63,9 @@ pub fn plan(props: &AssistantRenderProps<'_>) -> AssistantRenderPlan {
         reasoning: if props.thinking.is_empty() {
             AssistantReasoning::Hidden
         } else if slim {
-            AssistantReasoning::SlimSummary
+            AssistantReasoning::SlimExpanded {
+                max_completed_lines: 4,
+            }
         } else {
             AssistantReasoning::Expanded {
                 max_completed_lines: 6,
@@ -151,38 +154,44 @@ fn push_reasoning_lines<'a>(
 ) {
     match reasoning {
         AssistantReasoning::Hidden => {}
-        AssistantReasoning::SlimSummary => {
+        AssistantReasoning::SlimExpanded {
+            max_completed_lines,
+        } => {
             let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(props.thinking);
-            let row_bg = subtle_tool_row_bg(bg);
-            apply_rows_bg(inner, lines.len() as u16, 1, row_bg, buf);
-            let preview = think_lines
-                .iter()
-                .map(|line| clean_inline_text(line.trim()))
-                .find(|line| !line.is_empty())
-                .unwrap_or_else(|| "thinking".to_string());
-            let budget = inner.width.saturating_sub(24) as usize;
-            lines.push(Line::from(vec![
-                Span::styled("◌ ", Style::default().fg(theme.border()).bg(row_bg)),
-                Span::styled(
-                    "reasoning ",
-                    Style::default()
-                        .fg(theme.dim())
-                        .bg(row_bg)
-                        .add_modifier(Modifier::ITALIC),
-                ),
-                Span::styled(
-                    format!("({} lines)", think_lines.len()),
-                    Style::default().fg(theme.border_dim()).bg(row_bg),
-                ),
-                Span::styled(" · ", Style::default().fg(theme.border_dim()).bg(row_bg)),
-                Span::styled(
-                    crate::util::truncate(&preview, budget),
-                    Style::default()
-                        .fg(theme.border())
-                        .bg(row_bg)
-                        .add_modifier(Modifier::ITALIC),
-                ),
-            ]));
+            let show = if props.complete {
+                think_lines.len().min(max_completed_lines)
+            } else {
+                think_lines.len()
+            };
+            let mut detail_rows = Vec::with_capacity(show.saturating_add(1));
+            detail_rows.push(format!(
+                "{} line{}",
+                think_lines.len(),
+                if think_lines.len() == 1 { "" } else { "s" }
+            ));
+            detail_rows.extend(
+                think_lines
+                    .iter()
+                    .take(show)
+                    .map(|line| clean_inline_text(line.trim())),
+            );
+            if props.complete && think_lines.len() > show {
+                detail_rows.push(format!("⋯ {} more", think_lines.len() - show));
+            }
+            compact_row::render(
+                Rect {
+                    x: inner.x,
+                    y: inner.y + lines.len() as u16,
+                    width: inner.width,
+                    height: inner.height.saturating_sub(lines.len() as u16),
+                },
+                buf,
+                theme,
+                bg,
+                subtle_tool_row_bg(bg),
+                compact_row::CompactRows::metadata("reasoning", theme.border(), &detail_rows),
+            );
+            lines.extend((0..detail_rows.len()).map(|_| Line::default()));
         }
         AssistantReasoning::Expanded {
             max_completed_lines,
@@ -397,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn assistant_plan_slim_omits_chrome_and_summarizes_reasoning() {
+    fn assistant_plan_slim_omits_chrome_and_expands_reasoning() {
         let meta = SegmentMeta::default();
         let presentation = SegmentPresentation {
             role: SegmentRole::Assistant,
@@ -419,7 +428,12 @@ mod tests {
         assert!(!plan.chrome.identity_line);
         assert!(!plan.chrome.meta_line);
         assert!(!plan.chrome.answer_label);
-        assert_eq!(plan.reasoning, AssistantReasoning::SlimSummary);
+        assert_eq!(
+            plan.reasoning,
+            AssistantReasoning::SlimExpanded {
+                max_completed_lines: 4
+            }
+        );
         assert_eq!(plan.body, AssistantBody::MarkdownTranscript);
     }
 

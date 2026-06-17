@@ -1087,6 +1087,11 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
             message: message.clone(),
         }),
         AgentEvent::HarnessStatusChanged { .. } => Some(IpcEventPayload::HarnessChanged),
+        AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
+            Some(IpcEventPayload::RuntimeQueueUpdated {
+                snapshot: snapshot_json.clone(),
+            })
+        }
         AgentEvent::SessionReset => Some(IpcEventPayload::SessionReset),
         // Internal-only events — not projected to IPC
         AgentEvent::MessageStart { .. } => None,
@@ -1132,6 +1137,7 @@ fn event_name(ev: &IpcEventPayload) -> &'static str {
         IpcEventPayload::FamilyVitalSignsUpdated { .. } => "family.vital_signs",
         IpcEventPayload::PlanUpdated { .. } => "plan.updated",
         IpcEventPayload::ProviderRouteChanged { .. } => "provider.route_changed",
+        IpcEventPayload::RuntimeQueueUpdated { .. } => "runtime.queue_updated",
         IpcEventPayload::HarnessChanged => "harness.changed",
         IpcEventPayload::StateChanged { .. } => "state.changed",
         IpcEventPayload::SystemNotification { .. } => "system.notification",
@@ -1155,6 +1161,7 @@ const KNOWN_EVENTS: &[&str] = &[
     "decomposition.child_completed",
     "decomposition.completed",
     "provider.route_changed",
+    "runtime.queue_updated",
     "harness.changed",
     "state.changed",
     "system.notification",

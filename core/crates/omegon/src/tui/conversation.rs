@@ -305,6 +305,12 @@ impl ConversationView {
         &self.segments
     }
 
+    /// Access segments mutably for focused tests and repair paths.
+    #[cfg(test)]
+    pub fn segments_mut(&mut self) -> &mut [Segment] {
+        &mut self.segments
+    }
+
     /// Whether we're currently receiving streaming text.
     pub fn is_streaming(&self) -> bool {
         self.streaming
@@ -1036,6 +1042,68 @@ impl ConversationView {
         let idx = self.last_selectable_segment()?;
         self.selected_segment = Some(idx);
         Some(idx)
+    }
+
+    pub fn tool_segment_by_id(&self, id: &str) -> Option<&Segment> {
+        self.segments.iter().rev().find(|seg| {
+            matches!(
+                &seg.content,
+                SegmentContent::ToolCard { id: tool_id, .. } if tool_id == id
+            )
+        })
+    }
+
+    pub fn tool_inspection_height_by_id(&self, id: &str) -> u16 {
+        self.tool_segment_by_id(id)
+            .and_then(|seg| match &seg.content {
+                SegmentContent::ToolCard {
+                    live_partial,
+                    detail_result,
+                    ..
+                } => {
+                    let line_count = live_partial
+                        .as_deref()
+                        .and_then(|partial| {
+                            (!partial.tail.trim().is_empty())
+                                .then_some(partial.tail.lines().count())
+                        })
+                        .or_else(|| {
+                            detail_result
+                                .as_deref()
+                                .map(|result| result.lines().count())
+                        })
+                        .unwrap_or(0);
+                    Some(crate::tui::tool_inspection::tool_inspection_height(
+                        line_count,
+                    ))
+                }
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    pub fn latest_expandable_tool_card(&self) -> Option<usize> {
+        self.segments.iter().rposition(|s| {
+            matches!(
+                &s.content,
+                SegmentContent::ToolCard {
+                    detail_args,
+                    detail_result,
+                    live_partial,
+                    ..
+                } if detail_args.as_ref().is_some_and(|s| !s.trim().is_empty())
+                    || detail_result.as_ref().is_some_and(|s| !s.trim().is_empty())
+                    || live_partial.as_ref().is_some_and(|p| !p.tail.trim().is_empty())
+            )
+        })
+    }
+
+    pub fn latest_expandable_tool_id(&self) -> Option<String> {
+        self.latest_expandable_tool_card()
+            .and_then(|idx| match &self.segments.get(idx)?.content {
+                SegmentContent::ToolCard { id, .. } => Some(id.clone()),
+                _ => None,
+            })
     }
 
     pub fn select_next_visible_tool_card(&mut self, viewport_height: Option<u16>) -> Option<usize> {

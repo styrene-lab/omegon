@@ -10,7 +10,6 @@
 //!   - user_input_tx → agent loop receives prompts
 //!   - AgentEvent broadcast → TUI receives streaming updates
 
-pub mod active_tool_stream;
 pub mod bootstrap;
 pub mod command_surfaces;
 pub mod conv_widget;
@@ -41,6 +40,7 @@ pub mod splash;
 pub mod statusline;
 pub mod tab_bar;
 pub mod theme;
+pub mod tool_inspection;
 pub mod tutorial;
 pub mod widget_renderer;
 pub mod widgets;
@@ -81,7 +81,6 @@ use tokio_util::sync::CancellationToken;
 
 use omegon_traits::AgentEvent;
 
-use self::active_tool_stream::{ActiveToolStream, render_active_tool_stream_panel};
 use self::command_surfaces::{
     CommandPanel, CommandPrompt, CommandPromptAction, CommandSeverity, CommandToast,
 };
@@ -184,6 +183,11 @@ enum UpdateSeverity {
 pub enum TuiCommand {
     /// User submitted a prompt with optional image attachments.
     SubmitPrompt(PromptSubmission),
+    /// Request cancellation of the active runtime turn.
+    CancelActiveTurn {
+        submitted_by: String,
+        via: &'static str,
+    },
     /// Execute a local shell command directly without LLM mediation.
     RunShellCommand {
         command: String,
@@ -299,14 +303,6 @@ struct OperatorEvent {
     expires_at: std::time::Instant,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct QueuedPrompt {
-    text: String,
-    attachments: Vec<std::path::PathBuf>,
-    metadata: PromptMetadata,
-    queue_mode: PromptQueueMode,
-}
-
 fn segment_meta_from_prompt_metadata(metadata: &PromptMetadata) -> SegmentMeta {
     let mut meta = SegmentMeta::default();
     if let Some(voice) = &metadata.voice {
@@ -364,7 +360,21 @@ pub(crate) fn voice_prompt_from_notification(
 }
 
 /// Application state for the TUI.
-pub struct App {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ToolInspectionTarget {
+    LiveLatest(String),
+    Pinned(String),
+}
+
+impl ToolInspectionTarget {
+    fn id(&self) -> &str {
+        match self {
+            Self::LiveLatest(id) | Self::Pinned(id) => id,
+        }
+    }
+}
+
+struct App {
     editor: Editor,
     conversation: ConversationView,
     agent_active: bool,
@@ -435,7 +445,7 @@ pub struct App {
     status_line: statusline::StatusLine,
     /// Structured session plan snapshot for the active Workbench panel.
     workbench_state: WorkbenchState,
-    active_tool_stream: Option<ActiveToolStream>,
+    tool_inspection_target: Option<ToolInspectionTarget>,
     /// Explicit Slim turn state rendered in the status line.
     slim_turn_state: SlimTurnState,
     /// Visual effects manager (tachyonfx).
@@ -456,7 +466,6 @@ pub struct App {
     /// Parsed web dashboard socket address (legacy/debug convenience).
     web_server_addr: Option<std::net::SocketAddr>,
     /// Prompts queued while the agent is busy — drained only after authoritative AgentEnd.
-    queued_prompts: std::collections::VecDeque<QueuedPrompt>,
     /// Local default queue policy for interactive submissions.
     queue_mode: PromptQueueMode,
     /// Inline operator-facing transient events (replaces floating toasts).
@@ -519,6 +528,8 @@ pub struct App {
     /// Whether the Anthropic subscription ToS notice has been shown this session.
     /// Shown once on first interactive session with an OAuth-only credential.
     oauth_tos_notice_shown: bool,
+    /// Authoritative runtime prompt queue snapshot emitted by the coordinator.
+    runtime_queue_snapshot: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1406,47 +1417,56 @@ fn detect_auspex_target() -> Option<AuspexProbe> {
     None
 }
 
+fn runtime_queue_depth(snapshot: Option<&serde_json::Value>) -> usize {
+    snapshot
+        .and_then(|snapshot| snapshot.get("depth"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize
+}
+
+fn render_runtime_queue_info_line(
+    area: Rect,
+    frame: &mut Frame<'_>,
+    theme: &dyn crate::tui::theme::Theme,
+    snapshot: Option<&serde_json::Value>,
+) {
+    if area.height == 0 {
+        return;
+    }
+    let Some(snapshot) = snapshot else {
+        return;
+    };
+    let depth = runtime_queue_depth(Some(snapshot));
+    if depth == 0 {
+        return;
+    }
+    let preview = snapshot
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(|item| item.get("preview"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let line = Line::from(vec![
+        Span::styled(" Runtime queue ", theme.style_dim()),
+        Span::styled(
+            format!("[{depth}]"),
+            Style::default()
+                .fg(theme.accent_bright())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  ", theme.style_dim()),
+        Span::styled(preview.to_string(), theme.style_accent()),
+    ]);
+    let widget = Paragraph::new(line).style(Style::default().bg(theme.surface_bg()));
+    frame.render_widget(widget, area);
+}
+
 fn editor_height_for(editor: &Editor, main_area: Rect) -> u16 {
     let content_width = main_area.width.saturating_sub(2).max(1);
     let editor_rows = editor.visual_line_count(content_width) as u16;
     let max_editor = (main_area.height * 40 / 100).clamp(5, 20);
     (editor_rows + 2).clamp(3, max_editor) // +2 for border
-}
-
-fn render_editor_info_line(
-    area: Rect,
-    frame: &mut Frame<'_>,
-    theme: &dyn crate::tui::theme::Theme,
-    queued_count: usize,
-    queued: Option<&QueuedPrompt>,
-    queue_mode: PromptQueueMode,
-) {
-    if area.height == 0 || queued_count == 0 {
-        return;
-    }
-
-    let mode = match queue_mode {
-        PromptQueueMode::InterruptAfterTurn => "interrupt after turn",
-        PromptQueueMode::UntilReady => "ready",
-        PromptQueueMode::Immediate => "immediate",
-    };
-    let preview = queued
-        .map(|queued| App::queue_prompt_preview(&queued.text, &queued.attachments))
-        .unwrap_or_default();
-    let line = Line::from(vec![
-        Span::styled(" Queued ", theme.style_dim()),
-        Span::styled(
-            format!("[{queued_count}]"),
-            Style::default()
-                .fg(theme.accent_bright())
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(format!("  Queue mode: {mode}"), theme.style_muted()),
-        Span::styled("  ", theme.style_dim()),
-        Span::styled(preview, theme.style_accent()),
-    ]);
-    let widget = Paragraph::new(line).style(Style::default().bg(theme.surface_bg()));
-    frame.render_widget(widget, area);
 }
 
 impl App {
@@ -1611,7 +1631,7 @@ impl App {
             status_line: statusline::StatusLine::default(),
             workbench_state: WorkbenchState::default(),
             completed_plan_history_available: false,
-            active_tool_stream: None,
+            tool_inspection_target: None,
             slim_turn_state: SlimTurnState::Ready,
             effects: effects::Effects::new(),
             bus_commands: Vec::new(),
@@ -1622,7 +1642,6 @@ impl App {
             dashboard_refresh_turn: u32::MAX, // force refresh on first frame
             web_startup: None,
             web_server_addr: None,
-            queued_prompts: std::collections::VecDeque::new(),
             queue_mode: PromptQueueMode::UntilReady,
             operator_events: std::collections::VecDeque::new(),
             previous_harness_status: None,
@@ -1647,6 +1666,7 @@ impl App {
             active_modal: None,
             active_action_prompt: None,
             oauth_tos_notice_shown: false,
+            runtime_queue_snapshot: None,
         }
     }
 
@@ -2845,8 +2865,19 @@ impl App {
         }
     }
 
+    fn submit_prompt_from_slash(
+        tx: &mpsc::Sender<TuiCommand>,
+        prompt: PromptSubmission,
+    ) -> Result<(), SlashResult> {
+        tx.try_send(TuiCommand::SubmitPrompt(prompt)).map_err(|_| {
+            SlashResult::Display(
+                "Runtime command queue is full; prompt was not queued. Try again shortly.".into(),
+            )
+        })
+    }
+
     /// Handle /tutorial — start, resume, or manage the interactive tutorial overlay.
-    fn handle_tutorial(&mut self, args: &str) -> SlashResult {
+    fn handle_tutorial(&mut self, args: &str, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
         match args.trim() {
             "status" => {
                 if let Some(ref overlay) = self.tutorial_overlay {
@@ -2905,7 +2936,19 @@ impl App {
                     let lesson = tut.current_lesson().clone();
                     let status = tut.status_line();
                     self.tutorial = Some(tut);
-                    self.queue_prompt(lesson.content, Vec::new());
+                    if let Err(result) = Self::submit_prompt_from_slash(
+                        tx,
+                        PromptSubmission {
+                            text: lesson.content,
+                            image_paths: Vec::new(),
+                            submitted_by: "local-tui".to_string(),
+                            via: "tui",
+                            queue_mode: PromptQueueMode::UntilReady,
+                            metadata: PromptMetadata::default(),
+                        },
+                    ) {
+                        return result;
+                    }
                     return SlashResult::Display(format!(
                         "{status}\n\nLesson queued. The agent will begin when ready."
                     ));
@@ -2981,7 +3024,7 @@ impl App {
     }
 
     /// Advance to the next tutorial step/lesson.
-    fn handle_tutorial_next(&mut self) -> SlashResult {
+    fn handle_tutorial_next(&mut self, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
         if let Some(ref mut overlay) = self.tutorial_overlay
             && overlay.active
         {
@@ -2996,7 +3039,19 @@ impl App {
             if tut.advance() {
                 let lesson = tut.current_lesson().clone();
                 let status = tut.status_line();
-                self.queue_prompt(lesson.content, Vec::new());
+                if let Err(result) = Self::submit_prompt_from_slash(
+                    tx,
+                    PromptSubmission {
+                        text: lesson.content,
+                        image_paths: Vec::new(),
+                        submitted_by: "local-tui".to_string(),
+                        via: "tui",
+                        queue_mode: PromptQueueMode::UntilReady,
+                        metadata: PromptMetadata::default(),
+                    },
+                ) {
+                    return result;
+                }
                 SlashResult::Display(format!("{status}\n\nLesson queued."))
             } else {
                 SlashResult::Display(
@@ -3010,7 +3065,7 @@ impl App {
     }
 
     /// Go back to the previous tutorial step/lesson.
-    fn handle_tutorial_prev(&mut self) -> SlashResult {
+    fn handle_tutorial_prev(&mut self, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
         if let Some(ref mut overlay) = self.tutorial_overlay
             && overlay.active
         {
@@ -3025,7 +3080,19 @@ impl App {
             if tut.go_back() {
                 let lesson = tut.current_lesson().clone();
                 let status = tut.status_line();
-                self.queue_prompt(lesson.content, Vec::new());
+                if let Err(result) = Self::submit_prompt_from_slash(
+                    tx,
+                    PromptSubmission {
+                        text: lesson.content,
+                        image_paths: Vec::new(),
+                        submitted_by: "local-tui".to_string(),
+                        via: "tui",
+                        queue_mode: PromptQueueMode::UntilReady,
+                        metadata: PromptMetadata::default(),
+                    },
+                ) {
+                    return result;
+                }
                 SlashResult::Display(format!("{status}\n\nLesson queued."))
             } else {
                 SlashResult::Display("Already at the first lesson.".into())
@@ -3261,25 +3328,6 @@ impl App {
         (PromptPrefixMode::Agent, text.to_string())
     }
 
-    fn queue_prompt_preview(text: &str, attachments: &[std::path::PathBuf]) -> String {
-        let preview = text.chars().take(48).collect::<String>();
-        if attachments.is_empty() {
-            preview
-        } else {
-            let names = attachments
-                .iter()
-                .take(3)
-                .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
-                .collect::<Vec<_>>();
-            let suffix = if attachments.len() > names.len() {
-                format!(" +{} more", attachments.len() - names.len())
-            } else {
-                String::new()
-            };
-            format!("{} [{}{}]", preview, names.join(", "), suffix)
-        }
-    }
-
     fn update_severity(current: &str, latest: &str) -> UpdateSeverity {
         let parse_minor = |value: &str| {
             let base = value.split('-').next().unwrap_or(value);
@@ -3301,17 +3349,6 @@ impl App {
         } else {
             UpdateSeverity::Available
         }
-    }
-
-    fn queue_prompt(&mut self, text: String, attachments: Vec<std::path::PathBuf>) {
-        let preview = Self::queue_prompt_preview(&text, &attachments);
-        self.queued_prompts.push_back(QueuedPrompt {
-            text,
-            attachments,
-            metadata: PromptMetadata::default(),
-            queue_mode: self.queue_mode,
-        });
-        tracing::debug!(queued = self.queued_prompts.len(), preview = %preview, "prompt queued");
     }
 
     async fn handle_ui_action(
@@ -3339,11 +3376,14 @@ impl App {
                 UiActionOutcome::accepted()
             }
             UiAction::CancelActiveTurn => {
-                if self.interrupt() {
-                    UiActionOutcome::accepted_message("active turn cancelled")
-                } else {
-                    UiActionOutcome::noop("no active turn to cancel")
-                }
+                self.prepare_interrupt_ui();
+                let _ = command_tx
+                    .send(TuiCommand::CancelActiveTurn {
+                        submitted_by: "local-tui".to_string(),
+                        via: "tui",
+                    })
+                    .await;
+                UiActionOutcome::accepted_message("active turn cancellation requested")
             }
             UiAction::RespondToPermission(action) => self.handle_permission_action(action),
             UiAction::RespondToOperatorWait(action) => self.handle_operator_wait_action(action),
@@ -3608,9 +3648,24 @@ impl App {
 
         if self.agent_active {
             let should_interrupt = matches!(self.queue_mode, PromptQueueMode::InterruptAfterTurn);
-            self.queue_prompt(final_text.clone(), attachments.clone());
+            let _ = command_tx
+                .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                    text: final_text,
+                    image_paths: attachments,
+                    submitted_by: "local-tui".to_string(),
+                    via: "tui",
+                    queue_mode: self.queue_mode,
+                    metadata: PromptMetadata::default(),
+                }))
+                .await;
             if should_interrupt {
-                let _ = self.interrupt();
+                self.prepare_interrupt_ui();
+                let _ = command_tx
+                    .send(TuiCommand::CancelActiveTurn {
+                        submitted_by: "local-tui".to_string(),
+                        via: "tui",
+                    })
+                    .await;
             }
             if let Some(ref mut overlay) = self.tutorial_overlay {
                 overlay.check_any_input();
@@ -3657,7 +3712,16 @@ impl App {
         }
         let decorated = format!("🎙 {text}");
         if self.agent_active {
-            self.queue_prompt(decorated.clone(), Vec::new());
+            let _ = command_tx
+                .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                    text: decorated,
+                    image_paths: Vec::new(),
+                    submitted_by: "voice".to_string(),
+                    via: "voice",
+                    queue_mode: self.queue_mode,
+                    metadata: PromptMetadata::default(),
+                }))
+                .await;
             return;
         }
 
@@ -3676,47 +3740,6 @@ impl App {
                 via: "voice",
                 queue_mode: self.queue_mode,
                 metadata: PromptMetadata::default(),
-            }))
-            .await;
-    }
-
-    async fn dispatch_next_queued_prompt(&mut self, command_tx: &mpsc::Sender<TuiCommand>) {
-        if self.agent_active || self.should_quit {
-            return;
-        }
-        let Some(queued) = self.queued_prompts.pop_front() else {
-            return;
-        };
-        let text = queued.text;
-        let attachments = queued.attachments;
-        let metadata = queued.metadata;
-        let queue_mode = queued.queue_mode;
-        let meta = segment_meta_from_prompt_metadata(&metadata);
-        if attachments.is_empty() {
-            self.conversation.push_user_with_meta(&text, meta);
-        } else {
-            self.conversation
-                .push_user_with_attachments_and_meta(&text, &attachments, meta);
-        }
-        self.history.push(text.clone());
-        self.history_idx = None;
-        self.agent_active = true;
-        if let Ok(mut ss) = self.dashboard_handles.session.lock() {
-            ss.busy = true;
-        }
-        let image_paths = if attachments.is_empty() {
-            Vec::new()
-        } else {
-            attachments
-        };
-        let _ = command_tx
-            .send(TuiCommand::SubmitPrompt(PromptSubmission {
-                text,
-                image_paths,
-                submitted_by: "local-tui".to_string(),
-                via: "tui",
-                queue_mode,
-                metadata,
             }))
             .await;
     }
@@ -3764,17 +3787,10 @@ impl App {
         &text[start..]
     }
 
-    fn interrupt(&mut self) -> bool {
+    fn prepare_interrupt_ui(&mut self) {
         self.editor.clear_line();
         self.interrupt_pending = true;
         self.suppress_editor_input_for(Duration::from_millis(1500));
-        if let Ok(guard) = self.cancel.lock()
-            && let Some(ref token) = *guard
-        {
-            token.cancel();
-            return true;
-        }
-        false
     }
 
     /// Render the bottom footer surface and return the instrument-owned area
@@ -3934,7 +3950,8 @@ impl App {
             || live_cleave.is_some()
             || live_delegate.is_some();
         let editor_height = editor_height_for(&self.editor, area);
-        let editor_info_height = u16::from(!self.queued_prompts.is_empty());
+        let editor_info_height =
+            u16::from(runtime_queue_depth(self.runtime_queue_snapshot.as_ref()) > 0);
         let workbench_state = if !self.focus_mode {
             WorkbenchState {
                 active: active_workbench_snapshot(self.workbench_state.active.as_ref(), None),
@@ -3945,20 +3962,15 @@ impl App {
         } else {
             WorkbenchState::default()
         };
-        let raw_active_tool_stream_height = if self.ui_surfaces.is_compact() && !self.focus_mode {
-            self.active_tool_stream
+        let raw_tool_inspection_height = if self.ui_surfaces.is_compact() && !self.focus_mode {
+            self.tool_inspection_target
                 .as_ref()
-                .map(ActiveToolStream::height)
+                .map(|target| self.conversation.tool_inspection_height_by_id(target.id()))
                 .unwrap_or(0)
         } else {
             0
         };
         let raw_workbench_height = workbench_preferred_height(&workbench_state, area.width);
-        let segment_detail_index = self.conversation.timeline_expanded_segment();
-        let segment_detail_height = segment_detail::preferred_height(
-            segment_detail_index.and_then(|idx| self.conversation.segments().get(idx)),
-            area.height,
-        );
         self.status_line.sync_from_footer(&self.footer_data);
         let status_height = self.status_line.preferred_height_for(area.width);
         let layout_plan = plan_tui_layout(TuiLayoutInputs {
@@ -3971,17 +3983,17 @@ impl App {
             instrument_footer_height: self.instrument_panel.preferred_height(),
             status_height,
             pending_permission: false,
-            active_tool_stream_height: raw_active_tool_stream_height,
+            tool_inspection_height: raw_tool_inspection_height,
             workbench_height: raw_workbench_height,
-            segment_detail_height,
+            segment_detail_height: 0,
         });
 
         let show_dashboard = layout_plan.show_dashboard;
         let main_area = layout_plan.main_area;
         let conversation_area = layout_plan.conversation_area;
-        let active_tool_stream_area = layout_plan.active_tool_stream_area;
+        let tool_inspection_area = layout_plan.tool_inspection_area;
         let workbench_area = layout_plan.workbench_area;
-        let segment_detail_area = layout_plan.segment_detail_area;
+        let _segment_detail_area = layout_plan.segment_detail_area;
         let editor_area = layout_plan.editor_area;
         let editor_info_area = layout_plan.editor_info_area;
         let status_area = layout_plan.status_area;
@@ -3999,6 +4011,14 @@ impl App {
 
         // Render tab bar + conversation/widget content
         let t = &self.theme;
+        if editor_info_area.height > 0 {
+            render_runtime_queue_info_line(
+                editor_info_area,
+                frame,
+                t.as_ref(),
+                self.runtime_queue_snapshot.as_ref(),
+            );
+        }
         let has_multiple_tabs = self.conversation.tabs.tabs.len() > 1;
         let show_tab_bar = has_multiple_tabs
             && !(self.ui_surfaces.is_compact()
@@ -4059,18 +4079,19 @@ impl App {
         self.conversation_area = Some(conversation_area);
         self.editor_area = Some(editor_area);
 
-        if let Some(stream) = self.active_tool_stream.as_ref()
-            && active_tool_stream_area.height > 0
+        if let Some(target) = self.tool_inspection_target.as_ref()
+            && tool_inspection_area.height > 0
+            && let Some(segment) = self.conversation.tool_segment_by_id(target.id())
         {
-            // The active tool stream is a transient projection of the canonical
-            // tool card. It is not inserted into conversation segments or the
-            // focus ring, so Ctrl+O/Tab/Enter inspection still targets the
-            // canonical tool card only.
-            render_active_tool_stream_panel(
-                active_tool_stream_area,
-                frame,
+            segment_detail::render_tool_card(
+                tool_inspection_area,
+                frame.buffer_mut(),
                 self.theme.as_ref(),
-                stream,
+                segment,
+                match target {
+                    ToolInspectionTarget::LiveLatest(_) => segment_detail::ToolDetailMode::Live,
+                    ToolInspectionTarget::Pinned(_) => segment_detail::ToolDetailMode::Detail,
+                },
             );
         }
 
@@ -4081,19 +4102,6 @@ impl App {
             && workbench_area.height > 0
         {
             render_workbench_panel(workbench_area, frame, self.theme.as_ref(), &workbench_state);
-        }
-
-        if segment_detail_area.height > 0
-            && let Some(idx) = segment_detail_index
-            && let Some(segment) = self.conversation.segments().get(idx)
-        {
-            segment_detail::render(
-                segment_detail_area,
-                frame.buffer_mut(),
-                self.theme.as_ref(),
-                idx,
-                segment,
-            );
         }
 
         // ── Sync footer data from settings (every frame) ────
@@ -4334,14 +4342,6 @@ impl App {
                 .block(editor_block)
                 .wrap(ratatui::widgets::Wrap { trim: false });
             frame.render_widget(editor_widget, editor_area);
-            render_editor_info_line(
-                editor_info_area,
-                frame,
-                t.as_ref(),
-                self.queued_prompts.len(),
-                self.queued_prompts.front(),
-                self.queue_mode,
-            );
         } else if let editor::EditorMode::ReverseSearch {
             ref query,
             ref match_idx,
@@ -4363,14 +4363,6 @@ impl App {
                 .block(editor_block)
                 .wrap(ratatui::widgets::Wrap { trim: false });
             frame.render_widget(editor_widget, editor_area);
-            render_editor_info_line(
-                editor_info_area,
-                frame,
-                t.as_ref(),
-                self.queued_prompts.len(),
-                self.queued_prompts.front(),
-                self.queue_mode,
-            );
         } else {
             let hint_text = if self.agent_active {
                 String::new()
@@ -4458,14 +4450,6 @@ impl App {
                 .style(Style::default().bg(t.surface_bg()))
                 .block(editor_block); // no .wrap() — pre-split above
             frame.render_widget(editor_widget, editor_rect);
-            render_editor_info_line(
-                editor_info_area,
-                frame,
-                t.as_ref(),
-                self.queued_prompts.len(),
-                self.queued_prompts.front(),
-                self.queue_mode,
-            );
             if !self.editor_input_suppressed_now() {
                 let (cx, cy) = self.editor.cursor_screen_position(editor_rect);
                 frame.set_cursor_position(ratatui::layout::Position { x: cx, y: cy });
@@ -5249,19 +5233,19 @@ impl App {
         match cmd {
             "help" => {
                 if matches!(args, "tutorial" | "tour") {
-                    return self.handle_tutorial("");
+                    return self.handle_tutorial("", tx);
                 }
                 if args == "tutorial status" {
-                    return self.handle_tutorial("status");
+                    return self.handle_tutorial("status", tx);
                 }
                 if args == "tutorial reset" {
-                    return self.handle_tutorial("reset");
+                    return self.handle_tutorial("reset", tx);
                 }
                 if args == "tutorial consent" {
-                    return self.handle_tutorial("consent");
+                    return self.handle_tutorial("consent", tx);
                 }
                 if args == "tutorial demo" {
-                    return self.handle_tutorial("demo");
+                    return self.handle_tutorial("demo", tx);
                 }
                 if args == "copy" {
                     return SlashResult::Display(
@@ -5290,10 +5274,10 @@ Scroll transcript:
                     );
                 }
                 if args == "next" {
-                    return self.handle_tutorial_next();
+                    return self.handle_tutorial_next(tx);
                 }
                 if args == "prev" {
-                    return self.handle_tutorial_prev();
+                    return self.handle_tutorial_prev(tx);
                 }
 
                 let show_all = args == "all";
@@ -5444,14 +5428,21 @@ Scroll transcript:
                     // with the operator to create a new skill.
                     let cwd = self.cwd().to_path_buf();
                     let builder_prompt = crate::skills::skill_builder_prompt(&cwd);
-                    self.queued_prompts.push_back(QueuedPrompt {
-                        text: builder_prompt,
-                        attachments: Vec::new(),
-                        metadata: PromptMetadata::default(),
-                        queue_mode: PromptQueueMode::UntilReady,
-                    });
+                    if let Err(result) = Self::submit_prompt_from_slash(
+                        tx,
+                        PromptSubmission {
+                            text: builder_prompt,
+                            image_paths: Vec::new(),
+                            submitted_by: "local-tui".to_string(),
+                            via: "tui",
+                            queue_mode: PromptQueueMode::UntilReady,
+                            metadata: PromptMetadata::default(),
+                        },
+                    ) {
+                        return result;
+                    }
                     self.queue_mode = PromptQueueMode::UntilReady;
-                    tracing::debug!("skill builder queued");
+                    tracing::debug!("skill builder submitted to runtime queue");
                     SlashResult::Handled
                 } else if let Some(command) = canonical_slash_command("skills", args) {
                     if let Some(request) =
@@ -5752,14 +5743,21 @@ Scroll transcript:
             "persona" => {
                 if args == "create" || args == "new" {
                     let builder_prompt = crate::plugins::persona_loader::persona_builder_prompt();
-                    self.queued_prompts.push_back(QueuedPrompt {
-                        text: builder_prompt,
-                        attachments: Vec::new(),
-                        metadata: PromptMetadata::default(),
-                        queue_mode: PromptQueueMode::UntilReady,
-                    });
+                    if let Err(result) = Self::submit_prompt_from_slash(
+                        tx,
+                        PromptSubmission {
+                            text: builder_prompt,
+                            image_paths: Vec::new(),
+                            submitted_by: "local-tui".to_string(),
+                            via: "tui",
+                            queue_mode: PromptQueueMode::UntilReady,
+                            metadata: PromptMetadata::default(),
+                        },
+                    ) {
+                        return result;
+                    }
                     self.queue_mode = PromptQueueMode::UntilReady;
-                    tracing::debug!("persona builder queued");
+                    tracing::debug!("persona builder submitted to runtime queue");
                     SlashResult::Handled
                 } else if args == "list" {
                     if let Some(command) = canonical_slash_command("persona", args)
@@ -6416,7 +6414,7 @@ Scroll transcript:
 
             "milestone" => self.handle_milestone(args),
 
-            "demo" => self.handle_tutorial(args),
+            "demo" => self.handle_tutorial(args, tx),
 
             "secrets" => self.handle_secrets(args, tx),
 
@@ -6996,6 +6994,14 @@ Scroll transcript:
             }
             AgentEvent::TurnEnd(te) => {
                 self.turn = te.turn;
+                if self.runtime_queue_snapshot.is_none() {
+                    self.runtime_queue_snapshot = Some(serde_json::json!({
+                        "depth": 0,
+                        "active": null,
+                        "items": [],
+                        "previews": [],
+                    }));
+                }
                 let turn_end_reason = te.turn_end_reason;
                 self.slim_turn_state = SlimTurnState::Finished(match turn_end_reason {
                     omegon_traits::TurnEndReason::AssistantCompleted => "done",
@@ -7174,7 +7180,7 @@ Scroll transcript:
                     | "lifecycle_doctor" => None,
                     _ => Some(serde_json::to_string_pretty(&args).unwrap_or_default()),
                 };
-                self.active_tool_stream = Some(ActiveToolStream::new(id.clone(), name.clone()));
+                self.tool_inspection_target = Some(ToolInspectionTarget::LiveLatest(id.clone()));
                 self.conversation.push_tool_start(
                     &id,
                     &name,
@@ -7374,11 +7380,11 @@ Scroll transcript:
                     .tool_finished(completed_name, is_error);
                 self.completed_tool_name = self.last_tool_name.take().or(Some(name));
                 if self
-                    .active_tool_stream
+                    .tool_inspection_target
                     .as_ref()
-                    .is_some_and(|stream| stream.id == id)
+                    .is_some_and(|target| matches!(target, ToolInspectionTarget::LiveLatest(active_id) if active_id == &id))
                 {
-                    self.active_tool_stream = None;
+                    self.tool_inspection_target = None;
                 }
                 if self.agent_active {
                     self.slim_turn_state = SlimTurnState::RequestingProvider;
@@ -7469,6 +7475,9 @@ Scroll transcript:
                 }
                 self.show_toast(&message, ratatui_toaster::ToastType::Info);
             }
+            AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
+                self.runtime_queue_snapshot = Some(snapshot_json);
+            }
             AgentEvent::SystemNotification { message } => {
                 if let Some(detail) = upstream_retry_hint(&message) {
                     self.slim_turn_state = SlimTurnState::UpstreamRetrying(detail);
@@ -7520,7 +7529,7 @@ Scroll transcript:
                 self.conversation = ConversationView::new();
                 self.workbench_state.active = None;
                 self.completed_plan_history_available = false;
-                self.active_tool_stream = None;
+                self.tool_inspection_target = None;
                 self.turn = 0;
                 self.tool_calls = 0;
                 self.last_tool_name = None;
@@ -7594,11 +7603,6 @@ Scroll transcript:
                 // picks it up via `live_partial` and displays the live
                 // tail / progress / heartbeat in place of the empty
                 // result section while the tool is still in flight.
-                if let Some(stream) = self.active_tool_stream.as_mut()
-                    && stream.id == id
-                {
-                    stream.update(&partial);
-                }
                 self.conversation.push_tool_update(&id, partial);
             }
             _ => {}
@@ -8574,7 +8578,16 @@ pub async fn run_tui(
 
     // Queue initial prompt if provided (--initial-prompt / --initial-prompt-file)
     if let Some(prompt) = config.initial_prompt {
-        app.queue_prompt(prompt, Vec::new());
+        let _ = command_tx
+            .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                text: prompt,
+                image_paths: Vec::new(),
+                submitted_by: "startup".to_string(),
+                via: "tui",
+                queue_mode: app.queue_mode,
+                metadata: PromptMetadata::default(),
+            }))
+            .await;
     }
 
     // Start tutorial overlay if --tutorial flag was passed (e.g. from demo exec)
@@ -8651,11 +8664,6 @@ pub async fn run_tui(
                 }
             }
         }
-
-        // Agent events were drained above; if a turn ended and a prompt is queued,
-        // dispatch it before drawing so the visible queue count ticks down on the
-        // same frame that work starts.
-        app.dispatch_next_queued_prompt(&command_tx).await;
 
         // Draw
         terminal.draw(|f| app.draw(f))?;
@@ -9066,7 +9074,18 @@ pub async fn run_tui(
                                                     ))
                                                     .await;
                                             } else {
-                                                app.queue_prompt(prompt, Vec::new());
+                                                let _ = command_tx
+                                                    .send(TuiCommand::SubmitPrompt(
+                                                        PromptSubmission {
+                                                            text: prompt,
+                                                            image_paths: Vec::new(),
+                                                            submitted_by: "local-tui".to_string(),
+                                                            via: "tui",
+                                                            queue_mode: app.queue_mode,
+                                                            metadata: PromptMetadata::default(),
+                                                        },
+                                                    ))
+                                                    .await;
                                             }
                                         }
                                         if should_open_dash {
@@ -9105,7 +9124,18 @@ pub async fn run_tui(
                                                     ))
                                                     .await;
                                             } else {
-                                                app.queue_prompt(prompt, Vec::new());
+                                                let _ = command_tx
+                                                    .send(TuiCommand::SubmitPrompt(
+                                                        PromptSubmission {
+                                                            text: prompt,
+                                                            image_paths: Vec::new(),
+                                                            submitted_by: "local-tui".to_string(),
+                                                            via: "tui",
+                                                            queue_mode: app.queue_mode,
+                                                            metadata: PromptMetadata::default(),
+                                                        },
+                                                    ))
+                                                    .await;
                                             }
                                         }
                                         // If already sent, Tab does nothing — wait for agent
@@ -9351,10 +9381,16 @@ pub async fn run_tui(
                             app.editor.move_word_forward();
                         }
 
-                        // Ctrl+O: toggle pin/expand on nearest visible tool card
+                        // Ctrl+O: toggle the unified tool inspection target.
                         (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
-                            let viewport_height = app.conversation_area.map(|area| area.height);
-                            app.conversation.toggle_pin_in_viewport(viewport_height);
+                            if matches!(
+                                app.tool_inspection_target,
+                                Some(ToolInspectionTarget::Pinned(_))
+                            ) {
+                                app.tool_inspection_target = None;
+                            } else if let Some(id) = app.conversation.latest_expandable_tool_id() {
+                                app.tool_inspection_target = Some(ToolInspectionTarget::Pinned(id));
+                            }
                         }
 
                         // Ctrl+F: toggle focus mode (copy-first selected segment view)
@@ -9719,6 +9755,7 @@ mod voice_prompt_tests {
 mod slash_command_parsing_tests {
     use super::App;
     use super::CanonicalSlashCommand;
+    use super::PromptQueueMode;
     use super::SlashResult;
     use super::TuiCommand;
     use super::canonical_slash_command;
@@ -10357,6 +10394,62 @@ mod slash_command_parsing_tests {
             canonical_slash_command("skills", "new"),
             Some(CanonicalSlashCommand::SkillCreate)
         ));
+    }
+
+    #[test]
+    fn skills_create_submits_runtime_prompt() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-5");
+        let mut app = App::new(settings);
+        let (tx, mut rx) = mpsc::channel(1);
+
+        let result = app.handle_slash_command("/skills create", &tx);
+        assert!(matches!(result, SlashResult::Handled));
+        match rx.try_recv() {
+            Ok(TuiCommand::SubmitPrompt(prompt)) => {
+                assert_eq!(prompt.submitted_by, "local-tui");
+                assert_eq!(prompt.via, "tui");
+                assert_eq!(prompt.queue_mode, PromptQueueMode::UntilReady);
+                assert!(prompt.image_paths.is_empty());
+                assert!(prompt.text.contains("skill"));
+            }
+            other => panic!("expected skill builder SubmitPrompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn persona_create_submits_runtime_prompt() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-5");
+        let mut app = App::new(settings);
+        let (tx, mut rx) = mpsc::channel(1);
+
+        let result = app.handle_slash_command("/persona create", &tx);
+        assert!(matches!(result, SlashResult::Handled));
+        match rx.try_recv() {
+            Ok(TuiCommand::SubmitPrompt(prompt)) => {
+                assert_eq!(prompt.submitted_by, "local-tui");
+                assert_eq!(prompt.via, "tui");
+                assert_eq!(prompt.queue_mode, PromptQueueMode::UntilReady);
+                assert!(prompt.image_paths.is_empty());
+                assert!(prompt.text.contains("persona"));
+            }
+            other => panic!("expected persona builder SubmitPrompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prompt_slash_submission_reports_full_runtime_queue() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-5");
+        let mut app = App::new(settings);
+        let (tx, _rx) = mpsc::channel(1);
+        tx.try_send(TuiCommand::Quit).expect("seed full channel");
+
+        let result = app.handle_slash_command("/skills create", &tx);
+        match result {
+            SlashResult::Display(message) => {
+                assert!(message.contains("Runtime command queue is full"));
+            }
+            other => panic!("expected full-queue display, got {other:?}"),
+        }
     }
 
     #[test]
