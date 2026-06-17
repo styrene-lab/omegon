@@ -8,7 +8,7 @@
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 use super::super::segments::{apply_rendered_links, apply_rows_bg};
 use super::super::theme::Theme;
@@ -49,7 +49,13 @@ pub(crate) fn detail_cells_from_rendered_row(row: &str) -> Vec<String> {
 }
 
 pub(crate) fn first_detail_row(area_width: u16, prefix_width: u16, row: &str) -> String {
-    let budget = area_width.saturating_sub(prefix_width);
+    // Hard invariant: the full rendered line is label + separator + detail, so
+    // the detail text must be budgeted against that exact prefix plus a small
+    // terminal safety gutter for ambiguous key glyph widths.
+    const RIGHT_GUTTER: u16 = 2;
+    let budget = area_width
+        .saturating_sub(prefix_width)
+        .saturating_sub(RIGHT_GUTTER);
     let cells = detail_cells_from_rendered_row(row);
     let (left_cells, right_cells): (Vec<_>, Vec<_>) = cells
         .into_iter()
@@ -109,6 +115,39 @@ impl<'a> CompactRows<'a> {
     }
 }
 
+fn wrapped_visual_rows(text: &str, width: u16) -> u16 {
+    let width = width.max(1) as usize;
+    let display_width = unicode_width::UnicodeWidthStr::width(text);
+    ((display_width + width.saturating_sub(1)) / width).max(1) as u16
+}
+
+pub(crate) fn measured_height(width: u16, rows: &CompactRows<'_>) -> u16 {
+    if width == 0 || rows.details.is_empty() {
+        return 0;
+    }
+    let child_width = width
+        .saturating_sub(unicode_width::UnicodeWidthStr::width(rows.child_indent) as u16)
+        .max(1);
+    rows.details
+        .iter()
+        .enumerate()
+        .map(|(idx, detail)| {
+            if idx == 0 {
+                let detail = first_detail_row(
+                    width,
+                    prefix_width(rows.identity, rows.name, rows.pinned),
+                    detail,
+                );
+                wrapped_visual_rows(&detail, width)
+            } else {
+                let child_budget = child_width.saturating_sub(2);
+                let detail = crate::util::truncate(detail, child_budget as usize);
+                wrapped_visual_rows(&detail, child_width)
+            }
+        })
+        .sum()
+}
+
 pub(crate) fn render(
     area: Rect,
     buf: &mut Buffer,
@@ -121,10 +160,10 @@ pub(crate) fn render(
         return;
     }
 
-    let visible_rows = rows.details.len().min(area.height as usize);
+    let visible_rows = rows.details.len();
     let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible_rows.max(1));
 
-    for (idx, detail) in rows.details.iter().take(visible_rows).enumerate() {
+    for (idx, detail) in rows.details.iter().enumerate() {
         let row_bg = if idx == 0 { bg } else { child_bg };
         apply_rows_bg(area, idx as u16, 1, row_bg, buf);
         if idx == 0 {
@@ -166,6 +205,7 @@ pub(crate) fn render(
 
     Paragraph::new(lines.clone())
         .style(Style::default().bg(bg))
+        .wrap(Wrap { trim: false })
         .render(area, buf);
     apply_rendered_links(
         area,

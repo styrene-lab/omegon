@@ -81,7 +81,6 @@ core/crates/omegon/src/tui/active_tool_stream.rs
 core/crates/omegon/src/tui/permission_lane.rs
 core/crates/omegon/src/tui/slim_plan.rs
 core/crates/omegon/src/tui/extension_overlays.rs
-core/crates/omegon/src/tui/focus_view.rs
 core/crates/omegon/src/tui/tab_bar.rs
 ```
 

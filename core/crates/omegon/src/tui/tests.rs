@@ -4,9 +4,7 @@
 //! No terminal rendering — uses App::new() with test settings.
 
 use super::*;
-use crate::lifecycle::types::NodeStatus;
 use crate::settings::{ContextClass, Settings, ThinkingLevel};
-use crate::tui::dashboard::FocusedNodeSummary;
 use crate::update::UpdateInfo;
 use crate::web::WebDaemonStatus;
 use ratatui::Terminal;
@@ -1558,7 +1556,6 @@ fn mouse_wheel_over_conversation_never_enters_history_recall() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
     app.editor.set_text("draft");
-    app.pane_focus = PaneFocus::Editor;
 
     app.conversation.push_user("user");
     app.conversation
@@ -1580,355 +1577,12 @@ fn mouse_wheel_over_conversation_never_enters_history_recall() {
 }
 
 #[test]
-fn conversation_focus_blocks_history_recall_on_up_down() {
-    let mut app = test_app();
-    app.history = vec!["first".into(), "second".into(), "third".into()];
-    app.editor.set_text("");
-    app.pane_focus = PaneFocus::Conversation;
-
-    app.conversation.push_user("user");
-    app.conversation
-        .append_streaming("line 1\nline 2\nline 3\nline 4\nline 5\nline 6");
-
-    let before_offset = app.conversation.conv_state.scroll_offset;
-
-    if matches!(app.pane_focus, PaneFocus::Conversation) {
-        app.conversation.scroll_up(3);
-    } else if app.editor.is_empty() || app.history_idx.is_some() {
-        app.history_up();
-    }
-
-    assert!(
-        app.conversation.conv_state.scroll_offset > before_offset,
-        "conversation focus should route Up into conversation scrolling"
-    );
-    assert_eq!(
-        app.history_idx, None,
-        "conversation focus must not enter history recall"
-    );
-    assert_eq!(
-        app.editor.render_text(),
-        "",
-        "conversation focus must not rewrite the composer"
-    );
-
-    let after_up_offset = app.conversation.conv_state.scroll_offset;
-    if matches!(app.pane_focus, PaneFocus::Conversation) {
-        app.conversation.scroll_down(3);
-    } else if app.history_idx.is_some() {
-        app.history_down();
-    }
-
-    assert!(
-        app.conversation.conv_state.scroll_offset < after_up_offset,
-        "conversation focus should route Down back toward the live tail"
-    );
-    assert_eq!(app.history_idx, None);
-    assert_eq!(app.editor.render_text(), "");
-}
-
-#[test]
-fn conversation_focus_blocks_lateral_editor_navigation() {
-    let mut app = test_app();
-    app.editor.set_text("draft");
-    app.editor.move_end();
-    app.pane_focus = PaneFocus::Conversation;
-
-    let before_cursor = app.editor.cursor_position();
-
-    if matches!(app.pane_focus, PaneFocus::Editor) {
-        app.editor.move_left();
-    }
-    assert_eq!(
-        app.editor.cursor_position(),
-        before_cursor,
-        "conversation focus must not move the composer cursor left"
-    );
-
-    if matches!(app.pane_focus, PaneFocus::Editor) {
-        app.editor.move_home();
-    }
-    assert_eq!(
-        app.editor.cursor_position(),
-        before_cursor,
-        "conversation focus must not route Home into the composer"
-    );
-
-    if matches!(app.pane_focus, PaneFocus::Editor) {
-        app.editor.move_right();
-    }
-    assert_eq!(
-        app.editor.cursor_position(),
-        before_cursor,
-        "conversation focus must not move the composer cursor right"
-    );
-
-    if matches!(app.pane_focus, PaneFocus::Editor) {
-        app.editor.move_end();
-    }
-    assert_eq!(
-        app.editor.cursor_position(),
-        before_cursor,
-        "conversation focus must not route End into the composer"
-    );
-
-    assert_eq!(app.editor.render_text(), "draft");
-    assert_eq!(app.history_idx, None);
-}
-
-#[test]
-fn selected_conversation_segment_exports_plain_text() {
-    let mut app = test_app();
-    app.conversation.push_user("operator prompt");
-    app.conversation.append_streaming("assistant answer");
-    app.conversation.finalize_message();
-    app.conversation.select_segment(1);
-
-    let selected = app.conversation.selected_segment_text();
-    assert_eq!(selected.as_deref(), Some("assistant answer"));
-}
-
-#[test]
-fn assistant_plaintext_export_strips_markdown_fences() {
-    let mut app = test_app();
-    app.conversation.push_user("operator prompt");
-    app.conversation.append_streaming(
-        "Run this:\n\n```bash\ncargo test -q\n```\n\nThen edit:\n\n```rust\nfn main() {}\n```",
-    );
-    app.conversation.finalize_message();
-    app.conversation.select_segment(1);
-
-    let selected = app
-        .conversation
-        .selected_segment_text_with_mode(SegmentExportMode::Plaintext);
-    assert_eq!(
-        selected.as_deref(),
-        Some("Run this:\n\ncargo test -q\n\nThen edit:\n\nfn main() {}")
-    );
-}
-
-#[test]
-fn latest_assistant_copy_uses_semantic_text_not_selected_segment() {
-    let mut app = test_app();
-    app.conversation.push_user("operator prompt");
-    app.conversation.append_streaming("first answer");
-    app.conversation.finalize_message();
-    app.conversation.push_user("follow-up");
-    app.conversation.append_streaming("second answer");
-    app.conversation.finalize_message();
-    app.conversation.select_segment(0);
-
-    let latest = app
-        .conversation
-        .latest_assistant_text_with_mode(SegmentExportMode::Raw);
-    assert_eq!(latest.as_deref(), Some("second answer"));
-}
-
-#[test]
-fn transcript_export_deduplicates_pinned_plan_progress() {
-    let mut app = test_app();
-    app.conversation
-        .push_system("Plan progress\nPlan mode: executing\nProgress: 1/2\n\n1. ◐ Do it");
-    app.conversation.push_user("operator prompt");
-    app.conversation.append_streaming("assistant answer");
-    app.conversation.finalize_message();
-
-    let transcript = app.build_session_transcript(SegmentExportMode::Raw);
-    assert!(transcript.contains("## Plan"), "{transcript}");
-    assert!(transcript.contains("## Operator"), "{transcript}");
-    assert!(transcript.contains("## Assistant"), "{transcript}");
-    assert_eq!(transcript.matches("Plan progress").count(), 1);
-}
-
-#[test]
-fn transcript_markdown_export_writes_clickable_artifact() {
-    let mut app = test_app();
-    app.conversation.push_user("operator prompt");
-    app.conversation.append_streaming("assistant answer");
-    app.conversation.finalize_message();
-
-    let tmp = tempfile::tempdir().unwrap();
-    let path = app
-        .write_session_transcript_markdown_to_dir(tmp.path())
-        .expect("transcript should write");
-    assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("md"));
-
-    let content = std::fs::read_to_string(&path).unwrap();
-    assert!(content.contains("# Omegon transcript"), "{content}");
-    assert!(content.contains("## Operator"), "{content}");
-    assert!(content.contains("## Assistant"), "{content}");
-    assert!(content.contains("assistant answer"), "{content}");
-}
-
-#[test]
-fn selected_tool_segment_exports_args_and_result() {
-    let mut app = test_app();
-    app.conversation
-        .push_tool_start("t1", "bash", Some("echo hi"), Some("echo hi"));
-    app.conversation.push_tool_end("t1", false, Some("hi"));
-    app.conversation.select_segment(0);
-
-    let selected = app
-        .conversation
-        .selected_segment_text()
-        .expect("tool text should export");
-    assert!(
-        selected.contains("tool: bash"),
-        "missing tool header: {selected}"
-    );
-    assert!(selected.contains("args:"), "missing args block: {selected}");
-    assert!(
-        selected.contains("echo hi"),
-        "missing args body: {selected}"
-    );
-    assert!(
-        selected.contains("result:"),
-        "missing result block: {selected}"
-    );
-    assert!(selected.contains("hi"), "missing result body: {selected}");
-}
-
-#[test]
-fn selected_tool_segment_copy_excludes_dashboard_content() {
-    let mut app = test_app();
-    app.dashboard.focused_node = Some(FocusedNodeSummary {
-        id: "auth-surface".into(),
-        title: "Dashboard node title that must never be copied".into(),
-        status: NodeStatus::Implementing,
-        open_questions: 2,
-        assumptions: 0,
-        decisions: 3,
-        readiness: 0.6,
-        openspec_change: None,
-    });
-    app.conversation
-        .push_tool_start("t1", "codebase_search", Some("routing"), Some("routing"));
-    app.conversation
-        .push_tool_end("t1", false, Some("core/crates/omegon/src/tui/mod.rs"));
-    app.conversation.select_segment(0);
-
-    let selected = app
-        .conversation
-        .selected_segment_text_with_mode(SegmentExportMode::Raw)
-        .expect("tool text should export");
-    assert!(selected.contains("tool: codebase_search"));
-    assert!(!selected.contains("Dashboard node title that must never be copied"));
-}
-
-#[test]
-fn commands_registry_lists_answer_copy_alias() {
-    let copy = App::COMMANDS
-        .iter()
-        .find(|(name, _, _)| *name == "copy")
-        .expect("/copy must be registered");
-
-    assert!(copy.1.contains("answer"), "{}", copy.1);
-    assert!(copy.2.contains(&"answer"), "{:?}", copy.2);
-}
-
-#[test]
-fn help_copy_documents_text_forward_contract() {
-    let mut app = test_app();
-    let tx = test_tx();
-    let result = app.handle_slash_command("/help copy", &tx);
-    let SlashResult::Display(text) = result else {
-        panic!("expected display");
-    };
-
-    assert!(text.contains("Ctrl+Shift+Y"), "{text}");
-    assert!(text.contains("/copy answer"), "{text}");
-    assert!(text.contains("PgUp/PgDn"), "{text}");
-}
-
-#[test]
-fn help_mouse_documents_passthrough_contract() {
-    let mut app = test_app();
-    let tx = test_tx();
-    let result = app.handle_slash_command("/help mouse", &tx);
-    let SlashResult::Display(text) = result else {
-        panic!("expected display");
-    };
-
-    assert!(text.contains("Mouse passthrough"), "{text}");
-    assert!(text.contains("terminal drag selects"), "{text}");
-    assert!(text.contains("Ctrl+Shift+T"), "{text}");
-}
-
-#[test]
-fn slash_copy_answer_is_registered_as_plaintext_latest_answer_alias() {
-    let mut app = test_app();
-    let tx = test_tx();
-    app.conversation.push_user("operator prompt");
-    app.conversation
-        .append_streaming("Run this:\n\n```bash\ncargo test\n```");
-    app.conversation.finalize_message();
-
-    assert!(matches!(
-        app.handle_slash_command("/copy answer", &tx),
-        SlashResult::Handled
-    ));
-    assert_eq!(
-        app.conversation
-            .latest_assistant_text_with_mode(SegmentExportMode::Plaintext)
-            .as_deref(),
-        Some("Run this:\n\ncargo test")
-    );
-}
-
-#[test]
-fn ctrl_shift_y_is_reserved_for_copy_latest_assistant_answer() {
-    let mut app = test_app();
-    app.conversation.push_user("operator prompt");
-    app.conversation.append_streaming("latest answer");
-    app.conversation.finalize_message();
-
-    assert_eq!(
-        app.conversation
-            .latest_assistant_text_with_mode(SegmentExportMode::Plaintext)
-            .as_deref(),
-        Some("latest answer")
-    );
-}
-
-#[test]
-fn normal_transcript_hint_advertises_scroll_and_answer_copy() {
-    let hint = super::workbench::slim_operator_hint(
-        false,
-        false,
-        false,
-        super::workbench::SlimPlanHintState::None,
-        &super::workbench::SlimPlanContext::from_dashboard(false, &[], None),
-    );
-
-    assert_eq!(hint, "transcript live");
-}
-
-#[test]
-fn terminal_copy_hint_describes_mouse_passthrough_not_copy_mode() {
-    let hint = super::workbench::slim_operator_hint(
-        false,
-        false,
-        true,
-        super::workbench::SlimPlanHintState::None,
-        &super::workbench::SlimPlanContext::from_dashboard(false, &[], None),
-    );
-
-    assert!(hint.contains("mouse passthrough"), "{hint}");
-    assert!(!hint.contains("copy mode"), "{hint}");
-}
-
-#[test]
-fn ctrl_y_keeps_editor_yank_outside_conversation_focus() {
+fn ctrl_y_keeps_editor_yank_available() {
     let mut app = test_app();
     app.editor.set_text("prefix");
     app.editor.clear_line();
-    app.pane_focus = PaneFocus::Editor;
 
-    if matches!(app.pane_focus, PaneFocus::Conversation) {
-        app.copy_selected_conversation_segment();
-    } else {
-        app.editor.yank();
-    }
+    app.editor.yank();
 
     assert_eq!(app.editor.render_text(), "prefix");
 }
@@ -2005,48 +1659,10 @@ fn terminal_copy_mode_disables_mouse_capture() {
     app.set_terminal_copy_mode(true);
     assert!(app.terminal_copy_mode);
     assert!(!app.mouse_capture_enabled);
-    assert!(!app.focus_mode);
 
     app.set_terminal_copy_mode(false);
     assert!(!app.terminal_copy_mode);
     assert!(app.mouse_capture_enabled);
-}
-
-#[test]
-fn focus_mode_disables_mouse_capture_and_restores_it() {
-    let mut app = test_app();
-    app.mouse_capture_enabled = true;
-
-    app.set_focus_mode(true);
-    assert!(app.focus_mode);
-    assert!(!app.mouse_capture_enabled);
-    assert!(!app.terminal_copy_mode);
-
-    app.set_focus_mode(false);
-    assert!(!app.focus_mode);
-    assert!(app.mouse_capture_enabled);
-}
-
-#[test]
-fn leaving_focus_mode_clears_focus_detail_pane() {
-    let mut app = test_app();
-    app.conversation.push_user("operator prompt");
-    app.conversation.append_streaming("assistant answer");
-    app.conversation.finalize_message();
-    app.set_focus_mode(true);
-    let idx = app
-        .conversation
-        .timeline_focused_segment()
-        .expect("focus mode selects a segment");
-
-    app.conversation.toggle_timeline_expanded_segment(idx);
-    assert_eq!(app.conversation.timeline_expanded_segment(), Some(idx));
-
-    app.set_focus_mode(false);
-
-    assert_eq!(app.conversation.timeline_expanded_segment(), None);
-    let rendered = render_app_to_string(&mut app, 120, 24);
-    assert!(!rendered.contains("detail · segment"), "{rendered}");
 }
 
 #[test]
@@ -2062,7 +1678,6 @@ fn mouse_slash_command_toggles_interaction_mode() {
     ));
     assert!(!app.terminal_copy_mode);
     assert!(app.mouse_capture_enabled);
-    assert!(!app.focus_mode);
 
     assert!(matches!(
         app.handle_slash_command("/mouse off", &tx),
@@ -2070,7 +1685,6 @@ fn mouse_slash_command_toggles_interaction_mode() {
     ));
     assert!(app.terminal_copy_mode);
     assert!(!app.mouse_capture_enabled);
-    assert!(!app.focus_mode);
 }
 
 #[test]
@@ -2229,24 +1843,12 @@ fn toggle_pin_prefers_selected_tool_card() {
 }
 
 #[test]
-fn slash_focus_toggles_fullscreen_conversation_mode() {
+fn slash_focus_reports_removed_command() {
     let mut app = test_app();
     let tx = test_tx();
-    app.conversation.push_user("operator prompt");
-    app.conversation.append_streaming("assistant answer");
-    app.conversation.finalize_message();
-    app.conversation.select_segment(1);
 
     let result = app.handle_slash_command("/focus", &tx);
-    assert!(matches!(result, SlashResult::Display(_)));
-    assert!(app.focus_mode);
-    assert!(!app.mouse_capture_enabled);
-    assert_eq!(app.conversation.selected_or_focused_segment(), Some(1));
-
-    let result = app.handle_slash_command("/focus", &tx);
-    assert!(matches!(result, SlashResult::Display(_)));
-    assert!(!app.focus_mode);
-    assert!(app.mouse_capture_enabled);
+    assert!(matches!(result, SlashResult::Display(message) if message.contains("removed")));
 }
 
 #[test]
@@ -2471,93 +2073,12 @@ fn slash_help_lists_ui_and_runtime_mode_commands() {
 }
 
 #[test]
-fn empty_editor_hint_mentions_focus_hotkey() {
+fn empty_editor_hint_mentions_tool_detail_hotkey() {
     let mut app = test_app();
     let rendered = render_app_to_string(&mut app, 100, 20);
-    assert!(rendered.contains("^F focus"), "{rendered}");
+    assert!(rendered.contains("^O/Tab details"), "{rendered}");
     assert!(!rendered.contains("^D tree"), "{rendered}");
     assert!(rendered.contains("/ui surfaces"), "{rendered}");
-}
-
-#[test]
-fn focus_mode_starts_on_last_selectable_segment_and_toggle_tracks_expansion() {
-    let mut app = test_app();
-    app.conversation.push_user("hello");
-    app.conversation.push_system("world");
-
-    assert_eq!(app.conversation.timeline_focused_segment(), Some(1));
-
-    app.set_focus_mode(true);
-    assert_eq!(app.conversation.timeline_focused_segment(), Some(1));
-    assert_eq!(app.conversation.timeline_expanded_segment(), None);
-
-    app.conversation.toggle_timeline_expanded_segment(1);
-    assert_eq!(app.conversation.timeline_expanded_segment(), Some(1));
-
-    app.conversation.toggle_timeline_expanded_segment(1);
-    assert_eq!(app.conversation.timeline_expanded_segment(), None);
-}
-
-#[test]
-fn focus_mode_ignores_stale_selected_segment_and_jumps_to_live_tail() {
-    let mut app = test_app();
-    app.conversation.push_user("older operator prompt");
-    app.conversation.append_streaming("older assistant answer");
-    app.conversation.finalize_message();
-    app.conversation.select_segment(0);
-
-    app.conversation.push_user("latest operator prompt");
-    app.conversation.append_streaming("latest assistant answer");
-    app.conversation.finalize_message();
-
-    app.set_focus_mode(true);
-
-    let selected = app.conversation.selected_or_focused_segment();
-    let text = app
-        .conversation
-        .selected_segment_text_with_mode(SegmentExportMode::Plaintext)
-        .unwrap_or_default();
-
-    assert_eq!(selected, app.conversation.last_selectable_segment());
-    assert!(
-        text.contains("latest assistant answer"),
-        "focus mode should land on the latest tail segment, got: {text:?}"
-    );
-}
-
-#[test]
-fn focus_mode_esc_exits_focus_before_interrupting_agent() {
-    let mut app = test_app();
-    app.conversation.push_system("segment");
-    app.set_focus_mode(true);
-
-    app.set_focus_mode(false);
-    assert!(!app.focus_mode);
-}
-
-#[test]
-fn focus_mode_render_shows_plaintext_fullscreen_conversation() {
-    let mut app = test_app();
-    app.conversation.push_user("operator prompt");
-    app.conversation.append_streaming("assistant answer");
-    app.conversation.finalize_message();
-    app.conversation.select_segment(1);
-    app.set_focus_mode(true);
-
-    let rendered = render_app_to_string(&mut app, 80, 20);
-    assert!(rendered.contains("assistant answer"), "{rendered}");
-    assert!(rendered.contains("PgUp/PgDn jump"), "{rendered}");
-    assert!(!rendered.contains("focus — segment"), "{rendered}");
-    // New card format uses ╰── tail and ▌/▎side borders (no ╭ top border)
-    assert!(
-        !rendered.contains("╭"),
-        "should not have top-border box drawing: {rendered}"
-    );
-    assert!(rendered.contains("╰"), "should have card tail: {rendered}");
-    assert!(
-        rendered.contains("▌") || rendered.contains("▎"),
-        "should have side borders: {rendered}"
-    );
 }
 
 #[test]

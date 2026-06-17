@@ -11,11 +11,11 @@ use crate::surfaces::inline::{
 use super::theme::Theme;
 
 const ELLIPSIS: &str = "…";
-pub const DETAILS_HINT_LABEL: &str = "⌃O details";
+pub const DETAILS_HINT_LABEL: &str = "^O details";
 
 pub fn key_chord_label(chord: KeyChord) -> String {
     match chord {
-        KeyChord::Ctrl(ch) => format!("⌃{}", ch.to_ascii_uppercase()),
+        KeyChord::Ctrl(ch) => format!("^{}", ch.to_ascii_uppercase()),
         KeyChord::Enter => "↵".to_string(),
         KeyChord::Esc => "Esc".to_string(),
         KeyChord::Tab => "Tab".to_string(),
@@ -54,12 +54,7 @@ pub fn render_inline_text_row(row: &InlineRow<String>, width: u16) -> String {
     match (left.is_empty(), right.is_empty()) {
         (true, true) => String::new(),
         (false, true) => truncate_display(&left, width),
-        (true, false) => match row.overflow {
-            InlineOverflowPolicy::PreserveRight => {
-                right_align(&truncate_display(&right, width), width)
-            }
-            InlineOverflowPolicy::DropRightWhenCrowded => truncate_display(&right, width),
-        },
+        (true, false) => truncate_display(&right, width),
         (false, false) => render_split_text(&left, &right, width, row.overflow),
     }
 }
@@ -83,11 +78,16 @@ fn render_split_text(
     let right_width = UnicodeWidthStr::width(right);
     match overflow {
         InlineOverflowPolicy::PreserveRight if right_width < width => {
-            let left_budget = width.saturating_sub(right_width).saturating_sub(1);
+            let separator = " · ";
+            let separator_width = UnicodeWidthStr::width(separator);
+            let left_budget = width.saturating_sub(right_width + separator_width);
             let left = truncate_display(left, left_budget);
-            let used = UnicodeWidthStr::width(left.as_str()) + right_width;
-            let gap = width.saturating_sub(used).max(1);
-            format!("{left}{}{right}", " ".repeat(gap))
+            if left.is_empty() {
+                truncate_display(right, width)
+            } else {
+                let joined = format!("{left}{separator}{right}");
+                truncate_display(&joined, width)
+            }
         }
         InlineOverflowPolicy::PreserveRight => truncate_display(right, width),
         InlineOverflowPolicy::DropRightWhenCrowded
@@ -109,15 +109,6 @@ fn join_cells(cells: &[InlineCell<String>]) -> String {
         .map(|cell| cell.text.as_str())
         .collect::<Vec<_>>()
         .join(" · ")
-}
-
-fn right_align(text: &str, width: usize) -> String {
-    let text_width = UnicodeWidthStr::width(text);
-    if text_width >= width {
-        text.to_string()
-    } else {
-        format!("{}{text}", " ".repeat(width - text_width))
-    }
 }
 
 fn truncate_display(text: &str, budget: usize) -> String {
@@ -152,26 +143,26 @@ mod tests {
     use crate::surfaces::inline::{InlineCellRole, InlinePriority};
 
     #[test]
-    fn ctrl_key_uses_compact_glyph() {
-        assert_eq!(key_chord_label(KeyChord::Ctrl('o')), "⌃O");
+    fn ctrl_key_uses_ascii_caret() {
+        assert_eq!(key_chord_label(KeyChord::Ctrl('o')), "^O");
         assert_eq!(
             action_hint_label(ActionHint::new(
                 InlineAffordance::Details,
                 KeyChord::Ctrl('O')
             )),
-            "⌃O details"
+            "^O details"
         );
     }
 
     #[test]
-    fn text_row_right_aligns_affordance() {
+    fn text_row_keeps_affordance_inline() {
         let row = InlineRow::new(
             vec![InlineCell::new("bash".to_string(), InlineCellRole::Value)],
             vec![details_hint_cell()],
         );
         let rendered = render_inline_text_row(&row, 32);
-        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 32);
-        assert!(rendered.ends_with("⌃O details"), "{rendered:?}");
+        assert_eq!(rendered, "bash · ^O details");
+        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 17);
     }
 
     #[test]
@@ -186,6 +177,6 @@ mod tests {
         let rendered = render_inline_text_row(&row, 28);
         assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 28);
         assert!(rendered.contains('…'), "{rendered:?}");
-        assert!(rendered.ends_with("⌃O details"), "{rendered:?}");
+        assert!(rendered.ends_with(" · ^O details"), "{rendered:?}");
     }
 }

@@ -11,7 +11,7 @@ use super::super::conversation_render_projection::SegmentRenderContext;
 use super::super::segments::{
     SegmentMeta, SegmentRenderMode, TableState, apply_rendered_links, build_meta_tag,
     clean_inline_text, compute_table_widths, is_table_separator, render_table_line,
-    split_trimmed_trailing_empty_lines, subtle_tool_row_bg, top_right_timestamp,
+    split_trimmed_trailing_empty_lines, top_right_timestamp,
 };
 use super::compact_row;
 
@@ -143,12 +143,40 @@ fn push_meta_line<'a>(
     )));
 }
 
+pub fn slim_reasoning_detail_rows(
+    thinking: &str,
+    complete: bool,
+    max_completed_lines: usize,
+) -> Vec<String> {
+    let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(thinking);
+    let show = if complete {
+        think_lines.len().min(max_completed_lines)
+    } else {
+        think_lines.len()
+    };
+    let mut detail_rows = Vec::with_capacity(show.saturating_add(1));
+    detail_rows.push(format!(
+        "{} line{}",
+        think_lines.len(),
+        if think_lines.len() == 1 { "" } else { "s" }
+    ));
+    detail_rows.extend(
+        think_lines
+            .iter()
+            .take(show)
+            .map(|line| clean_inline_text(line.trim())),
+    );
+    if complete && think_lines.len() > show {
+        detail_rows.push(format!("⋯ {} more", think_lines.len() - show));
+    }
+    detail_rows
+}
+
 fn push_reasoning_lines<'a>(
     lines: &mut Vec<Line<'a>>,
     props: &AssistantRenderProps<'_>,
     reasoning: AssistantReasoning,
     inner: Rect,
-    buf: &mut Buffer,
     theme: &dyn crate::tui::theme::Theme,
     bg: Color,
 ) {
@@ -157,41 +185,36 @@ fn push_reasoning_lines<'a>(
         AssistantReasoning::SlimExpanded {
             max_completed_lines,
         } => {
-            let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(props.thinking);
-            let show = if props.complete {
-                think_lines.len().min(max_completed_lines)
-            } else {
-                think_lines.len()
-            };
-            let mut detail_rows = Vec::with_capacity(show.saturating_add(1));
-            detail_rows.push(format!(
-                "{} line{}",
-                think_lines.len(),
-                if think_lines.len() == 1 { "" } else { "s" }
-            ));
-            detail_rows.extend(
-                think_lines
-                    .iter()
-                    .take(show)
-                    .map(|line| clean_inline_text(line.trim())),
-            );
-            if props.complete && think_lines.len() > show {
-                detail_rows.push(format!("⋯ {} more", think_lines.len() - show));
+            let detail_rows =
+                slim_reasoning_detail_rows(props.thinking, props.complete, max_completed_lines);
+            let prefix = compact_row::prefix_width("", "reasoning", false);
+            for (idx, detail) in detail_rows.iter().enumerate() {
+                if idx == 0 {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            compact_row::label("", "reasoning"),
+                            Style::default()
+                                .fg(theme.border())
+                                .bg(bg)
+                                .add_modifier(Modifier::ITALIC),
+                        ),
+                        Span::styled(" · ", Style::default().fg(theme.dim()).bg(bg)),
+                        Span::styled(
+                            compact_row::first_detail_row(inner.width, prefix, detail),
+                            Style::default().fg(theme.muted()).bg(bg),
+                        ),
+                    ]));
+                } else {
+                    let budget = inner.width.saturating_sub(2).saturating_sub(2) as usize;
+                    lines.push(Line::from(vec![
+                        Span::styled("  ", Style::default().fg(theme.dim()).bg(bg)),
+                        Span::styled(
+                            crate::util::truncate(detail, budget),
+                            Style::default().fg(theme.dim()).bg(bg),
+                        ),
+                    ]));
+                }
             }
-            compact_row::render(
-                Rect {
-                    x: inner.x,
-                    y: inner.y + lines.len() as u16,
-                    width: inner.width,
-                    height: inner.height.saturating_sub(lines.len() as u16),
-                },
-                buf,
-                theme,
-                bg,
-                subtle_tool_row_bg(bg),
-                compact_row::CompactRows::metadata("reasoning", theme.border(), &detail_rows),
-            );
-            lines.extend((0..detail_rows.len()).map(|_| Line::default()));
         }
         AssistantReasoning::Expanded {
             max_completed_lines,
@@ -338,21 +361,13 @@ pub fn render(
     if render_plan.chrome.meta_line {
         push_meta_line(&mut lines, &props, theme, bg);
     }
-    push_reasoning_lines(
-        &mut lines,
-        &props,
-        render_plan.reasoning,
-        inner,
-        buf,
-        theme,
-        bg,
-    );
+    push_reasoning_lines(&mut lines, &props, render_plan.reasoning, inner, theme, bg);
     if render_plan.chrome.answer_label {
         push_answer_label(&mut lines, theme, bg);
     }
     match render_plan.body {
         AssistantBody::MarkdownTranscript => {
-            push_answer_body_lines(&mut lines, props.text, area.width as usize, theme, bg);
+            push_answer_body_lines(&mut lines, props.text, inner.width as usize, theme, bg);
         }
     }
 
@@ -491,6 +506,44 @@ mod tests {
 
         let plan = super::plan(&props);
         assert_eq!(plan.reasoning, AssistantReasoning::Hidden);
+    }
+
+    #[test]
+    fn slim_reasoning_rows_do_not_exceed_inner_width() {
+        let meta = SegmentMeta::default();
+        let presentation = SegmentPresentation {
+            role: SegmentRole::Assistant,
+            sigil: "Ω",
+            emphasis: SegmentEmphasis::Normal,
+            tool_category: None,
+        };
+        let area = Rect::new(0, 0, 72, 8);
+        let mut buf = Buffer::empty(area);
+        render(
+            AssistantRenderProps {
+                text: "",
+                thinking: "Evaluating prefix widths
+I need to take a closer look at the actual prefix widths and current assumptions about prefix lengths, especially for bash.",
+                complete: false,
+                meta: &meta,
+                presentation: &presentation,
+                mode: SegmentRenderMode::Slim,
+            },
+            area,
+            &mut buf,
+            &SegmentRenderContext::new(&Alpharius, crate::tui::segments::SegmentRenderMode::Slim),
+        );
+
+        for y in 0..area.height {
+            let mut line = String::new();
+            for x in 0..area.width {
+                line.push_str(buf[(x, y)].symbol());
+            }
+            assert!(
+                unicode_width::UnicodeWidthStr::width(line.trim_end()) <= area.width as usize,
+                "row {y} overflowed: {line:?}"
+            );
+        }
     }
 
     #[test]

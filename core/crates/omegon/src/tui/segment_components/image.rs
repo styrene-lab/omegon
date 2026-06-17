@@ -5,7 +5,7 @@ use std::path::Path;
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::text::Span;
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget, Wrap};
 
 use super::super::conversation_render_projection::SegmentRenderContext;
 use super::super::segments::{apply_rows_bg, file_url_for_path};
@@ -26,14 +26,19 @@ pub fn render(
         return;
     }
 
-    // Title: full disk path (or alt text if the caller supplied one).
-    // The previous behavior used only the filename which left
-    // operators guessing about the parent directory.
+    // Keep the title short and stable. The full path is rendered in the body;
+    // putting it in the border title makes Ratatui clip the header hard on
+    // narrow terminals and obscures the image chrome.
     let path_str = props.path.display().to_string();
+    let file_name = props
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path_str.as_str());
     let label = if props.alt.is_empty() || props.alt == "clipboard paste" {
-        format!(" ▦ {path_str} ")
+        format!(" ▦ {file_name} ")
     } else {
-        format!(" ▦ {} — {path_str} ", props.alt)
+        format!(" ▦ {} ", props.alt)
     };
 
     let block = Block::default()
@@ -62,31 +67,27 @@ pub fn render(
             .bg(theme.bg())
             .add_modifier(Modifier::UNDERLINED),
     ));
-    if let Some(url) = file_url_for_path(&path_str) {
+    if area.height > 1 {
         let caption_area = Rect {
             x: area.x.saturating_add(1),
             y: area.bottom().saturating_sub(1),
             width: area.width.saturating_sub(2),
             height: 1,
         };
-        hyperrat::Link::new(path_str, url)
-            .style(
-                Style::default()
-                    .fg(theme.accent_muted())
-                    .bg(theme.bg())
-                    .add_modifier(Modifier::UNDERLINED),
-            )
-            .render(caption_area, buf);
-    } else if area.height > 1 {
-        Paragraph::new(line).render(
-            Rect {
-                x: area.x.saturating_add(1),
-                y: area.bottom().saturating_sub(1),
-                width: area.width.saturating_sub(2),
-                height: 1,
-            },
-            buf,
-        );
+        if let Some(url) = file_url_for_path(&path_str) {
+            hyperrat::Link::new(path_str, url)
+                .style(
+                    Style::default()
+                        .fg(theme.accent_muted())
+                        .bg(theme.bg())
+                        .add_modifier(Modifier::UNDERLINED),
+                )
+                .render(caption_area, buf);
+        } else {
+            Paragraph::new(line)
+                .wrap(Wrap { trim: false })
+                .render(caption_area, buf);
+        }
     }
 }
 
