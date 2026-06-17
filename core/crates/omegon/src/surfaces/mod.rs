@@ -9,3 +9,4 @@ pub mod instruments;
 pub mod layout;
 pub mod memory_status;
 pub mod operations;
+pub mod settings;

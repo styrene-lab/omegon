@@ -45,22 +45,7 @@ impl HarnessSettings {
 
     fn settings_overview(&self) -> String {
         let s = self.settings.lock().unwrap();
-        format!(
-            "## Current Harness Settings\n\n\
-             - **Model**: {}\n\
-             - **Thinking**: {} {}\n\
-             - **Context class**: {}\n\
-             - **Context window**: {} tokens\n\
-             - **Max turns**: {}\n\
-             - **Tool display**: {}",
-            s.model,
-            s.thinking.icon(),
-            s.thinking.as_str(),
-            s.context_class.short(),
-            s.context_window,
-            s.max_turns,
-            s.tool_detail.as_str(),
-        )
+        crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&s).render_markdown()
     }
 
     fn session_stats_overview(&self) -> String {
