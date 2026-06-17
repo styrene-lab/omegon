@@ -3700,6 +3700,67 @@ impl App {
         footer_cols[0].union(footer_cols[2])
     }
 
+    fn render_settings_screen(&self, area: Rect, frame: &mut Frame) {
+        let settings = self.settings();
+        let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        let Some(screen) = self.settings_screen.as_ref() else {
+            return;
+        };
+        let rows = screen.active_rows(&projection);
+        let mut lines = vec![
+            ratatui::text::Line::from(ratatui::text::Span::styled(
+                "Settings",
+                ratatui::style::Style::default()
+                    .fg(self.theme.accent())
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )),
+            ratatui::text::Line::from(""),
+        ];
+        for (idx, row) in rows.iter().enumerate() {
+            let marker = if idx == screen.selected_row { "›" } else { " " };
+            lines.push(ratatui::text::Line::from(vec![
+                ratatui::text::Span::raw(format!("{marker} ")),
+                ratatui::text::Span::styled(
+                    format!("{:<18}", row.label),
+                    ratatui::style::Style::default().fg(self.theme.fg()),
+                ),
+                ratatui::text::Span::styled(
+                    row.value.clone(),
+                    ratatui::style::Style::default().fg(self.theme.accent_bright()),
+                ),
+            ]));
+            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                format!("    {}", row.description),
+                ratatui::style::Style::default().fg(self.theme.muted()),
+            )));
+        }
+        lines.push(ratatui::text::Line::from(""));
+        lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+            "↑/↓ navigate · Enter edit (coming next) · Esc close",
+            ratatui::style::Style::default().fg(self.theme.dim()),
+        )));
+
+        let width = area.width.min(88);
+        let height = area.height.saturating_sub(4).min((lines.len() as u16).saturating_add(2));
+        let popup = ratatui::layout::Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height.max(8)) / 2,
+            width,
+            height: height.max(8),
+        };
+        let block = ratatui::widgets::Block::default()
+            .borders(ratatui::widgets::Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_style(self.theme.style_border())
+            .title(" settings ");
+        let paragraph = ratatui::widgets::Paragraph::new(lines)
+            .block(block)
+            .wrap(ratatui::widgets::Wrap { trim: true });
+
+        frame.render_widget(ratatui::widgets::Clear, popup);
+        frame.render_widget(paragraph, popup);
+    }
+
     fn draw(&mut self, frame: &mut Frame) {
         self.refresh_at_picker();
         let area = frame.area();
@@ -4340,6 +4401,10 @@ impl App {
 
         if let Some(ref picker) = self.at_picker {
             picker.render(area, frame, t.as_ref());
+        }
+
+        if self.settings_screen.is_some() {
+            self.render_settings_screen(area, frame);
         }
 
         // Selector popup (overlays everything when active)
@@ -8629,6 +8694,38 @@ pub async fn run_tui(
                     }
 
                     if app.should_discard_key_after_interrupt(&key) {
+                        continue;
+                    }
+
+                    // ── Settings screen intercepts navigation when open ────
+                    if app.settings_screen.is_some() {
+                        match key.code {
+                            KeyCode::Up => {
+                                if let Some(screen) = app.settings_screen.as_mut() {
+                                    screen.selected_row = screen.selected_row.saturating_sub(1);
+                                }
+                            }
+                            KeyCode::Down => {
+                                let settings = app.settings();
+                                let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+                                if let Some(screen) = app.settings_screen.as_mut() {
+                                    let len = screen.active_rows(&projection).len();
+                                    if len > 0 {
+                                        screen.selected_row = (screen.selected_row + 1).min(len - 1);
+                                    }
+                                }
+                            }
+                            KeyCode::Enter => {
+                                app.show_command_toast(CommandToast::new(
+                                    "Settings row editing is not wired yet",
+                                    CommandSeverity::Info,
+                                ));
+                            }
+                            KeyCode::Esc => {
+                                app.settings_screen = None;
+                            }
+                            _ => {}
+                        }
                         continue;
                     }
 
