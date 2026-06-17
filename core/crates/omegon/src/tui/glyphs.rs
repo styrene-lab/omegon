@@ -27,6 +27,7 @@ pub enum ToolCategoryGlyphRole {
     Design,
     Memory,
     Network,
+    Subagent,
     Generic,
 }
 
@@ -62,6 +63,7 @@ pub struct ToolCategoryGlyphMatrix {
     pub design: &'static str,
     pub memory: &'static str,
     pub network: &'static str,
+    pub subagent: &'static str,
     pub generic: &'static str,
 }
 
@@ -105,6 +107,7 @@ pub const UNICODE_GLYPHS: GlyphSet = GlyphSet {
         design: "◇",
         memory: "◈",
         network: "⇄",
+        subagent: "⬡",
         generic: "•",
     },
 };
@@ -145,6 +148,7 @@ impl GlyphSet {
             ToolCategoryGlyphRole::Design => self.tool_category.design,
             ToolCategoryGlyphRole::Memory => self.tool_category.memory,
             ToolCategoryGlyphRole::Network => self.tool_category.network,
+            ToolCategoryGlyphRole::Subagent => self.tool_category.subagent,
             ToolCategoryGlyphRole::Generic => self.tool_category.generic,
         }
     }
@@ -169,6 +173,11 @@ pub fn tool_category_role_for_name(name: &str) -> ToolCategoryGlyphRole {
         }
         "memory_store" | "memory_recall" | "memory_query" | "store_memory_fact" => {
             ToolCategoryGlyphRole::Memory
+        }
+        "delegate" | "delegate_result" | "delegate_status" | "delegate_cancel"
+        | "cleave_assess" | "cleave_run" => ToolCategoryGlyphRole::Subagent,
+        name if name.contains("delegate") || name.contains("cleave") => {
+            ToolCategoryGlyphRole::Subagent
         }
         name if name.contains("search") => ToolCategoryGlyphRole::Search,
         name if name.contains("memory") => ToolCategoryGlyphRole::Memory,

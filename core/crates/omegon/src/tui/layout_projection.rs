@@ -19,7 +19,7 @@ pub struct TuiLayoutInputs {
     pub instrument_footer_height: u16,
     pub status_height: u16,
     pub pending_permission: bool,
-    pub active_tool_stream_height: u16,
+    pub tool_inspection_height: u16,
     pub workbench_height: u16,
     pub segment_detail_height: u16,
 }
@@ -31,7 +31,7 @@ pub struct TuiLayoutPlan {
     pub main_area: Rect,
     pub dashboard_area: Option<Rect>,
     pub conversation_area: Rect,
-    pub active_tool_stream_area: Rect,
+    pub tool_inspection_area: Rect,
     pub permission_lane_area: Rect,
     pub workbench_area: Rect,
     pub segment_detail_area: Rect,
@@ -40,7 +40,7 @@ pub struct TuiLayoutPlan {
     pub status_area: Rect,
     pub footer_area: Rect,
     pub footer_height: u16,
-    pub active_tool_stream_height: u16,
+    pub tool_inspection_height: u16,
     pub permission_lane_height: u16,
     pub workbench_height: u16,
     pub segment_detail_height: u16,
@@ -74,8 +74,8 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     } else {
         0
     };
-    let mut active_tool_stream_height = if is_slim {
-        inputs.active_tool_stream_height
+    let mut tool_inspection_height = if is_slim {
+        inputs.tool_inspection_height
     } else {
         0
     };
@@ -87,7 +87,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     let mut segment_detail_height = inputs.segment_detail_height;
 
     if permission_lane_height > 0 {
-        active_tool_stream_height = active_tool_stream_height.min(6);
+        tool_inspection_height = tool_inspection_height.min(6);
         workbench_height = workbench_height.min(4);
     }
 
@@ -105,17 +105,17 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     if segment_detail_height > bottom_budget {
         segment_detail_height = bottom_budget;
     }
-    if active_tool_stream_height.saturating_add(workbench_height) > bottom_budget {
+    if tool_inspection_height.saturating_add(workbench_height) > bottom_budget {
         workbench_height = workbench_height.min(bottom_budget);
         let stream_budget = bottom_budget.saturating_sub(workbench_height);
-        active_tool_stream_height = active_tool_stream_height.min(stream_budget);
+        tool_inspection_height = tool_inspection_height.min(stream_budget);
     }
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(3),
-            Constraint::Length(active_tool_stream_height),
+            Constraint::Length(tool_inspection_height),
             Constraint::Length(permission_lane_height),
             Constraint::Length(segment_detail_height),
             Constraint::Length(inputs.editor_height),
@@ -133,7 +133,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         main_area,
         dashboard_area,
         conversation_area: chunks[0],
-        active_tool_stream_area: chunks[1],
+        tool_inspection_area: chunks[1],
         permission_lane_area: chunks[2],
         segment_detail_area: chunks[3],
         editor_area: chunks[4],
@@ -142,7 +142,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         status_area: chunks[7],
         footer_area: chunks[9],
         footer_height,
-        active_tool_stream_height,
+        tool_inspection_height,
         permission_lane_height,
         workbench_height,
         segment_detail_height,
@@ -165,7 +165,7 @@ mod tests {
             instrument_footer_height: 4,
             status_height: 2,
             pending_permission: false,
-            active_tool_stream_height: 0,
+            tool_inspection_height: 0,
             workbench_height: 0,
             segment_detail_height: 0,
         });
@@ -187,7 +187,7 @@ mod tests {
             instrument_footer_height: 4,
             status_height: 2,
             pending_permission: false,
-            active_tool_stream_height: 0,
+            tool_inspection_height: 0,
             workbench_height: 0,
             segment_detail_height: 0,
         });
@@ -214,7 +214,7 @@ mod tests {
             instrument_footer_height: 3,
             status_height: 2,
             pending_permission: false,
-            active_tool_stream_height: 6,
+            tool_inspection_height: 6,
             workbench_height: 4,
             segment_detail_height: 3,
         });
@@ -243,13 +243,13 @@ mod tests {
             instrument_footer_height: 4,
             status_height: 2,
             pending_permission: true,
-            active_tool_stream_height: 20,
+            tool_inspection_height: 20,
             workbench_height: 20,
             segment_detail_height: 0,
         });
         assert!(plan.is_slim);
         assert_eq!(plan.permission_lane_height, 2);
-        assert!(plan.active_tool_stream_height <= 6);
+        assert!(plan.tool_inspection_height <= 6);
         assert!(plan.workbench_height <= 4);
     }
 
@@ -265,7 +265,7 @@ mod tests {
             instrument_footer_height: 4,
             status_height: 2,
             pending_permission: false,
-            active_tool_stream_height: 0,
+            tool_inspection_height: 0,
             workbench_height: 0,
             segment_detail_height: 8,
         });
@@ -286,13 +286,13 @@ mod tests {
             instrument_footer_height: 4,
             status_height: 2,
             pending_permission: false,
-            active_tool_stream_height: 5,
+            tool_inspection_height: 5,
             workbench_height: 5,
             segment_detail_height: 4,
         });
 
         assert_eq!(plan.workbench_height, 5);
-        assert!(plan.active_tool_stream_area.y < plan.segment_detail_area.y);
+        assert!(plan.tool_inspection_area.y < plan.segment_detail_area.y);
         assert!(plan.segment_detail_area.y < plan.editor_area.y);
         assert!(plan.editor_area.y < plan.editor_info_area.y);
         assert!(plan.editor_info_area.y < plan.workbench_area.y);
@@ -311,7 +311,7 @@ mod tests {
             instrument_footer_height: 4,
             status_height: 2,
             pending_permission: false,
-            active_tool_stream_height: 12,
+            tool_inspection_height: 12,
             workbench_height: 5,
             segment_detail_height: 4,
         });

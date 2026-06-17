@@ -240,6 +240,11 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
         AgentEvent::TurnCancelled { reason } => Some(IpcEventPayload::SystemNotification {
             message: format!("turn cancelled: {reason}"),
         }),
+        AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
+            Some(IpcEventPayload::RuntimeQueueUpdated {
+                snapshot: snapshot_json.clone(),
+            })
+        }
         AgentEvent::FamilyVitalSignsUpdated { signs } => {
             Some(IpcEventPayload::FamilyVitalSignsUpdated {
                 signs: signs.clone(),
@@ -293,6 +298,7 @@ fn event_name(ev: &IpcEventPayload) -> &'static str {
         IpcEventPayload::FamilyVitalSignsUpdated { .. } => "family.vital_signs",
         IpcEventPayload::PlanUpdated { .. } => "plan.updated",
         IpcEventPayload::ProviderRouteChanged { .. } => "provider.route_changed",
+        IpcEventPayload::RuntimeQueueUpdated { .. } => "runtime.queue_updated",
         IpcEventPayload::HarnessChanged => "harness.changed",
         IpcEventPayload::StateChanged { .. } => "state.changed",
         IpcEventPayload::SystemNotification { .. } => "system.notification",

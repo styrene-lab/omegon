@@ -544,6 +544,7 @@ pub enum ToolCategory {
     DesignTree,
     Memory,
     Search,
+    Subagent,
     Generic,
 }
 
@@ -557,6 +558,7 @@ impl ToolCategory {
             Self::DesignTree => "design",
             Self::Memory => "memory",
             Self::Search => "search",
+            Self::Subagent => "subagent",
             Self::Generic => "tool",
         }
     }
@@ -570,8 +572,14 @@ pub fn tool_category_for_name(name: &str) -> ToolCategory {
         "design_tree" | "design_tree_update" | "openspec_manage" | "lifecycle_doctor" => {
             ToolCategory::DesignTree
         }
-        name if name.starts_with("memory_") => ToolCategory::Memory,
-        "web_search" => ToolCategory::Search,
+        name if name.starts_with("memory_") || name.contains("memory") => ToolCategory::Memory,
+        "web_search" | "browser_search" | "codebase_search" | "search_documents" => {
+            ToolCategory::Search
+        }
+        name if name.contains("search") => ToolCategory::Search,
+        "delegate" | "delegate_result" | "delegate_status" | "delegate_cancel"
+        | "cleave_assess" | "cleave_run" => ToolCategory::Subagent,
+        name if name.contains("delegate") || name.contains("cleave") => ToolCategory::Subagent,
         _ => ToolCategory::Generic,
     }
 }
@@ -650,6 +658,29 @@ mod tests {
         assert_eq!(projection.presentation.sigil, "Ω");
         assert_eq!(projection.presentation.emphasis, SegmentEmphasis::Normal);
         assert_eq!(projection.presentation.tool_category, None);
+    }
+
+    #[test]
+    fn tool_category_for_name_classifies_common_tool_families() {
+        let cases = [
+            ("bash", ToolCategory::CommandExec),
+            ("read", ToolCategory::FileRead),
+            ("edit", ToolCategory::FileMutation),
+            ("design_tree_update", ToolCategory::DesignTree),
+            ("memory_recall", ToolCategory::Memory),
+            ("codebase_search", ToolCategory::Search),
+            ("search_documents", ToolCategory::Search),
+            ("browser_search", ToolCategory::Search),
+            ("delegate", ToolCategory::Subagent),
+            ("delegate_result", ToolCategory::Subagent),
+            ("cleave_assess", ToolCategory::Subagent),
+            ("cleave_run", ToolCategory::Subagent),
+            ("unknown", ToolCategory::Generic),
+        ];
+
+        for (name, expected) in cases {
+            assert_eq!(tool_category_for_name(name), expected, "{name}");
+        }
     }
 
     #[test]

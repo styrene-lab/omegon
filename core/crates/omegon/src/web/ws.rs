@@ -2314,6 +2314,11 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "event_name": "harness.changed",
             "status": status_json,
         }),
+        AgentEvent::RuntimeQueueUpdated { snapshot_json } => json!({
+            "type": "runtime_queue_updated",
+            "event_name": "runtime.queue_updated",
+            "snapshot": snapshot_json,
+        }),
         AgentEvent::WebDashboardStarted { .. } => unreachable!("filtered by serialize_ws_messages"),
         AgentEvent::ContextUpdated {
             tokens,
@@ -2883,6 +2888,7 @@ mod tests {
             AgentEvent::ProviderFailure { .. } => {}
             AgentEvent::TurnCancelled { .. } => {}
             AgentEvent::HarnessStatusChanged { .. } => {}
+            AgentEvent::RuntimeQueueUpdated { .. } => {}
             AgentEvent::WebDashboardStarted { .. } => {}
             AgentEvent::ContextUpdated { .. } => {}
             AgentEvent::ContextCompaction(_) => {}
@@ -3018,6 +3024,9 @@ mod tests {
             AgentEvent::HarnessStatusChanged {
                 status_json: serde_json::json!({"thinking_level": "low"}),
             },
+            AgentEvent::RuntimeQueueUpdated {
+                snapshot_json: serde_json::json!({"depth": 1, "items": []}),
+            },
             AgentEvent::WebDashboardStarted {
                 startup_json: serde_json::json!({"port": 0}),
             },
@@ -3057,8 +3066,8 @@ mod tests {
         }
         assert_eq!(
             events.len(),
-            24,
-            "should cover all 24 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
+            25,
+            "should cover all 25 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
         );
     }
 

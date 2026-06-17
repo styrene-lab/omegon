@@ -19,6 +19,7 @@ pub fn tool_category_color(kind: ToolCategory, t: &dyn Theme) -> Color {
         ToolCategory::DesignTree => t.accent_bright(),
         ToolCategory::Memory => t.accent(),
         ToolCategory::Search => t.accent_muted(),
+        ToolCategory::Subagent => t.accent(),
         ToolCategory::Generic => t.border_dim(),
     }
 }

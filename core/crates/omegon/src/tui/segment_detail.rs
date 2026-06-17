@@ -8,6 +8,56 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget, Wrap};
 use super::segments::{Segment, SegmentContent, SegmentExportMode};
 use super::theme::Theme;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolDetailMode {
+    Live,
+    Detail,
+}
+
+impl ToolDetailMode {
+    fn title_prefix(self) -> &'static str {
+        match self {
+            Self::Live => "live",
+            Self::Detail => "detail",
+        }
+    }
+}
+
+fn tool_output_lines(segment: &Segment) -> Vec<String> {
+    match &segment.content {
+        SegmentContent::ToolCard {
+            detail_args,
+            detail_result,
+            live_partial,
+            ..
+        } => {
+            let mut lines = Vec::new();
+            if let Some(partial) = live_partial.as_deref()
+                && !partial.tail.trim().is_empty()
+            {
+                lines.extend(partial.tail.lines().map(str::to_string));
+            }
+            if let Some(args) = detail_args.as_deref().filter(|s| !s.trim().is_empty()) {
+                lines.push("args:".to_string());
+                lines.extend(args.lines().map(str::to_string));
+            }
+            if let Some(result) = detail_result.as_deref().filter(|s| !s.trim().is_empty()) {
+                lines.push("result:".to_string());
+                lines.extend(result.lines().map(str::to_string));
+            }
+            if lines.is_empty() {
+                lines.push(segment.export_text(SegmentExportMode::Raw));
+            }
+            lines
+        }
+        _ => segment
+            .export_text(SegmentExportMode::Raw)
+            .lines()
+            .map(str::to_string)
+            .collect(),
+    }
+}
+
 pub fn preferred_height(segment: Option<&Segment>, available_height: u16) -> u16 {
     if segment.is_none() || available_height < 14 {
         return 0;
@@ -15,8 +65,94 @@ pub fn preferred_height(segment: Option<&Segment>, available_height: u16) -> u16
     available_height.clamp(0, 12).max(7)
 }
 
+fn classify_tool_content_form(
+    segment: &Segment,
+    fallback_lines: &[String],
+) -> crate::surfaces::conversation::ContentForm {
+    if let SegmentContent::ToolCard {
+        name,
+        is_error,
+        complete,
+        detail_result,
+        live_partial,
+        ..
+    } = &segment.content
+    {
+        if let Some(result) = detail_result.as_deref().filter(|s| !s.trim().is_empty()) {
+            return crate::tui::tool_inspection::tool_content_form(
+                name,
+                &[result.to_string()],
+                *complete,
+                *is_error,
+            );
+        }
+        if let Some(partial) = live_partial
+            .as_deref()
+            .filter(|p| !p.tail.trim().is_empty())
+        {
+            return crate::tui::tool_inspection::tool_content_form(
+                name,
+                &partial.tail.lines().map(str::to_string).collect::<Vec<_>>(),
+                *complete,
+                *is_error,
+            );
+        }
+        return crate::tui::tool_inspection::tool_content_form(
+            name,
+            fallback_lines,
+            *complete,
+            *is_error,
+        );
+    }
+    crate::surfaces::conversation::ContentForm::Prose
+}
+
+pub fn render_tool_card(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: &dyn Theme,
+    segment: &Segment,
+    mode: ToolDetailMode,
+) {
+    if let SegmentContent::ToolCard {
+        name,
+        is_error,
+        complete,
+        started_at,
+        ..
+    } = &segment.content
+    {
+        let lines = tool_output_lines(segment);
+        let state = if !complete {
+            crate::tui::glyphs::ToolStateGlyphRole::Running
+        } else if *is_error {
+            crate::tui::glyphs::ToolStateGlyphRole::Failed
+        } else {
+            crate::tui::glyphs::ToolStateGlyphRole::Completed
+        };
+        let content_form = classify_tool_content_form(segment, &lines);
+        crate::tui::tool_inspection::render_tool_inspection_panel(
+            area,
+            buf,
+            theme,
+            crate::tui::tool_inspection::ToolInspection {
+                name,
+                state,
+                title_prefix: mode.title_prefix(),
+                elapsed: started_at.map(|instant| instant.elapsed()),
+                content_form,
+                lines: &lines,
+            },
+        );
+    }
+}
+
 pub fn render(area: Rect, buf: &mut Buffer, theme: &dyn Theme, idx: usize, segment: &Segment) {
     if area.width == 0 || area.height == 0 {
+        return;
+    }
+    if matches!(segment.content, SegmentContent::ToolCard { .. }) {
+        render_tool_card(area, buf, theme, segment, ToolDetailMode::Detail);
         return;
     }
     let title = format!(" detail · segment {idx} · {} ", segment_kind_label(segment));

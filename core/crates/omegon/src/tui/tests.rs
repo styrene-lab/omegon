@@ -880,24 +880,8 @@ async fn star_prefix_wraps_prompt_as_memory_injection_request() {
         other => panic!("expected prompt submission, got {other:?}"),
     }
 }
-#[test]
-fn queued_prompt_preview_mentions_attachment_count() {
-    let mut app = test_app();
-    app.queue_prompt(
-        "describe this long image task".to_string(),
-        vec![std::path::PathBuf::from("/tmp/paste.png")],
-    );
-    let rendered = render_app_to_string(&mut app, 100, 20);
-    assert!(rendered.contains("Queued [1]"), "{rendered}");
-    assert!(rendered.contains("paste.png"), "{rendered}");
-    assert!(
-        rendered.contains("describe this long image task"),
-        "{rendered}"
-    );
-}
-
 #[tokio::test]
-async fn submitting_while_agent_active_queues_without_interrupt_by_default() {
+async fn submitting_while_agent_active_submits_to_runtime_queue_without_interrupt_by_default() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 
@@ -906,22 +890,23 @@ async fn submitting_while_agent_active_queues_without_interrupt_by_default() {
 
     app.submit_editor_buffer(&tx).await;
 
-    assert_eq!(app.queued_prompts.len(), 1);
     assert!(
         !app.interrupt_pending,
-        "queued input must not cancel the active turn"
+        "queued input must not cancel the active turn by default"
     );
-    assert!(
-        rx.try_recv().is_err(),
-        "queued input should not dispatch until the current turn ends"
-    );
-    let rendered = render_app_to_string(&mut app, 100, 20);
-    assert!(rendered.contains("Queued [1]"), "{rendered}");
-    assert!(rendered.contains("Queue mode: ready"), "{rendered}");
+    match rx.recv().await.expect("runtime prompt submission") {
+        TuiCommand::SubmitPrompt(PromptSubmission {
+            text, queue_mode, ..
+        }) => {
+            assert_eq!(text, "follow up after this turn");
+            assert_eq!(queue_mode, PromptQueueMode::UntilReady);
+        }
+        other => panic!("expected runtime prompt submission, got {other:?}"),
+    }
 }
 
 #[tokio::test]
-async fn explicit_interrupt_queue_mode_still_requests_cancel() {
+async fn explicit_interrupt_queue_mode_submits_prompt_then_cancel() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 
@@ -931,69 +916,26 @@ async fn explicit_interrupt_queue_mode_still_requests_cancel() {
 
     app.submit_editor_buffer(&tx).await;
 
-    assert_eq!(app.queued_prompts.len(), 1);
     assert!(
         app.interrupt_pending,
-        "explicit interrupt mode should cancel the active turn"
+        "explicit interrupt mode should mark local interrupt UI state"
     );
-    assert!(
-        rx.try_recv().is_err(),
-        "interrupt uses the shared cancellation token, not a queued command"
-    );
-}
-
-#[tokio::test]
-async fn queued_prompt_dispatch_preserves_captured_queue_mode() {
-    let mut app = test_app();
-    let (tx, mut rx) = test_tx_with_rx();
-
-    app.queue_mode = PromptQueueMode::InterruptAfterTurn;
-    app.queue_prompt("queued under interrupt".to_string(), Vec::new());
-    app.queue_mode = PromptQueueMode::UntilReady;
-
-    app.dispatch_next_queued_prompt(&tx).await;
-
-    match rx.recv().await.expect("queued prompt dispatched") {
+    match rx.recv().await.expect("runtime prompt submission") {
         TuiCommand::SubmitPrompt(PromptSubmission {
             text, queue_mode, ..
         }) => {
-            assert_eq!(text, "queued under interrupt");
+            assert_eq!(text, "steer immediately");
             assert_eq!(queue_mode, PromptQueueMode::InterruptAfterTurn);
         }
-        other => panic!("expected prompt submission, got {other:?}"),
+        other => panic!("expected runtime prompt submission, got {other:?}"),
     }
-    assert!(app.queued_prompts.is_empty());
-    assert!(app.agent_active);
-}
-
-#[tokio::test]
-async fn queued_prompt_dispatch_waits_for_idle_agent() {
-    let mut app = test_app();
-    let (tx, mut rx) = test_tx_with_rx();
-
-    app.agent_active = true;
-    app.queue_prompt("wait for current turn".to_string(), Vec::new());
-
-    app.dispatch_next_queued_prompt(&tx).await;
-
-    assert_eq!(app.queued_prompts.len(), 1);
-    assert!(rx.try_recv().is_err());
-}
-
-#[test]
-fn queue_prompt_preserves_fifo_order() {
-    let mut app = test_app();
-    app.queue_prompt("first".to_string(), Vec::new());
-    app.queue_prompt("second".to_string(), Vec::new());
-
-    let first = app.queued_prompts.pop_front().expect("first queued prompt");
-    let second = app
-        .queued_prompts
-        .pop_front()
-        .expect("second queued prompt");
-
-    assert_eq!(first.text, "first");
-    assert_eq!(second.text, "second");
+    match rx.recv().await.expect("runtime cancel submission") {
+        TuiCommand::CancelActiveTurn { submitted_by, via } => {
+            assert_eq!(submitted_by, "local-tui");
+            assert_eq!(via, "tui");
+        }
+        other => panic!("expected runtime cancel submission, got {other:?}"),
+    }
 }
 
 #[test]
@@ -1488,9 +1430,9 @@ fn mouse_wheel_scroll_up_matches_natural_scroll_direction() {
 }
 
 #[tokio::test]
-async fn ui_action_cancel_active_turn_cancels_token_and_suppresses_input() {
+async fn ui_action_cancel_active_turn_routes_to_runtime_and_suppresses_input() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
     let token = CancellationToken::new();
     *app.cancel.lock().expect("cancel lock") = Some(token.clone());
     app.editor.set_text("draft");
@@ -1499,22 +1441,42 @@ async fn ui_action_cancel_active_turn_cancels_token_and_suppresses_input() {
 
     assert_eq!(
         outcome,
-        UiActionOutcome::accepted_message("active turn cancelled")
+        UiActionOutcome::accepted_message("active turn cancellation requested")
     );
-    assert!(token.is_cancelled());
+    assert!(
+        !token.is_cancelled(),
+        "TUI cancel action must not trip the runtime token directly"
+    );
+    match rx.try_recv() {
+        Ok(TuiCommand::CancelActiveTurn { submitted_by, via }) => {
+            assert_eq!(submitted_by, "local-tui");
+            assert_eq!(via, "tui");
+        }
+        other => panic!("expected runtime cancel command, got {other:?}"),
+    }
     assert_eq!(app.editor.render_text(), "");
     assert!(app.interrupt_pending);
 }
 
 #[tokio::test]
-async fn ui_action_cancel_active_turn_without_token_is_noop_but_suppresses_input() {
+async fn ui_action_cancel_active_turn_without_token_still_routes_to_runtime() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
     app.editor.set_text("draft");
 
     let outcome = app.handle_ui_action(UiAction::CancelActiveTurn, &tx).await;
 
-    assert_eq!(outcome, UiActionOutcome::noop("no active turn to cancel"));
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("active turn cancellation requested")
+    );
+    match rx.try_recv() {
+        Ok(TuiCommand::CancelActiveTurn { submitted_by, via }) => {
+            assert_eq!(submitted_by, "local-tui");
+            assert_eq!(via, "tui");
+        }
+        other => panic!("expected runtime cancel command, got {other:?}"),
+    }
     assert_eq!(app.editor.render_text(), "");
     assert!(app.interrupt_pending);
 }
@@ -1525,7 +1487,7 @@ fn interrupt_suppresses_terminal_protocol_fragments_from_editor() {
     app.agent_active = true;
     app.editor.set_text("draft");
 
-    let _ = app.interrupt();
+    app.prepare_interrupt_ui();
 
     assert_eq!(app.editor.render_text(), "");
     assert!(app.interrupt_pending);
@@ -1722,16 +1684,14 @@ fn slim_status_line_marks_turn_state() {
         name: "bash".into(),
         args: serde_json::json!({"command":"cargo test"}),
     });
-    if let Some(stream) = app.active_tool_stream.as_mut() {
-        stream.started_at -= std::time::Duration::from_secs(54);
+    if let SegmentContent::ToolCard { started_at, .. } =
+        &mut app.conversation.segments_mut()[0].content
+        && let Some(started_at) = started_at.as_mut()
+    {
+        *started_at -= std::time::Duration::from_secs(54);
     }
     let running = render_app_to_string(&mut app, 140, 18);
-    let running_glyph =
-        crate::tui::glyphs::glyphs().tool(crate::tui::glyphs::ToolGlyphRole::Running);
-    assert!(
-        running.contains(&format!("{running_glyph} cargo · running")),
-        "{running}"
-    );
+    assert!(running.contains("$ cargo"), "{running}");
     assert!(running.contains("live log"), "{running}");
     assert!(running.contains("bash"), "{running}");
     assert!(running.contains("54s"), "{running}");
@@ -5629,20 +5589,12 @@ fn selected_tool_segment_detail_pane_renders_full_tool_context() {
             details: serde_json::Value::Null,
         },
     });
-    let idx = app
-        .conversation
-        .segments()
-        .iter()
-        .position(|seg| matches!(seg.content, SegmentContent::ToolCard { .. }))
-        .expect("tool card segment");
-    app.conversation.set_timeline_expanded_segment(Some(idx));
+    app.tool_inspection_target = Some(ToolInspectionTarget::Pinned("tool-1".into()));
 
     let rendered = render_app_to_string(&mut app, 140, 36);
 
-    assert!(rendered.contains("detail · segment"), "{rendered}");
-    assert!(rendered.contains("tool"), "{rendered}");
+    assert!(rendered.contains("detail log"), "{rendered}");
     assert!(rendered.contains("bash"), "{rendered}");
-    assert!(rendered.contains("tool-1"), "{rendered}");
     assert!(rendered.contains("test result details"), "{rendered}");
 }
 
@@ -5768,4 +5720,49 @@ fn slash_context_reset_uses_context_clear_control_path() {
         rx.try_recv().unwrap(),
         TuiCommand::ContextClear { .. }
     ));
+}
+
+#[test]
+fn runtime_queue_update_renders_authoritative_queue_line() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::RuntimeQueueUpdated {
+        snapshot_json: serde_json::json!({
+            "depth": 1,
+            "active": null,
+            "items": [{
+                "id": 7,
+                "submitted_by": "local-tui",
+                "via": "tui",
+                "queue_mode": "until_ready",
+                "preview": "queued follow-up from runtime",
+                "attachments": 0,
+                "voice": false
+            }],
+            "previews": ["#7 ready: queued follow-up from runtime"]
+        }),
+    });
+
+    let rendered = render_app_to_string(&mut app, 100, 24);
+    assert!(rendered.contains("Runtime queue"), "{rendered}");
+    assert!(rendered.contains("[1]"), "{rendered}");
+    assert!(
+        rendered.contains("queued follow-up from runtime"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn runtime_queue_zero_depth_hides_queue_line() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::RuntimeQueueUpdated {
+        snapshot_json: serde_json::json!({
+            "depth": 0,
+            "active": null,
+            "items": [],
+            "previews": []
+        }),
+    });
+
+    let rendered = render_app_to_string(&mut app, 100, 24);
+    assert!(!rendered.contains("Runtime queue"), "{rendered}");
 }
