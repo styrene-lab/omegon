@@ -6538,7 +6538,7 @@ Scroll transcript:
             "models" => self.handle_slash_command("/model", tx),
             "settings" => {
                 self.open_settings_screen();
-                SlashResult::Display(crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&self.settings()).render_markdown())
+                SlashResult::Handled
             }
             "preferences" | "prefs" => {
                 self.open_preferences_selector();
@@ -8823,6 +8823,9 @@ pub async fn run_tui(
                             }
                             KeyCode::Enter => app.open_selected_settings_row(),
                             KeyCode::Esc => {
+                                app.settings_screen = None;
+                            }
+                            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 app.settings_screen = None;
                             }
                             _ => {}
