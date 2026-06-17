@@ -3576,12 +3576,28 @@ impl App {
             return;
         };
         let rows = screen.active_rows(&projection);
+        let tab_line = projection
+            .tabs
+            .iter()
+            .map(|tab| {
+                if tab.id == screen.active_tab {
+                    format!("[{}]", tab.label)
+                } else {
+                    format!(" {} ", tab.label)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("  ");
         let mut lines = vec![
             ratatui::text::Line::from(ratatui::text::Span::styled(
                 "Settings",
                 ratatui::style::Style::default()
                     .fg(self.theme.accent())
                     .add_modifier(ratatui::style::Modifier::BOLD),
+            )),
+            ratatui::text::Line::from(ratatui::text::Span::styled(
+                tab_line,
+                ratatui::style::Style::default().fg(self.theme.muted()),
             )),
             ratatui::text::Line::from(""),
         ];
@@ -3605,7 +3621,7 @@ impl App {
         }
         lines.push(ratatui::text::Line::from(""));
         lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
-            "↑/↓ navigate · Enter edit (coming next) · Esc close",
+            "↑/↓ navigate · Tab category · Enter edit (coming next) · Esc close",
             ratatui::style::Style::default().fg(self.theme.dim()),
         )));
 
@@ -8565,6 +8581,32 @@ pub async fn run_tui(
                                     let len = screen.active_rows(&projection).len();
                                     if len > 0 {
                                         screen.selected_row = (screen.selected_row + 1).min(len - 1);
+                                    }
+                                }
+                            }
+                            KeyCode::Tab => {
+                                let settings = app.settings();
+                                let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+                                if let Some(screen) = app.settings_screen.as_mut() {
+                                    if let Some(current) = projection.tabs.iter().position(|tab| tab.id == screen.active_tab) {
+                                        let next = (current + 1) % projection.tabs.len().max(1);
+                                        if let Some(tab) = projection.tabs.get(next) {
+                                            screen.active_tab = tab.id.clone();
+                                            screen.selected_row = 0;
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::BackTab => {
+                                let settings = app.settings();
+                                let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+                                if let Some(screen) = app.settings_screen.as_mut() {
+                                    if let Some(current) = projection.tabs.iter().position(|tab| tab.id == screen.active_tab) {
+                                        let prev = if current == 0 { projection.tabs.len().saturating_sub(1) } else { current - 1 };
+                                        if let Some(tab) = projection.tabs.get(prev) {
+                                            screen.active_tab = tab.id.clone();
+                                            screen.selected_row = 0;
+                                        }
                                     }
                                 }
                             }
