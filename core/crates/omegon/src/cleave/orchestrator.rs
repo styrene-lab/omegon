@@ -497,9 +497,16 @@ pub async fn run_cleave(
                                     });
 
                                 // Re-read the prompt that was written during worktree setup.
+                                let fb_prompt_path =
+                                    child_prompt_relative_path(ChildPromptKind::Cleave, label)
+                                        .map(|relative| wt_path.join(relative))
+                                        .unwrap_or_else(|_| {
+                                            wt_path
+                                                .join(".omegon/cleave-prompts")
+                                                .join(format!("{label}.md"))
+                                        });
                                 let fb_prompt =
-                                    std::fs::read_to_string(wt_path.join(".cleave-prompt.md"))
-                                        .unwrap_or_default();
+                                    std::fs::read_to_string(fb_prompt_path).unwrap_or_default();
 
                                 let fb_runtime = state.children[child_idx]
                                     .runtime
