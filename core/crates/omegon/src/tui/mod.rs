@@ -1978,6 +1978,56 @@ impl App {
         self.settings_screen = Some(settings_menu::SettingsScreen::from_projection(&projection));
     }
 
+    fn open_selected_settings_row(&mut self) {
+        let Some(screen) = self.settings_screen.as_ref() else {
+            return;
+        };
+        let settings = self.settings();
+        let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        let Some(row) = screen.active_rows(&projection).get(screen.selected_row) else {
+            self.show_command_toast(CommandToast::new(
+                "No settings row selected",
+                CommandSeverity::Warning,
+            ));
+            return;
+        };
+        let row_id = row.id.clone();
+
+        match row_id.as_str() {
+            "runtime.model" => self.open_model_selector(),
+            "runtime.thinking" => self.open_thinking_selector(),
+            "runtime.context_class" => self.open_context_selector(),
+            "ui.tool_detail" => self.open_tool_detail_selector(),
+            "updates.channel" => self.open_update_channel_selector(),
+            "workspace.role" => self.open_workspace_role_selector(),
+            "workspace.kind" => self.open_workspace_kind_selector(),
+            "workspace.trusted_directories" => {
+                let settings = self.settings();
+                if settings.trusted_directories.is_empty() {
+                    self.show_command_toast(CommandToast::new(
+                        "No trusted directories. Use /permissions add <path> to add one.",
+                        CommandSeverity::Info,
+                    ));
+                } else {
+                    self.show_command_toast(CommandToast::new(
+                        "Trusted directories are managed with /permissions add|remove <path>",
+                        CommandSeverity::Info,
+                    ));
+                }
+            }
+            "runtime.max_turns" | "workspace.sandbox" | "updates.auto_update" => {
+                self.show_command_toast(CommandToast::new(
+                    format!("{} editing is not wired yet", row.label),
+                    CommandSeverity::Info,
+                ));
+            }
+            _ => self.show_command_toast(CommandToast::new(
+                format!("No editor registered for {}", row.label),
+                CommandSeverity::Warning,
+            )),
+        }
+    }
+
     fn open_preferences_selector(&mut self) {
         let settings = self.settings();
         let options = settings_menu::preferences_selector_options(&settings);
@@ -8757,12 +8807,7 @@ pub async fn run_tui(
                                     }
                                 }
                             }
-                            KeyCode::Enter => {
-                                app.show_command_toast(CommandToast::new(
-                                    "Settings row editing is not wired yet",
-                                    CommandSeverity::Info,
-                                ));
-                            }
+                            KeyCode::Enter => app.open_selected_settings_row(),
                             KeyCode::Esc => {
                                 app.settings_screen = None;
                             }
