@@ -27,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Fixed
+- Made `/settings` open the persistent settings page directly without also rendering a command-output panel, and let Ctrl+C close that page like Esc.
 - Removed mouse copyability from the preferences/settings menu and profile persistence while preserving `/mouse` and Ctrl+Shift+T as transient app-mouse versus terminal-selection controls.
 - Removed the obsolete hardcoded auth-based model selector scaffold in favor of the existing catalog-backed model selector path.
 - Cleared Clippy warnings that blocked `just lint`, including derivable defaults, single-character string pushes, manual contains checks, collapsible conditionals, bool assert comparisons, and explicit allowances for intentionally broad dispatcher signatures.

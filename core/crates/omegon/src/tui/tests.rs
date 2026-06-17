@@ -5061,3 +5061,14 @@ fn runtime_queue_zero_depth_hides_queue_line() {
     let rendered = render_app_to_string(&mut app, 100, 24);
     assert!(!rendered.contains("Runtime queue"), "{rendered}");
 }
+
+#[test]
+fn slash_settings_opens_settings_screen_without_command_panel() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/settings", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.settings_screen.is_some());
+}
