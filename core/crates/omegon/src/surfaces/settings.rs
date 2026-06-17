@@ -181,6 +181,53 @@ impl SettingsSurfaceProjection {
                             SettingsPersistenceProjection::PersistedProfile,
                             SettingsEditorProjection::Toggle,
                         ),
+                        choice_row(
+                            "workspace.role",
+                            "Workspace role",
+                            "select…",
+                            "Federation role advertised for this checkout",
+                            SettingsMutationRouteProjection::RuntimeCommand,
+                            SettingsPersistenceProjection::ProjectPolicy,
+                            [
+                                crate::workspace::types::WorkspaceRole::Primary,
+                                crate::workspace::types::WorkspaceRole::Feature,
+                                crate::workspace::types::WorkspaceRole::CleaveChild,
+                                crate::workspace::types::WorkspaceRole::Benchmark,
+                                crate::workspace::types::WorkspaceRole::Release,
+                                crate::workspace::types::WorkspaceRole::Exploratory,
+                                crate::workspace::types::WorkspaceRole::ReadOnly,
+                            ]
+                            .iter()
+                                .map(|role| SettingsChoiceProjection {
+                                    value: role.as_str().into(),
+                                    label: role.as_str().into(),
+                                    active: false,
+                                })
+                                .collect(),
+                        ),
+                        choice_row(
+                            "workspace.kind",
+                            "Workspace kind",
+                            "select…",
+                            "Primary content shape for workspace/federation projections",
+                            SettingsMutationRouteProjection::RuntimeCommand,
+                            SettingsPersistenceProjection::ProjectPolicy,
+                            [
+                                crate::workspace::types::WorkspaceKind::Code,
+                                crate::workspace::types::WorkspaceKind::Vault,
+                                crate::workspace::types::WorkspaceKind::Knowledge,
+                                crate::workspace::types::WorkspaceKind::Spec,
+                                crate::workspace::types::WorkspaceKind::Mixed,
+                                crate::workspace::types::WorkspaceKind::Generic,
+                            ]
+                            .iter()
+                                .map(|kind| SettingsChoiceProjection {
+                                    value: kind.as_str().into(),
+                                    label: kind.as_str().into(),
+                                    active: false,
+                                })
+                                .collect(),
+                        ),
                     ],
                 },
                 SettingsTabProjection {
@@ -318,6 +365,14 @@ mod tests {
 
         assert_eq!(thinking.editor, SettingsEditorProjection::Choice);
         assert!(thinking.choices.iter().any(|choice| choice.active));
+
+        let workspace = projection.tabs.iter().find(|tab| tab.id == "workspace").unwrap();
+        let role = workspace.rows.iter().find(|row| row.id == "workspace.role").unwrap();
+        let kind = workspace.rows.iter().find(|row| row.id == "workspace.kind").unwrap();
+        assert_eq!(role.editor, SettingsEditorProjection::Choice);
+        assert_eq!(kind.editor, SettingsEditorProjection::Choice);
+        assert!(role.choices.iter().any(|choice| choice.value == "primary"));
+        assert!(kind.choices.iter().any(|choice| choice.value == "code"));
     }
 
     #[test]
