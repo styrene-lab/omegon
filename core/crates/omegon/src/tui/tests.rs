@@ -524,6 +524,198 @@ async fn ui_action_submit_prompt_sends_local_tui_prompt() {
 }
 
 #[tokio::test]
+async fn ui_action_replace_composer_draft_updates_editor() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::ReplaceComposerDraft(ReplaceComposerDraftAction {
+                text: "draft through action seam".into(),
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("composer draft replaced")
+    );
+    assert_eq!(app.editor.render_text(), "draft through action seam");
+}
+
+#[tokio::test]
+async fn ui_action_clear_composer_draft_clears_editor() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.editor.set_text("draft");
+
+    let outcome = app
+        .handle_ui_action(UiAction::ClearComposerDraft, &tx)
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("composer draft cleared")
+    );
+    assert!(app.editor.is_empty());
+}
+
+#[tokio::test]
+async fn ui_action_attach_composer_path_inserts_attachment_token() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.editor.set_text("see ");
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::AttachComposerPath(AttachComposerPathAction {
+                path: std::path::PathBuf::from("/tmp/screenshot.png"),
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("composer attachment inserted: /tmp/screenshot.png")
+    );
+    assert_eq!(app.editor.render_text(), "see [image0]");
+}
+
+#[tokio::test]
+async fn ui_action_move_composer_cursor_supports_character_and_word_units() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.editor.set_text("alpha beta");
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                direction: ComposerCursorDirection::Backward,
+                unit: ComposerCursorUnit::Word,
+            }),
+            &tx,
+        )
+        .await;
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("composer cursor moved")
+    );
+
+    app.editor.insert('!');
+    assert_eq!(app.editor.render_text(), "alpha !beta");
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                direction: ComposerCursorDirection::Forward,
+                unit: ComposerCursorUnit::Character,
+            }),
+            &tx,
+        )
+        .await;
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("composer cursor moved")
+    );
+
+    app.editor.insert('?');
+    assert_eq!(app.editor.render_text(), "alpha !b?eta");
+}
+
+#[tokio::test]
+async fn ui_action_edit_composer_deletes_words_and_exits_history_recall() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.history = vec!["alpha beta".into()];
+    app.history_recall_up();
+    assert_eq!(app.history_idx, Some(0));
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::EditComposer(EditComposerAction {
+                operation: ComposerEditOperation::DeleteWordBackward,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("composer edited")
+    );
+    assert_eq!(app.editor.render_text(), "alpha ");
+    assert_eq!(app.history_idx, None);
+    assert_eq!(app.history_draft, None);
+}
+
+#[tokio::test]
+async fn ui_action_insert_composer_text_inserts_at_cursor_and_exits_history_recall() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.history = vec!["alpha beta".into()];
+    app.history_recall_up();
+    app.editor.move_word_backward();
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::InsertComposerText(InsertComposerTextAction { text: "!".into() }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("composer text inserted")
+    );
+    assert_eq!(app.editor.render_text(), "alpha !beta");
+    assert_eq!(app.history_idx, None);
+    assert_eq!(app.history_draft, None);
+}
+
+#[tokio::test]
+async fn ui_action_insert_composer_text_collapses_large_paste() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let text = format!("one\ntwo\nthree\n{}", "x".repeat(120));
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::InsertComposerText(InsertComposerTextAction { text }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("composer text inserted")
+    );
+    assert_eq!(app.editor.render_text(), "[Pasted text #1 +2 lines]");
+}
+
+#[tokio::test]
+async fn ui_action_move_composer_cursor_rejects_unsupported_direction_unit_pair() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                direction: ComposerCursorDirection::Home,
+                unit: ComposerCursorUnit::Word,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::rejected("unsupported composer cursor movement")
+    );
+}
+
+#[tokio::test]
 async fn ui_action_permission_response_unblocks_pending_permission() {
     let mut app = test_app();
     let tx = test_tx();
@@ -2172,7 +2364,7 @@ fn non_empty_editor_ctrl_up_does_not_start_history_recall() {
 }
 
 #[test]
-fn ctrl_down_clears_editor_after_latest_entry() {
+fn history_down_restores_draft_after_latest_entry() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into()];
 
@@ -2180,6 +2372,35 @@ fn ctrl_down_clears_editor_after_latest_entry() {
     app.history_recall_down();
     assert_eq!(app.editor.render_text(), "");
     assert_eq!(app.history_idx, None);
+}
+
+#[test]
+fn history_down_restores_prefilled_draft_after_recall_session() {
+    let mut app = test_app();
+    app.history = vec!["first".into(), "second".into()];
+    app.editor.set_text("draft");
+
+    app.history_up();
+    assert_eq!(app.editor.render_text(), "second");
+    app.history_down();
+
+    assert_eq!(app.editor.render_text(), "draft");
+    assert_eq!(app.history_idx, None);
+    assert_eq!(app.history_draft, None);
+}
+
+#[test]
+fn editing_after_history_recall_exits_history_session() {
+    let mut app = test_app();
+    app.history = vec!["first".into(), "second".into()];
+
+    app.history_recall_up();
+    app.editor.insert('!');
+    app.exit_history_recall();
+
+    assert_eq!(app.editor.render_text(), "second!");
+    assert_eq!(app.history_idx, None);
+    assert_eq!(app.history_draft, None);
 }
 
 #[test]
@@ -3617,10 +3838,12 @@ fn draw_routes_active_delegate_to_workbench_without_instruments() {
         running: 1,
         completed: 2,
         failed: 0,
+        pending_results: 0,
         children: vec![crate::features::delegate::DelegateProgressChild {
             task_id: "delegate_1".into(),
             label: "scout".into(),
             status: "running".into(),
+            result_viewed: true,
             last_tool: Some("read".into()),
             last_turn: Some(1),
             started_at: None,
@@ -3649,10 +3872,12 @@ fn draw_routes_failed_delegate_summary_to_workbench_without_instruments() {
         running: 0,
         completed: 0,
         failed: 1,
+        pending_results: 0,
         children: vec![crate::features::delegate::DelegateProgressChild {
             task_id: "delegate_2".into(),
             label: "delegate_2".into(),
             status: "failed".into(),
+            result_viewed: false,
             last_tool: Some("bash".into()),
             last_turn: Some(3),
             started_at: None,
@@ -3685,10 +3910,12 @@ fn draw_truncates_failed_delegate_summary_in_workbench() {
         running: 0,
         completed: 0,
         failed: 1,
+        pending_results: 0,
         children: vec![crate::features::delegate::DelegateProgressChild {
             task_id: "delegate_2".into(),
             label: "delegate_2".into(),
             status: "failed".into(),
+            result_viewed: false,
             last_tool: Some("bash".into()),
             last_turn: Some(3),
             started_at: None,

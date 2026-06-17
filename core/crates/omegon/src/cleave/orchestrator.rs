@@ -912,7 +912,8 @@ fn spawn_child_process(
     if !cwd.exists() {
         anyhow::bail!("Child cwd does not exist: {}", cwd.display());
     }
-    let prompt_file = write_child_prompt_file(cwd, ".cleave-prompt.md", prompt)?;
+    let prompt_file =
+        write_child_prompt_file(cwd, &format!(".omegon/cleave/{label}/prompt.md"), prompt)?;
     tracing::info!(child = %label, prompt_file = %prompt_file.display(), prompt_len = prompt.len(), "writing prompt file");
     let child_config = ChildAgentSpawnConfig {
         agent_binary: config.agent_binary.clone(),

@@ -70,6 +70,7 @@ pub struct OperationWorkbenchProjection {
     pub running: usize,
     pub completed: usize,
     pub failed: usize,
+    pub pending_results: usize,
     pub children: Vec<OperationChildRow>,
 }
 
@@ -80,6 +81,7 @@ impl OperationWorkbenchProjection {
             "running": self.running,
             "completed": self.completed,
             "failed": self.failed,
+            "pending_results": self.pending_results,
             "task_count": self.children.len(),
             "child_count": self.children.len(),
             "operation": {
@@ -99,6 +101,7 @@ impl OperationWorkbenchProjection {
             running: progress.running,
             completed: progress.completed,
             failed: progress.failed,
+            pending_results: progress.pending_results,
             children: progress
                 .children
                 .iter()
@@ -119,6 +122,7 @@ impl OperationWorkbenchProjection {
                 .count(),
             completed: progress.completed,
             failed: progress.failed,
+            pending_results: 0,
             children: progress
                 .children
                 .iter()
@@ -135,6 +139,7 @@ pub struct OperationChildRow {
     pub label: String,
     pub status: OperationChildStatus,
     pub status_label: String,
+    pub result_viewed: bool,
     pub last_activity: Option<OperationActivity>,
     pub progress: Option<OperationChildProgress>,
     pub result_summary: Option<String>,
@@ -148,6 +153,8 @@ impl OperationChildRow {
             "label": self.label,
             "status": self.status.as_str(),
             "status_label": self.status_label,
+            "result_viewed": self.result_viewed,
+            "result_ready": !self.result_viewed && !matches!(self.status, OperationChildStatus::Running | OperationChildStatus::Queued | OperationChildStatus::Starting | OperationChildStatus::Waiting),
             "last_tool": self.last_activity.as_ref().map(|activity| activity.label.as_str()),
             "last_turn": self.last_activity.as_ref().and_then(|activity| activity.turn),
             "result_summary": self.result_summary.as_deref(),
@@ -169,6 +176,7 @@ impl OperationChildRow {
             label: child.label.clone(),
             status,
             status_label: child.status.clone(),
+            result_viewed: true,
             last_activity: child.last_tool.as_ref().map(|tool| OperationActivity {
                 kind: OperationActivityKind::Tool,
                 label: tool.clone(),
@@ -222,6 +230,7 @@ impl OperationChildRow {
             label: child.label.clone(),
             status,
             status_label: child.status.clone(),
+            result_viewed: child.result_viewed,
             last_activity: child.last_tool.as_ref().map(|tool| OperationActivity {
                 kind: OperationActivityKind::Tool,
                 label: tool.clone(),
@@ -469,6 +478,7 @@ mod tests {
             task_id: "delegate_1".into(),
             label: "delegate_1".into(),
             status: status.into(),
+            result_viewed: !matches!(status, "completed" | "failed" | "cancelled"),
             last_tool: None,
             last_turn: None,
             started_at: None,
@@ -489,6 +499,7 @@ mod tests {
             running: 0,
             completed: 0,
             failed: 0,
+            pending_results: 0,
             children: vec![child],
         };
 
@@ -507,6 +518,7 @@ mod tests {
             running: 2,
             completed: 1,
             failed: 1,
+            pending_results: 0,
             children: vec![delegate_child("running")],
         };
 
@@ -540,6 +552,7 @@ mod tests {
             running: 1,
             completed: 0,
             failed: 0,
+            pending_results: 0,
             children: vec![child],
         };
 
@@ -561,6 +574,7 @@ mod tests {
             running: 0,
             completed: 0,
             failed: 1,
+            pending_results: 0,
             children: vec![child],
         };
 
@@ -581,6 +595,7 @@ mod tests {
             running: 0,
             completed: 0,
             failed: 1,
+            pending_results: 0,
             children: vec![child],
         };
 
@@ -600,6 +615,7 @@ mod tests {
             running: 0,
             completed: 0,
             failed: 1,
+            pending_results: 0,
             children: vec![child],
         };
 
@@ -700,6 +716,7 @@ mod tests {
             running: 0,
             completed: 0,
             failed: 2,
+            pending_results: 0,
             children: vec![wall, idle],
         };
 
@@ -725,6 +742,7 @@ mod tests {
             running: 0,
             completed: 1,
             failed: 0,
+            pending_results: 0,
             children: vec![child],
         };
 
@@ -750,6 +768,7 @@ mod tests {
             running: 0,
             completed: 0,
             failed: 1,
+            pending_results: 0,
             children: vec![child],
         };
 

@@ -17,6 +17,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added semantic composer draft UI actions for replacing, clearing, and attaching paths to the TUI editor through the shared `UiAction` seam.
+- Added semantic composer cursor/edit UI actions for character/word movement and bounded edit operations without exposing frontend key events.
+- Added semantic composer text insertion for typed characters and pasted text, including existing large-paste collapse behavior through the shared action seam.
+- Added parent-lane system notifications when background delegates complete or fail, including actionable `/delegate result <id>` hints.
+- Injected the live delegate queue into model context when background delegates are active or have unviewed terminal results, making reconciliation front-and-center for the agent.
+- Strengthened active plan context injection so the Workbench plan remains front-and-center until active/todo items are reconciled.
+- Improved TUI composer history recall to preserve the pre-recall draft and clear history session state when the operator edits recalled input.
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Fixed
@@ -25,6 +32,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Changed
 - Improved slim TUI summaries for shell-based git pushes so remote boilerplate no longer leaves command rows looking empty when a branch is pushed or tracking is set up.
 - Propagated `--dangerously-bypass-permissions` into delegate and cleave child Omegon processes so higher-order workers inherit parent permission bypass authority.
+- Updated the Claude Code OAuth user-agent to match upstream `@anthropic-ai/claude-code` 2.1.179.
+- Expanded upstream provider failure classification for Anthropic, OpenAI/Codex, Gemini, Groq, Mistral, OpenRouter, xAI, and Cerebras degradation signals, with explicit false-positive guards for generic quota, capacity, and not-found prose.
 - Clarified that policy prompts are allow-once until durable policy grants exist, and documented default-open unknown-tool behavior plus lexical permission-pattern matching.
 - Strengthened Lex Imperialis operator-agency guidance to require interactive background terminal/session handling for OAuth, browser, device-code, approval, and other human-blocking workflows when that tooling is available.
 - Improved slim TUI tool-row summaries so skipped validation, shell errors, edit/commit outcomes, search result counts, and memory recall counts surface as concise row outcomes instead of generic first-line result text.

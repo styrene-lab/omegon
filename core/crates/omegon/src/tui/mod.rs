@@ -101,8 +101,10 @@ use self::workbench::{
 use crate::surfaces::layout::UiSurfaces;
 use crate::surfaces::operations::OperationMilestoneProjection;
 use crate::ui_runtime::actions::{
-    ConversationSegmentRef, OpenConversationSegmentDetailAction, OperatorWaitAction,
-    PermissionAction, PromptSource, SelectConversationSegmentAction, SetSurfaceVisibleAction,
+    AttachComposerPathAction, ComposerCursorDirection, ComposerCursorUnit, ComposerEditOperation,
+    ConversationSegmentRef, EditComposerAction, InsertComposerTextAction, MoveComposerCursorAction,
+    OpenConversationSegmentDetailAction, OperatorWaitAction, PermissionAction, PromptSource,
+    ReplaceComposerDraftAction, SelectConversationSegmentAction, SetSurfaceVisibleAction,
     SetUiPresetAction, SlashCommandAction, SubmitPromptAction, UiAction, UiActionOutcome,
     UiSurfaceToggle,
 };
@@ -377,6 +379,8 @@ pub struct App {
     memory_ops_this_frame: u32,
     history: Vec<String>,
     history_idx: Option<usize>,
+    /// Draft captured before entering history recall, restored after walking back to newest.
+    history_draft: Option<String>,
     dashboard: DashboardState,
     /// Last on-screen dashboard area for mouse hit-testing.
     dashboard_area: Option<Rect>,
@@ -1575,6 +1579,7 @@ impl App {
             memory_ops_this_frame: 0,
             history: Vec::new(),
             history_idx: None,
+            history_draft: None,
             dashboard: DashboardState::default(),
             dashboard_area: None,
             conversation_area: None,
@@ -3351,18 +3356,18 @@ impl App {
                 match self.handle_slash_command(&action.raw, command_tx) {
                     SlashResult::Display(response) => {
                         self.history.push(action.raw.clone());
-                        self.history_idx = None;
+                        self.exit_history_recall();
                         self.show_slash_response(&action.raw, &response);
                         UiActionOutcome::accepted_message(response)
                     }
                     SlashResult::Handled => {
                         self.history.push(action.raw);
-                        self.history_idx = None;
+                        self.exit_history_recall();
                         UiActionOutcome::accepted()
                     }
                     SlashResult::Quit => {
                         self.history.push(action.raw);
-                        self.history_idx = None;
+                        self.exit_history_recall();
                         self.should_quit = true;
                         let _ = command_tx.send(TuiCommand::Quit).await;
                         UiActionOutcome::accepted_message("quit requested")
@@ -3378,7 +3383,92 @@ impl App {
             UiAction::OpenConversationSegmentDetail(action) => {
                 self.handle_open_conversation_segment_detail_action(action)
             }
+            UiAction::ReplaceComposerDraft(action) => {
+                self.handle_replace_composer_draft_action(action)
+            }
+            UiAction::ClearComposerDraft => self.handle_clear_composer_draft_action(),
+            UiAction::AttachComposerPath(action) => self.handle_attach_composer_path_action(action),
+            UiAction::MoveComposerCursor(action) => self.handle_move_composer_cursor_action(action),
+            UiAction::EditComposer(action) => self.handle_edit_composer_action(action),
+            UiAction::InsertComposerText(action) => self.handle_insert_composer_text_action(action),
         }
+    }
+
+    fn handle_replace_composer_draft_action(
+        &mut self,
+        action: ReplaceComposerDraftAction,
+    ) -> UiActionOutcome {
+        self.editor.set_text(&action.text);
+        UiActionOutcome::accepted_message("composer draft replaced")
+    }
+
+    fn handle_clear_composer_draft_action(&mut self) -> UiActionOutcome {
+        if self.editor.is_empty() {
+            return UiActionOutcome::noop("composer draft already empty");
+        }
+        self.editor.clear_line();
+        UiActionOutcome::accepted_message("composer draft cleared")
+    }
+
+    fn handle_attach_composer_path_action(
+        &mut self,
+        action: AttachComposerPathAction,
+    ) -> UiActionOutcome {
+        self.editor.insert_attachment(action.path.clone());
+        UiActionOutcome::accepted_message(format!(
+            "composer attachment inserted: {}",
+            action.path.display()
+        ))
+    }
+
+    fn handle_move_composer_cursor_action(
+        &mut self,
+        action: MoveComposerCursorAction,
+    ) -> UiActionOutcome {
+        match (action.direction, action.unit) {
+            (ComposerCursorDirection::Backward, ComposerCursorUnit::Character) => {
+                self.editor.move_left();
+            }
+            (ComposerCursorDirection::Forward, ComposerCursorUnit::Character) => {
+                self.editor.move_right();
+            }
+            (ComposerCursorDirection::Backward, ComposerCursorUnit::Word) => {
+                self.editor.move_word_backward();
+            }
+            (ComposerCursorDirection::Forward, ComposerCursorUnit::Word) => {
+                self.editor.move_word_forward();
+            }
+            (ComposerCursorDirection::Home, ComposerCursorUnit::Line) => {
+                self.editor.move_home();
+            }
+            (ComposerCursorDirection::End, ComposerCursorUnit::Line) => {
+                self.editor.move_end();
+            }
+            _ => return UiActionOutcome::rejected("unsupported composer cursor movement"),
+        }
+        UiActionOutcome::accepted_message("composer cursor moved")
+    }
+
+    fn handle_edit_composer_action(&mut self, action: EditComposerAction) -> UiActionOutcome {
+        match action.operation {
+            ComposerEditOperation::DeleteBackward => self.editor.backspace(),
+            ComposerEditOperation::DeleteWordBackward => self.editor.delete_word_backward(),
+            ComposerEditOperation::DeleteWordForward => self.editor.delete_word_forward(),
+            ComposerEditOperation::ClearLine => self.editor.clear_line(),
+            ComposerEditOperation::KillToEnd => self.editor.kill_to_end(),
+            ComposerEditOperation::InsertNewline => self.editor.insert_newline(),
+        }
+        self.exit_history_recall();
+        UiActionOutcome::accepted_message("composer edited")
+    }
+
+    fn handle_insert_composer_text_action(
+        &mut self,
+        action: InsertComposerTextAction,
+    ) -> UiActionOutcome {
+        self.editor.insert_paste(&action.text);
+        self.exit_history_recall();
+        UiActionOutcome::accepted_message("composer text inserted")
     }
 
     fn handle_select_conversation_segment_action(
@@ -3562,7 +3652,7 @@ impl App {
                         return;
                     }
                     self.history.push(raw_text.clone());
-                    self.history_idx = None;
+                    self.exit_history_recall();
                     let _ = command_tx
                         .send(TuiCommand::ShellHandoff {
                             keyboard_enhancement: self.keyboard_enhancement,
@@ -3572,7 +3662,7 @@ impl App {
                 }
 
                 self.history.push(raw_text.clone());
-                self.history_idx = None;
+                self.exit_history_recall();
                 self.conversation.push_user(&raw_text);
                 let _ = command_tx
                     .send(TuiCommand::RunShellCommand {
@@ -3625,7 +3715,7 @@ impl App {
                 .push_user_with_attachments(&final_text, &attachments);
         }
         self.history.push(raw_text.clone());
-        self.history_idx = None;
+        self.exit_history_recall();
         self.agent_active = true;
         if let Ok(mut ss) = self.dashboard_handles.session.lock() {
             ss.busy = true;
@@ -3663,7 +3753,7 @@ impl App {
 
         self.conversation.push_user(&decorated);
         self.history.push(decorated.clone());
-        self.history_idx = None;
+        self.exit_history_recall();
         self.agent_active = true;
         if let Ok(mut ss) = self.dashboard_handles.session.lock() {
             ss.busy = true;
@@ -3699,7 +3789,7 @@ impl App {
                 .push_user_with_attachments_and_meta(&text, &attachments, meta);
         }
         self.history.push(text.clone());
-        self.history_idx = None;
+        self.exit_history_recall();
         self.agent_active = true;
         if let Ok(mut ss) = self.dashboard_handles.session.lock() {
             ss.busy = true;
@@ -6946,6 +7036,9 @@ Scroll transcript:
         if self.history.is_empty() {
             return;
         }
+        if self.history_idx.is_none() {
+            self.history_draft = Some(self.editor.render_text());
+        }
         let idx = match self.history_idx {
             None => self.history.len().saturating_sub(1),
             Some(i) => i.saturating_sub(1),
@@ -6963,10 +7056,16 @@ Scroll transcript:
                     self.editor.set_text(&self.history[i + 1]);
                 } else {
                     self.history_idx = None;
-                    self.editor.set_text("");
+                    let draft = self.history_draft.take().unwrap_or_default();
+                    self.editor.set_text(&draft);
                 }
             }
         }
+    }
+
+    fn exit_history_recall(&mut self) {
+        self.history_idx = None;
+        self.history_draft = None;
     }
 
     fn history_recall_up(&mut self) {
@@ -8753,7 +8852,14 @@ pub async fn run_tui(
                     } else if text.is_empty() {
                         app.try_paste_clipboard_image();
                     } else {
-                        app.editor.insert_paste(text);
+                        let _ = app
+                            .handle_ui_action(
+                                UiAction::InsertComposerText(InsertComposerTextAction {
+                                    text: text.clone(),
+                                }),
+                                &command_tx,
+                            )
+                            .await;
                     }
                 }
                 // ── Ctrl+V: check for clipboard image ──────────
@@ -9305,13 +9411,34 @@ pub async fn run_tui(
 
                         // ── Editor: word/line operations (idle only) ────
                         (KeyCode::Char('w'), KeyModifiers::CONTROL) => {
-                            app.editor.delete_word_backward();
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::EditComposer(EditComposerAction {
+                                        operation: ComposerEditOperation::DeleteWordBackward,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-                            app.editor.clear_line();
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::EditComposer(EditComposerAction {
+                                        operation: ComposerEditOperation::ClearLine,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
-                            app.editor.kill_to_end();
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::EditComposer(EditComposerAction {
+                                        operation: ComposerEditOperation::KillToEnd,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Char('Y'), KeyModifiers::CONTROL) => {
                             app.copy_latest_assistant_response(SegmentExportMode::Plaintext);
@@ -9339,16 +9466,46 @@ pub async fn run_tui(
 
                         // Meta (Alt) key combos for word operations
                         (KeyCode::Backspace, KeyModifiers::ALT) => {
-                            app.editor.delete_word_backward();
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::EditComposer(EditComposerAction {
+                                        operation: ComposerEditOperation::DeleteWordBackward,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Char('d'), KeyModifiers::ALT) => {
-                            app.editor.delete_word_forward();
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::EditComposer(EditComposerAction {
+                                        operation: ComposerEditOperation::DeleteWordForward,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Char('b'), KeyModifiers::ALT) => {
-                            app.editor.move_word_backward();
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                        direction: ComposerCursorDirection::Backward,
+                                        unit: ComposerCursorUnit::Word,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Char('f'), KeyModifiers::ALT) => {
-                            app.editor.move_word_forward();
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                        direction: ComposerCursorDirection::Forward,
+                                        unit: ComposerCursorUnit::Word,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
 
                         // Ctrl+O: toggle pin/expand on nearest visible tool card
@@ -9438,7 +9595,14 @@ pub async fn run_tui(
                         (KeyCode::Enter, m)
                             if m.contains(KeyModifiers::SHIFT) || m.contains(KeyModifiers::ALT) =>
                         {
-                            app.editor.insert_newline();
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::EditComposer(EditComposerAction {
+                                        operation: ComposerEditOperation::InsertNewline,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
 
                         // Enter in focus mode toggles expansion for the focused segment.
@@ -9483,39 +9647,101 @@ pub async fn run_tui(
                         // Basic editing — only insert if no Ctrl modifier
                         // (Ctrl+letter arms above handle those explicitly)
                         (KeyCode::Char(c), mods) if !mods.contains(KeyModifiers::CONTROL) => {
-                            app.editor.insert(c);
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::InsertComposerText(InsertComposerTextAction {
+                                        text: c.to_string(),
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Backspace, _) => {
-                            app.editor.backspace();
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::EditComposer(EditComposerAction {
+                                        operation: ComposerEditOperation::DeleteBackward,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Left, KeyModifiers::ALT) => {
                             if matches!(app.pane_focus, PaneFocus::Editor) {
-                                app.editor.move_word_backward();
+                                let _ = app
+                                    .handle_ui_action(
+                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                            direction: ComposerCursorDirection::Backward,
+                                            unit: ComposerCursorUnit::Word,
+                                        }),
+                                        &command_tx,
+                                    )
+                                    .await;
                             }
                         }
                         (KeyCode::Right, KeyModifiers::ALT) => {
                             if matches!(app.pane_focus, PaneFocus::Editor) {
-                                app.editor.move_word_forward();
+                                let _ = app
+                                    .handle_ui_action(
+                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                            direction: ComposerCursorDirection::Forward,
+                                            unit: ComposerCursorUnit::Word,
+                                        }),
+                                        &command_tx,
+                                    )
+                                    .await;
                             }
                         }
                         (KeyCode::Left, _) => {
                             if matches!(app.pane_focus, PaneFocus::Editor) {
-                                app.editor.move_left();
+                                let _ = app
+                                    .handle_ui_action(
+                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                            direction: ComposerCursorDirection::Backward,
+                                            unit: ComposerCursorUnit::Character,
+                                        }),
+                                        &command_tx,
+                                    )
+                                    .await;
                             }
                         }
                         (KeyCode::Right, _) => {
                             if matches!(app.pane_focus, PaneFocus::Editor) {
-                                app.editor.move_right();
+                                let _ = app
+                                    .handle_ui_action(
+                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                            direction: ComposerCursorDirection::Forward,
+                                            unit: ComposerCursorUnit::Character,
+                                        }),
+                                        &command_tx,
+                                    )
+                                    .await;
                             }
                         }
                         (KeyCode::Home, _) => {
                             if matches!(app.pane_focus, PaneFocus::Editor) {
-                                app.editor.move_home();
+                                let _ = app
+                                    .handle_ui_action(
+                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                            direction: ComposerCursorDirection::Home,
+                                            unit: ComposerCursorUnit::Line,
+                                        }),
+                                        &command_tx,
+                                    )
+                                    .await;
                             }
                         }
                         (KeyCode::End, _) => {
                             if matches!(app.pane_focus, PaneFocus::Editor) {
-                                app.editor.move_end();
+                                let _ = app
+                                    .handle_ui_action(
+                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                            direction: ComposerCursorDirection::End,
+                                            unit: ComposerCursorUnit::Line,
+                                        }),
+                                        &command_tx,
+                                    )
+                                    .await;
                             }
                         }
 

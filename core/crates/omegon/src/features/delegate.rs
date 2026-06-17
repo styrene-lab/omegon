@@ -49,6 +49,7 @@ pub struct DelegateProgressChild {
     pub task_id: String,
     pub label: String,
     pub status: String,
+    pub result_viewed: bool,
     pub last_tool: Option<String>,
     pub last_turn: Option<u32>,
     pub started_at: Option<std::time::SystemTime>,
@@ -65,6 +66,7 @@ pub struct DelegateProgress {
     pub running: usize,
     pub completed: usize,
     pub failed: usize,
+    pub pending_results: usize,
     pub children: Vec<DelegateProgressChild>,
 }
 
@@ -92,6 +94,8 @@ pub struct DelegateTask {
     pub task_description: String,
     pub status: DelegateTaskStatus,
     pub result: Option<String>,
+    /// Whether the terminal result has been fetched/acknowledged by the parent lane.
+    pub result_viewed: bool,
     pub started_at: SystemTime,
     pub completed_at: Option<SystemTime>,
     /// Live tool activity (updated during streaming).
@@ -140,6 +144,23 @@ impl DelegateResultStore {
         tasks.get(task_id).cloned()
     }
 
+    pub fn mark_result_viewed(&self, task_id: &str) {
+        let mut tasks = self.tasks.lock().unwrap();
+        if let Some(task) = tasks.get_mut(task_id) {
+            task.result_viewed = true;
+        }
+    }
+
+    pub fn pending_terminal_count(&self) -> usize {
+        let tasks = self.tasks.lock().unwrap();
+        tasks
+            .values()
+            .filter(|task| {
+                !task.result_viewed && !matches!(task.status, DelegateTaskStatus::Running)
+            })
+            .count()
+    }
+
     pub fn update_task_status(
         &self,
         task_id: &str,
@@ -150,6 +171,7 @@ impl DelegateResultStore {
         if let Some(task) = tasks.get_mut(task_id) {
             task.status = status;
             task.result = result;
+            task.result_viewed = false;
             if matches!(
                 task.status,
                 DelegateTaskStatus::Completed { .. }
@@ -177,6 +199,7 @@ impl DelegateResultStore {
                 };
                 task.status = status.clone();
                 task.result = reason;
+                task.result_viewed = false;
                 task.completed_at = Some(SystemTime::now());
                 Ok(status)
             }
@@ -282,6 +305,9 @@ impl DelegateResultStore {
         let tasks = self.list_all_tasks();
         let mut progress = DelegateProgress::default();
         for task in tasks {
+            if !task.result_viewed && !matches!(task.status, DelegateTaskStatus::Running) {
+                progress.pending_results += 1;
+            }
             let status = match &task.status {
                 DelegateTaskStatus::Running => {
                     progress.active = true;
@@ -309,6 +335,7 @@ impl DelegateResultStore {
                     .clone()
                     .unwrap_or_else(|| task.task_id.clone()),
                 status: status.to_string(),
+                result_viewed: task.result_viewed,
                 last_tool: task.last_tool.clone(),
                 last_turn: task.last_turn,
                 started_at: Some(task.started_at),
@@ -836,7 +863,7 @@ If blocked, say the blocker plainly.\n",
         mind: Option<&str>,
         session_model: Option<String>,
     ) -> anyhow::Result<String> {
-        let prompt_file = format!(".delegate-prompt-{task_id}.md");
+        let prompt_file = format!(".omegon/delegates/{task_id}/prompt.md");
         let prompt_path = write_child_prompt_file(&self.cwd, &prompt_file, prompt)?;
 
         let model = match runtime.model.clone() {
@@ -1023,6 +1050,7 @@ If blocked, say the blocker plainly.\n",
         mind: Option<String>,
         session_model: Option<String>,
         consecutive_failures: Arc<Mutex<u32>>,
+        event_sink: Option<BusRequestSink>,
     ) -> anyhow::Result<()> {
         // Assemble field kit: load persona mind if specified
         let mut field_kit_context = String::new();
@@ -1066,6 +1094,7 @@ If blocked, say the blocker plainly.\n",
             task_description: task.clone(),
             status: DelegateTaskStatus::Running,
             result: None,
+            result_viewed: false,
             started_at: SystemTime::now(),
             completed_at: None,
             last_tool: None,
@@ -1104,25 +1133,45 @@ If blocked, say the blocker plainly.\n",
                     store.update_task_status(
                         &task_id,
                         DelegateTaskStatus::Completed { success: true },
-                        Some(result),
+                        Some(result.clone()),
                     );
+                    if let Some(sink) = &event_sink {
+                        sink.send(BusRequest::EmitAgentEvent {
+                            event: Box::new(AgentEvent::SystemNotification {
+                                message: format!(
+                                    "✓ {task_id} completed — result ready: /delegate result {task_id}"
+                                ),
+                            }),
+                        });
+                    }
                     if let Ok(mut count) = fail_counter.lock() {
                         *count = 0;
                     }
                 }
                 Err(err) => {
                     // Only increment on actual failure, not pre-spawn.
+                    let error = err.to_string();
                     if let Ok(mut count) = fail_counter.lock() {
                         *count += 1;
                     }
                     store.update_task_status(
                         &task_id,
                         DelegateTaskStatus::Failed {
-                            error: err.to_string(),
+                            error: error.clone(),
                             kind: DelegateChildFailureKind::Unknown,
                         },
                         None,
                     );
+                    if let Some(sink) = &event_sink {
+                        let first_line = error.lines().next().unwrap_or("delegate failed");
+                        sink.send(BusRequest::EmitAgentEvent {
+                            event: Box::new(AgentEvent::SystemNotification {
+                                message: format!(
+                                    "✗ {task_id} failed — {first_line}: /delegate result {task_id}"
+                                ),
+                            }),
+                        });
+                    }
                 }
             }
             Ok(())
@@ -1356,7 +1405,7 @@ impl DelegateFeature {
             completed: progress.completed,
             failed: progress.failed,
             running: progress.running,
-            pending: 0,
+            pending: progress.pending_results,
             total_tokens_in: 0,
             total_tokens_out: 0,
             children: progress
@@ -1705,6 +1754,7 @@ impl Feature for DelegateFeature {
                     mind,
                     parent_model,
                     self.consecutive_failures.clone(),
+                    self.event_slot.lock().ok().and_then(|slot| (*slot).clone()),
                 )?;
                 if let Ok(mut handle) = self.progress_handle.lock() {
                     *handle = self.result_store.progress_snapshot();
@@ -1748,33 +1798,47 @@ impl Feature for DelegateFeature {
                             }],
                             details: json!({ "status": "running", "task_id": task_id }),
                         }),
-                        DelegateTaskStatus::Completed { success: true } => Ok(ToolResult {
-                            content: vec![ContentBlock::Text {
-                                text: task.result.unwrap_or_else(|| "Task completed".to_string()),
-                            }],
-                            details: json!({ "status": "completed", "success": true, "task_id": task_id }),
-                        }),
-                        DelegateTaskStatus::Completed { success: false } => Ok(ToolResult {
-                            content: vec![ContentBlock::Text {
-                                text: "Task completed with failure".to_string(),
-                            }],
-                            details: json!({ "status": "completed", "success": false, "task_id": task_id }),
-                        }),
-                        DelegateTaskStatus::Failed { error, .. } => Ok(ToolResult {
-                            content: vec![ContentBlock::Text {
-                                text: format!("Task failed: {}", error),
-                            }],
-                            details: json!({ "status": "failed", "error": error, "task_id": task_id }),
-                        }),
-                        DelegateTaskStatus::Cancelled { reason } => Ok(ToolResult {
-                            content: vec![ContentBlock::Text {
-                                text: reason
-                                    .as_ref()
-                                    .map(|reason| format!("Task cancelled: {reason}"))
-                                    .unwrap_or_else(|| "Task cancelled".to_string()),
-                            }],
-                            details: json!({ "status": "cancelled", "reason": reason, "task_id": task_id }),
-                        }),
+                        DelegateTaskStatus::Completed { success: true } => {
+                            self.result_store.mark_result_viewed(&task_id);
+                            Ok(ToolResult {
+                                content: vec![ContentBlock::Text {
+                                    text: task
+                                        .result
+                                        .unwrap_or_else(|| "Task completed".to_string()),
+                                }],
+                                details: json!({ "status": "completed", "success": true, "task_id": task_id, "result_viewed": true }),
+                            })
+                        }
+                        DelegateTaskStatus::Completed { success: false } => {
+                            self.result_store.mark_result_viewed(&task_id);
+                            Ok(ToolResult {
+                                content: vec![ContentBlock::Text {
+                                    text: "Task completed with failure".to_string(),
+                                }],
+                                details: json!({ "status": "completed", "success": false, "task_id": task_id, "result_viewed": true }),
+                            })
+                        }
+                        DelegateTaskStatus::Failed { error, .. } => {
+                            self.result_store.mark_result_viewed(&task_id);
+                            Ok(ToolResult {
+                                content: vec![ContentBlock::Text {
+                                    text: format!("Task failed: {}", error),
+                                }],
+                                details: json!({ "status": "failed", "error": error, "task_id": task_id, "result_viewed": true }),
+                            })
+                        }
+                        DelegateTaskStatus::Cancelled { reason } => {
+                            self.result_store.mark_result_viewed(&task_id);
+                            Ok(ToolResult {
+                                content: vec![ContentBlock::Text {
+                                    text: reason
+                                        .as_ref()
+                                        .map(|reason| format!("Task cancelled: {reason}"))
+                                        .unwrap_or_else(|| "Task cancelled".to_string()),
+                                }],
+                                details: json!({ "status": "cancelled", "reason": reason, "task_id": task_id, "result_viewed": true }),
+                            })
+                        }
                     },
                     None => Err(anyhow::anyhow!("Task not found: {}", task_id)),
                 }
@@ -1831,12 +1895,15 @@ impl Feature for DelegateFeature {
             crate::tool_registry::delegate::DELEGATE_STATUS => {
                 let snapshot = self.result_store.progress_snapshot();
                 let projection = OperationWorkbenchProjection::from_delegate(&snapshot);
-                let mut status_text = String::from(
+                let mut status_text = format!(
                     "# Delegate Tasks
 
-| Task ID | Agent | Status | Last Tool | Turn | Tasks | Description |
-|---------|-------|--------|-----------|------|-------|-------------|
+Running: {} · Completed: {} · Failed: {} · Pending results: {}
+
+| Task ID | Agent | Status | Result | Last Tool | Turn | Tasks | Description |
+|---------|-------|--------|--------|-----------|------|-------|-------------|
 ",
+                    snapshot.running, snapshot.completed, snapshot.failed, snapshot.pending_results
                 );
 
                 for child in &projection.children {
@@ -1871,12 +1938,21 @@ impl Feature for DelegateFeature {
                         .as_ref()
                         .map(|progress| format!("{}/{}", progress.done, progress.total))
                         .unwrap_or_else(|| "0/0".to_string());
+                    let result_state = task
+                        .as_ref()
+                        .map(|t| match (&t.status, t.result_viewed) {
+                            (DelegateTaskStatus::Running, _) => "-",
+                            (_, false) => "ready",
+                            (_, true) => "viewed",
+                        })
+                        .unwrap_or("-");
                     status_text.push_str(&format!(
-                        "| {} | {} | {} | {} | {} | {} | {} |
+                        "| {} | {} | {} | {} | {} | {} | {} | {} |
 ",
                         child.id,
                         agent,
                         child.status_label,
+                        result_state,
                         last_tool,
                         last_turn,
                         task_progress,
@@ -1979,6 +2055,11 @@ No delegate tasks found.
             if !catalog.is_empty() {
                 sections.push(catalog);
             }
+        }
+
+        let progress = self.result_store.progress_snapshot();
+        if progress.active || progress.pending_results > 0 || !progress.children.is_empty() {
+            sections.push(format_delegate_queue_context(&progress));
         }
 
         // Available agents
@@ -2184,6 +2265,43 @@ fn format_background_delegate_started(task_id: &str) -> String {
         "result_tool": "delegate_result"
     })
     .to_string()
+}
+
+fn format_delegate_queue_context(progress: &DelegateProgress) -> String {
+    let mut lines = vec![format!(
+        "Delegate queue: running={} completed={} failed={} pending_results={}",
+        progress.running, progress.completed, progress.failed, progress.pending_results
+    )];
+
+    for child in progress.children.iter().take(8) {
+        let result_state = if child.status == "running" {
+            "active"
+        } else if child.result_viewed {
+            "viewed"
+        } else {
+            "result_ready"
+        };
+        let mut line = format!(
+            "- {}: {} ({}) — {}",
+            child.task_id, child.status, result_state, child.label
+        );
+        if let Some(summary) = child.result_summary.as_deref().filter(|s| !s.is_empty()) {
+            line.push_str(&format!(" — {}", crate::util::truncate(summary, 120)));
+        }
+        lines.push(line);
+    }
+
+    if progress.children.len() > 8 {
+        lines.push(format!(
+            "- … {} more delegate task(s) omitted from context",
+            progress.children.len() - 8
+        ));
+    }
+
+    lines.push(
+        "Instruction: before claiming no pending work, reconcile running delegates and fetch ready results with delegate_result.".to_string(),
+    );
+    lines.join("\n")
 }
 
 /// Parse agent specification from markdown content
@@ -2649,6 +2767,7 @@ This agent runs in write mode and can modify files.
             task_description: "Fix the auth bug".into(),
             status: DelegateTaskStatus::Completed { success: true },
             result: Some("Fixed in auth.rs".into()),
+            result_viewed: false,
             started_at: SystemTime::now(),
             completed_at: Some(SystemTime::now()),
             last_tool: None,
@@ -2685,6 +2804,7 @@ This agent runs in write mode and can modify files.
                 kind: DelegateChildFailureKind::Unknown,
             },
             result: None,
+            result_viewed: false,
             started_at: SystemTime::now(),
             completed_at: Some(SystemTime::now()),
             last_tool: None,
@@ -2747,6 +2867,7 @@ This agent runs in write mode and can modify files.
             task_description: "Verify cancellation".into(),
             status: DelegateTaskStatus::Running,
             result: None,
+            result_viewed: false,
             started_at: now,
             completed_at: None,
             last_tool: None,
@@ -2802,6 +2923,7 @@ This agent runs in write mode and can modify files.
                 reason: Some("operator stopped task".into()),
             },
             result: Some("operator stopped task".into()),
+            result_viewed: false,
             started_at: now,
             completed_at: Some(now),
             last_tool: Some("bash".into()),
@@ -2833,6 +2955,7 @@ This agent runs in write mode and can modify files.
             task_description: "- [ ] Inspect files\n- [ ] Report findings".into(),
             status: DelegateTaskStatus::Running,
             result: None,
+            result_viewed: false,
             started_at: now,
             completed_at: None,
             last_tool: None,
@@ -2848,6 +2971,7 @@ This agent runs in write mode and can modify files.
             task_description: "Run checks".into(),
             status: DelegateTaskStatus::Completed { success: true },
             result: Some("Validation passed with a long enough result summary to truncate".into()),
+            result_viewed: false,
             started_at: now,
             completed_at: Some(now),
             last_tool: None,
@@ -2863,6 +2987,7 @@ This agent runs in write mode and can modify files.
                 kind: DelegateChildFailureKind::Unknown,
             },
             result: None,
+            result_viewed: false,
             started_at: now,
             completed_at: Some(now),
             last_tool: None,
@@ -3012,6 +3137,7 @@ This agent runs in write mode and can modify files.
             agent_name: Some("timeout-worker".to_string()),
             status: DelegateTaskStatus::Running,
             result: None,
+            result_viewed: false,
             started_at: SystemTime::now(),
             completed_at: None,
             last_tool: None,
@@ -3091,6 +3217,7 @@ exec sleep 10
             agent_name: Some("idle-worker".to_string()),
             status: DelegateTaskStatus::Running,
             result: None,
+            result_viewed: false,
             started_at: SystemTime::now(),
             completed_at: None,
             last_tool: None,

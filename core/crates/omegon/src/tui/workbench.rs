@@ -700,10 +700,20 @@ fn render_operation_workbench_panel(
     let mut lines = vec![workbench_rule_line(
         t,
         bg,
-        format!(
-            "{kind} running {} · done {} · failed {}",
-            projection.running, projection.completed, projection.failed
-        ),
+        if projection.pending_results > 0 {
+            format!(
+                "{kind} running {} · done {} · failed {} · pending results {}",
+                projection.running,
+                projection.completed,
+                projection.failed,
+                projection.pending_results
+            )
+        } else {
+            format!(
+                "{kind} running {} · done {} · failed {}",
+                projection.running, projection.completed, projection.failed
+            )
+        },
         area.width,
     )];
     let max_rows = area.height.saturating_sub(1) as usize;
@@ -726,6 +736,18 @@ fn operation_worker_chrome_line(child: &OperationChildRow, width: u16) -> String
         .as_ref()
         .map(|progress| format!(" · tasks {}/{}", progress.done, progress.total))
         .unwrap_or_default();
+    let result_hint = if !child.result_viewed
+        && !matches!(
+            child.status,
+            OperationChildStatus::Running
+                | OperationChildStatus::Queued
+                | OperationChildStatus::Starting
+                | OperationChildStatus::Waiting
+        ) {
+        format!(" · result ready: /delegate result {}", child.id)
+    } else {
+        String::new()
+    };
     let failure = child
         .failure
         .as_ref()
@@ -740,7 +762,7 @@ fn operation_worker_chrome_line(child: &OperationChildRow, width: u16) -> String
         &child.label,
         child.status.label(),
         last_tool,
-        &format!("{task_progress}{failure}"),
+        &format!("{task_progress}{result_hint}{failure}"),
         width,
     )
 }

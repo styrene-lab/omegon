@@ -745,7 +745,7 @@ impl ConversationState {
             ));
             if intent.plan_mode == PlanMode::Executing {
                 lines.push(
-                    "Plan execution contract: when the active item is completed, call the `plan` tool with action `advance` or `complete` before continuing."
+                    "Plan execution contract: keep this Workbench plan front-and-center. Before claiming completion or switching topics, reconcile every active/todo item; when the active item is completed, call the `plan` tool with action `advance` or `complete` before continuing."
                         .to_string(),
                 );
             }
