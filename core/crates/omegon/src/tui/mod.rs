@@ -8617,7 +8617,7 @@ pub async fn run_tui(
                     }
 
                     // ── Settings screen intercepts navigation when open ────
-                    if app.settings_screen.is_some() {
+                    if app.settings_screen.is_some() && app.selector.is_none() {
                         match key.code {
                             KeyCode::Up => {
                                 if let Some(screen) = app.settings_screen.as_mut() {
