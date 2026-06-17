@@ -420,6 +420,10 @@ pub(crate) fn workspace_kind_selector_options() -> Vec<selector::SelectOption> {
 pub(crate) enum SettingApplyOutcome {
     Thinking(crate::settings::ThinkingLevel),
     ContextClass(crate::settings::ContextClass),
+    ToolDetail(crate::settings::ToolDetail),
+    UpdateChannel(crate::update::UpdateChannel),
+    WorkspaceRole(crate::workspace::types::WorkspaceRole),
+    WorkspaceKind(crate::workspace::types::WorkspaceKind),
     Invalid { label: &'static str, value: String },
 }
 
@@ -428,6 +432,13 @@ impl SettingApplyOutcome {
         match self {
             Self::Thinking(level) => format!("Thinking → {} {}", level.icon(), level.as_str()),
             Self::ContextClass(class) => format!("Context policy → {}", class.label()),
+            Self::ToolDetail(mode) => format!("Tool density → {}", mode.as_str()),
+            Self::UpdateChannel(channel) => format!(
+                "Update channel set to {}. Rechecking for updates now.",
+                channel.as_str()
+            ),
+            Self::WorkspaceRole(role) => format!("Workspace role → {}", role.as_str()),
+            Self::WorkspaceKind(kind) => format!("Workspace kind → {}", kind.as_str()),
             Self::Invalid { label, value } => format!("Unknown {label}: {value}"),
         }
     }
@@ -447,6 +458,42 @@ pub(crate) fn apply_context_class_selection(value: &str) -> SettingApplyOutcome 
         .map(SettingApplyOutcome::ContextClass)
         .unwrap_or_else(|| SettingApplyOutcome::Invalid {
             label: "context class",
+            value: value.to_string(),
+        })
+}
+
+pub(crate) fn apply_tool_detail_selection(value: &str) -> SettingApplyOutcome {
+    crate::settings::ToolDetail::parse(value)
+        .map(SettingApplyOutcome::ToolDetail)
+        .unwrap_or_else(|| SettingApplyOutcome::Invalid {
+            label: "density",
+            value: value.to_string(),
+        })
+}
+
+pub(crate) fn apply_update_channel_selection(value: &str) -> SettingApplyOutcome {
+    crate::update::UpdateChannel::parse(value)
+        .map(SettingApplyOutcome::UpdateChannel)
+        .unwrap_or_else(|| SettingApplyOutcome::Invalid {
+            label: "update channel",
+            value: value.to_string(),
+        })
+}
+
+pub(crate) fn apply_workspace_role_selection(value: &str) -> SettingApplyOutcome {
+    crate::workspace::types::WorkspaceRole::parse(value)
+        .map(SettingApplyOutcome::WorkspaceRole)
+        .unwrap_or_else(|| SettingApplyOutcome::Invalid {
+            label: "workspace role",
+            value: value.to_string(),
+        })
+}
+
+pub(crate) fn apply_workspace_kind_selection(value: &str) -> SettingApplyOutcome {
+    crate::workspace::types::WorkspaceKind::parse(value)
+        .map(SettingApplyOutcome::WorkspaceKind)
+        .unwrap_or_else(|| SettingApplyOutcome::Invalid {
+            label: "workspace kind",
             value: value.to_string(),
         })
 }
@@ -555,6 +602,62 @@ mod tests {
             SettingApplyOutcome::ContextClass(crate::settings::ContextClass::Extended)
         );
         assert_eq!(outcome.message(), "Context policy → Extended (400k)");
+    }
+
+    #[test]
+    fn applying_tool_detail_selection_parses_valid_density() {
+        let outcome = apply_tool_detail_selection("compact");
+        assert_eq!(
+            outcome,
+            SettingApplyOutcome::ToolDetail(crate::settings::ToolDetail::Compact)
+        );
+        assert_eq!(outcome.message(), "Tool density → compact");
+    }
+
+    #[test]
+    fn applying_update_channel_selection_parses_valid_channel() {
+        let outcome = apply_update_channel_selection("nightly");
+        assert_eq!(
+            outcome,
+            SettingApplyOutcome::UpdateChannel(crate::update::UpdateChannel::Nightly)
+        );
+        assert_eq!(
+            outcome.message(),
+            "Update channel set to nightly. Rechecking for updates now."
+        );
+    }
+
+    #[test]
+    fn applying_workspace_role_selection_parses_valid_role() {
+        let outcome = apply_workspace_role_selection("cleave-child");
+        assert_eq!(
+            outcome,
+            SettingApplyOutcome::WorkspaceRole(crate::workspace::types::WorkspaceRole::CleaveChild)
+        );
+        assert_eq!(outcome.message(), "Workspace role → cleave-child");
+    }
+
+    #[test]
+    fn applying_workspace_kind_selection_parses_valid_kind() {
+        let outcome = apply_workspace_kind_selection("mixed");
+        assert_eq!(
+            outcome,
+            SettingApplyOutcome::WorkspaceKind(crate::workspace::types::WorkspaceKind::Mixed)
+        );
+        assert_eq!(outcome.message(), "Workspace kind → mixed");
+    }
+
+    #[test]
+    fn invalid_setting_selection_reports_label_and_value() {
+        let outcome = apply_tool_detail_selection("nope");
+        assert_eq!(
+            outcome,
+            SettingApplyOutcome::Invalid {
+                label: "density",
+                value: "nope".into()
+            }
+        );
+        assert_eq!(outcome.message(), "Unknown density: nope");
     }
 
     #[test]
