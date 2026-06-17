@@ -2390,40 +2390,34 @@ impl App {
                 Some(format!("Vault configure → {value}"))
             }
             SelectorKind::UpdateChannel => {
-                if let Some(channel) = crate::update::UpdateChannel::parse(&value) {
+                let outcome = settings_menu::apply_update_channel_selection(&value);
+                if let settings_menu::SettingApplyOutcome::UpdateChannel(channel) = outcome {
                     self.update_settings(|s| s.update_channel = channel.as_str().to_string());
                     if let Some(tx) = self.update_tx.clone() {
                         crate::update::spawn_check_now(tx, channel);
                     }
-                    Some(format!(
-                        "Update channel set to {}. Rechecking for updates now.",
-                        channel.as_str()
-                    ))
-                } else {
-                    Some(format!("Unknown update channel: {value}"))
                 }
+                Some(outcome.message())
             }
             SelectorKind::WorkspaceRole => {
-                if let Some(role) = crate::workspace::types::WorkspaceRole::parse(&value) {
+                let outcome = settings_menu::apply_workspace_role_selection(&value);
+                if let settings_menu::SettingApplyOutcome::WorkspaceRole(role) = outcome {
                     let _ = tx.try_send(TuiCommand::ExecuteControl {
                         request: crate::control_runtime::ControlRequest::WorkspaceRoleSet { role },
                         respond_to: None,
                     });
-                    Some(format!("Workspace role → {}", role.as_str()))
-                } else {
-                    Some(format!("Unknown workspace role: {value}"))
                 }
+                Some(outcome.message())
             }
             SelectorKind::WorkspaceKind => {
-                if let Some(kind) = crate::workspace::types::WorkspaceKind::parse(&value) {
+                let outcome = settings_menu::apply_workspace_kind_selection(&value);
+                if let settings_menu::SettingApplyOutcome::WorkspaceKind(kind) = outcome {
                     let _ = tx.try_send(TuiCommand::ExecuteControl {
                         request: crate::control_runtime::ControlRequest::WorkspaceKindSet { kind },
                         respond_to: None,
                     });
-                    Some(format!("Workspace kind → {}", kind.as_str()))
-                } else {
-                    Some(format!("Unknown workspace kind: {value}"))
                 }
+                Some(outcome.message())
             }
             SelectorKind::Preferences => {
                 // Open the sub-selector for the chosen preference category
@@ -2474,12 +2468,11 @@ impl App {
                 }
             }
             SelectorKind::ToolDetail => {
-                if let Some(mode) = crate::settings::ToolDetail::parse(&value) {
+                let outcome = settings_menu::apply_tool_detail_selection(&value);
+                if let settings_menu::SettingApplyOutcome::ToolDetail(mode) = outcome {
                     self.update_and_persist(|s| s.tool_detail = mode);
-                    Some(format!("Tool density → {}", mode.as_str()))
-                } else {
-                    Some(format!("Unknown density: {value}"))
                 }
+                Some(outcome.message())
             }
         }
     }
