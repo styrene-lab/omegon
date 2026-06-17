@@ -207,8 +207,11 @@ pub async fn execute_streaming(
                 anyhow::bail!("Command aborted");
             }
             _ = &mut timeout_fut => {
+                let secs = timeout_secs.unwrap();
                 let _ = child.kill().await;
-                anyhow::bail!("Command timed out after {} seconds", timeout_secs.unwrap());
+                anyhow::bail!(
+                    "Command timed out after {secs} seconds; the process was killed before Omegon could observe a final exit status. This is an indeterminate host-action result: the operation may have partially completed, completed just before the timeout, or made no progress. Verify with an idempotent status/check command before retrying or reporting failure. For installers, check whether the target is already present."
+                );
             }
             _ = heartbeat.tick() => {
                 // Only emit if quiet — if we've flushed content recently
@@ -920,7 +923,10 @@ mod tests {
     async fn execute_timeout() {
         let cancel = CancellationToken::new();
         let result = execute("sleep 10", Path::new("."), Some(1), cancel).await;
-        assert!(result.is_err());
+        let err = result.expect_err("sleep should time out").to_string();
+        assert!(err.contains("Command timed out after 1 seconds"));
+        assert!(err.contains("indeterminate host-action result"));
+        assert!(err.contains("Verify with an idempotent status/check command"));
     }
 
     #[tokio::test]

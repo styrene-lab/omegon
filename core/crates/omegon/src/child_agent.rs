@@ -121,6 +121,14 @@ pub fn write_child_prompt_file(
     let prompt_file = std::fs::canonicalize(cwd)
         .unwrap_or_else(|_| cwd.to_path_buf())
         .join(file_name);
+    if let Some(parent) = prompt_file.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "Failed to create child prompt directory {}",
+                parent.display()
+            )
+        })?;
+    }
     std::fs::write(&prompt_file, prompt).with_context(|| {
         format!(
             "Failed to write child prompt file {}",

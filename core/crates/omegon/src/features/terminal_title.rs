@@ -23,6 +23,8 @@ pub struct TerminalTitle {
     /// Last 2 tool names for pipeline visibility.
     tool_chain: Vec<String>,
     tool_active: bool,
+    /// Background family/delegate status kept in the tab title while parent is idle.
+    family_status: Option<String>,
 }
 
 impl TerminalTitle {
@@ -34,6 +36,7 @@ impl TerminalTitle {
             turn: 0,
             tool_chain: Vec::new(),
             tool_active: false,
+            family_status: None,
         }
     }
 
@@ -41,6 +44,8 @@ impl TerminalTitle {
         let status = if self.tool_active {
             let chain = self.tool_chain.join(" → ");
             format!("⚙ {chain}")
+        } else if let Some(family_status) = &self.family_status {
+            family_status.clone()
         } else if self.idle {
             "✦".to_string()
         } else {
