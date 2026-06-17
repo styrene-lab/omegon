@@ -423,6 +423,8 @@ struct App {
     selector: Option<selector::Selector>,
     /// What the selector is for — determines what happens on confirm.
     selector_kind: Option<SelectorKind>,
+    /// Persistent settings screen state backed by the shared settings surface projection.
+    settings_screen: Option<settings_menu::SettingsScreen>,
     /// Active @-file picker popup.
     at_picker: Option<selector::Selector>,
     /// Last tool name from ToolStart — used to track memory mutations.
@@ -1595,6 +1597,7 @@ impl App {
             command_prompt: None,
             selector: None,
             selector_kind: None,
+            settings_screen: None,
             at_picker: None,
             last_tool_name: None,
             completed_tool_name: None,
@@ -1967,6 +1970,12 @@ impl App {
         std::fs::read_to_string(&notes_path)
             .map(|c| c.lines().filter(|l| l.starts_with("- [")).count())
             .unwrap_or(0)
+    }
+
+    fn open_settings_screen(&mut self) {
+        let settings = self.settings();
+        let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        self.settings_screen = Some(settings_menu::SettingsScreen::from_projection(&projection));
     }
 
     fn open_preferences_selector(&mut self) {
@@ -6393,6 +6402,10 @@ Scroll transcript:
             }
             "thinking" => self.handle_slash_command(&format!("/think {args}"), tx),
             "models" => self.handle_slash_command("/model", tx),
+            "settings" => {
+                self.open_settings_screen();
+                SlashResult::Display(crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&self.settings()).render_markdown())
+            }
             "preferences" | "prefs" => {
                 self.open_preferences_selector();
                 SlashResult::Handled

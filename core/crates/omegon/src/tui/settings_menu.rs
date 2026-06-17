@@ -7,6 +7,58 @@
 
 use super::selector;
 
+/// Persistent settings screen navigation state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SettingsScreen {
+    pub active_tab: String,
+    pub selected_row: usize,
+    pub filter: String,
+    pub mode: SettingsScreenMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SettingsScreenMode {
+    Browse,
+    Search,
+}
+
+impl SettingsScreen {
+    pub(crate) fn new() -> Self {
+        Self {
+            active_tab: "runtime".into(),
+            selected_row: 0,
+            filter: String::new(),
+            mode: SettingsScreenMode::Browse,
+        }
+    }
+
+    pub(crate) fn from_projection(
+        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
+    ) -> Self {
+        let active_tab = projection
+            .tabs
+            .first()
+            .map(|tab| tab.id.clone())
+            .unwrap_or_else(|| "runtime".into());
+        Self {
+            active_tab,
+            ..Self::new()
+        }
+    }
+
+    pub(crate) fn active_rows<'a>(
+        &self,
+        projection: &'a crate::surfaces::settings::SettingsSurfaceProjection,
+    ) -> &'a [crate::surfaces::settings::SettingsRowProjection] {
+        projection
+            .tabs
+            .iter()
+            .find(|tab| tab.id == self.active_tab)
+            .map(|tab| tab.rows.as_slice())
+            .unwrap_or(&[])
+    }
+}
+
 /// What the active selector is editing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum SelectorKind {
@@ -491,5 +543,16 @@ mod tests {
             SettingApplyOutcome::ContextClass(crate::settings::ContextClass::Extended)
         );
         assert_eq!(outcome.message(), "Context policy → Extended (400k)");
+    }
+
+    #[test]
+    fn settings_screen_defaults_to_projection_first_tab() {
+        let settings = crate::settings::Settings::new("test-model");
+        let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        let screen = SettingsScreen::from_projection(&projection);
+
+        assert_eq!(screen.active_tab, "runtime");
+        assert_eq!(screen.selected_row, 0);
+        assert!(screen.active_rows(&projection).iter().any(|row| row.id == "runtime.model"));
     }
 }
