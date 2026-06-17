@@ -210,6 +210,159 @@ pub(crate) fn context_class_selector_options(
         .collect()
 }
 
+pub(crate) fn preferences_selector_options(
+    settings: &crate::settings::Settings,
+) -> Vec<selector::SelectOption> {
+    let dirs = if settings.trusted_directories.is_empty() {
+        "none".to_string()
+    } else {
+        settings.trusted_directories.len().to_string()
+    };
+
+    vec![
+        selector::SelectOption {
+            value: "model".into(),
+            label: "Model".into(),
+            description: format!("Current: {}", settings.model),
+            active: false,
+        },
+        selector::SelectOption {
+            value: "thinking".into(),
+            label: "Thinking Level".into(),
+            description: format!("Current: {}", settings.thinking.as_str()),
+            active: false,
+        },
+        selector::SelectOption {
+            value: "context".into(),
+            label: "Context Class".into(),
+            description: format!("Current: {}", settings.context_class.label()),
+            active: false,
+        },
+        selector::SelectOption {
+            value: "detail".into(),
+            label: "Tool Density".into(),
+            description: format!("Current: {}", settings.tool_detail.as_str()),
+            active: false,
+        },
+        selector::SelectOption {
+            value: "persona".into(),
+            label: "Persona".into(),
+            description: "Activate or change persona".into(),
+            active: false,
+        },
+        selector::SelectOption {
+            value: "tone".into(),
+            label: "Tone".into(),
+            description: "Activate or change tone".into(),
+            active: false,
+        },
+        selector::SelectOption {
+            value: "permissions".into(),
+            label: "Permissions".into(),
+            description: format!("Configured: {dirs}"),
+            active: false,
+        },
+        selector::SelectOption {
+            value: "update".into(),
+            label: "Update Channel".into(),
+            description: format!(
+                "Current: {} (auto: {})",
+                settings.update_channel,
+                if settings.auto_update { "on" } else { "off" }
+            ),
+            active: false,
+        },
+    ]
+}
+
+pub(crate) fn tool_detail_selector_options(
+    current: crate::settings::ToolDetail,
+) -> Vec<selector::SelectOption> {
+    vec![
+        selector::SelectOption {
+            value: "lean".into(),
+            label: "Lean".into(),
+            description: "One-liner per tool. Minimal noise.".into(),
+            active: current == crate::settings::ToolDetail::Lean,
+        },
+        selector::SelectOption {
+            value: "compact".into(),
+            label: "Compact".into(),
+            description: "2-3 lines: name + summary + short result.".into(),
+            active: current == crate::settings::ToolDetail::Compact,
+        },
+        selector::SelectOption {
+            value: "detailed".into(),
+            label: "Detailed".into(),
+            description: "Full args and results. Default.".into(),
+            active: current == crate::settings::ToolDetail::Detailed,
+        },
+        selector::SelectOption {
+            value: "verbose".into(),
+            label: "Verbose".into(),
+            description: "Maximum output. For debugging.".into(),
+            active: current == crate::settings::ToolDetail::Verbose,
+        },
+    ]
+}
+
+pub(crate) fn update_channel_selector_options(current: &str) -> Vec<selector::SelectOption> {
+    [
+        crate::update::UpdateChannel::Stable,
+        crate::update::UpdateChannel::Nightly,
+    ]
+    .into_iter()
+    .map(|channel| selector::SelectOption {
+        value: channel.as_str().to_string(),
+        label: channel.as_str().to_string(),
+        description: match channel {
+            crate::update::UpdateChannel::Stable => "Stable releases".to_string(),
+            crate::update::UpdateChannel::Nightly => "Nightly builds from main".to_string(),
+        },
+        active: current == channel.as_str(),
+    })
+    .collect()
+}
+
+pub(crate) fn workspace_role_selector_options() -> Vec<selector::SelectOption> {
+    [
+        crate::workspace::types::WorkspaceRole::Primary,
+        crate::workspace::types::WorkspaceRole::Feature,
+        crate::workspace::types::WorkspaceRole::CleaveChild,
+        crate::workspace::types::WorkspaceRole::Benchmark,
+        crate::workspace::types::WorkspaceRole::Release,
+        crate::workspace::types::WorkspaceRole::Exploratory,
+        crate::workspace::types::WorkspaceRole::ReadOnly,
+    ]
+    .into_iter()
+    .map(|role| selector::SelectOption {
+        value: role.as_str().to_string(),
+        label: role.as_str().to_string(),
+        description: format!("Set workspace role to {}", role.as_str()),
+        active: false,
+    })
+    .collect()
+}
+
+pub(crate) fn workspace_kind_selector_options() -> Vec<selector::SelectOption> {
+    [
+        crate::workspace::types::WorkspaceKind::Code,
+        crate::workspace::types::WorkspaceKind::Vault,
+        crate::workspace::types::WorkspaceKind::Knowledge,
+        crate::workspace::types::WorkspaceKind::Spec,
+        crate::workspace::types::WorkspaceKind::Mixed,
+        crate::workspace::types::WorkspaceKind::Generic,
+    ]
+    .into_iter()
+    .map(|kind| selector::SelectOption {
+        value: kind.as_str().to_string(),
+        label: kind.as_str().to_string(),
+        description: format!("Set workspace kind to {}", kind.as_str()),
+        active: false,
+    })
+    .collect()
+}
+
 /// Result of applying a selected settings value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SettingApplyOutcome {
@@ -276,6 +429,48 @@ mod tests {
                 .iter()
                 .any(|option| option.value == "Extended" && option.active)
         );
+    }
+
+    #[test]
+    fn preferences_options_summarize_current_settings() {
+        let settings = crate::settings::Settings::default();
+        let options = preferences_selector_options(&settings);
+
+        assert!(options.iter().any(|option| option.value == "model"));
+        assert!(options.iter().any(|option| {
+            option.value == "thinking"
+                && option.description == format!("Current: {}", settings.thinking.as_str())
+        }));
+        assert!(options.iter().any(|option| {
+            option.value == "permissions" && option.description == "Configured: none"
+        }));
+    }
+
+    #[test]
+    fn tool_detail_options_mark_current_density_active() {
+        let options = tool_detail_selector_options(crate::settings::ToolDetail::Compact);
+
+        assert_eq!(options.iter().filter(|option| option.active).count(), 1);
+        assert!(options.iter().any(|option| option.value == "compact" && option.active));
+    }
+
+    #[test]
+    fn update_channel_options_mark_current_channel_active() {
+        let options = update_channel_selector_options("nightly");
+
+        assert_eq!(options.iter().filter(|option| option.active).count(), 1);
+        assert!(options.iter().any(|option| option.value == "nightly" && option.active));
+    }
+
+    #[test]
+    fn workspace_options_include_known_values() {
+        let roles = workspace_role_selector_options();
+        let kinds = workspace_kind_selector_options();
+
+        assert!(roles.iter().any(|option| option.value == "primary"));
+        assert!(roles.iter().any(|option| option.value == "cleave-child"));
+        assert!(kinds.iter().any(|option| option.value == "code"));
+        assert!(kinds.iter().any(|option| option.value == "mixed"));
     }
 
     #[test]
