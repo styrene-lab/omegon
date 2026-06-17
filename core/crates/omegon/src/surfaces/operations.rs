@@ -461,7 +461,7 @@ impl OperationFailureKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cleave::progress::ChildTaskItem;
+    use crate::child_agent::ChildTaskItem;
     use crate::features::delegate::{DelegateProgress, DelegateProgressChild};
 
     fn delegate_child(status: &str) -> DelegateProgressChild {

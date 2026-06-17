@@ -1,5 +1,6 @@
 //! Cleave plan — the input specification for a cleave run.
 
+use crate::child_agent::ChildAgentRuntimeProfile;
 use serde::{Deserialize, Serialize};
 
 /// A cleave plan describes children to dispatch and their dependencies.
@@ -16,35 +17,7 @@ pub struct CleavePlan {
 }
 
 /// A fully-specified child runtime profile controlled by the launching parent.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct CleaveChildRuntimeProfile {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thinking_level: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_class: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub enabled_tools: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub disabled_tools: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub enabled_extensions: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub disabled_extensions: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub preloaded_files: Vec<String>,
-    /// Persona to activate at child startup (resolved by name or ID).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub persona: Option<String>,
-    /// Force slim mode on the child (compact schemas, lazy tool injection).
-    /// Defaults to false; parent can set true for token-constrained children.
-    #[serde(default)]
-    pub slim: bool,
-}
+pub type CleaveChildRuntimeProfile = ChildAgentRuntimeProfile;
 
 /// A single child in the plan.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,7 +129,9 @@ mod tests {
                         "skills": ["rust", "security"],
                         "enabledExtensions": ["scribe-rpc"],
                         "disabledExtensions": ["legacy-http"],
-                        "preloadedFiles": ["docs/spec.md"]
+                        "preloadedFiles": ["docs/spec.md"],
+                        "nexProfile": "sandboxed",
+                        "slim": true
                     }
                 }
             ]
@@ -171,6 +146,8 @@ mod tests {
         assert_eq!(runtime.enabled_extensions, vec!["scribe-rpc"]);
         assert_eq!(runtime.disabled_extensions, vec!["legacy-http"]);
         assert_eq!(runtime.preloaded_files, vec!["docs/spec.md"]);
+        assert_eq!(runtime.nex_profile.as_deref(), Some("sandboxed"));
+        assert!(runtime.slim);
     }
 
     #[test]

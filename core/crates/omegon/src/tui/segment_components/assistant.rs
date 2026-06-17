@@ -354,6 +354,32 @@ pub fn render(
         return;
     }
 
+    let mut content_area = inner;
+    if let AssistantReasoning::SlimExpanded {
+        max_completed_lines,
+    } = render_plan.reasoning
+    {
+        let detail_rows =
+            slim_reasoning_detail_rows(props.thinking, props.complete, max_completed_lines);
+        let rows = compact_row::CompactRows::metadata("reasoning", theme.border(), &detail_rows);
+        let reasoning_height = compact_row::measured_height(inner.width, &rows).min(inner.height);
+        if reasoning_height > 0 {
+            let reasoning_area = Rect {
+                x: inner.x,
+                y: inner.y,
+                width: inner.width,
+                height: reasoning_height,
+            };
+            compact_row::render(reasoning_area, buf, theme, bg, bg, rows);
+            content_area = Rect {
+                x: inner.x,
+                y: inner.y.saturating_add(reasoning_height),
+                width: inner.width,
+                height: inner.height.saturating_sub(reasoning_height),
+            };
+        }
+    }
+
     let mut lines: Vec<Line<'_>> = Vec::new();
     if render_plan.chrome.identity_line {
         push_identity_line(&mut lines, &props, theme, bg, border_color);
@@ -361,13 +387,24 @@ pub fn render(
     if render_plan.chrome.meta_line {
         push_meta_line(&mut lines, &props, theme, bg);
     }
-    push_reasoning_lines(&mut lines, &props, render_plan.reasoning, inner, theme, bg);
+    if !matches!(
+        render_plan.reasoning,
+        AssistantReasoning::SlimExpanded { .. }
+    ) {
+        push_reasoning_lines(&mut lines, &props, render_plan.reasoning, inner, theme, bg);
+    }
     if render_plan.chrome.answer_label {
         push_answer_label(&mut lines, theme, bg);
     }
     match render_plan.body {
         AssistantBody::MarkdownTranscript => {
-            push_answer_body_lines(&mut lines, props.text, inner.width as usize, theme, bg);
+            push_answer_body_lines(
+                &mut lines,
+                props.text,
+                content_area.width as usize,
+                theme,
+                bg,
+            );
         }
     }
 
@@ -375,19 +412,23 @@ pub fn render(
         lines.push(Line::from(Span::styled("…", theme.style_dim().bg(bg))));
     }
 
+    if content_area.height == 0 {
+        return;
+    }
+
     Paragraph::new(lines.clone())
         .wrap(Wrap { trim: false })
         .style(Style::default().bg(bg))
-        .render(inner, buf);
+        .render(content_area, buf);
     apply_rendered_links(
-        inner,
+        content_area,
         &lines,
         buf,
         Style::default()
             .fg(theme.accent_muted())
             .bg(bg)
             .add_modifier(Modifier::UNDERLINED),
-        inner.height,
+        content_area.height,
     );
 }
 
@@ -544,6 +585,51 @@ I need to take a closer look at the actual prefix widths and current assumptions
                 "row {y} overflowed: {line:?}"
             );
         }
+    }
+
+    #[test]
+    fn slim_reasoning_reserves_space_before_answer() {
+        let meta = SegmentMeta::default();
+        let presentation = SegmentPresentation {
+            role: SegmentRole::Assistant,
+            sigil: "Ω",
+            emphasis: SegmentEmphasis::Normal,
+            tool_category: None,
+        };
+        let area = Rect::new(0, 0, 72, 8);
+        let mut buf = Buffer::empty(area);
+        render(
+            AssistantRenderProps {
+                text: "final answer",
+                thinking: "**Considering user request**\nI need to respond to the user based on their request, which involves reasoning and utilizing a single tool. This text should be truncated before it can wrap into the answer body.",
+                complete: false,
+                meta: &meta,
+                presentation: &presentation,
+                mode: SegmentRenderMode::Slim,
+            },
+            area,
+            &mut buf,
+            &SegmentRenderContext::new(&Alpharius, crate::tui::segments::SegmentRenderMode::Slim),
+        );
+
+        let lines: Vec<String> = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect();
+
+        assert!(lines[0].contains("reasoning"), "first row: {:?}", lines[0]);
+        assert!(
+            lines.iter().any(|line| line.contains("final answer")),
+            "answer missing from rendered buffer: {lines:?}"
+        );
+        let answer_row = lines
+            .iter()
+            .position(|line| line.contains("final answer"))
+            .expect("answer row");
+        assert!(answer_row >= 2, "answer overlapped reasoning: {lines:?}");
     }
 
     #[test]

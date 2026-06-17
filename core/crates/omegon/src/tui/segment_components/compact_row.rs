@@ -121,27 +121,29 @@ fn wrapped_visual_rows(text: &str, width: u16) -> u16 {
     ((display_width + width.saturating_sub(1)) / width).max(1) as u16
 }
 
+fn rendered_child_detail(row: &CompactRows<'_>, detail: &str, width: u16) -> String {
+    let child_width = width
+        .saturating_sub(unicode_width::UnicodeWidthStr::width(row.child_indent) as u16)
+        .max(1);
+    let child_budget = child_width.saturating_sub(2) as usize;
+    crate::util::truncate(detail, child_budget)
+}
+
 pub(crate) fn measured_height(width: u16, rows: &CompactRows<'_>) -> u16 {
     if width == 0 || rows.details.is_empty() {
         return 0;
     }
-    let child_width = width
-        .saturating_sub(unicode_width::UnicodeWidthStr::width(rows.child_indent) as u16)
-        .max(1);
     rows.details
         .iter()
         .enumerate()
         .map(|(idx, detail)| {
             if idx == 0 {
-                let detail = first_detail_row(
-                    width,
-                    prefix_width(rows.identity, rows.name, rows.pinned),
-                    detail,
-                );
-                wrapped_visual_rows(&detail, width)
+                1
             } else {
-                let child_budget = child_width.saturating_sub(2);
-                let detail = crate::util::truncate(detail, child_budget as usize);
+                let detail = rendered_child_detail(rows, detail, width);
+                let child_width = width
+                    .saturating_sub(unicode_width::UnicodeWidthStr::width(rows.child_indent) as u16)
+                    .max(1);
                 wrapped_visual_rows(&detail, child_width)
             }
         })
@@ -198,7 +200,10 @@ pub(crate) fn render(
                     rows.child_indent,
                     Style::default().fg(theme.dim()).bg(row_bg),
                 ),
-                Span::styled(detail.clone(), Style::default().fg(theme.dim()).bg(row_bg)),
+                Span::styled(
+                    rendered_child_detail(&rows, detail, area.width),
+                    Style::default().fg(theme.dim()).bg(row_bg),
+                ),
             ]));
         }
     }

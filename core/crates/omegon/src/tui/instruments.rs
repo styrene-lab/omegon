@@ -1660,7 +1660,7 @@ impl InstrumentPanel {
     /// Render task sub-rows (■ done / □ pending) for a child's task list.
     /// Returns the number of rows rendered.
     fn render_task_rows(
-        tasks: &[crate::cleave::progress::ChildTaskItem],
+        tasks: &[crate::child_agent::ChildTaskItem],
         start_y: u16,
         inner: Rect,
         buf: &mut ratatui::buffer::Buffer,

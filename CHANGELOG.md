@@ -32,7 +32,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Propagated `--dangerously-bypass-permissions` into delegate and cleave child Omegon processes so higher-order workers inherit parent permission bypass authority.
 - Clarified that policy prompts are allow-once until durable policy grants exist, and documented default-open unknown-tool behavior plus lexical permission-pattern matching.
 - Strengthened Lex Imperialis operator-agency guidance to require interactive background terminal/session handling for OAuth, browser, device-code, approval, and other human-blocking workflows when that tooling is available.
-- Improved slim TUI tool-row summaries so skipped validation, shell errors, edit/commit outcomes, search result counts, and memory recall counts surface as concise row outcomes instead of generic first-line result text.
+- Improved slim TUI memory tool rows so recall, query, episode, archive-search, and memory mutation operations expose richer structured result summaries while keeping the `^O details` affordance right-aligned.
+- Moved delegate child prompt files under `.omegon/delegate-prompts/` and cleave child prompt files under `.omegon/cleave-prompts/`; child prompt writing now creates nested state directories and rejects absolute or parent-directory escape paths.
+- Shared delegate/cleave child-agent substrate for prompt path routing, runtime profile deserialization, child activity/task parsing, and sandboxed Nex profile resolution.
 - Shortened common compound tool names in slim TUI rows, including search, memory, context, wait, and browser tools.
 - Routed engine status and operation workbench worker rows through inline row projections instead of ad hoc separator/truncation composition.
 - Documented that memory sync and multi-checkout federation workflows are context-gated so one-off and non-Git tasks remain task-local.
