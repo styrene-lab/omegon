@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Cleared Clippy warnings that blocked `just lint`, including derivable defaults, single-character string pushes, manual contains checks, collapsible conditionals, bool assert comparisons, and explicit allowances for intentionally broad dispatcher signatures.
 
 ### Changed
+- Moved more TUI settings selector projections — preferences, tool-density, update-channel, and workspace role/kind choices — into the settings menu module as the next step in extracting settings behavior from the main TUI loop.
 - Removed the TUI Focus mode path; Tab on an empty composer now toggles the latest tool detail row directly, Shift+Tab collapses it, and `/focus` reports the replacement controls.
 - Wrapped slim TUI reasoning preview rows to the terminal width so long thoughts stay legible instead of running off-screen.
 - Made `just run` exec this workspace's dev-release Omegon binary directly, building it only when missing, so UI smoke checks cannot accidentally use an installed launcher or another checkout.

@@ -1965,98 +1965,15 @@ impl App {
     }
 
     fn open_preferences_selector(&mut self) {
-        let s = self.settings();
-        let dirs = if s.trusted_directories.is_empty() {
-            "none".to_string()
-        } else {
-            format!("{}", s.trusted_directories.len())
-        };
-        let options = vec![
-            selector::SelectOption {
-                value: "model".into(),
-                label: "Model".into(),
-                description: format!("Current: {}", s.model),
-                active: false,
-            },
-            selector::SelectOption {
-                value: "thinking".into(),
-                label: "Thinking Level".into(),
-                description: format!("Current: {}", s.thinking.as_str()),
-                active: false,
-            },
-            selector::SelectOption {
-                value: "context".into(),
-                label: "Context Class".into(),
-                description: format!("Current: {}", s.context_class.label()),
-                active: false,
-            },
-            selector::SelectOption {
-                value: "detail".into(),
-                label: "Tool Density".into(),
-                description: format!("Current: {}", s.tool_detail.as_str()),
-                active: false,
-            },
-            selector::SelectOption {
-                value: "persona".into(),
-                label: "Persona".into(),
-                description: "Activate or change persona".into(),
-                active: false,
-            },
-            selector::SelectOption {
-                value: "tone".into(),
-                label: "Tone".into(),
-                description: "Activate or change tone".into(),
-                active: false,
-            },
-            selector::SelectOption {
-                value: "permissions".into(),
-                label: "Permissions".into(),
-                description: format!("Configured: {dirs}"),
-                active: false,
-            },
-            selector::SelectOption {
-                value: "update".into(),
-                label: "Update Channel".into(),
-                description: format!(
-                    "Current: {} (auto: {})",
-                    s.update_channel,
-                    if s.auto_update { "on" } else { "off" }
-                ),
-                active: false,
-            },
-        ];
+        let settings = self.settings();
+        let options = settings_menu::preferences_selector_options(&settings);
         self.selector = Some(selector::Selector::new("Preferences", options));
         self.selector_kind = Some(SelectorKind::Preferences);
     }
 
     fn open_tool_detail_selector(&mut self) {
         let current = self.settings().tool_detail;
-        let options = vec![
-            selector::SelectOption {
-                value: "lean".into(),
-                label: "Lean".into(),
-                description: "One-liner per tool. Minimal noise.".into(),
-                active: current == crate::settings::ToolDetail::Lean,
-            },
-            selector::SelectOption {
-                value: "compact".into(),
-                label: "Compact".into(),
-                description: "2-3 lines: name + summary + short result.".into(),
-                active: current == crate::settings::ToolDetail::Compact,
-            },
-            selector::SelectOption {
-                value: "detailed".into(),
-                label: "Detailed".into(),
-                description: "Full args and results. Default.".into(),
-                active: current == crate::settings::ToolDetail::Detailed,
-            },
-            selector::SelectOption {
-                value: "verbose".into(),
-                label: "Verbose".into(),
-                description: "Maximum output. For debugging.".into(),
-                active: current == crate::settings::ToolDetail::Verbose,
-            },
-        ];
+        let options = settings_menu::tool_detail_selector_options(current);
         self.selector = Some(selector::Selector::new("Tool Density", options));
         self.selector_kind = Some(SelectorKind::ToolDetail);
     }
@@ -2100,64 +2017,19 @@ impl App {
 
     fn open_update_channel_selector(&mut self) {
         let current = self.settings().update_channel;
-        let options = [
-            crate::update::UpdateChannel::Stable,
-            crate::update::UpdateChannel::Nightly,
-        ]
-        .into_iter()
-        .map(|channel| selector::SelectOption {
-            value: channel.as_str().to_string(),
-            label: channel.as_str().to_string(),
-            description: match channel {
-                crate::update::UpdateChannel::Stable => "Stable releases".to_string(),
-                crate::update::UpdateChannel::Nightly => "Nightly builds from main".to_string(),
-            },
-            active: current == channel.as_str(),
-        })
-        .collect();
+        let options = settings_menu::update_channel_selector_options(&current);
         self.selector = Some(selector::Selector::new("Update Channel", options));
         self.selector_kind = Some(SelectorKind::UpdateChannel);
     }
 
     fn open_workspace_role_selector(&mut self) {
-        let options = [
-            crate::workspace::types::WorkspaceRole::Primary,
-            crate::workspace::types::WorkspaceRole::Feature,
-            crate::workspace::types::WorkspaceRole::CleaveChild,
-            crate::workspace::types::WorkspaceRole::Benchmark,
-            crate::workspace::types::WorkspaceRole::Release,
-            crate::workspace::types::WorkspaceRole::Exploratory,
-            crate::workspace::types::WorkspaceRole::ReadOnly,
-        ]
-        .into_iter()
-        .map(|role| selector::SelectOption {
-            value: role.as_str().to_string(),
-            label: role.as_str().to_string(),
-            description: format!("Set workspace role to {}", role.as_str()),
-            active: false,
-        })
-        .collect();
+        let options = settings_menu::workspace_role_selector_options();
         self.selector = Some(selector::Selector::new("Workspace Role", options));
         self.selector_kind = Some(SelectorKind::WorkspaceRole);
     }
 
     fn open_workspace_kind_selector(&mut self) {
-        let options = [
-            crate::workspace::types::WorkspaceKind::Code,
-            crate::workspace::types::WorkspaceKind::Vault,
-            crate::workspace::types::WorkspaceKind::Knowledge,
-            crate::workspace::types::WorkspaceKind::Spec,
-            crate::workspace::types::WorkspaceKind::Mixed,
-            crate::workspace::types::WorkspaceKind::Generic,
-        ]
-        .into_iter()
-        .map(|kind| selector::SelectOption {
-            value: kind.as_str().to_string(),
-            label: kind.as_str().to_string(),
-            description: format!("Set workspace kind to {}", kind.as_str()),
-            active: false,
-        })
-        .collect();
+        let options = settings_menu::workspace_kind_selector_options();
         self.selector = Some(selector::Selector::new("Workspace Kind", options));
         self.selector_kind = Some(SelectorKind::WorkspaceKind);
     }
