@@ -209,7 +209,7 @@ fn push_reasoning_lines<'a>(
                     lines.push(Line::from(vec![
                         Span::styled("  ", Style::default().fg(theme.dim()).bg(bg)),
                         Span::styled(
-                            crate::util::truncate(detail, budget),
+                            compact_row::truncate_to_width(detail, budget),
                             Style::default().fg(theme.dim()).bg(bg),
                         ),
                     ]));

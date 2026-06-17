@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Fixed
+- Clamped slim reasoning and memory/tool segment rows to the visible terminal width so long summaries cannot bleed past the right edge.
 - Made `/settings` open the persistent settings page directly without also rendering a command-output panel, and let Ctrl+C close that page like Esc.
 - Removed mouse copyability from the preferences/settings menu and profile persistence while preserving `/mouse` and Ctrl+Shift+T as transient app-mouse versus terminal-selection controls.
 - Removed the obsolete hardcoded auth-based model selector scaffold in favor of the existing catalog-backed model selector path.
@@ -44,7 +45,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Moved more TUI settings selector projections — preferences, tool-density, update-channel, and workspace role/kind choices — into the settings menu module as the next step in extracting settings behavior from the main TUI loop.
 - Removed the TUI Focus mode path; Tab on an empty composer now toggles the latest tool detail row directly, Shift+Tab collapses it, and `/focus` reports the replacement controls.
 - Wrapped slim TUI reasoning preview rows to the terminal width so long thoughts stay legible instead of running off-screen.
-- Made `just run` exec this workspace's dev-release Omegon binary directly, building it only when missing, so UI smoke checks cannot accidentally use an installed launcher or another checkout.
+- Made `just run` rebuild this workspace's dev-release binary from current source before execing it, so TUI smoke checks cannot reuse a stale dev-release executable.
 - Unified Slim TUI tool inspection around concrete transcript tool cards so live tools and Ctrl+O-pinned details share the same inspection renderer, with success glyphs aligned before tool identity/category glyphs and delegate/cleave rows classified as subagent tool calls.
 - Routed TUI, web dashboard, startup, tutorial, skill-builder, persona-builder, voice, and active-turn prompt/cancel paths through actor-tagged runtime supervisor ingress instead of TUI/web-local queue or cancellation side channels.
 - Improved slim TUI summaries for shell-based git pushes so remote boilerplate no longer leaves command rows looking empty when a branch is pushed or tracking is set up.
