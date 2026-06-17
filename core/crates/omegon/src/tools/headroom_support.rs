@@ -49,6 +49,22 @@ pub fn maybe_compress_tool_text(
             details: None,
         };
     }
+    let effective_kind = kind_hint.unwrap_or_else(|| omegon_headroom::detect_kind(&text));
+    let effective_kind_name = content_kind_name(effective_kind);
+    if !headroom.allows_auto_kind_name(effective_kind_name) {
+        return HeadroomToolTextResult {
+            text,
+            details: Some(json!({
+                "compressed": false,
+                "reason": "content_kind_not_auto_enabled",
+                "original_bytes": original_bytes,
+                "content_kind": effective_kind,
+                "auto_allowed": false,
+                "auto_kinds": headroom.auto_kinds,
+                "mode": headroom.mode.as_str(),
+            })),
+        };
+    }
     if text.len() < headroom.min_bytes {
         return HeadroomToolTextResult {
             text,
@@ -56,6 +72,8 @@ pub fn maybe_compress_tool_text(
                 "compressed": false,
                 "reason": "below_min_bytes",
                 "original_bytes": original_bytes,
+                "content_kind": effective_kind,
+                "auto_allowed": true,
                 "min_bytes": headroom.min_bytes,
                 "mode": headroom.mode.as_str(),
             })),
@@ -99,7 +117,7 @@ pub fn maybe_compress_tool_text(
         max_original_bytes: headroom.max_store_bytes,
     });
     let output = store.compress(CompressionInput {
-        kind_hint,
+        kind_hint: Some(effective_kind),
         source: source.to_owned(),
         text,
         policy,
@@ -119,5 +137,104 @@ pub fn maybe_compress_tool_text(
             "reversible": headroom.reversible,
             "store": store_stats,
         })),
+    }
+}
+
+fn content_kind_name(kind: ContentKind) -> &'static str {
+    match kind {
+        ContentKind::Json => "json",
+        ContentKind::Code => "code",
+        ContentKind::Log => "log",
+        ContentKind::Diff => "diff",
+        ContentKind::Markdown => "markdown",
+        ContentKind::PlainText => "plain_text",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::{HeadroomCompressionMode, HeadroomRuntimeConfig, Settings};
+    use std::sync::{Arc, Mutex as StdMutex};
+
+    fn settings_with_headroom(
+        mut headroom: HeadroomRuntimeConfig,
+    ) -> crate::settings::SharedSettings {
+        headroom.enabled = true;
+        headroom.mode = HeadroomCompressionMode::On;
+        headroom.min_bytes = 1;
+        headroom.target_bytes = 1024;
+        let mut settings = Settings::new("test-model");
+        settings.headroom = headroom;
+        Arc::new(StdMutex::new(settings))
+    }
+
+    fn large_json() -> String {
+        let rows = (0..120)
+            .map(|i| format!(r#"{{"id":{i},"status":"ok","message":"heartbeat accepted"}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("[{rows}]")
+    }
+
+    #[test]
+    fn auto_kind_gate_allows_json_by_default() {
+        let settings = settings_with_headroom(HeadroomRuntimeConfig::default());
+        let store = new_shared_store();
+        let result = maybe_compress_tool_text(
+            Some(&settings),
+            Some(&store),
+            "json",
+            Some(ContentKind::Json),
+            large_json(),
+        );
+        let details = result.details.expect("headroom details");
+        assert_eq!(details["compressed"], true);
+        assert_eq!(details["content_kind"], "json");
+    }
+
+    #[test]
+    fn auto_kind_gate_blocks_markdown_by_default() {
+        let settings = settings_with_headroom(HeadroomRuntimeConfig::default());
+        let store = new_shared_store();
+        let text = (0..120)
+            .map(|i| format!("# Heading {i}\nbody"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let result = maybe_compress_tool_text(
+            Some(&settings),
+            Some(&store),
+            "markdown",
+            Some(ContentKind::Markdown),
+            text,
+        );
+        let details = result.details.expect("headroom details");
+        assert_eq!(details["compressed"], false);
+        assert_eq!(details["reason"], "content_kind_not_auto_enabled");
+        assert_eq!(details["auto_allowed"], false);
+    }
+
+    #[test]
+    fn auto_kind_gate_allows_markdown_when_configured() {
+        let headroom = HeadroomRuntimeConfig {
+            auto_kinds: vec!["markdown".into()],
+            ..HeadroomRuntimeConfig::default()
+        };
+        let settings = settings_with_headroom(headroom);
+        let store = new_shared_store();
+        let text = (0..120)
+            .map(|i| format!("# Heading {i}\nbody"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let result = maybe_compress_tool_text(
+            Some(&settings),
+            Some(&store),
+            "markdown",
+            Some(ContentKind::Markdown),
+            text,
+        );
+        let details = result.details.expect("headroom details");
+        assert_eq!(details["compressed"], true);
+        assert_eq!(details["content_kind"], "markdown");
     }
 }

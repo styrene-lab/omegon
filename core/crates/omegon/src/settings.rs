@@ -464,6 +464,13 @@ pub struct HeadroomRuntimeConfig {
     /// Maximum original bytes retained in the session CCR store.
     #[serde(default = "default_headroom_max_store_bytes")]
     pub max_store_bytes: usize,
+    /// Content kinds eligible for automatic compression in `mode=on`.
+    ///
+    /// Defaults are evidence-gated from real A/B runs: JSON and diff were
+    /// positive, logs are structurally similar high-signal output, while
+    /// markdown/code/plain text remain manual-only until they prove out.
+    #[serde(default = "default_headroom_auto_kinds")]
+    pub auto_kinds: Vec<String>,
     /// Optional local semantic compression/evaluation model. None means deterministic only.
     #[serde(default)]
     pub local_model: Option<String>,
@@ -480,6 +487,7 @@ impl Default for HeadroomRuntimeConfig {
             target_bytes: default_headroom_target_bytes(),
             max_store_objects: default_headroom_max_store_objects(),
             max_store_bytes: default_headroom_max_store_bytes(),
+            auto_kinds: default_headroom_auto_kinds(),
             local_model: None,
         }
     }
@@ -531,16 +539,29 @@ impl HeadroomRuntimeConfig {
         {
             self.max_store_bytes = parsed;
         }
+        if let Ok(value) = std::env::var("OMEGON_HEADROOM_AUTO_KINDS") {
+            let kinds = parse_headroom_auto_kinds(&value);
+            if !kinds.is_empty() {
+                self.auto_kinds = kinds;
+            }
+        }
         if let Ok(value) = std::env::var("OMEGON_HEADROOM_LOCAL_MODEL") {
             let trimmed = value.trim();
             self.local_model = (!trimmed.is_empty()).then(|| trimmed.to_owned());
         }
     }
 
+    pub fn allows_auto_kind_name(&self, kind: &str) -> bool {
+        let normalized = normalize_headroom_kind(kind);
+        self.auto_kinds
+            .iter()
+            .any(|configured| normalize_headroom_kind(configured) == normalized)
+    }
+
     pub fn summary(&self) -> String {
         let model = self.local_model.as_deref().unwrap_or("deterministic");
         format!(
-            "enabled={} mode={} reversible={} metrics={} min_bytes={} target_bytes={} max_store_objects={} max_store_bytes={} model={}",
+            "enabled={} mode={} reversible={} metrics={} min_bytes={} target_bytes={} max_store_objects={} max_store_bytes={} auto_kinds={} model={}",
             self.enabled,
             self.mode.as_str(),
             self.reversible,
@@ -549,6 +570,7 @@ impl HeadroomRuntimeConfig {
             self.target_bytes,
             self.max_store_objects,
             self.max_store_bytes,
+            self.auto_kinds.join(","),
             model
         )
     }
@@ -576,6 +598,33 @@ fn default_headroom_min_bytes() -> usize {
 
 fn default_headroom_target_bytes() -> usize {
     16 * 1024
+}
+
+fn parse_headroom_auto_kinds(value: &str) -> Vec<String> {
+    let mut kinds = Vec::new();
+    for raw in value.split(',') {
+        let kind = normalize_headroom_kind(raw);
+        if !is_valid_headroom_kind(&kind) || kinds.iter().any(|existing| existing == &kind) {
+            continue;
+        }
+        kinds.push(kind);
+    }
+    kinds
+}
+
+fn normalize_headroom_kind(value: &str) -> String {
+    value.trim().to_ascii_lowercase().replace('-', "_")
+}
+
+fn is_valid_headroom_kind(value: &str) -> bool {
+    matches!(
+        value,
+        "json" | "diff" | "log" | "markdown" | "code" | "plain_text"
+    )
+}
+
+fn default_headroom_auto_kinds() -> Vec<String> {
+    vec!["json".into(), "diff".into(), "log".into()]
 }
 
 fn default_headroom_max_store_objects() -> usize {

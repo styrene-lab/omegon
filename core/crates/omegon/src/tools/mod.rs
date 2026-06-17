@@ -1754,17 +1754,27 @@ open_questions:
     #[tokio::test]
     async fn read_compression_respects_headroom_mode_and_shared_store() {
         let project = tempfile::tempdir().unwrap();
-        let file = project.path().join("large.log");
-        let text = (0..500)
+        let file = project.path().join("large.json");
+        let rows = (0..500)
             .map(|i| {
                 if i == 250 {
-                    "ERROR failed to open database at src/db.rs:42".to_string()
+                    serde_json::json!({
+                        "id": i,
+                        "status": "critical_error",
+                        "error": "failed to open database",
+                        "path": "src/db.rs",
+                        "line": 42
+                    })
                 } else {
-                    format!("routine log line {i}")
+                    serde_json::json!({
+                        "id": i,
+                        "status": "ok",
+                        "message": "routine heartbeat"
+                    })
                 }
             })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .collect::<Vec<_>>();
+        let text = serde_json::to_string(&rows).unwrap();
         std::fs::write(&file, &text).unwrap();
 
         let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
@@ -1773,7 +1783,7 @@ open_questions:
             settings.headroom.mode = crate::settings::HeadroomCompressionMode::Manual;
             settings.headroom.enabled = true;
             settings.headroom.min_bytes = 1;
-            settings.headroom.target_bytes = 1024;
+            settings.headroom.target_bytes = 2048;
         }
         let store = crate::tools::headroom_support::new_shared_store();
         let tools = CoreTools::new(project.path().to_path_buf())
@@ -1784,7 +1794,7 @@ open_questions:
             .execute(
                 reg::READ,
                 "test",
-                serde_json::json!({ "path": "large.log" }),
+                serde_json::json!({ "path": "large.json" }),
                 CancellationToken::new(),
             )
             .await
@@ -1800,7 +1810,7 @@ open_questions:
             .execute(
                 reg::READ,
                 "test",
-                serde_json::json!({ "path": "large.log" }),
+                serde_json::json!({ "path": "large.json" }),
                 CancellationToken::new(),
             )
             .await
@@ -1809,7 +1819,7 @@ open_questions:
             panic!("expected text result");
         };
         assert!(compressed.contains("headroom: compressed"));
-        assert!(compressed.contains("ERROR failed to open database"));
+        assert!(compressed.contains("critical_error"));
         let reference_id = compressed_result.details["headroom"]["original_ref"]["id"]
             .as_str()
             .expect("headroom reference id");
@@ -1822,6 +1832,47 @@ open_questions:
             .text
             .clone();
         assert_eq!(retrieved, manual_result_text(&manual_result));
+    }
+
+    #[tokio::test]
+    async fn read_compression_blocks_markdown_by_default_auto_kinds() {
+        let project = tempfile::tempdir().unwrap();
+        let file = project.path().join("large.md");
+        let text = (0..500)
+            .map(|i| {
+                format!("# Section {i}\n\nDECISION: markdown remains manual-only by default {i}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&file, &text).unwrap();
+
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+        {
+            let mut settings = settings.lock().unwrap();
+            settings.headroom.mode = crate::settings::HeadroomCompressionMode::On;
+            settings.headroom.enabled = true;
+            settings.headroom.min_bytes = 1;
+            settings.headroom.target_bytes = 2048;
+        }
+        let store = crate::tools::headroom_support::new_shared_store();
+        let tools = CoreTools::new(project.path().to_path_buf())
+            .with_settings(settings)
+            .with_headroom_store(store.clone());
+
+        let result = tools
+            .execute(
+                reg::READ,
+                "test",
+                serde_json::json!({ "path": "large.md" }),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let details = &result.details["headroom"];
+        assert_eq!(details["compressed"], false);
+        assert_eq!(details["reason"], "content_kind_not_auto_enabled");
+        assert_eq!(details["content_kind"], "markdown");
+        assert_eq!(store.lock().unwrap().len(), 0);
     }
 
     fn manual_result_text(result: &ToolResult) -> String {
