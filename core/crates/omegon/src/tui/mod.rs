@@ -1974,7 +1974,8 @@ impl App {
 
     fn open_settings_screen(&mut self) {
         let settings = self.settings();
-        let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        let projection =
+            crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
         self.settings_screen = Some(settings_menu::SettingsScreen::from_projection(&projection));
     }
 
@@ -1983,7 +1984,8 @@ impl App {
             return;
         };
         let settings = self.settings();
-        let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        let projection =
+            crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
         let Some(row) = screen.active_rows(&projection).get(screen.selected_row) else {
             self.show_command_toast(CommandToast::new(
                 "No settings row selected",
@@ -3752,7 +3754,8 @@ impl App {
 
     fn render_settings_screen(&self, area: Rect, frame: &mut Frame) {
         let settings = self.settings();
-        let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        let projection =
+            crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
         let Some(screen) = self.settings_screen.as_ref() else {
             return;
         };
@@ -3783,7 +3786,11 @@ impl App {
             ratatui::text::Line::from(""),
         ];
         for (idx, row) in rows.iter().enumerate() {
-            let marker = if idx == screen.selected_row { "›" } else { " " };
+            let marker = if idx == screen.selected_row {
+                "›"
+            } else {
+                " "
+            };
             lines.push(ratatui::text::Line::from(vec![
                 ratatui::text::Span::raw(format!("{marker} ")),
                 ratatui::text::Span::styled(
@@ -3807,7 +3814,10 @@ impl App {
         )));
 
         let width = area.width.min(88);
-        let height = area.height.saturating_sub(4).min((lines.len() as u16).saturating_add(2));
+        let height = area
+            .height
+            .saturating_sub(4)
+            .min((lines.len() as u16).saturating_add(2));
         let popup = ratatui::layout::Rect {
             x: area.x + area.width.saturating_sub(width) / 2,
             y: area.y + area.height.saturating_sub(height.max(8)) / 2,
@@ -8777,33 +8787,44 @@ pub async fn run_tui(
                                 if let Some(screen) = app.settings_screen.as_mut() {
                                     let len = screen.active_rows(&projection).len();
                                     if len > 0 {
-                                        screen.selected_row = (screen.selected_row + 1).min(len - 1);
+                                        screen.selected_row =
+                                            (screen.selected_row + 1).min(len - 1);
                                     }
                                 }
                             }
                             KeyCode::Tab => {
                                 let settings = app.settings();
                                 let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
-                                if let Some(screen) = app.settings_screen.as_mut() {
-                                    if let Some(current) = projection.tabs.iter().position(|tab| tab.id == screen.active_tab) {
-                                        let next = (current + 1) % projection.tabs.len().max(1);
-                                        if let Some(tab) = projection.tabs.get(next) {
-                                            screen.active_tab = tab.id.clone();
-                                            screen.selected_row = 0;
-                                        }
+                                if let Some(screen) = app.settings_screen.as_mut()
+                                    && let Some(current) = projection
+                                        .tabs
+                                        .iter()
+                                        .position(|tab| tab.id == screen.active_tab)
+                                {
+                                    let next = (current + 1) % projection.tabs.len().max(1);
+                                    if let Some(tab) = projection.tabs.get(next) {
+                                        screen.active_tab = tab.id.clone();
+                                        screen.selected_row = 0;
                                     }
                                 }
                             }
                             KeyCode::BackTab => {
                                 let settings = app.settings();
                                 let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
-                                if let Some(screen) = app.settings_screen.as_mut() {
-                                    if let Some(current) = projection.tabs.iter().position(|tab| tab.id == screen.active_tab) {
-                                        let prev = if current == 0 { projection.tabs.len().saturating_sub(1) } else { current - 1 };
-                                        if let Some(tab) = projection.tabs.get(prev) {
-                                            screen.active_tab = tab.id.clone();
-                                            screen.selected_row = 0;
-                                        }
+                                if let Some(screen) = app.settings_screen.as_mut()
+                                    && let Some(current) = projection
+                                        .tabs
+                                        .iter()
+                                        .position(|tab| tab.id == screen.active_tab)
+                                {
+                                    let prev = if current == 0 {
+                                        projection.tabs.len().saturating_sub(1)
+                                    } else {
+                                        current - 1
+                                    };
+                                    if let Some(tab) = projection.tabs.get(prev) {
+                                        screen.active_tab = tab.id.clone();
+                                        screen.selected_row = 0;
                                     }
                                 }
                             }

@@ -3,8 +3,8 @@
 //! These test the App struct as a state machine: feed inputs, check outputs.
 //! No terminal rendering — uses App::new() with test settings.
 
-use super::*;
 use super::settings_menu::build_model_selector_options;
+use super::*;
 use crate::settings::{ContextClass, Settings, ThinkingLevel};
 use crate::update::UpdateInfo;
 use crate::web::WebDaemonStatus;

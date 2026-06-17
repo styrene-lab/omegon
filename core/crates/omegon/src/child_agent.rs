@@ -306,13 +306,15 @@ pub fn extract_task_items(content: &str) -> Vec<ChildTaskItem> {
                 description: rest.to_string(),
                 done: false,
             });
-        } else if let Some(rest) = trimmed.strip_prefix("- ") {
-            if rest.len() > 3 && !rest.starts_with("Stay ") && !rest.starts_with("Do not ") {
-                bullet_items.push(ChildTaskItem {
-                    description: rest.to_string(),
-                    done: false,
-                });
-            }
+        } else if let Some(rest) = trimmed.strip_prefix("- ")
+            && rest.len() > 3
+            && !rest.starts_with("Stay ")
+            && !rest.starts_with("Do not ")
+        {
+            bullet_items.push(ChildTaskItem {
+                description: rest.to_string(),
+                done: false,
+            });
         }
     }
 

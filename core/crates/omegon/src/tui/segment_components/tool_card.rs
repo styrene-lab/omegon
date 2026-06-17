@@ -1199,7 +1199,7 @@ mod tests {
             .map(|span| span.content.as_ref())
             .collect();
         assert!(
-            rendered.contains("⌃O expand"),
+            rendered.contains("^O expand"),
             "lean hint should render: {rendered}"
         );
     }
