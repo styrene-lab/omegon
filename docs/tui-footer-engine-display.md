@@ -192,15 +192,11 @@ The `╫` double-line divider marks the conceptual split. Left half is two borde
 
 **Scaling behavior**: On tall terminals (80+ rows), conversation gets even more space naturally since it uses `Min(3)`. The footer stays fixed at 10-12. On short terminals (30 rows), 10-12 rows of footer would be too much — need a collapse threshold where we fall back to a compact 5-row layout.
 
-### Focus mode, conversation tabs, and fractal state mapping
+### Conversation tabs and fractal state mapping
 
-**Focus mode — toggle between instruments and content:**
+**Current model — responsive chrome with inline detail:**
 
-The operator can toggle between two modes:
-- **Normal**: 10-12 row instrument panel visible, conversation gets remaining space
-- **Focus**: instrument panel disappears entirely, conversation gets full height. Toggle via hotkey or `/focus`. Useful for reading long responses, viewing rendered images/diagrams, or working in alternate tabs.
-
-This eliminates the height budget concern entirely. The default is instrument-heavy. When you need the text, you toggle. The toggle is instant and stateless — your instruments are still updating in the background, they're just not rendered.
+Conversation reading space is governed by responsive chrome/density rules, while `Ctrl+O` or `Tab` on an empty composer toggles the latest tool detail row inline.
 
 **Conversation area becomes multi-tab:**
 
@@ -335,11 +331,11 @@ This creates a visual bridge between the sonar and waterfall instruments — the
 
 **Rationale:** Left half = what is inferencing and what is being inferenced about (engine config + linked minds). Right half = what is the state of the system driving the inference (four fractal instruments + operational stats). Maps to CIC station separation. High-frequency glance target (inference) on the reading side for LTR.
 
-### Decision: Footer grows to 10-12 rows with focus mode toggle
+### Decision: Footer grows to 10-12 rows with responsive collapse
 
 **Status:** decided
 
-**Rationale:** Conversation is compressible scroll history. Instruments are the persistent situational awareness surface. Default is instrument-heavy (10-12 rows). Focus mode (hotkey or /focus) hides the instrument panel entirely for full-height conversation — useful for reading long outputs, viewing rendered images, or working in alternate tabs. Compact fallback at terminal heights under 35 rows.
+**Rationale:** Conversation is compressible scroll history. Instruments are the persistent situational awareness surface. Default is instrument-heavy (10-12 rows), with compact fallback at constrained terminal heights. Inline tool detail toggles now handle inspection without a separate pane mode.
 
 ### Decision: Four simultaneous fractal instruments in 2×2 grid
 
@@ -372,7 +368,7 @@ This creates a visual bridge between the sonar and waterfall instruments — the
 - `core/crates/omegon/src/tui/footer.rs` (modified)` — Complete rewrite: replace 4-card layout with split-panel (engine+memory left, system state right). 10-12 rows. All data always visible.
 - `core/crates/omegon/src/tui/instruments.rs` (new)` — New: four-instrument renderer (Perlin sonar, Lissajous radar, Plasma thermal, CA waterfall). CIE L* color ramp. Per-mind waterfall columns.
 - `core/crates/omegon/src/tui/fractal.rs` (modified)` — Remove or gut — replaced by instruments.rs. Keep color ramp utilities.
-- `core/crates/omegon/src/tui/mod.rs` (modified)` — Layout change: footer grows from Length(5) to Length(12). Add /focus toggle. Remove hint line (absorbed into footer). Wire instrument telemetry from bus events.
+- `core/crates/omegon/src/tui/mod.rs` (modified)` — Layout change: footer grows from Length(5) to Length(12). Remove hint line (absorbed into footer). Wire instrument telemetry from bus events.
 - `core/crates/omegon/src/tui/dashboard.rs` (modified)` — Remove fractal from dashboard header. Dashboard sidebar gains 8 rows for design tree.
 - `core/crates/omegon/src/tui/theme.rs` (modified)` — Add instrument-specific theme methods if needed. Ensure footer_bg works with new layout.
 - `core/crates/omegon/src/tui/widgets.rs` (modified)` — Gauge bar may need updates for new engine panel context gauge.
@@ -383,7 +379,7 @@ This creates a visual bridge between the sonar and waterfall instruments — the
 ### Constraints
 
 - Must work at minimum terminal width 120 cols
-- Focus mode toggle must be instant — no re-layout delay
+- Inline tool-detail toggles must be instant — no re-layout delay
 - Compact fallback at terminal heights under 35 rows (revert to simple 5-row footer)
 - All four instruments must render in under 1ms combined at 60fps
 - alpharius.json is the authoritative theme source — all color changes go there

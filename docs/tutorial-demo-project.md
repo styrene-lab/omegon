@@ -65,7 +65,7 @@ The tutorial should tell a story with the demo project as the stage. The operato
 8. Verification — after cleave completes, overlay explains `/assess spec`. The tutorial auto-triggers assessment. Operator sees pass/fail.
 
 **Act 4 — You're Ready**
-9. Focus mode toggle, calibrate mention, key bindings summary
+9. Tool detail toggle, calibrate mention, key bindings summary
 10. Final — "you're ready, /help for everything, /tutorial to replay"
 
 This is ~10 steps, up from 7. The key difference: Acts 2-3 involve the agent doing real work while the overlay narrates. The overlay needs a new trigger type: `AutoPrompt(String)` — sends a prompt automatically and waits for the agent to finish before advancing.

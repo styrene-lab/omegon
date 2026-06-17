@@ -856,7 +856,15 @@ fn render_tool_card(
             ),
             true,
         );
-        let detail_rows = vec![segments::slim_tool_collapsed_line(area.width, &cells)];
+        let detail_rows = vec![segments::slim_tool_first_detail_for_prefix(
+            area.width,
+            crate::tui::segment_components::compact_row::prefix_width(
+                category_icon_for_segment_producer(header.producer),
+                &header.display_name,
+                pinned,
+            ),
+            &cells,
+        )];
         render_slim_tool_summary_rows(
             area,
             buf,

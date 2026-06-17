@@ -33,7 +33,7 @@ Handle terminal resizing dynamically. As the terminal shrinks: sidebar disappear
 | Component | Current behavior | Width/height check |
 |-----------|-----------------|-------------------|
 | Sidebar | Shows at ≥120 cols, 40 col wide | `area.width >= 120` |
-| Footer | Always 9 rows (0 in focus mode) | None — always rendered |
+| Footer | Responsive compact/full rows; no focus-mode override | Height/density dependent |
 | Footer narrow | 4-card → render_narrow fallback | `width < 60` |
 | Engine panel | Ultra-narrow 1-line fallback | `area.height < 4 \|\| area.width < 20` |
 | Engine inner | Early return | `inner.width < 15 \|\| inner.height < 3` |
@@ -73,6 +73,6 @@ Handle terminal resizing dynamically. As the terminal shrinks: sidebar disappear
 ### Constraints
 
 - No new files — this is layout logic changes to existing draw path
-- Must not break focus mode (operator toggle overrides automatic collapse)
+- Must preserve inline tool-detail toggles while automatic chrome collapse changes
 - Tier transitions should not flicker — use hysteresis if needed
 - All existing tests must pass with no snapshot changes at current test terminal sizes

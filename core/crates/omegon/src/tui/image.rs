@@ -8,7 +8,7 @@
 //! separate from the Segment enum (which needs Clone + Debug).
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use ratatui::prelude::*;
@@ -43,7 +43,22 @@ pub fn is_available() -> bool {
 /// Lives alongside the ConversationView, not inside Segment.
 #[derive(Default)]
 pub struct ImageCache {
-    protocols: HashMap<usize, StatefulProtocol>,
+    protocols: HashMap<ImageCacheKey, StatefulProtocol>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ImageCacheKey {
+    segment_idx: usize,
+    path: PathBuf,
+}
+
+impl ImageCacheKey {
+    fn new(segment_idx: usize, path: &Path) -> Self {
+        Self {
+            segment_idx,
+            path: path.to_path_buf(),
+        }
+    }
 }
 
 impl ImageCache {
@@ -55,7 +70,8 @@ impl ImageCache {
         path: &Path,
     ) -> Option<&mut StatefulProtocol> {
         use std::collections::hash_map::Entry;
-        match self.protocols.entry(segment_idx) {
+        let key = ImageCacheKey::new(segment_idx, path);
+        match self.protocols.entry(key) {
             Entry::Occupied(e) => Some(e.into_mut()),
             Entry::Vacant(e) => {
                 let protocol = create_protocol(path)?;
@@ -71,7 +87,7 @@ impl ImageCache {
 
     /// Remove entries beyond a certain index (for truncation).
     pub fn truncate_from(&mut self, idx: usize) {
-        self.protocols.retain(|k, _| *k < idx);
+        self.protocols.retain(|key, _| key.segment_idx < idx);
     }
 }
 
@@ -134,6 +150,13 @@ mod tests {
     fn image_cache_default_empty() {
         let cache = ImageCache::default();
         assert!(cache.protocols.is_empty());
+    }
+
+    #[test]
+    fn image_cache_key_tracks_segment_and_path() {
+        let key = ImageCacheKey::new(7, Path::new("/tmp/a.png"));
+        assert_eq!(key.segment_idx, 7);
+        assert_eq!(key.path, PathBuf::from("/tmp/a.png"));
     }
 
     #[test]

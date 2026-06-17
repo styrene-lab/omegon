@@ -323,6 +323,14 @@ impl ConversationView {
         (&self.segments, &mut self.conv_state)
     }
 
+    /// Split borrow for frame rendering paths that need segment data, scroll
+    /// state, and ratatui-image protocol state in the same frame.
+    pub fn segments_state_and_image_cache(
+        &mut self,
+    ) -> (&[Segment], &mut ConvState, &mut ImageCache) {
+        (&self.segments, &mut self.conv_state, &mut self.image_cache)
+    }
+
     // ─── Push methods ───────────────────────────────────────────
 
     pub fn push_user(&mut self, text: &str) {
@@ -1027,19 +1035,6 @@ impl ConversationView {
         viewport_height: Option<u16>,
     ) -> Option<usize> {
         let idx = self.focused_tool_card_in_viewport(viewport_height)?;
-        self.selected_segment = Some(idx);
-        Some(idx)
-    }
-
-    /// Select the segment focus mode should open on.
-    ///
-    /// Focus mode is a reading view, so entry should bias to the live tail of
-    /// the conversation. Tool-card viewport targeting is reserved for explicit
-    /// tool navigation actions like Tab/Ctrl+O; using it here can anchor focus
-    /// to an older visible tool when the viewport cache lags behind streaming
-    /// assistant output.
-    pub fn select_focus_entry_segment(&mut self) -> Option<usize> {
-        let idx = self.last_selectable_segment()?;
         self.selected_segment = Some(idx);
         Some(idx)
     }
@@ -2093,22 +2088,14 @@ mod tests {
         cv.append_thinking("reasoning about the latest response");
 
         // Simulate a stale/older viewport where the bottom visible rows still
-        // contain tool cards. Explicit tool navigation should continue to use
-        // the visible tool-card target, but entering focus mode must open at
-        // the live tail instead.
+        // contain tool cards. Explicit tool navigation continues to use the
+        // visible tool-card target.
         cv.conv_state.heights = vec![1; cv.segments.len()];
         cv.conv_state.scroll_offset = 2;
         cv.selected_segment = Some(1);
 
         assert_eq!(cv.select_latest_visible_tool_card(Some(3)), Some(4));
         assert_eq!(cv.selected_segment, Some(4));
-
-        assert_eq!(cv.select_focus_entry_segment(), Some(6));
-        assert_eq!(cv.selected_segment, Some(6));
-        assert!(matches!(
-            cv.segments[6].content,
-            SegmentContent::AssistantText { .. }
-        ));
     }
 
     #[test]

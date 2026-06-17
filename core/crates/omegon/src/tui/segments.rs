@@ -11,7 +11,7 @@ use tui_syntax_highlight::Highlighter;
 use unicode_width::UnicodeWidthStr;
 
 use super::conversation_render_projection::SegmentRenderMetadata;
-use super::inline_render::{DETAILS_HINT_LABEL, details_hint_cell, render_inline_text_row};
+use super::inline_render::{DETAILS_HINT_LABEL, details_hint_cell};
 use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
@@ -19,7 +19,6 @@ use crate::surfaces::conversation::{
     PeerAgentSource, PeerAgentStatus, ProjectConversationSegment, SegmentPresentation, SegmentRole,
     SystemSegment, ToolSegment, UserSegment,
 };
-use crate::surfaces::inline::{InlineCell, InlineCellRole, InlineRow};
 
 const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
     .add(b' ')
@@ -392,6 +391,56 @@ pub(crate) fn summarize_tool_args(tool_name: &str, args: Option<&str>) -> Option
             }
             fallback()
         }
+        "context_status" => Some("session headroom".to_string()),
+        "request_context" => {
+            if let Some(value) = json_arg(args)
+                && let Some(requests) = value.get("requests").and_then(|v| v.as_array())
+            {
+                let mut parts = requests
+                    .iter()
+                    .take(2)
+                    .filter_map(|request| {
+                        let kind = json_string_field(request, &["kind"])?;
+                        let query = json_string_field(request, &["query"])
+                            .map(clean_inline_text)
+                            .unwrap_or_default();
+                        if query.is_empty() {
+                            Some(kind.to_string())
+                        } else {
+                            Some(format!("{kind}: {}", crate::util::truncate(&query, 36)))
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if requests.len() > parts.len() && !parts.is_empty() {
+                    parts.push(format!("+{} more", requests.len() - parts.len()));
+                }
+                if !parts.is_empty() {
+                    return Some(parts.join(" · "));
+                }
+            }
+            fallback()
+        }
+        "codebase_search" | "search_documents" | "memory_recall" | "memory_query" => {
+            if let Some(value) = json_arg(args) {
+                let query = json_string_field(&value, &["query"])
+                    .map(clean_inline_text)
+                    .map(|query| crate::util::truncate(&query, 72));
+                let scope = json_string_field(&value, &["scope"])
+                    .map(|scope| format!(" · {scope}"))
+                    .unwrap_or_default();
+                let limit = value
+                    .get("max_results")
+                    .or_else(|| value.get("limit"))
+                    .or_else(|| value.get("k"))
+                    .and_then(|v| v.as_u64())
+                    .map(|limit| format!(" · limit {limit}"))
+                    .unwrap_or_default();
+                if let Some(query) = query {
+                    return Some(format!("{query}{scope}{limit}"));
+                }
+            }
+            fallback()
+        }
         _ => json_arg(args)
             .and_then(|v| {
                 if let Some(paths) = summarize_json_paths(&v) {
@@ -459,6 +508,26 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
         .map(|line| clean_inline_text(line.trim()))
         .find(|line| !line.is_empty());
 
+    if matches!(tool_name, "context_status") {
+        return first_non_empty
+            .as_ref()
+            .map(|line| crate::util::truncate(line, 72))
+            .or_else(|| Some("headroom checked".to_string()));
+    }
+
+    if matches!(tool_name, "request_context") {
+        let packs = lines
+            .iter()
+            .filter(|line| line.trim_start().starts_with("### "))
+            .count();
+        if packs > 0 {
+            return Some(format!(
+                "{packs} context pack{}",
+                if packs == 1 { "" } else { "s" }
+            ));
+        }
+    }
+
     if matches!(tool_name, "validate")
         && let Some(line) = lines
             .iter()
@@ -523,7 +592,8 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
             .map(|line| clean_inline_text(line.trim()))
             .find(|line| line.contains("result(s)"))
     {
-        return Some(crate::util::truncate(&line, 96));
+        let line = line.replace("**", "").replace('`', "");
+        return Some(crate::util::truncate(&line, 72));
     }
 
     if matches!(tool_name, "memory_recall" | "memory_query") {
@@ -654,74 +724,13 @@ fn slim_tool_overflow_hint(hidden_count: usize, hidden_cells: &[&String]) -> Str
     }
 }
 
-fn slim_tool_detail_lines(width: u16, cells: &[String]) -> Vec<String> {
-    if cells.is_empty() {
-        return vec![String::new()];
-    }
-
-    let one_line_budget = width.saturating_sub(16) as usize;
+pub(crate) fn slim_tool_first_detail_for_prefix(
+    area_width: u16,
+    prefix_width: u16,
+    cells: &[String],
+) -> String {
     let joined = cells.join(" · ");
-    if UnicodeWidthStr::width(joined.as_str()) <= one_line_budget {
-        return vec![crate::util::truncate(&joined, one_line_budget)];
-    }
-
-    let row_budget = width.saturating_sub(16) as usize;
-    let max_rows = 4usize;
-    let mut rows = Vec::new();
-    rows.push(crate::util::truncate(&cells[0], row_budget));
-
-    let remaining = &cells[1..];
-    for (idx, cell) in remaining
-        .iter()
-        .take(max_rows.saturating_sub(1))
-        .enumerate()
-    {
-        let is_last_visible = idx + 1 == remaining.len().min(max_rows.saturating_sub(1));
-        let marker = if is_last_visible { "  └ " } else { "  ├ " };
-        rows.push(format!(
-            "{marker}{}",
-            crate::util::truncate(cell, row_budget.saturating_sub(marker.len()))
-        ));
-    }
-
-    if remaining.len() > max_rows.saturating_sub(1)
-        && let Some(last) = rows.last_mut()
-    {
-        let hidden_start = max_rows.saturating_sub(1);
-        let hidden_cells = remaining[hidden_start..].iter().collect::<Vec<_>>();
-        *last = format!(
-            "  └ {}",
-            slim_tool_overflow_hint(hidden_cells.len(), &hidden_cells)
-        );
-    }
-
-    rows
-}
-
-pub(crate) fn slim_tool_collapsed_line(width: u16, cells: &[String]) -> String {
-    slim_tool_collapsed_line_for_budget(width.saturating_sub(16), cells)
-}
-
-pub(crate) fn slim_tool_collapsed_line_for_budget(budget: u16, cells: &[String]) -> String {
-    if cells.is_empty() {
-        return String::new();
-    }
-
-    let (left_cells, right_cells): (Vec<_>, Vec<_>) = cells
-        .iter()
-        .cloned()
-        .partition(|cell| !cell.contains(DETAILS_HINT_LABEL));
-    let row = InlineRow::new(
-        left_cells
-            .into_iter()
-            .map(|cell| InlineCell::new(cell, InlineCellRole::Value))
-            .collect(),
-        right_cells
-            .into_iter()
-            .map(|cell| InlineCell::new(cell, InlineCellRole::Affordance))
-            .collect(),
-    );
-    render_inline_text_row(&row, budget)
+    crate::tui::segment_components::compact_row::first_detail_row(area_width, prefix_width, &joined)
 }
 
 pub(crate) fn slim_tool_live_rows(width: u16, cells: &[String]) -> Vec<String> {
@@ -1730,12 +1739,27 @@ status: {}
         // buffer clips content and the cached height becomes permanently wrong.
         let estimate = match &self.content {
             UserPrompt { text } => wrapped_rows(text, width.saturating_sub(4)) + 2,
-            AssistantText { text, thinking, .. } if matches!(mode, SegmentRenderMode::Slim) => {
+            AssistantText {
+                text,
+                thinking,
+                complete,
+            } if matches!(mode, SegmentRenderMode::Slim) => {
                 let thinking_rows = if thinking.is_empty() {
                     0
                 } else {
-                    let line_count = split_trimmed_trailing_empty_lines(thinking).len();
-                    1 + line_count.min(4) as u16
+                    let max_completed_lines = 4;
+                    let detail_rows =
+                        crate::tui::segment_components::assistant::slim_reasoning_detail_rows(
+                            thinking,
+                            *complete,
+                            max_completed_lines,
+                        );
+                    let rows = crate::tui::segment_components::compact_row::CompactRows::metadata(
+                        "reasoning",
+                        t.border(),
+                        &detail_rows,
+                    );
+                    crate::tui::segment_components::compact_row::measured_height(width, &rows)
                 };
                 let text_rows = if text.is_empty() {
                     0
@@ -1780,11 +1804,26 @@ status: {}
                     *started_at,
                     self.meta.duration_ms,
                 );
-                if *complete {
-                    1
+                let detail_rows = if *complete {
+                    vec![slim_tool_first_detail_for_prefix(
+                        width,
+                        crate::tui::segment_components::compact_row::prefix_width("", name, false),
+                        &cells,
+                    )]
                 } else {
-                    slim_tool_live_rows(width, &cells).len().max(1) as u16
-                }
+                    slim_tool_live_rows(width, &cells)
+                };
+                crate::tui::segment_components::compact_row::measured_height(
+                    width,
+                    &crate::tui::segment_components::compact_row::CompactRows::tool(
+                        "",
+                        name,
+                        Color::Reset,
+                        &detail_rows,
+                        false,
+                    ),
+                )
+                .max(1)
             }
             ToolCard {
                 name,
@@ -2634,15 +2673,9 @@ mod tests {
             "zeta".to_string(),
         ];
 
-        let detail_rows = slim_tool_detail_lines(42, &cells);
         let live_rows = slim_tool_live_rows(12, &cells);
 
         assert_eq!(slim_tool_overflow_hint(1, &[]), "+1 more");
-        assert!(
-            !detail_rows
-                .iter()
-                .any(|row| row.contains(DETAILS_HINT_LABEL))
-        );
         assert!(!live_rows.iter().any(|row| row.contains(DETAILS_HINT_LABEL)));
     }
 
@@ -2657,7 +2690,6 @@ mod tests {
             DETAILS_HINT_LABEL.to_string(),
         ];
 
-        let _detail_rows = slim_tool_detail_lines(42, &cells);
         let live_rows = slim_tool_live_rows(12, &cells);
 
         assert_eq!(
@@ -2672,36 +2704,42 @@ mod tests {
     }
 
     #[test]
-    fn slim_tool_collapsed_line_right_aligns_details_affordance() {
+    fn slim_tool_first_detail_keeps_details_affordance_inline() {
         let cells = vec![
             "bash".to_string(),
             "git status --short".to_string(),
             DETAILS_HINT_LABEL.to_string(),
         ];
-        let rendered = slim_tool_collapsed_line(56, &cells);
+        let rendered = slim_tool_first_detail_for_prefix(56, 16, &cells);
 
-        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 40);
-        assert!(
-            rendered.starts_with("bash · git status --short"),
-            "{rendered:?}"
+        assert_eq!(
+            rendered,
+            format!("bash · git status --short · {DETAILS_HINT_LABEL}")
         );
         assert!(rendered.ends_with(DETAILS_HINT_LABEL), "{rendered:?}");
         assert!(
-            rendered.contains(&format!("  {DETAILS_HINT_LABEL}")),
-            "affordance should be separated by flex spacer: {rendered:?}"
+            UnicodeWidthStr::width(rendered.as_str()) <= 56usize.saturating_sub(16 + 2),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.contains(&format!(" · {DETAILS_HINT_LABEL}")),
+            "affordance should stay in flow after an inline separator: {rendered:?}"
         );
     }
 
     #[test]
-    fn slim_tool_collapsed_line_preserves_details_when_left_truncates() {
+    fn slim_tool_first_detail_preserves_details_when_left_truncates() {
         let cells = vec![
             "bash".to_string(),
             "very long command summary with enough tokens to overflow".to_string(),
             DETAILS_HINT_LABEL.to_string(),
         ];
-        let rendered = slim_tool_collapsed_line(44, &cells);
+        let rendered = slim_tool_first_detail_for_prefix(44, 16, &cells);
 
-        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 28);
+        assert!(
+            UnicodeWidthStr::width(rendered.as_str()) <= 44usize.saturating_sub(16 + 2),
+            "{rendered:?}"
+        );
         assert!(rendered.contains('…'), "{rendered:?}");
         assert!(rendered.ends_with(DETAILS_HINT_LABEL), "{rendered:?}");
     }
@@ -2746,6 +2784,46 @@ mod tests {
     }
 
     #[test]
+    fn summarize_search_args_show_query_scope_and_limit() {
+        let summary = summarize_tool_args(
+            "codebase_search",
+            Some(r#"{"query":"reasoning compact row render slim tool summary rows tests","scope":"code","max_results":10}"#),
+        )
+        .expect("summary");
+
+        assert_eq!(
+            summary,
+            "reasoning compact row render slim tool summary rows tests · code · limit 10"
+        );
+    }
+
+    #[test]
+    fn summarize_request_context_args_avoids_empty_summary() {
+        let summary = summarize_tool_args(
+            "request_context",
+            Some(r#"{"requests":[{"kind":"session_state","query":"current git branch dirty files recent commits reasoning and tool rows"},{"kind":"recent_runtime","query":"reasoning compact row tool render row latest failures screenshots validation commands"}]}"#),
+        )
+        .expect("summary");
+
+        assert!(
+            summary.contains("session_state: current git branch dirty files recen…"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("recent_runtime: reasoning compact row tool render ro…"),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn summarize_request_context_args_falls_back_when_no_renderable_requests() {
+        let summary =
+            summarize_tool_args("request_context", Some(r#"{"requests":[{}]}"#)).expect("summary");
+
+        assert!(summary.contains("requests"), "{summary}");
+    }
+
+    #[test]
     fn summarize_search_result_promotes_result_count() {
         let summary = summarize_tool_result(
             "codebase_search",
@@ -2753,7 +2831,7 @@ mod tests {
         )
         .expect("summary");
 
-        assert_eq!(summary, "**2 result(s)** (scope: `code`)");
+        assert_eq!(summary, "2 result(s) (scope: code)");
     }
 
     #[test]
@@ -2892,6 +2970,35 @@ mod tests {
         assert!(text.contains("3 lines"), "{text}");
         assert!(text.contains("Considering documentation needs"), "{text}");
         assert!(text.contains("I need to modify documents"), "{text}");
+    }
+
+    #[test]
+    fn slim_assistant_reasoning_truncates_long_lines_to_view_width() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: String::new(),
+                thinking: "**Fixing code issues**\n\nI need to fix a long reasoning row before it reaches the right edge of the slim transcript viewport. The row should truncate safely and keep the terminal stable.".into(),
+                complete: false,
+            },
+        };
+        let (area, mut buf) = make_buf(64, 8);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(
+            text.contains("I need to fix a long reasoning row"),
+            "{text}"
+        );
+        assert!(
+            text.contains('…'),
+            "long reasoning line should truncate safely: {text}"
+        );
     }
 
     #[test]
@@ -3095,7 +3202,7 @@ mod tests {
         let text = buf_text(&buf, area);
         assert!(text.contains("diskutil"), "{text}");
         assert!(text.contains("diskutil list /dev/disk4"), "{text}");
-        assert!(text.contains("3 lin"), "{text}");
+        assert!(text.contains("3 li"), "{text}");
         assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
     }
 

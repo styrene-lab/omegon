@@ -20,7 +20,6 @@ pub mod dashboard_projection;
 pub mod editor;
 pub mod effects;
 pub mod extension_overlays;
-pub mod focus_view;
 pub mod footer;
 pub mod footer_projection;
 pub mod glyphs;
@@ -291,13 +290,6 @@ pub enum TuiCommand {
 /// the agent loop checks it. Arc so both tasks can access it.
 pub type SharedCancel = std::sync::Arc<std::sync::Mutex<Option<CancellationToken>>>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PaneFocus {
-    Editor,
-    Conversation,
-    Dashboard,
-}
-
 struct OperatorEvent {
     message: String,
     color: Color,
@@ -398,13 +390,9 @@ struct App {
     conversation_area: Option<Rect>,
     /// Last on-screen editor area for mouse hit-testing.
     editor_area: Option<Rect>,
-    /// Which pane currently owns pointer-driven interaction.
-    pane_focus: PaneFocus,
     footer_data: FooterData,
     /// CIC instrument panel for telemetry visualization
     instrument_panel: InstrumentPanel,
-    /// Focus mode toggle state
-    focus_mode: bool,
     // ui_mode removed — all behavior driven by ui_surfaces
     ui_surfaces: UiSurfaces,
     theme: Box<dyn theme::Theme>,
@@ -1604,14 +1592,12 @@ impl App {
             dashboard_area: None,
             conversation_area: None,
             editor_area: None,
-            pane_focus: PaneFocus::Editor,
             footer_data: FooterData {
                 model_id,
                 model_provider,
                 ..Default::default()
             },
             instrument_panel: InstrumentPanel::default(),
-            focus_mode: false,
             // ui_mode removed — surfaces drive everything
             ui_surfaces: UiSurfaces::lean(),
             theme: theme::default_theme(),
@@ -1689,15 +1675,12 @@ impl App {
 
     fn enable_mouse_interaction_mode(&mut self) {
         self.terminal_copy_mode = false;
-        self.focus_mode = false;
         self.set_mouse_capture(true);
     }
 
     fn apply_ui_preset(&mut self, surfaces: UiSurfaces) {
         self.ui_surfaces = surfaces;
-        if surfaces.is_compact() {
-            self.focus_mode = false;
-        }
+        if surfaces.is_compact() {}
     }
 
     fn toggle_ui_surface(&mut self, surface: UiSurfaceToggle, enabled: bool) {
@@ -1774,47 +1757,9 @@ impl App {
         )
     }
 
-    fn set_focus_mode(&mut self, enabled: bool) {
-        if self.focus_mode == enabled {
-            return;
-        }
-        self.focus_mode = enabled;
-        if enabled {
-            // Entering /focus should bias to the live tail, not to a stale
-            // previously-selected segment. Operators use /focus as a
-            // "show me the current conversation clearly" command; if an old
-            // selection remains latched from earlier mouse/keyboard navigation,
-            // preserving it here makes focus mode appear off-by-one (or more)
-            // relative to the latest assistant turn.
-            let focus_idx = self.conversation.select_focus_entry_segment();
-            if let Some(idx) = focus_idx {
-                let _ = self.handle_select_conversation_segment_action(
-                    SelectConversationSegmentAction {
-                        segment: ConversationSegmentRef::by_index(idx),
-                    },
-                );
-            }
-            self.pane_focus = PaneFocus::Conversation;
-            self.terminal_copy_mode = false;
-            self.set_mouse_capture(false);
-            self.show_toast(
-                "Focus mode — Tab/Shift+Tab tools, Ctrl+O details, a expands visible, Esc exits",
-                ratatui_toaster::ToastType::Info,
-            );
-        } else {
-            self.conversation.set_timeline_expanded_segment(None);
-            self.set_mouse_capture(true);
-            self.show_toast(
-                "Focus mode disabled — Shift+click-drag to select text",
-                ratatui_toaster::ToastType::Info,
-            );
-        }
-    }
-
     fn set_terminal_copy_mode(&mut self, enabled: bool) {
         let changed = self.terminal_copy_mode != enabled;
         self.terminal_copy_mode = enabled;
-        self.focus_mode = false;
         self.set_mouse_capture(!enabled);
         if !changed {
             return;
@@ -3933,7 +3878,7 @@ impl App {
     /// it falls back to the compact engine panel so non-instrument layouts still
     /// expose provider/model state.
     fn render_bottom_footer(&self, area: Rect, frame: &mut Frame, t: &dyn theme::Theme) -> Rect {
-        if self.focus_mode || !self.ui_surfaces.footer {
+        if !self.ui_surfaces.footer {
             return Rect::ZERO;
         }
 
@@ -4046,15 +3991,6 @@ impl App {
             }
         }
 
-        // ── Focus mode: isolate the selected conversation segment ─────────
-        if self.focus_mode && self.conversation.tabs.is_conversation_active() {
-            self.render_focus_view(frame, area);
-
-            let now = std::time::Instant::now();
-            self.operator_events.retain(|e| e.expires_at > now);
-            return;
-        }
-
         // ── Main surface layout ────────────────────────────────────
         let live_cleave = self
             .dashboard_handles
@@ -4083,17 +4019,13 @@ impl App {
         let editor_height = editor_height_for(&self.editor, area);
         let editor_info_height =
             u16::from(runtime_queue_depth(self.runtime_queue_snapshot.as_ref()) > 0);
-        let workbench_state = if !self.focus_mode {
-            WorkbenchState {
-                active: active_workbench_snapshot(self.workbench_state.active.as_ref(), None),
-                cleave: live_cleave,
-                delegate: live_delegate,
-                workstreams: self.workbench_state.workstreams.clone(),
-            }
-        } else {
-            WorkbenchState::default()
+        let workbench_state = WorkbenchState {
+            active: active_workbench_snapshot(self.workbench_state.active.as_ref(), None),
+            cleave: live_cleave,
+            delegate: live_delegate,
+            workstreams: self.workbench_state.workstreams.clone(),
         };
-        let raw_tool_inspection_height = if self.ui_surfaces.is_compact() && !self.focus_mode {
+        let raw_tool_inspection_height = if self.ui_surfaces.is_compact() {
             self.tool_inspection_target
                 .as_ref()
                 .map(|target| self.conversation.tool_inspection_height_by_id(target.id()))
@@ -4107,7 +4039,6 @@ impl App {
         let layout_plan = plan_tui_layout(TuiLayoutInputs {
             area,
             surfaces: self.ui_surfaces,
-            focus_mode: self.focus_mode,
             dashboard_has_content,
             editor_height,
             editor_info_height,
@@ -4180,7 +4111,8 @@ impl App {
             let density = self.settings().tool_detail;
             let pinned_segment = self.conversation.timeline_expanded_segment();
             let selected_segment = self.conversation.selected_segment_index();
-            let (segments, conv_state) = self.conversation.segments_and_state();
+            let (segments, conv_state, image_cache) =
+                self.conversation.segments_state_and_image_cache();
             let conv_widget = conv_widget::ConversationWidget::new(segments, t.as_ref())
                 .with_mode(if self.ui_surfaces.is_compact() {
                     SegmentRenderMode::Slim
@@ -4190,8 +4122,19 @@ impl App {
                 .with_density(density)
                 .with_pinned_segment(pinned_segment)
                 .with_selected_segment(selected_segment)
-                .with_detail_hint_enabled(self.focus_mode);
+                .with_detail_hint_enabled(false);
             frame.render_stateful_widget(conv_widget, content_area, conv_state);
+            for (segment_idx, image_area) in conv_state.visible_image_areas(segments, content_area)
+            {
+                let Some(SegmentContent::Image { path, .. }) =
+                    segments.get(segment_idx).map(|segment| &segment.content)
+                else {
+                    continue;
+                };
+                if let Some(protocol) = image_cache.get_or_create(segment_idx, path) {
+                    image::render_image(image_area, frame, protocol);
+                }
+            }
         } else {
             // Render extension widget with schema-aware formatting
             if let Tab::Extension { widget_id, .. } = self.conversation.tabs.active()
@@ -4303,34 +4246,6 @@ impl App {
             ));
             self.status_line
                 .render(status_area, frame, self.theme.as_ref());
-        }
-
-        // Overlay images on top of placeholders (second pass — needs Frame for StatefulImage)
-        {
-            let conv_area = conversation_area;
-            // Collect image info without holding borrows
-            let image_renders: Vec<(usize, Rect, std::path::PathBuf)> = {
-                let segments = self.conversation.segments();
-                let conv_state = &self.conversation.conv_state;
-                conv_state
-                    .visible_image_areas(segments, conv_area)
-                    .into_iter()
-                    .filter_map(|(idx, area)| {
-                        if let SegmentContent::Image { ref path, .. } = segments[idx].content {
-                            Some((idx, area, path.clone()))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            };
-            // Now render with mutable access to image_cache
-            for (seg_idx, area, path) in image_renders {
-                if let Some(protocol) = self.conversation.image_cache.get_or_create(seg_idx, &path)
-                {
-                    image::render_image(area, frame, protocol);
-                }
-            }
         }
 
         // Project dashboard strip (above footer/tooling/instruments)
@@ -4499,9 +4414,9 @@ impl App {
                 String::new()
             } else if self.editor.is_empty() {
                 if self.ui_surfaces.dashboard {
-                    "⏎ send  ⇧⏎/⌥⏎ newline  ^F focus  ^D tree  / commands ".into()
+                    "⏎ send  ⇧⏎/⌥⏎ newline  ^O/Tab details  ^D tree  / commands ".into()
                 } else {
-                    "⏎ send  ⇧⏎/⌥⏎ newline  ^F focus  /ui surfaces  / commands ".into()
+                    "⏎ send  ⇧⏎/⌥⏎ newline  ^O/Tab details  /ui surfaces  / commands ".into()
                 }
             } else {
                 "⏎ send  ⇧⏎/⌥⏎ newline  ↑/↓ history ".into()
@@ -4648,11 +4563,7 @@ impl App {
 
         // ── Tutorial overlay — rendered on top of everything except toasts ──
         if let Some(ref overlay) = self.tutorial_overlay {
-            let footer_h = if self.focus_mode {
-                0
-            } else {
-                footer_area.height
-            };
+            let footer_h = footer_area.height;
             overlay.render(main_area, frame.buffer_mut(), self.theme.as_ref(), footer_h);
         }
 
@@ -4743,29 +4654,6 @@ impl App {
         }
     }
 
-    fn render_focus_view(&mut self, frame: &mut Frame, area: Rect) {
-        self.conversation_area = Some(area);
-        self.editor_area = None;
-        self.dashboard_area = None;
-
-        let focus = focus_view::build_focus_lines(
-            self.conversation.segments(),
-            self.conversation.selected_or_focused_segment(),
-            area,
-            self.theme.as_ref(),
-        );
-        let total_lines = focus.lines.len() as u16;
-        let max_scroll = total_lines.saturating_sub(focus.viewport_height);
-        if self.conversation.conv_state.scroll_offset > max_scroll {
-            self.conversation.conv_state.scroll_offset = max_scroll;
-        }
-        self.conversation.conv_state.user_scrolled = self.conversation.conv_state.scroll_offset > 0;
-        let top_line = max_scroll.saturating_sub(self.conversation.conv_state.scroll_offset);
-        focus_view::render_focus_lines(frame, area, self.theme.as_ref(), focus, top_line);
-    }
-
-    /// Show a transient toast notification.
-    /// Try to paste a clipboard image. Shows visible feedback in conversation.
     fn try_paste_clipboard_image(&mut self) {
         if let Some(path) = clipboard_image_to_temp() {
             self.show_toast(
@@ -5295,7 +5183,6 @@ impl App {
             "show harness status (providers, MCP, secrets, routing)",
             &[],
         ),
-        ("focus", "toggle instrument panel focus mode", &[]),
         (
             "tree",
             "show design tree summary",
@@ -6368,17 +6255,10 @@ Scroll transcript:
                 SlashResult::Display("Use the explicit singular command: /subagent status".into())
             }
 
-            "focus" => {
-                self.set_focus_mode(!self.focus_mode);
-                let status = if self.focus_mode {
-                    "enabled"
-                } else {
-                    "disabled"
-                };
-                SlashResult::Display(format!(
-                    "Focus mode → {status} (selected segment isolated for terminal-native selection)"
-                ))
-            }
+            "focus" => SlashResult::Display(
+                "Focus mode has been removed. Use Ctrl+O or Tab on an empty composer to toggle the tool detail row."
+                    .into(),
+            ),
 
             "ui" => {
                 let args = args.trim();
@@ -8826,10 +8706,8 @@ pub async fn run_tui(
                         };
 
                         if point_in(app.dashboard_area) {
-                            app.pane_focus = PaneFocus::Dashboard;
                             app.dashboard.sidebar_active = true;
                         } else if point_in(app.conversation_area) {
-                            app.pane_focus = PaneFocus::Conversation;
                             app.dashboard.sidebar_active = false;
                             if let Some(area) = app.conversation_area
                                 && let Some(idx) = app.conversation.segment_at(area, mouse.row)
@@ -8852,7 +8730,6 @@ pub async fn run_tui(
                                 app.last_left_click = Some((mouse.column, mouse.row, now));
                             }
                         } else if point_in(app.editor_area) {
-                            app.pane_focus = PaneFocus::Editor;
                             app.dashboard.sidebar_active = false;
                         }
                     }
@@ -9376,49 +9253,16 @@ pub async fn run_tui(
                         }
                     }
 
-                    if app.focus_mode && app.editor.is_empty() {
-                        match (key.code, key.modifiers) {
-                            (KeyCode::Up, _) | (KeyCode::Left, _) => {
-                                app.conversation.scroll_up(3);
-                                continue;
-                            }
-                            (KeyCode::Down, _) | (KeyCode::Right, _) => {
-                                app.conversation.scroll_down(3);
-                                continue;
-                            }
-                            (KeyCode::PageUp, _) => {
-                                app.conversation.scroll_up(20);
-                                continue;
-                            }
-                            (KeyCode::PageDown, _) => {
-                                app.conversation.scroll_down(20);
-                                continue;
-                            }
-                            (KeyCode::Home, _) => {
-                                app.conversation.conv_state.scroll_offset = u16::MAX;
-                                app.conversation.conv_state.user_scrolled = true;
-                                continue;
-                            }
-                            (KeyCode::End, _) => {
-                                app.conversation.scroll_down(u16::MAX);
-                                continue;
-                            }
-                            _ => {}
-                        }
-                    }
-
                     match (key.code, key.modifiers) {
                         // ── Interrupt: Escape or Ctrl+C ─────────────────
                         (KeyCode::Esc, _) => {
-                            // Dismiss modal/focus if active, otherwise interrupt agent
+                            // Dismiss modal if active, otherwise interrupt agent
                             if app.command_panel.is_some() {
                                 app.command_panel = None;
                             } else if app.active_modal.is_some() {
                                 app.active_modal = None;
                             } else if app.active_action_prompt.is_some() {
                                 app.active_action_prompt = None;
-                            } else if app.focus_mode {
-                                app.set_focus_mode(false);
                             } else if app.agent_active {
                                 let outcome = app
                                     .handle_ui_action(UiAction::CancelActiveTurn, &command_tx)
@@ -9515,11 +9359,7 @@ pub async fn run_tui(
                             app.copy_latest_assistant_response(SegmentExportMode::Plaintext);
                         }
                         (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
-                            if matches!(app.pane_focus, PaneFocus::Conversation) {
-                                app.copy_selected_conversation_segment();
-                            } else {
-                                app.editor.yank();
-                            }
+                            app.editor.yank();
                         }
                         (KeyCode::Char('t'), KeyModifiers::CONTROL | KeyModifiers::SHIFT)
                         | (KeyCode::Char('T'), KeyModifiers::CONTROL) => {
@@ -9591,11 +9431,6 @@ pub async fn run_tui(
                             }
                         }
 
-                        // Ctrl+F: toggle focus mode (copy-first selected segment view)
-                        (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-                            app.set_focus_mode(!app.focus_mode);
-                        }
-
                         // Ctrl+G: toggle UI preset (lean ↔ full).
                         (KeyCode::Char('g'), KeyModifiers::CONTROL) => {
                             let next = app.ui_surfaces.toggle_preset();
@@ -9617,7 +9452,7 @@ pub async fn run_tui(
                             }
                         }
 
-                        // Tab: command completion, @-picker insertion, or tool-focus traversal.
+                        // Tab: command completion, @-picker insertion, or inline tool-detail toggle.
                         (KeyCode::Tab, _) => {
                             let text = app.editor.render_text().to_string();
                             if let Some(ref picker) = app.at_picker {
@@ -9633,25 +9468,23 @@ pub async fn run_tui(
                                     app.editor.set_text(&cmd);
                                 }
                             } else if text.is_empty() {
-                                let viewport_height = app.conversation_area.map(|area| area.height);
-                                if app.focus_mode {
-                                    app.conversation
-                                        .select_next_visible_tool_card(viewport_height);
-                                } else if app
-                                    .conversation
-                                    .select_latest_visible_tool_card(viewport_height)
-                                    .is_some()
+                                if matches!(
+                                    app.tool_inspection_target,
+                                    Some(ToolInspectionTarget::Pinned(_))
+                                ) {
+                                    app.tool_inspection_target = None;
+                                } else if let Some(id) =
+                                    app.conversation.latest_expandable_tool_id()
                                 {
-                                    app.set_focus_mode(true);
+                                    app.tool_inspection_target =
+                                        Some(ToolInspectionTarget::Pinned(id));
                                 }
                             }
                         }
 
-                        // Shift+Tab: previous visible tool card in focus mode.
-                        (KeyCode::BackTab, _) if app.focus_mode => {
-                            let viewport_height = app.conversation_area.map(|area| area.height);
-                            app.conversation
-                                .select_prev_visible_tool_card(viewport_height);
+                        // Shift+Tab: collapse the pinned tool detail row.
+                        (KeyCode::BackTab, _) => {
+                            app.tool_inspection_target = None;
                         }
 
                         // Alt+N: next conversation tab
@@ -9680,32 +9513,6 @@ pub async fn run_tui(
                                     &command_tx,
                                 )
                                 .await;
-                        }
-
-                        // Enter in focus mode toggles expansion for the focused segment.
-                        (KeyCode::Enter, _) if app.focus_mode => {
-                            if let Some(idx) = app.conversation.timeline_focused_segment() {
-                                let _ = app.handle_open_conversation_segment_detail_action(
-                                    OpenConversationSegmentDetailAction {
-                                        segment: ConversationSegmentRef::by_index(idx),
-                                    },
-                                );
-                            }
-                        }
-
-                        // `a` in focus mode expands all visible tool cards.
-                        (KeyCode::Char('a'), mods)
-                            if app.focus_mode && !mods.contains(KeyModifiers::CONTROL) =>
-                        {
-                            let viewport_height = app.conversation_area.map(|area| area.height);
-                            app.conversation.expand_visible_tool_cards(viewport_height);
-                        }
-
-                        // `c` in focus mode copies the focused segment to clipboard.
-                        (KeyCode::Char('c'), mods)
-                            if app.focus_mode && !mods.contains(KeyModifiers::CONTROL) =>
-                        {
-                            app.copy_selected_conversation_segment();
                         }
 
                         // Submit / @-picker confirm

@@ -12,7 +12,6 @@ use crate::surfaces::layout::UiSurfaces;
 pub struct TuiLayoutInputs {
     pub area: Rect,
     pub surfaces: UiSurfaces,
-    pub focus_mode: bool,
     pub dashboard_has_content: bool,
     pub editor_height: u16,
     pub editor_info_height: u16,
@@ -46,12 +45,8 @@ pub struct TuiLayoutPlan {
     pub segment_detail_height: u16,
 }
 
-fn project_dashboard_height(inputs: TuiLayoutInputs, show_dashboard: bool) -> u16 {
-    if show_dashboard && !inputs.focus_mode {
-        1
-    } else {
-        0
-    }
+fn project_dashboard_height(_inputs: TuiLayoutInputs, show_dashboard: bool) -> u16 {
+    if show_dashboard { 1 } else { 0 }
 }
 
 pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
@@ -59,7 +54,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     let main_area = inputs.area;
     let dashboard_area = None;
 
-    let footer_height = if inputs.focus_mode || !inputs.surfaces.footer {
+    let footer_height = if !inputs.surfaces.footer {
         0
     } else if inputs.surfaces.instruments {
         inputs.instrument_footer_height
@@ -67,7 +62,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         1
     };
 
-    let is_slim = inputs.surfaces.is_compact() && !inputs.focus_mode;
+    let is_slim = inputs.surfaces.is_compact();
     let status_height = if is_slim { inputs.status_height } else { 0 };
     let permission_lane_height = if is_slim && inputs.pending_permission {
         2
@@ -79,11 +74,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     } else {
         0
     };
-    let mut workbench_height = if inputs.focus_mode {
-        0
-    } else {
-        inputs.workbench_height
-    };
+    let mut workbench_height = inputs.workbench_height;
     let mut segment_detail_height = inputs.segment_detail_height;
 
     if permission_lane_height > 0 {
@@ -158,7 +149,6 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 100, 40),
             surfaces: UiSurfaces::lean(),
-            focus_mode: false,
             dashboard_has_content: true,
             editor_height: 3,
             editor_info_height: 0,
@@ -180,7 +170,6 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 140, 40),
             surfaces: UiSurfaces::full(),
-            focus_mode: false,
             dashboard_has_content: true,
             editor_height: 3,
             editor_info_height: 0,
@@ -207,7 +196,6 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 120, 36),
             surfaces: UiSurfaces::lean(),
-            focus_mode: false,
             dashboard_has_content: false,
             editor_height: 4,
             editor_info_height: 1,
@@ -236,7 +224,6 @@ mod tests {
                 instruments: false,
                 footer: true,
             },
-            focus_mode: false,
             dashboard_has_content: false,
             editor_height: 3,
             editor_info_height: 0,
@@ -258,7 +245,6 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 100, 32),
             surfaces: UiSurfaces::lean(),
-            focus_mode: false,
             dashboard_has_content: false,
             editor_height: 3,
             editor_info_height: 0,
@@ -279,7 +265,6 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 120, 40),
             surfaces: UiSurfaces::lean(),
-            focus_mode: false,
             dashboard_has_content: false,
             editor_height: 4,
             editor_info_height: 1,
@@ -304,7 +289,6 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 120, 18),
             surfaces: UiSurfaces::lean(),
-            focus_mode: false,
             dashboard_has_content: false,
             editor_height: 4,
             editor_info_height: 1,
