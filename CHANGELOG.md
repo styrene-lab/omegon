@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Injected the live delegate queue into model context when background delegates are active or have unviewed terminal results, making reconciliation front-and-center for the agent.
 - Strengthened active plan context injection so the Workbench plan remains front-and-center until active/todo items are reconciled.
 - Improved TUI composer history recall to preserve the pre-recall draft and clear history session state when the operator edits recalled input.
+- Added Workspace role/kind rows to the shared settings projection so the `/settings` workspace tab exposes the existing workspace selectors instead of hiding dispatched editors behind unreachable row IDs.
 - Wired Enter on TUI `/settings` rows to the existing model, thinking, context, tool-density, update-channel, workspace-role, and workspace-kind selectors so the settings screen now edits already-supported choice settings.
 - Expanded the shared settings projection with Runtime, UI, Workspace, and Updates tabs plus editor, choice, status, route, and persistence metadata for full-screen settings rendering.
 - Added initial TUI settings-screen state backed by the renderer-neutral settings surface projection so `/settings` can evolve into a persistent surface rather than a selector chain.
