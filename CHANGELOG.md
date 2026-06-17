@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Wired Enter on TUI `/settings` rows to the existing model, thinking, context, tool-density, update-channel, workspace-role, and workspace-kind selectors so the settings screen now edits already-supported choice settings.
 - Expanded the shared settings projection with Runtime, UI, Workspace, and Updates tabs plus editor, choice, status, route, and persistence metadata for full-screen settings rendering.
 - Added initial TUI settings-screen state backed by the renderer-neutral settings surface projection so `/settings` can evolve into a persistent surface rather than a selector chain.
 - Added a renderer-neutral settings surface projection under `surfaces/settings.rs` and routed the harness settings command/tool overview through it so TUI, ACP, CLI, web, and agent-facing paths can share one semantic settings model.
