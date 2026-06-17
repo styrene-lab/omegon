@@ -10,8 +10,8 @@ use super::state::{self, ChildStatus, CleaveState};
 use super::waves::compute_waves;
 use super::worktree;
 use crate::child_agent::{
-    ChildAgentRuntimeProfile, ChildAgentSpawnConfig, spawn_headless_child_agent,
-    write_child_prompt_file,
+    ChildAgentSpawnConfig, ChildPromptKind, child_prompt_relative_path, spawn_headless_child_agent,
+    spawn_sandboxed_child_agent, write_child_prompt_file,
 };
 use anyhow::{Context, Result};
 use std::collections::VecDeque;
@@ -330,7 +330,7 @@ pub async fn run_cleave(
 
         // ── Emit task inventories ────────────────────────────────────────
         for info in &to_dispatch {
-            let tasks = progress::extract_task_items(&info.prompt);
+            let tasks = crate::child_agent::extract_task_items(&info.prompt);
             let scope_files = state.children[info.child_idx].scope.len();
             config
                 .progress_sink
@@ -812,41 +812,6 @@ struct ChildDispatchConfig {
     pub dangerously_bypass_permissions: bool,
 }
 
-/// Resolve a Nex profile and spawn the child inside a container.
-fn resolve_and_spawn_sandboxed(
-    config: &ChildAgentSpawnConfig,
-    cwd: &Path,
-    prompt_file: &Path,
-) -> anyhow::Result<(Child, u32)> {
-    let home = dirs::home_dir().unwrap_or_default().join(".omegon");
-    let registry = crate::nex::NexRegistry::load(&home, Some(cwd))?;
-
-    // Try project-local profile first, then fall back to "coding" built-in
-    let profile = registry
-        .resolve(cwd.file_name().and_then(|n| n.to_str()).unwrap_or("coding"))
-        .or_else(|| registry.resolve("coding"))
-        .ok_or_else(|| anyhow::anyhow!("no nex profile available for sandbox"))?
-        .clone();
-
-    crate::nex::spawn_containerized_child_agent(config, &profile, cwd, prompt_file)
-}
-
-fn child_runtime_profile(runtime: &CleaveChildRuntimeProfile) -> ChildAgentRuntimeProfile {
-    ChildAgentRuntimeProfile {
-        context_class: runtime.context_class.clone(),
-        thinking_level: runtime.thinking_level.clone(),
-        enabled_tools: runtime.enabled_tools.clone(),
-        disabled_tools: runtime.disabled_tools.clone(),
-        skills: runtime.skills.clone(),
-        enabled_extensions: runtime.enabled_extensions.clone(),
-        disabled_extensions: runtime.disabled_extensions.clone(),
-        preloaded_files: runtime.preloaded_files.clone(),
-        persona: runtime.persona.clone(),
-        slim: runtime.slim,
-        nex_profile: None,
-    }
-}
-
 fn classify_child_error(model: &str, e: anyhow::Error) -> ChildError {
     let provider = model.split(':').next().unwrap_or("unknown").to_string();
     let msg = e.to_string();
@@ -912,8 +877,8 @@ fn spawn_child_process(
     if !cwd.exists() {
         anyhow::bail!("Child cwd does not exist: {}", cwd.display());
     }
-    let prompt_file =
-        write_child_prompt_file(cwd, &format!(".omegon/cleave/{label}/prompt.md"), prompt)?;
+    let prompt_relative_path = child_prompt_relative_path(ChildPromptKind::Cleave, label)?;
+    let prompt_file = write_child_prompt_file(cwd, &prompt_relative_path, prompt)?;
     tracing::info!(child = %label, prompt_file = %prompt_file.display(), prompt_len = prompt.len(), "writing prompt file");
     let child_config = ChildAgentSpawnConfig {
         agent_binary: config.agent_binary.clone(),
@@ -921,12 +886,12 @@ fn spawn_child_process(
         max_turns: config.max_turns,
         inherited_env: config.inherited_env.clone(),
         injected_env: config.injected_env.clone(),
-        runtime: child_runtime_profile(&config.runtime),
+        runtime: config.runtime.clone(),
         dangerously_bypass_permissions: config.dangerously_bypass_permissions,
     };
     tracing::info!(child = %label, inherited_env = config.inherited_env.len(), injected_env = config.injected_env.len(), inherited_env_names = ?config.inherited_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), injected_env_names = ?config.injected_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), "child env inheritance");
     let (child, pid) = if config.sandbox {
-        match resolve_and_spawn_sandboxed(&child_config, cwd, &prompt_file) {
+        match spawn_sandboxed_child_agent(&child_config, cwd, &prompt_file, None) {
             Ok(result) => result,
             Err(e) => {
                 tracing::warn!(child = %label, error = %e, "sandbox spawn failed, falling back to subprocess");

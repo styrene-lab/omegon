@@ -596,21 +596,11 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
         return Some(crate::util::truncate(&line, 72));
     }
 
-    if matches!(tool_name, "memory_recall" | "memory_query") {
-        let fact_count = lines
-            .iter()
-            .filter(|line| {
-                let trimmed = line.trim_start();
-                trimmed.chars().next().is_some_and(|ch| ch.is_ascii_digit())
-                    && trimmed.contains(". [")
-            })
-            .count();
-        if fact_count > 0 {
-            return Some(format!(
-                "{fact_count} fact{}",
-                if fact_count == 1 { "" } else { "s" }
-            ));
-        }
+    if is_memory_tool(tool_name)
+        && let Some(summary) =
+            summarize_memory_result_cells(tool_name, &lines).map(|cells| cells.join(" · "))
+    {
+        return Some(summary);
     }
 
     match (line_count, first_non_empty) {
@@ -626,6 +616,194 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
         (count, None) if count > 0 => Some(format!("{count} blank line(s)")),
         _ => Some("ok".to_string()),
     }
+}
+
+fn is_memory_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "memory_store"
+            | "memory_recall"
+            | "memory_query"
+            | "memory_archive"
+            | "memory_supersede"
+            | "memory_connect"
+            | "memory_focus"
+            | "memory_release"
+            | "memory_episodes"
+            | "memory_compact"
+            | "memory_search_archive"
+            | "memory_ingest_lifecycle"
+    )
+}
+
+fn summarize_memory_result_cells(tool_name: &str, lines: &[&str]) -> Option<Vec<String>> {
+    if matches!(tool_name, "memory_recall") {
+        if let Some(cells) = summarize_numbered_memory_facts(lines) {
+            return Some(cells);
+        }
+    }
+
+    if matches!(tool_name, "memory_query") {
+        if let Some(cells) = summarize_memory_query_sections(lines) {
+            return Some(cells);
+        }
+    }
+
+    if matches!(tool_name, "memory_search_archive") {
+        if let Some(cells) = summarize_archived_memory_facts(lines) {
+            return Some(cells);
+        }
+    }
+
+    if matches!(tool_name, "memory_episodes") {
+        if let Some(cells) = summarize_memory_episodes(lines) {
+            return Some(cells);
+        }
+    }
+
+    summarize_memory_status_line(lines)
+}
+
+fn summarize_numbered_memory_facts(lines: &[&str]) -> Option<Vec<String>> {
+    let facts = lines
+        .iter()
+        .filter_map(|line| parse_memory_fact_line(line))
+        .collect::<Vec<_>>();
+    if facts.is_empty() {
+        return None;
+    }
+
+    let fact_count = facts.len();
+    let mut cells = vec![format!(
+        "{fact_count} fact{}",
+        if fact_count == 1 { "" } else { "s" }
+    )];
+
+    let mut topics: Vec<(&str, usize)> = Vec::new();
+    for fact in &facts {
+        if let Some(topic) = fact.topic {
+            if let Some((_, count)) = topics.iter_mut().find(|(known, _)| *known == topic) {
+                *count += 1;
+            } else {
+                topics.push((topic, 1));
+            }
+        }
+    }
+    topics.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    cells.extend(
+        topics
+            .into_iter()
+            .take(2)
+            .map(|(topic, count)| format!("{topic} {count}")),
+    );
+
+    if let Some(preview) = facts
+        .iter()
+        .find_map(|fact| (!fact.preview.is_empty()).then_some(fact.preview))
+    {
+        cells.push(format!("top: {}", crate::util::truncate(preview, 56)));
+    }
+
+    Some(cells)
+}
+
+fn summarize_memory_query_sections(lines: &[&str]) -> Option<Vec<String>> {
+    let mut cells = Vec::new();
+    if let Some(header) = lines
+        .iter()
+        .map(|line| line.trim())
+        .find(|line| line.contains(" facts across ") && line.contains(" sections"))
+    {
+        cells.push(header.trim_end_matches(':').to_string());
+    }
+
+    cells.extend(
+        lines
+            .iter()
+            .filter_map(|line| line.trim().strip_prefix("## "))
+            .take(2)
+            .map(str::to_string),
+    );
+
+    if cells.is_empty() { None } else { Some(cells) }
+}
+
+fn summarize_archived_memory_facts(lines: &[&str]) -> Option<Vec<String>> {
+    let facts = lines
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| line.starts_with('[') && line.contains("] ("))
+        .collect::<Vec<_>>();
+    if facts.is_empty() {
+        return None;
+    }
+    let mut cells = vec![format!(
+        "{} archived fact{}",
+        facts.len(),
+        if facts.len() == 1 { "" } else { "s" }
+    )];
+    if let Some(first) = facts.first() {
+        cells.push(format!("top: {}", crate::util::truncate(first, 56)));
+    }
+    Some(cells)
+}
+
+fn summarize_memory_episodes(lines: &[&str]) -> Option<Vec<String>> {
+    let episodes = lines
+        .iter()
+        .filter_map(|line| line.trim().strip_prefix("### "))
+        .collect::<Vec<_>>();
+    if episodes.is_empty() {
+        return None;
+    }
+    let mut cells = vec![format!(
+        "{} episode{}",
+        episodes.len(),
+        if episodes.len() == 1 { "" } else { "s" }
+    )];
+    cells.push(format!("top: {}", crate::util::truncate(episodes[0], 56)));
+    Some(cells)
+}
+
+fn summarize_memory_status_line(lines: &[&str]) -> Option<Vec<String>> {
+    let line = lines
+        .iter()
+        .map(|line| clean_inline_text(line.trim()))
+        .find(|line| !line.is_empty())?;
+    Some(vec![crate::util::truncate(&line, 96)])
+}
+
+struct MemoryFactLine<'a> {
+    topic: Option<&'a str>,
+    preview: &'a str,
+}
+
+fn parse_memory_fact_line(line: &str) -> Option<MemoryFactLine<'_>> {
+    let trimmed = line.trim_start();
+    let dot = trimmed.find(". [")?;
+    if !trimmed[..dot].chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+
+    let after_id = trimmed[dot + 3..].find(']').map(|idx| dot + 3 + idx + 1)?;
+    let remainder = trimmed[after_id..].trim_start();
+    if let Some(after_open) = remainder.strip_prefix('(')
+        && let Some(close_idx) = after_open.find(')')
+    {
+        let meta = &after_open[..close_idx];
+        let topic = meta
+            .split(',')
+            .next()
+            .map(str::trim)
+            .filter(|topic| !topic.is_empty());
+        let preview = after_open[close_idx + 1..].trim_start();
+        return Some(MemoryFactLine { topic, preview });
+    }
+
+    Some(MemoryFactLine {
+        topic: None,
+        preview: remainder,
+    })
 }
 
 fn summarize_live_tool_progress(
@@ -698,7 +876,14 @@ pub(crate) fn slim_tool_summary_cells(
         cells.push(summary);
     }
     if complete {
-        if let Some(summary) = summarize_tool_result(name, detail_result) {
+        if is_memory_tool(name)
+            && let Some(result) = detail_result
+        {
+            let lines = split_trimmed_trailing_empty_lines(result);
+            if let Some(memory_cells) = summarize_memory_result_cells(name, &lines) {
+                cells.extend(memory_cells);
+            }
+        } else if let Some(summary) = summarize_tool_result(name, detail_result) {
             cells.push(summary);
         }
         if let Some(ms) = duration_ms {
@@ -2835,14 +3020,103 @@ mod tests {
     }
 
     #[test]
-    fn summarize_memory_result_counts_recalled_facts() {
-        let summary = summarize_tool_result(
-            "memory_recall",
-            Some("1. [abc123] (Architecture, 120%) First fact\n2. [def456] (Decisions, 90%) Second fact"),
-        )
-        .expect("summary");
+    fn summarize_memory_result_counts_recalled_facts_with_context() {
+        let result = "1. [abc123] (Architecture, 120%) First fact\n2. [def456] (Decisions, 90%) Second fact\n3. [fedcba] (Architecture, 80%) Third fact";
+        let summary = summarize_tool_result("memory_recall", Some(result)).expect("summary");
 
-        assert_eq!(summary, "2 facts");
+        assert_eq!(
+            summary,
+            "3 facts · Architecture 2 · Decisions 1 · top: First fact"
+        );
+    }
+
+    #[test]
+    fn slim_memory_summary_cells_keep_result_context_separate_from_affordance() {
+        let result = "1. [abc123] (Architecture, 120%) First fact\n2. [def456] (Decisions, 90%) Second fact\n3. [fedcba] (Architecture, 80%) Third fact";
+        let cells = slim_tool_summary_cells(
+            "memory_recall",
+            Some(r#"{"query":"line above editor"}"#),
+            Some(result),
+            true,
+            None,
+            None,
+            Some(42),
+        );
+
+        assert_eq!(cells[0], "line above editor");
+        assert_eq!(cells[1], "3 facts");
+        assert_eq!(cells[2], "Architecture 2");
+        assert_eq!(cells[3], "Decisions 1");
+        assert_eq!(cells[4], "top: First fact");
+        assert_eq!(cells[5], "0.0s");
+        assert_eq!(cells[6], DETAILS_HINT_LABEL);
+    }
+
+    #[test]
+    fn slim_memory_query_cells_summarize_sections() {
+        let result = "18 facts across 3 sections:\n\n## Architecture (11 facts)\n  [a] Alpha\n\n## Decisions (4 facts)\n  [b] Beta\n\n## Known Issues (3 facts)";
+        let cells =
+            slim_tool_summary_cells("memory_query", None, Some(result), true, None, None, None);
+
+        assert_eq!(
+            cells,
+            vec![
+                "18 facts across 3 sections",
+                "Architecture (11 facts)",
+                "Decisions (4 facts)",
+                DETAILS_HINT_LABEL,
+            ]
+        );
+    }
+
+    #[test]
+    fn slim_memory_status_operations_use_action_summary_cells() {
+        let cases = [
+            ("memory_store", "Stored in Architecture: durable fact"),
+            ("memory_archive", "Archived 2 fact(s)."),
+            ("memory_supersede", "Superseded old-id → new fact new-id"),
+            ("memory_focus", "Pinned 3 fact(s) to working memory."),
+            ("memory_release", "Working memory cleared."),
+            (
+                "memory_compact",
+                "Context compaction requested. The agent loop will compact older conversation history.",
+            ),
+        ];
+
+        for (tool, result) in cases {
+            let cells = slim_tool_summary_cells(tool, None, Some(result), true, None, None, None);
+            assert_eq!(cells[0], crate::util::truncate(result, 96), "{tool}");
+            assert_eq!(cells[1], DETAILS_HINT_LABEL, "{tool}");
+        }
+    }
+
+    #[test]
+    fn slim_memory_episode_and_archive_search_cells_summarize_hits() {
+        let episode_cells = slim_tool_summary_cells(
+            "memory_episodes",
+            None,
+            Some("### 2026-06-17: UI polish\nWe improved slim rows.\n\n### 2026-06-16: Routing"),
+            true,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(episode_cells[0], "2 episodes");
+        assert_eq!(episode_cells[1], "top: 2026-06-17: UI polish");
+        assert_eq!(episode_cells[2], DETAILS_HINT_LABEL);
+
+        let archive_cells = slim_tool_summary_cells(
+            "memory_search_archive",
+            None,
+            Some("[abc] (Architecture) Archived fact\n[def] (Decisions) Other fact"),
+            true,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(archive_cells[0], "2 archived facts");
+        assert_eq!(archive_cells[1], "top: [abc] (Architecture) Archived fact");
+        assert_eq!(archive_cells[2], DETAILS_HINT_LABEL);
     }
 
     #[test]

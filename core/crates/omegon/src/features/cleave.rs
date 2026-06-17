@@ -20,6 +20,7 @@ use crate::autonomy::{
     ApprovalRequest, DecisionPolicy, active_subagent_policy, required_approval_details,
     subagent_policy_for_automation,
 };
+use crate::child_agent::ChildTaskItem;
 use crate::surfaces::operations::OperationWorkbenchProjection;
 
 use omegon_traits::{
@@ -346,7 +347,7 @@ pub struct ChildProgress {
     /// Most recent turn number reported by this child.
     pub last_turn: Option<u32>,
     /// Task checklist items extracted from the child's prompt.
-    pub tasks: Vec<crate::cleave::progress::ChildTaskItem>,
+    pub tasks: Vec<ChildTaskItem>,
     /// Number of tasks marked done (explicit or heuristic).
     pub tasks_done: usize,
     /// Wall-clock instant when status transitioned to "running".
@@ -2776,11 +2777,11 @@ mod assessment_tests {
                 total_tasks: 2,
                 scope_files: 1,
                 tasks: vec![
-                    crate::cleave::progress::ChildTaskItem {
+                    ChildTaskItem {
                         description: "Inspect".into(),
                         done: false,
                     },
-                    crate::cleave::progress::ChildTaskItem {
+                    ChildTaskItem {
                         description: "Report".into(),
                         done: false,
                     },
@@ -2867,11 +2868,11 @@ mod assessment_tests {
                 last_tool: Some("bash".into()),
                 last_turn: Some(3),
                 tasks: vec![
-                    crate::cleave::progress::ChildTaskItem {
+                    ChildTaskItem {
                         description: "Inspect".into(),
                         done: true,
                     },
-                    crate::cleave::progress::ChildTaskItem {
+                    ChildTaskItem {
                         description: "Patch".into(),
                         done: false,
                     },

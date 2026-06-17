@@ -20,8 +20,10 @@ use crate::autonomy::{
     subagent_policy_for_automation,
 };
 use crate::child_agent::{
-    ChildAgentBoundary, ChildAgentRuntimeProfile, ChildAgentSpawnConfig,
-    spawn_headless_child_agent, write_child_prompt_file,
+    ChildAgentActivity, ChildAgentBoundary, ChildAgentRuntimeProfile, ChildAgentSpawnConfig,
+    ChildPromptKind, ChildTaskItem, child_prompt_relative_path, extract_task_items,
+    parse_child_activity, spawn_headless_child_agent, spawn_sandboxed_child_agent,
+    write_child_prompt_file,
 };
 use crate::surfaces::operations::OperationWorkbenchProjection;
 use anyhow::Context;
@@ -56,7 +58,7 @@ pub struct DelegateProgressChild {
     pub completed_at: Option<std::time::SystemTime>,
     pub result_summary: Option<String>,
     pub failure_kind: Option<DelegateChildFailureKind>,
-    pub tasks: Vec<crate::cleave::progress::ChildTaskItem>,
+    pub tasks: Vec<ChildTaskItem>,
     pub tasks_done: usize,
 }
 
@@ -103,7 +105,7 @@ pub struct DelegateTask {
     /// Live turn number (updated during streaming).
     pub last_turn: Option<u32>,
     /// Task checklist items extracted from the delegate prompt.
-    pub tasks: Vec<crate::cleave::progress::ChildTaskItem>,
+    pub tasks: Vec<ChildTaskItem>,
 }
 
 /// Thread-safe store for delegate task results
@@ -760,20 +762,6 @@ impl DelegateRunner {
         self
     }
 
-    fn spawn_sandboxed(
-        &self,
-        config: &ChildAgentSpawnConfig,
-        prompt_file: &std::path::Path,
-    ) -> anyhow::Result<(tokio::process::Child, u32)> {
-        let home = dirs::home_dir().unwrap_or_default().join(".omegon");
-        let registry = crate::nex::NexRegistry::load(&home, Some(&self.cwd))?;
-        let profile = registry
-            .resolve("coding")
-            .ok_or_else(|| anyhow::anyhow!("no nex profile available for delegate sandbox"))?
-            .clone();
-        crate::nex::spawn_containerized_child_agent(config, &profile, &self.cwd, prompt_file)
-    }
-
     fn build_delegate_prompt(
         &self,
         worker_profile: DelegateWorkerProfile,
@@ -855,6 +843,10 @@ If blocked, say the blocker plainly.\n",
         prompt
     }
 
+    fn delegate_prompt_path(task_id: &str) -> anyhow::Result<String> {
+        child_prompt_relative_path(ChildPromptKind::Delegate, task_id)
+    }
+
     async fn run_delegate_child(
         &self,
         task_id: &str,
@@ -863,10 +855,19 @@ If blocked, say the blocker plainly.\n",
         mind: Option<&str>,
         session_model: Option<String>,
     ) -> anyhow::Result<String> {
-        let prompt_file = format!(".omegon/delegates/{task_id}/prompt.md");
+        let prompt_file = Self::delegate_prompt_path(task_id)?;
         let prompt_path = write_child_prompt_file(&self.cwd, &prompt_file, prompt)?;
 
-        let model = match runtime.model.clone() {
+        let child_runtime = runtime.worker_profile.runtime_profile(
+            runtime.scope.as_deref(),
+            runtime.thinking_level.as_deref(),
+            mind,
+        );
+        let model = match runtime
+            .model
+            .clone()
+            .or_else(|| child_runtime.model.clone())
+        {
             Some(model) => model,
             None => {
                 // Inherit the parent session's model so children use the same
@@ -888,15 +889,16 @@ If blocked, say the blocker plainly.\n",
             max_turns: runtime.worker_profile.max_turns(),
             inherited_env: Vec::new(),
             injected_env: Vec::new(),
-            runtime: runtime.worker_profile.runtime_profile(
-                runtime.scope.as_deref(),
-                runtime.thinking_level.as_deref(),
-                mind,
-            ),
+            runtime: child_runtime,
             dangerously_bypass_permissions: self.dangerously_bypass_permissions,
         };
         let (mut child, _pid) = if self.sandbox {
-            match self.spawn_sandboxed(&child_config, &prompt_path) {
+            match spawn_sandboxed_child_agent(
+                &child_config,
+                &self.cwd,
+                &prompt_path,
+                Some("coding"),
+            ) {
                 Ok(result) => result,
                 Err(e) => {
                     tracing::warn!(error = %e, "delegate sandbox spawn failed, falling back to subprocess");
@@ -940,31 +942,24 @@ If blocked, say the blocker plainly.\n",
 
                             // Throttle: parse at most once per second
                             if last_activity.duration_since(last_activity_event).as_secs() >= 1
-                                && let Some(event) =
-                                    crate::cleave::progress::parse_child_activity(&tid, &line)
-                                {
-                                    last_activity_event = std::time::Instant::now();
-                                    match &event {
-                                        crate::cleave::progress::ProgressEvent::ChildActivity {
-                                            turn,
-                                            tool,
-                                            ..
-                                        } => {
-                                            store.update_task_live_state(
-                                                &tid,
-                                                tool.clone(),
-                                                *turn,
-                                            );
-                                        }
-                                        crate::cleave::progress::ProgressEvent::ChildTaskDone {
-                                            task_index,
-                                            ..
-                                        } => {
-                                            store.mark_task_done(&tid, *task_index);
-                                        }
-                                        _ => {}
+                                && let Some(activity) = parse_child_activity(&line)
+                            {
+                                last_activity_event = std::time::Instant::now();
+                                match activity {
+                                    ChildAgentActivity::Tool { tool, .. } => {
+                                        store.update_task_live_state(&tid, Some(tool), None);
+                                    }
+                                    ChildAgentActivity::Turn { turn } => {
+                                        store.update_task_live_state(&tid, None, Some(turn));
+                                    }
+                                    ChildAgentActivity::TaskDone { task_index } => {
+                                        store.mark_task_done(&tid, task_index);
+                                    }
+                                    ChildAgentActivity::Tokens { .. } => {
+                                        // Delegate progress does not currently surface child token usage.
                                     }
                                 }
+                            }
                         }
                         Ok(Ok(None)) => break, // EOF
                         Ok(Err(e)) => {
@@ -1087,7 +1082,7 @@ If blocked, say the blocker plainly.\n",
             }
         }
 
-        let tasks = crate::cleave::progress::extract_task_items(&task);
+        let tasks = extract_task_items(&task);
         let task_entry = DelegateTask {
             task_id: task_id.clone(),
             agent_name,
@@ -2488,6 +2483,14 @@ mod tests {
     }
 
     #[test]
+    fn delegate_prompt_path_lives_under_omegon_state_dir() {
+        assert_eq!(
+            DelegateRunner::delegate_prompt_path("delegate_7").unwrap(),
+            ".omegon/delegate-prompts/delegate_7.md"
+        );
+    }
+
+    #[test]
     fn delegate_prompt_explicitly_forbids_trailing_prefill_stub() {
         let temp_dir = TempDir::new().unwrap();
         let runner = DelegateRunner::new(
@@ -2507,6 +2510,33 @@ mod tests {
                 && prompt.contains("trailing assistant prefill stub"),
             "got: {prompt}"
         );
+    }
+
+    #[test]
+    fn delegate_worker_profiles_disable_nested_subagent_tools() {
+        for profile in [
+            DelegateWorkerProfile::Scout,
+            DelegateWorkerProfile::Patch,
+            DelegateWorkerProfile::Verify,
+        ] {
+            let runtime = profile.runtime_profile(None, None, None);
+            for tool in [
+                "delegate",
+                "delegate_result",
+                "delegate_status",
+                "delegate_cancel",
+                "cleave_assess",
+                "cleave_run",
+            ] {
+                assert!(
+                    runtime
+                        .disabled_tools
+                        .iter()
+                        .any(|disabled| disabled == tool),
+                    "{profile:?} should disable nested subagent tool {tool}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -2960,9 +2990,7 @@ This agent runs in write mode and can modify files.
             completed_at: None,
             last_tool: None,
             last_turn: None,
-            tasks: crate::cleave::progress::extract_task_items(
-                "- [ ] Inspect files\n- [ ] Report findings",
-            ),
+            tasks: extract_task_items("- [ ] Inspect files\n- [ ] Report findings"),
         });
         store.update_task_live_state("delegate_1", Some("read".into()), Some(2));
         store.store_task(DelegateTask {

@@ -5,16 +5,10 @@
 //! - in-process harness tool use: callback sink updating shared state
 //! - future telemetry / RPC: file, socket, or event-bus sinks
 
-use serde::{Deserialize, Serialize};
+use crate::child_agent::{ChildAgentActivity, ChildTaskItem};
+use serde::Serialize;
 use std::io::Write;
 use std::sync::Arc;
-
-/// A single task item extracted from a child's prompt checklist.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChildTaskItem {
-    pub description: String,
-    pub done: bool,
-}
 
 /// Progress events emitted during cleave orchestration.
 #[derive(Debug, Clone, Serialize)]
@@ -166,222 +160,40 @@ where
 
 /// Parse a child stderr line for tool-call or turn-boundary patterns.
 ///
-/// Returns a `ChildActivity` event if the line matches, or `None`.
-/// Recognized patterns:
-/// - `→ write path/to/file` → tool="write", target="path/to/file"
-/// - `→ bash command...`    → tool="bash", target="command..."
-/// - `── Turn N ──`         → turn=N
+/// Returns a cleave progress event if the line matches, or `None`.
 pub fn parse_child_activity(child: &str, line: &str) -> Option<ProgressEvent> {
-    // Strip ANSI escape codes for matching
-    let clean = strip_ansi(line);
-    let trimmed = clean.trim();
-
-    // Child stderr lines come through tracing, so they look like:
-    //   "2026-03-18T02:22:27.776691Z  INFO → write tmp/foo.txt"
-    //   "2026-03-18T02:22:24.249368Z  INFO ── Turn 1 ──"
-    // We need to find the marker ANYWHERE in the line, not just at the start.
-
-    // Task-done marker: "TASK_DONE: N" (1-indexed)
-    if let Some(pos) = trimmed.find("TASK_DONE: ") {
-        let rest = &trimmed[pos + "TASK_DONE: ".len()..];
-        let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if let Ok(idx) = num_str.parse::<usize>() {
-            return Some(ProgressEvent::ChildTaskDone {
-                child: child.to_string(),
-                task_index: idx,
-            });
-        }
-    }
-
-    // Tool call: find "→ " anywhere in the line
-    if let Some(arrow_pos) = trimmed.find("→ ") {
-        let rest = &trimmed[arrow_pos + "→ ".len()..];
-        if !rest.is_empty() {
-            let mut parts = rest.splitn(2, ' ');
-            let tool = parts.next()?.to_string();
-            let target = parts.next().map(|s| s.to_string());
-            return Some(ProgressEvent::ChildActivity {
-                child: child.to_string(),
-                turn: None,
-                tool: Some(tool),
-                target,
-            });
-        }
-    }
-
-    // Turn boundary with optional token counts:
-    //   "── Turn N complete — in:1234 out:567 ──" (headless child log)
-    //   "── Turn N ──"
-    if let Some(turn) = extract_turn_number(trimmed) {
-        let (input_tokens, output_tokens) = extract_token_counts(trimmed);
-        if input_tokens > 0 || output_tokens > 0 {
-            // Emit tokens as a separate event so the caller can handle them independently.
-            // Return a ChildTokens event; the orchestrator will also see the turn via
-            // the next parse pass — throttling means one event per second anyway.
-            return Some(ProgressEvent::ChildTokens {
-                child: child.to_string(),
-                input_tokens,
-                output_tokens,
-            });
-        }
-        return Some(ProgressEvent::ChildActivity {
+    match crate::child_agent::parse_child_activity(line)? {
+        ChildAgentActivity::Tool { tool, target } => Some(ProgressEvent::ChildActivity {
+            child: child.to_string(),
+            turn: None,
+            tool: Some(tool),
+            target,
+        }),
+        ChildAgentActivity::Turn { turn } => Some(ProgressEvent::ChildActivity {
             child: child.to_string(),
             turn: Some(turn),
             tool: None,
             target: None,
-        });
+        }),
+        ChildAgentActivity::Tokens {
+            input_tokens,
+            output_tokens,
+        } => Some(ProgressEvent::ChildTokens {
+            child: child.to_string(),
+            input_tokens,
+            output_tokens,
+        }),
+        ChildAgentActivity::TaskDone { task_index } => Some(ProgressEvent::ChildTaskDone {
+            child: child.to_string(),
+            task_index,
+        }),
     }
-
-    None
-}
-
-/// Extract `in:N out:M` token counts from a log line like
-/// `"── Turn 3 complete — in:1234 out:567 ──"`.
-/// Returns (0, 0) when the pattern is absent.
-fn extract_token_counts(s: &str) -> (u64, u64) {
-    let input_tokens = s
-        .find("in:")
-        .and_then(|p| s[p + 3..].split_whitespace().next())
-        .and_then(|v| {
-            v.trim_end_matches(|c: char| !c.is_ascii_digit())
-                .parse()
-                .ok()
-        })
-        .unwrap_or(0);
-    let output_tokens = s
-        .find("out:")
-        .and_then(|p| s[p + 4..].split_whitespace().next())
-        .and_then(|v| {
-            v.trim_end_matches(|c: char| !c.is_ascii_digit())
-                .parse()
-                .ok()
-        })
-        .unwrap_or(0);
-    (input_tokens, output_tokens)
-}
-
-fn extract_turn_number(s: &str) -> Option<u32> {
-    // Find "Turn " anywhere in the string (handles tracing prefix)
-    let turn_pos = s.find("Turn ")?;
-    let after = &s[turn_pos + "Turn ".len()..];
-    // Skip "Turn complete" messages
-    let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if num_str.is_empty() {
-        return None;
-    }
-    num_str.parse().ok()
-}
-
-/// Count task checklist items in a task file.
-///
-/// Looks for `- [ ]` or `- [x]` markdown checkboxes, but stops
-/// at the "## Result" or "## Contract" sections to avoid counting
-/// template checkboxes.
-pub fn count_task_items(content: &str) -> usize {
-    extract_task_items(content).len()
-}
-
-/// Extract task checklist items with descriptions from a task file.
-///
-/// Recognizes multiple formats:
-/// - `- [ ] description` / `- [x] description` — markdown checklists
-/// - `1. description` / `2. description` — numbered lists
-/// - `- description` — plain bullet points (only when no checklists found)
-///
-/// Stops at structural sections (`## Result`, `## Contract`, `## Constraints`,
-/// `## Output`, `## Finalization`) to avoid extracting non-task bullets.
-pub fn extract_task_items(content: &str) -> Vec<ChildTaskItem> {
-    let mut checklist_items = Vec::new();
-    let mut numbered_items = Vec::new();
-    let mut bullet_items = Vec::new();
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        // Stop at structural template / constraint sections
-        if trimmed.starts_with("## Result")
-            || trimmed.starts_with("## Contract")
-            || trimmed.starts_with("## Finalization")
-            || trimmed.starts_with("## Constraints")
-            || trimmed.starts_with("## Output")
-        {
-            break;
-        }
-        // Markdown checklists (highest priority)
-        if let Some(rest) = trimmed.strip_prefix("- [ ] ") {
-            checklist_items.push(ChildTaskItem {
-                description: rest.to_string(),
-                done: false,
-            });
-        } else if let Some(rest) = trimmed
-            .strip_prefix("- [x] ")
-            .or_else(|| trimmed.strip_prefix("- [X] "))
-        {
-            checklist_items.push(ChildTaskItem {
-                description: rest.to_string(),
-                done: true,
-            });
-        }
-        // Numbered lists: "1. description", "2. description", etc.
-        else if let Some(rest) = strip_numbered_prefix(trimmed) {
-            numbered_items.push(ChildTaskItem {
-                description: rest.to_string(),
-                done: false,
-            });
-        }
-        // Plain bullets: "- description" (fallback only)
-        else if let Some(rest) = trimmed.strip_prefix("- ") {
-            // Skip short items or items that look like metadata/constraints
-            if rest.len() > 3 && !rest.starts_with("Stay ") && !rest.starts_with("Do not ") {
-                bullet_items.push(ChildTaskItem {
-                    description: rest.to_string(),
-                    done: false,
-                });
-            }
-        }
-    }
-
-    // Priority: checklists > numbered > plain bullets
-    if !checklist_items.is_empty() {
-        checklist_items
-    } else if !numbered_items.is_empty() {
-        numbered_items
-    } else {
-        bullet_items
-    }
-}
-
-/// Strip a numbered list prefix like "1. ", "2. ", "10. " and return the rest.
-fn strip_numbered_prefix(s: &str) -> Option<&str> {
-    let digit_end = s.find(|c: char| !c.is_ascii_digit())?;
-    if digit_end == 0 {
-        return None;
-    }
-    let rest = &s[digit_end..];
-    rest.strip_prefix(". ")
-}
-
-/// Strip ANSI escape sequences from a string.
-fn strip_ansi(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Skip until 'm' (SGR) or other terminator
-            for c2 in chars.by_ref() {
-                if c2.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            result.push(c);
-        }
-    }
-    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::child_agent::extract_task_items;
     use std::sync::Mutex;
 
     #[test]
@@ -504,12 +316,6 @@ mod tests {
         assert!(
             parse_child_activity("ch1", "2026-03-18T02:22:24Z  INFO LLM bridge ready").is_none()
         );
-    }
-
-    #[test]
-    fn test_strip_ansi() {
-        assert_eq!(strip_ansi("\x1b[32mhello\x1b[0m"), "hello");
-        assert_eq!(strip_ansi("no escapes"), "no escapes");
     }
 
     #[test]
