@@ -99,7 +99,11 @@ impl SettingsSurfaceProjection {
                         choice_row(
                             "runtime.thinking",
                             "Thinking",
-                            &format!("{} {}", settings.thinking.icon(), settings.thinking.as_str()),
+                            &format!(
+                                "{} {}",
+                                settings.thinking.icon(),
+                                settings.thinking.as_str()
+                            ),
                             "Reasoning budget requested from capable providers",
                             SettingsMutationRouteProjection::RuntimeCommand,
                             SettingsPersistenceProjection::RuntimeOnly,
@@ -175,7 +179,11 @@ impl SettingsSurfaceProjection {
                         row(
                             "workspace.sandbox",
                             "Sandbox",
-                            if settings.sandbox { "enabled" } else { "disabled" },
+                            if settings.sandbox {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            },
                             "Run delegate/cleave children inside OCI isolation when available",
                             SettingsMutationRouteProjection::RuntimeCommand,
                             SettingsPersistenceProjection::PersistedProfile,
@@ -198,12 +206,12 @@ impl SettingsSurfaceProjection {
                                 crate::workspace::types::WorkspaceRole::ReadOnly,
                             ]
                             .iter()
-                                .map(|role| SettingsChoiceProjection {
-                                    value: role.as_str().into(),
-                                    label: role.as_str().into(),
-                                    active: false,
-                                })
-                                .collect(),
+                            .map(|role| SettingsChoiceProjection {
+                                value: role.as_str().into(),
+                                label: role.as_str().into(),
+                                active: false,
+                            })
+                            .collect(),
                         ),
                         choice_row(
                             "workspace.kind",
@@ -221,12 +229,12 @@ impl SettingsSurfaceProjection {
                                 crate::workspace::types::WorkspaceKind::Generic,
                             ]
                             .iter()
-                                .map(|kind| SettingsChoiceProjection {
-                                    value: kind.as_str().into(),
-                                    label: kind.as_str().into(),
-                                    active: false,
-                                })
-                                .collect(),
+                            .map(|kind| SettingsChoiceProjection {
+                                value: kind.as_str().into(),
+                                label: kind.as_str().into(),
+                                active: false,
+                            })
+                            .collect(),
                         ),
                     ],
                 },
@@ -360,15 +368,35 @@ mod tests {
     fn projection_contains_choice_metadata() {
         let settings = Settings::new("test-model");
         let projection = SettingsSurfaceProjection::from_settings(&settings);
-        let runtime = projection.tabs.iter().find(|tab| tab.id == "runtime").unwrap();
-        let thinking = runtime.rows.iter().find(|row| row.id == "runtime.thinking").unwrap();
+        let runtime = projection
+            .tabs
+            .iter()
+            .find(|tab| tab.id == "runtime")
+            .unwrap();
+        let thinking = runtime
+            .rows
+            .iter()
+            .find(|row| row.id == "runtime.thinking")
+            .unwrap();
 
         assert_eq!(thinking.editor, SettingsEditorProjection::Choice);
         assert!(thinking.choices.iter().any(|choice| choice.active));
 
-        let workspace = projection.tabs.iter().find(|tab| tab.id == "workspace").unwrap();
-        let role = workspace.rows.iter().find(|row| row.id == "workspace.role").unwrap();
-        let kind = workspace.rows.iter().find(|row| row.id == "workspace.kind").unwrap();
+        let workspace = projection
+            .tabs
+            .iter()
+            .find(|tab| tab.id == "workspace")
+            .unwrap();
+        let role = workspace
+            .rows
+            .iter()
+            .find(|row| row.id == "workspace.role")
+            .unwrap();
+        let kind = workspace
+            .rows
+            .iter()
+            .find(|row| row.id == "workspace.kind")
+            .unwrap();
         assert_eq!(role.editor, SettingsEditorProjection::Choice);
         assert_eq!(kind.editor, SettingsEditorProjection::Choice);
         assert!(role.choices.iter().any(|choice| choice.value == "primary"));

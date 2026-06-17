@@ -102,9 +102,11 @@ impl HarnessSettings {
                     .query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0))
                     .unwrap_or(0);
                 let active: i64 = conn
-                    .query_row("SELECT COUNT(*) FROM facts WHERE status = 'active'", [], |r| {
-                        r.get(0)
-                    })
+                    .query_row(
+                        "SELECT COUNT(*) FROM facts WHERE status = 'active'",
+                        [],
+                        |r| r.get(0),
+                    )
                     .unwrap_or(0);
                 let episodes: i64 = conn
                     .query_row("SELECT COUNT(*) FROM episodes", [], |r| r.get(0))
@@ -139,7 +141,8 @@ impl HarnessSettings {
                     .collect()
             })
             .unwrap_or_default();
-        entries.sort_by_key(|e| std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok())));
+        entries
+            .sort_by_key(|e| std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok())));
 
         let lines: Vec<String> = entries
             .iter()
@@ -203,7 +206,12 @@ impl Feature for HarnessSettings {
         vec![CommandDefinition {
             name: "settings".into(),
             description: "Show current harness settings".into(),
-            subcommands: vec!["get".into(), "stats".into(), "memory_stats".into(), "sessions".into()],
+            subcommands: vec![
+                "get".into(),
+                "stats".into(),
+                "memory_stats".into(),
+                "sessions".into(),
+            ],
             availability: CommandAvailability::ALL,
             safety: CommandSafety::READ_ONLY,
         }]

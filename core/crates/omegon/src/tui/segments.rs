@@ -637,28 +637,28 @@ fn is_memory_tool(name: &str) -> bool {
 }
 
 fn summarize_memory_result_cells(tool_name: &str, lines: &[&str]) -> Option<Vec<String>> {
-    if matches!(tool_name, "memory_recall") {
-        if let Some(cells) = summarize_numbered_memory_facts(lines) {
-            return Some(cells);
-        }
+    if matches!(tool_name, "memory_recall")
+        && let Some(cells) = summarize_numbered_memory_facts(lines)
+    {
+        return Some(cells);
     }
 
-    if matches!(tool_name, "memory_query") {
-        if let Some(cells) = summarize_memory_query_sections(lines) {
-            return Some(cells);
-        }
+    if matches!(tool_name, "memory_query")
+        && let Some(cells) = summarize_memory_query_sections(lines)
+    {
+        return Some(cells);
     }
 
-    if matches!(tool_name, "memory_search_archive") {
-        if let Some(cells) = summarize_archived_memory_facts(lines) {
-            return Some(cells);
-        }
+    if matches!(tool_name, "memory_search_archive")
+        && let Some(cells) = summarize_archived_memory_facts(lines)
+    {
+        return Some(cells);
     }
 
-    if matches!(tool_name, "memory_episodes") {
-        if let Some(cells) = summarize_memory_episodes(lines) {
-            return Some(cells);
-        }
+    if matches!(tool_name, "memory_episodes")
+        && let Some(cells) = summarize_memory_episodes(lines)
+    {
+        return Some(cells);
     }
 
     summarize_memory_status_line(lines)

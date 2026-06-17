@@ -469,7 +469,11 @@ mod tests {
     fn thinking_options_mark_current_level_active() {
         let options = thinking_selector_options(crate::settings::ThinkingLevel::High);
         assert_eq!(options.iter().filter(|option| option.active).count(), 1);
-        assert!(options.iter().any(|option| option.value == "high" && option.active));
+        assert!(
+            options
+                .iter()
+                .any(|option| option.value == "high" && option.active)
+        );
     }
 
     #[test]
@@ -503,7 +507,11 @@ mod tests {
         let options = tool_detail_selector_options(crate::settings::ToolDetail::Compact);
 
         assert_eq!(options.iter().filter(|option| option.active).count(), 1);
-        assert!(options.iter().any(|option| option.value == "compact" && option.active));
+        assert!(
+            options
+                .iter()
+                .any(|option| option.value == "compact" && option.active)
+        );
     }
 
     #[test]
@@ -511,7 +519,11 @@ mod tests {
         let options = update_channel_selector_options("nightly");
 
         assert_eq!(options.iter().filter(|option| option.active).count(), 1);
-        assert!(options.iter().any(|option| option.value == "nightly" && option.active));
+        assert!(
+            options
+                .iter()
+                .any(|option| option.value == "nightly" && option.active)
+        );
     }
 
     #[test]
@@ -548,11 +560,17 @@ mod tests {
     #[test]
     fn settings_screen_defaults_to_projection_first_tab() {
         let settings = crate::settings::Settings::new("test-model");
-        let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        let projection =
+            crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
         let screen = SettingsScreen::from_projection(&projection);
 
         assert_eq!(screen.active_tab, "runtime");
         assert_eq!(screen.selected_row, 0);
-        assert!(screen.active_rows(&projection).iter().any(|row| row.id == "runtime.model"));
+        assert!(
+            screen
+                .active_rows(&projection)
+                .iter()
+                .any(|row| row.id == "runtime.model")
+        );
     }
 }
