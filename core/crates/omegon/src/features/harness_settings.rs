@@ -16,7 +16,10 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use omegon_traits::{BusEvent, BusRequest, ContentBlock, Feature, ToolDefinition, ToolResult};
+use omegon_traits::{
+    BusEvent, BusRequest, CommandAvailability, CommandDefinition, CommandResult, CommandSafety,
+    ContentBlock, Feature, ToolDefinition, ToolResult,
+};
 
 use crate::settings::SharedSettings;
 
@@ -38,6 +41,140 @@ impl HarnessSettings {
             tool_calls: 0,
             refresh_status_pending: AtomicBool::new(false),
         }
+    }
+
+    fn settings_overview(&self) -> String {
+        let s = self.settings.lock().unwrap();
+        format!(
+            "## Current Harness Settings\n\n\
+             - **Model**: {}\n\
+             - **Thinking**: {} {}\n\
+             - **Context class**: {}\n\
+             - **Context window**: {} tokens\n\
+             - **Max turns**: {}\n\
+             - **Tool display**: {}",
+            s.model,
+            s.thinking.icon(),
+            s.thinking.as_str(),
+            s.context_class.short(),
+            s.context_window,
+            s.max_turns,
+            s.tool_detail.as_str(),
+        )
+    }
+
+    fn session_stats_overview(&self) -> String {
+        let s = self.settings.lock().unwrap();
+        let elapsed = self.session_start.elapsed();
+        let time = if elapsed.as_secs() >= 3600 {
+            format!(
+                "{}h{}m",
+                elapsed.as_secs() / 3600,
+                (elapsed.as_secs() % 3600) / 60
+            )
+        } else if elapsed.as_secs() >= 60 {
+            format!("{}m{}s", elapsed.as_secs() / 60, elapsed.as_secs() % 60)
+        } else {
+            format!("{}s", elapsed.as_secs())
+        };
+        format!(
+            "## Session Stats\n\n\
+             - **Duration**: {time}\n\
+             - **Turns**: {}\n\
+             - **Tool calls**: {}\n\
+             - **Model**: {}\n\
+             - **Thinking**: {} {}",
+            self.turns,
+            self.tool_calls,
+            s.model,
+            s.thinking.icon(),
+            s.thinking.as_str(),
+        )
+    }
+
+    fn memory_stats_overview(&self) -> String {
+        // Read from ai/memory/facts.db if accessible
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let db_path = {
+            let ai = cwd.join("ai").join("memory").join("facts.db");
+            let legacy = cwd.join(".omegon").join("memory").join("facts.db");
+            if legacy.exists() && !ai.exists() {
+                legacy
+            } else {
+                ai
+            }
+        };
+        if !db_path.exists() {
+            return "No memory database found".into();
+        }
+
+        match rusqlite::Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            Ok(conn) => {
+                let total: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0))
+                    .unwrap_or(0);
+                let active: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM facts WHERE status = 'active'", [], |r| {
+                        r.get(0)
+                    })
+                    .unwrap_or(0);
+                let episodes: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM episodes", [], |r| r.get(0))
+                    .unwrap_or(0);
+                let edges: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0))
+                    .unwrap_or(0);
+                format!(
+                    "## Memory Stats\n\n\
+                     - **Total facts**: {total}\n\
+                     - **Active facts**: {active}\n\
+                     - **Archived**: {}\n\
+                     - **Episodes**: {episodes}\n\
+                     - **Edges**: {edges}",
+                    total - active,
+                )
+            }
+            Err(e) => format!("Error: Cannot read memory DB: {e}"),
+        }
+    }
+
+    fn sessions_overview(&self) -> String {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let sessions_dir = cwd.join("ai").join("sessions");
+        if !sessions_dir.is_dir() {
+            return "No saved sessions.".into();
+        }
+        let mut entries: Vec<_> = std::fs::read_dir(&sessions_dir)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        entries.sort_by_key(|e| std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok())));
+
+        let lines: Vec<String> = entries
+            .iter()
+            .take(10)
+            .map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+                format!("- {} ({:.1}KB)", name, size as f64 / 1024.0)
+            })
+            .collect();
+
+        format!(
+            "## Recent Sessions ({})\n\n{}",
+            entries.len(),
+            if lines.is_empty() {
+                "None.".into()
+            } else {
+                lines.join("\n")
+            }
+        )
     }
 }
 
@@ -77,6 +214,32 @@ impl Feature for HarnessSettings {
         }]
     }
 
+    fn commands(&self) -> Vec<CommandDefinition> {
+        vec![CommandDefinition {
+            name: "settings".into(),
+            description: "Show current harness settings".into(),
+            subcommands: vec!["get".into(), "stats".into(), "memory_stats".into(), "sessions".into()],
+            availability: CommandAvailability::ALL,
+            safety: CommandSafety::READ_ONLY,
+        }]
+    }
+
+    fn handle_command(&mut self, name: &str, args: &str) -> CommandResult {
+        if name != "settings" {
+            return CommandResult::NotHandled;
+        }
+
+        match args.trim() {
+            "" | "get" => CommandResult::Display(self.settings_overview()),
+            "stats" => CommandResult::Display(self.session_stats_overview()),
+            "memory" | "memory_stats" => CommandResult::Display(self.memory_stats_overview()),
+            "sessions" => CommandResult::Display(self.sessions_overview()),
+            other => CommandResult::Display(format!(
+                "Unknown /settings argument: {other}. Options: get, stats, memory_stats, sessions"
+            )),
+        }
+    }
+
     async fn execute(
         &self,
         _tool_name: &str,
@@ -87,26 +250,7 @@ impl Feature for HarnessSettings {
         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("get");
 
         match action {
-            "get" => {
-                let s = self.settings.lock().unwrap();
-                let out = format!(
-                    "## Current Harness Settings\n\n\
-                     - **Model**: {}\n\
-                     - **Thinking**: {} {}\n\
-                     - **Context class**: {}\n\
-                     - **Context window**: {} tokens\n\
-                     - **Max turns**: {}\n\
-                     - **Tool display**: {}",
-                    s.model,
-                    s.thinking.icon(),
-                    s.thinking.as_str(),
-                    s.context_class.short(),
-                    s.context_window,
-                    s.max_turns,
-                    s.tool_detail.as_str(),
-                );
-                Ok(text_result(&out))
-            }
+            "get" => Ok(text_result(&self.settings_overview())),
 
             "set_context_class" => {
                 let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
@@ -138,125 +282,11 @@ impl Feature for HarnessSettings {
                 ))
             }
 
-            "stats" => {
-                let s = self.settings.lock().unwrap();
-                let elapsed = self.session_start.elapsed();
-                let time = if elapsed.as_secs() >= 3600 {
-                    format!(
-                        "{}h{}m",
-                        elapsed.as_secs() / 3600,
-                        (elapsed.as_secs() % 3600) / 60
-                    )
-                } else if elapsed.as_secs() >= 60 {
-                    format!("{}m{}s", elapsed.as_secs() / 60, elapsed.as_secs() % 60)
-                } else {
-                    format!("{}s", elapsed.as_secs())
-                };
-                let out = format!(
-                    "## Session Stats\n\n\
-                     - **Duration**: {time}\n\
-                     - **Turns**: {}\n\
-                     - **Tool calls**: {}\n\
-                     - **Model**: {}\n\
-                     - **Thinking**: {} {}",
-                    self.turns,
-                    self.tool_calls,
-                    s.model,
-                    s.thinking.icon(),
-                    s.thinking.as_str(),
-                );
-                Ok(text_result(&out))
-            }
+            "stats" => Ok(text_result(&self.session_stats_overview())),
 
-            "memory_stats" => {
-                // Read from ai/memory/facts.db if accessible
-                let cwd = std::env::current_dir().unwrap_or_default();
-                let db_path = {
-                    let ai = cwd.join("ai").join("memory").join("facts.db");
-                    let legacy = cwd.join(".omegon").join("memory").join("facts.db");
-                    if legacy.exists() && !ai.exists() {
-                        legacy
-                    } else {
-                        ai
-                    }
-                };
-                if db_path.exists() {
-                    match rusqlite::Connection::open_with_flags(
-                        &db_path,
-                        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-                    ) {
-                        Ok(conn) => {
-                            let total: i64 = conn
-                                .query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0))
-                                .unwrap_or(0);
-                            let active: i64 = conn
-                                .query_row(
-                                    "SELECT COUNT(*) FROM facts WHERE status = 'active'",
-                                    [],
-                                    |r| r.get(0),
-                                )
-                                .unwrap_or(0);
-                            let episodes: i64 = conn
-                                .query_row("SELECT COUNT(*) FROM episodes", [], |r| r.get(0))
-                                .unwrap_or(0);
-                            let edges: i64 = conn
-                                .query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0))
-                                .unwrap_or(0);
-                            Ok(text_result(&format!(
-                                "## Memory Stats\n\n\
-                                 - **Total facts**: {total}\n\
-                                 - **Active facts**: {active}\n\
-                                 - **Archived**: {}\n\
-                                 - **Episodes**: {episodes}\n\
-                                 - **Edges**: {edges}",
-                                total - active,
-                            )))
-                        }
-                        Err(e) => Ok(error_result(&format!("Cannot read memory DB: {e}"))),
-                    }
-                } else {
-                    Ok(text_result("No memory database found"))
-                }
-            }
+            "memory_stats" => Ok(text_result(&self.memory_stats_overview())),
 
-            "sessions" => {
-                let cwd = std::env::current_dir().unwrap_or_default();
-                let sessions_dir = cwd.join("ai").join("sessions");
-                if !sessions_dir.is_dir() {
-                    return Ok(text_result("No saved sessions."));
-                }
-                let mut entries: Vec<_> = std::fs::read_dir(&sessions_dir)
-                    .map(|rd| {
-                        rd.filter_map(|e| e.ok())
-                            .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                entries.sort_by_key(|e| {
-                    std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok()))
-                });
-
-                let lines: Vec<String> = entries
-                    .iter()
-                    .take(10)
-                    .map(|e| {
-                        let name = e.file_name().to_string_lossy().to_string();
-                        let size = e.metadata().map(|m| m.len()).unwrap_or(0);
-                        format!("- {} ({:.1}KB)", name, size as f64 / 1024.0)
-                    })
-                    .collect();
-
-                Ok(text_result(&format!(
-                    "## Recent Sessions ({})\n\n{}",
-                    entries.len(),
-                    if lines.is_empty() {
-                        "None.".into()
-                    } else {
-                        lines.join("\n")
-                    }
-                )))
-            }
+            "sessions" => Ok(text_result(&self.sessions_overview())),
 
             other => Ok(error_result(&format!(
                 "Unknown action: '{}'. Options: get, set_context_class, compact, stats, memory_stats, sessions",
