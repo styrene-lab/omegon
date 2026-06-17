@@ -4,6 +4,7 @@
 //! No terminal rendering — uses App::new() with test settings.
 
 use super::*;
+use super::settings_menu::build_model_selector_options;
 use crate::settings::{ContextClass, Settings, ThinkingLevel};
 use crate::update::UpdateInfo;
 use crate::web::WebDaemonStatus;

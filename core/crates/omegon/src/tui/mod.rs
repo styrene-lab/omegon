@@ -34,6 +34,7 @@ pub mod segment_components;
 pub mod segment_detail;
 pub mod segments;
 pub mod selector;
+pub(crate) mod settings_menu;
 pub mod spinner;
 pub mod splash;
 pub mod statusline;
@@ -91,6 +92,7 @@ use self::instruments::InstrumentPanel;
 use self::layout_projection::{TuiLayoutInputs, plan_tui_layout};
 use self::permission_lane::{format_permission_prompt, permission_response_for_key};
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode};
+use self::settings_menu::SelectorKind;
 use self::workbench::{
     PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, WorkbenchState,
     active_workbench_snapshot, render_workbench_panel, slim_completed_plan_hint_available,
@@ -518,24 +520,6 @@ struct App {
     oauth_tos_notice_shown: bool,
     /// Authoritative runtime prompt queue snapshot emitted by the coordinator.
     runtime_queue_snapshot: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum SelectorKind {
-    Model,
-    ThinkingLevel,
-    ContextClass,
-    Persona,
-    Tone,
-    SecretName,
-    LoginProvider,
-    VaultConfigure,
-    UpdateChannel,
-    WorkspaceRole,
-    WorkspaceKind,
-    Preferences,
-    ToolDetail,
-    MouseMode,
 }
 
 /// Result of handling a slash command.
@@ -1824,44 +1808,21 @@ impl App {
 
     fn open_thinking_selector(&mut self) {
         let current = self.settings().thinking;
-        let options = crate::settings::ThinkingLevel::all()
-            .iter()
-            .map(|level| selector::SelectOption {
-                value: level.as_str().to_string(),
-                label: format!("{} {}", level.icon(), level.as_str()),
-                description: match level {
-                    crate::settings::ThinkingLevel::Off => "Servitor — no extended thinking".into(),
-                    crate::settings::ThinkingLevel::Minimal => {
-                        "Functionary — ~2k token budget".into()
-                    }
-                    crate::settings::ThinkingLevel::Low => "Adept — ~5k token budget".into(),
-                    crate::settings::ThinkingLevel::Medium => "Magos — ~10k token budget".into(),
-                    crate::settings::ThinkingLevel::High => "Archmagos — ~50k token budget".into(),
-                },
-                active: *level == current,
-            })
-            .collect();
-        self.selector = Some(selector::Selector::new("Thinking Level", options));
+        let options = settings_menu::thinking_selector_options(current);
+        self.selector = Some(selector::Selector::new(
+            settings_menu::THINKING_DESCRIPTOR.label,
+            options,
+        ));
         self.selector_kind = Some(SelectorKind::ThinkingLevel);
     }
 
     fn open_context_selector(&mut self) {
         let current = self.settings().context_class;
-        let options = crate::settings::ContextClass::all()
-            .iter()
-            .map(|class| selector::SelectOption {
-                value: class.short().to_string(),
-                label: class.label().to_string(),
-                description: match class {
-                    crate::settings::ContextClass::Compact => "Standard sessions".into(),
-                    crate::settings::ContextClass::Standard => "Extended analysis".into(),
-                    crate::settings::ContextClass::Extended => "Large codebase".into(),
-                    crate::settings::ContextClass::Massive => "Massive context".into(),
-                },
-                active: *class == current,
-            })
-            .collect();
-        self.selector = Some(selector::Selector::new("Context Class", options));
+        let options = settings_menu::context_class_selector_options(current);
+        self.selector = Some(selector::Selector::new(
+            settings_menu::CONTEXT_DESCRIPTOR.label,
+            options,
+        ));
         self.selector_kind = Some(SelectorKind::ContextClass);
     }
 
@@ -2036,19 +1997,6 @@ impl App {
                 active: false,
             },
             selector::SelectOption {
-                value: "mouse".into(),
-                label: "Mouse Mode".into(),
-                description: format!(
-                    "Current: {}",
-                    if s.mouse {
-                        "enabled"
-                    } else {
-                        "disabled (terminal selection)"
-                    }
-                ),
-                active: false,
-            },
-            selector::SelectOption {
                 value: "persona".into(),
                 label: "Persona".into(),
                 description: "Activate or change persona".into(),
@@ -2111,26 +2059,6 @@ impl App {
         ];
         self.selector = Some(selector::Selector::new("Tool Density", options));
         self.selector_kind = Some(SelectorKind::ToolDetail);
-    }
-
-    fn open_mouse_selector(&mut self) {
-        let current = self.settings().mouse;
-        let options = vec![
-            selector::SelectOption {
-                value: "on".into(),
-                label: "Mouse Enabled".into(),
-                description: "Omegon captures mouse for scrolling and interaction.".into(),
-                active: current,
-            },
-            selector::SelectOption {
-                value: "off".into(),
-                label: "Mouse Disabled".into(),
-                description: "Terminal-native text selection. Better for copy/paste.".into(),
-                active: !current,
-            },
-        ];
-        self.selector = Some(selector::Selector::new("Mouse Mode", options));
-        self.selector_kind = Some(SelectorKind::MouseMode);
     }
 
     fn open_login_selector(&mut self) {
@@ -2364,26 +2292,24 @@ impl App {
                 Some(format!("Switching model → {value}"))
             }
             SelectorKind::ThinkingLevel => {
-                if let Some(level) = crate::settings::ThinkingLevel::parse(&value) {
+                let outcome = settings_menu::apply_thinking_selection(&value);
+                if let settings_menu::SettingApplyOutcome::Thinking(level) = outcome {
                     let _ = tx.try_send(TuiCommand::SetThinking {
                         level,
                         respond_to: None,
                     });
-                    Some(format!("Thinking → {} {}", level.icon(), level.as_str()))
-                } else {
-                    Some(format!("Unknown level: {value}"))
                 }
+                Some(outcome.message())
             }
             SelectorKind::ContextClass => {
-                if let Some(class) = crate::settings::ContextClass::parse(&value) {
+                let outcome = settings_menu::apply_context_class_selection(&value);
+                if let settings_menu::SettingApplyOutcome::ContextClass(class) = outcome {
                     let _ = tx.try_send(TuiCommand::ExecuteControl {
                         request: crate::control_runtime::ControlRequest::SetContextClass { class },
                         respond_to: None,
                     });
-                    Some(format!("Context policy → {}", class.label()))
-                } else {
-                    Some(format!("Unknown context class: {value}"))
                 }
+                Some(outcome.message())
             }
             SelectorKind::Persona => {
                 let (personas, _) = crate::plugins::persona_loader::scan_available();
@@ -2580,10 +2506,6 @@ impl App {
                         self.open_tool_detail_selector();
                         None
                     }
-                    "mouse" => {
-                        self.open_mouse_selector();
-                        None
-                    }
                     "persona" => {
                         self.open_persona_selector();
                         None
@@ -2620,15 +2542,6 @@ impl App {
                 } else {
                     Some(format!("Unknown density: {value}"))
                 }
-            }
-            SelectorKind::MouseMode => {
-                let enabled = value == "on";
-                self.set_terminal_copy_mode(!enabled);
-                self.update_and_persist(|s| s.mouse = enabled);
-                Some(format!(
-                    "Mouse → {}",
-                    if enabled { "enabled" } else { "disabled" }
-                ))
             }
         }
     }
@@ -5074,7 +4987,7 @@ impl App {
         ),
         (
             "preferences",
-            "open preferences menu (model, thinking, density, mouse, etc.)",
+            "open preferences menu (model, thinking, density, etc.)",
             &[],
         ),
         (
@@ -5153,10 +5066,10 @@ Scroll transcript:
                     return SlashResult::Display(
                         "Mouse contract:
   App mouse          wheel/click panes
-  Mouse passthrough  terminal drag selects text
+  Mouse passthrough  terminal drag selects text for this session
   Ctrl+Shift+T       toggle app mouse / mouse passthrough
   /mouse on          restore app mouse
-  /mouse off         enable terminal-native drag selection"
+  /mouse off         enable terminal-native drag selection for this session"
                             .into(),
                     );
                 }
@@ -5196,17 +5109,14 @@ Scroll transcript:
             "mouse" => match args {
                 "" => {
                     self.set_terminal_copy_mode(!self.terminal_copy_mode);
-                    self.update_and_persist(|s| s.mouse = !self.terminal_copy_mode);
                     SlashResult::Handled
                 }
                 "on" => {
                     self.set_terminal_copy_mode(false);
-                    self.update_and_persist(|s| s.mouse = true);
                     SlashResult::Handled
                 }
                 "off" => {
                     self.set_terminal_copy_mode(true);
-                    self.update_and_persist(|s| s.mouse = false);
                     SlashResult::Handled
                 }
                 _ => SlashResult::Display("Usage: /mouse [on|off]".into()),
@@ -7729,92 +7639,6 @@ fn history_path(cwd: &str) -> std::path::PathBuf {
     project_root.join(".omegon").join("history")
 }
 
-fn sel_opt(value: &str, label: &str, desc: &str, current: &str) -> selector::SelectOption {
-    selector::SelectOption {
-        value: value.to_string(),
-        label: label.to_string(),
-        description: desc.to_string(),
-        active: value == current,
-    }
-}
-
-fn build_model_selector_options(
-    current: &str,
-    anthropic_auth: Option<(String, bool)>,
-    openai_auth: Option<(String, bool)>,
-    openai_codex_auth: Option<(String, bool)>,
-) -> Vec<selector::SelectOption> {
-    let mut options: Vec<selector::SelectOption> = Vec::new();
-
-    if let Some((_, is_oauth)) = anthropic_auth {
-        let auth = if is_oauth { "oauth" } else { "api key" };
-        options.push(sel_opt(
-            "anthropic:claude-sonnet-4-6",
-            "Sonnet 4.6",
-            &format!("Anthropic · balanced · 200k · {auth}"),
-            current,
-        ));
-        options.push(sel_opt(
-            "anthropic:claude-opus-4-6",
-            "Opus 4.6",
-            &format!("Anthropic · strongest · 200k · {auth}"),
-            current,
-        ));
-        options.push(sel_opt(
-            "anthropic:claude-haiku-4-5-20251001",
-            "Haiku 4.5",
-            &format!("Anthropic · fast · cheap · 200k · {auth}"),
-            current,
-        ));
-    }
-
-    if let Some((_, is_oauth)) = openai_auth {
-        let auth = if is_oauth { "oauth" } else { "api key" };
-        options.push(sel_opt(
-            "openai:gpt-5.4",
-            "GPT-5.4",
-            &format!("OpenAI API · frontier · 1M · {auth}"),
-            current,
-        ));
-        options.push(sel_opt(
-            "openai:o3",
-            "o3",
-            &format!("OpenAI API · reasoning · 200k · {auth}"),
-            current,
-        ));
-        options.push(sel_opt(
-            "openai:o4-mini",
-            "o4-mini",
-            &format!("OpenAI API · fast reasoning · 200k · {auth}"),
-            current,
-        ));
-        options.push(sel_opt(
-            "openai:gpt-4.1",
-            "GPT-4.1",
-            &format!("OpenAI API · coding · 1M · {auth}"),
-            current,
-        ));
-    }
-
-    if let Some((_, is_oauth)) = openai_codex_auth {
-        let auth = if is_oauth { "oauth" } else { "api key" };
-        options.push(sel_opt(
-            "openai-codex:gpt-5.4",
-            "GPT-5.4",
-            &format!("ChatGPT/Codex · GPT route · 1M · {auth}"),
-            current,
-        ));
-        options.push(sel_opt(
-            "openai-codex:gpt-5.4-mini",
-            "GPT-5.4 mini",
-            &format!("ChatGPT/Codex · fast coding · 1M · {auth}"),
-            current,
-        ));
-    }
-
-    options
-}
-
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct Milestone {
     nodes: Vec<String>,
@@ -8245,10 +8069,8 @@ pub async fn run_tui(
         },
     );
 
-    // Mouse capture on by default — required for scroll wheel to work
-    // without being reinterpreted as arrow keys. Text selection via
-    // Shift+click-drag (works in all modern terminals).
-    let mouse_enabled = settings.lock().map(|s| s.mouse).unwrap_or(true);
+    // Mouse capture starts disabled so terminal-native selection works by default.
+    // `/mouse on` enables pane click/scroll interaction for the current session.
     let mut app = App::new(settings.clone());
     app.keyboard_enhancement = has_keyboard_enhancement;
     // Populate extension widgets and receivers from config
@@ -8282,10 +8104,6 @@ pub async fn run_tui(
                 }
             }
         });
-    }
-    // Respect the persisted mouse setting (default: true).
-    if mouse_enabled {
-        app.enable_mouse_interaction_mode();
     }
     app.history = App::load_history(&config.cwd);
     app.footer_data.cwd = config.cwd.clone();

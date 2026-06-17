@@ -373,11 +373,6 @@ pub struct Settings {
     #[serde(skip)]
     pub provider_is_oauth: bool,
 
-    /// Enable mouse capture (pane clicks, wheel scroll, segment targeting).
-    /// Defaults to true. Set to false to restore terminal-native text selection.
-    #[serde(default = "default_mouse")]
-    pub mouse: bool,
-
     /// Sandbox isolation — when true, delegate/cleave children run inside
     /// OCI containers (podman/docker) with resource limits and network isolation.
     #[serde(default)]
@@ -613,10 +608,6 @@ fn default_update_channel() -> String {
     "stable".to_string()
 }
 
-fn default_mouse() -> bool {
-    true
-}
-
 fn default_terminal_tool() -> bool {
     true
 }
@@ -688,7 +679,6 @@ impl Default for Settings {
             permissions: ProfilePermissions::default(),
             provider_connected: true, // optimistic default — set false when NullBridge
             provider_is_oauth: false,
-            mouse: true,
             sandbox: false,
             terminal_tool: true,
             clipboard_retention_hours: default_clipboard_retention_hours(),
@@ -1107,9 +1097,6 @@ pub struct Profile {
     /// Tool output density: "lean", "compact", "detailed", "verbose".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_detail: Option<String>,
-    /// Mouse interaction mode. false = terminal-native text selection.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mouse: Option<bool>,
 
     // ── Sandbox ──
     /// Sandbox isolation for delegate/cleave children.
@@ -1396,9 +1383,6 @@ impl Profile {
         {
             settings.tool_detail = detail;
         }
-        if let Some(m) = self.mouse {
-            settings.mouse = m;
-        }
         if let Some(s) = self.sandbox {
             settings.sandbox = s;
         }
@@ -1471,11 +1455,6 @@ impl Profile {
             self.tool_detail = Some(settings.tool_detail.as_str().to_string());
         } else {
             self.tool_detail = None;
-        }
-        if !settings.mouse {
-            self.mouse = Some(false);
-        } else {
-            self.mouse = None;
         }
         if settings.sandbox {
             self.sandbox = Some(true);
