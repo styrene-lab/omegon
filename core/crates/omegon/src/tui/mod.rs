@@ -5009,6 +5009,7 @@ impl App {
         ),
         ("sessions", "list saved sessions", &[]),
         ("memory", "memory stats", &[]),
+        ("settings", "open settings page", &[]),
         (
             "skills",
             "manage bundled, user, project-local, and armory skills",
@@ -6538,6 +6539,7 @@ Scroll transcript:
             "models" => self.handle_slash_command("/model", tx),
             "settings" => {
                 self.open_settings_screen();
+                self.command_panel = None;
                 SlashResult::Handled
             }
             "preferences" | "prefs" => {
@@ -8825,7 +8827,9 @@ pub async fn run_tui(
                             KeyCode::Esc => {
                                 app.settings_screen = None;
                             }
-                            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            KeyCode::Char('c') | KeyCode::Char('C')
+                                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                            {
                                 app.settings_screen = None;
                             }
                             _ => {}
