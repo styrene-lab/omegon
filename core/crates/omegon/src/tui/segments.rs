@@ -3266,12 +3266,12 @@ mod tests {
     }
 
     #[test]
-    fn slim_assistant_reasoning_truncates_long_lines_to_view_width() {
+    fn slim_assistant_reasoning_wraps_long_lines_to_view_width() {
         let seg = Segment {
             meta: SegmentMeta::default(),
             content: SegmentContent::AssistantText {
                 text: String::new(),
-                thinking: "**Fixing code issues**\n\nI need to fix a long reasoning row before it reaches the right edge of the slim transcript viewport. The row should truncate safely and keep the terminal stable.".into(),
+                thinking: "**Fixing code issues**\n\nI need to fix a long reasoning row before it reaches the right edge of the slim transcript viewport. The row should wrap safely and keep the terminal stable.".into(),
                 complete: false,
             },
         };
@@ -3289,8 +3289,12 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains('…'),
-            "long reasoning line should truncate safely: {text}"
+            text.contains("safely and keep the terminal stable"),
+            "long reasoning line should wrap instead of truncate: {text}"
+        );
+        assert!(
+            !text.contains('…'),
+            "long reasoning line should not be ellipsized: {text}"
         );
         assert!(
             row_widths(&buf, area).into_iter().all(|width| width <= 64),

@@ -1970,6 +1970,43 @@ fn verbose_or_error_slash_responses_still_use_panel_surface() {
 }
 
 #[test]
+fn slash_version_displays_multiline_build_info() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/version", &tx);
+
+    match result {
+        SlashResult::Display(text) => {
+            assert!(text.starts_with("Version\n"), "got: {text}");
+            assert!(text.contains("Omegon:"), "got: {text}");
+            assert!(text.contains("Git SHA:"), "got: {text}");
+            assert!(text.contains("Build Date:"), "got: {text}");
+            assert!(!super::should_toast_slash_response(&text));
+        }
+        other => panic!("/version should display version info, got: {other:?}"),
+    }
+}
+
+#[test]
+fn quit_aliases_are_advertised_and_handled() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    for command in ["q", "quit", "exit"] {
+        assert!(
+            App::COMMANDS.iter().any(|(name, _, _)| *name == command),
+            "/{command} should be advertised"
+        );
+        let result = app.handle_slash_command(&format!("/{command}"), &tx);
+        assert!(
+            matches!(result, SlashResult::Quit),
+            "/{command} got {result:?}"
+        );
+    }
+}
+
+#[test]
 fn ctrl_g_preset_toggle_skips_removed_standard_mode() {
     let mut surfaces = UiSurfaces::lean();
     surfaces = surfaces.toggle_preset();
