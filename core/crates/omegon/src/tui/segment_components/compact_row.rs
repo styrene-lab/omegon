@@ -150,12 +150,67 @@ pub(crate) fn truncate_to_width(text: &str, max_width: usize) -> String {
     out
 }
 
-fn rendered_child_detail(row: &CompactRows<'_>, detail: &str, width: u16) -> String {
-    let child_width = width
+fn child_width(row: &CompactRows<'_>, width: u16) -> u16 {
+    width
         .saturating_sub(unicode_width::UnicodeWidthStr::width(row.child_indent) as u16)
-        .max(1);
-    let child_budget = child_width.saturating_sub(2) as usize;
-    truncate_to_width(detail, child_budget)
+        .max(1)
+}
+
+fn wrap_to_width(text: &str, width: u16) -> Vec<String> {
+    let width = width.max(1) as usize;
+    let mut rows = Vec::new();
+    let mut current = String::new();
+    let mut used = 0usize;
+
+    for word in text.split_whitespace() {
+        let word_width = unicode_width::UnicodeWidthStr::width(word);
+        let sep_width = usize::from(!current.is_empty());
+        if !current.is_empty() && used + sep_width + word_width > width {
+            rows.push(std::mem::take(&mut current));
+            used = 0;
+        }
+
+        if word_width > width {
+            if !current.is_empty() {
+                rows.push(std::mem::take(&mut current));
+                used = 0;
+            }
+            let mut chunk = String::new();
+            let mut chunk_width = 0usize;
+            for ch in word.chars() {
+                let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                if chunk_width > 0 && chunk_width + ch_width > width {
+                    rows.push(std::mem::take(&mut chunk));
+                    chunk_width = 0;
+                }
+                chunk.push(ch);
+                chunk_width += ch_width;
+            }
+            if !chunk.is_empty() {
+                current = chunk;
+                used = chunk_width;
+            }
+        } else {
+            if !current.is_empty() {
+                current.push(' ');
+                used += 1;
+            }
+            current.push_str(word);
+            used += word_width;
+        }
+    }
+
+    if !current.is_empty() {
+        rows.push(current);
+    }
+    if rows.is_empty() {
+        rows.push(String::new());
+    }
+    rows
+}
+
+fn wrapped_child_rows(row: &CompactRows<'_>, detail: &str, width: u16) -> Vec<String> {
+    wrap_to_width(detail, child_width(row, width))
 }
 
 pub(crate) fn measured_height(width: u16, rows: &CompactRows<'_>) -> u16 {
@@ -169,11 +224,7 @@ pub(crate) fn measured_height(width: u16, rows: &CompactRows<'_>) -> u16 {
             if idx == 0 {
                 1
             } else {
-                let detail = rendered_child_detail(rows, detail, width);
-                let child_width = width
-                    .saturating_sub(unicode_width::UnicodeWidthStr::width(rows.child_indent) as u16)
-                    .max(1);
-                wrapped_visual_rows(&detail, child_width)
+                wrapped_child_rows(rows, detail, width).len() as u16
             }
         })
         .sum()
@@ -196,7 +247,12 @@ pub(crate) fn render(
 
     for (idx, detail) in rows.details.iter().enumerate() {
         let row_bg = if idx == 0 { bg } else { child_bg };
-        apply_rows_bg(area, idx as u16, 1, row_bg, buf);
+        let visual_rows = if idx == 0 {
+            1
+        } else {
+            wrapped_visual_rows(detail, child_width(&rows, area.width))
+        };
+        apply_rows_bg(area, lines.len() as u16, visual_rows, row_bg, buf);
         if idx == 0 {
             lines.push(Line::from(vec![
                 Span::styled(
@@ -224,16 +280,19 @@ pub(crate) fn render(
                 ),
             ]));
         } else {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    rows.child_indent,
-                    Style::default().fg(theme.dim()).bg(row_bg),
-                ),
-                Span::styled(
-                    rendered_child_detail(&rows, detail, area.width),
-                    Style::default().fg(theme.dim()).bg(row_bg),
-                ),
-            ]));
+            let wrapped = wrap_to_width(detail, child_width(&rows, area.width));
+            for (line_idx, wrapped_detail) in wrapped.iter().enumerate() {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        if line_idx == 0 { rows.child_indent } else { "" },
+                        Style::default().fg(theme.dim()).bg(row_bg),
+                    ),
+                    Span::styled(
+                        wrapped_detail.clone(),
+                        Style::default().fg(theme.dim()).bg(row_bg),
+                    ),
+                ]));
+            }
         }
     }
 

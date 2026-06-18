@@ -5155,6 +5155,8 @@ impl App {
             &["on", "off", "status"],
         ),
         ("version", "show build version and git sha", &[]),
+        ("q", "quit alias", &[]),
+        ("quit", "quit alias", &[]),
         ("exit", "quit (or double Ctrl+C)", &[]),
     ];
 
@@ -6625,7 +6627,7 @@ Scroll transcript:
                 }
             }
             "version" => SlashResult::Display(format!(
-                "omegon {} ({} {})",
+                "Version\n  Omegon:     {}\n  Git SHA:    {}\n  Build Date: {}",
                 env!("CARGO_PKG_VERSION"),
                 env!("OMEGON_GIT_SHA"),
                 env!("OMEGON_BUILD_DATE"),
