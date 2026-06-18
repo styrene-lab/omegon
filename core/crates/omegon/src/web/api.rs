@@ -690,8 +690,8 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                     .unwrap_or_else(|| "Medium".into()),
                 capability_tier: harness
                     .as_ref()
-                    .map(|h| h.capability_tier.clone())
-                    .unwrap_or_else(|| "victory".into()),
+                    .map(|h| h.capability_grade.clone())
+                    .unwrap_or_else(|| "B".into()),
                 runtime_profile: harness
                     .as_ref()
                     .map(|h| h.runtime_profile.as_str().to_string())
@@ -713,7 +713,14 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                         .as_ref()
                         .map(|h| h.dispatcher.available_options.clone())
                         .unwrap_or_else(|| {
-                            vec!["retribution".into(), "victory".into(), "gloriana".into()]
+                            vec![
+                                "F".into(),
+                                "D".into(),
+                                "C".into(),
+                                "B".into(),
+                                "A".into(),
+                                "S".into(),
+                            ]
                         }),
                     switch_state: harness
                         .as_ref()
@@ -731,7 +738,7 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                     active_profile: harness
                         .as_ref()
                         .and_then(|h| h.dispatcher.active_profile.clone())
-                        .or_else(|| Some("victory".into())),
+                        .or_else(|| Some("B".into())),
                     active_model: harness
                         .as_ref()
                         .and_then(|h| h.dispatcher.active_model.clone()),
@@ -1174,7 +1181,7 @@ required = ["BRAVE_API_KEY"]
         state.handles = DashboardHandles {
             harness: Some(Arc::new(Mutex::new(crate::status::HarnessStatus {
                 thinking_level: "high".into(),
-                capability_tier: "victory".into(),
+                capability_grade: "B".into(),
                 memory_available: true,
                 cleave_available: true,
                 ..Default::default()
@@ -1185,7 +1192,7 @@ required = ["BRAVE_API_KEY"]
         let snap = build_snapshot(&state);
         let harness = snap.harness.expect("harness snapshot");
         assert_eq!(harness.thinking_level, "high");
-        assert_eq!(harness.capability_tier, "victory");
+        assert_eq!(harness.capability_grade, "B");
         assert!(harness.memory_available);
         assert!(harness.cleave_available);
         assert!(!harness.execution_substrate.paths.workspace.is_empty());

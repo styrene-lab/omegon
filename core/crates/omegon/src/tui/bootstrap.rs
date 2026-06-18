@@ -111,7 +111,7 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
         format!("{dim}unknown{reset}")
     };
     out.push_str(&format!("  {dim}Git:{reset} {repo_state}  {dim}Context:{reset} {cyan}{}{reset}  {dim}Thinking:{reset} {cyan}{}{reset}  {dim}Tier:{reset} {cyan}{}{reset}\n",
-        status.context_class, status.thinking_level, status.capability_tier));
+        status.context_class, status.thinking_level, status.capability_grade));
 
     // Memory — single line
     let mem = &status.memory;

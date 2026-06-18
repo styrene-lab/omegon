@@ -44,7 +44,7 @@ pub struct HarnessStatus {
     // ── Context routing (three-axis model) ───────────────────
     pub context_class: String, // "Compact" / "Standard" / "Extended" / "Massive"
     pub thinking_level: String, // "Off" / "Minimal" / "Low" / "Medium" / "High"
-    pub capability_tier: String, // "retribution" / "victory" / "gloriana"
+    pub capability_grade: String, // "F" / "D" / "C" / "B" / "A" / "S"
     pub posture: String,       // "Explorator" / "Fabricator" / "Architect" / "Devastator"
     pub operating_profile: String,
     pub principal_id: String,
@@ -584,7 +584,7 @@ impl HarnessStatus {
         &mut self,
         context_class: &str,
         thinking_level: &str,
-        capability_tier: &str,
+        capability_grade: &str,
         posture: &str,
         operating_profile: &str,
         principal_id: &str,
@@ -594,7 +594,7 @@ impl HarnessStatus {
     ) {
         self.context_class = context_class.into();
         self.thinking_level = thinking_level.into();
-        self.capability_tier = capability_tier.into();
+        self.capability_grade = capability_grade.into();
         self.posture = posture.into();
         self.operating_profile = operating_profile.into();
         self.principal_id = principal_id.into();
@@ -819,7 +819,7 @@ impl Default for HarnessStatus {
             execution_substrate: crate::execution_substrate::detect(),
             context_class: "Compact".into(),
             thinking_level: "Medium".into(),
-            capability_tier: "victory".into(),
+            capability_grade: "B".into(),
             posture: "Architect".into(),
             operating_profile: "anonymous / Architect / Medium / Extended".into(),
             principal_id: "local-operator".into(),
@@ -829,12 +829,19 @@ impl Default for HarnessStatus {
             runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
             autonomy_mode: omegon_traits::OmegonAutonomyMode::OperatorDriven,
             dispatcher: DispatcherStatus {
-                available_options: vec!["retribution".into(), "victory".into(), "gloriana".into()],
+                available_options: vec![
+                    "F".into(),
+                    "D".into(),
+                    "C".into(),
+                    "B".into(),
+                    "A".into(),
+                    "S".into(),
+                ],
                 switch_state: "idle".into(),
                 request_id: None,
                 expected_profile: None,
                 expected_model: None,
-                active_profile: Some("victory".into()),
+                active_profile: Some("B".into()),
                 active_model: None,
                 failure_code: None,
                 note: None,

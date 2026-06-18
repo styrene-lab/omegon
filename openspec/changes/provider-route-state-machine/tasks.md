@@ -58,7 +58,7 @@ delegate/cleave child routing.
 ## 7. 0.27.0 model intent and endpoint matrix follow-up
 <!-- specs: provider-route/model-intent -->
 
-- [x] 7.1 Replace legacy `ModelTier` vocabulary with provider-neutral `ModelGrade` F/D/C/B/A/S; remove `Local` as a capability value.
+- [ ] 7.1 Replace legacy `ModelTier` vocabulary with provider-neutral `ModelGrade` F/D/C/B/A/S; remove `Local` as a capability value.
 - [x] 7.2 Remove legacy slash commands `/gloriana`, `/victory`, `/retribution`, `/opus`, `/sonnet`, and `/haiku` entirely; they should be unknown commands, not hidden aliases.
 - [x] 7.3 Replace legacy `set_model_tier` semantics with model-intent tooling (`set_model_intent` preferred, or explicit grade/provider/policy tools during migration).
 - [ ] 7.4 Extend the model registry from provider-tier maps to endpoint/model capability rows with grade, grade source, context window, tool/streaming/json/vision support, and cost/latency bands.
@@ -72,7 +72,11 @@ delegate/cleave child routing.
 - [x] 7.11 Replace stale TypeScript implementation scope in provider-neutral model-control docs with Rust-native files before coding from the design.
 - [x] 7.12 Define default grade, provider selection, grade policy, failover policy, and degradation policy for interactive sessions and daemon agents.
 - [x] 7.13 Add exact model override clearing (`/model unpin` or equivalent) and make pinned state visible in route/status projections.
-- [x] 7.14 Enforce reserved provider selector tokens (`auto`, `local`, `upstream`) in registry/profile validation.
-- [x] 7.15 Extend OpenAI-compatible endpoint profiles to normalize responses and provider-specific errors, not only request fields.
-- [x] 7.16 Add data-driven endpoint auth schemes and route credential probing through endpoint metadata.
-- [x] 7.17 Update or remove baseline routing/effort specs that still require `/local`, `/haiku`, `/sonnet`, `/opus`, or `set_model_tier`.
+- [ ] 7.14 Enforce reserved provider selector tokens (`auto`, `local`, `upstream`) in registry/profile validation.
+- [ ] 7.15 Extend OpenAI-compatible endpoint profiles to normalize responses and provider-specific errors, not only request fields.
+- [ ] 7.16 Add data-driven endpoint auth schemes and route credential probing through endpoint metadata.
+- [ ] 7.17 Update or remove baseline routing/effort specs that still require `/local`, `/haiku`, `/sonnet`, `/opus`, or `set_model_tier`.
+
+- [ ] 7.18 Replace remaining internal `ModelTier` bridge and `data/model-registry.json` `tiers`/`tier` fields with grade/capability-row data.
+- [x] 7.19 Update web/status/IPC projections that still expose `capability_tier` and legacy options (`retribution`, `victory`, `gloriana`).
+- [ ] 7.20 Rewrite stale long-lived docs that still describe public tiers as stable (`docs/model-routing.md` was patched; baseline specs remain).

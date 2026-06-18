@@ -2241,7 +2241,7 @@ fn wrapped_rows(text: &str, width: u16) -> u16 {
 }
 
 /// Build a compact meta tag string from SegmentMeta for display in the response header.
-/// Example: "claude-sonnet-4-6 · anthropic · victory · think:medium · ctx:34%"
+/// Example: "claude-sonnet-4-6 · anthropic · B · think:medium · ctx:34%"
 pub fn build_meta_tag(meta: &SegmentMeta) -> String {
     let mut parts = Vec::new();
     if let Some(ref m) = meta.model_id {
@@ -6297,7 +6297,7 @@ After fence text.
         let meta = SegmentMeta {
             model_id: Some("anthropic:claude-sonnet-4-6".into()),
             provider: Some("anthropic".into()),
-            tier: Some("victory".into()),
+            tier: Some("B".into()),
             thinking_level: Some("medium".into()),
             ..Default::default()
         };
@@ -6307,7 +6307,7 @@ After fence text.
             "should strip provider prefix: {tag}"
         );
         assert!(tag.contains("anthropic"), "should include provider: {tag}");
-        assert!(tag.contains("victory"), "should include tier: {tag}");
+        assert!(tag.contains("B"), "should include grade: {tag}");
         assert!(
             tag.contains("think:medium"),
             "should include thinking level: {tag}"

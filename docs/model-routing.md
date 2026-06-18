@@ -61,18 +61,18 @@ The system also controls compaction model selection (local → GPT → Haiku fal
 
 ## Design Decisions
 
-- **Public tier semantics stable, provider resolution underneath**: Agent-facing tiers (local/haiku/sonnet/opus) never change. Provider choice is a session-level policy resolved at runtime, not hardcoded.
-- **Effort tiers coexist with model-budget**: Effort sets caps and preferences; model-budget enforces budgets and handles failures. Clean interface boundary — effort doesn't import model-budget internals.
-- **`/effort cap` locks tier, agent downgrades only**: Operator sets a ceiling; the agent can voluntarily use cheaper tiers but never exceed the cap.
-- **Intelligent compaction fallback chain**: Compaction tries local first (cheapest), falls back to GPT-5.3 (good quality), then Haiku (always available). Heavy local compaction disabled by default to avoid GPU contention.
+- **0.27.0 breaks public tier semantics intentionally**: Agent-facing capability should use F/D/C/B/A/S grades. Legacy `local/haiku/sonnet/opus` and `local/retribution/victory/gloriana` terminology is historical only and must not be treated as stable public API.
+- **Endpoint selection is separate from capability**: `local` is an endpoint class / provider selector, not a capability grade. Provider choice is a session-level policy resolved at runtime, not hardcoded into grade vocabulary.
+- **Model intent replaces effort-tier command semantics**: Model control should persist requested grade, provider selection, exact-model pin state, and failover/degradation policy separately from the active concrete route.
+- **Intelligent compaction fallback chain remains a route policy concern**: Compaction and memory flows should resolve through model intent / endpoint policy rather than hard-coded tier names as the resolver matures.
 - **Request fingerprint + provider/model retry ledger**: Each API call gets a fingerprint; retries tracked per-fingerprint per-provider to prevent loops. Ledger clears on next successful turn.
 - **`invalid-request` is non-retryable**: 400-class errors (oversized images, malformed payloads) surface actionable guidance immediately, no blind retry.
 
 ## Behavioral Contracts
 
 See `openspec/baseline/effort.md`, `openspec/baseline/routing.md`, `openspec/baseline/routing/spec.md`, and `openspec/baseline/models/profile.md` for Given/When/Then scenarios covering:
-- Effort tier transitions and cap enforcement
-- Provider fallback ordering
+- Model-grade transitions, exact pins, and provider selector enforcement
+- Endpoint/provider fallback ordering
 - Transient failure classification and retry bounds
 - Operator profile role resolution
 
@@ -87,7 +87,7 @@ See `openspec/baseline/effort.md`, `openspec/baseline/routing.md`, `openspec/bas
 ## Related Subsystems
 
 - [Error Recovery](error-recovery.md) — failure classification and recovery signaling
-- [Dashboard](dashboard.md) — displays current model, tier, and recovery state
-- [Cleave](cleave.md) — child model selection respects effort tiers
+- [Dashboard](dashboard.md) — displays requested model intent, active route, and recovery state
+- [Cleave](cleave.md) — child model selection should resolve model grades and endpoint policy
 - [Project Memory](project-memory.md) — extraction/compaction model routing
 - [Operator Profile](operator-profile.md) — provider preferences and fallback policy

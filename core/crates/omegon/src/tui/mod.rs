@@ -494,7 +494,7 @@ struct App {
     /// Previous harness status for diffing on HarnessStatusChanged.
     previous_harness_status: Option<crate::status::HarnessStatus>,
     /// Capability tier detected at startup by systems check probes.
-    pub capability_tier: Option<crate::startup::CapabilityTier>,
+    pub capability_grade: Option<crate::startup::CapabilityTier>,
     /// Tutorial state — active when running /tutorial (lesson-based).
     tutorial: Option<TutorialState>,
     /// Tutorial overlay — game-style first-play advisor.
@@ -1706,7 +1706,7 @@ impl App {
             queue_mode: PromptQueueMode::UntilReady,
             operator_events: std::collections::VecDeque::new(),
             previous_harness_status: None,
-            capability_tier: None,
+            capability_grade: None,
             tutorial: None,
             tutorial_overlay: None,
             pending_permission: None,
@@ -4211,7 +4211,7 @@ impl App {
             self.footer_data.is_oauth = s.provider_is_oauth;
         }
         {
-            self.footer_data.model_tier = self.footer_data.harness.capability_tier.clone();
+            self.footer_data.model_tier = self.footer_data.harness.capability_grade.clone();
         }
         self.footer_data.turn = self.turn;
         self.footer_data.tool_calls = self.tool_calls;
@@ -8318,7 +8318,7 @@ pub async fn run_tui(
                 collected_probes.push(result);
             }
             // Classify capability tier from ALL collected results
-            app.capability_tier = Some(crate::startup::classify_tier(&collected_probes));
+            app.capability_grade = Some(crate::startup::classify_tier(&collected_probes));
         }
     }
 

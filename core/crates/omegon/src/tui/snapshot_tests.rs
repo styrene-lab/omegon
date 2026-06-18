@@ -389,7 +389,7 @@ fn snapshot_engine_fallback_and_instrument_panels() {
         compactions: 2,
         cwd: "/home/user/workspace/black-meridian/omegon".into(),
         thinking_level: "high".into(),
-        model_tier: "victory".into(),
+        model_tier: "B".into(),
         provider_connected: true,
         is_oauth: false,
         ..Default::default()
@@ -408,7 +408,7 @@ fn snapshot_engine_fallback_and_instrument_panels() {
             name: "Concise".into(),
             intensity_mode: "full".into(),
         }),
-        capability_tier: "victory".into(),
+        capability_grade: "B".into(),
         memory: MemoryStatus {
             total_facts: 2440,
             active_facts: 1800,
@@ -610,7 +610,7 @@ fn snapshot_bootstrap_full() {
         }),
         context_class: "Standard".into(),
         thinking_level: "High".into(),
-        capability_tier: "victory".into(),
+        capability_grade: "B".into(),
         memory: MemoryStatus {
             total_facts: 2440,
             active_facts: 1800,
