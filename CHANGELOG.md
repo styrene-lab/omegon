@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added profile schema support for durable model intent persistence.
 - Added `/model route` and `/model providers` aliases for inspecting active model routing and provider options.
 - Added `/model policy <exact|minimum|nearest>` to update durable grade-policy intent without switching the active route.
 - Added `/model unpin` to clear exact model overrides while preserving the active route and grade/provider intent.
