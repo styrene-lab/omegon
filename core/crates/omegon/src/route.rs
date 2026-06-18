@@ -54,6 +54,19 @@ pub enum ProviderSelection {
     Endpoint(String),
 }
 
+impl ProviderSelection {
+    pub fn parse(s: &str) -> Option<Self> {
+        let trimmed = s.trim();
+        match trimmed {
+            "auto" => Some(Self::Auto),
+            "local" => Some(Self::Local),
+            "upstream" => Some(Self::Upstream),
+            "" => None,
+            other => Some(Self::Endpoint(other.to_string())),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GradePolicy {
     Exact,
@@ -569,6 +582,18 @@ impl RouteController {
 
     pub async fn clear_exact_model_override(&self) -> RouteSnapshot {
         let mut state = self.state.write().await;
+        state.intent.exact_model_override = None;
+        if state.intent.grade.is_none() {
+            state.intent.grade = Some(ModelGrade::B);
+        }
+        state.warning = None;
+        drop(state);
+        self.emit_changed().await
+    }
+
+    pub async fn set_provider_selection(&self, provider_selection: ProviderSelection) -> RouteSnapshot {
+        let mut state = self.state.write().await;
+        state.intent.provider_selection = provider_selection;
         state.intent.exact_model_override = None;
         if state.intent.grade.is_none() {
             state.intent.grade = Some(ModelGrade::B);
@@ -1441,4 +1466,23 @@ mod tests {
         assert_eq!(snapshot.intent.exact_model_override, None);
         assert_eq!(snapshot.intent.grade, Some(ModelGrade::B));
     }
+    #[tokio::test]
+    async fn provider_selection_update_clears_exact_pin_without_route_switch() {
+        let controller = RouteController::new(
+            ProviderRoute::Serving {
+                model: "anthropic:claude-sonnet-4-6".into(),
+            },
+            Box::new(NullBridge),
+            None,
+        );
+
+        let snapshot = controller
+            .set_provider_selection(ProviderSelection::Local)
+            .await;
+
+        assert_eq!(snapshot.serving_model(), Some("anthropic:claude-sonnet-4-6"));
+        assert_eq!(snapshot.intent.provider_selection, ProviderSelection::Local);
+        assert_eq!(snapshot.intent.exact_model_override, None);
+    }
+
 }
