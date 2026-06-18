@@ -494,7 +494,7 @@ struct App {
     /// Previous harness status for diffing on HarnessStatusChanged.
     previous_harness_status: Option<crate::status::HarnessStatus>,
     /// Capability tier detected at startup by systems check probes.
-    pub capability_grade: Option<crate::startup::CapabilityTier>,
+    pub capability_grade: Option<crate::startup::CapabilityGradeBand>,
     /// Tutorial state — active when running /tutorial (lesson-based).
     tutorial: Option<TutorialState>,
     /// Tutorial overlay — game-style first-play advisor.
