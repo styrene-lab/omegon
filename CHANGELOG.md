@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Added the first durable model-intent state slice so route snapshots carry requested grade/provider intent separately from the active serving route.
 - Added registry validation coverage requiring every OpenAI-compatible endpoint to declare verified profile metadata.
 - Wired endpoint-declared auth schemes into provider API-key resolution for registry-only endpoints.
 - Migrated the model registry and routing internals from legacy tier fields to provider-neutral grade mappings while retaining external DTO compatibility where required.
