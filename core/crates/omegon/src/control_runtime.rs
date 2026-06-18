@@ -33,6 +33,7 @@ pub enum ControlRequest {
         profile: String,
         model: Option<String>,
     },
+    ThinkingView,
     SetThinking {
         level: crate::settings::ThinkingLevel,
     },
@@ -226,6 +227,7 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::SetModel(requested_model) => ControlRequest::SetModel {
             requested_model: requested_model.clone(),
         },
+        crate::tui::CanonicalSlashCommand::ThinkingView => ControlRequest::ThinkingView,
         crate::tui::CanonicalSlashCommand::SetThinking(level) => {
             ControlRequest::SetThinking { level: *level }
         }
@@ -448,6 +450,7 @@ async fn try_stateless_control(
     let resp = match request {
         ControlRequest::ModelView => model_view_response(shared_settings).await,
         ControlRequest::ModelList => model_list_response().await,
+        ControlRequest::ThinkingView => thinking_view_response(shared_settings).await,
         ControlRequest::AuthStatus => auth_status_response().await,
         ControlRequest::AuthUnlock => auth_unlock_response().await,
         ControlRequest::AuthLogout { provider } => {
@@ -1183,6 +1186,76 @@ pub async fn switch_dispatcher_response(
     }
 }
 
+pub async fn thinking_view_response(
+    shared_settings: &settings::SharedSettings,
+) -> SlashCommandResponse {
+    use crate::surfaces::palette::{
+        PaletteBadgeTone, PaletteGroupProjection, PaletteProjection, PaletteRowProjection,
+    };
+
+    let current = shared_settings
+        .lock()
+        .ok()
+        .map(|settings| settings.thinking);
+    let mut rows = Vec::new();
+    for level in [
+        crate::settings::ThinkingLevel::Off,
+        crate::settings::ThinkingLevel::Minimal,
+        crate::settings::ThinkingLevel::Low,
+        crate::settings::ThinkingLevel::Medium,
+        crate::settings::ThinkingLevel::High,
+    ] {
+        let mut row = PaletteRowProjection::action(
+            format!("think.{}", level.as_str()),
+            format!("/think {}", level.as_str()),
+            thinking_level_description(level),
+        )
+        .with_badge(
+            format!("{} {}", level.icon(), level.as_str()),
+            PaletteBadgeTone::Info,
+        );
+        if current == Some(level) {
+            row = row.with_badge("current", PaletteBadgeTone::Success);
+        }
+        rows.push(row);
+    }
+
+    let summary = current
+        .map(|level| {
+            format!(
+                "Current thinking level: {} {}",
+                level.icon(),
+                level.as_str()
+            )
+        })
+        .unwrap_or_else(|| "Current thinking level unavailable".into());
+
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(
+            PaletteProjection::new("Thinking levels")
+                .with_summary(summary)
+                .with_group(
+                    PaletteGroupProjection::new("Actions")
+                        .with_description("`command` · level · state")
+                        .with_rows(rows),
+                )
+                .with_footer("Use `/think <level>` to apply a level directly.")
+                .render_markdown(),
+        ),
+    }
+}
+
+fn thinking_level_description(level: crate::settings::ThinkingLevel) -> &'static str {
+    match level {
+        crate::settings::ThinkingLevel::Off => "disable explicit reasoning budget",
+        crate::settings::ThinkingLevel::Minimal => "use the smallest reasoning budget",
+        crate::settings::ThinkingLevel::Low => "use light reasoning for simple work",
+        crate::settings::ThinkingLevel::Medium => "use the default balanced reasoning level",
+        crate::settings::ThinkingLevel::High => "use deeper reasoning for complex work",
+    }
+}
+
 pub async fn set_thinking_response(
     shared_settings: &settings::SharedSettings,
     level: crate::settings::ThinkingLevel,
@@ -1707,7 +1780,6 @@ pub async fn context_status_response(
 
     // Per-category breakdown from prompt telemetry
     let telemetry = runtime_state.context_manager.last_prompt_telemetry();
-    let tool_count = runtime_state.bus.tool_definitions().len();
     let base_tokens = crate::util::estimate_chars_to_tokens(telemetry.base_prompt_chars);
     let hud_tokens = crate::util::estimate_chars_to_tokens(telemetry.session_hud_chars);
     let intent_tokens = crate::util::estimate_chars_to_tokens(telemetry.intent_chars);
@@ -1717,49 +1789,105 @@ pub async fn context_status_response(
     let injection_total = external_tokens + tool_guidance_tokens + file_guidance_tokens;
     let conversation_tokens =
         est.saturating_sub(base_tokens + hud_tokens + intent_tokens + injection_total);
+    let telemetry_total =
+        base_tokens + hud_tokens + intent_tokens + injection_total + conversation_tokens;
 
-    let mut lines = vec![
-        format!("Context: {} / {} tokens ({}%)", est, ctx_window, pct),
-        format!("  System prompt:   {:>6} tokens", base_tokens),
-        format!(
-            "  Tool schemas:    {:>6} tokens ({} tools, compact)",
-            0, tool_count
-        ), // schema tokens not in telemetry
-        format!("  Session HUD:     {:>6} tokens", hud_tokens),
-        format!("  Intent:          {:>6} tokens", intent_tokens),
-    ];
-    if external_tokens > 0 {
-        lines.push(format!(
-            "  Features:        {:>6} tokens (memory, lifecycle, etc.)",
-            external_tokens
-        ));
-    }
-    if tool_guidance_tokens > 0 {
-        lines.push(format!(
-            "  Tool guidance:   {:>6} tokens",
-            tool_guidance_tokens
-        ));
-    }
-    if file_guidance_tokens > 0 {
-        lines.push(format!(
-            "  File guidance:   {:>6} tokens",
-            file_guidance_tokens
-        ));
-    }
-    lines.push(format!(
-        "  Conversation:    {:>6} tokens",
-        conversation_tokens
-    ));
-    lines.push(format!(
-        "Policy: {} | Thinking: {}",
-        settings.effective_requested_class().label(),
-        settings.thinking.as_str()
-    ));
+    let requested_class = settings.effective_requested_class();
+    let actual_class = settings.context_class;
+    let thinking = settings.thinking;
+    let model = settings.model.clone();
 
     SlashCommandResponse {
         accepted: true,
-        output: Some(lines.join("\n")),
+        output: Some(
+            context_status_projection(
+                est,
+                ctx_window,
+                pct,
+                requested_class,
+                actual_class,
+                &model,
+                thinking,
+                telemetry_total,
+            )
+            .render_markdown(),
+        ),
     }
+}
+
+fn context_status_projection(
+    est: usize,
+    ctx_window: usize,
+    pct: u32,
+    requested_class: settings::ContextClass,
+    actual_class: settings::ContextClass,
+    model: &str,
+    thinking: settings::ThinkingLevel,
+    telemetry_total: usize,
+) -> crate::surfaces::palette::PaletteProjection {
+    use crate::surfaces::palette::{
+        PaletteBadgeTone, PaletteGroupProjection, PaletteProjection, PaletteRowProjection,
+    };
+
+    let context_actions = vec![
+        PaletteRowProjection::action(
+            "context.compact",
+            "/context compact",
+            "compact older turns through the context manager",
+        ),
+        PaletteRowProjection::action(
+            "context.reset",
+            "/context reset",
+            "archive this session and start fresh context",
+        ),
+        PaletteRowProjection::action("context.new", "/new", "alias for `/context reset`"),
+        PaletteRowProjection::action(
+            "context.request",
+            "/context request <kind> <query>",
+            "pull a mediated context pack",
+        ),
+    ];
+
+    let class_rows = settings::ContextClass::all()
+        .iter()
+        .copied()
+        .map(|class| {
+            let mut row = PaletteRowProjection::action(
+                format!("context.class.{}", class.short().to_lowercase()),
+                format!("/context {}", class.short().to_lowercase()),
+                format!("set requested context policy to {}", class.label()),
+            )
+            .with_badge(class.label(), PaletteBadgeTone::Info);
+            if class == requested_class {
+                row = row.with_badge("requested", PaletteBadgeTone::Success);
+            }
+            if class == actual_class {
+                row = row.with_badge("actual", PaletteBadgeTone::Neutral);
+            }
+            row
+        })
+        .collect();
+
+    PaletteProjection::new("Context")
+        .with_summary(format!(
+            "{est}/{ctx_window} tokens ({pct}%) · requested {} · actual {} · model {model} · thinking {}",
+            requested_class.label(),
+            actual_class.label(),
+            thinking.as_str()
+        ))
+        .with_group(
+            PaletteGroupProjection::new("Actions")
+                .with_description("`command` · effect")
+                .with_rows(context_actions),
+        )
+        .with_group(
+            PaletteGroupProjection::new("Context classes")
+                .with_description("`command` · requested/actual markers")
+                .with_rows(class_rows),
+        )
+        .with_footer(format!(
+            "Last prompt telemetry accounts for ~{telemetry_total} local tokens. Use `/context request <kind> <query>` for targeted retrieval instead of dumping full state."
+        ))
 }
 
 const MANUAL_COMPACTION_KEEP_RECENT_TURNS: u32 = 2;
@@ -4038,6 +4166,61 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_status_projection_uses_palette_instead_of_dump() {
+        let rendered = context_status_projection(
+            23_271,
+            1_000_000,
+            2,
+            settings::ContextClass::Compact,
+            settings::ContextClass::Massive,
+            "openai-codex:gpt-5.5",
+            crate::settings::ThinkingLevel::High,
+            12_345,
+        )
+        .render_markdown();
+
+        assert!(rendered.starts_with("## Context"));
+        assert!(rendered.contains("23271/1000000 tokens (2%)"));
+        assert!(rendered.contains("requested Compact (128k)"));
+        assert!(rendered.contains("actual Massive (1M+)"));
+        assert!(rendered.contains("### Actions"));
+        assert!(
+            rendered
+                .contains("- `/context compact` — compact older turns through the context manager")
+        );
+        assert!(
+            rendered.contains("- `/context request <kind> <query>` — pull a mediated context pack")
+        );
+        assert!(rendered.contains("### Context classes"));
+        assert!(rendered.contains("- `/context compact` — Compact (128k) · requested"));
+        assert!(rendered.contains("- `/context massive` — Massive (1M+) · actual"));
+        assert!(!rendered.contains("Meter:"));
+        assert!(!rendered.contains("System prompt:"));
+        assert!(!rendered.contains("Tool schemas:"));
+    }
+
+    #[tokio::test]
+    async fn thinking_view_renders_shared_palette_rows() {
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
+            thinking: crate::settings::ThinkingLevel::High,
+            ..Default::default()
+        }));
+
+        let response = thinking_view_response(&shared_settings).await;
+        let output = response.output.expect("thinking view output");
+
+        assert!(response.accepted);
+        assert!(output.starts_with("## Thinking levels"));
+        assert!(output.contains("Current thinking level: ◉ high"));
+        assert!(output.contains("### Actions"));
+        assert!(output.contains("- `/think off` — ○ off · disable explicit reasoning budget"));
+        assert!(output.contains(
+            "- `/think high` — ◉ high · current · use deeper reasoning for complex work"
+        ));
+        assert!(output.contains("Use `/think <level>` to apply a level directly."));
+    }
 
     #[test]
     fn skills_palette_renders_action_and_object_rows() {
