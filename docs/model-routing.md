@@ -18,7 +18,20 @@ subsystem = "model-routing"
 
 # Model Routing
 
-> Provider-aware model selection, effort tiers, cost control, and intelligent fallback — the control plane for all inference decisions across Omegon.
+> Provider-aware model selection, capability grades, endpoint routing, cost control, and intelligent failover — the control plane for all inference decisions across Omegon.
+
+## 0.27.0 direction
+
+The 0.27.0 model-routing direction supersedes the legacy `local/haiku/sonnet/opus` and `local/retribution/victory/gloriana` tier vocabulary. Capability is expressed as provider-neutral F/D/C/B/A/S grades. Endpoint/provider selection is a separate axis, and `local` is an endpoint class / operational posture rather than a model grade.
+
+Concrete model selection should be resolver output:
+
+```text
+model intent = grade + endpoint selection + failover/degradation policy + exact override state
+route result = endpoint:model plus structured resolution reasons
+```
+
+Most upstream providers should share an OpenAI-compatible adapter with endpoint profiles for headers, unsupported fields, path variants, and quirks. Custom protocol adapters are reserved for materially different APIs such as Anthropic Messages, and possibly native Gemini/Ollama paths when feature coverage requires them.
 
 ## What It Does
 

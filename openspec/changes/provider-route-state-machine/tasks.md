@@ -53,3 +53,18 @@ delegate/cleave child routing.
 - [x] 6.1 CHANGELOG `[Unreleased]`: breaking-change entry — silent fallback removed; include exact `fallback_providers = [...]` profile snippet for operators who relied on it
 - [x] 6.2 Startup one-time notice when Disconnected would have silently fallen back under the old behavior (detected: fallback_providers empty AND a provider with valid creds exists) pointing at the new config key
 - [x] 6.3 Update docs/provider-route-state-machine.md design node impl notes with final file scope deltas
+
+
+## 7. 0.27.0 model intent and endpoint matrix follow-up
+<!-- specs: provider-route/model-intent -->
+
+- [ ] 7.1 Replace legacy `ModelTier` vocabulary with provider-neutral `ModelGrade` F/D/C/B/A/S; remove `Local` as a capability value.
+- [ ] 7.2 Remove legacy slash commands `/gloriana`, `/victory`, `/retribution`, `/opus`, `/sonnet`, and `/haiku` entirely; they should be unknown commands, not hidden aliases.
+- [ ] 7.3 Replace legacy `set_model_tier` semantics with model-intent tooling (`set_model_intent` preferred, or explicit grade/provider/policy tools during migration).
+- [ ] 7.4 Extend the model registry from provider-tier maps to endpoint/model capability rows with grade, grade source, context window, tool/streaming/json/vision support, and cost/latency bands.
+- [ ] 7.5 Add endpoint definitions carrying endpoint id, display name, endpoint class (`LocalDev`/`Upstream`), protocol kind, base URL, credential reference, and enabled state.
+- [ ] 7.6 Implement OpenAI-compatible endpoint profiles for OpenRouter, Groq, Mistral, xAI, Hugging Face router, Gemini compatibility, and private OpenAI-compatible endpoints; keep Anthropic as a custom adapter.
+- [ ] 7.7 Add request sanitization/profile shaping for OpenAI-compatible endpoints, including unsupported fields and required/optional headers.
+- [ ] 7.8 Add `/model grade`, `/model provider`, `/model policy`, `/model route`, and `/model providers` to the canonical command registry and parser path.
+- [ ] 7.9 Preserve operator intent separately from active route so route failover can change the serving endpoint without erasing requested grade/provider/policy.
+- [ ] 7.10 Add tests proving local is not accepted as a grade, legacy commands/tools are absent, and grade+provider intent resolves through endpoint capability rows.
