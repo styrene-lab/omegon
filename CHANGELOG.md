@@ -37,6 +37,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 - Documented the registry-backed slash-command matrix and added drift coverage for canonical parser commands versus intentional hidden compatibility aliases.
 - Gated built-in remote slash execution with command-registry CLI availability metadata so interactive-only commands are rejected consistently.
+- Added explicit built-in remote slash policy for confirmation-required commands while preserving remote logout compatibility.
 - Kept agent/tool `context_status` calls local to their tool card so they no longer enqueue the full `/context` palette into the transcript after assistant turns.
 - Persisted interactive `/think <level>` changes to the project profile and restored explicit thinking preferences after slim/full posture startup defaults.
 - Restored the full idle editor top-line engine block so it shows provider, tier, and thinking level beside the short model label.
