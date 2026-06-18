@@ -51,6 +51,12 @@ Current `/skills` TUI route passes through `canonical_slash_command("skills", ar
 
 **Rationale:** Prompt libraries should not pollute the global slash namespace or collide with built-ins such as `/model`, `/help`, or `/plan`. `/prompt <name>` is the canonical quick preview path. If an operator wants direct `/review` style invocation, they create an explicit user command alias targeting `prompt:<id>` with availability and safety metadata.
 
+### Slash command menu is a registry-derived projection
+
+**Status:** accepted
+
+**Rationale:** The slash menu should not be a second command registry hidden inside the TUI. A renderer-neutral command-menu projection should merge built-in commands and feature/user commands, preserve availability and safety metadata, deduplicate built-ins ahead of feature commands, and feed inline autocomplete, `/help`, CLI/ACP discovery, and future expanded modal palettes.
+
 ## Open Questions
 
 - [assumption] `/skills` and `/prompt` default outputs should be improved first as text projections before building a full interactive modal palette.
@@ -63,8 +69,11 @@ Current `/skills` TUI route passes through `canonical_slash_command("skills", ar
 ### File Scope
 
 - `core/crates/omegon/src/surfaces/palette.rs` — introduced the shared renderer-neutral command/menu palette row-group DTO used by `/skills` and intended for `/prompt`, menus, CLI, ACP, and web consumers.
+- `core/crates/omegon/src/surfaces/command_menu.rs` — introduced the renderer-neutral slash command menu projection that merges built-in and feature command definitions while retaining source, availability, safety, badges, and subcommand matching for autocomplete/help surfaces.
 - `core/crates/omegon/src/control_runtime.rs` — existing `/skills` control response remains the main target for palette-style skill projection.
-- `core/crates/omegon/src/tui/mod.rs` — static help/completion should expose prompt/user-command surfaces through registry-backed command definitions rather than bespoke allowlists.
+- `core/crates/omegon/src/command_registry.rs` — shared registry-shaped built-in slash command metadata with per-command availability/safety, projected by TUI and ACP command discovery.
+- `core/crates/omegon/src/tui/mod.rs` — TUI autocomplete and `/help` consume shared registry definitions through the shared command-menu surface instead of maintaining renderer-local command rows.
+- `core/crates/omegon/src/acp.rs` — ACP available-command advertisement and `/help` derive supported local command metadata from the shared command registry while preserving existing ACP command names (`/thinking`, `/login`) as surface aliases.
 - `core/crates/omegon/src/skills.rs` — skill inventory already provides bundled/user/project-local data needed for palette rows.
 - `core/crates/omegon/src/prompts.rs` — implemented reusable prompt definitions, storage lookup, safety verdicts, and bundled/user/project-local prompt inventory.
 - `core/crates/omegon/src/features/prompt.rs` — implemented `/prompt` as the registry-native prompt router with `<name>` shorthand preview.
@@ -84,7 +93,7 @@ Current `/skills` TUI route passes through `canonical_slash_command("skills", ar
 1. **Skill and prompt palettes** — convert `/skills` and related manageable-content commands from inventory dumps into compact action/object rows with detail-on-demand commands.
 2. **Shared palette DTO** — extract renderer-neutral palette row/group projections so TUI transcript output, command menus, CLI remote slash execution, and ACP/web clients consume the same semantic surface.
 3. **Settings surface completion** — make `SettingsSurfaceProjection` the settings-page source of truth and leave TUI-local code responsible only for navigation, filtering, selection, and input dispatch.
-4. **Registry-backed menu discovery** — drive slash help, menus, command palette rows, CLI remote execution metadata, and ACP command discovery from command-registry availability/safety metadata instead of per-surface allowlists.
+4. **Registry-backed menu discovery** — drive slash help, menus, command palette rows, CLI remote execution metadata, and ACP command discovery from command-registry availability/safety metadata instead of per-surface allowlists. First implementation slices now provide a shared command-menu projection, route TUI autocomplete plus `/help` through it, carry per-command safety metadata, lift built-ins into a shared non-TUI registry module, and make ACP available-command discovery consume that registry without changing ACP's advertised command spellings.
 
 ## Remaining Work
 

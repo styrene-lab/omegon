@@ -44,6 +44,7 @@ pub mod code_act;
 pub mod code_act_proxy;
 pub mod code_act_sandbox;
 mod codex_config;
+mod command_registry;
 mod context;
 mod control_actions;
 mod control_runtime;
@@ -7177,6 +7178,20 @@ async fn execute_remote_slash_command(
         };
     };
 
+    let registry_name = remote_registry_name_for_command(name, &command);
+    if crate::command_registry::builtin_command_definitions()
+        .into_iter()
+        .find(|definition| definition.name == registry_name)
+        .is_some_and(|definition| !definition.availability.cli)
+    {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Command /{name} is interactive-only or unavailable via remote slash execution."
+            )),
+        };
+    }
+
     if let Some(control_request) = control_runtime::control_request_from_slash(&command) {
         let mut ctx = control_runtime::ControlContext {
             runtime_state,
@@ -7225,6 +7240,40 @@ async fn execute_remote_slash_command(
         output: Some(format!(
             "Command /{name} is interactive-only or unavailable via remote slash execution."
         )),
+    }
+}
+
+fn remote_registry_name_for_command<'a>(
+    name: &'a str,
+    command: &crate::tui::CanonicalSlashCommand,
+) -> &'a str {
+    match command {
+        crate::tui::CanonicalSlashCommand::AutomationView
+        | crate::tui::CanonicalSlashCommand::AutomationSet(_) => "automation",
+        crate::tui::CanonicalSlashCommand::AuthLogin { .. }
+        | crate::tui::CanonicalSlashCommand::AuthLogout { .. } => "auth",
+        crate::tui::CanonicalSlashCommand::NoteAdd { .. }
+        | crate::tui::CanonicalSlashCommand::NotesView
+        | crate::tui::CanonicalSlashCommand::NotesClear
+        | crate::tui::CanonicalSlashCommand::CheckinView => "notes",
+        crate::tui::CanonicalSlashCommand::WorkspaceStatusView
+        | crate::tui::CanonicalSlashCommand::WorkspaceListView
+        | crate::tui::CanonicalSlashCommand::WorkspaceNew(_)
+        | crate::tui::CanonicalSlashCommand::WorkspaceDestroy(_)
+        | crate::tui::CanonicalSlashCommand::WorkspaceAdopt
+        | crate::tui::CanonicalSlashCommand::WorkspaceRelease
+        | crate::tui::CanonicalSlashCommand::WorkspaceArchive
+        | crate::tui::CanonicalSlashCommand::WorkspacePrune
+        | crate::tui::CanonicalSlashCommand::WorkspaceBindMilestone(_)
+        | crate::tui::CanonicalSlashCommand::WorkspaceBindNode(_)
+        | crate::tui::CanonicalSlashCommand::WorkspaceBindClear
+        | crate::tui::CanonicalSlashCommand::WorkspaceRoleView
+        | crate::tui::CanonicalSlashCommand::WorkspaceRoleSet(_)
+        | crate::tui::CanonicalSlashCommand::WorkspaceRoleClear
+        | crate::tui::CanonicalSlashCommand::WorkspaceKindView
+        | crate::tui::CanonicalSlashCommand::WorkspaceKindSet(_)
+        | crate::tui::CanonicalSlashCommand::WorkspaceKindClear => "status",
+        _ => name,
     }
 }
 
@@ -9539,6 +9588,75 @@ mod tests {
             output.contains("hidden login selector") || output.contains("choose OpenAI API"),
             "got: {output}"
         );
+    }
+
+    #[test]
+    fn remote_slash_focus_is_blocked_by_registry_availability() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let agent = test_agent_setup();
+        let (events_tx, _) = broadcast::channel(16);
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
+            "anthropic:claude-sonnet-4-6",
+        )));
+        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(Box::new(
+            crate::bridge::NullBridge,
+        ) as Box<dyn LlmBridge>));
+        let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
+        let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
+
+        let (mut agent, mut runtime_state) = split_interactive_agent(agent);
+
+        let response = rt.block_on(execute_remote_slash_command(
+            &mut runtime_state,
+            &mut agent,
+            &events_tx,
+            &shared_settings,
+            &bridge,
+            &login_prompt_tx,
+            &cli,
+            "focus",
+            "on",
+        ));
+
+        assert!(!response.accepted);
+        assert!(
+            response
+                .output
+                .unwrap()
+                .contains("interactive-only or unavailable")
+        );
+    }
+
+    #[test]
+    fn remote_slash_stats_is_allowed_by_registry_availability() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let agent = test_agent_setup();
+        let (events_tx, _) = broadcast::channel(16);
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
+            "anthropic:claude-sonnet-4-6",
+        )));
+        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(Box::new(
+            crate::bridge::NullBridge,
+        ) as Box<dyn LlmBridge>));
+        let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
+        let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
+
+        let (mut agent, mut runtime_state) = split_interactive_agent(agent);
+
+        let response = rt.block_on(execute_remote_slash_command(
+            &mut runtime_state,
+            &mut agent,
+            &events_tx,
+            &shared_settings,
+            &bridge,
+            &login_prompt_tx,
+            &cli,
+            "stats",
+            "",
+        ));
+
+        assert!(response.accepted);
+        assert!(response.output.unwrap().contains("Session Overview"));
     }
 
     #[test]

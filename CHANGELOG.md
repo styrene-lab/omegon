@@ -17,6 +17,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added a renderer-neutral slash command menu projection that merges built-in and feature command definitions with source, availability, safety, and badge metadata for shared autocomplete/help surfaces.
+- Added per-command safety metadata to built-in slash command specs so autocomplete and `/help` can distinguish read-only, queue-mutating, state-changing, external, and destructive commands.
+- Moved built-in slash command metadata into a shared command registry module so non-TUI surfaces can consume the same command definitions.
+- Routed ACP available-command advertisement and `/help` through shared slash command registry metadata while preserving the existing ACP `/thinking` and `/login` command names.
 - Let selector popups opened from `/settings` handle their own keyboard input while preserving the persistent settings overlay behind them, so Enter confirms row edits instead of being recaptured by settings navigation.
 - Added Workspace role/kind rows to the shared settings projection so the `/settings` workspace tab exposes the existing workspace selectors instead of hiding dispatched editors behind unreachable row IDs.
 - Wired Enter on TUI `/settings` rows to the existing model, thinking, context, tool-density, update-channel, workspace-role, and workspace-kind selectors so the settings screen now edits already-supported choice settings.
@@ -31,6 +35,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a runtime final-answer nudge when an assistant turn would end while the visible Workbench plan still has active/todo items.
 
 ### Fixed
+- Documented the registry-backed slash-command matrix and added drift coverage for canonical parser commands versus intentional hidden compatibility aliases.
+- Gated built-in remote slash execution with command-registry CLI availability metadata so interactive-only commands are rejected consistently.
 - Kept agent/tool `context_status` calls local to their tool card so they no longer enqueue the full `/context` palette into the transcript after assistant turns.
 - Persisted interactive `/think <level>` changes to the project profile and restored explicit thinking preferences after slim/full posture startup defaults.
 - Restored the full idle editor top-line engine block so it shows provider, tier, and thinking level beside the short model label.

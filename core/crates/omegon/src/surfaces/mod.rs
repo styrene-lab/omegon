@@ -1,5 +1,6 @@
 //! Shared semantic surface projections consumed by TUI, ACP, and future clients.
 
+pub mod command_menu;
 pub mod conversation;
 pub mod dashboard;
 pub mod editor;

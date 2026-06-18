@@ -4394,10 +4394,16 @@ impl App {
 
             let items: Vec<Line<'static>> = matches
                 .iter()
-                .map(|(name, desc)| {
+                .map(|row| {
+                    let badges = if row.badges.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  [{}]", row.badges.join(" · "))
+                    };
                     Line::from(vec![
-                        Span::styled(format!(" /{name}"), t.style_accent()),
-                        Span::styled(format!("  {desc}"), t.style_muted()),
+                        Span::styled(format!(" {}", row.command), t.style_accent()),
+                        Span::styled(format!("  {}", row.description), t.style_muted()),
+                        Span::styled(badges, t.style_dim()),
                     ])
                 })
                 .collect();
@@ -4890,221 +4896,6 @@ impl App {
         }
     }
 
-    /// Command registry: (name, description, subcommands).
-    const COMMANDS: &'static [(&'static str, &'static str, &'static [&'static str])] = &[
-        ("help", "show available commands", &[]),
-        (
-            "copy",
-            "copy selected segment, latest answer, or session",
-            &["raw", "plain", "answer", "latest", "session"],
-        ),
-        (
-            "transcript",
-            "write a clean clickable Markdown transcript",
-            &["file", "open", "scrollback"],
-        ),
-        (
-            "mouse",
-            "toggle pane mouse interaction mode",
-            &["on", "off"],
-        ),
-        ("model", "view or switch model", &["list"]),
-        (
-            "think",
-            "set thinking level",
-            &["off", "minimal", "low", "medium", "high"],
-        ),
-        (
-            "profile",
-            "view, capture, apply, or edit runtime profile defaults",
-            &[
-                "view",
-                "capture",
-                "apply",
-                "mqtt",
-                "extension",
-                "persona",
-                "tone",
-            ],
-        ),
-        (
-            "stats",
-            "session telemetry and performance metrics",
-            &["bench"],
-        ),
-        ("new", "quick alias for /context reset", &[]),
-        (
-            "ui",
-            "switch UI presets or toggle individual surfaces",
-            &[
-                "status", "lean", "full", "show", "hide", "toggle", "detail", "density",
-            ],
-        ),
-        (
-            "context",
-            "context lifecycle and budget management",
-            &[
-                "status", "compact", "reset", "clear", "request", "standard", "extended", "massive",
-            ],
-        ),
-        (
-            "plan",
-            "manage session plan gate and progress",
-            &[
-                "status", "list", "set", "approve", "execute", "advance", "skip", "clear",
-            ],
-        ),
-        ("sessions", "list saved sessions", &[]),
-        ("memory", "memory stats", &[]),
-        ("settings", "open settings page", &[]),
-        (
-            "skills",
-            "manage bundled, user, project-local, and armory skills",
-            &["list", "install", "create", "get", "delete"],
-        ),
-        (
-            "extension",
-            "manage extensions (armory name, URL, path)",
-            &[
-                "list", "get", "install", "remove", "update", "enable", "disable", "search",
-            ],
-        ),
-        (
-            "plugin",
-            "manage local or git plugins",
-            &["list", "install", "remove", "update"],
-        ),
-        (
-            "armory",
-            "browse and install extensions, plugins, skills, and agents",
-            &["browse", "search", "list", "install"],
-        ),
-        (
-            "catalog",
-            "browse and manage agent catalog",
-            &["list", "install", "remove"],
-        ),
-        (
-            "cleave",
-            "show cleave status or trigger decomposition",
-            &["status"],
-        ),
-        (
-            "auth",
-            "authentication management",
-            &[
-                "status",
-                "unlock",
-                "login",
-                "logout",
-                "anthropic",
-                "openai",
-                "openai-codex",
-                "openrouter",
-                "ollama-cloud",
-                "github",
-            ],
-        ),
-        (
-            "chronos",
-            "date/time context",
-            &[
-                "week", "month", "quarter", "relative", "iso", "epoch", "tz", "range", "all",
-            ],
-        ),
-        (
-            "init",
-            "initialize project — scan & migrate agent conventions",
-            &["scan", "migrate"],
-        ),
-        (
-            "update",
-            "check for and install updates",
-            &["install", "channel"],
-        ),
-        (
-            "migrate",
-            "import from other tools",
-            &["auto", "claude-code", "pi", "codex", "cursor", "aider"],
-        ),
-        (
-            "auspex",
-            "primary local desktop handoff — show status or open Auspex",
-            &["status", "open"],
-        ),
-        (
-            "secrets",
-            "manage stored secrets",
-            &["list", "set", "get", "delete"],
-        ),
-        (
-            "vault",
-            "Vault status and management",
-            &["status", "configure", "init-policy"],
-        ),
-        (
-            "persona",
-            "switch persona, list, create, or deactivate",
-            &["list", "create", "off"],
-        ),
-        ("tone", "switch tone (or 'off' to deactivate)", &["off"]),
-        ("delegate", "subagent/delegate task management", &["status"]),
-        (
-            "subagent",
-            "alias for /delegate; inspect subagent tasks",
-            &["status"],
-        ),
-        (
-            "status",
-            "show harness status (providers, MCP, secrets, routing)",
-            &[],
-        ),
-        (
-            "tree",
-            "show design tree summary",
-            &["list", "frontier", "ready", "blocked"],
-        ),
-        (
-            "milestone",
-            "release milestone management",
-            &["freeze", "status"],
-        ),
-        (
-            "notes",
-            "capture, show, clear, or triage pending notes",
-            &["add", "clear", "checkin"],
-        ),
-        (
-            "editor",
-            "integrate omegon with an editor/IDE",
-            &["zed", "vscode", "status"],
-        ),
-        (
-            "preferences",
-            "open preferences menu (model, thinking, density, etc.)",
-            &[],
-        ),
-        (
-            "permissions",
-            "view grants and always-allow persistence",
-            &["list", "add", "remove", "keys"],
-        ),
-        (
-            "automation",
-            "tune ask/proceed gates without changing permissions",
-            &["status", "ask", "guarded", "flow", "autonomous"],
-        ),
-        (
-            "sandbox",
-            "toggle agent sandbox isolation (OCI containers)",
-            &["on", "off", "status"],
-        ),
-        ("version", "show build version and git sha", &[]),
-        ("q", "quit alias", &[]),
-        ("quit", "quit alias", &[]),
-        ("exit", "quit (or double Ctrl+C)", &[]),
-    ];
-
     /// Handle a slash command.
     fn handle_slash_command(&mut self, text: &str, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
         let trimmed = text.trim();
@@ -5180,14 +4971,28 @@ Scroll transcript:
                 let slim = !show_all && self.settings.lock().ok().is_some_and(|s| s.is_slim());
                 // Harness-lifecycle commands hidden in slim/Cruise zone.
                 const SLIM_HIDDEN: &[&str] = &["tree", "cleave", "delegate", "milestone"];
-                let lines: Vec<String> = Self::COMMANDS
-                    .iter()
-                    .filter(|(n, _, _)| !slim || !SLIM_HIDDEN.contains(n))
-                    .map(|(n, d, subs)| {
-                        if subs.is_empty() {
-                            format!("  /{n:<12} {d}")
+                let lines: Vec<String> = self
+                    .command_menu_projection()
+                    .rows
+                    .into_iter()
+                    .filter(|row| !slim || !SLIM_HIDDEN.contains(&row.name.as_str()))
+                    .map(|row| {
+                        let source = row.source.label();
+                        let safety = row.safety.class_label();
+                        if row.subcommands.is_empty() {
+                            format!(
+                                "  /{:<12} {}  [{} · {}]",
+                                row.name, row.description, source, safety
+                            )
                         } else {
-                            format!("  /{n:<12} {d}  [{}]", subs.join("|"))
+                            format!(
+                                "  /{:<12} {}  [{}]  [{} · {}]",
+                                row.name,
+                                row.description,
+                                row.subcommands.join("|"),
+                                source,
+                                safety
+                            )
                         }
                     })
                     .collect();
@@ -6674,9 +6479,9 @@ Scroll transcript:
                     SlashResult::Handled
                 } else {
                     // Try prefix match — e.g. "/das" matches "/dash"
-                    let matches: Vec<&str> = Self::COMMANDS
+                    let matches: Vec<&str> = crate::command_registry::BUILTIN_COMMANDS
                         .iter()
-                        .map(|(name, _, _)| *name)
+                        .map(|command| command.name)
                         .filter(|name| name.starts_with(cmd) && *name != cmd)
                         .collect();
                     if matches.len() == 1 {
@@ -6712,63 +6517,18 @@ Scroll transcript:
         matches!(name, "opus" | "sonnet" | "haiku")
     }
 
-    /// Palette: matching commands + subcommands for the current editor text.
-    fn matching_commands(&self) -> Vec<(String, String)> {
-        let text = self.editor.render_text();
-        if !text.starts_with('/') {
-            return vec![];
-        }
-        let input = &text[1..];
-        let parts: Vec<&str> = input.splitn(2, ' ').collect();
+    fn command_menu_projection(&self) -> crate::surfaces::command_menu::CommandMenuProjection {
+        crate::surfaces::command_menu::command_menu_projection(
+            crate::command_registry::builtin_command_definitions(),
+            self.bus_commands.clone(),
+            &["opus", "sonnet", "haiku"],
+        )
+    }
 
-        if parts.len() <= 1 {
-            let prefix = parts.first().copied().unwrap_or("");
-            let mut matches: Vec<(String, String)> = if prefix.is_empty() {
-                Self::COMMANDS
-                    .iter()
-                    .map(|(n, d, _)| (n.to_string(), d.to_string()))
-                    .collect()
-            } else {
-                Self::COMMANDS
-                    .iter()
-                    .filter(|(name, _, _)| name.starts_with(prefix))
-                    .map(|(n, d, _)| (n.to_string(), d.to_string()))
-                    .collect()
-            };
-            let mut seen: std::collections::HashSet<String> =
-                matches.iter().map(|(name, _)| name.clone()).collect();
-            // Append bus feature commands without duplicating built-ins.
-            for cmd in &self.bus_commands {
-                if Self::is_hidden_bus_command(&cmd.name) {
-                    continue;
-                }
-                if (prefix.is_empty() || cmd.name.starts_with(prefix))
-                    && seen.insert(cmd.name.clone())
-                {
-                    matches.push((cmd.name.clone(), cmd.description.clone()));
-                }
-            }
-            matches
-        } else {
-            let cmd = parts[0];
-            let sub_prefix = parts.get(1).copied().unwrap_or("");
-            // Check built-in commands first, then bus commands
-            if let Some((_, _, subs)) = Self::COMMANDS.iter().find(|(n, _, _)| *n == cmd) {
-                subs.iter()
-                    .filter(|s| s.starts_with(sub_prefix))
-                    .map(|s| (format!("{cmd} {s}"), String::new()))
-                    .collect()
-            } else if let Some(bus_cmd) = self.bus_commands.iter().find(|c| c.name == cmd) {
-                bus_cmd
-                    .subcommands
-                    .iter()
-                    .filter(|s| s.starts_with(sub_prefix))
-                    .map(|s| (format!("{cmd} {s}"), String::new()))
-                    .collect()
-            } else {
-                vec![]
-            }
-        }
+    /// Palette: matching commands + subcommands for the current editor text.
+    fn matching_commands(&self) -> Vec<crate::surfaces::command_menu::CommandMenuRowProjection> {
+        let text = self.editor.render_text();
+        self.command_menu_projection().matching(&text)
     }
 
     fn is_at_file_picker_trigger(text: &str) -> Option<String> {
@@ -9299,8 +9059,7 @@ pub async fn run_tui(
                             } else if text.starts_with('/') {
                                 let matches = app.matching_commands();
                                 if matches.len() == 1 {
-                                    let cmd = format!("/{}", matches[0].0);
-                                    app.editor.set_text(&cmd);
+                                    app.editor.set_text(&matches[0].command);
                                 }
                             } else if text.is_empty() {
                                 if matches!(
@@ -9461,17 +9220,19 @@ mod auspex_copy_tests {
     #[test]
     fn command_copy_marks_auspex_primary_without_dash_autocomplete() {
         assert!(
-            App::COMMANDS.iter().all(|(name, _, _)| *name != "dash"),
+            crate::command_registry::BUILTIN_COMMANDS
+                .iter()
+                .all(|command| command.name != "dash"),
             "/dash is a hidden compatibility/debug handler, not an autocomplete command"
         );
 
-        let auspex = App::COMMANDS
+        let auspex = crate::command_registry::BUILTIN_COMMANDS
             .iter()
-            .find(|(name, _, _)| *name == "auspex")
+            .find(|command| command.name == "auspex")
             .expect("/auspex command must exist");
-        assert!(auspex.1.contains("primary"));
-        assert!(auspex.1.contains("Auspex"));
-        assert!(auspex.1.contains("open"));
+        assert!(auspex.description.contains("primary"));
+        assert!(auspex.description.contains("Auspex"));
+        assert!(auspex.description.contains("open"));
     }
 
     #[test]
@@ -10678,62 +10439,69 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn commands_array_includes_extension() {
-        let ext = App::COMMANDS
+        let ext = crate::command_registry::BUILTIN_COMMANDS
             .iter()
-            .find(|(name, _, _)| *name == "extension")
+            .find(|command| command.name == "extension")
             .expect("/extension command must be in COMMANDS array");
-        assert!(ext.2.contains(&"install"));
-        assert!(ext.2.contains(&"remove"));
-        assert!(ext.2.contains(&"enable"));
-        assert!(ext.2.contains(&"search"));
+        assert!(ext.subcommands.contains(&"install"));
+        assert!(ext.subcommands.contains(&"remove"));
+        assert!(ext.subcommands.contains(&"enable"));
+        assert!(ext.subcommands.contains(&"search"));
     }
 
     #[test]
     fn commands_array_includes_catalog() {
-        let cat = App::COMMANDS
+        let cat = crate::command_registry::BUILTIN_COMMANDS
             .iter()
-            .find(|(name, _, _)| *name == "catalog")
+            .find(|command| command.name == "catalog")
             .expect("/catalog command must be in COMMANDS array");
-        assert!(cat.2.contains(&"install"));
-        assert!(cat.2.contains(&"remove"));
+        assert!(cat.subcommands.contains(&"install"));
+        assert!(cat.subcommands.contains(&"remove"));
     }
 
     #[test]
     fn commands_array_includes_armory() {
-        let armory = App::COMMANDS
+        let armory = crate::command_registry::BUILTIN_COMMANDS
             .iter()
-            .find(|(name, _, _)| *name == "armory")
+            .find(|command| command.name == "armory")
             .expect("/armory command must be in COMMANDS array");
-        assert!(armory.1.contains("install"));
-        assert!(armory.2.contains(&"browse"));
-        assert!(armory.2.contains(&"search"));
-        assert!(armory.2.contains(&"install"));
+        assert!(armory.description.contains("install"));
+        assert!(armory.subcommands.contains(&"browse"));
+        assert!(armory.subcommands.contains(&"search"));
+        assert!(armory.subcommands.contains(&"install"));
     }
 
     #[test]
     fn commands_array_skills_includes_delete() {
-        let skills = App::COMMANDS
+        let skills = crate::command_registry::BUILTIN_COMMANDS
             .iter()
-            .find(|(name, _, _)| *name == "skills")
+            .find(|command| command.name == "skills")
             .expect("/skills must be in COMMANDS");
-        assert!(skills.2.contains(&"create"));
-        assert!(skills.2.contains(&"delete"));
-        assert!(skills.2.contains(&"get"));
+        assert!(skills.subcommands.contains(&"create"));
+        assert!(skills.subcommands.contains(&"delete"));
+        assert!(skills.subcommands.contains(&"get"));
     }
 
     #[test]
     fn commands_array_context_palette_metadata_is_action_oriented() {
-        let context = App::COMMANDS
+        let context = crate::command_registry::BUILTIN_COMMANDS
             .iter()
-            .find(|(name, _, _)| *name == "context")
+            .find(|command| command.name == "context")
             .expect("/context must be in COMMANDS");
-        assert!(context.1.contains("context"));
+        assert!(context.description.contains("context"));
         for expected in [
             "status", "compact", "reset", "clear", "request", "standard", "extended", "massive",
         ] {
-            assert!(context.2.contains(&expected), "missing /context {expected}");
+            assert!(
+                context.subcommands.contains(&expected),
+                "missing /context {expected}"
+            );
         }
-        let compact_count = context.2.iter().filter(|sub| **sub == "compact").count();
+        let compact_count = context
+            .subcommands
+            .iter()
+            .filter(|sub| **sub == "compact")
+            .count();
         assert_eq!(
             compact_count, 1,
             "/context compact should not be duplicated"
@@ -10742,15 +10510,18 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn commands_array_think_palette_metadata_matches_supported_levels() {
-        let think = App::COMMANDS
+        let think = crate::command_registry::BUILTIN_COMMANDS
             .iter()
-            .find(|(name, _, _)| *name == "think")
+            .find(|command| command.name == "think")
             .expect("/think must be in COMMANDS");
         for expected in ["off", "minimal", "low", "medium", "high"] {
-            assert!(think.2.contains(&expected), "missing /think {expected}");
+            assert!(
+                think.subcommands.contains(&expected),
+                "missing /think {expected}"
+            );
         }
         assert!(
-            !think.2.contains(&"max"),
+            !think.subcommands.contains(&"max"),
             "/think max should not be advertised unless ThinkingLevel supports it"
         );
     }

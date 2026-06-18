@@ -43,6 +43,38 @@ type PendingResponseTx =
     futures::channel::oneshot::Sender<agent_client_protocol::Result<serde_json::Value>>;
 type PendingResponses = Rc<RefCell<std::collections::BTreeMap<String, PendingResponseTx>>>;
 
+fn acp_available_commands() -> Vec<AvailableCommand> {
+    let mut commands = Vec::new();
+    for definition in crate::command_registry::builtin_command_definitions()
+        .into_iter()
+        .filter(|definition| definition.availability.acp)
+    {
+        // Preserve ACP's already-advertised slash names while sourcing the
+        // underlying command metadata from the shared registry. The local handler
+        // accepts both these ACP names and the canonical TUI registry names.
+        let name = match definition.name.as_str() {
+            "think" => "thinking".to_string(),
+            "auth" => "login".to_string(),
+            _ => definition.name,
+        };
+        commands.push(AvailableCommand::new(name, definition.description));
+
+        // ACP exposes posture as a client/workbench mode control, not a TUI
+        // slash command. Keep it next to thinking, matching the historical
+        // advertised command ordering.
+        if commands
+            .last()
+            .is_some_and(|command| command.name == "thinking")
+        {
+            commands.push(AvailableCommand::new(
+                "posture",
+                "Show or set behavioral posture",
+            ));
+        }
+    }
+    commands
+}
+
 pub(crate) type SharedAcpClientConnection = Rc<RefCell<Option<AcpClientConnection>>>;
 
 #[derive(Clone)]
@@ -1132,32 +1164,9 @@ impl OmegonAcpAgent {
                 let _ = send_session_update(
                     c,
                     cmd_sid,
-                    SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(vec![
-                        AvailableCommand::new("model", "List or switch LLM model"),
-                        AvailableCommand::new("thinking", "Show or set thinking level"),
-                        AvailableCommand::new("posture", "Show or set behavioral posture"),
-                        AvailableCommand::new(
-                            "skills",
-                            "Manage skills (list, get, create, delete)",
-                        ),
-                        AvailableCommand::new(
-                            "extension",
-                            "Manage extensions (list, install, enable, search)",
-                        ),
-                        AvailableCommand::new(
-                            "armory",
-                            "Browse upstream extensions, plugins, skills, and agents",
-                        ),
-                        AvailableCommand::new("persona", "Manage personas (list, create, switch)"),
-                        AvailableCommand::new(
-                            "catalog",
-                            "Browse agent catalog (list, install, remove)",
-                        ),
-                        AvailableCommand::new("secrets", "Show configured secrets (no values)"),
-                        AvailableCommand::new("status", "Session status"),
-                        AvailableCommand::new("login", "Authentication help"),
-                        AvailableCommand::new("help", "List all commands"),
-                    ])),
+                    SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(
+                        acp_available_commands(),
+                    )),
                 )
                 .await;
             }
@@ -3918,7 +3927,7 @@ impl OmegonAcpAgent {
                 format!("Model set to: {}", args.trim())
             }
             "/model" => "Current model from CLI args. Use the model dropdown or /model <provider:model> to switch.".into(),
-            "/thinking" if !args.is_empty() => {
+            "/thinking" | "/think" if !args.is_empty() => {
                 let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
                 if let Some(tx) = tx {
                     let _ = tokio::runtime::Handle::current().block_on(tx.send(
@@ -3930,7 +3939,7 @@ impl OmegonAcpAgent {
                 }
                 format!("Thinking set to: {}", args.trim())
             }
-            "/thinking" => "Use the thinking dropdown or /thinking <off|minimal|low|medium|high>".into(),
+            "/thinking" | "/think" => "Use the thinking dropdown or /think <off|minimal|low|medium|high>".into(),
             "/posture" if !args.is_empty() => {
                 let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
                 if let Some(tx) = tx {
@@ -3988,7 +3997,7 @@ impl OmegonAcpAgent {
                 lines.push("To add or change secrets, run `omegon secrets configure` in a terminal.".into());
                 lines.join("\n")
             }
-            "/login" => "Omegon manages authentication independently.\nRun `omegon auth login` in a terminal or set API keys.".into(),
+            "/login" | "/auth" => "Omegon manages authentication independently.\nRun `omegon auth login` in a terminal or set API keys.".into(),
             "/skills" => {
                 let args = args.trim();
                 match args {
@@ -4019,7 +4028,14 @@ impl OmegonAcpAgent {
                 }
             }
             "/armory" => "Use the **armory/browse** RPC for structured upstream discovery across extensions, plugins, skills, and agents, and **armory/install** to install a registry item.\nBrowse parameters: kind, query. Install parameter: target.".into(),
-            "/help" => "Commands: /model /thinking /posture /skills /extension /armory /persona /catalog /secrets /status /login /help\n\nFull CRUD is available via RPC ext_methods (armory/*, skills/*, extensions/*, personas/*, catalog/*, secrets/*).".into(),
+            "/help" => {
+                let commands = acp_available_commands()
+                    .into_iter()
+                    .map(|command| format!("/{}", command.name))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("Commands: {commands}\n\nFull CRUD is available via RPC ext_methods (armory/*, skills/*, extensions/*, personas/*, catalog/*, secrets/*).")
+            }
             _ => format!("Unknown: {cmd}. Type /help"),
         }
     }
@@ -4223,6 +4239,50 @@ mod extension_metadata_tests {
             .expect("surface metadata should be advertised");
         assert_eq!(meta["omegon/surfaces"]["conversation"]["enabled"], false);
         assert!(!*agent.surface_updates_enabled.borrow());
+    }
+
+    #[test]
+    fn acp_available_commands_derive_from_shared_registry() {
+        let names: Vec<String> = acp_available_commands()
+            .into_iter()
+            .map(|command| command.name)
+            .collect();
+
+        assert!(names.contains(&"model".to_string()), "{names:?}");
+        assert!(names.contains(&"thinking".to_string()), "{names:?}");
+        assert!(names.contains(&"login".to_string()), "{names:?}");
+        assert!(names.contains(&"posture".to_string()), "{names:?}");
+        assert!(!names.contains(&"think".to_string()), "{names:?}");
+        assert!(!names.contains(&"auth".to_string()), "{names:?}");
+
+        let definitions = crate::command_registry::builtin_command_definitions();
+        for (advertised, registry_name) in [("thinking", "think"), ("login", "auth")] {
+            let definition = definitions
+                .iter()
+                .find(|definition| definition.name == registry_name)
+                .expect("ACP aliased command should come from shared registry");
+            assert!(definition.availability.acp, "{definition:?}");
+            assert!(names.contains(&advertised.to_string()), "{names:?}");
+        }
+    }
+
+    #[test]
+    fn acp_help_preserves_advertised_command_names() {
+        let agent = OmegonAcpAgent::new("test-model");
+        let text = agent.handle_slash_command("/help");
+
+        let command_line = text.lines().next().expect("help should include commands");
+        let commands: Vec<&str> = command_line
+            .strip_prefix("Commands: ")
+            .expect("help should start with command list")
+            .split_whitespace()
+            .collect();
+
+        assert!(commands.contains(&"/thinking"), "{text}");
+        assert!(commands.contains(&"/login"), "{text}");
+        assert!(commands.contains(&"/posture"), "{text}");
+        assert!(!commands.contains(&"/think"), "{text}");
+        assert!(!commands.contains(&"/auth"), "{text}");
     }
 
     #[test]

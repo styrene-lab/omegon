@@ -1995,7 +1995,9 @@ fn quit_aliases_are_advertised_and_handled() {
 
     for command in ["q", "quit", "exit"] {
         assert!(
-            App::COMMANDS.iter().any(|(name, _, _)| *name == command),
+            crate::command_registry::BUILTIN_COMMANDS
+                .iter()
+                .any(|entry| entry.name == command),
             "/{command} should be advertised"
         );
         let result = app.handle_slash_command(&format!("/{command}"), &tx);
@@ -3530,7 +3532,8 @@ fn all_commands_in_table_are_handled() {
     let mut app = test_app();
     let tx = test_tx();
 
-    for (name, _desc, _subs) in App::COMMANDS {
+    for command in crate::command_registry::BUILTIN_COMMANDS {
+        let name = command.name;
         let cmd = format!("/{name}");
         let result = app.handle_slash_command(&cmd, &tx);
         // Every command in the table should be recognized (not NotACommand)
@@ -3549,8 +3552,10 @@ fn handled_commands_are_in_commands_table() {
     let mut app = test_app();
     let tx = test_tx();
 
-    let known_names: std::collections::HashSet<&str> =
-        App::COMMANDS.iter().map(|(name, _, _)| *name).collect();
+    let known_names: std::collections::HashSet<&str> = crate::command_registry::BUILTIN_COMMANDS
+        .iter()
+        .map(|command| command.name)
+        .collect();
 
     // Test a set of plausible undocumented command names
     let undocumented = [
@@ -3872,8 +3877,102 @@ fn hidden_model_aliases_do_not_appear_in_palette() {
     ];
     app.editor.set_text("/");
     let matches = app.matching_commands();
-    assert!(matches.iter().any(|(name, _)| name == "victory"));
-    assert!(!matches.iter().any(|(name, _)| name == "sonnet"));
+    assert!(matches.iter().any(|row| row.name == "victory"));
+    assert!(!matches.iter().any(|row| row.name == "sonnet"));
+}
+
+#[test]
+fn command_palette_exposes_registry_metadata_badges() {
+    let mut app = test_app();
+    app.bus_commands = vec![omegon_traits::CommandDefinition {
+        name: "prompt".into(),
+        description: "manage prompts".into(),
+        subcommands: vec!["list".into()],
+        availability: omegon_traits::CommandAvailability::ALL,
+        safety: omegon_traits::CommandSafety::QUEUE_MUTATION,
+    }];
+    app.editor.set_text("/pro");
+
+    let matches = app.matching_commands();
+    let prompt = matches
+        .iter()
+        .find(|row| row.name == "prompt")
+        .expect("/prompt should be projected from bus registry");
+
+    assert_eq!(prompt.command, "/prompt");
+    assert!(prompt.badges.contains(&"feature".to_string()), "{prompt:?}");
+    assert!(prompt.badges.contains(&"queue".to_string()), "{prompt:?}");
+    assert!(prompt.badges.contains(&"prompt".to_string()), "{prompt:?}");
+}
+
+#[test]
+fn command_palette_exposes_builtin_safety_metadata() {
+    let mut app = test_app();
+    app.editor.set_text("/update");
+
+    let matches = app.matching_commands();
+    let update = matches
+        .iter()
+        .find(|row| row.name == "update")
+        .expect("/update should be projected from built-in registry");
+
+    assert_eq!(
+        update.source,
+        crate::surfaces::command_menu::CommandMenuSource::Builtin
+    );
+    assert!(
+        update.badges.contains(&"external".to_string()),
+        "{update:?}"
+    );
+    assert!(update.badges.contains(&"confirm".to_string()), "{update:?}");
+}
+
+#[test]
+fn help_uses_command_menu_safety_metadata() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    match app.handle_slash_command("/help all", &tx) {
+        SlashResult::Display(text) => {
+            assert!(text.contains("/update"), "{text}");
+            assert!(text.contains("[builtin · external]"), "{text}");
+            assert!(text.contains("/context"), "{text}");
+            assert!(text.contains("[builtin · queue]"), "{text}");
+        }
+        other => panic!("expected /help all display, got {other:?}"),
+    }
+}
+
+#[test]
+fn builtin_command_specs_are_not_all_local_only() {
+    assert!(
+        crate::command_registry::BUILTIN_COMMANDS
+            .iter()
+            .any(|command| {
+                command.safety.class == omegon_traits::CommandSafetyClass::ExternalSideEffect
+            })
+    );
+    assert!(
+        crate::command_registry::BUILTIN_COMMANDS
+            .iter()
+            .any(|command| {
+                command.safety.class == omegon_traits::CommandSafetyClass::QueueMutation
+            })
+    );
+    assert!(
+        crate::command_registry::BUILTIN_COMMANDS
+            .iter()
+            .any(|command| {
+                command.safety.class == omegon_traits::CommandSafetyClass::StateChanging
+            })
+    );
+    assert!(
+        crate::command_registry::BUILTIN_COMMANDS
+            .iter()
+            .any(|command| {
+                command.safety.class == omegon_traits::CommandSafetyClass::Destructive
+            })
+    );
 }
 
 #[test]
@@ -3888,7 +3987,7 @@ fn palette_deduplicates_builtin_and_bus_commands() {
     }];
     app.editor.set_text("/cl");
     let matches = app.matching_commands();
-    let cleave_count = matches.iter().filter(|(name, _)| name == "cleave").count();
+    let cleave_count = matches.iter().filter(|row| row.name == "cleave").count();
     assert_eq!(
         cleave_count, 1,
         "expected one /cleave entry, got: {matches:?}"
@@ -3900,7 +3999,11 @@ fn clear_command_is_not_documented_or_handled() {
     let mut app = test_app();
     let tx = test_tx();
 
-    assert!(!App::COMMANDS.iter().any(|(name, _, _)| *name == "clear"));
+    assert!(
+        !crate::command_registry::BUILTIN_COMMANDS
+            .iter()
+            .any(|command| command.name == "clear")
+    );
 
     let result = app.handle_slash_command("/clear", &tx);
     match result {
@@ -3940,6 +4043,66 @@ fn slash_cleave_warns_on_anthropic_subscription_but_proceeds() {
 
     unsafe {
         std::env::remove_var("ANTHROPIC_OAUTH_TOKEN");
+    }
+}
+
+#[test]
+fn canonical_slash_commands_are_registry_backed_or_intentional_aliases() {
+    let registry_names: std::collections::HashSet<&str> = crate::command_registry::BUILTIN_COMMANDS
+        .iter()
+        .map(|command| command.name)
+        .collect();
+
+    let canonical_names = [
+        "model",
+        "think",
+        "profile",
+        "automation",
+        "permissions",
+        "status",
+        "tree",
+        "context",
+        "new",
+        "sessions",
+        "auth",
+        "skills",
+        "plan",
+        "extension",
+        "armory",
+        "persona",
+        "catalog",
+        "plugin",
+        "secrets",
+        "vault",
+        "cleave",
+        "delegate",
+    ];
+
+    for name in canonical_names {
+        assert!(
+            registry_names.contains(name),
+            "canonical slash command /{name} is parsed but missing from BUILTIN_COMMANDS"
+        );
+    }
+
+    let intentional_aliases = [
+        ("autonomy", "automation"),
+        ("workspace", "status"),
+        ("login", "auth"),
+        ("logout", "auth"),
+        ("note", "notes"),
+        ("checkin", "notes"),
+    ];
+
+    for (alias, canonical) in intentional_aliases {
+        assert!(
+            !registry_names.contains(alias),
+            "compatibility alias /{alias} should stay hidden; register /{canonical} instead"
+        );
+        assert!(
+            registry_names.contains(canonical),
+            "compatibility alias /{alias} points at missing canonical /{canonical}"
+        );
     }
 }
 

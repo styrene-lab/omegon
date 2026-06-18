@@ -6,9 +6,10 @@ This document maps Omegon's operator command surfaces. It is intentionally inter
 
 | Surface | Primary implementation | Notes |
 |---|---|---|
-| Interactive slash commands | `core/crates/omegon/src/tui/mod.rs::handle_slash_command` | Executes TUI-local actions and routes canonical commands to control/runtime handlers. |
-| Slash autocomplete | `core/crates/omegon/src/tui/mod.rs::App::COMMANDS` plus bus commands | Must advertise only supported canonical commands. Aliases should be rare and intentional. |
-| Canonical slash parser | `core/crates/omegon/src/tui/mod.rs::canonical_slash_command` | Shared parser for commands that can route through `control_runtime`. |
+| Built-in slash registry | `core/crates/omegon/src/command_registry.rs::BUILTIN_COMMANDS` | Primary built-in command metadata: name, description, subcommands, availability, and safety. |
+| Renderer-neutral menu projection | `core/crates/omegon/src/surfaces/command_menu.rs::command_menu_projection` | Merges built-in and feature command definitions for TUI autocomplete/help-style surfaces while filtering hidden names. |
+| Interactive slash execution | `core/crates/omegon/src/tui/mod.rs::handle_slash_command` | Executes TUI-local actions and routes canonical commands to control/runtime handlers. |
+| Canonical slash parser | `core/crates/omegon/src/tui/mod.rs::canonical_slash_command` | Shared parser for commands that can route through `control_runtime` or remote slash execution. |
 | Control runtime mapping | `core/crates/omegon/src/control_runtime.rs::control_request_from_slash` | Converts canonical slash commands into executable control requests. |
 | CLI commands | `core/crates/omegon/src/main.rs::Commands` and nested `*Action` enums | Clap surface for non-interactive and system-management workflows. |
 | Operator docs | `core/docs/cli-reference.md` | Public-facing subset; not exhaustive. |
@@ -24,7 +25,7 @@ This document maps Omegon's operator command surfaces. It is intentionally inter
 
 ## Interactive slash command tree
 
-This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
+This is the built-in tree exposed by `command_registry::BUILTIN_COMMANDS` and projected through `surfaces::command_menu::command_menu_projection` for TUI command menus. Feature/user commands are merged by the projection at runtime; this tree records built-ins only.
 
 ```text
 /help
@@ -32,6 +33,7 @@ This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
 /copy
   raw
   plain
+  answer
   latest
   session
 
@@ -64,26 +66,26 @@ This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
   tone
 
 /stats
-/bench
+  bench
 
 /new
 
-/detail
+/ui
+  status
   lean
-  compact
-  detailed
-  verbose
-
-  lean
-  compact
-  detailed
-  verbose
+  full
+  show
+  hide
+  toggle
+  detail
+  density
 
 /context
   status
   compact
+  reset
   clear
-  compact
+  request
   standard
   extended
   massive
@@ -99,7 +101,10 @@ This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
   clear
 
 /sessions
+
 /memory
+
+/settings
 
 /skills
   list
@@ -109,15 +114,6 @@ This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
   delete
 
 /extension
-  list
-  get
-  install
-  remove
-  update
-  enable
-  disable
-  search
-
   list
   get
   install
@@ -178,17 +174,6 @@ This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
   install
   channel
 
-/ui
-  status
-  lean
-  full
-  show
-  hide
-  toggle
-  detail
-  density
-
-
 /migrate
   auto
   claude-code
@@ -196,8 +181,6 @@ This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
   codex
   cursor
   aider
-
-  status
 
 /auspex
   status
@@ -225,8 +208,10 @@ This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
 /delegate
   status
 
+/subagent
+  status
+
 /status
-/focus
 
 /tree
   list
@@ -238,7 +223,7 @@ This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
   freeze
   status
 
-/notes  # transitional; planned scratchpad-extension extraction
+/notes
   add
   clear
   checkin
@@ -263,21 +248,17 @@ This is the built-in tree exposed by `App::COMMANDS` after UI cleanup.
   flow
   autonomous
 
-  ask
-  guarded
-  flow
-  autonomous
-
-  add
-  remove
-  list
-
 /sandbox
   on
   off
   status
 
 /version
+
+/q
+
+/quit
+
 /exit
 ```
 
@@ -449,15 +430,32 @@ Some nested families are intentionally summarized here because their flags are o
 | Cleave | `/cleave` | `omegon cleave ...` | Slash is interactive/status/decompose; CLI is orchestration runner. |
 | Headless run | none | `omegon run ...` | CLI-only automation surface. |
 | Daemon/control plane | none | `omegon serve`, `omegon acp`, `omegon sentry` | CLI-only service surfaces. |
-| UI layout | `/ui`, `/focus`, `/mouse` | none | TUI-only. |
+| UI layout | `/ui`, `/mouse` | none | TUI-only. `/focus` is a removed compatibility handler that reports replacement controls, not a registry command. |
 | Session-local plan | `/plan` | none | TUI/session lifecycle surface. |
 | Context window | `/context` | run flags partially overlap | Interactive context management has no direct CLI equivalent. |
 
+## Registry-backed surface audit
+
+Current automated guards:
+
+- `command_registry::tests::builtin_command_names_are_unique` prevents duplicate built-in registry names.
+- `command_registry::tests::builtin_definitions_preserve_availability_and_safety` checks representative availability/safety metadata.
+- `tui::tests::all_commands_in_table_are_handled` verifies every built-in registry command is recognized by the TUI slash handler.
+- `tui::tests::handled_commands_are_in_commands_table` guards a sample of likely undocumented handlers.
+- `acp::extension_metadata_tests::acp_available_commands_derive_from_shared_registry` verifies ACP advertised commands derive from the shared registry while preserving ACP compatibility names.
+
+Known surface split:
+
+- TUI autocomplete/help uses the command-menu projection over built-in plus feature command definitions.
+- ACP availability is opt-in through `CommandAvailability.acp`; ACP still advertises `/thinking` for registry `/think` and `/login` for registry `/auth` for client compatibility.
+- Remote slash execution first parses canonical slash commands via `canonical_slash_command`, then falls back to registered feature commands whose definitions set `availability.cli`; built-in registry rows currently have no CLI availability.
+
 ## Drift and cleanup backlog
 
-- Verify every command in `App::COMMANDS` has an active `handle_slash_command` path or intentional bus-command route.
-- Verify every `handle_slash_command` arm that is operator-facing is either autocomplete-visible or explicitly hidden.
+- Add a stricter parser-vs-registry test for canonical command names and intentional hidden aliases; the current negative sample test is useful but not exhaustive.
+- Audit whether remote slash execution should consult built-in `CommandAvailability` before canonical parsing, or whether canonical remote commands remain a separate allowlist by design.
 - Alias commands removed from autocomplete: `/ext`, `/perf`, `/density`, `/prefs`, `/autonomy`, and `/trust`. `/bench` and `/detail` are also no longer primary palette entries; use `/stats bench` and `/ui detail ...`. Delete hidden handlers too if usage evidence stays absent.
+- Compatibility aliases that remain intentional: ACP advertises `/thinking` and `/login`; TUI keeps `/q`, `/quit`, and `/exit`; `/subagent status` aliases `/delegate status`.
 - `/dash` removed from autocomplete; delete the handler after Auspex diagnostics no longer require the compatibility browser path.
 - Normalize `secret` vs `secrets` naming across CLI/slash or document the asymmetry as intentional.
 - Keep `/ui` strict: no `standard`, `std`, `slim`, `minimal`, `tree`, or `status` aliases.
