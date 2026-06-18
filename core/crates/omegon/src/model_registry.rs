@@ -81,8 +81,36 @@ pub struct ProviderEndpoint {
     pub protocol: EndpointProtocol,
     pub base_url: Option<String>,
     pub auth_scheme: EndpointAuthScheme,
+    #[serde(default)]
+    pub open_ai_compatible_profile: Option<OpenAiCompatibleProfile>,
     #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenAiCompatibleProfile {
+    #[serde(default = "default_true")]
+    pub supports_chat_completions: bool,
+    #[serde(default)]
+    pub supports_responses_api: bool,
+    #[serde(default = "default_true")]
+    pub supports_streaming: bool,
+    #[serde(default = "default_true")]
+    pub supports_tools: bool,
+    #[serde(default)]
+    pub unsupported_request_fields: Vec<String>,
+    #[serde(default)]
+    pub required_headers: Vec<String>,
+    #[serde(default)]
+    pub optional_headers: Vec<String>,
+    #[serde(default)]
+    pub quirks: Vec<String>,
+    #[serde(default)]
+    pub docs_url: Option<String>,
+    #[serde(default)]
+    pub verified_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -367,6 +395,23 @@ fn validate_endpoints(endpoints: Vec<ProviderEndpoint>) -> Result<Vec<ProviderEn
         }
         if !seen.insert(endpoint.id.as_str()) {
             return Err(format!("duplicate endpoint id '{}'", endpoint.id));
+        }
+        match endpoint.protocol {
+            EndpointProtocol::OpenAiCompatible if endpoint.open_ai_compatible_profile.is_none() => {
+                return Err(format!(
+                    "OpenAI-compatible endpoint '{}' lacks an openAiCompatibleProfile",
+                    endpoint.id
+                ));
+            }
+            EndpointProtocol::Anthropic | EndpointProtocol::GeminiNative | EndpointProtocol::OllamaNative => {
+                if endpoint.open_ai_compatible_profile.is_some() {
+                    return Err(format!(
+                        "non-OpenAI-compatible endpoint '{}' must not declare openAiCompatibleProfile",
+                        endpoint.id
+                    ));
+                }
+            }
+            EndpointProtocol::OpenAiCompatible => {}
         }
     }
     Ok(endpoints)
