@@ -31,6 +31,7 @@ pub enum ControlRequest {
     SetModelIntent {
         grade: String,
     },
+    ClearModelOverride,
     SwitchDispatcher {
         request_id: String,
         profile: String,
@@ -227,6 +228,7 @@ pub fn control_request_from_slash(
     Some(match command {
         crate::tui::CanonicalSlashCommand::ModelView => ControlRequest::ModelView,
         crate::tui::CanonicalSlashCommand::ModelList => ControlRequest::ModelList,
+        crate::tui::CanonicalSlashCommand::ModelUnpin => ControlRequest::ClearModelOverride,
         crate::tui::CanonicalSlashCommand::SetModel(requested_model) => ControlRequest::SetModel {
             requested_model: requested_model.clone(),
         },
@@ -576,6 +578,10 @@ pub async fn execute_control(
             .await
         }
         ControlRequest::SetModelIntent { grade } => set_model_intent_response(&grade),
+        ControlRequest::ClearModelOverride => SlashCommandResponse {
+            accepted: true,
+            output: Some("Model exact override clear requested; interactive route state clears this through /model unpin.".into()),
+        },
         ControlRequest::SwitchDispatcher {
             request_id,
             profile,
@@ -760,6 +766,7 @@ pub async fn execute_daemon_control(
         request,
         ControlRequest::SetModel { .. }
             | ControlRequest::SetModelIntent { .. }
+            | ControlRequest::ClearModelOverride
             | ControlRequest::SetThinking { .. }
             | ControlRequest::SetContextClass { .. }
             | ControlRequest::SetRuntimeMode { .. }
@@ -785,6 +792,10 @@ pub async fn execute_daemon_control(
                 set_model_daemon_response(shared_settings, cwd, &requested_model).await
             }
             ControlRequest::SetModelIntent { grade } => set_model_intent_response(&grade),
+            ControlRequest::ClearModelOverride => SlashCommandResponse {
+                accepted: true,
+                output: Some("Model exact override clear requested; daemon route state does not yet persist model intent.".into()),
+            },
             ControlRequest::SetThinking { level } => {
                 set_thinking_daemon_response(shared_settings, cwd, level).await
             }

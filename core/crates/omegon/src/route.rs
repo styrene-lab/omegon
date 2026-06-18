@@ -567,6 +567,17 @@ impl RouteController {
         self.emit_changed().await
     }
 
+    pub async fn clear_exact_model_override(&self) -> RouteSnapshot {
+        let mut state = self.state.write().await;
+        state.intent.exact_model_override = None;
+        if state.intent.grade.is_none() {
+            state.intent.grade = Some(ModelGrade::B);
+        }
+        state.warning = None;
+        drop(state);
+        self.emit_changed().await
+    }
+
     pub async fn switch_model(
         &self,
         model: String,
@@ -1410,5 +1421,24 @@ mod tests {
         );
         assert_eq!(snapshot.intent.grade, Some(ModelGrade::S));
         assert_eq!(snapshot.intent.exact_model_override, None);
+    }
+    #[tokio::test]
+    async fn clear_exact_override_preserves_serving_route() {
+        let controller = RouteController::new(
+            ProviderRoute::Serving {
+                model: "anthropic:claude-sonnet-4-6".into(),
+            },
+            Box::new(NullBridge),
+            None,
+        );
+
+        let snapshot = controller.clear_exact_model_override().await;
+
+        assert_eq!(
+            snapshot.serving_model(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
+        assert_eq!(snapshot.intent.exact_model_override, None);
+        assert_eq!(snapshot.intent.grade, Some(ModelGrade::B));
     }
 }

@@ -313,7 +313,11 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
         "toggle pane mouse interaction mode",
         &["on", "off"],
     ),
-    BuiltinCommandSpec::cli_acp_state_changing("model", "view or switch model", &["list", "grade"]),
+    BuiltinCommandSpec::cli_acp_state_changing(
+        "model",
+        "view or switch model",
+        &["list", "grade", "unpin"],
+    ),
     BuiltinCommandSpec::cli_acp_state_changing(
         "think",
         "set thinking level",
