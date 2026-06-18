@@ -19,6 +19,8 @@ struct RegistryFile {
     grades: HashMap<String, HashMap<String, String>>,
     #[serde(default)]
     tiers: HashMap<String, HashMap<String, String>>,
+    #[serde(default)]
+    endpoints: Vec<ProviderEndpoint>,
     routes: Vec<RouteEntry>,
     models: Vec<ModelEntry>,
     #[serde(default)]
@@ -68,6 +70,56 @@ impl Default for InferenceDefaults {
     }
 }
 
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderEndpoint {
+    pub id: String,
+    pub display_name: String,
+    #[serde(rename = "class")]
+    pub class_: EndpointClass,
+    pub protocol: EndpointProtocol,
+    pub base_url: Option<String>,
+    pub auth_scheme: EndpointAuthScheme,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EndpointClass {
+    LocalDev,
+    Upstream,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EndpointProtocol {
+    OpenAiCompatible,
+    Anthropic,
+    GeminiNative,
+    OllamaNative,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind")]
+pub enum EndpointAuthScheme {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "bearerToken")]
+    BearerToken { #[serde(rename = "secretRef")] secret_ref: String },
+    #[serde(rename = "apiKeyHeader")]
+    ApiKeyHeader { header: String, #[serde(rename = "secretRef")] secret_ref: String },
+    #[serde(rename = "oauthProvider")]
+    OAuthProvider { provider: String },
+    #[serde(rename = "custom")]
+    Custom { #[serde(rename = "customKind")] custom_kind: String, #[serde(rename = "secretRef")] secret_ref: Option<String> },
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct RouteEntry {
     pub provider: String,
@@ -110,6 +162,7 @@ pub struct PricingEntry {
 pub struct ModelRegistry {
     defaults: HashMap<String, String>,
     grades: HashMap<String, HashMap<String, String>>,
+    endpoints: Vec<ProviderEndpoint>,
     routes: Vec<RouteEntry>,
     /// Keyed by "provider:model_id"
     models: HashMap<String, ModelEntry>,
@@ -133,6 +186,8 @@ impl ModelRegistry {
                 } else {
                     file.grades
                 },
+                endpoints: validate_endpoints(file.endpoints)
+                    .expect("model-registry.json endpoint validation error"),
                 routes: file.routes,
                 models,
                 inference_defaults: file.inference_defaults,
@@ -151,6 +206,16 @@ impl ModelRegistry {
             .get(&grade.to_ascii_uppercase())
             .and_then(|m| m.get(provider))
             .map(|s| s.as_str())
+    }
+
+    /// Endpoint definitions from the registry.
+    pub fn endpoints(&self) -> &[ProviderEndpoint] {
+        &self.endpoints
+    }
+
+    /// Endpoint definition by id.
+    pub fn endpoint(&self, id: &str) -> Option<&ProviderEndpoint> {
+        self.endpoints.iter().find(|endpoint| endpoint.id == id)
     }
 
     /// Full model entry by qualified ID ("provider:model_id").
@@ -288,6 +353,23 @@ impl ModelRegistry {
         }
         self.infer_unknown_model(provider, model_id)
     }
+}
+
+fn validate_endpoints(endpoints: Vec<ProviderEndpoint>) -> Result<Vec<ProviderEndpoint>, String> {
+    const RESERVED: &[&str] = &["auto", "local", "upstream"];
+    let mut seen = std::collections::HashSet::new();
+    for endpoint in &endpoints {
+        if RESERVED.contains(&endpoint.id.as_str()) {
+            return Err(format!(
+                "endpoint id '{}' is reserved for provider selection",
+                endpoint.id
+            ));
+        }
+        if !seen.insert(endpoint.id.as_str()) {
+            return Err(format!("duplicate endpoint id '{}'", endpoint.id));
+        }
+    }
+    Ok(endpoints)
 }
 
 fn legacy_grades_from_tiers(
