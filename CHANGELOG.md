@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Injected the live delegate queue into model context when background delegates are active or have unviewed terminal results, making reconciliation front-and-center for the agent.
 - Strengthened active plan context injection so the Workbench plan remains front-and-center until active/todo items are reconciled.
 - Improved TUI composer history recall to preserve the pre-recall draft and clear history session state when the operator edits recalled input.
+- Added profile schema support for durable model intent persistence.
 - Added `/model route` and `/model providers` aliases for inspecting active model routing and provider options.
 - Added `/model policy <exact|minimum|nearest>` to update durable grade-policy intent without switching the active route.
 - Added `/model unpin` to clear exact model overrides while preserving the active route and grade/provider intent.

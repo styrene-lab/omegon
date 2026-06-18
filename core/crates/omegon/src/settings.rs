@@ -1043,6 +1043,8 @@ pub struct Profile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used_model: Option<ProfileModel>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_intent: Option<ProfileModelIntent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
@@ -1147,6 +1149,67 @@ impl ProfileAutomation {
 pub struct ProfileModel {
     pub provider: String,
     pub model_id: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileModelIntent {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grade: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grade_policy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact_model_override: Option<String>,
+}
+
+impl ProfileModelIntent {
+    pub fn from_route_intent(intent: &crate::route::ModelIntent) -> Self {
+        let provider = match &intent.provider_selection {
+            crate::route::ProviderSelection::Auto => "auto".to_string(),
+            crate::route::ProviderSelection::Local => "local".to_string(),
+            crate::route::ProviderSelection::Upstream => "upstream".to_string(),
+            crate::route::ProviderSelection::Endpoint(endpoint) => endpoint.clone(),
+        };
+        let grade_policy = match &intent.grade_policy {
+            crate::route::GradePolicy::Exact => "exact",
+            crate::route::GradePolicy::Minimum => "minimum",
+            crate::route::GradePolicy::NearestAllowed { .. } => "nearest",
+        };
+        Self {
+            grade: intent
+                .grade
+                .as_ref()
+                .map(|grade| grade.as_str().to_string()),
+            provider: Some(provider),
+            grade_policy: Some(grade_policy.to_string()),
+            exact_model_override: intent.exact_model_override.clone(),
+        }
+    }
+
+    pub fn to_route_intent(&self) -> Option<crate::route::ModelIntent> {
+        let grade = match self.grade.as_deref() {
+            Some(raw) => Some(crate::route::ModelGrade::parse(raw)?),
+            None => None,
+        };
+        let provider_selection = self
+            .provider
+            .as_deref()
+            .and_then(crate::route::ProviderSelection::parse)
+            .unwrap_or(crate::route::ProviderSelection::Auto);
+        let grade_policy = match self.grade_policy.as_deref() {
+            Some(raw) => crate::route::GradePolicy::parse(raw)?,
+            None => crate::route::GradePolicy::Minimum,
+        };
+        Some(crate::route::ModelIntent {
+            grade,
+            provider_selection,
+            grade_policy,
+            exact_model_override: self.exact_model_override.clone(),
+            ..crate::route::ModelIntent::default()
+        })
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2405,5 +2468,31 @@ mod tests {
         assert_eq!(policy.requested_class, ContextClass::Massive);
         assert_eq!(policy.assembly_window(), 200_000);
         assert!(policy.has_class_mismatch());
+    }
+    #[test]
+    fn profile_model_intent_round_trips_route_intent() {
+        let intent = crate::route::ModelIntent {
+            grade: Some(crate::route::ModelGrade::S),
+            provider_selection: crate::route::ProviderSelection::Local,
+            grade_policy: crate::route::GradePolicy::Exact,
+            exact_model_override: None,
+            ..crate::route::ModelIntent::default()
+        };
+        let profile = ProfileModelIntent::from_route_intent(&intent);
+        assert_eq!(profile.grade.as_deref(), Some("S"));
+        assert_eq!(profile.provider.as_deref(), Some("local"));
+        assert_eq!(profile.grade_policy.as_deref(), Some("exact"));
+        assert_eq!(profile.to_route_intent(), Some(intent));
+    }
+
+    #[test]
+    fn profile_model_intent_rejects_local_as_grade() {
+        let profile = ProfileModelIntent {
+            grade: Some("local".into()),
+            provider: Some("auto".into()),
+            grade_policy: Some("minimum".into()),
+            exact_model_override: None,
+        };
+        assert_eq!(profile.to_route_intent(), None);
     }
 }
