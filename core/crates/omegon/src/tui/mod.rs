@@ -244,6 +244,11 @@ pub enum TuiCommand {
         provider: String,
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
+    /// Switch model grade policy intent.
+    SetModelPolicy {
+        policy: String,
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
     /// Clear exact model override and resume grade/provider intent routing.
     ModelUnpin {
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
@@ -584,6 +589,7 @@ pub enum CanonicalSlashCommand {
     SetModel(String),
     SetModelGrade(String),
     SetModelProvider(String),
+    SetModelPolicy(String),
     ModelUnpin,
     ThinkingView,
     SetThinking(crate::settings::ThinkingLevel),
@@ -708,12 +714,22 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "model" if args.is_empty() => Some(CanonicalSlashCommand::ModelView),
         "model" if args == "list" => Some(CanonicalSlashCommand::ModelList),
         "model" if args == "unpin" => Some(CanonicalSlashCommand::ModelUnpin),
+        "model" if let Some(policy) = args.strip_prefix("policy ") => {
+            let policy = policy.trim();
+            if policy.is_empty() {
+                None
+            } else {
+                Some(CanonicalSlashCommand::SetModelPolicy(policy.to_string()))
+            }
+        }
         "model" if let Some(provider) = args.strip_prefix("provider ") => {
             let provider = provider.trim();
             if provider.is_empty() {
                 None
             } else {
-                Some(CanonicalSlashCommand::SetModelProvider(provider.to_string()))
+                Some(CanonicalSlashCommand::SetModelProvider(
+                    provider.to_string(),
+                ))
             }
         }
         "model" if let Some(grade) = args.strip_prefix("grade ") => {
@@ -5081,6 +5097,13 @@ Scroll transcript:
                             });
                             SlashResult::Display(format!("Switching Model Provider Intent → {provider}"))
                         }
+                        Some(CanonicalSlashCommand::SetModelPolicy(policy)) => {
+                            let _ = tx.try_send(TuiCommand::SetModelPolicy {
+                                policy: policy.clone(),
+                                respond_to: None,
+                            });
+                            SlashResult::Display(format!("Switching Model Policy Intent → {policy}"))
+                        }
                         Some(CanonicalSlashCommand::ModelUnpin) => {
                             let _ = tx.try_send(TuiCommand::ModelUnpin { respond_to: None });
                             SlashResult::Display("Clearing exact model pin".into())
@@ -5092,7 +5115,7 @@ Scroll transcript:
                             });
                             SlashResult::Display(format!("Switching Model → {model}"))
                         }
-                        _ => SlashResult::Display("Usage: /model [list|grade <F|D|C|B|A|S>|provider <auto|local|upstream|endpoint>|unpin|<provider:model>]".into()),
+                        _ => SlashResult::Display("Usage: /model [list|grade <F|D|C|B|A|S>|provider <auto|local|upstream|endpoint>|policy <exact|minimum|nearest>|unpin|<provider:model>]".into()),
                     }
                 }
             }

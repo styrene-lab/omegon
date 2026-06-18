@@ -34,6 +34,9 @@ pub enum ControlRequest {
     SetModelProvider {
         provider: String,
     },
+    SetModelPolicy {
+        policy: String,
+    },
     ClearModelOverride,
     SwitchDispatcher {
         request_id: String,
@@ -241,6 +244,11 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::SetModelProvider(provider) => {
             ControlRequest::SetModelProvider {
                 provider: provider.clone(),
+            }
+        }
+        crate::tui::CanonicalSlashCommand::SetModelPolicy(policy) => {
+            ControlRequest::SetModelPolicy {
+                policy: policy.clone(),
             }
         }
         crate::tui::CanonicalSlashCommand::ThinkingView => ControlRequest::ThinkingView,
@@ -587,6 +595,7 @@ pub async fn execute_control(
         }
         ControlRequest::SetModelIntent { grade } => set_model_intent_response(&grade),
         ControlRequest::SetModelProvider { provider } => set_model_provider_response(&provider),
+        ControlRequest::SetModelPolicy { policy } => set_model_policy_response(&policy),
         ControlRequest::ClearModelOverride => SlashCommandResponse {
             accepted: true,
             output: Some("Model exact override clear requested; interactive route state clears this through /model unpin.".into()),
@@ -776,6 +785,7 @@ pub async fn execute_daemon_control(
         ControlRequest::SetModel { .. }
             | ControlRequest::SetModelIntent { .. }
             | ControlRequest::SetModelProvider { .. }
+            | ControlRequest::SetModelPolicy { .. }
             | ControlRequest::ClearModelOverride
             | ControlRequest::SetThinking { .. }
             | ControlRequest::SetContextClass { .. }
@@ -803,6 +813,7 @@ pub async fn execute_daemon_control(
             }
             ControlRequest::SetModelIntent { grade } => set_model_intent_response(&grade),
             ControlRequest::SetModelProvider { provider } => set_model_provider_response(&provider),
+            ControlRequest::SetModelPolicy { policy } => set_model_policy_response(&policy),
             ControlRequest::ClearModelOverride => SlashCommandResponse {
                 accepted: true,
                 output: Some("Model exact override clear requested; daemon route state does not yet persist model intent.".into()),
@@ -922,6 +933,27 @@ pub async fn model_list_response() -> SlashCommandResponse {
     }
 }
 
+fn set_model_policy_response(policy: &str) -> SlashCommandResponse {
+    match crate::route::GradePolicy::parse(policy) {
+        Some(parsed) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!(
+                "Model grade policy intent requested — {}. Interactive route state will preserve this intent without pinning a concrete model.",
+                crate::route::ModelIntent {
+                    grade_policy: parsed,
+                    exact_model_override: None,
+                    ..crate::route::ModelIntent::default()
+                }
+                .summary()
+            )),
+        },
+        None => SlashCommandResponse {
+            accepted: false,
+            output: Some("Invalid model policy. Use exact, minimum, or nearest.".into()),
+        },
+    }
+}
+
 fn set_model_provider_response(provider: &str) -> SlashCommandResponse {
     match crate::route::ProviderSelection::parse(provider) {
         Some(selection) => SlashCommandResponse {
@@ -938,7 +970,10 @@ fn set_model_provider_response(provider: &str) -> SlashCommandResponse {
         },
         None => SlashCommandResponse {
             accepted: false,
-            output: Some("Invalid model provider selector. Use auto, local, upstream, or an endpoint id.".into()),
+            output: Some(
+                "Invalid model provider selector. Use auto, local, upstream, or an endpoint id."
+                    .into(),
+            ),
         },
     }
 }

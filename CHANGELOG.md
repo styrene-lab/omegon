@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added `/model policy <exact|minimum|nearest>` to update durable grade-policy intent without switching the active route.
 - Added `/model unpin` to clear exact model overrides while preserving the active route and grade/provider intent.
 - Added a renderer-neutral slash command menu projection that merges built-in and feature command definitions with source, availability, safety, and badge metadata for shared autocomplete/help surfaces.
 - Added per-command safety metadata to built-in slash command specs so autocomplete and `/help` can distinguish read-only, queue-mutating, state-changing, external, and destructive commands.
