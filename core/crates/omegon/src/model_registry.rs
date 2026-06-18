@@ -100,6 +100,8 @@ pub struct OpenAiCompatibleProfile {
     #[serde(default)]
     pub error_profile: OpenAiErrorProfile,
     #[serde(default)]
+    pub response_profile: OpenAiResponseProfile,
+    #[serde(default)]
     pub required_headers: Vec<String>,
     #[serde(default)]
     pub optional_headers: Vec<String>,
@@ -185,6 +187,46 @@ pub struct NormalizedEndpointError {
     pub category: NormalizedEndpointErrorCategory,
     pub error_type: Option<String>,
     pub message: String,
+}
+
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenAiResponseProfile {
+    #[serde(default = "default_openai_tool_call_id_paths")]
+    pub tool_call_id_paths: Vec<String>,
+    #[serde(default = "default_openai_tool_call_name_paths")]
+    pub tool_call_name_paths: Vec<String>,
+    #[serde(default = "default_openai_tool_call_arguments_paths")]
+    pub tool_call_arguments_paths: Vec<String>,
+}
+
+impl Default for OpenAiResponseProfile {
+    fn default() -> Self {
+        Self {
+            tool_call_id_paths: default_openai_tool_call_id_paths(),
+            tool_call_name_paths: default_openai_tool_call_name_paths(),
+            tool_call_arguments_paths: default_openai_tool_call_arguments_paths(),
+        }
+    }
+}
+
+fn default_openai_tool_call_id_paths() -> Vec<String> {
+    ["id"].into_iter().map(str::to_string).collect()
+}
+fn default_openai_tool_call_name_paths() -> Vec<String> {
+    ["function.name"].into_iter().map(str::to_string).collect()
+}
+fn default_openai_tool_call_arguments_paths() -> Vec<String> {
+    ["function.arguments"].into_iter().map(str::to_string).collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NormalizedToolCallDelta {
+    pub index: usize,
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub arguments_delta: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -413,6 +455,46 @@ impl ModelRegistry {
             error_type,
             message,
         })
+    }
+
+
+    pub fn normalize_openai_tool_call_deltas(
+        &self,
+        endpoint_id: &str,
+        chunk: &serde_json::Value,
+    ) -> Result<Vec<NormalizedToolCallDelta>, String> {
+        let endpoint = self
+            .endpoint(endpoint_id)
+            .ok_or_else(|| format!("unknown endpoint '{endpoint_id}'"))?;
+        let profile = endpoint
+            .open_ai_compatible_profile
+            .as_ref()
+            .ok_or_else(|| {
+                format!("endpoint '{endpoint_id}' is not OpenAI-compatible or lacks a profile")
+            })?;
+        let Some(tool_calls) = chunk
+            .pointer("/choices/0/delta/tool_calls")
+            .and_then(|value| value.as_array())
+        else {
+            return Ok(vec![]);
+        };
+        Ok(tool_calls
+            .iter()
+            .enumerate()
+            .map(|(fallback_index, call)| NormalizedToolCallDelta {
+                index: call
+                    .get("index")
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value as usize)
+                    .unwrap_or(fallback_index),
+                id: first_string_path(call, &profile.response_profile.tool_call_id_paths),
+                name: first_string_path(call, &profile.response_profile.tool_call_name_paths),
+                arguments_delta: first_string_path(
+                    call,
+                    &profile.response_profile.tool_call_arguments_paths,
+                ),
+            })
+            .collect())
     }
 
     /// Full model entry by qualified ID ("provider:model_id").
@@ -952,4 +1034,30 @@ mod tests {
                 .is_err()
         );
     }
+    #[test]
+    fn openai_tool_call_delta_normalization_uses_profile_paths() {
+        let reg = ModelRegistry::global();
+        let chunk = serde_json::json!({
+            "choices": [{"delta": {"tool_calls": [{
+                "index": 0,
+                "id": "call_1",
+                "function": {"name": "bash", "arguments": "{\"command\":"}
+            }]}}]
+        });
+        let deltas = reg.normalize_openai_tool_call_deltas("openai", &chunk).unwrap();
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].index, 0);
+        assert_eq!(deltas[0].id.as_deref(), Some("call_1"));
+        assert_eq!(deltas[0].name.as_deref(), Some("bash"));
+        assert_eq!(deltas[0].arguments_delta.as_deref(), Some("{\"command\":"));
+    }
+
+    #[test]
+    fn openai_tool_call_delta_normalization_rejects_non_openai_endpoint() {
+        let reg = ModelRegistry::global();
+        assert!(reg
+            .normalize_openai_tool_call_deltas("anthropic", &serde_json::json!({}))
+            .is_err());
+    }
+
 }
