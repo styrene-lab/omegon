@@ -62,7 +62,7 @@ delegate/cleave child routing.
 - [x] 7.2 Remove legacy slash commands `/gloriana`, `/victory`, `/retribution`, `/opus`, `/sonnet`, and `/haiku` entirely; they should be unknown commands, not hidden aliases.
 - [x] 7.3 Replace legacy `set_model_tier` semantics with model-intent tooling (`set_model_intent` preferred, or explicit grade/provider/policy tools during migration).
 - [ ] 7.4 Extend the model registry from provider-tier maps to endpoint/model capability rows with grade, grade source, context window, tool/streaming/json/vision support, and cost/latency bands.
-- [ ] 7.5 Add endpoint definitions carrying endpoint id, display name, endpoint class (`LocalDev`/`Upstream`), protocol kind, base URL, credential reference, and enabled state.
+- [x] 7.5 Add endpoint definitions carrying endpoint id, display name, endpoint class (`LocalDev`/`Upstream`), protocol kind, base URL, credential reference, and enabled state.
 - [ ] 7.6 Implement OpenAI-compatible endpoint profiles for OpenRouter, Groq, Mistral, xAI, Hugging Face router, Gemini compatibility, and private OpenAI-compatible endpoints; keep Anthropic as a custom adapter.
 - [ ] 7.7 Add request sanitization/profile shaping for OpenAI-compatible endpoints, including unsupported fields and required/optional headers.
 - [x] 7.8 Add `/model grade`, `/model provider`, `/model policy`, `/model route`, and `/model providers` to the canonical command registry and parser path.
@@ -72,7 +72,7 @@ delegate/cleave child routing.
 - [x] 7.11 Replace stale TypeScript implementation scope in provider-neutral model-control docs with Rust-native files before coding from the design.
 - [x] 7.12 Define default grade, provider selection, grade policy, failover policy, and degradation policy for interactive sessions and daemon agents.
 - [x] 7.13 Add exact model override clearing (`/model unpin` or equivalent) and make pinned state visible in route/status projections.
-- [ ] 7.14 Enforce reserved provider selector tokens (`auto`, `local`, `upstream`) in registry/profile validation.
+- [x] 7.14 Enforce reserved provider selector tokens (`auto`, `local`, `upstream`) in registry/profile validation.
 - [ ] 7.15 Extend OpenAI-compatible endpoint profiles to normalize responses and provider-specific errors, not only request fields.
 - [ ] 7.16 Add data-driven endpoint auth schemes and route credential probing through endpoint metadata.
 - [x] 7.17 Update or remove baseline routing/effort specs that still require `/local`, `/haiku`, `/sonnet`, `/opus`, or `set_model_tier`.
