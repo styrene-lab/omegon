@@ -715,8 +715,8 @@ pub enum CanonicalSlashCommand {
 pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<CanonicalSlashCommand> {
     let args = args.trim();
     match cmd {
-        "model" if args.is_empty() => Some(CanonicalSlashCommand::ModelView),
-        "model" if args == "list" => Some(CanonicalSlashCommand::ModelList),
+        "model" if args.is_empty() || args == "route" => Some(CanonicalSlashCommand::ModelView),
+        "model" if args == "list" || args == "providers" => Some(CanonicalSlashCommand::ModelList),
         "model" if args == "unpin" => Some(CanonicalSlashCommand::ModelUnpin),
         "model" if let Some(policy) = args.strip_prefix("policy ") => {
             let policy = policy.trim();
@@ -5246,7 +5246,7 @@ Scroll transcript:
                             });
                             SlashResult::Display(format!("Switching Model → {model}"))
                         }
-                        _ => SlashResult::Display("Usage: /model [list|grade <F|D|C|B|A|S>|provider <auto|local|upstream|endpoint>|policy <exact|minimum|nearest>|unpin|<provider:model>]".into()),
+                        _ => SlashResult::Display("Usage: /model [list|route|providers|grade <F|D|C|B|A|S>|provider <auto|local|upstream|endpoint>|policy <exact|minimum|nearest>|unpin|<provider:model>]".into()),
                     }
                 }
             }

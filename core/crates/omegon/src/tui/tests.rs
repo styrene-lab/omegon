@@ -5569,6 +5569,14 @@ fn slash_settings_opens_settings_screen_without_command_panel() {
 #[test]
 fn model_grade_slash_command_parses_and_rejects_local_grade() {
     assert_eq!(
+        crate::tui::canonical_slash_command("model", "route"),
+        Some(crate::tui::CanonicalSlashCommand::ModelView)
+    );
+    assert_eq!(
+        crate::tui::canonical_slash_command("model", "providers"),
+        Some(crate::tui::CanonicalSlashCommand::ModelList)
+    );
+    assert_eq!(
         crate::tui::canonical_slash_command("model", "grade S"),
         Some(crate::tui::CanonicalSlashCommand::SetModelGrade("S".into()))
     );
