@@ -3,7 +3,7 @@
 //!
 //! Only injected when `openspec_change_path` is set. Reads specs + design
 //! to produce per-child test plan files that guide test writing.
-//! Runs at cheap model tier — pure analysis, no code generation.
+//! Runs at cheap model grade — pure analysis, no code generation.
 
 use std::path::Path;
 

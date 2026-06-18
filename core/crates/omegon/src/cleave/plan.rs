@@ -29,7 +29,7 @@ pub struct ChildPlan {
     pub depends_on: Vec<String>,
     /// Explicit model override for this child. Takes priority over `CleavePlan::default_model`
     /// and scope-based routing. Use for intentional up- or down-delegation
-    /// (e.g. a research child that needs a higher-tier model).
+    /// (e.g. a research child that needs a higher-grade model).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

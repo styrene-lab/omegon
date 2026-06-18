@@ -4096,7 +4096,7 @@ fn hidden_model_aliases_do_not_appear_in_palette() {
         },
         omegon_traits::CommandDefinition {
             name: "B".into(),
-            description: "visible tier".into(),
+            description: "visible grade".into(),
             subcommands: vec![],
             availability: omegon_traits::CommandAvailability::ALL,
             safety: omegon_traits::CommandSafety::READ_ONLY,

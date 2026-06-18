@@ -493,7 +493,7 @@ struct App {
     operator_events: std::collections::VecDeque<OperatorEvent>,
     /// Previous harness status for diffing on HarnessStatusChanged.
     previous_harness_status: Option<crate::status::HarnessStatus>,
-    /// Capability tier detected at startup by systems check probes.
+    /// Startup capability tier detected at startup by systems check probes.
     pub capability_grade: Option<crate::startup::CapabilityTier>,
     /// Tutorial state — active when running /tutorial (lesson-based).
     tutorial: Option<TutorialState>,
@@ -2854,7 +2854,7 @@ impl App {
                             "\n\nℹ Anthropic subscription detected. Type /help tutorial consent\nto enable interactive agent steps (uses subscription quota)."
                         }
                         tutorial::TutorialMode::OrientationOnly => {
-                            "\n\nℹ No Victory-tier cloud model found. Add an API key or\n/auth login openai-codex for the full interactive tutorial."
+                            "\n\nℹ No B-grade cloud model found. Add an API key or\n/auth login openai-codex for the full interactive tutorial."
                         }
                         tutorial::TutorialMode::Interactive => "",
                     };
@@ -2883,7 +2883,7 @@ impl App {
                     }
                     tutorial::TutorialMode::OrientationOnly => {
                         "Tutorial started (orientation mode).\n\n\
-                         No Victory-tier cloud model found. Add an API key or\n\
+                         No B-grade cloud model found. Add an API key or\n\
                          /auth login openai-codex for the full interactive tutorial.\n\n\
                          Tab to advance, Esc to dismiss."
                             .to_string()
@@ -8317,7 +8317,7 @@ pub async fn run_tui(
             while let Ok(result) = probe_rx.try_recv() {
                 collected_probes.push(result);
             }
-            // Classify capability tier from ALL collected results
+            // Classify startup capability tier from ALL collected results
             app.capability_grade = Some(crate::startup::classify_tier(&collected_probes));
         }
     }

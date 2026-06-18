@@ -667,7 +667,7 @@ impl AgentSetup {
             )));
         }
 
-        // ─── Model budget (tier switching + thinking) ───────────────────
+        // ─── Model budget (grade intent + thinking) ───────────────────
         if let Some(ref settings) = settings {
             bus.register(Box::new(features::model_budget::ModelBudget::new(
                 settings.clone(),

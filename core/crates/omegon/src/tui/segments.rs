@@ -1270,7 +1270,7 @@ pub struct SegmentMeta {
     pub provider: Option<String>,
     /// Model ID at generation time (e.g. "claude-sonnet-4-20250514").
     pub model_id: Option<String>,
-    /// Capability tier at generation time (e.g. "frontier").
+    /// Capability grade at generation time (e.g. "frontier").
     pub tier: Option<String>,
     /// Thinking level active at generation time (e.g. "medium", "high").
     pub thinking_level: Option<String>,

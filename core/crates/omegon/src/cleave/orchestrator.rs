@@ -267,7 +267,7 @@ pub async fn run_cleave(
                     }
 
                     // Route per-child model: explicit plan model wins; if absent, infer from scope size.
-                    // Parent model is the floor — we never route to a tier above the parent.
+                    // Parent model is the floor — we never route to a grade band above the parent.
                     let model = if let Some(ref inv_lock) = config.inventory {
                         let child_state = &state.children[child_idx];
                         if let Some(explicit) = &child_state.execute_model {
@@ -280,16 +280,16 @@ pub async fn run_cleave(
                                     crate::routing::infer_model_grade_band(&effective_model);
                                 let scope_tier =
                                     crate::routing::infer_capability_grade(child_state.scope.len());
-                                let tier = scope_tier.min(parent_tier);
+                                let grade = scope_tier.min(parent_tier);
                                 let req = crate::routing::CapabilityRequest {
-                                    grade: tier,
+                                    grade,
                                     prefer_local: false,
                                     avoid_providers: vec![],
                                 };
                                 let candidates = crate::routing::route(&req, &inv);
                                 if let Some(best) = candidates.first() {
                                     let routed = format!("{}:{}", best.provider_id, best.model_id);
-                                    tracing::info!(child = %label, scope_tier = %scope_tier, parent_tier = %parent_tier, effective_tier = %tier, routed = %routed, "per-child routing");
+                                    tracing::info!(child = %label, scope_tier = %scope_tier, parent_tier = %parent_tier, effective_grade = %grade, routed = %routed, "per-child grade routing");
                                     routed
                                 } else {
                                     effective_model.clone()

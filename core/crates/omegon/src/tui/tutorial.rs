@@ -21,7 +21,7 @@ pub enum Anchor {
 
 /// Whether the tutorial may fire AutoPrompt agent turns.
 ///
-/// Determined at start time from env vars and capability tier.
+/// Determined at start time from env vars and startup capability tier.
 /// Does NOT gate demo mode — the demo project is an explicit opt-in
 /// that always intends agent work.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -34,7 +34,7 @@ pub enum TutorialMode {
     /// User must explicitly type `/tutorial consent` to enable AutoPrompt.
     /// Shows orientation steps until consent is given.
     ConsentRequired,
-    /// No Victory-tier cloud model available.
+    /// No B-grade cloud model available.
     /// AutoPrompt steps render as Tab (description only, no agent turn).
     OrientationOnly,
 }
@@ -223,7 +223,7 @@ Finally, briefly explain what was fixed and that the user can now use the board.
 // ─── Orientation mode STEPS (no agent turns — for OrientationOnly and pre-consent) ──
 
 /// Steps for orientation mode — Tab-only, no AutoPrompt.
-/// Used when no Victory-tier model is available, or before consent for Anthropic OAuth.
+/// Used when no B-grade model is available, or before consent for Anthropic OAuth.
 /// Describes each feature without executing it.
 pub const STEPS_ORIENTATION: &[Step] = &[
     STEP_WELCOME_HANDS_ON,
