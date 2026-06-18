@@ -542,6 +542,7 @@ pub enum CanonicalSlashCommand {
     ModelView,
     ModelList,
     SetModel(String),
+    ThinkingView,
     SetThinking(crate::settings::ThinkingLevel),
     ProfileView,
     ProfileExport,
@@ -650,6 +651,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "model" if args.is_empty() => Some(CanonicalSlashCommand::ModelView),
         "model" if args == "list" => Some(CanonicalSlashCommand::ModelList),
         "model" if !args.is_empty() => Some(CanonicalSlashCommand::SetModel(args.to_string())),
+        "think" if args == "list" || args == "status" => Some(CanonicalSlashCommand::ThinkingView),
         "think" => {
             crate::settings::ThinkingLevel::parse(args).map(CanonicalSlashCommand::SetThinking)
         }
@@ -5164,6 +5166,14 @@ Scroll transcript:
                 if args.is_empty() {
                     // No args → open interactive selector
                     self.open_thinking_selector();
+                    SlashResult::Handled
+                } else if let Some(CanonicalSlashCommand::ThinkingView) =
+                    canonical_slash_command("think", args)
+                {
+                    let _ = tx.try_send(TuiCommand::ExecuteControl {
+                        request: crate::control_runtime::ControlRequest::ThinkingView,
+                        respond_to: None,
+                    });
                     SlashResult::Handled
                 } else if let Some(CanonicalSlashCommand::SetThinking(level)) =
                     canonical_slash_command("think", args)

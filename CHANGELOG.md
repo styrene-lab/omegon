@@ -34,6 +34,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Cleared Clippy warnings that blocked `just lint`, including derivable defaults, single-character string pushes, manual contains checks, collapsible conditionals, bool assert comparisons, and explicit allowances for intentionally broad dispatcher signatures.
 
 ### Changed
+- Removed the old TUI-local `/context status` dump and routed context status through the shared control-runtime palette projection.
+- Rendered `/think list` and `/think status` through the shared palette projection so thinking-level discovery now uses action rows while bare `/think` continues to open the existing TUI selector and `/think <level>` remains the direct setter.
 - Rendered `/prompt list` through the shared palette projection so prompt inventory now uses the same action/object row semantics as `/skills`.
 - Extracted the shared palette row/group projection used by modern command-menu surfaces and moved `/skills` rendering onto it as the first consumer.
 - Started the modern menu/settings consolidation tracks and changed `/skills` default output into a compact action/object palette with detail-on-demand guidance instead of a report-style inventory dump.

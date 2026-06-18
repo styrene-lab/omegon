@@ -69,6 +69,8 @@ Current `/skills` TUI route passes through `canonical_slash_command("skills", ar
 - `core/crates/omegon/src/prompts.rs` — implemented reusable prompt definitions, storage lookup, safety verdicts, and bundled/user/project-local prompt inventory.
 - `core/crates/omegon/src/features/prompt.rs` — implemented `/prompt` as the registry-native prompt router with `<name>` shorthand preview.
 - `core/crates/omegon/src/features/prompt.rs` — `/prompt list` now uses the shared palette projection for action rows and prompt object rows; `/prompt <name>` remains shorthand for preview.
+- `core/crates/omegon/src/control_runtime.rs` — `/context status` now renders a compact shared palette projection for actions and context-class rows instead of dumping token-breakdown internals.
+- `core/crates/omegon/src/control_runtime.rs` — `/think list` and `/think status` now render a shared palette projection listing direct level-setting actions; bare `/think` remains the TUI selector and `/think <level>` remains the mutation path.
 - `core/crates/omegon/src/features/user_commands.rs` — implemented explicit prompt-backed user command aliases for direct slash invocation.
 - `core/crates/omegon/src/backend.rs` — registered skill/prompt ACP/RPC surface contracts.
 - `core/crates/omegon/src/acp.rs` — wired ACP skill and prompt read/preview handling.
@@ -86,6 +88,5 @@ Current `/skills` TUI route passes through `canonical_slash_command("skills", ar
 
 ## Remaining Work
 
-- Integrate `/context` and `/think` into the modern palette track without breaking their existing bare-command selector behavior. Their static TUI metadata now exposes action-oriented subcommands, but they still need shared state/action projections for CLI/ACP/text surfaces.
 - Complete settings-page consolidation by deriving TUI settings rows/selectors from `SettingsSurfaceProjection` instead of parallel descriptors.
 - Add a stronger confirmation/trust flow before any prompt/user-command surface queues or executes prompt bodies directly.

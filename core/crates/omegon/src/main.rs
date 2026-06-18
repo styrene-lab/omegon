@@ -4598,38 +4598,14 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::ContextStatus { respond_to } => {
-                let est = runtime_state.conversation.estimate_tokens();
-                let settings = shared_settings.lock().unwrap();
-                let ctx_window = settings.context_window;
-                let pct = if ctx_window > 0 {
-                    ((est as f64 / ctx_window as f64) * 100.0).min(100.0) as u32
-                } else {
-                    0
-                };
-                let bar_width = 24usize;
-                let filled = ((pct as usize * bar_width) / 100).min(bar_width);
-                let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_width - filled));
-                let requested_class = settings.effective_requested_class().label().to_string();
-                let actual_class = settings.context_class.label().to_string();
-                let model = settings.model.clone();
-                let thinking = {
-                    let raw = settings.thinking.as_str();
-                    let mut chars = raw.chars();
-                    match chars.next() {
-                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                        None => String::new(),
-                    }
-                };
-                let message = format!(
-                    "Context\n  Usage:           {est}/{ctx_window} tokens ({pct}%)\n  Meter:           {bar}\n  Requested Class: {requested_class}\n  Actual Class:    {actual_class}\n  Model:           {model}\n  Thinking Level:  {thinking}\n\nActions\n  /context compact   Compact older turns\n  /context reset     Save current session and start fresh context\n  /new               Alias for /context reset\n  /context request   Pull a mediated context pack"
-                );
-                let _ = events_tx.send(AgentEvent::SystemNotification {
-                    message: message.clone(),
-                });
+                let response = control_runtime::context_status_response(&runtime_state, &shared_settings).await;
+                if let Some(output) = response.output.clone() {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
+                }
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
-                        accepted: true,
-                        output: Some(message),
+                        accepted: response.accepted,
+                        output: response.output,
                     });
                 }
             }
