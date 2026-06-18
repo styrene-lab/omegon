@@ -288,7 +288,7 @@ pub(crate) fn tool_short_name(name: &str) -> String {
         "list_local_models" => ("⊛", "l.list"),
         "manage_ollama" => ("⊛", "ollama"),
         // ── Settings / meta ── (⚙ is in the emoji set; using ⌥ for settings cluster)
-        "set_model_tier" => ("⌥", "tier"),
+        "set_model_intent" => ("⌥", "model"),
         "set_thinking_level" => ("⌥", "think"),
         "switch_to_offline_driver" => ("⌥", "offln"),
         "manage_tools" => ("⌥", "tools"),
@@ -2570,7 +2570,7 @@ mod tests {
             "list_local_models",
             "manage_ollama",
             // settings/meta
-            "set_model_tier",
+            "set_model_intent",
             "set_thinking_level",
             "switch_to_offline_driver",
             "manage_tools",

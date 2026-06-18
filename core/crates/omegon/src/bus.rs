@@ -168,7 +168,7 @@ impl EventBus {
         disabled.insert(reg::lifecycle::LIFECYCLE_DOCTOR.into());
         disabled.insert(reg::codescan::CODEBASE_INDEX.into());
         disabled.insert(reg::session_log::SESSION_LOG.into());
-        disabled.insert(reg::model_budget::SET_MODEL_TIER.into());
+        disabled.insert(reg::model_budget::SET_MODEL_INTENT.into());
         disabled.insert(reg::model_budget::SWITCH_TO_OFFLINE_DRIVER.into());
         disabled.insert(reg::model_budget::SET_THINKING_LEVEL.into());
 

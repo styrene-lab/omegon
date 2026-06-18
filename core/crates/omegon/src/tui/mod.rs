@@ -234,6 +234,11 @@ pub enum TuiCommand {
         model: String,
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
+    /// Switch model intent to a provider-neutral capability grade.
+    SetModelGrade {
+        grade: String,
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
     /// Set the thinking level.
     SetThinking {
         level: crate::settings::ThinkingLevel,
@@ -568,6 +573,7 @@ pub enum CanonicalSlashCommand {
     ModelView,
     ModelList,
     SetModel(String),
+    SetModelGrade(String),
     ThinkingView,
     SetThinking(crate::settings::ThinkingLevel),
     ProfileView,
@@ -690,6 +696,14 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
     match cmd {
         "model" if args.is_empty() => Some(CanonicalSlashCommand::ModelView),
         "model" if args == "list" => Some(CanonicalSlashCommand::ModelList),
+        "model" if let Some(grade) = args.strip_prefix("grade ") => {
+            let grade = grade.trim();
+            if matches!(grade, "F" | "D" | "C" | "B" | "A" | "S") {
+                Some(CanonicalSlashCommand::SetModelGrade(grade.to_string()))
+            } else {
+                None
+            }
+        }
         "model" if !args.is_empty() => Some(CanonicalSlashCommand::SetModel(args.to_string())),
         "think" if args == "list" || args == "status" => Some(CanonicalSlashCommand::ThinkingView),
         "think" => {
@@ -5033,6 +5047,13 @@ Scroll transcript:
                             let _ = tx.try_send(TuiCommand::ModelList { respond_to: None });
                             SlashResult::Handled
                         }
+                        Some(CanonicalSlashCommand::SetModelGrade(grade)) => {
+                            let _ = tx.try_send(TuiCommand::SetModelGrade {
+                                grade: grade.clone(),
+                                respond_to: None,
+                            });
+                            SlashResult::Display(format!("Switching Model Intent → grade {grade}"))
+                        }
                         Some(CanonicalSlashCommand::SetModel(model)) => {
                             let _ = tx.try_send(TuiCommand::SetModel {
                                 model: model.clone(),
@@ -5040,7 +5061,7 @@ Scroll transcript:
                             });
                             SlashResult::Display(format!("Switching Model → {model}"))
                         }
-                        _ => SlashResult::Display("Usage: /model [list|<provider:model>]".into()),
+                        _ => SlashResult::Display("Usage: /model [list|grade <F|D|C|B|A|S>|<provider:model>]".into()),
                     }
                 }
             }

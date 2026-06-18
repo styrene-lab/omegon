@@ -218,6 +218,16 @@ pub enum ControlRequest {
     },
 }
 
+fn model_for_grade(grade: &str) -> Option<String> {
+    let model = match grade {
+        "S" => "anthropic:claude-fable-5",
+        "A" | "B" => "anthropic:claude-sonnet-4-6",
+        "C" | "D" | "F" => "anthropic:claude-haiku-4-5-20251001",
+        _ => return None,
+    };
+    Some(model.to_string())
+}
+
 pub fn control_request_from_slash(
     command: &crate::tui::CanonicalSlashCommand,
 ) -> Option<ControlRequest> {
@@ -226,6 +236,9 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::ModelList => ControlRequest::ModelList,
         crate::tui::CanonicalSlashCommand::SetModel(requested_model) => ControlRequest::SetModel {
             requested_model: requested_model.clone(),
+        },
+        crate::tui::CanonicalSlashCommand::SetModelGrade(grade) => ControlRequest::SetModel {
+            requested_model: model_for_grade(grade).unwrap_or_else(|| grade.clone()),
         },
         crate::tui::CanonicalSlashCommand::ThinkingView => ControlRequest::ThinkingView,
         crate::tui::CanonicalSlashCommand::SetThinking(level) => {
