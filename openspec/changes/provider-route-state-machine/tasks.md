@@ -80,5 +80,5 @@ delegate/cleave child routing.
 - [x] 7.18 Replace remaining internal `ModelTier` bridge and `data/model-registry.json` `tiers`/`tier` fields with grade/capability-row data.
 - [x] 7.19 Update web/status/IPC projections that still expose `capability_tier` and legacy options (`retribution`, `victory`, `gloriana`).
 - [x] 7.20 Rewrite stale long-lived docs that still describe public tiers as stable (`docs/model-routing.md` was patched; baseline specs remain).
-- [ ] 7.21 Add OpenAI-compatible error normalization profiles that map provider-specific error envelopes and rate-limit responses into common route/provider error categories.
+- [x] 7.21 Add OpenAI-compatible error normalization profiles that map provider-specific error envelopes and rate-limit responses into common route/provider error categories.
 - [ ] 7.22 Add OpenAI-compatible response/stream normalization profiles for endpoint-specific tool-call delta quirks.

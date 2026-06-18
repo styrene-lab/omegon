@@ -1685,15 +1685,29 @@ impl LlmBridge for OpenAIClient {
         if !response.status().is_success() {
             let status = response.status();
             let err = response.text().await.unwrap_or_default();
-            let user_msg = serde_json::from_str::<Value>(&err)
-                .ok()
-                .and_then(|v| v["error"]["message"].as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| err.chars().take(200).collect());
-            let _ = tx
-                .send(LlmEvent::Error {
-                    message: format!("OpenAI {status}: {user_msg}"),
+            let user_msg = crate::model_registry::ModelRegistry::global()
+                .normalize_openai_error(&self.endpoint_id, status, &err)
+                .map(|normalized| {
+                    let error_type = normalized
+                        .error_type
+                        .as_deref()
+                        .map(|kind| format!(" [{kind}]"))
+                        .unwrap_or_default();
+                    format!(
+                        "{} {status} {}{error_type}: {}",
+                        self.endpoint_id,
+                        normalized.category.as_str(),
+                        normalized.message
+                    )
                 })
-                .await;
+                .unwrap_or_else(|_| {
+                    let fallback = serde_json::from_str::<Value>(&err)
+                        .ok()
+                        .and_then(|v| v["error"]["message"].as_str().map(|s| s.to_string()))
+                        .unwrap_or_else(|| err.chars().take(200).collect());
+                    format!("{} {status}: {fallback}", self.endpoint_id)
+                });
+            let _ = tx.send(LlmEvent::Error { message: user_msg }).await;
             return Ok(rx);
         }
 
