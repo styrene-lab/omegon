@@ -367,12 +367,11 @@ pub(crate) enum BehavioralTier {
 }
 
 pub(crate) fn behavioral_tier(config: &super::r#loop::LoopConfig) -> BehavioralTier {
-    let tier = crate::routing::infer_model_tier(&config.model);
+    let tier = crate::routing::infer_model_grade_band(&config.model);
     match tier {
-        crate::routing::CapabilityTier::Max | crate::routing::CapabilityTier::Frontier => {
-            BehavioralTier::Standard
-        }
-        crate::routing::CapabilityTier::Mid | crate::routing::CapabilityTier::Leaf => {
+        crate::routing::CapabilityGradeBand::Max
+        | crate::routing::CapabilityGradeBand::Frontier => BehavioralTier::Standard,
+        crate::routing::CapabilityGradeBand::Mid | crate::routing::CapabilityGradeBand::Leaf => {
             BehavioralTier::Constrained
         }
     }

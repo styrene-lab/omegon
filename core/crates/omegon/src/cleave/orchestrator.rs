@@ -277,7 +277,7 @@ pub async fn run_cleave(
                             } else {
                                 let inv = inv_lock.read().await;
                                 let parent_tier =
-                                    crate::routing::infer_model_tier(&effective_model);
+                                    crate::routing::infer_model_grade_band(&effective_model);
                                 let scope_tier =
                                     crate::routing::infer_capability_grade(child_state.scope.len());
                                 let tier = scope_tier.min(parent_tier);
@@ -470,7 +470,7 @@ pub async fn run_cleave(
                                     .execute_model
                                     .as_deref()
                                     .unwrap_or(&config.model);
-                                let tier = crate::routing::infer_model_tier(failed_model);
+                                let tier = crate::routing::infer_model_grade_band(failed_model);
                                 let req = crate::routing::CapabilityRequest {
                                     grade: tier,
                                     prefer_local: false,

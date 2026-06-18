@@ -26,7 +26,7 @@ pub enum ProbeState {
     Failed,
 }
 
-/// Capability tier derived from probe results. Drives tutorial variant
+/// Startup capability tier derived from probe results. Drives tutorial variant
 /// selection, default routing policy, and bootstrap panel messaging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityTier {
@@ -95,7 +95,7 @@ pub async fn run_probes(tx: mpsc::Sender<ProbeResult>, cwd: String) {
     .await;
 }
 
-/// Classify probe results into a capability tier.
+/// Classify probe results into a startup capability tier.
 pub fn classify_tier(results: &[ProbeResult]) -> CapabilityTier {
     let cloud = results.iter().find(|r| r.label == "cloud");
     let local = results.iter().find(|r| r.label == "local");

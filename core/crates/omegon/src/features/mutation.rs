@@ -200,7 +200,7 @@ fn load_impact_config(omegon_home: &std::path::Path) -> ImpactConfig {
 #[derive(Debug, Clone, Default)]
 struct CreationContext {
     model: String,
-    capability_tier: String,
+    capability_grade: String,
     thinking_level: String,
     context_class: String,
     omegon_version: String,
@@ -217,13 +217,13 @@ impl CreationContext {
             r#"
 [creation_context]
 model = "{}"
-capability_tier = "{}"
+capability_grade = "{}"
 thinking_level = "{}"
 context_class = "{}"
 omegon_version = "{}"
 tests_component = [{}]"#,
             self.model,
-            self.capability_tier,
+            self.capability_grade,
             self.thinking_level,
             self.context_class,
             self.omegon_version,
@@ -244,7 +244,7 @@ struct ImpactLogEntry {
     artifact_tags: Vec<String>,
     artifact_age_days: f32,
     model: String,
-    capability_tier: String,
+    capability_grade: String,
     thinking_level: String,
     context_class: String,
     omegon_version: String,
@@ -1087,7 +1087,7 @@ This pattern applies when working with `{tool}` on files matching the recovery c
                     .collect(),
                 artifact_age_days: age_days as f32,
                 model: self.creation_ctx.model.clone(),
-                capability_tier: self.creation_ctx.capability_tier.clone(),
+                capability_grade: self.creation_ctx.capability_grade.clone(),
                 thinking_level: self.creation_ctx.thinking_level.clone(),
                 context_class: self.creation_ctx.context_class.clone(),
                 omegon_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1985,8 +1985,8 @@ impl Feature for MutationFeature {
             BusEvent::HarnessStatusChanged { status_json } => {
                 // Capture harness configuration for creation_context.
                 if let Some(obj) = status_json.as_object() {
-                    if let Some(s) = obj.get("capability_tier").and_then(|v| v.as_str()) {
-                        self.creation_ctx.capability_tier = s.to_string();
+                    if let Some(s) = obj.get("capability_grade").and_then(|v| v.as_str()) {
+                        self.creation_ctx.capability_grade = s.to_string();
                     }
                     if let Some(s) = obj.get("thinking_level").and_then(|v| v.as_str()) {
                         self.creation_ctx.thinking_level = s.to_string();

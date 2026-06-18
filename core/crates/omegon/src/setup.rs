@@ -970,10 +970,10 @@ impl AgentSetup {
             .as_ref()
             .and_then(|s| s.lock().ok().map(|g| (g.is_slim(), g.model.clone())))
             .unwrap_or((false, String::new()));
-        let model_tier = crate::routing::infer_model_tier(&current_model);
+        let model_tier = crate::routing::infer_model_grade_band(&current_model);
         let prompt_mode = if matches!(
             model_tier,
-            crate::routing::CapabilityTier::Mid | crate::routing::CapabilityTier::Leaf
+            crate::routing::CapabilityGradeBand::Mid | crate::routing::CapabilityGradeBand::Leaf
         ) {
             prompt::PromptMode::Constrained
         } else if slim_mode {

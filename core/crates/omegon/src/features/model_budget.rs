@@ -240,7 +240,7 @@ impl Feature for ModelBudget {
                         },
                         "reason": {
                             "type": "string",
-                            "description": "Brief explanation for the tier change"
+                            "description": "Brief explanation for the grade change"
                         }
                     },
                     "required": ["grade", "reason"]
@@ -438,11 +438,11 @@ mod tests {
 
     #[test]
     fn resolve_preserves_current_model_version() {
-        // If already on a sonnet variant, switching to victory should keep it
+        // If already on a B-grade Anthropic model, switching to B should keep it
         let model = ModelGrade::B.resolve_model("anthropic", "claude-sonnet-4-6");
         assert_eq!(model, "claude-sonnet-4-6", "should preserve exact version");
 
-        // If on a different tier, should switch to highest-tier default.
+        // If on a different grade band, should switch to the S-grade default.
         let model = ModelGrade::S.resolve_model("anthropic", "claude-sonnet-4-6");
         assert_eq!(model, "claude-fable-5");
     }
