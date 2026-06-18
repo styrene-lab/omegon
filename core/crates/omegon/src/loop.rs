@@ -1021,6 +1021,83 @@ pub async fn run(
                 continue; // give it one more turn to commit
             }
 
+            // If the agent is about to end the turn while the visible
+            // Workbench plan still has active/todo items, force one explicit
+            // reconciliation pass. The plan is the operator's primary
+            // awareness surface; stale rows are worse than a slightly longer
+            // turn because they misrepresent what is happening now.
+            if should_nudge_plan_reconciliation(&conversation.intent, &assistant_msg.text)
+                && turn < config.max_turns
+            {
+                conversation.intent.plan_reconciliation_nudged = true;
+                tracing::info!(
+                    "Agent finishing with incomplete visible plan — nudging reconciliation"
+                );
+                conversation.push_user(
+                    "[System: The visible Workbench plan still has active/todo items. \
+                     Before ending the turn, reconcile it with the `plan` tool: use \
+                     `plan advance`/`plan complete` for finished items, `plan skip` for \
+                     deliberately bypassed items, or `plan clear` only if the plan gate is no \
+                     longer useful. If work truly remains, leave the plan active and state the \
+                     remaining work explicitly.]"
+                        .to_string(),
+                );
+                let nudge_system_prompt =
+                    context.build_system_prompt(conversation.last_user_prompt(), conversation);
+                let nudge_llm_messages = conversation.build_llm_view();
+                let nudge_prompt_telemetry = context.last_prompt_telemetry();
+                let nudge_context_composition = compute_context_composition(
+                    &nudge_system_prompt,
+                    &nudge_llm_messages,
+                    &tool_defs,
+                    context_window,
+                    Some(&nudge_prompt_telemetry),
+                );
+                bus.emit(&omegon_traits::BusEvent::TurnEnd(Box::new(
+                    BusEventTurnEnd {
+                        turn,
+                        model: Some(active_model.clone()),
+                        provider: Some(
+                            crate::providers::infer_provider_id(&active_model).to_string(),
+                        ),
+                        estimated_tokens: conversation.estimate_tokens(),
+                        context_window,
+                        context_composition: nudge_context_composition.clone(),
+                        actual_input_tokens: act_in,
+                        actual_output_tokens: act_out,
+                        cache_read_tokens: act_cr,
+                        provider_telemetry: provider_telemetry.clone(),
+                        dominant_phase: None,
+                        drift_kind: Some(DriftKind::ClosureStall),
+                        progress_signal: omegon_traits::ProgressSignal::None,
+                    },
+                )));
+                let _ = events.send(AgentEvent::TurnEnd(Box::new(AgentEventTurnEnd {
+                    turn,
+                    turn_end_reason: TurnEndReason::ProgressNudge,
+                    model: Some(active_model.clone()),
+                    provider: Some(crate::providers::infer_provider_id(&active_model).to_string()),
+                    estimated_tokens: conversation.estimate_tokens(),
+                    context_window,
+                    context_composition: nudge_context_composition,
+                    actual_input_tokens: act_in,
+                    actual_output_tokens: act_out,
+                    cache_read_tokens: act_cr,
+                    cache_creation_tokens: act_cc,
+                    provider_telemetry: provider_telemetry.clone(),
+                    dominant_phase: None,
+                    drift_kind: Some(DriftKind::ClosureStall),
+                    progress_nudge_reason: Some(ProgressNudgeReason::PlanReconciliation),
+                    intent_task: conversation.intent.current_task.clone(),
+                    intent_phase: Some(format!("{:?}", conversation.intent.lifecycle_phase)),
+                    files_read_count: conversation.intent.files_read.len(),
+                    files_modified_count: conversation.intent.files_modified.len(),
+                    stats_tool_calls: conversation.intent.stats.tool_calls,
+                    streaks: controller.streaks(),
+                })));
+                continue;
+            }
+
             // If any loaded skill has numbered phases, check whether the
             // agent's response references the final phase. If not, nudge
             // it to continue. Prevents the "I'm done" pattern when
@@ -3818,8 +3895,16 @@ fn looks_like_completion(text: &str) -> bool {
         "implementation is complete",
         "task is complete",
         "done!",
+        "not committed yet",
     ];
     completion_phrases.iter().any(|p| lower.contains(p))
+}
+
+fn should_nudge_plan_reconciliation(intent: &IntentDocument, assistant_text: &str) -> bool {
+    !intent.plan_reconciliation_nudged
+        && !intent.work_plan.is_empty()
+        && !intent.work_plan_complete()
+        && looks_like_completion(assistant_text)
 }
 
 /// Returns true if a write target path looks like a session-administrative
@@ -4694,6 +4779,40 @@ mod tests {
         assert!(notification.contains("● Only item"));
         assert_eq!(intent.work_plan_snapshot_json()["total"], 1);
         assert_eq!(intent.work_plan_snapshot_json()["mode"], "complete");
+    }
+
+    #[test]
+    fn plan_reconciliation_nudge_requires_incomplete_plan_and_completion_language() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Inspect".into(), "Patch".into()]);
+
+        assert!(should_nudge_plan_reconciliation(
+            &intent,
+            "Done! The patch is validated."
+        ));
+        assert!(!should_nudge_plan_reconciliation(
+            &intent,
+            "I found the likely issue and will patch the handler next."
+        ));
+
+        intent.advance_work_plan();
+        intent.advance_work_plan();
+        assert!(!should_nudge_plan_reconciliation(
+            &intent,
+            "Done! The patch is validated."
+        ));
+    }
+
+    #[test]
+    fn plan_reconciliation_nudge_is_one_shot() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Inspect".into()]);
+        intent.plan_reconciliation_nudged = true;
+
+        assert!(!should_nudge_plan_reconciliation(
+            &intent,
+            "Done! The patch is validated."
+        ));
     }
 
     #[test]

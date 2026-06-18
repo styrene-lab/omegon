@@ -5093,7 +5093,10 @@ fn editor_top_line_shows_engine_block_details() {
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(rendered.contains("claude-sonnet"), "{rendered}");
-    assert!(rendered.contains("anthropic · frontier · think high"), "{rendered}");
+    assert!(
+        rendered.contains("anthropic · frontier · think high"),
+        "{rendered}"
+    );
 }
 
 #[test]
@@ -5343,7 +5346,7 @@ fn runtime_queue_zero_depth_hides_queue_line() {
 #[test]
 fn palette_system_notification_matrix_accounts_for_palette_slash_outputs() {
     let cases = [
-        ("## Context\nsummary", Some("/context status")),
+        ("## Context\nsummary", None),
         ("## Thinking levels\nsummary", Some("/think status")),
         ("## Skills\nsummary", Some("/skills")),
         ("## Prompt library\nsummary", Some("/prompt list")),
@@ -5364,14 +5367,28 @@ fn slash_context_without_subcommand_maps_to_status() {
 }
 
 #[test]
-fn palette_system_notifications_open_command_panel_instead_of_transcript_block() {
+fn context_system_notifications_do_not_open_command_panel() {
     let mut app = test_app();
 
     app.handle_agent_event(AgentEvent::SystemNotification {
-        message: "## Context\n4966/1000000 tokens (0%)\n\n### Actions\n- `/context compact` — compact".into(),
+        message:
+            "## Context\n4966/1000000 tokens (0%)\n\n### Actions\n- `/context compact` — compact"
+                .into(),
     });
 
-    assert!(app.command_panel.is_some());
+    assert!(app.command_panel.is_none());
+    assert_eq!(app.conversation.segments().len(), 1);
+}
+
+#[test]
+fn one_shot_context_notifications_toast_without_command_panel() {
+    let mut app = test_app();
+
+    app.handle_agent_event(AgentEvent::SystemNotification {
+        message: "Context cleared. Starting fresh conversation.".into(),
+    });
+
+    assert!(app.command_panel.is_none());
     assert!(app.conversation.segments().is_empty());
 }
 

@@ -33,7 +33,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Exposed `/settings` through the shared command registry, including ACP availability, so ACP-hosted clients can read the same harness settings overview as the in-agent settings surface.
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
+### Changed
+- Strengthened model-facing Workbench/plan guidance so visible plans are treated as the operator's primary awareness surface and must be updated, completed, skipped, or cleared before final replies.
+- Added a runtime final-answer nudge when an assistant turn would end while the visible Workbench plan still has active/todo items.
+
 ### Fixed
+- Kept agent/tool `context_status` calls local to their tool card so they no longer enqueue the full `/context` palette into the transcript after assistant turns.
+- Persisted interactive `/think <level>` changes to the project profile and restored explicit thinking preferences after slim/full posture startup defaults.
 - Restored the full idle editor top-line engine block so it shows provider, tier, and thinking level beside the short model label.
 - Right-aligned slim tool-row detail affordances through the shared semantic inline renderer, including `read`/tool rows with crowded detail text.
 - Summarized `/context status` tool rows from the palette summary instead of repeating the `Context` block title at the end of the row.

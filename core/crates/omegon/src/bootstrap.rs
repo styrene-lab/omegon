@@ -58,6 +58,17 @@ pub fn initialize_shared_settings(init: &SettingsInit<'_>) -> SharedSettings {
             s.set_posture(settings::PosturePreset::Explorator);
         }
 
+        // Resource posture sets defaults, but explicit persisted settings win
+        // unless the operator passed an explicit CLI posture override.
+        if init.cli_posture.is_none()
+            && let Some(thinking) = profile
+                .thinking_level
+                .as_deref()
+                .and_then(settings::ThinkingLevel::parse)
+        {
+            s.thinking = thinking;
+        }
+
         // Only override max_turns when explicitly set (50 is the default).
         if init.max_turns != 50 {
             s.max_turns = init.max_turns;
@@ -261,6 +272,36 @@ mod tests {
             "slim flag must map to Explorator posture"
         );
         assert_eq!(s.thinking, settings::ThinkingLevel::Minimal);
+    }
+
+    #[test]
+    fn initialize_shared_settings_slim_preserves_profile_thinking_level() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon")).unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/profile.json"),
+            r#"{"thinkingLevel":"high"}"#,
+        )
+        .unwrap();
+
+        let shared = initialize_shared_settings(&SettingsInit {
+            model: "anthropic:claude-sonnet-4-6",
+            cwd: tmp.path(),
+            cli_posture: None,
+            slim: true,
+            full: false,
+            max_turns: 50,
+            apply_profile_posture: true,
+        });
+
+        let s = shared.lock().unwrap();
+        assert!(s.is_slim(), "slim=true should still set Explorator posture");
+        assert_eq!(
+            s.thinking,
+            settings::ThinkingLevel::High,
+            "explicit profile thinking should survive slim posture defaults"
+        );
     }
 
     #[test]

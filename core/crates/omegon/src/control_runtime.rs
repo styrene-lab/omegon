@@ -586,7 +586,7 @@ pub async fn execute_control(
             .await
         }
         ControlRequest::SetThinking { level } => {
-            set_thinking_response(ctx.shared_settings, level).await
+            set_thinking_response(ctx.shared_settings, &ctx.agent.cwd, level).await
         }
         ControlRequest::ProfileApply => {
             profile_apply_response(
@@ -1259,14 +1259,33 @@ fn thinking_level_description(level: crate::settings::ThinkingLevel) -> &'static
 
 pub async fn set_thinking_response(
     shared_settings: &settings::SharedSettings,
+    cwd: &Path,
     level: crate::settings::ThinkingLevel,
 ) -> SlashCommandResponse {
-    if let Ok(mut s) = shared_settings.lock() {
-        s.thinking = level;
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!("Thinking → {} {}", level.icon(), level.as_str())),
+    let Ok(mut s) = shared_settings.lock() else {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some("failed to acquire settings lock".to_string()),
+        };
+    };
+    let previous = s.thinking;
+    s.thinking = level;
+    let mut profile = settings::Profile::load(cwd);
+    profile.capture_from(&s);
+    let save_result = profile.save(cwd);
+
+    match save_result {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!("Thinking → {} {}", level.icon(), level.as_str())),
+        },
+        Err(e) => {
+            s.thinking = previous;
+            SlashCommandResponse {
+                accepted: false,
+                output: Some(format!("failed to save profile: {e}")),
+            }
+        }
     }
 }
 
@@ -4200,6 +4219,55 @@ mod tests {
         assert!(!rendered.contains("Meter:"));
         assert!(!rendered.contains("System prompt:"));
         assert!(!rendered.contains("Tool schemas:"));
+    }
+
+    #[tokio::test]
+    async fn set_thinking_response_persists_project_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
+            thinking: crate::settings::ThinkingLevel::Minimal,
+            ..Default::default()
+        }));
+
+        let response = set_thinking_response(
+            &shared_settings,
+            tmp.path(),
+            crate::settings::ThinkingLevel::High,
+        )
+        .await;
+
+        assert!(response.accepted);
+        assert_eq!(
+            shared_settings.lock().unwrap().thinking,
+            crate::settings::ThinkingLevel::High
+        );
+        let profile = settings::Profile::load(tmp.path());
+        assert_eq!(profile.thinking_level.as_deref(), Some("high"));
+    }
+
+    #[tokio::test]
+    async fn set_thinking_response_rolls_back_runtime_when_profile_save_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".omegon"), "not a directory").unwrap();
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
+            thinking: crate::settings::ThinkingLevel::Minimal,
+            ..Default::default()
+        }));
+
+        let response = set_thinking_response(
+            &shared_settings,
+            tmp.path(),
+            crate::settings::ThinkingLevel::High,
+        )
+        .await;
+
+        assert!(!response.accepted);
+        assert_eq!(
+            shared_settings.lock().unwrap().thinking,
+            crate::settings::ThinkingLevel::Minimal,
+            "live runtime should not diverge from failed persistence"
+        );
     }
 
     #[tokio::test]
