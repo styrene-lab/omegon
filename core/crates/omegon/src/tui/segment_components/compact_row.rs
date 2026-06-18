@@ -159,50 +159,57 @@ fn child_width(row: &CompactRows<'_>, width: u16) -> u16 {
 fn wrap_to_width(text: &str, width: u16) -> Vec<String> {
     let width = width.max(1) as usize;
     let mut rows = Vec::new();
-    let mut current = String::new();
-    let mut used = 0usize;
 
-    for word in text.split_whitespace() {
-        let word_width = unicode_width::UnicodeWidthStr::width(word);
-        let sep_width = usize::from(!current.is_empty());
-        if !current.is_empty() && used + sep_width + word_width > width {
-            rows.push(std::mem::take(&mut current));
-            used = 0;
+    for line in text.split('\n') {
+        if line.trim().is_empty() {
+            rows.push(String::new());
+            continue;
         }
 
-        if word_width > width {
-            if !current.is_empty() {
-                rows.push(std::mem::take(&mut current));
-                used = 0;
-            }
-            let mut chunk = String::new();
-            let mut chunk_width = 0usize;
-            for ch in word.chars() {
-                let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-                if chunk_width > 0 && chunk_width + ch_width > width {
-                    rows.push(std::mem::take(&mut chunk));
-                    chunk_width = 0;
+        let mut current = String::new();
+        let mut used = 0usize;
+
+        for word in line.split_whitespace() {
+            let word_width = unicode_width::UnicodeWidthStr::width(word);
+            if word_width > width {
+                if !current.is_empty() {
+                    rows.push(std::mem::take(&mut current));
+                    used = 0;
                 }
-                chunk.push(ch);
-                chunk_width += ch_width;
-            }
-            if !chunk.is_empty() {
-                current = chunk;
-                used = chunk_width;
-            }
-        } else {
-            if !current.is_empty() {
+                let mut chunk = String::new();
+                let mut chunk_width = 0usize;
+                for ch in word.chars() {
+                    let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                    if chunk_width > 0 && chunk_width + ch_width > width {
+                        rows.push(std::mem::take(&mut chunk));
+                        chunk_width = 0;
+                    }
+                    chunk.push(ch);
+                    chunk_width += ch_width;
+                }
+                if !chunk.is_empty() {
+                    current = chunk;
+                    used = chunk_width;
+                }
+            } else if current.is_empty() {
+                current.push_str(word);
+                used = word_width;
+            } else if used + 1 + word_width > width {
+                rows.push(std::mem::take(&mut current));
+                current.push_str(word);
+                used = word_width;
+            } else {
                 current.push(' ');
-                used += 1;
+                current.push_str(word);
+                used += 1 + word_width;
             }
-            current.push_str(word);
-            used += word_width;
+        }
+
+        if !current.is_empty() {
+            rows.push(current);
         }
     }
 
-    if !current.is_empty() {
-        rows.push(current);
-    }
     if rows.is_empty() {
         rows.push(String::new());
     }
@@ -281,10 +288,10 @@ pub(crate) fn render(
             ]));
         } else {
             let wrapped = wrap_to_width(detail, child_width(&rows, area.width));
-            for (line_idx, wrapped_detail) in wrapped.iter().enumerate() {
+            for wrapped_detail in &wrapped {
                 lines.push(Line::from(vec![
                     Span::styled(
-                        if line_idx == 0 { rows.child_indent } else { "" },
+                        rows.child_indent,
                         Style::default().fg(theme.dim()).bg(row_bg),
                     ),
                     Span::styled(

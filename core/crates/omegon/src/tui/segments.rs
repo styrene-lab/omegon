@@ -3292,6 +3292,14 @@ mod tests {
             text.contains("safely and keep the terminal stable"),
             "long reasoning line should wrap instead of truncate: {text}"
         );
+        let continuation = text
+            .lines()
+            .find(|line| line.contains("safely and keep the terminal stable"))
+            .expect("wrapped continuation row");
+        assert!(
+            continuation.starts_with("  "),
+            "wrapped child rows should preserve child indentation: {text}"
+        );
         assert!(
             !text.contains('…'),
             "long reasoning line should not be ellipsized: {text}"
