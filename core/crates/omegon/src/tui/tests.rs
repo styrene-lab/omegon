@@ -5573,6 +5573,10 @@ fn model_grade_slash_command_parses_and_rejects_local_grade() {
         Some(crate::tui::CanonicalSlashCommand::SetModelGrade("S".into()))
     );
     assert_eq!(
+        crate::tui::canonical_slash_command("model", "unpin"),
+        Some(crate::tui::CanonicalSlashCommand::ModelUnpin)
+    );
+    assert_eq!(
         crate::tui::canonical_slash_command("model", "grade local"),
         None
     );

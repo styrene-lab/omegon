@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Injected the live delegate queue into model context when background delegates are active or have unviewed terminal results, making reconciliation front-and-center for the agent.
 - Strengthened active plan context injection so the Workbench plan remains front-and-center until active/todo items are reconciled.
 - Improved TUI composer history recall to preserve the pre-recall draft and clear history session state when the operator edits recalled input.
+- Added `/model unpin` to clear exact model overrides while preserving the active route and grade/provider intent.
 - Added a renderer-neutral slash command menu projection that merges built-in and feature command definitions with source, availability, safety, and badge metadata for shared autocomplete/help surfaces.
 - Added per-command safety metadata to built-in slash command specs so autocomplete and `/help` can distinguish read-only, queue-mutating, state-changing, external, and destructive commands.
 - Moved built-in slash command metadata into a shared command registry module so non-TUI surfaces can consume the same command definitions.

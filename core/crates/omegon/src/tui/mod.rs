@@ -241,6 +241,10 @@ pub enum TuiCommand {
         grade: String,
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
+    /// Clear exact model override and resume grade/provider intent routing.
+    ModelUnpin {
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
     /// Set the thinking level.
     SetThinking {
         level: crate::settings::ThinkingLevel,
@@ -578,6 +582,7 @@ pub enum CanonicalSlashCommand {
     ModelList,
     SetModel(String),
     SetModelGrade(String),
+    ModelUnpin,
     ThinkingView,
     SetThinking(crate::settings::ThinkingLevel),
     ProfileView,
@@ -700,6 +705,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
     match cmd {
         "model" if args.is_empty() => Some(CanonicalSlashCommand::ModelView),
         "model" if args == "list" => Some(CanonicalSlashCommand::ModelList),
+        "model" if args == "unpin" => Some(CanonicalSlashCommand::ModelUnpin),
         "model" if let Some(grade) = args.strip_prefix("grade ") => {
             let grade = grade.trim();
             if matches!(grade, "F" | "D" | "C" | "B" | "A" | "S") {
@@ -5185,6 +5191,10 @@ Scroll transcript:
                             });
                             SlashResult::Display(format!("Switching Model Intent → grade {grade}"))
                         }
+                        Some(CanonicalSlashCommand::ModelUnpin) => {
+                            let _ = tx.try_send(TuiCommand::ModelUnpin { respond_to: None });
+                            SlashResult::Display("Clearing exact model pin".into())
+                        }
                         Some(CanonicalSlashCommand::SetModel(model)) => {
                             let _ = tx.try_send(TuiCommand::SetModel {
                                 model: model.clone(),
@@ -5192,7 +5202,7 @@ Scroll transcript:
                             });
                             SlashResult::Display(format!("Switching Model → {model}"))
                         }
-                        _ => SlashResult::Display("Usage: /model [list|grade <F|D|C|B|A|S>|<provider:model>]".into()),
+                        _ => SlashResult::Display("Usage: /model [list|grade <F|D|C|B|A|S>|unpin|<provider:model>]".into()),
                     }
                 }
             }

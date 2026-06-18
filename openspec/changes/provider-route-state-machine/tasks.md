@@ -66,7 +66,7 @@ delegate/cleave child routing.
 - [x] 7.6 Implement OpenAI-compatible endpoint profiles for OpenRouter, Groq, Mistral, xAI, Hugging Face router, Gemini compatibility, and private OpenAI-compatible endpoints; keep Anthropic as a custom adapter.
 - [x] 7.7 Add request sanitization/profile shaping for OpenAI-compatible endpoints, including unsupported fields and required/optional headers.
 - [x] 7.8 Add `/model grade`, `/model provider`, `/model policy`, `/model route`, and `/model providers` to the canonical command registry and parser path.
-- [ ] 7.9 Preserve operator intent separately from active route so route failover can change the serving endpoint without erasing requested grade/provider/policy. (Partial: RouteSnapshot/RouteState now carry ModelIntent; exact model switches pin intent; /model grade updates intent without changing active route.)
+- [ ] 7.9 Preserve operator intent separately from active route so route failover can change the serving endpoint without erasing requested grade/provider/policy. (Partial: RouteSnapshot/RouteState now carry ModelIntent; exact model switches pin intent; /model grade updates intent without changing active route; /model unpin clears exact overrides while preserving active route.)
 - [x] 7.10 Add tests proving local is not accepted as a grade, legacy commands/tools are absent, and grade+provider intent resolves through endpoint capability rows.
 
 - [x] 7.11 Replace stale TypeScript implementation scope in provider-neutral model-control docs with Rust-native files before coding from the design.

@@ -4521,6 +4521,24 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 }
             }
 
+            tui::TuiCommand::ModelUnpin { respond_to } => {
+                let snapshot = route_controller.clear_exact_model_override().await;
+                let output = format!(
+                    "Model exact override cleared — {}. Active route unchanged: {}",
+                    snapshot.intent.summary(),
+                    snapshot.serving_model().unwrap_or("disconnected")
+                );
+                let _ = events_tx.send(AgentEvent::SystemNotification {
+                    message: output.clone(),
+                });
+                if let Some(respond_to) = respond_to {
+                    let _ = respond_to.send(omegon_traits::ControlOutputResponse {
+                        accepted: true,
+                        output: Some(output),
+                    });
+                }
+            }
+
             tui::TuiCommand::SetThinking { level, respond_to } => {
                 let response =
                     control_runtime::set_thinking_response(&shared_settings, &agent.cwd, level).await;
