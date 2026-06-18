@@ -3048,6 +3048,16 @@ pub async fn skills_view_response() -> SlashCommandResponse {
 }
 
 fn render_skills_palette(entries: &[crate::skills::SkillEntry]) -> String {
+    skills_palette_projection(entries).render_markdown()
+}
+
+fn skills_palette_projection(
+    entries: &[crate::skills::SkillEntry],
+) -> crate::surfaces::palette::PaletteProjection {
+    use crate::surfaces::palette::{
+        PaletteBadgeTone, PaletteGroupProjection, PaletteProjection, PaletteRowProjection,
+    };
+
     let bundled_total = entries.iter().filter(|entry| entry.bundled).count();
     let bundled_installed = entries
         .iter()
@@ -3059,35 +3069,57 @@ fn render_skills_palette(entries: &[crate::skills::SkillEntry]) -> String {
         .count();
     let project_total = entries.iter().filter(|entry| entry.project_local).count();
 
-    let mut out = String::new();
-    out.push_str("## Skills\n");
-    out.push_str(&format!(
-        "Bundled {bundled_installed}/{bundled_total} installed · User {user_total} · Project {project_total}\n\n"
-    ));
-    out.push_str("### Actions\n");
-    out.push_str("- `/skills get <name>` — inspect manifest metadata and body preview\n");
-    out.push_str("- `/skills install` — install or refresh all bundled skills\n");
-    out.push_str("- `/skills install <name>` — install one skill from the armory\n\n");
-    out.push_str("### Skill rows\n");
-    out.push_str("`name` · scope · state · activation/profile/tags\n");
+    let action_rows = vec![
+        PaletteRowProjection::action(
+            "skills.get",
+            "/skills get <name>",
+            "inspect manifest metadata and body preview",
+        ),
+        PaletteRowProjection::action(
+            "skills.install.all",
+            "/skills install",
+            "install or refresh all bundled skills",
+        ),
+        PaletteRowProjection::action(
+            "skills.install.one",
+            "/skills install <name>",
+            "install one skill from the armory",
+        ),
+    ];
 
-    for entry in entries {
-        let scope = skill_scope_label(entry);
-        let state = skill_state_label(entry);
-        let metadata = skill_palette_metadata(entry);
-        let description = if entry.description.trim().is_empty() {
-            String::new()
-        } else {
-            format!(" — {}", crate::util::truncate(entry.description.trim(), 88))
-        };
-        out.push_str(&format!(
-            "- `{}` · {scope} · {state} · {metadata}{description}\n",
-            entry.name
-        ));
-    }
+    let skill_rows = entries
+        .iter()
+        .map(|entry| {
+            let metadata = skill_palette_metadata(entry);
+            let description = crate::util::truncate(entry.description.trim(), 88);
+            let mut row =
+                PaletteRowProjection::object(format!("skills.{}", entry.name), entry.name.clone())
+                    .with_badge(skill_scope_label(entry), PaletteBadgeTone::Info)
+                    .with_badge(skill_state_label(entry), skill_state_tone(entry))
+                    .with_command(format!("/skills get {}", entry.name));
+            for item in metadata {
+                row = row.with_metadata(item);
+            }
+            if !description.is_empty() {
+                row = row.with_description(description);
+            }
+            row
+        })
+        .collect();
 
-    out.push_str("\nDetails stay behind `/skills get <name>` so the default surface remains scan-friendly.");
-    out
+    PaletteProjection::new("Skills")
+        .with_summary(format!(
+            "Bundled {bundled_installed}/{bundled_total} installed · User {user_total} · Project {project_total}"
+        ))
+        .with_group(PaletteGroupProjection::new("Actions").with_rows(action_rows))
+        .with_group(
+            PaletteGroupProjection::new("Skill rows")
+                .with_description("`name` · scope · state · activation/profile/tags")
+                .with_rows(skill_rows),
+        )
+        .with_footer(
+            "Details stay behind `/skills get <name>` so the default surface remains scan-friendly.",
+        )
 }
 
 fn skill_scope_label(entry: &crate::skills::SkillEntry) -> &'static str {
@@ -3112,9 +3144,25 @@ fn skill_state_label(entry: &crate::skills::SkillEntry) -> &'static str {
     }
 }
 
-fn skill_palette_metadata(entry: &crate::skills::SkillEntry) -> String {
+fn skill_state_tone(
+    entry: &crate::skills::SkillEntry,
+) -> crate::surfaces::palette::PaletteBadgeTone {
+    if entry.project_local || entry.installed {
+        crate::surfaces::palette::PaletteBadgeTone::Success
+    } else if entry.bundled {
+        crate::surfaces::palette::PaletteBadgeTone::Neutral
+    } else {
+        crate::surfaces::palette::PaletteBadgeTone::Info
+    }
+}
+
+fn skill_palette_metadata(entry: &crate::skills::SkillEntry) -> Vec<String> {
     let mut metadata = Vec::new();
-    if let Some(activation) = entry.activation.as_deref().filter(|value| !value.is_empty()) {
+    if let Some(activation) = entry
+        .activation
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
         metadata.push(activation.to_string());
     }
     if !entry.profile.is_empty() {
@@ -3124,9 +3172,9 @@ fn skill_palette_metadata(entry: &crate::skills::SkillEntry) -> String {
         metadata.push(format!("tags:{}", entry.tags.join(",")));
     }
     if metadata.is_empty() {
-        "manual".into()
+        vec!["manual".into()]
     } else {
-        metadata.join(" · ")
+        metadata
     }
 }
 
@@ -4039,8 +4087,10 @@ mod tests {
         assert!(rendered.contains("`/skills get <name>`"));
         assert!(rendered.contains("`/skills install <name>`"));
         assert!(rendered.contains("### Skill rows"));
-        assert!(rendered.contains("`rust` · bundled · available · project_detected · profile:coding · tags:lang"));
-        assert!(rendered.contains("`team` · project · local · always"));
+        assert!(rendered.contains(
+            "- `rust` — bundled · available · project_detected · profile:coding · tags:lang"
+        ));
+        assert!(rendered.contains("- `team` — project · local · always"));
         assert!(!rendered.contains("+ = installed"));
         assert!(rendered.contains("Details stay behind `/skills get <name>`"));
     }
