@@ -1543,6 +1543,7 @@ pub struct OpenAIClient {
     client: reqwest::Client,
     api_key: String,
     base_url: String,
+    endpoint_id: String,
 }
 
 impl OpenAIClient {
@@ -1552,6 +1553,7 @@ impl OpenAIClient {
             api_key,
             base_url: std::env::var("OPENAI_BASE_URL")
                 .unwrap_or_else(|_| "https://api.openai.com".into()),
+            endpoint_id: "openai".into(),
         }
     }
 
@@ -1643,6 +1645,9 @@ impl LlmBridge for OpenAIClient {
         for (k, v) in &options.extra_body {
             body[k] = v.clone();
         }
+        let _ = crate::model_registry::ModelRegistry::global()
+            .shape_openai_request(&self.endpoint_id, &mut body);
+
         // Apply reasoning_effort for models that support it (o-series, gpt-5+).
         // OpenAI's /v1/chat/completions rejects reasoning_effort when tools are
         // present for gpt-5.4+. Strip it in that case — the model still reasons,
@@ -1813,6 +1818,7 @@ impl OpenRouterClient {
                 api_key,
                 base_url: std::env::var("OPENROUTER_BASE_URL")
                     .unwrap_or_else(|_| "https://openrouter.ai/api".into()),
+                endpoint_id: "openrouter".into(),
             },
         }
     }
@@ -2590,6 +2596,7 @@ impl OpenAICompatClient {
                 client: reqwest::Client::new(),
                 api_key,
                 base_url,
+                endpoint_id: provider_id.clone(),
             },
             provider_id,
             default_model,

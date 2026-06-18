@@ -1,7 +1,7 @@
 //! Centralized model registry loaded from `data/model-registry.json`.
 //!
 //! This is the single source of truth for model metadata: IDs, pricing,
-//! context windows, tier mappings, and capabilities. Adding a new model
+//! context windows, grade mappings, endpoint profiles, and capabilities. Adding a new model
 //! means editing the JSON file — zero Rust changes required.
 
 use serde::Deserialize;
@@ -17,8 +17,6 @@ struct RegistryFile {
     defaults: HashMap<String, String>,
     #[serde(default)]
     grades: HashMap<String, HashMap<String, String>>,
-    #[serde(default)]
-    tiers: HashMap<String, HashMap<String, String>>,
     #[serde(default)]
     endpoints: Vec<ProviderEndpoint>,
     routes: Vec<RouteEntry>,
@@ -70,7 +68,6 @@ impl Default for InferenceDefaults {
     }
 }
 
-
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderEndpoint {
@@ -86,7 +83,6 @@ pub struct ProviderEndpoint {
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
-
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -135,13 +131,25 @@ pub enum EndpointAuthScheme {
     #[serde(rename = "none")]
     None,
     #[serde(rename = "bearerToken")]
-    BearerToken { #[serde(rename = "secretRef")] secret_ref: String },
+    BearerToken {
+        #[serde(rename = "secretRef")]
+        secret_ref: String,
+    },
     #[serde(rename = "apiKeyHeader")]
-    ApiKeyHeader { header: String, #[serde(rename = "secretRef")] secret_ref: String },
+    ApiKeyHeader {
+        header: String,
+        #[serde(rename = "secretRef")]
+        secret_ref: String,
+    },
     #[serde(rename = "oauthProvider")]
     OAuthProvider { provider: String },
     #[serde(rename = "custom")]
-    Custom { #[serde(rename = "customKind")] custom_kind: String, #[serde(rename = "secretRef")] secret_ref: Option<String> },
+    Custom {
+        #[serde(rename = "customKind")]
+        custom_kind: String,
+        #[serde(rename = "secretRef")]
+        secret_ref: Option<String>,
+    },
 }
 
 fn default_true() -> bool {
@@ -157,8 +165,6 @@ pub struct RouteEntry {
     pub context_ceiling: usize,
     #[serde(default)]
     pub grade: Option<String>,
-    #[serde(default)]
-    pub tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -209,11 +215,7 @@ impl ModelRegistry {
             }
             ModelRegistry {
                 defaults: file.defaults,
-                grades: if file.grades.is_empty() {
-                    legacy_grades_from_tiers(file.tiers)
-                } else {
-                    file.grades
-                },
+                grades: file.grades,
                 endpoints: validate_endpoints(file.endpoints)
                     .expect("model-registry.json endpoint validation error"),
                 routes: file.routes,
@@ -244,6 +246,30 @@ impl ModelRegistry {
     /// Endpoint definition by id.
     pub fn endpoint(&self, id: &str) -> Option<&ProviderEndpoint> {
         self.endpoints.iter().find(|endpoint| endpoint.id == id)
+    }
+
+    /// Apply OpenAI-compatible endpoint request shaping in-place.
+    ///
+    /// This removes request fields the selected endpoint profile declares unsupported.
+    /// Nested message fields use dotted paths such as `messages[].name`.
+    pub fn shape_openai_request(
+        &self,
+        endpoint_id: &str,
+        request: &mut serde_json::Value,
+    ) -> Result<(), String> {
+        let endpoint = self
+            .endpoint(endpoint_id)
+            .ok_or_else(|| format!("unknown endpoint '{endpoint_id}'"))?;
+        let profile = endpoint
+            .open_ai_compatible_profile
+            .as_ref()
+            .ok_or_else(|| {
+                format!("endpoint '{endpoint_id}' is not OpenAI-compatible or lacks a profile")
+            })?;
+        for field in &profile.unsupported_request_fields {
+            remove_request_field(request, field);
+        }
+        Ok(())
     }
 
     /// Full model entry by qualified ID ("provider:model_id").
@@ -383,6 +409,25 @@ impl ModelRegistry {
     }
 }
 
+fn remove_request_field(request: &mut serde_json::Value, field: &str) {
+    if let Some(name) = field.strip_prefix("messages[].") {
+        if let Some(messages) = request
+            .get_mut("messages")
+            .and_then(|value| value.as_array_mut())
+        {
+            for message in messages {
+                if let Some(object) = message.as_object_mut() {
+                    object.remove(name);
+                }
+            }
+        }
+        return;
+    }
+    if let Some(object) = request.as_object_mut() {
+        object.remove(field);
+    }
+}
+
 fn validate_endpoints(endpoints: Vec<ProviderEndpoint>) -> Result<Vec<ProviderEndpoint>, String> {
     const RESERVED: &[&str] = &["auto", "local", "upstream"];
     let mut seen = std::collections::HashSet::new();
@@ -403,7 +448,9 @@ fn validate_endpoints(endpoints: Vec<ProviderEndpoint>) -> Result<Vec<ProviderEn
                     endpoint.id
                 ));
             }
-            EndpointProtocol::Anthropic | EndpointProtocol::GeminiNative | EndpointProtocol::OllamaNative => {
+            EndpointProtocol::Anthropic
+            | EndpointProtocol::GeminiNative
+            | EndpointProtocol::OllamaNative => {
                 if endpoint.open_ai_compatible_profile.is_some() {
                     return Err(format!(
                         "non-OpenAI-compatible endpoint '{}' must not declare openAiCompatibleProfile",
@@ -417,31 +464,8 @@ fn validate_endpoints(endpoints: Vec<ProviderEndpoint>) -> Result<Vec<ProviderEn
     Ok(endpoints)
 }
 
-fn legacy_grades_from_tiers(
-    tiers: HashMap<String, HashMap<String, String>>,
-) -> HashMap<String, HashMap<String, String>> {
-    tiers
-        .into_iter()
-        .filter_map(|(tier, models)| {
-            legacy_grade_for_tier(&tier).map(|grade| (grade.to_string(), models))
-        })
-        .collect()
-}
-
-fn legacy_grade_for_tier(tier: &str) -> Option<&'static str> {
-    match tier {
-        "gloriana" => Some("S"),
-        "victory" => Some("B"),
-        "retribution" => Some("D"),
-        _ => None,
-    }
-}
-
 fn route_grade(route: &RouteEntry) -> Option<&str> {
-    route
-        .grade
-        .as_deref()
-        .or_else(|| route.tier.as_deref().and_then(legacy_grade_for_tier))
+    route.grade.as_deref()
 }
 
 /// Simple glob matching: `*` at end matches any suffix, otherwise exact.
@@ -562,12 +586,12 @@ mod tests {
                 "default model lacks context constraint: {provider}:{model_id}"
             );
         }
-        for (tier, providers) in &reg.grades {
+        for (grade, providers) in &reg.grades {
             for (provider, model_id) in providers {
                 let info = reg.model_info_or_infer(provider, model_id);
                 assert!(
                     info.context_input > 0,
-                    "grade model lacks context constraint: {tier} {provider}:{model_id}"
+                    "grade model lacks context constraint: {grade} {provider}:{model_id}"
                 );
             }
         }
@@ -597,6 +621,33 @@ mod tests {
         let unknown = reg.model_info_or_infer("ollama-cloud", "mystery-model:13b");
         assert_eq!(unknown.provider, "ollama-cloud");
         assert_eq!(unknown.context_input, 131_072);
+    }
+
+    #[test]
+    fn openai_request_shaping_removes_unsupported_fields() {
+        let reg = ModelRegistry::global();
+        let mut request = serde_json::json!({
+            "model": "llama-3.3-70b-versatile",
+            "logprobs": true,
+            "top_logprobs": 2,
+            "messages": [
+                {"role": "user", "name": "operator", "content": "hello"}
+            ]
+        });
+
+        reg.shape_openai_request("groq", &mut request).unwrap();
+
+        assert!(request.get("logprobs").is_none());
+        assert!(request.get("top_logprobs").is_none());
+        assert!(request["messages"][0].get("name").is_none());
+        assert_eq!(request["messages"][0]["content"], "hello");
+    }
+
+    #[test]
+    fn request_shaping_rejects_non_openai_endpoint() {
+        let reg = ModelRegistry::global();
+        let mut request = serde_json::json!({"messages": []});
+        assert!(reg.shape_openai_request("anthropic", &mut request).is_err());
     }
 
     #[test]

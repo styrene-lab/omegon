@@ -31,6 +31,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Migrated the model registry and routing internals from legacy tier fields to provider-neutral grade mappings while retaining external DTO compatibility where required.
+- Added endpoint definitions and OpenAI-compatible request shaping hooks to the model registry/provider path.
 - Added OpenAI-compatible endpoint profile metadata to the bundled model registry for known upstream endpoints, capturing supported capabilities, unsupported fields, optional headers, and provider quirks.
 - Added endpoint definitions to the bundled model registry, including endpoint class/protocol/auth metadata and validation for reserved selector tokens and duplicate endpoint IDs.
 - Migrated routing internals and the bundled model registry from legacy tier lookups to grade-based registry helpers while retaining one-release loader tolerance for old registry files.

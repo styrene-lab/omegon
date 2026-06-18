@@ -14,7 +14,7 @@ use crate::bridge::LlmBridge;
 
 // ── Capability grade bands ────────────────────────────────────────────────
 
-/// Capability grade band for task routing. Higher tiers can handle more complex tasks.
+/// Capability grade band for task routing. Higher grade bands can handle more complex tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CapabilityGradeBand {
@@ -359,7 +359,7 @@ pub fn route(req: &CapabilityRequest, inventory: &ProviderInventory) -> Vec<Prov
 /// Default model for a provider at a given internal capability grade band.
 fn default_model_for_provider(provider_id: &str, grade: CapabilityGradeBand) -> String {
     let reg = crate::model_registry::ModelRegistry::global();
-    // Map the legacy internal CapabilityGradeBand enum to grade registry keys.
+    // Map the internal grade-band enum to grade registry keys.
     let grades = match grade {
         CapabilityGradeBand::Max => &["S", "A", "B", "D"][..],
         CapabilityGradeBand::Frontier => &["B", "A", "S", "D"][..],
@@ -381,12 +381,12 @@ fn default_model_for_provider(provider_id: &str, grade: CapabilityGradeBand) -> 
 /// Used by the orchestrator to determine how much headroom children get relative
 /// to the parent model — children are capped to parent grade to avoid accidentally
 /// routing a leaf-scoped task to a more expensive model than the one that launched the run.
-pub fn infer_model_tier(model_str: &str) -> CapabilityGradeBand {
+pub fn infer_model_grade_band(model_str: &str) -> CapabilityGradeBand {
     let (provider, model) = model_str.split_once(':').unwrap_or(("", model_str));
 
     // Local/ollama models use parameter-count heuristic
     if matches!(provider, "ollama" | "local") {
-        return infer_local_model_tier(model);
+        return infer_local_model_grade_band(model);
     }
 
     // Try registry route patterns first
@@ -418,7 +418,7 @@ pub fn infer_model_tier(model_str: &str) -> CapabilityGradeBand {
 
 /// Infer capability grade band for local/ollama models based on parameter count in the name.
 /// Models with 70B+ parameters are Frontier-capable; 14B-32B are Mid; smaller are Leaf.
-fn infer_local_model_tier(model_name: &str) -> CapabilityGradeBand {
+fn infer_local_model_grade_band(model_name: &str) -> CapabilityGradeBand {
     // Extract numeric parameter count from model name patterns like "70b", "72b", "32b"
     let lower = model_name.to_lowercase();
     // Look for patterns like "70b", "72b", "120b", "405b"
@@ -473,7 +473,7 @@ impl BridgeFactory {
     }
 }
 
-// ── Cleave tier inference ───────────────────────────────────────────
+// ── Cleave grade inference ───────────────────────────────────────────
 
 /// Infer capability grade band from a child plan's scope.
 pub fn infer_capability_grade(scope_len: usize) -> CapabilityGradeBand {
@@ -494,11 +494,11 @@ mod tests {
         ProviderInventory {
             entries: providers
                 .into_iter()
-                .map(|(id, tier, cost)| ProviderEntry {
+                .map(|(id, grade, cost)| ProviderEntry {
                     provider_id: id.to_string(),
                     has_credentials: true,
                     is_reachable: true,
-                    capability_grade: tier,
+                    capability_grade: grade,
                     models: vec![],
                     cost_tier: cost,
                 })
