@@ -31,6 +31,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Migrated internal harness status and dispatcher projections from legacy model-tier values to provider-neutral grade values while preserving external snapshot field compatibility.
+- Adversarially corrected stale model-routing documentation that still claimed legacy public tiers were stable, and reopened implementation tasks for internal tier/data-model and baseline-spec cleanup.
 - Replaced the advertised model-tier control surface with provider-neutral model intent grades, added canonical `/model grade <F|D|C|B|A|S>` parsing, and removed legacy tier slash command dispatch.
 - Tightened the model-control redesign plan with adversarial follow-up requirements for Rust-native implementation scope, explicit grade/failover/degradation policies, atomic model-intent tooling, endpoint auth schemes, response/error normalization, and baseline spec cleanup.
 - Documented the 0.27.0 model-control redesign plan: provider-neutral F/D/C/B/A/S grades, separate endpoint/provider selection, protocol-profile-driven upstream provider matrix, and removal of legacy model-tier commands/tool semantics.

@@ -94,7 +94,7 @@ fn project_web_instance(
         .map(|h| IpcHarnessSnapshot {
             context_class: h.context_class.clone(),
             thinking_level: h.thinking_level.clone(),
-            capability_tier: h.capability_tier.clone(),
+            capability_tier: h.capability_grade.clone(),
             runtime_profile: h.runtime_profile.as_str().to_string(),
             autonomy_mode: match h.autonomy_mode {
                 omegon_traits::OmegonAutonomyMode::OperatorDriven => "operator-driven".into(),
@@ -132,16 +132,23 @@ fn project_web_instance(
         .unwrap_or(IpcHarnessSnapshot {
             context_class: "Compact".into(),
             thinking_level: "Medium".into(),
-            capability_tier: "victory".into(),
+            capability_tier: "B".into(),
             runtime_profile: "primary-interactive".into(),
             autonomy_mode: "operator-driven".into(),
             dispatcher: omegon_traits::IpcDispatcherSnapshot {
-                available_options: vec!["retribution".into(), "victory".into(), "gloriana".into()],
+                available_options: vec![
+                    "F".into(),
+                    "D".into(),
+                    "C".into(),
+                    "B".into(),
+                    "A".into(),
+                    "S".into(),
+                ],
                 switch_state: "idle".into(),
                 request_id: None,
                 expected_profile: None,
                 expected_model: None,
-                active_profile: Some("victory".into()),
+                active_profile: Some("B".into()),
                 active_model: None,
                 failure_code: None,
                 note: None,

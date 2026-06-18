@@ -378,16 +378,23 @@ fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
         return IpcHarnessSnapshot {
             context_class: "Compact".into(),
             thinking_level: "Medium".into(),
-            capability_tier: "victory".into(),
+            capability_tier: "B".into(),
             runtime_profile: "primary-interactive".into(),
             autonomy_mode: "operator-driven".into(),
             dispatcher: IpcDispatcherSnapshot {
-                available_options: vec!["retribution".into(), "victory".into(), "gloriana".into()],
+                available_options: vec![
+                    "F".into(),
+                    "D".into(),
+                    "C".into(),
+                    "B".into(),
+                    "A".into(),
+                    "S".into(),
+                ],
                 switch_state: "idle".into(),
                 request_id: None,
                 expected_profile: None,
                 expected_model: None,
-                active_profile: Some("victory".into()),
+                active_profile: Some("B".into()),
                 active_model: None,
                 failure_code: None,
                 note: None,
@@ -414,16 +421,23 @@ fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
         return IpcHarnessSnapshot {
             context_class: "Compact".into(),
             thinking_level: "Medium".into(),
-            capability_tier: "victory".into(),
+            capability_tier: "B".into(),
             runtime_profile: "primary-interactive".into(),
             autonomy_mode: "operator-driven".into(),
             dispatcher: IpcDispatcherSnapshot {
-                available_options: vec!["retribution".into(), "victory".into(), "gloriana".into()],
+                available_options: vec![
+                    "F".into(),
+                    "D".into(),
+                    "C".into(),
+                    "B".into(),
+                    "A".into(),
+                    "S".into(),
+                ],
                 switch_state: "idle".into(),
                 request_id: None,
                 expected_profile: None,
                 expected_model: None,
-                active_profile: Some("victory".into()),
+                active_profile: Some("B".into()),
                 active_model: None,
                 failure_code: None,
                 note: None,
@@ -450,7 +464,7 @@ fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
     IpcHarnessSnapshot {
         context_class: h.context_class.clone(),
         thinking_level: h.thinking_level.clone(),
-        capability_tier: h.capability_tier.clone(),
+        capability_tier: h.capability_grade.clone(),
         runtime_profile: h.runtime_profile.as_str().to_string(),
         autonomy_mode: match h.autonomy_mode {
             omegon_traits::OmegonAutonomyMode::OperatorDriven => "operator-driven".into(),
@@ -535,20 +549,16 @@ mod tests {
             harness: Some(Arc::new(Mutex::new(crate::status::HarnessStatus {
                 context_class: "Compact".into(),
                 thinking_level: "high".into(),
-                capability_tier: "victory".into(),
+                capability_grade: "B".into(),
                 runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
                 autonomy_mode: omegon_traits::OmegonAutonomyMode::OperatorDriven,
                 dispatcher: crate::status::DispatcherStatus {
-                    available_options: vec![
-                        "retribution".into(),
-                        "victory".into(),
-                        "gloriana".into(),
-                    ],
+                    available_options: vec!["D".into(), "B".into(), "S".into()],
                     switch_state: "idle".into(),
                     request_id: None,
                     expected_profile: None,
                     expected_model: None,
-                    active_profile: Some("victory".into()),
+                    active_profile: Some("B".into()),
                     active_model: Some("anthropic:claude-sonnet-4-6".into()),
                     failure_code: None,
                     note: None,
@@ -578,10 +588,7 @@ mod tests {
         assert_eq!(snap.harness.runtime_profile, "primary-interactive");
         assert_eq!(snap.harness.autonomy_mode, "operator-driven");
         assert_eq!(snap.harness.dispatcher.switch_state, "idle");
-        assert_eq!(
-            snap.harness.dispatcher.active_profile.as_deref(),
-            Some("victory")
-        );
+        assert_eq!(snap.harness.dispatcher.active_profile.as_deref(), Some("B"));
         assert_eq!(
             snap.harness.dispatcher.active_model.as_deref(),
             Some("anthropic:claude-sonnet-4-6")

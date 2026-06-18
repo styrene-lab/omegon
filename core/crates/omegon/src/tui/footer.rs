@@ -1335,7 +1335,7 @@ mod tests {
             context_percent: 68.0,
             context_window: 262_144,
             thinking_level: "high".into(),
-            model_tier: "victory".into(),
+            model_tier: "B".into(),
             provider_connected: true,
             ..Default::default()
         };
@@ -1625,7 +1625,7 @@ mod tests {
             session_output_tokens: 3_000,
             turn: 7,
             thinking_level: "high".into(),
-            model_tier: "victory".into(),
+            model_tier: "B".into(),
             provider_connected: true,
             is_oauth: true,
             ..Default::default()
@@ -1673,7 +1673,7 @@ mod tests {
             provider_connected: true,
             is_oauth: true,
             thinking_level: "high".into(),
-            model_tier: "victory".into(),
+            model_tier: "B".into(),
             provider_telemetry: Some(omegon_traits::ProviderTelemetrySnapshot {
                 provider: "openai-codex".into(),
                 source: "response_headers".into(),
@@ -1705,7 +1705,7 @@ mod tests {
             provider_connected: true,
             is_oauth: true,
             thinking_level: "medium".into(),
-            model_tier: "victory".into(),
+            model_tier: "B".into(),
             turn: 9,
             session_input_tokens: 12_000,
             session_output_tokens: 3_000,
@@ -1727,7 +1727,7 @@ mod tests {
             provider_connected: true,
             is_oauth: true,
             thinking_level: "high".into(),
-            model_tier: "victory".into(),
+            model_tier: "B".into(),
             provider_telemetry: Some(omegon_traits::ProviderTelemetrySnapshot {
                 provider: "openai-codex".into(),
                 source: "response_headers".into(),
@@ -1760,7 +1760,7 @@ mod tests {
             model_provider: "openai".into(),
             provider_connected: true,
             thinking_level: "high".into(),
-            model_tier: "victory".into(),
+            model_tier: "B".into(),
             turn: 9,
             session_input_tokens: 12_000,
             session_output_tokens: 3_000,

@@ -3868,7 +3868,7 @@ fn hidden_model_aliases_do_not_appear_in_palette() {
             safety: omegon_traits::CommandSafety::READ_ONLY,
         },
         omegon_traits::CommandDefinition {
-            name: "victory".into(),
+            name: "B".into(),
             description: "visible tier".into(),
             subcommands: vec![],
             availability: omegon_traits::CommandAvailability::ALL,
@@ -3877,7 +3877,7 @@ fn hidden_model_aliases_do_not_appear_in_palette() {
     ];
     app.editor.set_text("/");
     let matches = app.matching_commands();
-    assert!(matches.iter().any(|row| row.name == "victory"));
+    assert!(matches.iter().any(|row| row.name == "B"));
     assert!(!matches.iter().any(|row| row.name == "sonnet"));
 }
 
@@ -4481,7 +4481,7 @@ fn auspex_attach_payload_carries_startup_and_instance_metadata() {
                 runtime_dir: None,
                 context_class: Some("Compact".into()),
                 thinking_level: Some("Medium".into()),
-                capability_tier: Some("victory".into()),
+                capability_tier: Some("B".into()),
                 execution_substrate: None,
             },
         }),
@@ -5024,7 +5024,7 @@ fn editor_top_line_shows_engine_block_details() {
     settings.thinking = ThinkingLevel::High;
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
     app.apply_ui_preset(UiSurfaces::lean());
-    app.footer_data.harness.capability_tier = "frontier".into();
+    app.footer_data.harness.capability_grade = "B".into();
 
     let rendered = render_app_to_string(&mut app, 140, 18);
 

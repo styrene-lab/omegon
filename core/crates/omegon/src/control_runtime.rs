@@ -1041,13 +1041,13 @@ pub async fn switch_dispatcher_response(
     model: Option<&str>,
     events_tx: &broadcast::Sender<AgentEvent>,
 ) -> SlashCommandResponse {
-    let normalized_profile = profile.trim().to_ascii_lowercase();
-    let allowed = ["retribution", "victory", "gloriana"];
+    let normalized_profile = profile.trim().to_ascii_uppercase();
+    let allowed = ["F", "D", "C", "B", "A", "S"];
     if !allowed.contains(&normalized_profile.as_str()) {
         return SlashCommandResponse {
             accepted: false,
             output: Some(format!(
-                "Unknown dispatcher profile '{profile}'. Expected one of: {}",
+                "Unknown dispatcher grade '{profile}'. Expected one of: {}",
                 allowed.join(", ")
             )),
         };
@@ -1061,13 +1061,16 @@ pub async fn switch_dispatcher_response(
         .unwrap_or_default();
     let current_provider = crate::providers::infer_provider_id(&current_model);
     let reg = crate::model_registry::ModelRegistry::global();
-    let tier_model = match normalized_profile.as_str() {
-        tier @ ("retribution" | "victory" | "gloriana") => reg
-            .tier_model(tier, &current_provider)
-            .unwrap_or(&current_model)
-            .to_string(),
-        _ => current_model.clone(),
+    let grade_tier = match normalized_profile.as_str() {
+        "S" => Some("gloriana"),
+        "A" | "B" => Some("victory"),
+        "F" | "D" | "C" => Some("retribution"),
+        _ => None,
     };
+    let tier_model = grade_tier
+        .and_then(|tier| reg.tier_model(tier, &current_provider))
+        .unwrap_or(&current_model)
+        .to_string();
     let requested_model_spec = requested_model.map(ToOwned::to_owned).unwrap_or_else(|| {
         if current_provider.is_empty() || current_provider == "anthropic" {
             format!("anthropic:{tier_model}")
@@ -1353,7 +1356,7 @@ pub async fn set_runtime_mode_response(
     status.update_routing(
         settings.effective_requested_class().label(),
         settings.thinking.as_str(),
-        &status.capability_tier.clone(),
+        &status.capability_grade.clone(),
         operating_profile.posture.effective.display_name(),
         &operating_profile_label,
         &principal_id,
@@ -1410,7 +1413,7 @@ pub async fn status_view_response(
     status.update_routing(
         settings.effective_requested_class().label(),
         settings.thinking.as_str(),
-        &status.capability_tier.clone(),
+        &status.capability_grade.clone(),
         operating_profile.posture.effective.display_name(),
         &operating_profile_label,
         &principal_id,
@@ -2721,7 +2724,7 @@ pub async fn profile_apply_response(
         status.update_routing(
             settings.effective_requested_class().label(),
             settings.thinking.as_str(),
-            &status.capability_tier.clone(),
+            &status.capability_grade.clone(),
             operating_profile.posture.effective.display_name(),
             &operating_profile.summary(),
             operating_profile
