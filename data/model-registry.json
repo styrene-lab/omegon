@@ -126,7 +126,19 @@
         "kind": "bearerToken",
         "secretRef": "OPENAI_API_KEY"
       },
-      "enabled": true
+      "enabled": true,
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": true,
+        "supportsResponsesApi": false,
+        "supportsStreaming": true,
+        "supportsTools": true,
+        "unsupportedRequestFields": [],
+        "requiredHeaders": [],
+        "optionalHeaders": [],
+        "quirks": [],
+        "docsUrl": null,
+        "verifiedAt": "2026-06-11"
+      }
     },
     {
       "id": "openai-codex",
@@ -138,7 +150,19 @@
         "kind": "oauthProvider",
         "provider": "openai-codex"
       },
-      "enabled": true
+      "enabled": true,
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": true,
+        "supportsResponsesApi": false,
+        "supportsStreaming": true,
+        "supportsTools": true,
+        "unsupportedRequestFields": [],
+        "requiredHeaders": [],
+        "optionalHeaders": [],
+        "quirks": [],
+        "docsUrl": null,
+        "verifiedAt": "2026-06-11"
+      }
     },
     {
       "id": "openrouter",
@@ -150,7 +174,25 @@
         "kind": "bearerToken",
         "secretRef": "OPENROUTER_API_KEY"
       },
-      "enabled": true
+      "enabled": true,
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": true,
+        "supportsResponsesApi": false,
+        "supportsStreaming": true,
+        "supportsTools": true,
+        "unsupportedRequestFields": [],
+        "requiredHeaders": [],
+        "optionalHeaders": [
+          "HTTP-Referer",
+          "X-OpenRouter-Title",
+          "X-Title"
+        ],
+        "quirks": [
+          "normalizes schema across providers/models"
+        ],
+        "docsUrl": null,
+        "verifiedAt": "2026-06-11"
+      }
     },
     {
       "id": "groq",
@@ -162,7 +204,27 @@
         "kind": "bearerToken",
         "secretRef": "GROQ_API_KEY"
       },
-      "enabled": true
+      "enabled": true,
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": true,
+        "supportsResponsesApi": false,
+        "supportsStreaming": true,
+        "supportsTools": true,
+        "unsupportedRequestFields": [
+          "logprobs",
+          "logit_bias",
+          "top_logprobs",
+          "messages[].name"
+        ],
+        "requiredHeaders": [],
+        "optionalHeaders": [],
+        "quirks": [
+          "n must equal 1",
+          "temperature 0 is converted to 1e-8"
+        ],
+        "docsUrl": null,
+        "verifiedAt": "2026-06-11"
+      }
     },
     {
       "id": "mistral",
@@ -174,7 +236,22 @@
         "kind": "bearerToken",
         "secretRef": "MISTRAL_API_KEY"
       },
-      "enabled": true
+      "enabled": true,
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": true,
+        "supportsResponsesApi": false,
+        "supportsStreaming": true,
+        "supportsTools": true,
+        "unsupportedRequestFields": [],
+        "requiredHeaders": [],
+        "optionalHeaders": [],
+        "quirks": [
+          "parallel function calling supported",
+          "prediction field supported"
+        ],
+        "docsUrl": null,
+        "verifiedAt": "2026-06-11"
+      }
     },
     {
       "id": "xai",
@@ -186,7 +263,21 @@
         "kind": "bearerToken",
         "secretRef": "XAI_API_KEY"
       },
-      "enabled": true
+      "enabled": true,
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": true,
+        "supportsResponsesApi": true,
+        "supportsStreaming": true,
+        "supportsTools": true,
+        "unsupportedRequestFields": [],
+        "requiredHeaders": [],
+        "optionalHeaders": [],
+        "quirks": [
+          "tools include function and web-search forms"
+        ],
+        "docsUrl": null,
+        "verifiedAt": "2026-06-11"
+      }
     },
     {
       "id": "huggingface-router",
@@ -198,7 +289,22 @@
         "kind": "bearerToken",
         "secretRef": "HF_TOKEN"
       },
-      "enabled": true
+      "enabled": true,
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": true,
+        "supportsResponsesApi": false,
+        "supportsStreaming": true,
+        "supportsTools": true,
+        "unsupportedRequestFields": [],
+        "requiredHeaders": [],
+        "optionalHeaders": [],
+        "quirks": [
+          "model IDs encode underlying provider",
+          "supports grammars/constraints"
+        ],
+        "docsUrl": null,
+        "verifiedAt": "2026-06-11"
+      }
     },
     {
       "id": "gemini-openai",
@@ -210,7 +316,21 @@
         "kind": "bearerToken",
         "secretRef": "GEMINI_API_KEY"
       },
-      "enabled": true
+      "enabled": true,
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": true,
+        "supportsResponsesApi": false,
+        "supportsStreaming": true,
+        "supportsTools": true,
+        "unsupportedRequestFields": [],
+        "requiredHeaders": [],
+        "optionalHeaders": [],
+        "quirks": [
+          "Gemini native semantics may differ from OpenAI-compatible baseline"
+        ],
+        "docsUrl": null,
+        "verifiedAt": "2026-06-11"
+      }
     },
     {
       "id": "ollama",
