@@ -356,18 +356,18 @@ pub fn route(req: &CapabilityRequest, inventory: &ProviderInventory) -> Vec<Prov
     candidates
 }
 
-/// Default model for a provider at a given tier.
+/// Default model for a provider at a given internal capability tier.
 fn default_model_for_provider(provider_id: &str, tier: CapabilityTier) -> String {
     let reg = crate::model_registry::ModelRegistry::global();
-    // Map CapabilityTier to registry tier names, cascading down
-    let tier_names = match tier {
-        CapabilityTier::Max => &["gloriana", "victory", "retribution"][..],
-        CapabilityTier::Frontier => &["victory", "gloriana", "retribution"][..],
-        CapabilityTier::Mid => &["retribution", "victory"][..],
-        CapabilityTier::Leaf => &["retribution"][..],
+    // Map the legacy internal CapabilityTier enum to grade registry keys.
+    let grades = match tier {
+        CapabilityTier::Max => &["S", "A", "B", "D"][..],
+        CapabilityTier::Frontier => &["B", "A", "S", "D"][..],
+        CapabilityTier::Mid => &["D", "C", "B"][..],
+        CapabilityTier::Leaf => &["D", "C", "F"][..],
     };
-    for t in tier_names {
-        if let Some(model) = reg.tier_model(t, provider_id) {
+    for grade in grades {
+        if let Some(model) = reg.grade_model(grade, provider_id) {
             return model.to_string();
         }
     }
@@ -391,11 +391,12 @@ pub fn infer_model_tier(model_str: &str) -> CapabilityTier {
 
     // Try registry route patterns first
     let reg = crate::model_registry::ModelRegistry::global();
-    if let Some(tier_str) = reg.infer_tier(provider, model) {
-        return match tier_str {
-            "gloriana" => CapabilityTier::Max,
-            "victory" => CapabilityTier::Frontier,
-            "retribution" => CapabilityTier::Mid,
+    if let Some(grade) = reg.infer_grade(provider, model) {
+        return match grade {
+            "S" => CapabilityTier::Max,
+            "A" | "B" => CapabilityTier::Frontier,
+            "C" | "D" => CapabilityTier::Mid,
+            "F" => CapabilityTier::Leaf,
             _ => CapabilityTier::Frontier,
         };
     }
