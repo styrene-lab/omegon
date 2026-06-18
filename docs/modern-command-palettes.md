@@ -75,9 +75,17 @@ Current `/skills` TUI route passes through `canonical_slash_command("skills", ar
 - `core/crates/omegon/src/control_actions.rs` — classified skill and prompt actions for legacy IPC/Web safety gates.
 - `core/crates/omegon-traits/src/lib.rs` — command availability and safety metadata already exists and is the registry contract.
 
+## Consolidation Tracks
+
+1. **Skill and prompt palettes** — convert `/skills` and related manageable-content commands from inventory dumps into compact action/object rows with detail-on-demand commands.
+2. **Shared palette DTO** — extract renderer-neutral palette row/group projections so TUI transcript output, command menus, CLI remote slash execution, and ACP/web clients consume the same semantic surface.
+3. **Settings surface completion** — make `SettingsSurfaceProjection` the settings-page source of truth and leave TUI-local code responsible only for navigation, filtering, selection, and input dispatch.
+4. **Registry-backed menu discovery** — drive slash help, menus, command palette rows, CLI remote execution metadata, and ACP command discovery from command-registry availability/safety metadata instead of per-surface allowlists.
+
 ## Remaining Work
 
 - Integrate `/context` and `/think` into the modern palette track without breaking their existing bare-command selector behavior. Their static TUI metadata now exposes action-oriented subcommands, but they still need shared state/action projections for CLI/ACP/text surfaces.
 - Refactor `/skills` default output into a compact palette-style action/object projection.
-- Consider extracting a shared command-palette row DTO so `/skills`, `/prompt`, TUI palette, ACP, and CLI text output can consume one projection.
+- Extract a shared command-palette row DTO so `/skills`, `/prompt`, TUI palette, ACP, and CLI text output can consume one projection.
+- Complete settings-page consolidation by deriving TUI settings rows/selectors from `SettingsSurfaceProjection` instead of parallel descriptors.
 - Add a stronger confirmation/trust flow before any prompt/user-command surface queues or executes prompt bodies directly.

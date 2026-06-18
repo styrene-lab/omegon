@@ -3035,50 +3035,98 @@ pub async fn skills_view_response() -> SlashCommandResponse {
                 };
             }
 
-            let bundled: Vec<&crate::skills::SkillEntry> =
-                entries.iter().filter(|e| e.bundled).collect();
-            let user: Vec<&crate::skills::SkillEntry> = entries
-                .iter()
-                .filter(|e| !e.bundled && !e.project_local)
-                .collect();
-            let project: Vec<&crate::skills::SkillEntry> =
-                entries.iter().filter(|e| e.project_local).collect();
-
-            let mut out = String::new();
-            if !bundled.is_empty() {
-                out.push_str(&format!("Bundled skills ({}):\n\n", bundled.len()));
-                for s in &bundled {
-                    let status = if s.installed { "+" } else { "o" };
-                    out.push_str(&format!("  {status} {:<14} {}\n", s.name, s.description));
-                }
-                out.push('\n');
-            }
-            if !user.is_empty() {
-                out.push_str(&format!("User skills ({}):\n\n", user.len()));
-                for s in &user {
-                    out.push_str(&format!("  + {:<14} {}\n", s.name, s.description));
-                }
-                out.push('\n');
-            }
-            if !project.is_empty() {
-                out.push_str(&format!("Project-local skills ({}):\n\n", project.len()));
-                for s in &project {
-                    out.push_str(&format!("  * {:<14} {}\n", s.name, s.description));
-                }
-                out.push('\n');
-            }
-            out.push_str("  + = installed    o = not installed    * = project-local\n");
-            out.push_str("Run /skills install to install bundled skills.\n");
-            out.push_str("Run /skills get <name> for details.");
             SlashCommandResponse {
                 accepted: true,
-                output: Some(out),
+                output: Some(render_skills_palette(&entries)),
             }
         }
         Err(err) => SlashCommandResponse {
             accepted: false,
             output: Some(format!("/skills list failed: {err}")),
         },
+    }
+}
+
+fn render_skills_palette(entries: &[crate::skills::SkillEntry]) -> String {
+    let bundled_total = entries.iter().filter(|entry| entry.bundled).count();
+    let bundled_installed = entries
+        .iter()
+        .filter(|entry| entry.bundled && entry.installed)
+        .count();
+    let user_total = entries
+        .iter()
+        .filter(|entry| !entry.bundled && !entry.project_local)
+        .count();
+    let project_total = entries.iter().filter(|entry| entry.project_local).count();
+
+    let mut out = String::new();
+    out.push_str("## Skills\n");
+    out.push_str(&format!(
+        "Bundled {bundled_installed}/{bundled_total} installed · User {user_total} · Project {project_total}\n\n"
+    ));
+    out.push_str("### Actions\n");
+    out.push_str("- `/skills get <name>` — inspect manifest metadata and body preview\n");
+    out.push_str("- `/skills install` — install or refresh all bundled skills\n");
+    out.push_str("- `/skills install <name>` — install one skill from the armory\n\n");
+    out.push_str("### Skill rows\n");
+    out.push_str("`name` · scope · state · activation/profile/tags\n");
+
+    for entry in entries {
+        let scope = skill_scope_label(entry);
+        let state = skill_state_label(entry);
+        let metadata = skill_palette_metadata(entry);
+        let description = if entry.description.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" — {}", crate::util::truncate(entry.description.trim(), 88))
+        };
+        out.push_str(&format!(
+            "- `{}` · {scope} · {state} · {metadata}{description}\n",
+            entry.name
+        ));
+    }
+
+    out.push_str("\nDetails stay behind `/skills get <name>` so the default surface remains scan-friendly.");
+    out
+}
+
+fn skill_scope_label(entry: &crate::skills::SkillEntry) -> &'static str {
+    if entry.project_local {
+        "project"
+    } else if entry.bundled {
+        "bundled"
+    } else {
+        "user"
+    }
+}
+
+fn skill_state_label(entry: &crate::skills::SkillEntry) -> &'static str {
+    if entry.project_local {
+        "local"
+    } else if entry.installed {
+        "installed"
+    } else if entry.bundled {
+        "available"
+    } else {
+        "installed"
+    }
+}
+
+fn skill_palette_metadata(entry: &crate::skills::SkillEntry) -> String {
+    let mut metadata = Vec::new();
+    if let Some(activation) = entry.activation.as_deref().filter(|value| !value.is_empty()) {
+        metadata.push(activation.to_string());
+    }
+    if !entry.profile.is_empty() {
+        metadata.push(format!("profile:{}", entry.profile.join("/")));
+    }
+    if !entry.tags.is_empty() {
+        metadata.push(format!("tags:{}", entry.tags.join(",")));
+    }
+    if metadata.is_empty() {
+        "manual".into()
+    } else {
+        metadata.join(" · ")
     }
 }
 
@@ -3942,6 +3990,60 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skills_palette_renders_action_and_object_rows() {
+        let entries = vec![
+            crate::skills::SkillEntry {
+                name: "rust".into(),
+                description: "Conventions for Rust development".into(),
+                id: None,
+                version: None,
+                tags: vec!["lang".into()],
+                aliases: vec![],
+                triggers: vec![],
+                activation: Some("project_detected".into()),
+                profile: vec!["coding".into()],
+                project_signals: vec!["Cargo.toml".into()],
+                posture: None,
+                max_turns: None,
+                installed: false,
+                bundled: true,
+                project_local: false,
+                path: String::new(),
+            },
+            crate::skills::SkillEntry {
+                name: "team".into(),
+                description: "Project team workflow".into(),
+                id: None,
+                version: None,
+                tags: vec![],
+                aliases: vec![],
+                triggers: vec![],
+                activation: Some("always".into()),
+                profile: vec![],
+                project_signals: vec![],
+                posture: None,
+                max_turns: None,
+                installed: true,
+                bundled: false,
+                project_local: true,
+                path: ".omegon/skills/team".into(),
+            },
+        ];
+
+        let rendered = render_skills_palette(&entries);
+
+        assert!(rendered.starts_with("## Skills"));
+        assert!(rendered.contains("### Actions"));
+        assert!(rendered.contains("`/skills get <name>`"));
+        assert!(rendered.contains("`/skills install <name>`"));
+        assert!(rendered.contains("### Skill rows"));
+        assert!(rendered.contains("`rust` · bundled · available · project_detected · profile:coding · tags:lang"));
+        assert!(rendered.contains("`team` · project · local · always"));
+        assert!(!rendered.contains("+ = installed"));
+        assert!(rendered.contains("Details stay behind `/skills get <name>`"));
+    }
 
     #[tokio::test]
     async fn permission_trust_add_remove_updates_live_settings_and_profile() {
