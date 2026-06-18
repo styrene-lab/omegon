@@ -662,10 +662,6 @@ impl Feature for ContextProvider {
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
             crate::tool_registry::context::CONTEXT_STATUS => {
-                let dispatched = dispatch_command(
-                    &self.command_tx,
-                    TuiCommand::ContextStatus { respond_to: None },
-                );
                 let runtime = self.runtime_state();
                 let thinking = runtime.thinking_display();
                 let result_text = format!(
@@ -695,7 +691,7 @@ Thinking Level: {}",
                         "assembly_budget": runtime.assembly_budget,
                         "class_mismatch": runtime.class_mismatch,
                         "thinking": runtime.thinking_level,
-                        "dispatched": dispatched,
+                        "dispatched": false,
                     }),
                 })
             }
@@ -965,6 +961,35 @@ mod tests {
         assert_eq!(result.details["tokens_used"], 96_433);
         assert_eq!(result.details["context_window"], 272_000);
         assert_eq!(result.details["usage_percent"], 35);
+        assert_eq!(result.details["dispatched"], false);
+    }
+
+    #[tokio::test]
+    async fn context_status_tool_does_not_enqueue_tui_context_panel() {
+        let metrics = SharedContextMetrics::new();
+        let command_tx = new_shared_command_tx();
+        let (tx, mut rx) = mpsc::channel(1);
+        {
+            let mut guard = command_tx.lock().unwrap();
+            *guard = Some(tx);
+        }
+        let provider = ContextProvider::new(metrics, command_tx);
+
+        let result = provider
+            .execute(
+                crate::tool_registry::context::CONTEXT_STATUS,
+                "call-2",
+                json!({}),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("tool result");
+
+        assert_eq!(result.details["dispatched"], false);
+        assert!(
+            rx.try_recv().is_err(),
+            "context_status should be tool-local"
+        );
     }
 
     #[tokio::test]

@@ -130,6 +130,11 @@ pub struct IntentDocument {
     #[serde(default)]
     pub skill_completion_nudged: bool,
 
+    /// Set to true after the agent has been nudged to reconcile an incomplete
+    /// visible Workbench plan before ending the turn.
+    #[serde(default)]
+    pub plan_reconciliation_nudged: bool,
+
     /// Set when the user's prompt contains MCQ options (A/B/C/D pattern).
     /// The loop injects a format hint so the agent states the letter answer.
     #[serde(default)]

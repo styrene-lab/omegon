@@ -4485,7 +4485,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::SetThinking { level, respond_to } => {
-                let response = control_runtime::set_thinking_response(&shared_settings, level).await;
+                let response =
+                    control_runtime::set_thinking_response(&shared_settings, &agent.cwd, level).await;
                 if let Some(output) = response.output.clone() {
                     let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
                 }

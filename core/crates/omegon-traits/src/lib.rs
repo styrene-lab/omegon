@@ -2224,6 +2224,7 @@ pub enum ProgressNudgeReason {
     ValidationPressure,
     ClosurePressure,
     CommitHygiene,
+    PlanReconciliation,
 }
 
 // ───────────────────────────────────────────────────────────────────────────

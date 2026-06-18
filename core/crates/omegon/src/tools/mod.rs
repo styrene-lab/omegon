@@ -886,13 +886,17 @@ impl ToolProvider for CoreTools {
             ToolDefinition {
                 name: reg::PLAN.into(),
                 label: reg::PLAN.into(),
-                description: "Manage the session work plan — a lightweight checklist for \
-                    tracking progress on the current request. Use 'list' to inspect the \
-                    visible plan plus lifecycle/OpenSpec plan summaries, 'set' to establish \
-                    a plan at the start of multi-step work, 'approve' to mark operator \
-                    approval, 'execute' to start mutation work, 'advance' to mark progress, \
-                    'complete' to mark a specific item done, 'skip' to skip an item, and \
-                    'clear' to disable the plan gate."
+                description: "Manage the session work plan — the primary operator-facing \
+                    Workbench surface for what's happening now and the agent's guidepost while \
+                    working. Use 'list' to inspect the visible plan plus lifecycle/OpenSpec \
+                    plan summaries, 'set' to establish a plan at the start of multi-step work, \
+                    'approve' to mark operator approval, 'execute' to start mutation work, \
+                    'advance' to mark the current item done and move to the next item, \
+                    'complete' to mark a specific item done, 'skip' to deliberately bypass an \
+                    item, and 'clear' only when the visible plan gate is no longer useful. \
+                    If you create or inherit a visible plan, keep it truthful before final \
+                    replies: update, complete, skip, or clear stale active/todo items rather \
+                    than leaving the Workbench stale."
                     .into(),
                 parameters: json!({
                     "type": "object",
@@ -2041,6 +2045,26 @@ open_questions:
                 "CoreTools should not include '{name}' — it belongs to a dedicated provider"
             );
         }
+    }
+
+    #[test]
+    fn plan_tool_description_frames_workbench_as_primary_surface() {
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
+        let all_tools = tools.tools();
+        let plan = all_tools
+            .iter()
+            .find(|tool| tool.name == crate::tool_registry::core::PLAN)
+            .expect("plan tool registered");
+
+        assert!(
+            plan.description
+                .contains("primary operator-facing Workbench surface")
+        );
+        assert!(plan.description.contains("agent's guidepost"));
+        assert!(
+            plan.description
+                .contains("keep it truthful before final replies")
+        );
     }
 
     // ── WorkspaceBoundary standalone tests ─────────────────────────────

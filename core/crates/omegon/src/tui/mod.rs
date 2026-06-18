@@ -51,7 +51,6 @@ mod snapshot_tests;
 
 fn slash_command_for_palette_notification(message: &str) -> Option<&'static str> {
     const PALETTE_NOTIFICATION_COMMANDS: &[(&str, &str)] = &[
-        ("## Context\n", "/context status"),
         ("## Thinking levels\n", "/think status"),
         ("## Skills\n", "/skills"),
         ("## Prompt library\n", "/prompt list"),
@@ -69,6 +68,14 @@ fn should_toast_slash_response(response: &str) -> bool {
         && trimmed.chars().count() <= 120
         && !trimmed.starts_with("Usage:")
         && !trimmed.contains("Unknown")
+}
+
+fn is_one_shot_context_notification(message: &str) -> bool {
+    matches!(
+        message.trim(),
+        "Context cleared. Starting fresh conversation."
+            | "Nothing eligible to compact yet — compaction only summarizes older turns after the decay window."
+    )
 }
 
 #[cfg(test)]
@@ -597,15 +604,22 @@ pub enum CanonicalSlashCommand {
     WorkspaceKindSet(crate::workspace::types::WorkspaceKind),
     WorkspaceKindClear,
     SessionStatsView,
-    TreeView { args: String },
-    NoteAdd { text: String },
+    TreeView {
+        args: String,
+    },
+    NoteAdd {
+        text: String,
+    },
     NotesView,
     NotesClear,
     CheckinView,
     ContextStatus,
     ContextCompact,
     ContextClear,
-    ContextRequest { kind: String, query: String },
+    ContextRequest {
+        kind: String,
+        query: String,
+    },
     ContextRequestJson(String),
     SetContextClass(crate::settings::ContextClass),
     NewSession,
@@ -616,7 +630,10 @@ pub enum CanonicalSlashCommand {
     SkillsView,
     SkillsInstall(Option<String>),
     SkillCreate(Option<SkillCreateScope>),
-    SkillImport { path: String, scope: Option<SkillCreateScope> },
+    SkillImport {
+        path: String,
+        scope: Option<SkillCreateScope>,
+    },
     SkillGet(String),
     SkillDelete(String),
     PlanView,
@@ -654,7 +671,10 @@ pub enum CanonicalSlashCommand {
     PluginRemove(String),
     PluginUpdate(Option<String>),
     SecretsView,
-    SecretsSet { name: String, value: String },
+    SecretsSet {
+        name: String,
+        value: String,
+    },
     SecretsGet(String),
     SecretsDelete(String),
     VaultStatus,
@@ -901,9 +921,13 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             } else if args == "create" || args == "new" {
                 Some(CanonicalSlashCommand::SkillCreate(None))
             } else if args == "create --project" || args == "new --project" {
-                Some(CanonicalSlashCommand::SkillCreate(Some(SkillCreateScope::Project)))
+                Some(CanonicalSlashCommand::SkillCreate(Some(
+                    SkillCreateScope::Project,
+                )))
             } else if args == "create --user" || args == "new --user" {
-                Some(CanonicalSlashCommand::SkillCreate(Some(SkillCreateScope::User)))
+                Some(CanonicalSlashCommand::SkillCreate(Some(
+                    SkillCreateScope::User,
+                )))
             } else if let Some(path) = args.strip_prefix("import --project ") {
                 let path = path.trim();
                 (!path.is_empty()).then(|| CanonicalSlashCommand::SkillImport {
@@ -7400,7 +7424,7 @@ Scroll transcript:
                     || message.contains("— retrying")
                 {
                     self.show_toast(&message, ratatui_toaster::ToastType::Warning);
-                } else if message.starts_with('↯') {
+                } else if message.starts_with('↯') || is_one_shot_context_notification(&message) {
                     self.show_toast(&message, ratatui_toaster::ToastType::Info);
                 } else if let Some(command) = slash_command_for_palette_notification(&message) {
                     self.show_slash_response(command, &message);
@@ -10200,11 +10224,15 @@ mod slash_command_parsing_tests {
         ));
         assert!(matches!(
             canonical_slash_command("skills", "create --project"),
-            Some(CanonicalSlashCommand::SkillCreate(Some(super::SkillCreateScope::Project)))
+            Some(CanonicalSlashCommand::SkillCreate(Some(
+                super::SkillCreateScope::Project
+            )))
         ));
         assert!(matches!(
             canonical_slash_command("skills", "new --user"),
-            Some(CanonicalSlashCommand::SkillCreate(Some(super::SkillCreateScope::User)))
+            Some(CanonicalSlashCommand::SkillCreate(Some(
+                super::SkillCreateScope::User
+            )))
         ));
     }
 
@@ -10284,7 +10312,11 @@ mod slash_command_parsing_tests {
         assert!(matches!(result, SlashResult::Handled));
         match rx.try_recv() {
             Ok(TuiCommand::SubmitPrompt(prompt)) => {
-                assert!(prompt.text.contains("`./bad\\`path/SKILL.md`"), "{}", prompt.text);
+                assert!(
+                    prompt.text.contains("`./bad\\`path/SKILL.md`"),
+                    "{}",
+                    prompt.text
+                );
             }
             other => panic!("expected skill import SubmitPrompt, got {other:?}"),
         }
