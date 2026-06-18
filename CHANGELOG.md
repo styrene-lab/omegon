@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Updated baseline routing and effort specs from legacy tier commands/tooling to model grades, endpoint selectors, and `set_model_intent`.
 - Migrated internal harness status and dispatcher projections from legacy model-tier values to provider-neutral grade values while preserving external snapshot field compatibility.
 - Adversarially corrected stale model-routing documentation that still claimed legacy public tiers were stable, and reopened implementation tasks for internal tier/data-model and baseline-spec cleanup.
 - Replaced the advertised model-tier control surface with provider-neutral model intent grades, added canonical `/model grade <F|D|C|B|A|S>` parsing, and removed legacy tier slash command dispatch.

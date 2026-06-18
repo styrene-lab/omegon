@@ -11,22 +11,22 @@ visibility = "private"
 
 # routing
 
-### Requirement: Operator-facing model controls describe capability tiers, not Anthropic-only products
+### Requirement: Operator-facing model controls describe capability grades and endpoint selection
 
-Provider-neutral model controls SHALL explain `/local`, `/haiku`, `/sonnet`, `/opus`, and `set_model_tier` in terms of capability tiers and multi-provider routing rather than implying Anthropic-exclusive backing.
+Provider-neutral model controls SHALL explain `/model grade <F|D|C|B|A|S>`, `/model provider <auto|local|upstream|endpoint-id>`, and `set_model_intent` in terms of capability grades, endpoint selection, and multi-provider routing. Legacy commands `/local`, `/haiku`, `/sonnet`, `/opus` and the `set_model_tier` tool SHALL NOT be required behavior.
 
-#### Scenario: Slash-command help uses provider-neutral wording
+#### Scenario: Slash-command help uses grade wording
 Given the operator has Omegon loaded with multiple cloud providers available
-When help text or command descriptions for `/haiku`, `/sonnet`, or `/opus` are shown
-Then the descriptions refer to capability tiers such as fast, balanced, or deep reasoning
+When help text or command descriptions for model controls are shown
+Then the descriptions refer to capability grades such as F, D, C, B, A, or S
+And local is described as a provider/endpoint selector rather than a capability grade
 And the descriptions do not require Anthropic product names to make sense
-And the descriptions remain compatible with the canonical internal tier keys
 
-#### Scenario: Tool help reflects provider-aware routing
-Given the operator inspects the `set_model_tier` tool
+#### Scenario: Tool help reflects model intent routing
+Given the operator inspects the `set_model_intent` tool
 When the tool description is rendered
-Then it explains that Omegon resolves the requested tier through the active routing policy
-And it does not imply that `haiku`, `sonnet`, or `opus` always map to Anthropic models
+Then it explains that Omegon resolves the requested grade through the active routing policy
+And it does not imply that F/D/C/B/A/S grades always map to one provider family
 
 ### Requirement: Sessions restore the last explicitly selected driver model
 
