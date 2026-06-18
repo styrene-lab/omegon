@@ -101,20 +101,20 @@ Then an error notification lists valid tier names
 
 ### Requirement: /effort cap locks the ceiling, agent can only downgrade
 
-`/effort cap` locks the current tier as the maximum. `set_model_tier` can downgrade but not upgrade past the cap. `/effort uncap` removes the lock.
+`/effort cap` locks the current effort level as the maximum. `set_model_intent` can request lower/equivalent capability grades but cannot upgrade past the cap policy. `/effort uncap` removes the lock.
 
 #### Scenario: Cap prevents agent upgrade
 
-Given effort is capped at Ruthless (level 4, driver=sonnet)
-When the agent calls set_model_tier with tier "opus"
+Given effort is capped at Ruthless (level 4, driver grade B)
+When the agent calls set_model_intent with grade "S"
 Then the request is rejected
 And the tool returns a message explaining the cap
 
 #### Scenario: Cap allows agent downgrade
 
-Given effort is capped at Ruthless (level 4, driver=sonnet)
-When the agent calls set_model_tier with tier "haiku"
-Then the model switches to haiku
+Given effort is capped at Ruthless (level 4, driver grade B)
+When the agent calls set_model_intent with grade "D"
+Then the model switches to a policy-compliant lower-grade route
 
 #### Scenario: Uncap restores full agent control
 
@@ -131,24 +131,24 @@ Then the output shows "CAPPED" indicator
 
 ### Requirement: model-budget respects effort cap on upgrades
 
-model-budget's `set_model_tier` tool checks `sharedState.effort` before switching. If a cap is active, upgrades past the cap tier's driver model are rejected.
+model-budget's `set_model_intent` tool checks `sharedState.effort` before switching. If a cap is active, upgrades past the cap policy are rejected.
 
 #### Scenario: No cap allows any switch
 
 Given no effort cap is active
-When set_model_tier is called with "opus"
+When set_model_intent is called with grade "S"
 Then the switch succeeds
 
 #### Scenario: Cap blocks upgrade past ceiling
 
-Given effort cap is at Substantial (driver=sonnet)
-When set_model_tier is called with "opus"
+Given effort cap is at Substantial (driver grade B)
+When set_model_intent is called with grade "S"
 Then the switch is blocked and returns an explanation
 
 #### Scenario: Cap allows lateral and downward switches
 
-Given effort cap is at Lethal (driver=sonnet/opus)
-When set_model_tier is called with "sonnet"
+Given effort cap is at Lethal (driver grade B/S)
+When set_model_intent is called with grade "B"
 Then the switch succeeds
 
 ### Requirement: Cleave reads effort config for dispatch decisions
