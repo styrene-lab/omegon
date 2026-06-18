@@ -27,6 +27,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Fixed
+- Restored the full idle editor top-line engine block so it shows provider, tier, and thinking level beside the short model label.
+- Right-aligned slim tool-row detail affordances through the shared semantic inline renderer, including `read`/tool rows with crowded detail text.
+- Summarized `/context status` tool rows from the palette summary instead of repeating the `Context` block title at the end of the row.
+- Accounted for the skills command matrix by parsing `/skills create --project|--user` and `/skills import [--project|--user] <path>`, then routing both through runtime prompts instead of falling into usage text; import prompts now escape backticks in rendered path text.
+- Mapped bare `/context` to the status command so the matrix behavior matches the `/model`, `/skills`, and other view-command families.
+- Routed palette-shaped slash-command notifications for context, thinking, skills, and prompt list into the command panel instead of treating them as transcript system messages.
+- Routed `/context status` slash output to the command panel instead of appending the palette markdown as a plaintext system block at the end of the transcript.
+- Kept expanded `context_status` tool cards compact by suppressing the full palette markdown result body after the summary row.
 - Preserved slim compact-row child indentation across wrapped reasoning/tool continuation lines so multi-line details stay visually nested.
 - Made `/version` render multiline build details so it opens in the command-output panel instead of disappearing as a short toast, and documented `/q` and `/quit` alongside `/exit` in the slash palette.
 - Clamped slim reasoning and memory/tool segment rows to the visible terminal width so long summaries cannot bleed past the right edge.

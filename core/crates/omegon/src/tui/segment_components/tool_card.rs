@@ -302,6 +302,10 @@ pub(crate) fn append_generic_result_section(
     let card_width = props.card_width;
     let bg = props.bg;
     let t = props.theme;
+    if matches!(props.name, "context_status") {
+        return;
+    }
+
     if let Some(result) = detail_result {
         let pre_result_line_count = lines.len();
         if !lines.is_empty() {

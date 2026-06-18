@@ -340,9 +340,10 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::SkillsInstall(name) => {
             ControlRequest::SkillsInstall { name: name.clone() }
         }
-        // SkillCreate is handled directly in the TUI (queues a prompt) —
-        // it never reaches control_runtime. Return None to signal this.
-        crate::tui::CanonicalSlashCommand::SkillCreate => return None,
+        // SkillCreate/SkillImport are handled directly in the TUI (queues a prompt) —
+        // they never reach control_runtime. Return None to signal this.
+        crate::tui::CanonicalSlashCommand::SkillCreate(_)
+        | crate::tui::CanonicalSlashCommand::SkillImport { .. } => return None,
         crate::tui::CanonicalSlashCommand::SkillGet(name) => {
             ControlRequest::SkillGet { name: name.clone() }
         }

@@ -49,6 +49,19 @@ pub mod workbench;
 #[cfg(test)]
 mod snapshot_tests;
 
+fn slash_command_for_palette_notification(message: &str) -> Option<&'static str> {
+    const PALETTE_NOTIFICATION_COMMANDS: &[(&str, &str)] = &[
+        ("## Context\n", "/context status"),
+        ("## Thinking levels\n", "/think status"),
+        ("## Skills\n", "/skills"),
+        ("## Prompt library\n", "/prompt list"),
+    ];
+
+    PALETTE_NOTIFICATION_COMMANDS
+        .iter()
+        .find_map(|(prefix, command)| message.starts_with(prefix).then_some(*command))
+}
+
 fn should_toast_slash_response(response: &str) -> bool {
     let trimmed = response.trim();
     !trimmed.is_empty()
@@ -537,6 +550,12 @@ enum SlashResult {
     Quit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillCreateScope {
+    Project,
+    User,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalSlashCommand {
     ModelView,
@@ -596,7 +615,8 @@ pub enum CanonicalSlashCommand {
     AuthLogout(String),
     SkillsView,
     SkillsInstall(Option<String>),
-    SkillCreate,
+    SkillCreate(Option<SkillCreateScope>),
+    SkillImport { path: String, scope: Option<SkillCreateScope> },
     SkillGet(String),
     SkillDelete(String),
     PlanView,
@@ -818,7 +838,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "notes" if args.is_empty() => Some(CanonicalSlashCommand::NotesView),
         "notes" if args == "clear" => Some(CanonicalSlashCommand::NotesClear),
         "checkin" if args.is_empty() => Some(CanonicalSlashCommand::CheckinView),
-        "context" if !args.is_empty() => {
+        "context" if args.is_empty() => Some(CanonicalSlashCommand::ContextStatus),
+        "context" => {
             let (sub, rest) = args.split_once(' ').unwrap_or((args, ""));
             match sub {
                 "status" => Some(CanonicalSlashCommand::ContextStatus),
@@ -878,7 +899,29 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 (!name.is_empty())
                     .then(|| CanonicalSlashCommand::SkillsInstall(Some(name.to_string())))
             } else if args == "create" || args == "new" {
-                Some(CanonicalSlashCommand::SkillCreate)
+                Some(CanonicalSlashCommand::SkillCreate(None))
+            } else if args == "create --project" || args == "new --project" {
+                Some(CanonicalSlashCommand::SkillCreate(Some(SkillCreateScope::Project)))
+            } else if args == "create --user" || args == "new --user" {
+                Some(CanonicalSlashCommand::SkillCreate(Some(SkillCreateScope::User)))
+            } else if let Some(path) = args.strip_prefix("import --project ") {
+                let path = path.trim();
+                (!path.is_empty()).then(|| CanonicalSlashCommand::SkillImport {
+                    path: path.to_string(),
+                    scope: Some(SkillCreateScope::Project),
+                })
+            } else if let Some(path) = args.strip_prefix("import --user ") {
+                let path = path.trim();
+                (!path.is_empty()).then(|| CanonicalSlashCommand::SkillImport {
+                    path: path.to_string(),
+                    scope: Some(SkillCreateScope::User),
+                })
+            } else if let Some(path) = args.strip_prefix("import ") {
+                let path = path.trim();
+                (!path.is_empty()).then(|| CanonicalSlashCommand::SkillImport {
+                    path: path.to_string(),
+                    scope: None,
+                })
             } else if let Some(name) = args.strip_prefix("get ") {
                 let name = name.trim();
                 (!name.is_empty()).then(|| CanonicalSlashCommand::SkillGet(name.to_string()))
@@ -4226,6 +4269,12 @@ impl App {
                 .take(2)
                 .collect::<Vec<_>>()
                 .join("-");
+            let engine_detail = format!(
+                "{} · {} · think {}",
+                self.footer_data.model_provider,
+                self.footer_data.model_tier,
+                self.footer_data.thinking_level
+            );
             let editor_title = if self.agent_active {
                 let verb_display = spinner::maybe_glitch(self.working_verb)
                     .unwrap_or_else(|| self.working_verb.to_string());
@@ -4242,7 +4291,10 @@ impl App {
                     ),
                 ])
             } else {
-                Line::from(Span::styled(format!(" {model_short} ▸ "), t.style_accent()))
+                Line::from(vec![
+                    Span::styled(format!(" {model_short} "), t.style_accent()),
+                    Span::styled(format!("{engine_detail} ▸ "), t.style_muted()),
+                ])
             };
             let editor_block = Block::default()
                 .borders(Borders::TOP)
@@ -5248,47 +5300,82 @@ Scroll transcript:
             }
 
             "skills" | "skill" => {
-                if args == "create" || args == "new" {
-                    // Queue the skill builder prompt — the agent converses
-                    // with the operator to create a new skill.
-                    let cwd = self.cwd().to_path_buf();
-                    let builder_prompt = crate::skills::skill_builder_prompt(&cwd);
-                    if let Err(result) = Self::submit_prompt_from_slash(
-                        tx,
-                        PromptSubmission {
-                            text: builder_prompt,
-                            image_paths: Vec::new(),
-                            submitted_by: "local-tui".to_string(),
-                            via: "tui",
-                            queue_mode: PromptQueueMode::UntilReady,
-                            metadata: PromptMetadata::default(),
-                        },
-                    ) {
-                        return result;
-                    }
-                    self.queue_mode = PromptQueueMode::UntilReady;
-                    tracing::debug!("skill builder submitted to runtime queue");
-                    SlashResult::Handled
-                } else if let Some(command) = canonical_slash_command("skills", args) {
-                    if let Some(request) =
-                        crate::control_runtime::control_request_from_slash(&command)
-                    {
-                        let _ = tx.try_send(TuiCommand::ExecuteControl {
-                            request,
-                            respond_to: None,
-                        });
-                        SlashResult::Handled
-                    } else {
-                        SlashResult::Display(
-                            "Usage: /skills [list|install [name|skills/name]|create|get <name>|delete <name>]"
-                                .into(),
-                        )
+                const USAGE: &str = "Usage: /skills [list|install [name|skills/name]|create [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]";
+                if let Some(command) = canonical_slash_command("skills", args) {
+                    match command {
+                        CanonicalSlashCommand::SkillCreate(scope) => {
+                            // Queue the skill builder prompt — the agent converses
+                            // with the operator to create a new skill.
+                            let cwd = self.cwd().to_path_buf();
+                            let mut builder_prompt = crate::skills::skill_builder_prompt(&cwd);
+                            if let Some(scope) = scope {
+                                let scope_label = match scope {
+                                    SkillCreateScope::Project => "project-local .omegon/skills",
+                                    SkillCreateScope::User => "user-level skills directory",
+                                };
+                                builder_prompt.push_str(&format!(
+                                    "\n\nThe operator requested {scope_label} output. Make that destination explicit before writing files."
+                                ));
+                            }
+                            if let Err(result) = Self::submit_prompt_from_slash(
+                                tx,
+                                PromptSubmission {
+                                    text: builder_prompt,
+                                    image_paths: Vec::new(),
+                                    submitted_by: "local-tui".to_string(),
+                                    via: "tui",
+                                    queue_mode: PromptQueueMode::UntilReady,
+                                    metadata: PromptMetadata::default(),
+                                },
+                            ) {
+                                return result;
+                            }
+                            self.queue_mode = PromptQueueMode::UntilReady;
+                            tracing::debug!("skill builder submitted to runtime queue");
+                            SlashResult::Handled
+                        }
+                        CanonicalSlashCommand::SkillImport { path, scope } => {
+                            let scope_hint = match scope {
+                                Some(SkillCreateScope::Project) => " into project-local .omegon/skills",
+                                Some(SkillCreateScope::User) => " into the user-level skills directory",
+                                None => "",
+                            };
+                            let safe_path = path.replace('`', "\\`");
+                            let prompt = format!(
+                                "Import the Omegon skill from `{safe_path}`{scope_hint}. Read and validate the skill frontmatter, copy it to the requested skill directory, and report any schema or collision issues before overwriting existing files."
+                            );
+                            if let Err(result) = Self::submit_prompt_from_slash(
+                                tx,
+                                PromptSubmission {
+                                    text: prompt,
+                                    image_paths: Vec::new(),
+                                    submitted_by: "local-tui".to_string(),
+                                    via: "tui",
+                                    queue_mode: PromptQueueMode::UntilReady,
+                                    metadata: PromptMetadata::default(),
+                                },
+                            ) {
+                                return result;
+                            }
+                            self.queue_mode = PromptQueueMode::UntilReady;
+                            SlashResult::Handled
+                        }
+                        other => {
+                            if let Some(request) =
+                                crate::control_runtime::control_request_from_slash(&other)
+                            {
+                                let _ = tx.try_send(TuiCommand::ExecuteControl {
+                                    request,
+                                    respond_to: None,
+                                });
+                                SlashResult::Handled
+                            } else {
+                                SlashResult::Display(USAGE.into())
+                            }
+                        }
                     }
                 } else {
-                    SlashResult::Display(
-                        "Usage: /skills [list|install [name|skills/name]|create|get <name>|delete <name>]"
-                            .into(),
-                    )
+                    SlashResult::Display(USAGE.into())
                 }
             }
 
@@ -7315,6 +7402,8 @@ Scroll transcript:
                     self.show_toast(&message, ratatui_toaster::ToastType::Warning);
                 } else if message.starts_with('↯') {
                     self.show_toast(&message, ratatui_toaster::ToastType::Info);
+                } else if let Some(command) = slash_command_for_palette_notification(&message) {
+                    self.show_slash_response(command, &message);
                 } else {
                     self.conversation.push_system(&message);
                 }
@@ -10103,11 +10192,44 @@ mod slash_command_parsing_tests {
     fn skills_create() {
         assert!(matches!(
             canonical_slash_command("skills", "create"),
-            Some(CanonicalSlashCommand::SkillCreate)
+            Some(CanonicalSlashCommand::SkillCreate(None))
         ));
         assert!(matches!(
             canonical_slash_command("skills", "new"),
-            Some(CanonicalSlashCommand::SkillCreate)
+            Some(CanonicalSlashCommand::SkillCreate(None))
+        ));
+        assert!(matches!(
+            canonical_slash_command("skills", "create --project"),
+            Some(CanonicalSlashCommand::SkillCreate(Some(super::SkillCreateScope::Project)))
+        ));
+        assert!(matches!(
+            canonical_slash_command("skills", "new --user"),
+            Some(CanonicalSlashCommand::SkillCreate(Some(super::SkillCreateScope::User)))
+        ));
+    }
+
+    #[test]
+    fn skills_import_matrix() {
+        match canonical_slash_command("skills", "import ./SKILL.md") {
+            Some(CanonicalSlashCommand::SkillImport { path, scope }) => {
+                assert_eq!(path, "./SKILL.md");
+                assert_eq!(scope, None);
+            }
+            other => panic!("expected SkillImport, got {other:?}"),
+        }
+        assert!(matches!(
+            canonical_slash_command("skills", "import --project ./SKILL.md"),
+            Some(CanonicalSlashCommand::SkillImport {
+                scope: Some(super::SkillCreateScope::Project),
+                ..
+            })
+        ));
+        assert!(matches!(
+            canonical_slash_command("skills", "import --user ./SKILL.md"),
+            Some(CanonicalSlashCommand::SkillImport {
+                scope: Some(super::SkillCreateScope::User),
+                ..
+            })
         ));
     }
 
@@ -10128,6 +10250,43 @@ mod slash_command_parsing_tests {
                 assert!(prompt.text.contains("skill"));
             }
             other => panic!("expected skill builder SubmitPrompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn skills_import_submits_runtime_prompt() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-5");
+        let mut app = App::new(settings);
+        let (tx, mut rx) = mpsc::channel(1);
+
+        let result = app.handle_slash_command("/skills import --project ./SKILL.md", &tx);
+        assert!(matches!(result, SlashResult::Handled));
+        match rx.try_recv() {
+            Ok(TuiCommand::SubmitPrompt(prompt)) => {
+                assert_eq!(prompt.submitted_by, "local-tui");
+                assert_eq!(prompt.via, "tui");
+                assert_eq!(prompt.queue_mode, PromptQueueMode::UntilReady);
+                assert!(prompt.text.contains("Import the Omegon skill"));
+                assert!(prompt.text.contains("./SKILL.md"));
+                assert!(prompt.text.contains("project-local"));
+            }
+            other => panic!("expected skill import SubmitPrompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn skills_import_prompt_escapes_markdown_code_fence_path() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-5");
+        let mut app = App::new(settings);
+        let (tx, mut rx) = mpsc::channel(1);
+
+        let result = app.handle_slash_command("/skills import ./bad`path/SKILL.md", &tx);
+        assert!(matches!(result, SlashResult::Handled));
+        match rx.try_recv() {
+            Ok(TuiCommand::SubmitPrompt(prompt)) => {
+                assert!(prompt.text.contains("`./bad\\`path/SKILL.md`"), "{}", prompt.text);
+            }
+            other => panic!("expected skill import SubmitPrompt, got {other:?}"),
         }
     }
 
