@@ -139,6 +139,20 @@ impl BuiltinCommandSpec {
             name,
             description,
             subcommands,
+            Self::TUI_AND_CLI,
+            omegon_traits::CommandSafety::READ_ONLY,
+        )
+    }
+
+    const fn cli_acp_read_only(
+        name: &'static str,
+        description: &'static str,
+        subcommands: &'static [&'static str],
+    ) -> Self {
+        Self::with_metadata(
+            name,
+            description,
+            subcommands,
             Self::TUI_CLI_AND_ACP,
             omegon_traits::CommandSafety::READ_ONLY,
         )
@@ -168,6 +182,20 @@ impl BuiltinCommandSpec {
             description,
             subcommands,
             Self::TUI_AND_CLI,
+            omegon_traits::CommandSafety::STATE_CHANGING,
+        )
+    }
+
+    const fn cli_acp_state_changing(
+        name: &'static str,
+        description: &'static str,
+        subcommands: &'static [&'static str],
+    ) -> Self {
+        Self::with_metadata(
+            name,
+            description,
+            subcommands,
+            Self::TUI_CLI_AND_ACP,
             omegon_traits::CommandSafety::STATE_CHANGING,
         )
     }
@@ -269,7 +297,7 @@ pub(crate) fn builtin_command_definitions() -> Vec<omegon_traits::CommandDefinit
 /// these via `CommandMenuProjection`; keep new metadata on this registry-shaped
 /// spec instead of adding renderer-local autocomplete tables.
 pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
-    BuiltinCommandSpec::cli_read_only("help", "show available commands", &[]),
+    BuiltinCommandSpec::cli_acp_read_only("help", "show available commands", &[]),
     BuiltinCommandSpec::read_only(
         "copy",
         "copy selected segment, latest answer, or session",
@@ -285,13 +313,11 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
         "toggle pane mouse interaction mode",
         &["on", "off"],
     ),
-    BuiltinCommandSpec::cli_state_changing("model", "view or switch model", &["list"]),
-    BuiltinCommandSpec::with_metadata(
+    BuiltinCommandSpec::cli_acp_state_changing("model", "view or switch model", &["list"]),
+    BuiltinCommandSpec::cli_acp_state_changing(
         "think",
         "set thinking level",
         &["off", "minimal", "low", "medium", "high"],
-        BuiltinCommandSpec::TUI_CLI_AND_ACP,
-        omegon_traits::CommandSafety::STATE_CHANGING,
     ),
     BuiltinCommandSpec::cli_state_changing(
         "profile",
@@ -306,7 +332,7 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
             "tone",
         ],
     ),
-    BuiltinCommandSpec::cli_read_only(
+    BuiltinCommandSpec::cli_acp_read_only(
         "stats",
         "session telemetry and performance metrics",
         &["bench"],
@@ -439,7 +465,7 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
         "alias for /delegate; inspect subagent tasks",
         &["status"],
     ),
-    BuiltinCommandSpec::cli_read_only(
+    BuiltinCommandSpec::cli_acp_read_only(
         "status",
         "show harness status (providers, MCP, secrets, routing)",
         &[],
