@@ -715,4 +715,52 @@ mod tests {
         );
         assert_eq!(ollama.auth_scheme.auth_header("secret"), None);
     }
+    #[test]
+    fn every_openai_compatible_endpoint_has_verified_profile() {
+        let reg = ModelRegistry::global();
+        for endpoint in reg.endpoints() {
+            if endpoint.protocol != EndpointProtocol::OpenAiCompatible {
+                continue;
+            }
+            let profile = endpoint
+                .open_ai_compatible_profile
+                .as_ref()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "OpenAI-compatible endpoint {} is missing openAiCompatibleProfile",
+                        endpoint.id
+                    )
+                });
+            assert!(
+                profile.supports_chat_completions
+                    || profile.supports_responses_api
+                    || profile.supports_streaming
+                    || profile.supports_tools,
+                "OpenAI-compatible endpoint {} declares no usable capability",
+                endpoint.id
+            );
+            assert!(
+                profile
+                    .docs_url
+                    .as_deref()
+                    .is_some_and(|url| url.starts_with("https://")),
+                "OpenAI-compatible endpoint {} must carry an https docsUrl",
+                endpoint.id
+            );
+            assert!(
+                profile.verified_at.as_deref().is_some_and(|date| {
+                    let bytes = date.as_bytes();
+                    bytes.len() == 10
+                        && bytes[4] == b'-'
+                        && bytes[7] == b'-'
+                        && bytes
+                            .iter()
+                            .enumerate()
+                            .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
+                }),
+                "OpenAI-compatible endpoint {} must carry verifiedAt as YYYY-MM-DD",
+                endpoint.id
+            );
+        }
+    }
 }

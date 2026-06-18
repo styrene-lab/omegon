@@ -63,7 +63,7 @@ delegate/cleave child routing.
 - [x] 7.3 Replace legacy `set_model_tier` semantics with model-intent tooling (`set_model_intent` preferred, or explicit grade/provider/policy tools during migration).
 - [x] 7.4 Extend the model registry from provider-tier maps to endpoint/model capability rows with grade, grade source, context window, tool/streaming/json/vision support, and cost/latency bands.
 - [x] 7.5 Add endpoint definitions carrying endpoint id, display name, endpoint class (`LocalDev`/`Upstream`), protocol kind, base URL, credential reference, and enabled state.
-- [ ] 7.6 Implement OpenAI-compatible endpoint profiles for OpenRouter, Groq, Mistral, xAI, Hugging Face router, Gemini compatibility, and private OpenAI-compatible endpoints; keep Anthropic as a custom adapter.
+- [x] 7.6 Implement OpenAI-compatible endpoint profiles for OpenRouter, Groq, Mistral, xAI, Hugging Face router, Gemini compatibility, and private OpenAI-compatible endpoints; keep Anthropic as a custom adapter.
 - [x] 7.7 Add request sanitization/profile shaping for OpenAI-compatible endpoints, including unsupported fields and required/optional headers.
 - [x] 7.8 Add `/model grade`, `/model provider`, `/model policy`, `/model route`, and `/model providers` to the canonical command registry and parser path.
 - [ ] 7.9 Preserve operator intent separately from active route so route failover can change the serving endpoint without erasing requested grade/provider/policy.
