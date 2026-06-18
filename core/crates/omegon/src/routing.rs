@@ -1,6 +1,6 @@
-//! Provider routing — inventory, capability tiers, and request routing.
+//! Provider routing — inventory, capability grade bands, and request routing.
 //!
-//! Providers are ranked by capability tier and credential availability.
+//! Providers are ranked by capability grade band and credential availability.
 //! The router produces a scored list of candidates; callers pick the top match.
 
 use std::collections::HashMap;
@@ -12,12 +12,12 @@ use serde::{Deserialize, Serialize};
 use crate::auth;
 use crate::bridge::LlmBridge;
 
-// ── Capability tiers ────────────────────────────────────────────────
+// ── Capability grade bands ────────────────────────────────────────────────
 
-/// Capability tier for task routing. Higher tiers can handle more complex tasks.
+/// Capability grade band for task routing. Higher tiers can handle more complex tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum CapabilityTier {
+pub enum CapabilityGradeBand {
     /// Small/fast models — renames, formatting, boilerplate
     Leaf,
     /// Mid-range models — routine coding, file edits
@@ -28,7 +28,7 @@ pub enum CapabilityTier {
     Max,
 }
 
-impl fmt::Display for CapabilityTier {
+impl fmt::Display for CapabilityGradeBand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Leaf => write!(f, "leaf"),
@@ -39,7 +39,7 @@ impl fmt::Display for CapabilityTier {
     }
 }
 
-/// Cost tier for rough ordering.
+/// Cost band for rough ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CostTier {
@@ -57,7 +57,7 @@ pub struct ProviderEntry {
     pub provider_id: String,
     pub has_credentials: bool,
     pub is_reachable: bool,
-    pub capability_tier: CapabilityTier,
+    pub capability_grade: CapabilityGradeBand,
     pub models: Vec<String>,
     pub cost_tier: CostTier,
 }
@@ -89,12 +89,12 @@ impl ProviderInventory {
                 let has_env = p.env_vars.iter().any(|v| std::env::var(v).is_ok());
                 let has_stored = auth::read_credentials(auth::auth_json_key(p.id)).is_some();
                 let has_credentials = has_env || has_stored;
-                let (capability_tier, cost_tier) = provider_tier(p.id);
+                let (capability_grade, cost_tier) = provider_grade(p.id);
                 ProviderEntry {
                     provider_id: p.id.to_string(),
                     has_credentials,
                     is_reachable: has_credentials, // Assume reachable if credentialed
-                    capability_tier,
+                    capability_grade,
                     models: vec![],
                     cost_tier,
                 }
@@ -210,7 +210,7 @@ impl ProviderInventory {
         if !cloud.is_empty() {
             lines.push("**Cloud (credentialed):**".to_string());
             for e in &cloud {
-                let default_model = default_model_for_provider(&e.provider_id, e.capability_tier);
+                let default_model = default_model_for_provider(&e.provider_id, e.capability_grade);
                 let is_current =
                     session_model.is_some_and(|s| s.starts_with(&format!("{}:", e.provider_id)));
                 let marker = if is_current { " ← current" } else { "" };
@@ -222,7 +222,7 @@ impl ProviderInventory {
                 };
                 lines.push(format!(
                     "- `{}:{}` — {}, {}{}",
-                    e.provider_id, default_model, e.capability_tier, cost, marker
+                    e.provider_id, default_model, e.capability_grade, cost, marker
                 ));
             }
             lines.push(String::new());
@@ -255,22 +255,22 @@ fn is_inference_provider(id: &str) -> bool {
     )
 }
 
-/// Map provider ID → (max capability tier, cost tier).
-fn provider_tier(id: &str) -> (CapabilityTier, CostTier) {
+/// Map provider ID → (max capability grade band, cost band).
+fn provider_grade(id: &str) -> (CapabilityGradeBand, CostTier) {
     match id {
-        "anthropic" => (CapabilityTier::Max, CostTier::Premium),
-        "openai" => (CapabilityTier::Max, CostTier::Premium),
-        "openai-codex" => (CapabilityTier::Frontier, CostTier::Free),
-        "openrouter" => (CapabilityTier::Frontier, CostTier::Standard),
-        "google" => (CapabilityTier::Frontier, CostTier::Standard),
-        "google-antigravity" => (CapabilityTier::Frontier, CostTier::Free),
-        "groq" => (CapabilityTier::Mid, CostTier::Cheap),
-        "xai" => (CapabilityTier::Frontier, CostTier::Standard),
-        "mistral" => (CapabilityTier::Frontier, CostTier::Standard),
-        "cerebras" => (CapabilityTier::Mid, CostTier::Cheap),
-        "huggingface" => (CapabilityTier::Frontier, CostTier::Cheap),
-        "ollama" => (CapabilityTier::Mid, CostTier::Free),
-        _ => (CapabilityTier::Leaf, CostTier::Standard),
+        "anthropic" => (CapabilityGradeBand::Max, CostTier::Premium),
+        "openai" => (CapabilityGradeBand::Max, CostTier::Premium),
+        "openai-codex" => (CapabilityGradeBand::Frontier, CostTier::Free),
+        "openrouter" => (CapabilityGradeBand::Frontier, CostTier::Standard),
+        "google" => (CapabilityGradeBand::Frontier, CostTier::Standard),
+        "google-antigravity" => (CapabilityGradeBand::Frontier, CostTier::Free),
+        "groq" => (CapabilityGradeBand::Mid, CostTier::Cheap),
+        "xai" => (CapabilityGradeBand::Frontier, CostTier::Standard),
+        "mistral" => (CapabilityGradeBand::Frontier, CostTier::Standard),
+        "cerebras" => (CapabilityGradeBand::Mid, CostTier::Cheap),
+        "huggingface" => (CapabilityGradeBand::Frontier, CostTier::Cheap),
+        "ollama" => (CapabilityGradeBand::Mid, CostTier::Free),
+        _ => (CapabilityGradeBand::Leaf, CostTier::Standard),
     }
 }
 
@@ -279,7 +279,7 @@ fn provider_tier(id: &str) -> (CapabilityTier, CostTier) {
 /// A capability request — what the task needs.
 #[derive(Debug, Clone)]
 pub struct CapabilityRequest {
-    pub tier: CapabilityTier,
+    pub grade: CapabilityGradeBand,
     pub prefer_local: bool,
     pub avoid_providers: Vec<String>,
 }
@@ -287,7 +287,7 @@ pub struct CapabilityRequest {
 impl Default for CapabilityRequest {
     fn default() -> Self {
         Self {
-            tier: CapabilityTier::Frontier,
+            grade: CapabilityGradeBand::Frontier,
             prefer_local: false,
             avoid_providers: vec![],
         }
@@ -310,16 +310,16 @@ pub fn route(req: &CapabilityRequest, inventory: &ProviderInventory) -> Vec<Prov
         .iter()
         .filter(|e| e.has_credentials)
         .filter(|e| !req.avoid_providers.contains(&e.provider_id))
-        .filter(|e| e.capability_tier >= req.tier)
+        .filter(|e| e.capability_grade >= req.grade)
         .map(|e| {
             let mut score: f32 = 1.0;
 
-            // Prefer exact tier match over over-provisioning
-            if e.capability_tier == req.tier {
+            // Prefer exact grade match over over-provisioning
+            if e.capability_grade == req.grade {
                 score += 2.0;
             }
 
-            // Prefer cheaper at same tier
+            // Prefer cheaper at same grade
             score -= match e.cost_tier {
                 CostTier::Free => 0.0,
                 CostTier::Cheap => 0.1,
@@ -335,9 +335,9 @@ pub fn route(req: &CapabilityRequest, inventory: &ProviderInventory) -> Vec<Prov
             let model_id = if e.provider_id == "ollama" {
                 inventory
                     .best_ollama_model()
-                    .unwrap_or_else(|| default_model_for_provider(&e.provider_id, req.tier))
+                    .unwrap_or_else(|| default_model_for_provider(&e.provider_id, req.grade))
             } else {
-                default_model_for_provider(&e.provider_id, req.tier)
+                default_model_for_provider(&e.provider_id, req.grade)
             };
 
             ProviderCandidate {
@@ -356,15 +356,15 @@ pub fn route(req: &CapabilityRequest, inventory: &ProviderInventory) -> Vec<Prov
     candidates
 }
 
-/// Default model for a provider at a given internal capability tier.
-fn default_model_for_provider(provider_id: &str, tier: CapabilityTier) -> String {
+/// Default model for a provider at a given internal capability grade band.
+fn default_model_for_provider(provider_id: &str, grade: CapabilityGradeBand) -> String {
     let reg = crate::model_registry::ModelRegistry::global();
-    // Map the legacy internal CapabilityTier enum to grade registry keys.
-    let grades = match tier {
-        CapabilityTier::Max => &["S", "A", "B", "D"][..],
-        CapabilityTier::Frontier => &["B", "A", "S", "D"][..],
-        CapabilityTier::Mid => &["D", "C", "B"][..],
-        CapabilityTier::Leaf => &["D", "C", "F"][..],
+    // Map the legacy internal CapabilityGradeBand enum to grade registry keys.
+    let grades = match grade {
+        CapabilityGradeBand::Max => &["S", "A", "B", "D"][..],
+        CapabilityGradeBand::Frontier => &["B", "A", "S", "D"][..],
+        CapabilityGradeBand::Mid => &["D", "C", "B"][..],
+        CapabilityGradeBand::Leaf => &["D", "C", "F"][..],
     };
     for grade in grades {
         if let Some(model) = reg.grade_model(grade, provider_id) {
@@ -377,11 +377,11 @@ fn default_model_for_provider(provider_id: &str, tier: CapabilityTier) -> String
         .unwrap_or_else(|| "auto".to_string())
 }
 
-/// Infer the capability tier of a fully-qualified model string ("provider:model").
+/// Infer the capability grade band of a fully-qualified model string ("provider:model").
 /// Used by the orchestrator to determine how much headroom children get relative
-/// to the parent model — children are capped to parent tier to avoid accidentally
+/// to the parent model — children are capped to parent grade to avoid accidentally
 /// routing a leaf-scoped task to a more expensive model than the one that launched the run.
-pub fn infer_model_tier(model_str: &str) -> CapabilityTier {
+pub fn infer_model_tier(model_str: &str) -> CapabilityGradeBand {
     let (provider, model) = model_str.split_once(':').unwrap_or(("", model_str));
 
     // Local/ollama models use parameter-count heuristic
@@ -393,32 +393,32 @@ pub fn infer_model_tier(model_str: &str) -> CapabilityTier {
     let reg = crate::model_registry::ModelRegistry::global();
     if let Some(grade) = reg.infer_grade(provider, model) {
         return match grade {
-            "S" => CapabilityTier::Max,
-            "A" | "B" => CapabilityTier::Frontier,
-            "C" | "D" => CapabilityTier::Mid,
-            "F" => CapabilityTier::Leaf,
-            _ => CapabilityTier::Frontier,
+            "S" => CapabilityGradeBand::Max,
+            "A" | "B" => CapabilityGradeBand::Frontier,
+            "C" | "D" => CapabilityGradeBand::Mid,
+            "F" => CapabilityGradeBand::Leaf,
+            _ => CapabilityGradeBand::Frontier,
         };
     }
 
     // Provider-level heuristics for models not in the registry
     match provider {
-        "anthropic" if model.contains("opus") => CapabilityTier::Max,
-        "anthropic" if model.contains("sonnet") => CapabilityTier::Frontier,
-        "anthropic" => CapabilityTier::Leaf,
-        "openai-codex" if model.contains("mini") => CapabilityTier::Mid,
-        "openai-codex" => CapabilityTier::Max,
-        "groq" if model.contains("70b") || model.contains("90b") => CapabilityTier::Frontier,
-        "groq" => CapabilityTier::Mid,
-        "cerebras" if model.contains("70b") => CapabilityTier::Frontier,
-        "cerebras" => CapabilityTier::Mid,
-        _ => CapabilityTier::Frontier,
+        "anthropic" if model.contains("opus") => CapabilityGradeBand::Max,
+        "anthropic" if model.contains("sonnet") => CapabilityGradeBand::Frontier,
+        "anthropic" => CapabilityGradeBand::Leaf,
+        "openai-codex" if model.contains("mini") => CapabilityGradeBand::Mid,
+        "openai-codex" => CapabilityGradeBand::Max,
+        "groq" if model.contains("70b") || model.contains("90b") => CapabilityGradeBand::Frontier,
+        "groq" => CapabilityGradeBand::Mid,
+        "cerebras" if model.contains("70b") => CapabilityGradeBand::Frontier,
+        "cerebras" => CapabilityGradeBand::Mid,
+        _ => CapabilityGradeBand::Frontier,
     }
 }
 
-/// Infer capability tier for local/ollama models based on parameter count in the name.
+/// Infer capability grade band for local/ollama models based on parameter count in the name.
 /// Models with 70B+ parameters are Frontier-capable; 14B-32B are Mid; smaller are Leaf.
-fn infer_local_model_tier(model_name: &str) -> CapabilityTier {
+fn infer_local_model_tier(model_name: &str) -> CapabilityGradeBand {
     // Extract numeric parameter count from model name patterns like "70b", "72b", "32b"
     let lower = model_name.to_lowercase();
     // Look for patterns like "70b", "72b", "120b", "405b"
@@ -427,18 +427,18 @@ fn infer_local_model_tier(model_name: &str) -> CapabilityTier {
             && let Ok(params) = num_str.parse::<u32>()
         {
             return match params {
-                70.. => CapabilityTier::Frontier,
-                14..=69 => CapabilityTier::Mid,
-                _ => CapabilityTier::Leaf,
+                70.. => CapabilityGradeBand::Frontier,
+                14..=69 => CapabilityGradeBand::Mid,
+                _ => CapabilityGradeBand::Leaf,
             };
         }
     }
     // Also check for "scout" pattern (llama4:scout = large model)
     if lower.contains("scout") || lower.contains("maverick") {
-        return CapabilityTier::Frontier;
+        return CapabilityGradeBand::Frontier;
     }
     // Default: Mid for unknown local models (conservative but not punishing)
-    CapabilityTier::Mid
+    CapabilityGradeBand::Mid
 }
 
 // ── Bridge factory ──────────────────────────────────────────────────
@@ -475,12 +475,12 @@ impl BridgeFactory {
 
 // ── Cleave tier inference ───────────────────────────────────────────
 
-/// Infer capability tier from a child plan's scope.
-pub fn infer_capability_tier(scope_len: usize) -> CapabilityTier {
+/// Infer capability grade band from a child plan's scope.
+pub fn infer_capability_grade(scope_len: usize) -> CapabilityGradeBand {
     match scope_len {
-        0..=2 => CapabilityTier::Leaf,
-        3..=5 => CapabilityTier::Mid,
-        _ => CapabilityTier::Frontier,
+        0..=2 => CapabilityGradeBand::Leaf,
+        3..=5 => CapabilityGradeBand::Mid,
+        _ => CapabilityGradeBand::Frontier,
     }
 }
 
@@ -490,7 +490,7 @@ pub fn infer_capability_tier(scope_len: usize) -> CapabilityTier {
 mod tests {
     use super::*;
 
-    fn mock_inventory(providers: Vec<(&str, CapabilityTier, CostTier)>) -> ProviderInventory {
+    fn mock_inventory(providers: Vec<(&str, CapabilityGradeBand, CostTier)>) -> ProviderInventory {
         ProviderInventory {
             entries: providers
                 .into_iter()
@@ -498,7 +498,7 @@ mod tests {
                     provider_id: id.to_string(),
                     has_credentials: true,
                     is_reachable: true,
-                    capability_tier: tier,
+                    capability_grade: tier,
                     models: vec![],
                     cost_tier: cost,
                 })
@@ -509,20 +509,20 @@ mod tests {
     }
 
     #[test]
-    fn test_capability_tier_ordering() {
-        assert!(CapabilityTier::Leaf < CapabilityTier::Mid);
-        assert!(CapabilityTier::Mid < CapabilityTier::Frontier);
-        assert!(CapabilityTier::Frontier < CapabilityTier::Max);
+    fn test_capability_grade_ordering() {
+        assert!(CapabilityGradeBand::Leaf < CapabilityGradeBand::Mid);
+        assert!(CapabilityGradeBand::Mid < CapabilityGradeBand::Frontier);
+        assert!(CapabilityGradeBand::Frontier < CapabilityGradeBand::Max);
     }
 
     #[test]
     fn test_route_frontier_prefers_anthropic() {
         let inv = mock_inventory(vec![
-            ("anthropic", CapabilityTier::Max, CostTier::Premium),
-            ("ollama", CapabilityTier::Mid, CostTier::Free),
+            ("anthropic", CapabilityGradeBand::Max, CostTier::Premium),
+            ("ollama", CapabilityGradeBand::Mid, CostTier::Free),
         ]);
         let req = CapabilityRequest {
-            tier: CapabilityTier::Frontier,
+            grade: CapabilityGradeBand::Frontier,
             prefer_local: false,
             avoid_providers: vec![],
         };
@@ -534,9 +534,9 @@ mod tests {
 
     #[test]
     fn test_route_leaf_returns_ollama() {
-        let inv = mock_inventory(vec![("ollama", CapabilityTier::Mid, CostTier::Free)]);
+        let inv = mock_inventory(vec![("ollama", CapabilityGradeBand::Mid, CostTier::Free)]);
         let req = CapabilityRequest {
-            tier: CapabilityTier::Leaf,
+            grade: CapabilityGradeBand::Leaf,
             prefer_local: false,
             avoid_providers: vec![],
         };
@@ -560,11 +560,11 @@ mod tests {
     #[test]
     fn test_route_prefer_local() {
         let inv = mock_inventory(vec![
-            ("anthropic", CapabilityTier::Max, CostTier::Premium),
-            ("ollama", CapabilityTier::Mid, CostTier::Free),
+            ("anthropic", CapabilityGradeBand::Max, CostTier::Premium),
+            ("ollama", CapabilityGradeBand::Mid, CostTier::Free),
         ]);
         let req = CapabilityRequest {
-            tier: CapabilityTier::Leaf, // Both can satisfy Leaf
+            grade: CapabilityGradeBand::Leaf, // Both can satisfy Leaf
             prefer_local: true,
             avoid_providers: vec![],
         };
@@ -576,11 +576,11 @@ mod tests {
     #[test]
     fn test_route_avoid_provider() {
         let inv = mock_inventory(vec![
-            ("anthropic", CapabilityTier::Max, CostTier::Premium),
-            ("openai", CapabilityTier::Max, CostTier::Premium),
+            ("anthropic", CapabilityGradeBand::Max, CostTier::Premium),
+            ("openai", CapabilityGradeBand::Max, CostTier::Premium),
         ]);
         let req = CapabilityRequest {
-            tier: CapabilityTier::Frontier,
+            grade: CapabilityGradeBand::Frontier,
             prefer_local: false,
             avoid_providers: vec!["anthropic".to_string()],
         };
@@ -592,22 +592,22 @@ mod tests {
     #[test]
     fn test_openai_codex_defaults_reflect_tier() {
         assert_eq!(
-            default_model_for_provider("openai-codex", CapabilityTier::Frontier),
+            default_model_for_provider("openai-codex", CapabilityGradeBand::Frontier),
             "gpt-5.4"
         );
         assert_eq!(
-            default_model_for_provider("openai-codex", CapabilityTier::Leaf),
+            default_model_for_provider("openai-codex", CapabilityGradeBand::Leaf),
             "gpt-5.4-mini"
         );
     }
 
     #[test]
-    fn test_infer_capability_tier() {
-        assert_eq!(infer_capability_tier(1), CapabilityTier::Leaf);
-        assert_eq!(infer_capability_tier(2), CapabilityTier::Leaf);
-        assert_eq!(infer_capability_tier(3), CapabilityTier::Mid);
-        assert_eq!(infer_capability_tier(5), CapabilityTier::Mid);
-        assert_eq!(infer_capability_tier(7), CapabilityTier::Frontier);
+    fn test_infer_capability_grade() {
+        assert_eq!(infer_capability_grade(1), CapabilityGradeBand::Leaf);
+        assert_eq!(infer_capability_grade(2), CapabilityGradeBand::Leaf);
+        assert_eq!(infer_capability_grade(3), CapabilityGradeBand::Mid);
+        assert_eq!(infer_capability_grade(5), CapabilityGradeBand::Mid);
+        assert_eq!(infer_capability_grade(7), CapabilityGradeBand::Frontier);
     }
 
     #[test]
@@ -616,13 +616,13 @@ mod tests {
             provider_id: "anthropic".to_string(),
             has_credentials: true,
             is_reachable: true,
-            capability_tier: CapabilityTier::Max,
+            capability_grade: CapabilityGradeBand::Max,
             models: vec!["claude-sonnet-4-20250514".to_string()],
             cost_tier: CostTier::Premium,
         };
         let json = serde_json::to_string(&entry).unwrap();
         let round: ProviderEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(round.provider_id, "anthropic");
-        assert_eq!(round.capability_tier, CapabilityTier::Max);
+        assert_eq!(round.capability_grade, CapabilityGradeBand::Max);
     }
 }
