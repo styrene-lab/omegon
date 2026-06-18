@@ -152,6 +152,35 @@ pub enum EndpointAuthScheme {
     },
 }
 
+impl EndpointAuthScheme {
+    pub fn required_secret_refs(&self) -> Vec<&str> {
+        match self {
+            Self::None | Self::OAuthProvider { .. } => vec![],
+            Self::BearerToken { secret_ref } | Self::ApiKeyHeader { secret_ref, .. } => {
+                vec![secret_ref.as_str()]
+            }
+            Self::Custom { secret_ref, .. } => secret_ref.as_deref().into_iter().collect(),
+        }
+    }
+
+    pub fn oauth_provider(&self) -> Option<&str> {
+        match self {
+            Self::OAuthProvider { provider } => Some(provider.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn auth_header(&self, secret_value: &str) -> Option<(String, String)> {
+        match self {
+            Self::BearerToken { .. } => {
+                Some(("Authorization".into(), format!("Bearer {secret_value}")))
+            }
+            Self::ApiKeyHeader { header, .. } => Some((header.clone(), secret_value.to_string())),
+            Self::None | Self::OAuthProvider { .. } | Self::Custom { .. } => None,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -657,5 +686,33 @@ mod tests {
         assert!(!glob_match("gpt-5.5*", "gpt-5.4"));
         assert!(glob_match("gpt-5.4", "gpt-5.4"));
         assert!(!glob_match("gpt-5.4", "gpt-5.4-mini"));
+    }
+    #[test]
+    fn endpoint_auth_scheme_exposes_secret_refs_and_headers() {
+        let reg = ModelRegistry::global();
+        let groq = reg.endpoint("groq").expect("groq endpoint");
+        assert_eq!(
+            groq.auth_scheme.required_secret_refs(),
+            vec!["GROQ_API_KEY"]
+        );
+        assert_eq!(
+            groq.auth_scheme.auth_header("secret"),
+            Some(("Authorization".into(), "Bearer secret".into()))
+        );
+
+        let anthropic = reg.endpoint("anthropic").expect("anthropic endpoint");
+        assert_eq!(
+            anthropic.auth_scheme.required_secret_refs(),
+            Vec::<&str>::new()
+        );
+        assert_eq!(anthropic.auth_scheme.oauth_provider(), Some("anthropic"));
+        assert_eq!(anthropic.auth_scheme.auth_header("secret"), None);
+
+        let ollama = reg.endpoint("ollama").expect("ollama endpoint");
+        assert_eq!(
+            ollama.auth_scheme.required_secret_refs(),
+            Vec::<&str>::new()
+        );
+        assert_eq!(ollama.auth_scheme.auth_header("secret"), None);
     }
 }
