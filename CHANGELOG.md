@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Cleared Clippy warnings that blocked `just lint`, including derivable defaults, single-character string pushes, manual contains checks, collapsible conditionals, bool assert comparisons, and explicit allowances for intentionally broad dispatcher signatures.
 
 ### Changed
+- Rendered `/prompt list` through the shared palette projection so prompt inventory now uses the same action/object row semantics as `/skills`.
 - Extracted the shared palette row/group projection used by modern command-menu surfaces and moved `/skills` rendering onto it as the first consumer.
 - Started the modern menu/settings consolidation tracks and changed `/skills` default output into a compact action/object palette with detail-on-demand guidance instead of a report-style inventory dump.
 - Moved simple TUI settings selector apply parsing for tool density, update channel, and workspace role/kind into the settings menu migration seam so the main TUI loop only dispatches validated outcomes.

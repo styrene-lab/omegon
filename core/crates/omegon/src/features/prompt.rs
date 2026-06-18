@@ -38,24 +38,96 @@ impl PromptFeature {
             return Ok("No prompts found.".into());
         }
 
-        let mut out = String::from("Prompt library\n\n");
-        for prompt in prompts {
-            let scope = if prompt.project_local {
-                "project"
-            } else if prompt.bundled {
-                "bundled"
-            } else {
-                "user"
-            };
-            let title = prompt.title.as_deref().unwrap_or(&prompt.name);
-            let description = prompt.description.as_deref().unwrap_or("");
-            if description.is_empty() {
-                out.push_str(&format!("- {} ({scope})\n", title));
-            } else {
-                out.push_str(&format!("- {} ({scope}) — {}\n", title, description));
-            }
-        }
-        Ok(out)
+        Ok(Self::list_projection(&prompts).render_markdown())
+    }
+
+    fn list_projection(
+        prompts: &[crate::prompts::PromptEntry],
+    ) -> crate::surfaces::palette::PaletteProjection {
+        use crate::surfaces::palette::{
+            PaletteBadgeTone, PaletteGroupProjection, PaletteProjection, PaletteRowProjection,
+        };
+
+        let bundled_total = prompts.iter().filter(|prompt| prompt.bundled).count();
+        let bundled_installed = prompts
+            .iter()
+            .filter(|prompt| prompt.bundled && prompt.installed)
+            .count();
+        let user_total = prompts
+            .iter()
+            .filter(|prompt| !prompt.bundled && !prompt.project_local)
+            .count();
+        let project_total = prompts.iter().filter(|prompt| prompt.project_local).count();
+
+        let action_rows = vec![
+            PaletteRowProjection::action(
+                "prompt.preview.shorthand",
+                "/prompt <name>",
+                "preview a prompt by id without registering it as a top-level slash command",
+            ),
+            PaletteRowProjection::action(
+                "prompt.preview",
+                "/prompt preview <name>",
+                "inspect a prompt body before queue/run boundaries",
+            ),
+            PaletteRowProjection::action(
+                "prompt.run",
+                "/prompt run <name>",
+                "resolve a prompt for the preview/queue boundary after safety checks",
+            ),
+            PaletteRowProjection::action(
+                "prompt.delete",
+                "/prompt delete <name>",
+                "delete a user or project prompt definition",
+            ),
+        ];
+
+        let prompt_rows = prompts
+            .iter()
+            .map(|prompt| {
+                let mut row = PaletteRowProjection::object(
+                    format!("prompt.{}", prompt.name),
+                    prompt.name.clone(),
+                )
+                .with_badge(prompt_scope_label(prompt), PaletteBadgeTone::Info)
+                .with_badge(prompt_state_label(prompt), prompt_state_tone(prompt))
+                .with_command(format!("/prompt preview {}", prompt.name));
+
+                if let Some(title) = prompt
+                    .title
+                    .as_deref()
+                    .filter(|title| *title != prompt.name)
+                {
+                    row = row.with_metadata(format!("title:{title}"));
+                }
+                if !prompt.tags.is_empty() {
+                    row = row.with_metadata(format!("tags:{}", prompt.tags.join(",")));
+                }
+                if !prompt.aliases.is_empty() {
+                    row = row.with_metadata(format!("aliases:{}", prompt.aliases.join(",")));
+                }
+                if let Some(description) = prompt
+                    .description
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                {
+                    row = row.with_description(crate::util::truncate(description, 88));
+                }
+                row
+            })
+            .collect();
+
+        PaletteProjection::new("Prompt library")
+            .with_summary(format!(
+                "Bundled {bundled_installed}/{bundled_total} installed · User {user_total} · Project {project_total}"
+            ))
+            .with_group(PaletteGroupProjection::new("Actions").with_rows(action_rows))
+            .with_group(
+                PaletteGroupProjection::new("Prompt rows")
+                    .with_description("`name` · scope · state · title/tags/aliases")
+                    .with_rows(prompt_rows),
+            )
+            .with_footer("Prompt IDs are data, not top-level slash commands. Use `/prompt preview <name>` for details.")
     }
 
     fn get(name: &str, include_body: bool) -> anyhow::Result<String> {
@@ -94,6 +166,40 @@ impl PromptFeature {
             safety,
             body
         ))
+    }
+}
+
+fn prompt_scope_label(prompt: &crate::prompts::PromptEntry) -> &'static str {
+    if prompt.project_local {
+        "project"
+    } else if prompt.bundled {
+        "bundled"
+    } else {
+        "user"
+    }
+}
+
+fn prompt_state_label(prompt: &crate::prompts::PromptEntry) -> &'static str {
+    if prompt.project_local {
+        "local"
+    } else if prompt.installed {
+        "installed"
+    } else if prompt.bundled {
+        "available"
+    } else {
+        "installed"
+    }
+}
+
+fn prompt_state_tone(
+    prompt: &crate::prompts::PromptEntry,
+) -> crate::surfaces::palette::PaletteBadgeTone {
+    if prompt.project_local || prompt.installed {
+        crate::surfaces::palette::PaletteBadgeTone::Success
+    } else if prompt.bundled {
+        crate::surfaces::palette::PaletteBadgeTone::Neutral
+    } else {
+        crate::surfaces::palette::PaletteBadgeTone::Info
     }
 }
 
@@ -188,6 +294,50 @@ mod tests {
             }
             other => panic!("unexpected command result: {other:?}"),
         }
+    }
+
+    #[test]
+    fn prompt_list_renders_shared_palette_rows() {
+        let prompts = vec![
+            crate::prompts::PromptEntry {
+                name: "review".into(),
+                id: None,
+                title: Some("Review".into()),
+                description: Some("Review the current change".into()),
+                tags: vec!["coding".into()],
+                aliases: vec!["rev".into()],
+                bundled: true,
+                installed: false,
+                project_local: false,
+                path: String::new(),
+            },
+            crate::prompts::PromptEntry {
+                name: "team-sync".into(),
+                id: None,
+                title: Some("Team Sync".into()),
+                description: None,
+                tags: vec![],
+                aliases: vec![],
+                bundled: false,
+                installed: true,
+                project_local: true,
+                path: ".omegon/prompts/team-sync.md".into(),
+            },
+        ];
+
+        let rendered = PromptFeature::list_projection(&prompts).render_markdown();
+
+        assert!(rendered.starts_with("## Prompt library"));
+        assert!(rendered.contains("Bundled 0/1 installed · User 0 · Project 1"));
+        assert!(rendered.contains("### Actions"));
+        assert!(rendered.contains("`/prompt <name>`"));
+        assert!(rendered.contains("`/prompt preview <name>`"));
+        assert!(rendered.contains("`/prompt run <name>`"));
+        assert!(rendered.contains("### Prompt rows"));
+        assert!(rendered.contains("- `review` — bundled · available · title:Review · tags:coding · aliases:rev · Review the current change"));
+        assert!(rendered.contains("- `team-sync` — project · local · title:Team Sync"));
+        assert!(!rendered.contains("Prompt library\n\n- Review (bundled)"));
+        assert!(rendered.contains("Prompt IDs are data"));
     }
 
     #[test]
