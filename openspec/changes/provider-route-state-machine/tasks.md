@@ -66,14 +66,14 @@ delegate/cleave child routing.
 - [x] 7.6 Implement OpenAI-compatible endpoint profiles for OpenRouter, Groq, Mistral, xAI, Hugging Face router, Gemini compatibility, and private OpenAI-compatible endpoints; keep Anthropic as a custom adapter.
 - [x] 7.7 Add request sanitization/profile shaping for OpenAI-compatible endpoints, including unsupported fields and required/optional headers.
 - [x] 7.8 Add `/model grade`, `/model provider`, `/model policy`, `/model route`, and `/model providers` to the canonical command registry and parser path.
-- [ ] 7.9 Preserve operator intent separately from active route so route failover can change the serving endpoint without erasing requested grade/provider/policy. (Partial: RouteSnapshot/RouteState now carry ModelIntent; exact model switches pin intent; /model grade updates intent without changing active route; /model unpin clears exact overrides while preserving active route; profile DTO support exists for durable persistence.)
+- [ ] 7.9 Preserve operator intent separately from active route so route failover can change the serving endpoint without erasing requested grade/provider/policy. (Partial: RouteSnapshot/RouteState carry ModelIntent; exact switches pin intent; /model grade/provider/policy update durable intent without changing active route; /model unpin clears exact overrides; Profile.modelIntent persists and hydrates startup intent. Remaining: resolver/failover must select serving route from intent without erasing it.)
 - [x] 7.10 Add tests proving local is not accepted as a grade, legacy commands/tools are absent, and grade+provider intent resolves through endpoint capability rows.
 
 - [x] 7.11 Replace stale TypeScript implementation scope in provider-neutral model-control docs with Rust-native files before coding from the design.
 - [x] 7.12 Define default grade, provider selection, grade policy, failover policy, and degradation policy for interactive sessions and daemon agents.
 - [x] 7.13 Add exact model override clearing (`/model unpin` or equivalent) and make pinned state visible in route/status projections.
 - [x] 7.14 Enforce reserved provider selector tokens (`auto`, `local`, `upstream`) in registry/profile validation.
-- [ ] 7.15 Extend OpenAI-compatible endpoint profiles to normalize responses and provider-specific errors, not only request fields. (Partial: request shaping is implemented via `shape_openai_request`; response/error/stream normalization remains open.)
+- [ ] 7.15 Extend OpenAI-compatible endpoint profiles to normalize responses and provider-specific errors, not only request fields. (Partial: request shaping is implemented via `shape_openai_request`; error normalization is implemented via 7.21; streaming text/tool-call delta normalization is implemented via 7.22. Remaining: non-streaming/final response-body normalization if needed.)
 - [x] 7.16 Add data-driven endpoint auth schemes and route credential probing through endpoint metadata.
 - [x] 7.17 Update or remove baseline routing/effort specs that still require `/local`, `/haiku`, `/sonnet`, `/opus`, or `set_model_tier`.
 
@@ -81,4 +81,4 @@ delegate/cleave child routing.
 - [x] 7.19 Update web/status/IPC projections that still expose `capability_tier` and legacy options (`retribution`, `victory`, `gloriana`).
 - [x] 7.20 Rewrite stale long-lived docs that still describe public tiers as stable (`docs/model-routing.md` was patched; baseline specs remain).
 - [x] 7.21 Add OpenAI-compatible error normalization profiles that map provider-specific error envelopes and rate-limit responses into common route/provider error categories.
-- [ ] 7.22 Add OpenAI-compatible response/stream normalization profiles for endpoint-specific tool-call delta quirks.
+- [x] 7.22 Add OpenAI-compatible response/stream normalization profiles for endpoint-specific tool-call delta quirks.
