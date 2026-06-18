@@ -98,6 +98,8 @@ pub struct OpenAiCompatibleProfile {
     #[serde(default)]
     pub unsupported_request_fields: Vec<String>,
     #[serde(default)]
+    pub error_profile: OpenAiErrorProfile,
+    #[serde(default)]
     pub required_headers: Vec<String>,
     #[serde(default)]
     pub optional_headers: Vec<String>,
@@ -107,6 +109,82 @@ pub struct OpenAiCompatibleProfile {
     pub docs_url: Option<String>,
     #[serde(default)]
     pub verified_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenAiErrorProfile {
+    #[serde(default = "default_openai_error_type_paths")]
+    pub type_paths: Vec<String>,
+    #[serde(default = "default_openai_error_message_paths")]
+    pub message_paths: Vec<String>,
+    #[serde(default = "default_openai_rate_limit_types")]
+    pub rate_limit_types: Vec<String>,
+}
+
+impl Default for OpenAiErrorProfile {
+    fn default() -> Self {
+        Self {
+            type_paths: default_openai_error_type_paths(),
+            message_paths: default_openai_error_message_paths(),
+            rate_limit_types: default_openai_rate_limit_types(),
+        }
+    }
+}
+
+fn default_openai_error_type_paths() -> Vec<String> {
+    ["error.type", "error.code", "type", "code"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn default_openai_error_message_paths() -> Vec<String> {
+    ["error.message", "message", "detail"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn default_openai_rate_limit_types() -> Vec<String> {
+    [
+        "rate_limit_exceeded",
+        "rate_limit_error",
+        "rate_limited",
+        "too_many_requests",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NormalizedEndpointErrorCategory {
+    RateLimited,
+    Authentication,
+    InvalidRequest,
+    ProviderUnavailable,
+    Unknown,
+}
+
+impl NormalizedEndpointErrorCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RateLimited => "rate_limited",
+            Self::Authentication => "authentication",
+            Self::InvalidRequest => "invalid_request",
+            Self::ProviderUnavailable => "provider_unavailable",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NormalizedEndpointError {
+    pub status: u16,
+    pub category: NormalizedEndpointErrorCategory,
+    pub error_type: Option<String>,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -301,6 +379,42 @@ impl ModelRegistry {
         Ok(())
     }
 
+    pub fn normalize_openai_error(
+        &self,
+        endpoint_id: &str,
+        status: reqwest::StatusCode,
+        body: &str,
+    ) -> Result<NormalizedEndpointError, String> {
+        let endpoint = self
+            .endpoint(endpoint_id)
+            .ok_or_else(|| format!("unknown endpoint '{endpoint_id}'"))?;
+        let profile = endpoint
+            .open_ai_compatible_profile
+            .as_ref()
+            .ok_or_else(|| {
+                format!("endpoint '{endpoint_id}' is not OpenAI-compatible or lacks a profile")
+            })?;
+        let parsed = serde_json::from_str::<serde_json::Value>(body).ok();
+        let error_type = parsed
+            .as_ref()
+            .and_then(|value| first_string_path(value, &profile.error_profile.type_paths));
+        let message = parsed
+            .as_ref()
+            .and_then(|value| first_string_path(value, &profile.error_profile.message_paths))
+            .unwrap_or_else(|| body.chars().take(200).collect());
+        let category = classify_openai_error(
+            status.as_u16(),
+            error_type.as_deref(),
+            &profile.error_profile.rate_limit_types,
+        );
+        Ok(NormalizedEndpointError {
+            status: status.as_u16(),
+            category,
+            error_type,
+            message,
+        })
+    }
+
     /// Full model entry by qualified ID ("provider:model_id").
     pub fn model_info(&self, qualified_id: &str) -> Option<&ModelEntry> {
         self.models.get(qualified_id)
@@ -435,6 +549,40 @@ impl ModelRegistry {
             return entry.clone();
         }
         self.infer_unknown_model(provider, model_id)
+    }
+}
+
+fn first_string_path(value: &serde_json::Value, paths: &[String]) -> Option<String> {
+    paths.iter().find_map(|path| string_at_path(value, path))
+}
+
+fn string_at_path(value: &serde_json::Value, path: &str) -> Option<String> {
+    let mut current = value;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    current.as_str().map(str::to_string)
+}
+
+fn classify_openai_error(
+    status: u16,
+    error_type: Option<&str>,
+    rate_limit_types: &[String],
+) -> NormalizedEndpointErrorCategory {
+    if status == 429
+        || error_type.is_some_and(|kind| {
+            rate_limit_types
+                .iter()
+                .any(|configured| configured.eq_ignore_ascii_case(kind))
+        })
+    {
+        return NormalizedEndpointErrorCategory::RateLimited;
+    }
+    match status {
+        401 | 403 => NormalizedEndpointErrorCategory::Authentication,
+        400 | 422 => NormalizedEndpointErrorCategory::InvalidRequest,
+        500..=599 => NormalizedEndpointErrorCategory::ProviderUnavailable,
+        _ => NormalizedEndpointErrorCategory::Unknown,
     }
 }
 
@@ -762,5 +910,46 @@ mod tests {
                 endpoint.id
             );
         }
+    }
+    #[test]
+    fn openai_error_normalization_maps_rate_limit_type() {
+        let reg = ModelRegistry::global();
+        let err = reg
+            .normalize_openai_error(
+                "groq",
+                reqwest::StatusCode::BAD_REQUEST,
+                r#"{"error":{"type":"rate_limit_exceeded","message":"slow down"}}"#,
+            )
+            .unwrap();
+        assert_eq!(err.category, NormalizedEndpointErrorCategory::RateLimited);
+        assert_eq!(err.error_type.as_deref(), Some("rate_limit_exceeded"));
+        assert_eq!(err.message, "slow down");
+    }
+
+    #[test]
+    fn openai_error_normalization_maps_auth_status() {
+        let reg = ModelRegistry::global();
+        let err = reg
+            .normalize_openai_error(
+                "openrouter",
+                reqwest::StatusCode::UNAUTHORIZED,
+                r#"{"message":"bad key","code":"invalid_api_key"}"#,
+            )
+            .unwrap();
+        assert_eq!(
+            err.category,
+            NormalizedEndpointErrorCategory::Authentication
+        );
+        assert_eq!(err.error_type.as_deref(), Some("invalid_api_key"));
+        assert_eq!(err.message, "bad key");
+    }
+
+    #[test]
+    fn openai_error_normalization_rejects_non_openai_endpoint() {
+        let reg = ModelRegistry::global();
+        assert!(
+            reg.normalize_openai_error("anthropic", reqwest::StatusCode::TOO_MANY_REQUESTS, "{}")
+                .is_err()
+        );
     }
 }
