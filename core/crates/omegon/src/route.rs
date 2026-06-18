@@ -74,6 +74,27 @@ pub enum GradePolicy {
     NearestAllowed { max_downgrade_steps: u8 },
 }
 
+impl GradePolicy {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim() {
+            "exact" => Some(Self::Exact),
+            "minimum" => Some(Self::Minimum),
+            "nearest" => Some(Self::NearestAllowed {
+                max_downgrade_steps: 1,
+            }),
+            _ => None,
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Minimum => "minimum",
+            Self::NearestAllowed { .. } => "nearest",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FailoverPolicy {
     SameGradeOtherEndpoint,
@@ -142,7 +163,10 @@ impl ModelIntent {
             ProviderSelection::Upstream => "upstream".to_string(),
             ProviderSelection::Endpoint(endpoint) => endpoint.clone(),
         };
-        format!("grade {grade}, provider {provider}")
+        format!(
+            "grade {grade}, provider {provider}, policy {}",
+            self.grade_policy.label()
+        )
     }
 }
 
@@ -591,9 +615,24 @@ impl RouteController {
         self.emit_changed().await
     }
 
-    pub async fn set_provider_selection(&self, provider_selection: ProviderSelection) -> RouteSnapshot {
+    pub async fn set_provider_selection(
+        &self,
+        provider_selection: ProviderSelection,
+    ) -> RouteSnapshot {
         let mut state = self.state.write().await;
         state.intent.provider_selection = provider_selection;
+        state.intent.exact_model_override = None;
+        if state.intent.grade.is_none() {
+            state.intent.grade = Some(ModelGrade::B);
+        }
+        state.warning = None;
+        drop(state);
+        self.emit_changed().await
+    }
+
+    pub async fn set_grade_policy(&self, grade_policy: GradePolicy) -> RouteSnapshot {
+        let mut state = self.state.write().await;
+        state.intent.grade_policy = grade_policy;
         state.intent.exact_model_override = None;
         if state.intent.grade.is_none() {
             state.intent.grade = Some(ModelGrade::B);
@@ -1480,9 +1519,31 @@ mod tests {
             .set_provider_selection(ProviderSelection::Local)
             .await;
 
-        assert_eq!(snapshot.serving_model(), Some("anthropic:claude-sonnet-4-6"));
+        assert_eq!(
+            snapshot.serving_model(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
         assert_eq!(snapshot.intent.provider_selection, ProviderSelection::Local);
         assert_eq!(snapshot.intent.exact_model_override, None);
     }
 
+    #[tokio::test]
+    async fn grade_policy_update_clears_exact_pin_without_route_switch() {
+        let controller = RouteController::new(
+            ProviderRoute::Serving {
+                model: "anthropic:claude-sonnet-4-6".into(),
+            },
+            Box::new(NullBridge),
+            None,
+        );
+
+        let snapshot = controller.set_grade_policy(GradePolicy::Exact).await;
+
+        assert_eq!(
+            snapshot.serving_model(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
+        assert_eq!(snapshot.intent.grade_policy, GradePolicy::Exact);
+        assert_eq!(snapshot.intent.exact_model_override, None);
+    }
 }

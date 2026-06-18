@@ -4549,6 +4549,34 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 }
             }
 
+            tui::TuiCommand::SetModelPolicy { policy, respond_to } => {
+                let response = if let Some(parsed) = crate::route::GradePolicy::parse(&policy) {
+                    let snapshot = route_controller.set_grade_policy(parsed).await;
+                    omegon_traits::SlashCommandResponse {
+                        accepted: true,
+                        output: Some(format!(
+                            "Model policy intent updated — {}. Active route unchanged: {}",
+                            snapshot.intent.summary(),
+                            snapshot.serving_model().unwrap_or("disconnected")
+                        )),
+                    }
+                } else {
+                    omegon_traits::SlashCommandResponse {
+                        accepted: false,
+                        output: Some("Invalid model policy. Use exact, minimum, or nearest.".into()),
+                    }
+                };
+                if let Some(output) = response.output.clone() {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
+                }
+                if let Some(respond_to) = respond_to {
+                    let _ = respond_to.send(omegon_traits::ControlOutputResponse {
+                        accepted: response.accepted,
+                        output: response.output,
+                    });
+                }
+            }
+
             tui::TuiCommand::ModelUnpin { respond_to } => {
                 let snapshot = route_controller.clear_exact_model_override().await;
                 let output = format!(
