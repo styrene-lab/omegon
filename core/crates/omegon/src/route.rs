@@ -433,7 +433,7 @@ impl RouteSnapshot {
     }
 }
 
-fn intent_from_route(route: &ProviderRoute) -> ModelIntent {
+pub(crate) fn intent_from_route(route: &ProviderRoute) -> ModelIntent {
     match route {
         ProviderRoute::Serving { model } => ModelIntent::pinned_model(model.clone()),
         ProviderRoute::Fallback { selected, .. } | ProviderRoute::Disconnected { selected, .. } => {
@@ -472,9 +472,19 @@ impl RouteController {
         initial_bridge: Box<dyn LlmBridge>,
         events_tx: Option<broadcast::Sender<omegon_traits::AgentEvent>>,
     ) -> Self {
+        let intent = intent_from_route(&initial_route);
+        Self::with_initial_intent(initial_route, initial_bridge, events_tx, intent)
+    }
+
+    pub fn with_initial_intent(
+        initial_route: ProviderRoute,
+        initial_bridge: Box<dyn LlmBridge>,
+        events_tx: Option<broadcast::Sender<omegon_traits::AgentEvent>>,
+        intent: ModelIntent,
+    ) -> Self {
         Self {
             state: RwLock::new(RouteState {
-                intent: intent_from_route(&initial_route),
+                intent,
                 route: initial_route,
                 last_login_outcome: None,
                 warning: None,

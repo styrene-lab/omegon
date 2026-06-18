@@ -1126,6 +1126,15 @@ fn parse_csv_env(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn persist_model_intent(
+    cwd: &std::path::Path,
+    intent: &crate::route::ModelIntent,
+) -> anyhow::Result<()> {
+    let mut profile = settings::Profile::load(cwd);
+    profile.model_intent = Some(settings::ProfileModelIntent::from_route_intent(intent));
+    profile.save(cwd)
+}
+
 fn parse_bool_env(name: &str) -> Option<bool> {
     let raw = std::env::var(name).ok()?;
     match raw.trim().to_ascii_lowercase().as_str() {
@@ -3981,10 +3990,15 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         s.provider_connected = startup_decision.provider_connected;
     }
     let (events_tx, events_rx) = bootstrap::wire_event_channel(&agent, 256);
-    let route_controller = Arc::new(route::RouteController::new(
+    let startup_model_intent = settings::Profile::load(&agent.cwd)
+        .model_intent
+        .and_then(|intent| intent.to_route_intent())
+        .unwrap_or_else(|| route::intent_from_route(&startup_route));
+    let route_controller = Arc::new(route::RouteController::with_initial_intent(
         startup_route.clone(),
         bridge,
         Some(events_tx.clone()),
+        startup_model_intent,
     ));
     let bridge: Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>> = route_controller.bridge();
     if shared_settings.lock().is_ok() {
@@ -4476,6 +4490,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     && let Ok(mut bridge_model) = runtime_resources.bridge_model.lock()
                 {
                     *bridge_model = None;
+                    let snapshot = route_controller.snapshot().await;
+                    if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
+                        let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
+                    }
                 }
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
@@ -4490,6 +4508,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     let snapshot = route_controller
                         .set_model_intent(crate::route::ModelIntent::with_grade(parsed))
                         .await;
+                    if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
+                        let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
+                    }
                     omegon_traits::SlashCommandResponse {
                         accepted: true,
                         output: Some(format!(
@@ -4524,6 +4545,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             tui::TuiCommand::SetModelProvider { provider, respond_to } => {
                 let response = if let Some(selection) = crate::route::ProviderSelection::parse(&provider) {
                     let snapshot = route_controller.set_provider_selection(selection).await;
+                    if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
+                        let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
+                    }
                     omegon_traits::SlashCommandResponse {
                         accepted: true,
                         output: Some(format!(
@@ -4552,6 +4576,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             tui::TuiCommand::SetModelPolicy { policy, respond_to } => {
                 let response = if let Some(parsed) = crate::route::GradePolicy::parse(&policy) {
                     let snapshot = route_controller.set_grade_policy(parsed).await;
+                    if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
+                        let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
+                    }
                     omegon_traits::SlashCommandResponse {
                         accepted: true,
                         output: Some(format!(
@@ -4579,6 +4606,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
             tui::TuiCommand::ModelUnpin { respond_to } => {
                 let snapshot = route_controller.clear_exact_model_override().await;
+                if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
+                }
                 let output = format!(
                     "Model exact override cleared — {}. Active route unchanged: {}",
                     snapshot.intent.summary(),
