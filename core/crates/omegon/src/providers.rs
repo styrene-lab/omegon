@@ -183,12 +183,19 @@ fn resolve_api_key_from_sources_with_external(
 pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
     // Use canonical provider map for env vars and auth.json key
     let env_keys = crate::auth::provider_env_vars(provider);
+    let endpoint_refs = crate::auth::endpoint_secret_refs(provider);
     let auth_key = crate::auth::auth_json_key(provider);
-    let env_values: Vec<(&str, Option<String>)> = env_keys
+    let mut env_values: Vec<(&str, Option<String>)> = env_keys
         .iter()
         .copied()
         .map(|key| (key, std::env::var(key).ok().filter(|v| !v.is_empty())))
         .collect();
+    for key in &endpoint_refs {
+        env_values.push((
+            key.as_str(),
+            std::env::var(key).ok().filter(|v| !v.is_empty()),
+        ));
+    }
 
     let external = crate::auth::read_external_credentials(auth_key);
 
@@ -235,6 +242,13 @@ fn resolve_api_key(provider: &str) -> Option<String> {
     let env_keys = crate::auth::provider_env_vars(provider);
     for key in env_keys {
         if let Ok(val) = std::env::var(key)
+            && !val.is_empty()
+        {
+            return Some(val);
+        }
+    }
+    for key in crate::auth::endpoint_secret_refs(provider) {
+        if let Ok(val) = std::env::var(&key)
             && !val.is_empty()
         {
             return Some(val);

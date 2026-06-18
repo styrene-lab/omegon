@@ -278,6 +278,25 @@ pub fn provider_env_vars(provider_id: &str) -> &[&str] {
         .unwrap_or(&[])
 }
 
+/// Get endpoint-declared secret references for providers that are present in
+/// the model registry but not yet first-class entries in `PROVIDERS`.
+pub fn endpoint_secret_refs(provider_id: &str) -> Vec<String> {
+    if provider_by_id(provider_id).is_some() {
+        return vec![];
+    }
+    crate::model_registry::ModelRegistry::global()
+        .endpoint(provider_id)
+        .map(|endpoint| {
+            endpoint
+                .auth_scheme
+                .required_secret_refs()
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn operator_auth_provider_ids() -> Vec<&'static str> {
     PROVIDERS
         .iter()
@@ -3488,5 +3507,11 @@ mod tests {
         assert!(providers.contains("openai-codex"), "got: {providers}");
         assert!(!providers.contains("ollama,"), "got: {providers}");
         assert!(!providers.contains("ollama "), "got: {providers}");
+    }
+    #[test]
+    fn endpoint_secret_refs_cover_registry_only_providers() {
+        assert_eq!(endpoint_secret_refs("ollama"), Vec::<String>::new());
+        // Existing first-class providers stay governed by PROVIDERS.
+        assert_eq!(endpoint_secret_refs("groq"), Vec::<String>::new());
     }
 }
