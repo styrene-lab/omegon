@@ -8,7 +8,7 @@
 //!
 //! ## Three-axis routing model
 //!
-//! - **Capability tier**: local / retribution / victory / gloriana
+//! - **Model capability grade**: F / D / C / B / A / S; local is provider selection
 //! - **Thinking level**: off / minimal / low / medium / high
 //! - **Context class**: Compact (128k) / Standard (272k) / Extended (400k) / Massive (1M+)
 
@@ -63,7 +63,7 @@ impl PosturePreset {
     /// First-pass resource defaults for the posture.
     ///
     /// This intentionally covers only the axes already modeled in `settings.rs`.
-    /// Model-tier unification remains in `model_budget.rs` for now.
+    /// Model-grade intent handling remains in `model_budget.rs` for now.
     pub fn default_resource_envelope(self) -> ResourceEnvelope {
         match self {
             Self::Explorator => ResourceEnvelope {

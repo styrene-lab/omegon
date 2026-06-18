@@ -98,7 +98,7 @@ pub struct FooterData {
     pub principal_id: String,
     /// Current authorization summary (descriptive only).
     pub authorization: String,
-    /// Current model tier name (for engine panel display).
+    /// Current model grade name (for engine panel display).
     pub model_tier: String,
     /// Whether a live LLM provider is connected. False when NullBridge is active.
     pub provider_connected: bool,

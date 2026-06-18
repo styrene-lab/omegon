@@ -2367,7 +2367,7 @@ mod tests {
         let cmd = serde_json::json!({
             "type": "switch_dispatcher",
             "request_id": "req-123",
-            "profile": "victory",
+            "profile": "B",
             "model": "anthropic:claude-sonnet-4-6",
             "caller_role": "admin"
         });
@@ -2389,7 +2389,7 @@ mod tests {
                         model,
                     } => {
                         assert_eq!(request_id, "req-123");
-                        assert_eq!(profile, "victory");
+                        assert_eq!(profile, "B");
                         assert_eq!(model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
                     }
                     other => panic!("wrong request: {other:?}"),
@@ -2426,7 +2426,7 @@ mod tests {
         let cmd = serde_json::json!({
             "type": "switch_dispatcher",
             "request_id": "req-123",
-            "profile": "victory",
+            "profile": "B",
             "caller_role": "edit"
         });
 

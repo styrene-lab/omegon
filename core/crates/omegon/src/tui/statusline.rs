@@ -332,7 +332,7 @@ impl StatusLine {
                     crate::surfaces::inline::InlineCellRole::Metadata,
                 ),
                 crate::surfaces::inline::InlineCell::new(
-                    format!("tier {}", self.model_tier),
+                    format!("grade {}", self.model_tier),
                     crate::surfaces::inline::InlineCellRole::Metadata,
                 ),
                 crate::surfaces::inline::InlineCell::new(
