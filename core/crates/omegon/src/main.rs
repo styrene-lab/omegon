@@ -7178,18 +7178,8 @@ async fn execute_remote_slash_command(
         };
     };
 
-    let registry_name = remote_registry_name_for_command(name, &command);
-    if crate::command_registry::builtin_command_definitions()
-        .into_iter()
-        .find(|definition| definition.name == registry_name)
-        .is_some_and(|definition| !definition.availability.cli)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!(
-                "Command /{name} is interactive-only or unavailable via remote slash execution."
-            )),
-        };
+    if let Some(response) = reject_remote_builtin_command(name, &command, cli) {
+        return response;
     }
 
     if let Some(control_request) = control_runtime::control_request_from_slash(&command) {
@@ -7240,6 +7230,62 @@ async fn execute_remote_slash_command(
         output: Some(format!(
             "Command /{name} is interactive-only or unavailable via remote slash execution."
         )),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteBuiltinPolicy {
+    Allow,
+    RequiresBypass,
+    Deny,
+}
+
+fn reject_remote_builtin_command(
+    name: &str,
+    command: &crate::tui::CanonicalSlashCommand,
+    cli: &Cli,
+) -> Option<omegon_traits::SlashCommandResponse> {
+    use omegon_traits::SlashCommandResponse;
+
+    match remote_builtin_policy(name, command) {
+        RemoteBuiltinPolicy::Allow => None,
+        RemoteBuiltinPolicy::RequiresBypass if cli.dangerously_bypass_permissions => None,
+        RemoteBuiltinPolicy::RequiresBypass => Some(SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Command /{name} requires interactive confirmation and is unavailable via remote slash execution."
+            )),
+        }),
+        RemoteBuiltinPolicy::Deny => Some(SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Command /{name} is interactive-only or unavailable via remote slash execution."
+            )),
+        }),
+    }
+}
+
+fn remote_builtin_policy(
+    name: &str,
+    command: &crate::tui::CanonicalSlashCommand,
+) -> RemoteBuiltinPolicy {
+    let registry_name = remote_registry_name_for_command(name, command);
+    let Some(definition) = crate::command_registry::builtin_command_definitions()
+        .into_iter()
+        .find(|definition| definition.name == registry_name)
+    else {
+        return RemoteBuiltinPolicy::Deny;
+    };
+
+    if !definition.availability.cli {
+        return RemoteBuiltinPolicy::Deny;
+    }
+
+    match command {
+        crate::tui::CanonicalSlashCommand::AuthStatus
+        | crate::tui::CanonicalSlashCommand::AuthLogout(_) => RemoteBuiltinPolicy::Allow,
+        _ if definition.safety.requires_confirmation => RemoteBuiltinPolicy::RequiresBypass,
+        _ => RemoteBuiltinPolicy::Allow,
     }
 }
 
@@ -9585,7 +9631,7 @@ mod tests {
         assert!(!response.accepted);
         let output = response.output.unwrap();
         assert!(
-            output.contains("hidden login selector") || output.contains("choose OpenAI API"),
+            output.contains("requires interactive confirmation"),
             "got: {output}"
         );
     }
@@ -9657,6 +9703,43 @@ mod tests {
 
         assert!(response.accepted);
         assert!(response.output.unwrap().contains("Session Overview"));
+    }
+
+    #[test]
+    fn remote_slash_auth_login_requires_bypass_by_builtin_policy() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let agent = test_agent_setup();
+        let (events_tx, _) = broadcast::channel(16);
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
+            "anthropic:claude-sonnet-4-6",
+        )));
+        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(Box::new(
+            crate::bridge::NullBridge,
+        ) as Box<dyn LlmBridge>));
+        let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
+        let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
+
+        let (mut agent, mut runtime_state) = split_interactive_agent(agent);
+
+        let response = rt.block_on(execute_remote_slash_command(
+            &mut runtime_state,
+            &mut agent,
+            &events_tx,
+            &shared_settings,
+            &bridge,
+            &login_prompt_tx,
+            &cli,
+            "auth",
+            "login anthropic",
+        ));
+
+        assert!(!response.accepted);
+        assert!(
+            response
+                .output
+                .unwrap()
+                .contains("requires interactive confirmation")
+        );
     }
 
     #[test]
