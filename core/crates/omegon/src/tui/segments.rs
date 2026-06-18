@@ -509,9 +509,19 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
         .find(|line| !line.is_empty());
 
     if matches!(tool_name, "context_status") {
-        return first_non_empty
+        let summary_line = lines
+            .iter()
+            .map(|line| clean_inline_text(line.trim()))
+            .find(|line| line.contains(" tokens ") && line.contains("requested "))
+            .or_else(|| {
+                lines
+                    .iter()
+                    .map(|line| clean_inline_text(line.trim()))
+                    .find(|line| line.starts_with("## Context"))
+            });
+        return summary_line
             .as_ref()
-            .map(|line| crate::util::truncate(line, 72))
+            .map(|line| crate::util::truncate(line.trim_start_matches("# "), 96))
             .or_else(|| Some("headroom checked".to_string()));
     }
 
@@ -2918,7 +2928,7 @@ mod tests {
 
         assert_eq!(
             rendered,
-            format!("bash · git status --short · {DETAILS_HINT_LABEL}")
+            format!("bash · git status --short   {DETAILS_HINT_LABEL}")
         );
         assert!(rendered.ends_with(DETAILS_HINT_LABEL), "{rendered:?}");
         assert!(
@@ -2926,8 +2936,8 @@ mod tests {
             "{rendered:?}"
         );
         assert!(
-            rendered.contains(&format!(" · {DETAILS_HINT_LABEL}")),
-            "affordance should stay in flow after an inline separator: {rendered:?}"
+            rendered.contains("  ^O details"),
+            "affordance should be right-aligned in the detail budget: {rendered:?}"
         );
     }
 
@@ -2946,6 +2956,22 @@ mod tests {
         );
         assert!(rendered.contains('…'), "{rendered:?}");
         assert!(rendered.ends_with(DETAILS_HINT_LABEL), "{rendered:?}");
+    }
+
+    #[test]
+    fn summarize_context_status_result_prefers_summary_over_palette_title() {
+        let summary = summarize_tool_result(
+            "context_status",
+            Some(
+                "## Context\n4966/1000000 tokens (0%) · requested Compact (128k) · actual Massive (1M+) · model openai-codex:gpt-5.5 · thinking minimal\n\n### Actions",
+            ),
+        )
+        .expect("summary");
+
+        assert!(summary.starts_with("4966/1000000 tokens (0%)"), "{summary}");
+        assert!(summary.contains("requested Compact (128k)"), "{summary}");
+        assert!(summary.contains("actual Massive (1M+)"), "{summary}");
+        assert!(!summary.starts_with("Context"), "{summary}");
     }
 
     #[test]

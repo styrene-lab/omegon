@@ -5083,6 +5083,20 @@ fn recovery_hint_no_match() {
 }
 
 #[test]
+fn editor_top_line_shows_engine_block_details() {
+    let mut settings = Settings::new("anthropic:claude-sonnet-4-6");
+    settings.thinking = ThinkingLevel::High;
+    let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
+    app.apply_ui_preset(UiSurfaces::lean());
+    app.footer_data.harness.capability_tier = "frontier".into();
+
+    let rendered = render_app_to_string(&mut app, 140, 18);
+
+    assert!(rendered.contains("claude-sonnet"), "{rendered}");
+    assert!(rendered.contains("anthropic · frontier · think high"), "{rendered}");
+}
+
+#[test]
 fn thinking_chunk_marks_runtime_phase_as_thinking() {
     let mut app = test_app();
 
@@ -5324,6 +5338,41 @@ fn runtime_queue_zero_depth_hides_queue_line() {
 
     let rendered = render_app_to_string(&mut app, 100, 24);
     assert!(!rendered.contains("Runtime queue"), "{rendered}");
+}
+
+#[test]
+fn palette_system_notification_matrix_accounts_for_palette_slash_outputs() {
+    let cases = [
+        ("## Context\nsummary", Some("/context status")),
+        ("## Thinking levels\nsummary", Some("/think status")),
+        ("## Skills\nsummary", Some("/skills")),
+        ("## Prompt library\nsummary", Some("/prompt list")),
+        ("## Random\nsummary", None),
+    ];
+
+    for (message, expected) in cases {
+        assert_eq!(slash_command_for_palette_notification(message), expected);
+    }
+}
+
+#[test]
+fn slash_context_without_subcommand_maps_to_status() {
+    assert_eq!(
+        canonical_slash_command("context", ""),
+        Some(CanonicalSlashCommand::ContextStatus)
+    );
+}
+
+#[test]
+fn palette_system_notifications_open_command_panel_instead_of_transcript_block() {
+    let mut app = test_app();
+
+    app.handle_agent_event(AgentEvent::SystemNotification {
+        message: "## Context\n4966/1000000 tokens (0%)\n\n### Actions\n- `/context compact` — compact".into(),
+    });
+
+    assert!(app.command_panel.is_some());
+    assert!(app.conversation.segments().is_empty());
 }
 
 #[test]

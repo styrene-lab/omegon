@@ -83,10 +83,17 @@ fn render_split_text(
             let left_budget = width.saturating_sub(right_width + separator_width);
             let left = truncate_display(left, left_budget);
             if left.is_empty() {
-                truncate_display(right, width)
+                format!(
+                    "{}{}",
+                    " ".repeat(width.saturating_sub(right_width)),
+                    truncate_display(right, width)
+                )
             } else {
-                let joined = format!("{left}{separator}{right}");
-                truncate_display(&joined, width)
+                let left_width = UnicodeWidthStr::width(left.as_str());
+                let gap = width
+                    .saturating_sub(left_width + right_width)
+                    .max(separator_width);
+                format!("{left}{}{right}", " ".repeat(gap))
             }
         }
         InlineOverflowPolicy::PreserveRight => truncate_display(right, width),
@@ -161,8 +168,8 @@ mod tests {
             vec![details_hint_cell()],
         );
         let rendered = render_inline_text_row(&row, 32);
-        assert_eq!(rendered, "bash · ^O details");
-        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 17);
+        assert_eq!(rendered, "bash                  ^O details");
+        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 32);
     }
 
     #[test]
@@ -177,6 +184,6 @@ mod tests {
         let rendered = render_inline_text_row(&row, 28);
         assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 28);
         assert!(rendered.contains('…'), "{rendered:?}");
-        assert!(rendered.ends_with(" · ^O details"), "{rendered:?}");
+        assert!(rendered.ends_with("^O details"), "{rendered:?}");
     }
 }
