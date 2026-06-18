@@ -153,11 +153,6 @@ impl ModelRegistry {
             .map(|s| s.as_str())
     }
 
-    /// Compatibility shim for older routing code that still asks for legacy tier keys.
-    pub fn tier_model(&self, tier: &str, provider: &str) -> Option<&str> {
-        self.grade_model(legacy_grade_for_tier(tier)?, provider)
-    }
-
     /// Full model entry by qualified ID ("provider:model_id").
     pub fn model_info(&self, qualified_id: &str) -> Option<&ModelEntry> {
         self.models.get(qualified_id)
@@ -226,11 +221,6 @@ impl ModelRegistry {
             }
         }
         best.map(|(_, t)| t)
-    }
-
-    /// Compatibility shim for older routing code that still asks for legacy tier keys.
-    pub fn infer_tier(&self, provider: &str, model_id: &str) -> Option<&'static str> {
-        legacy_tier_for_grade(self.infer_grade(provider, model_id)?)
     }
 
     /// Whether this model supports reasoning/thinking parameters.
@@ -309,15 +299,6 @@ fn legacy_grades_from_tiers(
             legacy_grade_for_tier(&tier).map(|grade| (grade.to_string(), models))
         })
         .collect()
-}
-
-fn legacy_tier_for_grade(grade: &str) -> Option<&'static str> {
-    match grade {
-        "S" => Some("gloriana"),
-        "A" | "B" => Some("victory"),
-        "F" | "D" | "C" => Some("retribution"),
-        _ => None,
-    }
 }
 
 fn legacy_grade_for_tier(tier: &str) -> Option<&'static str> {
@@ -445,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn defaults_and_tier_models_have_context_constraints() {
+    fn defaults_and_grade_models_have_context_constraints() {
         let reg = ModelRegistry::global();
         for (provider, model_id) in &reg.defaults {
             let info = reg.model_info_or_infer(provider, model_id);
