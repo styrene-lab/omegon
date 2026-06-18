@@ -62,6 +62,7 @@ Current `/skills` TUI route passes through `canonical_slash_command("skills", ar
 
 ### File Scope
 
+- `core/crates/omegon/src/surfaces/palette.rs` — introduced the shared renderer-neutral command/menu palette row-group DTO used by `/skills` and intended for `/prompt`, menus, CLI, ACP, and web consumers.
 - `core/crates/omegon/src/control_runtime.rs` — existing `/skills` control response remains the main target for palette-style skill projection.
 - `core/crates/omegon/src/tui/mod.rs` — static help/completion should expose prompt/user-command surfaces through registry-backed command definitions rather than bespoke allowlists.
 - `core/crates/omegon/src/skills.rs` — skill inventory already provides bundled/user/project-local data needed for palette rows.
@@ -84,8 +85,7 @@ Current `/skills` TUI route passes through `canonical_slash_command("skills", ar
 
 ## Remaining Work
 
+- Refactor `/prompt list` onto the shared palette projection so prompt inventory and `/skills` share action/object row semantics.
 - Integrate `/context` and `/think` into the modern palette track without breaking their existing bare-command selector behavior. Their static TUI metadata now exposes action-oriented subcommands, but they still need shared state/action projections for CLI/ACP/text surfaces.
-- Refactor `/skills` default output into a compact palette-style action/object projection.
-- Extract a shared command-palette row DTO so `/skills`, `/prompt`, TUI palette, ACP, and CLI text output can consume one projection.
 - Complete settings-page consolidation by deriving TUI settings rows/selectors from `SettingsSurfaceProjection` instead of parallel descriptors.
 - Add a stronger confirmation/trust flow before any prompt/user-command surface queues or executes prompt bodies directly.
