@@ -49,7 +49,7 @@ Given a token count of 1,048,576
 When classifyContextWindow is called
 Then the result is `Legion`
 
-### Requirement: Route downgrade classification evaluates against context floor
+### Requirement: Route downgrade classification evaluates against context floor and grade policy
 
 #### Scenario: Compatible route — ceiling meets floor
 
@@ -65,11 +65,11 @@ And a routing state with requiredMinContextWindow 400,000 (Clan)
 When classifyRoute is called
 Then the classification is `Degrading`
 
-#### Scenario: Ineligible route — fails tier or thinking constraints
+#### Scenario: Ineligible route — fails grade or thinking constraints
 
-Given a route envelope with tier `retribution`
-And a requested tier of `gloriana`
-When classifyRoute is called with tier mismatch
+Given a route envelope with grade `D`
+And a requested exact grade of `S`
+When classifyRoute is called with grade mismatch
 Then the classification is `Ineligible`
 
 ### Requirement: Downgrade policy enforces safety boundaries

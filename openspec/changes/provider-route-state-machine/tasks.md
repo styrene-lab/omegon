@@ -79,4 +79,4 @@ delegate/cleave child routing.
 
 - [ ] 7.18 Replace remaining internal `ModelTier` bridge and `data/model-registry.json` `tiers`/`tier` fields with grade/capability-row data.
 - [x] 7.19 Update web/status/IPC projections that still expose `capability_tier` and legacy options (`retribution`, `victory`, `gloriana`).
-- [ ] 7.20 Rewrite stale long-lived docs that still describe public tiers as stable (`docs/model-routing.md` was patched; baseline specs remain).
+- [x] 7.20 Rewrite stale long-lived docs that still describe public tiers as stable (`docs/model-routing.md` was patched; baseline specs remain).
