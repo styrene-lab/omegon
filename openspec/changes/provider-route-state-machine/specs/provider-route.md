@@ -235,3 +235,25 @@ Given baseline routing specs are assessed after this change
 When requirements mention legacy model-tier commands or `set_model_tier`
 Then those requirements have been removed or rewritten to the model-intent vocabulary
 And implementation that rejects legacy commands is not considered a regression
+
+
+### Requirement: OpenAI-compatible response and error normalization is profile-driven
+
+OpenAI-compatible endpoint profiles SHALL cover request shaping, response normalization, stream normalization, and provider-specific error normalization. Request shaping alone SHALL NOT satisfy this requirement.
+
+#### Scenario: Request shaping alone is insufficient
+Given an OpenAI-compatible endpoint profile strips unsupported request fields
+When implementation evidence is assessed
+Then the requirement remains incomplete until provider-specific response and error normalization are also implemented
+
+#### Scenario: Error envelope maps to common rejection reason
+Given an OpenAI-compatible endpoint returns a provider-specific rate-limit error envelope
+When the shared OpenAI-compatible adapter handles the error
+Then the endpoint error profile maps it to a common rate-limit/retry category
+And route/failover logic can use that category without branching on endpoint id
+
+#### Scenario: Streaming tool-call deltas normalize before tool execution
+Given an OpenAI-compatible endpoint streams tool-call deltas using endpoint-specific chunk quirks
+When the shared OpenAI-compatible adapter receives the stream
+Then the endpoint response profile normalizes those chunks into Omegon's common tool-call event shape
+And downstream tool execution does not branch on endpoint id
