@@ -27,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Fixed
+- Preserved slim compact-row child indentation across wrapped reasoning/tool continuation lines so multi-line details stay visually nested.
 - Made `/version` render multiline build details so it opens in the command-output panel instead of disappearing as a short toast, and documented `/q` and `/quit` alongside `/exit` in the slash palette.
 - Clamped slim reasoning and memory/tool segment rows to the visible terminal width so long summaries cannot bleed past the right edge.
 - Made `/settings` open the persistent settings page directly without also rendering a command-output panel, and let Ctrl+C close that page like Esc.
