@@ -1061,14 +1061,8 @@ pub async fn switch_dispatcher_response(
         .unwrap_or_default();
     let current_provider = crate::providers::infer_provider_id(&current_model);
     let reg = crate::model_registry::ModelRegistry::global();
-    let grade_tier = match normalized_profile.as_str() {
-        "S" => Some("gloriana"),
-        "A" | "B" => Some("victory"),
-        "F" | "D" | "C" => Some("retribution"),
-        _ => None,
-    };
-    let tier_model = grade_tier
-        .and_then(|tier| reg.tier_model(tier, &current_provider))
+    let tier_model = reg
+        .grade_model(&normalized_profile, &current_provider)
         .unwrap_or(&current_model)
         .to_string();
     let requested_model_spec = requested_model.map(ToOwned::to_owned).unwrap_or_else(|| {
