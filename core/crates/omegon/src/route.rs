@@ -11,6 +11,128 @@ use tokio::sync::{RwLock, broadcast};
 
 use crate::bridge::{LlmBridge, NullBridge};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModelGrade {
+    F,
+    D,
+    C,
+    B,
+    A,
+    S,
+}
+
+impl ModelGrade {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_uppercase().as_str() {
+            "F" => Some(Self::F),
+            "D" => Some(Self::D),
+            "C" => Some(Self::C),
+            "B" => Some(Self::B),
+            "A" => Some(Self::A),
+            "S" => Some(Self::S),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::F => "F",
+            Self::D => "D",
+            Self::C => "C",
+            Self::B => "B",
+            Self::A => "A",
+            Self::S => "S",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderSelection {
+    Auto,
+    Local,
+    Upstream,
+    Endpoint(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GradePolicy {
+    Exact,
+    Minimum,
+    NearestAllowed { max_downgrade_steps: u8 },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FailoverPolicy {
+    SameGradeOtherEndpoint,
+    AnyPolicyCompliantEndpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DegradationPolicy {
+    None,
+    OneStep,
+    BestEffort,
+    Ask,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelIntent {
+    pub grade: Option<ModelGrade>,
+    pub provider_selection: ProviderSelection,
+    pub grade_policy: GradePolicy,
+    pub failover_policy: FailoverPolicy,
+    pub degradation_policy: DegradationPolicy,
+    pub exact_model_override: Option<String>,
+}
+
+impl Default for ModelIntent {
+    fn default() -> Self {
+        Self {
+            grade: Some(ModelGrade::B),
+            provider_selection: ProviderSelection::Auto,
+            grade_policy: GradePolicy::Minimum,
+            failover_policy: FailoverPolicy::AnyPolicyCompliantEndpoint,
+            degradation_policy: DegradationPolicy::Ask,
+            exact_model_override: None,
+        }
+    }
+}
+
+impl ModelIntent {
+    pub fn pinned_model(model: String) -> Self {
+        Self {
+            exact_model_override: Some(model),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_grade(grade: ModelGrade) -> Self {
+        Self {
+            grade: Some(grade),
+            exact_model_override: None,
+            ..Self::default()
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        if let Some(model) = &self.exact_model_override {
+            return format!("pinned {model}");
+        }
+        let grade = self
+            .grade
+            .as_ref()
+            .map(ModelGrade::as_str)
+            .unwrap_or("auto");
+        let provider = match &self.provider_selection {
+            ProviderSelection::Auto => "auto".to_string(),
+            ProviderSelection::Local => "local".to_string(),
+            ProviderSelection::Upstream => "upstream".to_string(),
+            ProviderSelection::Endpoint(endpoint) => endpoint.clone(),
+        };
+        format!("grade {grade}, provider {provider}")
+    }
+}
+
 /// Why the selected model is not the one serving the session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FallbackReason {
@@ -243,6 +365,7 @@ pub enum ProviderRoute {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RouteSnapshot {
     pub route: ProviderRoute,
+    pub intent: ModelIntent,
     pub last_login_outcome: Option<LoginOutcome>,
     pub warning: Option<String>,
 }
@@ -259,6 +382,7 @@ impl RouteSnapshot {
 
     pub fn operator_status(&self) -> String {
         let mut lines = vec![format!("Provider route: {}", route_summary(self))];
+        lines.push(format!("Model intent: {}", self.intent.summary()));
         if let Some(warning) = &self.warning {
             lines.push(format!("Route warning: {warning}"));
         }
@@ -269,6 +393,16 @@ impl RouteSnapshot {
             ));
         }
         lines.join("\n")
+    }
+}
+
+fn intent_from_route(route: &ProviderRoute) -> ModelIntent {
+    match route {
+        ProviderRoute::Serving { model } => ModelIntent::pinned_model(model.clone()),
+        ProviderRoute::Fallback { selected, .. } | ProviderRoute::Disconnected { selected, .. } => {
+            ModelIntent::pinned_model(selected.clone())
+        }
+        ProviderRoute::LoginPending { prior, .. } => intent_from_route(prior),
     }
 }
 
@@ -283,6 +417,7 @@ fn serving_model_from_route(route: &ProviderRoute) -> Option<&str> {
 
 struct RouteState {
     route: ProviderRoute,
+    intent: ModelIntent,
     last_login_outcome: Option<LoginOutcome>,
     warning: Option<String>,
 }
@@ -302,6 +437,7 @@ impl RouteController {
     ) -> Self {
         Self {
             state: RwLock::new(RouteState {
+                intent: intent_from_route(&initial_route),
                 route: initial_route,
                 last_login_outcome: None,
                 warning: None,
@@ -319,6 +455,7 @@ impl RouteController {
         let state = self.state.read().await;
         RouteSnapshot {
             route: state.route.clone(),
+            intent: state.intent.clone(),
             last_login_outcome: state.last_login_outcome.clone(),
             warning: state.warning.clone(),
         }
@@ -422,6 +559,14 @@ impl RouteController {
         Ok(self.emit_changed().await)
     }
 
+    pub async fn set_model_intent(&self, intent: ModelIntent) -> RouteSnapshot {
+        let mut state = self.state.write().await;
+        state.intent = intent;
+        state.warning = None;
+        drop(state);
+        self.emit_changed().await
+    }
+
     pub async fn switch_model(
         &self,
         model: String,
@@ -451,6 +596,7 @@ impl RouteController {
 
         *self.bridge.write().await = bridge;
         let mut state = self.state.write().await;
+        state.intent = ModelIntent::pinned_model(model.clone());
         state.route = ProviderRoute::Serving { model };
         state.warning = None;
         drop(state);
@@ -1119,6 +1265,7 @@ mod tests {
     #[test]
     fn route_status_reports_login_pending_and_last_outcome() {
         let pending = RouteSnapshot {
+            intent: ModelIntent::default(),
             route: ProviderRoute::LoginPending {
                 provider: "openai-codex".into(),
                 since: SystemTime::now(),
@@ -1242,5 +1389,26 @@ mod tests {
                 }
             }
         }
+    }
+    #[tokio::test]
+    async fn model_intent_grade_update_preserves_serving_route() {
+        let controller = RouteController::new(
+            ProviderRoute::Serving {
+                model: "anthropic:claude-sonnet-4-6".into(),
+            },
+            Box::new(NullBridge),
+            None,
+        );
+
+        let snapshot = controller
+            .set_model_intent(ModelIntent::with_grade(ModelGrade::S))
+            .await;
+
+        assert_eq!(
+            snapshot.serving_model(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
+        assert_eq!(snapshot.intent.grade, Some(ModelGrade::S));
+        assert_eq!(snapshot.intent.exact_model_override, None);
     }
 }

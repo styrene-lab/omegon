@@ -28,6 +28,9 @@ pub enum ControlRequest {
     SetModel {
         requested_model: String,
     },
+    SetModelIntent {
+        grade: String,
+    },
     SwitchDispatcher {
         request_id: String,
         profile: String,
@@ -218,16 +221,6 @@ pub enum ControlRequest {
     },
 }
 
-fn model_for_grade(grade: &str) -> Option<String> {
-    let model = match grade {
-        "S" => "anthropic:claude-fable-5",
-        "A" | "B" => "anthropic:claude-sonnet-4-6",
-        "C" | "D" | "F" => "anthropic:claude-haiku-4-5-20251001",
-        _ => return None,
-    };
-    Some(model.to_string())
-}
-
 pub fn control_request_from_slash(
     command: &crate::tui::CanonicalSlashCommand,
 ) -> Option<ControlRequest> {
@@ -237,8 +230,8 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::SetModel(requested_model) => ControlRequest::SetModel {
             requested_model: requested_model.clone(),
         },
-        crate::tui::CanonicalSlashCommand::SetModelGrade(grade) => ControlRequest::SetModel {
-            requested_model: model_for_grade(grade).unwrap_or_else(|| grade.clone()),
+        crate::tui::CanonicalSlashCommand::SetModelGrade(grade) => ControlRequest::SetModelIntent {
+            grade: grade.clone(),
         },
         crate::tui::CanonicalSlashCommand::ThinkingView => ControlRequest::ThinkingView,
         crate::tui::CanonicalSlashCommand::SetThinking(level) => {
@@ -582,6 +575,7 @@ pub async fn execute_control(
             )
             .await
         }
+        ControlRequest::SetModelIntent { grade } => set_model_intent_response(&grade),
         ControlRequest::SwitchDispatcher {
             request_id,
             profile,
@@ -765,6 +759,7 @@ pub async fn execute_daemon_control(
     let is_settings_mutation = matches!(
         request,
         ControlRequest::SetModel { .. }
+            | ControlRequest::SetModelIntent { .. }
             | ControlRequest::SetThinking { .. }
             | ControlRequest::SetContextClass { .. }
             | ControlRequest::SetRuntimeMode { .. }
@@ -789,6 +784,7 @@ pub async fn execute_daemon_control(
             ControlRequest::SetModel { requested_model } => {
                 set_model_daemon_response(shared_settings, cwd, &requested_model).await
             }
+            ControlRequest::SetModelIntent { grade } => set_model_intent_response(&grade),
             ControlRequest::SetThinking { level } => {
                 set_thinking_daemon_response(shared_settings, cwd, level).await
             }
@@ -901,6 +897,24 @@ pub async fn model_list_response() -> SlashCommandResponse {
     SlashCommandResponse {
         accepted: true,
         output: Some(output),
+    }
+}
+
+fn set_model_intent_response(grade: &str) -> SlashCommandResponse {
+    match crate::route::ModelGrade::parse(grade) {
+        Some(parsed) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!(
+                "Model intent requested — grade {}, provider auto. Interactive route state will preserve this intent without pinning a concrete model.",
+                parsed.as_str()
+            )),
+        },
+        None => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Invalid model grade: {grade}. Use F, D, C, B, A, or S. Use /model provider local for local endpoints."
+            )),
+        },
     }
 }
 

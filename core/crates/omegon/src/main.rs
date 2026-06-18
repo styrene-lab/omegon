@@ -4486,21 +4486,18 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::SetModelGrade { grade, respond_to } => {
-                let target = match grade.as_str() {
-                    "S" => Some("anthropic:claude-fable-5"),
-                    "A" | "B" => Some("anthropic:claude-sonnet-4-6"),
-                    "C" | "D" | "F" => Some("anthropic:claude-haiku-4-5-20251001"),
-                    _ => None,
-                };
-                let response = if let Some(model) = target {
-                    control_runtime::set_model_response(
-                        &mut agent,
-                        &shared_settings,
-                        &bridge,
-                        Some(route_controller.clone()),
-                        model,
-                    )
-                    .await
+                let response = if let Some(parsed) = crate::route::ModelGrade::parse(&grade) {
+                    let snapshot = route_controller
+                        .set_model_intent(crate::route::ModelIntent::with_grade(parsed))
+                        .await;
+                    omegon_traits::SlashCommandResponse {
+                        accepted: true,
+                        output: Some(format!(
+                            "Model intent updated — {}. Active route unchanged: {}",
+                            snapshot.intent.summary(),
+                            snapshot.serving_model().unwrap_or("disconnected")
+                        )),
+                    }
                 } else {
                     omegon_traits::SlashCommandResponse {
                         accepted: false,
@@ -4515,11 +4512,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             message: line.to_string(),
                         });
                     }
-                }
-                if response.accepted
-                    && let Ok(mut bridge_model) = runtime_resources.bridge_model.lock()
-                {
-                    *bridge_model = None;
                 }
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
