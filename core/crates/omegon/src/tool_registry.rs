@@ -102,9 +102,9 @@ pub mod session_log {
     pub const SESSION_LOG: &str = "agent_journal";
 }
 
-/// Model budget (tier switching) — owned by `features::model_budget`
+/// Model budget / intent controls — owned by `features::model_budget`
 pub mod model_budget {
-    pub const SET_MODEL_TIER: &str = "set_model_tier";
+    pub const SET_MODEL_INTENT: &str = "set_model_intent";
     pub const SWITCH_TO_OFFLINE_DRIVER: &str = "switch_to_offline_driver";
     pub const SET_THINKING_LEVEL: &str = "set_thinking_level";
 }
@@ -231,7 +231,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         // session_log (1)
         session_log::SESSION_LOG,
         // model_budget (3)
-        model_budget::SET_MODEL_TIER,
+        model_budget::SET_MODEL_INTENT,
         model_budget::SWITCH_TO_OFFLINE_DRIVER,
         model_budget::SET_THINKING_LEVEL,
         // manage_tools (1)

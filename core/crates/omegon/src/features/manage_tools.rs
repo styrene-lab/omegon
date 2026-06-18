@@ -42,7 +42,7 @@ pub static TOOL_GROUPS: &[(&str, &[&str])] = &[
     (
         "model-control",
         &[
-            "set_model_tier",
+            "set_model_intent",
             "switch_to_offline_driver",
             "set_thinking_level",
         ],

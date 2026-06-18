@@ -5565,3 +5565,38 @@ fn slash_settings_opens_settings_screen_without_command_panel() {
     assert!(matches!(result, SlashResult::Handled));
     assert!(app.settings_screen.is_some());
 }
+
+#[test]
+fn model_grade_slash_command_parses_and_rejects_local_grade() {
+    assert_eq!(
+        crate::tui::canonical_slash_command("model", "grade S"),
+        Some(crate::tui::CanonicalSlashCommand::SetModelGrade("S".into()))
+    );
+    assert_eq!(
+        crate::tui::canonical_slash_command("model", "grade local"),
+        None
+    );
+}
+
+#[test]
+fn legacy_model_tier_slash_commands_are_unknown() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    for command in [
+        "/gloriana",
+        "/victory",
+        "/retribution",
+        "/opus",
+        "/sonnet",
+        "/haiku",
+    ] {
+        let result = app.handle_slash_command(command, &tx);
+        match result {
+            SlashResult::Display(text) => {
+                assert!(text.contains("Unknown command"), "{command} got: {text}");
+            }
+            other => panic!("{command} should be unknown, got: {other:?}"),
+        }
+    }
+}

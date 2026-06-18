@@ -1,11 +1,10 @@
-//! Model budget — tier routing + thinking level control.
+//! Model budget — model intent + thinking level control.
 //!
 //! Provides two orthogonal levers for cost/capability tuning:
-//! 1. Model tier: gloriana (deep) → victory (capable) → retribution (fast)
+//! 1. Model intent: requested provider-neutral capability grade plus routing reason
 //! 2. Thinking level: off → minimal → low → medium → high
 //!
-//! Tools: set_model_tier, set_thinking_level
-//! Commands: /gloriana, /victory, /retribution, /haiku, /sonnet, /opus
+//! Tools: set_model_intent, set_thinking_level
 
 use std::sync::Arc;
 
@@ -34,6 +33,15 @@ impl ModelTier {
             "retribution" => Some(Self::Retribution),
             "victory" => Some(Self::Victory),
             "gloriana" => Some(Self::Gloriana),
+            _ => None,
+        }
+    }
+
+    fn parse_grade(s: &str) -> Option<Self> {
+        match s.to_ascii_uppercase().as_str() {
+            "F" | "D" | "C" => Some(Self::Retribution),
+            "B" | "A" => Some(Self::Victory),
+            "S" => Some(Self::Gloriana),
             _ => None,
         }
     }
@@ -204,23 +212,27 @@ impl Feature for ModelBudget {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: crate::tool_registry::model_budget::SET_MODEL_TIER.into(),
-                label: "set_model_tier".into(),
-                description: "Switch the active model tier. Use 'retribution' for simple tasks, 'victory' for routine coding, 'gloriana' for deep reasoning.".into(),
+                name: crate::tool_registry::model_budget::SET_MODEL_INTENT.into(),
+                label: "set_model_intent".into(),
+                description: "Switch the active model intent by provider-neutral grade. Use D/C for simple work, B/A for routine coding, S for deep reasoning. Use provider=local to request local endpoints; local is not a grade.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "tier": {
+                        "grade": {
                             "type": "string",
-                            "enum": ["local", "retribution", "victory", "gloriana"],
-                            "description": "Target model tier"
+                            "enum": ["F", "D", "C", "B", "A", "S"],
+                            "description": "Target provider-neutral model capability grade; local is not a grade"
+                        },
+                        "provider": {
+                            "type": "string",
+                            "description": "Optional provider selector such as auto, local, upstream, or an endpoint/provider id"
                         },
                         "reason": {
                             "type": "string",
                             "description": "Brief explanation for the tier change"
                         }
                     },
-                    "required": ["tier", "reason"]
+                    "required": ["grade", "reason"]
                 }),
                 capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
@@ -276,17 +288,20 @@ impl Feature for ModelBudget {
         _cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
-            crate::tool_registry::model_budget::SET_MODEL_TIER => {
-                let tier_str = args["tier"]
+            crate::tool_registry::model_budget::SET_MODEL_INTENT => {
+                let grade_str = args["grade"]
                     .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("tier required"))?;
+                    .ok_or_else(|| anyhow::anyhow!("grade required"))?;
                 let reason = args["reason"].as_str().unwrap_or("No reason given");
-                let tier = ModelTier::parse(tier_str)
-                    .ok_or_else(|| anyhow::anyhow!("Invalid tier: {tier_str}"))?;
+                let provider = args["provider"].as_str().unwrap_or("auto");
+                let tier = ModelTier::parse_grade(grade_str)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid grade: {grade_str}; expected F, D, C, B, A, or S. Use provider=local for local endpoints."))?;
                 let msg = self.switch_tier(tier, reason).await?;
                 Ok(ToolResult {
-                    content: vec![ContentBlock::Text { text: msg }],
-                    details: json!({"tier": tier_str, "model": tier.resolve_model(&self.current_provider(), "")}),
+                    content: vec![ContentBlock::Text {
+                        text: format!("{msg}\nIntent: grade {grade_str}, provider {provider}"),
+                    }],
+                    details: json!({"grade": grade_str, "provider": provider, "model": tier.resolve_model(&self.current_provider(), "")}),
                 })
             }
             crate::tool_registry::model_budget::SWITCH_TO_OFFLINE_DRIVER => {
@@ -302,7 +317,7 @@ impl Feature for ModelBudget {
                             "{msg}\nModel preference: {model}. Local inference via Ollama."
                         ),
                     }],
-                    details: json!({"tier": "local", "preferred_model": model, "reason": reason}),
+                    details: json!({"provider": "local", "preferred_model": model, "reason": reason}),
                 })
             }
             crate::tool_registry::model_budget::SET_THINKING_LEVEL => {
@@ -323,62 +338,11 @@ impl Feature for ModelBudget {
     }
 
     fn commands(&self) -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition {
-                name: "gloriana".into(),
-                description: "Switch to gloriana tier (deep reasoning)".into(),
-                subcommands: vec![],
-                availability: omegon_traits::CommandAvailability::ALL,
-                safety: omegon_traits::CommandSafety::STATE_CHANGING,
-            },
-            CommandDefinition {
-                name: "victory".into(),
-                description: "Switch to victory tier (capable coding)".into(),
-                subcommands: vec![],
-                availability: omegon_traits::CommandAvailability::ALL,
-                safety: omegon_traits::CommandSafety::STATE_CHANGING,
-            },
-            CommandDefinition {
-                name: "retribution".into(),
-                description: "Switch to retribution tier (fast/cheap)".into(),
-                subcommands: vec![],
-                availability: omegon_traits::CommandAvailability::ALL,
-                safety: omegon_traits::CommandSafety::STATE_CHANGING,
-            },
-            // Aliases for familiarity
-            CommandDefinition {
-                name: "opus".into(),
-                description: "Switch to gloriana/opus tier".into(),
-                subcommands: vec![],
-                availability: omegon_traits::CommandAvailability::ALL,
-                safety: omegon_traits::CommandSafety::STATE_CHANGING,
-            },
-            CommandDefinition {
-                name: "sonnet".into(),
-                description: "Switch to victory/sonnet tier".into(),
-                subcommands: vec![],
-                availability: omegon_traits::CommandAvailability::ALL,
-                safety: omegon_traits::CommandSafety::STATE_CHANGING,
-            },
-            CommandDefinition {
-                name: "haiku".into(),
-                description: "Switch to retribution/haiku tier".into(),
-                subcommands: vec![],
-                availability: omegon_traits::CommandAvailability::ALL,
-                safety: omegon_traits::CommandSafety::STATE_CHANGING,
-            },
-        ]
+        vec![]
     }
 
-    fn handle_command(&mut self, name: &str, _args: &str) -> CommandResult {
-        let tier = match name {
-            "gloriana" | "opus" => ModelTier::Gloriana,
-            "victory" | "sonnet" => ModelTier::Victory,
-            "retribution" | "haiku" => ModelTier::Retribution,
-            _ => return CommandResult::NotHandled,
-        };
-        let msg = self.switch_tier_legacy(tier, &format!("/{name} command"));
-        CommandResult::Display(msg)
+    fn handle_command(&mut self, _name: &str, _args: &str) -> CommandResult {
+        CommandResult::NotHandled
     }
 }
 
@@ -397,6 +361,15 @@ mod tests {
         assert_eq!(ModelTier::parse("local"), Some(ModelTier::Local));
         assert_eq!(ModelTier::parse("GLORIANA"), Some(ModelTier::Gloriana));
         assert_eq!(ModelTier::parse("invalid"), None);
+    }
+
+    #[test]
+    fn grade_parse_rejects_local() {
+        assert_eq!(ModelTier::parse_grade("S"), Some(ModelTier::Gloriana));
+        assert_eq!(ModelTier::parse_grade("B"), Some(ModelTier::Victory));
+        assert_eq!(ModelTier::parse_grade("D"), Some(ModelTier::Retribution));
+        assert_eq!(ModelTier::parse_grade("local"), None);
+        assert_eq!(ModelTier::parse_grade("victory"), None);
     }
 
     #[test]
@@ -485,17 +458,23 @@ mod tests {
     }
 
     #[test]
-    fn command_aliases() {
+    fn legacy_tier_commands_are_not_handled() {
         let settings = crate::settings::shared("test");
         let mut budget = ModelBudget::new(settings.clone());
 
-        let result = budget.handle_command("opus", "");
-        assert!(matches!(result, CommandResult::Display(ref s) if s.contains("gloriana")));
-
-        let result = budget.handle_command("sonnet", "");
-        assert!(matches!(result, CommandResult::Display(ref s) if s.contains("victory")));
-
-        let result = budget.handle_command("haiku", "");
-        assert!(matches!(result, CommandResult::Display(ref s) if s.contains("retribution")));
+        for command in [
+            "gloriana",
+            "victory",
+            "retribution",
+            "opus",
+            "sonnet",
+            "haiku",
+        ] {
+            let result = budget.handle_command(command, "");
+            assert!(
+                matches!(result, CommandResult::NotHandled),
+                "legacy command /{command} should not be handled: {result:?}"
+            );
+        }
     }
 }

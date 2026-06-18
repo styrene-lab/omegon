@@ -434,7 +434,7 @@ impl DelegateWorkerProfile {
                 "memory_episodes".into(),
                 "memory_compact".into(),
                 "manage_tools".into(),
-                "set_model_tier".into(),
+                "set_model_intent".into(),
                 "switch_to_offline_driver".into(),
                 "set_thinking_level".into(),
                 "agent_journal".into(),

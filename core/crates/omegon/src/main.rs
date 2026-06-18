@@ -4485,6 +4485,50 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 }
             }
 
+            tui::TuiCommand::SetModelGrade { grade, respond_to } => {
+                let target = match grade.as_str() {
+                    "S" => Some("anthropic:claude-fable-5"),
+                    "A" | "B" => Some("anthropic:claude-sonnet-4-6"),
+                    "C" | "D" | "F" => Some("anthropic:claude-haiku-4-5-20251001"),
+                    _ => None,
+                };
+                let response = if let Some(model) = target {
+                    control_runtime::set_model_response(
+                        &mut agent,
+                        &shared_settings,
+                        &bridge,
+                        Some(route_controller.clone()),
+                        model,
+                    )
+                    .await
+                } else {
+                    omegon_traits::SlashCommandResponse {
+                        accepted: false,
+                        output: Some(format!(
+                            "Invalid model grade: {grade}. Use F, D, C, B, A, or S. Use /model provider local for local endpoints."
+                        )),
+                    }
+                };
+                if let Some(output) = response.output.clone() {
+                    for line in output.split('\n') {
+                        let _ = events_tx.send(AgentEvent::SystemNotification {
+                            message: line.to_string(),
+                        });
+                    }
+                }
+                if response.accepted
+                    && let Ok(mut bridge_model) = runtime_resources.bridge_model.lock()
+                {
+                    *bridge_model = None;
+                }
+                if let Some(respond_to) = respond_to {
+                    let _ = respond_to.send(omegon_traits::ControlOutputResponse {
+                        accepted: response.accepted,
+                        output: response.output,
+                    });
+                }
+            }
+
             tui::TuiCommand::SetThinking { level, respond_to } => {
                 let response =
                     control_runtime::set_thinking_response(&shared_settings, &agent.cwd, level).await;
