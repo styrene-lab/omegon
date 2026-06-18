@@ -143,6 +143,14 @@ impl ModelRegistry {
             .map(|s| s.as_str())
     }
 
+    /// Model for a provider-neutral capability grade + provider (bare model ID).
+    ///
+    /// This is a migration shim over the legacy JSON `tiers` map until the
+    /// registry is converted to endpoint/model capability rows.
+    pub fn grade_model(&self, grade: &str, provider: &str) -> Option<&str> {
+        self.tier_model(legacy_tier_for_grade(grade)?, provider)
+    }
+
     /// Full model entry by qualified ID ("provider:model_id").
     pub fn model_info(&self, qualified_id: &str) -> Option<&ModelEntry> {
         self.models.get(qualified_id)
@@ -208,6 +216,11 @@ impl ModelRegistry {
             }
         }
         best.map(|(_, t)| t)
+    }
+
+    /// Infer provider-neutral capability grade from route patterns.
+    pub fn infer_grade(&self, provider: &str, model_id: &str) -> Option<&'static str> {
+        legacy_grade_for_tier(self.infer_tier(provider, model_id)?)
     }
 
     /// Whether this model supports reasoning/thinking parameters.
@@ -277,6 +290,25 @@ impl ModelRegistry {
     }
 }
 
+
+fn legacy_tier_for_grade(grade: &str) -> Option<&'static str> {
+    match grade.to_ascii_uppercase().as_str() {
+        "S" => Some("gloriana"),
+        "A" | "B" => Some("victory"),
+        "F" | "D" | "C" => Some("retribution"),
+        _ => None,
+    }
+}
+
+fn legacy_grade_for_tier(tier: &str) -> Option<&'static str> {
+    match tier {
+        "gloriana" => Some("S"),
+        "victory" => Some("B"),
+        "retribution" => Some("D"),
+        _ => None,
+    }
+}
+
 /// Simple glob matching: `*` at end matches any suffix, otherwise exact.
 fn glob_match(pattern: &str, value: &str) -> bool {
     if let Some(prefix) = pattern.strip_suffix('*') {
@@ -308,18 +340,18 @@ mod tests {
     }
 
     #[test]
-    fn tier_model_lookup() {
+    fn grade_model_lookup() {
         let reg = ModelRegistry::global();
-        assert_eq!(reg.tier_model("gloriana", "openai"), Some("gpt-5.5"));
+        assert_eq!(reg.grade_model("S", "openai"), Some("gpt-5.5"));
         assert_eq!(
-            reg.tier_model("gloriana", "anthropic"),
+            reg.grade_model("S", "anthropic"),
             Some("claude-fable-5")
         );
         assert_eq!(
-            reg.tier_model("retribution", "anthropic"),
+            reg.grade_model("D", "anthropic"),
             Some("claude-haiku-4-5-20251001")
         );
-        assert_eq!(reg.tier_model("gloriana", "nonexistent"), None);
+        assert_eq!(reg.grade_model("S", "nonexistent"), None);
     }
 
     #[test]
@@ -331,8 +363,8 @@ mod tests {
         assert_eq!(info.context_output, 131_072);
         assert_eq!(info.cost_tier, "premium");
         assert_eq!(
-            reg.infer_tier("anthropic", "claude-opus-4-8"),
-            Some("gloriana")
+            reg.infer_grade("anthropic", "claude-opus-4-8"),
+            Some("S")
         );
     }
 
@@ -366,14 +398,14 @@ mod tests {
     }
 
     #[test]
-    fn infer_tier_from_routes() {
+    fn infer_grade_from_routes() {
         let reg = ModelRegistry::global();
-        assert_eq!(reg.infer_tier("openai", "gpt-5.5"), Some("gloriana"));
+        assert_eq!(reg.infer_grade("openai", "gpt-5.5"), Some("S"));
         assert_eq!(
-            reg.infer_tier("anthropic", "claude-haiku-4-5-20251001"),
-            Some("retribution")
+            reg.infer_grade("anthropic", "claude-haiku-4-5-20251001"),
+            Some("D")
         );
-        assert_eq!(reg.infer_tier("openai", "gpt-5-mini"), Some("retribution"));
+        assert_eq!(reg.infer_grade("openai", "gpt-5-mini"), Some("D"));
     }
 
     #[test]
