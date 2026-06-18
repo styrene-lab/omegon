@@ -1835,6 +1835,7 @@ pub async fn context_status_response(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn context_status_projection(
     est: usize,
     ctx_window: usize,
