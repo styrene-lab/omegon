@@ -282,6 +282,7 @@ pub struct CapabilityRequest {
     pub grade: CapabilityGradeBand,
     pub prefer_local: bool,
     pub avoid_providers: Vec<String>,
+    pub only_providers: Vec<String>,
 }
 
 impl Default for CapabilityRequest {
@@ -290,6 +291,7 @@ impl Default for CapabilityRequest {
             grade: CapabilityGradeBand::Frontier,
             prefer_local: false,
             avoid_providers: vec![],
+            only_providers: vec![],
         }
     }
 }
@@ -309,6 +311,7 @@ pub fn route(req: &CapabilityRequest, inventory: &ProviderInventory) -> Vec<Prov
         .entries
         .iter()
         .filter(|e| e.has_credentials)
+        .filter(|e| req.only_providers.is_empty() || req.only_providers.contains(&e.provider_id))
         .filter(|e| !req.avoid_providers.contains(&e.provider_id))
         .filter(|e| e.capability_grade >= req.grade)
         .map(|e| {
@@ -525,6 +528,7 @@ mod tests {
             grade: CapabilityGradeBand::Frontier,
             prefer_local: false,
             avoid_providers: vec![],
+            only_providers: vec![],
         };
         let candidates = route(&req, &inv);
         // Anthropic can satisfy Frontier (Max >= Frontier), Ollama cannot (Mid < Frontier)
@@ -539,6 +543,7 @@ mod tests {
             grade: CapabilityGradeBand::Leaf,
             prefer_local: false,
             avoid_providers: vec![],
+            only_providers: vec![],
         };
         let candidates = route(&req, &inv);
         assert_eq!(candidates.len(), 1);
@@ -567,6 +572,7 @@ mod tests {
             grade: CapabilityGradeBand::Leaf, // Both can satisfy Leaf
             prefer_local: true,
             avoid_providers: vec![],
+            only_providers: vec![],
         };
         let candidates = route(&req, &inv);
         assert!(candidates.len() >= 2);
@@ -583,6 +589,7 @@ mod tests {
             grade: CapabilityGradeBand::Frontier,
             prefer_local: false,
             avoid_providers: vec!["anthropic".to_string()],
+            only_providers: vec![],
         };
         let candidates = route(&req, &inv);
         assert_eq!(candidates.len(), 1);

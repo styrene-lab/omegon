@@ -285,6 +285,7 @@ pub async fn run_cleave(
                                     grade,
                                     prefer_local: false,
                                     avoid_providers: vec![],
+                                    only_providers: vec![],
                                 };
                                 let candidates = crate::routing::route(&req, &inv);
                                 if let Some(best) = candidates.first() {
@@ -475,6 +476,7 @@ pub async fn run_cleave(
                                     grade: tier,
                                     prefer_local: false,
                                     avoid_providers: vec![provider.clone()],
+                                    only_providers: vec![],
                                 };
                                 crate::routing::route(&req, &inv)
                                     .into_iter()

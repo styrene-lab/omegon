@@ -44,6 +44,15 @@ impl ModelGrade {
             Self::S => "S",
         }
     }
+
+    pub fn to_capability_grade_band(&self) -> crate::routing::CapabilityGradeBand {
+        match self {
+            Self::S => crate::routing::CapabilityGradeBand::Max,
+            Self::A | Self::B => crate::routing::CapabilityGradeBand::Frontier,
+            Self::C | Self::D => crate::routing::CapabilityGradeBand::Mid,
+            Self::F => crate::routing::CapabilityGradeBand::Leaf,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,6 +155,36 @@ impl ModelIntent {
             exact_model_override: None,
             ..Self::default()
         }
+    }
+
+    pub fn to_capability_request(&self) -> crate::routing::CapabilityRequest {
+        let grade = if let Some(exact) = self.exact_model_override.as_deref() {
+            crate::routing::infer_model_grade_band(exact)
+        } else {
+            self.grade
+                .clone()
+                .unwrap_or(ModelGrade::B)
+                .to_capability_grade_band()
+        };
+        let mut req = crate::routing::CapabilityRequest {
+            grade,
+            ..Default::default()
+        };
+        match &self.provider_selection {
+            ProviderSelection::Auto => {}
+            ProviderSelection::Local => {
+                req.only_providers.push("ollama".into());
+                req.prefer_local = true;
+            }
+            ProviderSelection::Upstream => req.avoid_providers.push("ollama".into()),
+            ProviderSelection::Endpoint(endpoint) => req.only_providers.push(endpoint.clone()),
+        }
+        if let Some(exact) = self.exact_model_override.as_deref() {
+            let provider = crate::providers::infer_provider_id(exact);
+            req.only_providers.clear();
+            req.only_providers.push(provider);
+        }
+        req
     }
 
     pub fn summary(&self) -> String {
@@ -1555,5 +1594,37 @@ mod tests {
         );
         assert_eq!(snapshot.intent.grade_policy, GradePolicy::Exact);
         assert_eq!(snapshot.intent.exact_model_override, None);
+    }
+    #[test]
+    fn model_intent_grade_maps_to_capability_request() {
+        let intent = ModelIntent::with_grade(ModelGrade::S);
+        let req = intent.to_capability_request();
+        assert_eq!(req.grade, crate::routing::CapabilityGradeBand::Max);
+        assert!(req.only_providers.is_empty());
+    }
+
+    #[test]
+    fn model_intent_local_provider_maps_to_ollama_only() {
+        let mut intent = ModelIntent::with_grade(ModelGrade::D);
+        intent.provider_selection = ProviderSelection::Local;
+        let req = intent.to_capability_request();
+        assert_eq!(req.only_providers, vec!["ollama"]);
+        assert!(req.prefer_local);
+    }
+
+    #[test]
+    fn model_intent_endpoint_provider_maps_to_only_provider() {
+        let mut intent = ModelIntent::with_grade(ModelGrade::B);
+        intent.provider_selection = ProviderSelection::Endpoint("groq".into());
+        let req = intent.to_capability_request();
+        assert_eq!(req.only_providers, vec!["groq"]);
+    }
+
+    #[test]
+    fn model_intent_exact_override_restricts_to_pinned_provider() {
+        let intent = ModelIntent::pinned_model("openai-codex:gpt-5.4".into());
+        let req = intent.to_capability_request();
+        assert_eq!(req.only_providers, vec!["openai-codex"]);
+        assert_eq!(req.grade, crate::routing::CapabilityGradeBand::Max);
     }
 }

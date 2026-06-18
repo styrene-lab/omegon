@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added a pure bridge from durable model intent to provider routing requests, including provider-only filters for endpoint selection.
 - Added endpoint-profile-driven error normalization for OpenAI-compatible non-success responses.
 - Added profile schema support for durable model intent persistence.
 - Added `/model route` and `/model providers` aliases for inspecting active model routing and provider options.
