@@ -290,7 +290,6 @@ impl ModelRegistry {
     }
 }
 
-
 fn legacy_tier_for_grade(grade: &str) -> Option<&'static str> {
     match grade.to_ascii_uppercase().as_str() {
         "S" => Some("gloriana"),
@@ -343,10 +342,7 @@ mod tests {
     fn grade_model_lookup() {
         let reg = ModelRegistry::global();
         assert_eq!(reg.grade_model("S", "openai"), Some("gpt-5.5"));
-        assert_eq!(
-            reg.grade_model("S", "anthropic"),
-            Some("claude-fable-5")
-        );
+        assert_eq!(reg.grade_model("S", "anthropic"), Some("claude-fable-5"));
         assert_eq!(
             reg.grade_model("D", "anthropic"),
             Some("claude-haiku-4-5-20251001")
@@ -362,10 +358,7 @@ mod tests {
         assert_eq!(info.context_input, 1_000_000);
         assert_eq!(info.context_output, 131_072);
         assert_eq!(info.cost_tier, "premium");
-        assert_eq!(
-            reg.infer_grade("anthropic", "claude-opus-4-8"),
-            Some("S")
-        );
+        assert_eq!(reg.infer_grade("anthropic", "claude-opus-4-8"), Some("S"));
     }
 
     #[test]

@@ -58,7 +58,7 @@ delegate/cleave child routing.
 ## 7. 0.27.0 model intent and endpoint matrix follow-up
 <!-- specs: provider-route/model-intent -->
 
-- [ ] 7.1 Replace legacy `ModelTier` vocabulary with provider-neutral `ModelGrade` F/D/C/B/A/S; remove `Local` as a capability value.
+- [x] 7.1 Replace legacy `ModelTier` vocabulary with provider-neutral `ModelGrade` F/D/C/B/A/S; remove `Local` as a capability value.
 - [x] 7.2 Remove legacy slash commands `/gloriana`, `/victory`, `/retribution`, `/opus`, `/sonnet`, and `/haiku` entirely; they should be unknown commands, not hidden aliases.
 - [x] 7.3 Replace legacy `set_model_tier` semantics with model-intent tooling (`set_model_intent` preferred, or explicit grade/provider/policy tools during migration).
 - [ ] 7.4 Extend the model registry from provider-tier maps to endpoint/model capability rows with grade, grade source, context window, tool/streaming/json/vision support, and cost/latency bands.

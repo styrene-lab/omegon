@@ -17,77 +17,66 @@ use omegon_traits::{
 
 use crate::settings::{SharedSettings, ThinkingLevel};
 
-/// Tier definitions with resolution priority.
+/// Provider-neutral model capability grades.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModelTier {
-    Local,
-    Retribution,
-    Victory,
-    Gloriana,
+pub enum ModelGrade {
+    F,
+    D,
+    C,
+    B,
+    A,
+    S,
 }
 
-impl ModelTier {
+impl ModelGrade {
     fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "local" => Some(Self::Local),
-            "retribution" => Some(Self::Retribution),
-            "victory" => Some(Self::Victory),
-            "gloriana" => Some(Self::Gloriana),
-            _ => None,
-        }
-    }
-
-    fn parse_grade(s: &str) -> Option<Self> {
-        match s.to_ascii_uppercase().as_str() {
-            "F" | "D" | "C" => Some(Self::Retribution),
-            "B" | "A" => Some(Self::Victory),
-            "S" => Some(Self::Gloriana),
+            "f" => Some(Self::F),
+            "d" => Some(Self::D),
+            "c" => Some(Self::C),
+            "b" => Some(Self::B),
+            "a" => Some(Self::A),
+            "s" => Some(Self::S),
             _ => None,
         }
     }
 
     fn as_str(&self) -> &'static str {
         match self {
-            Self::Local => "local",
-            Self::Retribution => "retribution",
-            Self::Victory => "victory",
-            Self::Gloriana => "gloriana",
+            Self::F => "F",
+            Self::D => "D",
+            Self::C => "C",
+            Self::B => "B",
+            Self::A => "A",
+            Self::S => "S",
         }
     }
 
     fn icon(&self) -> &'static str {
         match self {
-            Self::Local => "🤖",
-            Self::Retribution => "💨",
-            Self::Victory => "↯",
-            Self::Gloriana => "🧠",
+            Self::F | Self::D | Self::C => "💨",
+            Self::B | Self::A => "↯",
+            Self::S => "🧠",
         }
     }
 
     fn description(&self) -> &'static str {
         match self {
-            Self::Local => "On-device model via Ollama",
-            Self::Retribution => "Fast, cheap — boilerplate and lookups",
-            Self::Victory => "Capable — routine coding and execution",
-            Self::Gloriana => "Deep reasoning — architecture and complex debugging",
+            Self::F => "Minimal capability — cheapest viable route",
+            Self::D => "Fast, cheap — boilerplate and lookups",
+            Self::C => "Fast routine assistance",
+            Self::B => "Capable — routine coding and execution",
+            Self::A => "Strong — complex implementation and review",
+            Self::S => "Deep reasoning — architecture and complex debugging",
         }
     }
 
-    /// Resolve tier to a concrete model ID from the model registry.
-    /// If the registry has no entry for this tier+provider, falls back
+    /// Resolve grade to a concrete model ID from the model registry.
+    /// If the registry has no entry for this grade+provider, falls back
     /// to the provider default.
     fn resolve_model(&self, provider: &str, _current_model: &str) -> String {
-        if matches!(self, Self::Local) {
-            return "local".to_string();
-        }
-        let tier_name = match self {
-            Self::Gloriana => "gloriana",
-            Self::Victory => "victory",
-            Self::Retribution => "retribution",
-            Self::Local => unreachable!(),
-        };
         let reg = crate::model_registry::ModelRegistry::global();
-        reg.tier_model(tier_name, provider)
+        reg.grade_model(self.as_str(), provider)
             .or_else(|| reg.default_model(provider))
             .unwrap_or("claude-sonnet-4-6")
             .to_string()
@@ -121,25 +110,12 @@ impl ModelBudget {
         self.settings.lock().unwrap().provider().to_string()
     }
 
-    async fn switch_tier(&self, tier: ModelTier, reason: &str) -> anyhow::Result<String> {
+    async fn switch_grade(&self, grade: ModelGrade, reason: &str) -> anyhow::Result<String> {
         let (provider, current) = {
             let s = self.settings.lock().unwrap();
-            let provider = if matches!(tier, ModelTier::Local) {
-                "ollama".to_string()
-            } else {
-                s.provider().to_string()
-            };
-            (provider, s.model_short().to_string())
+            (s.provider().to_string(), s.model_short().to_string())
         };
-        let model = if matches!(tier, ModelTier::Local) {
-            if provider == "ollama" && current != "local" {
-                current
-            } else {
-                "qwen3:30b".to_string()
-            }
-        } else {
-            tier.resolve_model(&provider, &current)
-        };
+        let model = grade.resolve_model(&provider, &current);
         let target = format!("{provider}:{model}");
         if let Some(controller) = self.route_controller.as_ref() {
             let bridge = crate::providers::auto_detect_bridge(&target).await;
@@ -157,38 +133,73 @@ impl ModelBudget {
         }
         Ok(format!(
             "{} {} → {target} ({})\n{reason}",
-            tier.icon(),
-            tier.as_str(),
-            tier.description(),
+            grade.icon(),
+            grade.as_str(),
+            grade.description(),
         ))
     }
 
-    fn switch_tier_legacy(&self, tier: ModelTier, reason: &str) -> String {
+    fn switch_grade_legacy(&self, grade: ModelGrade, reason: &str) -> String {
         let mut s = self.settings.lock().unwrap();
-        let provider = if matches!(tier, ModelTier::Local) {
-            "ollama".to_string()
-        } else {
-            s.provider().to_string()
-        };
+        let provider = s.provider().to_string();
         let current = s.model_short().to_string();
-        let model = if matches!(tier, ModelTier::Local) {
-            if s.provider() == "ollama" && current != "local" {
-                current
-            } else {
-                "qwen3:30b".to_string()
-            }
-        } else {
-            tier.resolve_model(&provider, &current)
-        };
+        let model = grade.resolve_model(&provider, &current);
         let target = format!("{provider}:{model}");
         s.set_model(&target);
         s.provider_connected = crate::auth::provider_connected_for_model(&target);
         drop(s);
         format!(
             "{} {} → {target} ({})\n{reason}",
-            tier.icon(),
-            tier.as_str(),
-            tier.description(),
+            grade.icon(),
+            grade.as_str(),
+            grade.description(),
+        )
+    }
+
+    async fn switch_offline(&self, reason: &str) -> anyhow::Result<String> {
+        let current = self.settings.lock().unwrap().model_short().to_string();
+        let model = if self.current_provider() == "ollama" && current != "local" {
+            current
+        } else {
+            "qwen3:30b".to_string()
+        };
+        let target = format!("ollama:{model}");
+        if let Some(controller) = self.route_controller.as_ref() {
+            let bridge = crate::providers::auto_detect_bridge(&target).await;
+            let snapshot = controller
+                .switch_model(target.clone(), &crate::route::CredentialLedger, bridge)
+                .await?;
+            if snapshot.serving_model() != Some(target.as_str()) {
+                anyhow::bail!(snapshot.operator_status());
+            }
+        }
+        {
+            let mut s = self.settings.lock().unwrap();
+            s.set_model(&target);
+            s.provider_connected = crate::auth::provider_connected_for_model(&target);
+        }
+        Ok(format!(
+            "🤖 provider local → {target} (On-device model via Ollama)
+{reason}"
+        ))
+    }
+
+    fn switch_offline_legacy(&self, reason: &str) -> String {
+        let current = self.settings.lock().unwrap().model_short().to_string();
+        let model = if self.current_provider() == "ollama" && current != "local" {
+            current
+        } else {
+            "qwen3:30b".to_string()
+        };
+        let target = format!("ollama:{model}");
+        {
+            let mut s = self.settings.lock().unwrap();
+            s.set_model(&target);
+            s.provider_connected = crate::auth::provider_connected_for_model(&target);
+        }
+        format!(
+            "🤖 provider local → {target} (On-device model via Ollama)
+{reason}"
         )
     }
 
@@ -294,14 +305,14 @@ impl Feature for ModelBudget {
                     .ok_or_else(|| anyhow::anyhow!("grade required"))?;
                 let reason = args["reason"].as_str().unwrap_or("No reason given");
                 let provider = args["provider"].as_str().unwrap_or("auto");
-                let tier = ModelTier::parse_grade(grade_str)
+                let grade = ModelGrade::parse(grade_str)
                     .ok_or_else(|| anyhow::anyhow!("Invalid grade: {grade_str}; expected F, D, C, B, A, or S. Use provider=local for local endpoints."))?;
-                let msg = self.switch_tier(tier, reason).await?;
+                let msg = self.switch_grade(grade, reason).await?;
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: format!("{msg}\nIntent: grade {grade_str}, provider {provider}"),
                     }],
-                    details: json!({"grade": grade_str, "provider": provider, "model": tier.resolve_model(&self.current_provider(), "")}),
+                    details: json!({"grade": grade_str, "provider": provider, "model": grade.resolve_model(&self.current_provider(), "")}),
                 })
             }
             crate::tool_registry::model_budget::SWITCH_TO_OFFLINE_DRIVER => {
@@ -310,7 +321,7 @@ impl Feature for ModelBudget {
                     .unwrap_or("User requested offline mode");
                 let preferred = args["preferred_model"].as_str();
                 let model = preferred.unwrap_or("auto");
-                let msg = self.switch_tier(ModelTier::Local, reason).await?;
+                let msg = self.switch_offline(reason).await?;
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: format!(
@@ -351,77 +362,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tier_parse() {
-        assert_eq!(ModelTier::parse("gloriana"), Some(ModelTier::Gloriana));
-        assert_eq!(ModelTier::parse("victory"), Some(ModelTier::Victory));
-        assert_eq!(
-            ModelTier::parse("retribution"),
-            Some(ModelTier::Retribution)
-        );
-        assert_eq!(ModelTier::parse("local"), Some(ModelTier::Local));
-        assert_eq!(ModelTier::parse("GLORIANA"), Some(ModelTier::Gloriana));
-        assert_eq!(ModelTier::parse("invalid"), None);
+    fn grade_parse() {
+        assert_eq!(ModelGrade::parse("S"), Some(ModelGrade::S));
+        assert_eq!(ModelGrade::parse("B"), Some(ModelGrade::B));
+        assert_eq!(ModelGrade::parse("D"), Some(ModelGrade::D));
+        assert_eq!(ModelGrade::parse("invalid"), None);
     }
 
     #[test]
     fn grade_parse_rejects_local() {
-        assert_eq!(ModelTier::parse_grade("S"), Some(ModelTier::Gloriana));
-        assert_eq!(ModelTier::parse_grade("B"), Some(ModelTier::Victory));
-        assert_eq!(ModelTier::parse_grade("D"), Some(ModelTier::Retribution));
-        assert_eq!(ModelTier::parse_grade("local"), None);
-        assert_eq!(ModelTier::parse_grade("victory"), None);
+        assert_eq!(ModelGrade::parse("S"), Some(ModelGrade::S));
+        assert_eq!(ModelGrade::parse("B"), Some(ModelGrade::B));
+        assert_eq!(ModelGrade::parse("D"), Some(ModelGrade::D));
+        assert_eq!(ModelGrade::parse("local"), None);
+        assert_eq!(ModelGrade::parse("victory"), None);
     }
 
     #[test]
-    fn tier_resolve_anthropic() {
+    fn grade_resolve_anthropic() {
         assert_eq!(
-            ModelTier::Gloriana.resolve_model("anthropic", ""),
+            ModelGrade::S.resolve_model("anthropic", ""),
             "claude-fable-5"
         );
         assert!(
-            ModelTier::Victory
+            ModelGrade::B
                 .resolve_model("anthropic", "")
                 .contains("sonnet")
         );
         assert!(
-            ModelTier::Retribution
+            ModelGrade::D
                 .resolve_model("anthropic", "")
                 .contains("haiku")
         );
     }
 
     #[test]
-    fn tier_resolve_openai() {
-        assert_eq!(ModelTier::Gloriana.resolve_model("openai", ""), "gpt-5.5");
-        assert!(
-            ModelTier::Victory
-                .resolve_model("openai", "")
-                .contains("gpt")
-        );
+    fn grade_resolve_openai() {
+        assert_eq!(ModelGrade::S.resolve_model("openai", ""), "gpt-5.5");
+        assert!(ModelGrade::B.resolve_model("openai", "").contains("gpt"));
     }
 
     #[test]
-    fn tier_resolve_openai_codex() {
+    fn grade_resolve_openai_codex() {
+        assert_eq!(ModelGrade::B.resolve_model("openai-codex", ""), "gpt-5.4");
         assert_eq!(
-            ModelTier::Victory.resolve_model("openai-codex", ""),
-            "gpt-5.4"
-        );
-        assert_eq!(
-            ModelTier::Retribution.resolve_model("openai-codex", ""),
+            ModelGrade::D.resolve_model("openai-codex", ""),
             "gpt-5.4-mini"
         );
     }
 
     #[test]
-    fn switch_tier_updates_settings() {
+    fn switch_grade_updates_settings() {
         let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
         let budget = ModelBudget::new(settings.clone());
-        let msg = budget.switch_tier_legacy(ModelTier::Gloriana, "test");
-        assert!(msg.contains("gloriana"), "should mention tier: {msg}");
+        let msg = budget.switch_grade_legacy(ModelGrade::S, "test");
+        assert!(msg.contains("S"), "should mention grade: {msg}");
         assert_eq!(
             settings.lock().unwrap().model,
             "anthropic:claude-fable-5",
-            "should switch to highest-tier Anthropic model"
+            "should switch to highest-grade Anthropic model"
         );
     }
 
@@ -429,7 +428,7 @@ mod tests {
     fn switch_local_tier_moves_to_ollama_instead_of_anthropic() {
         let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
         let budget = ModelBudget::new(settings.clone());
-        let msg = budget.switch_tier_legacy(ModelTier::Local, "offline please");
+        let msg = budget.switch_offline_legacy("offline please");
         assert!(
             msg.contains("ollama:qwen3:30b"),
             "unexpected message: {msg}"
@@ -440,11 +439,11 @@ mod tests {
     #[test]
     fn resolve_preserves_current_model_version() {
         // If already on a sonnet variant, switching to victory should keep it
-        let model = ModelTier::Victory.resolve_model("anthropic", "claude-sonnet-4-6");
+        let model = ModelGrade::B.resolve_model("anthropic", "claude-sonnet-4-6");
         assert_eq!(model, "claude-sonnet-4-6", "should preserve exact version");
 
         // If on a different tier, should switch to highest-tier default.
-        let model = ModelTier::Gloriana.resolve_model("anthropic", "claude-sonnet-4-6");
+        let model = ModelGrade::S.resolve_model("anthropic", "claude-sonnet-4-6");
         assert_eq!(model, "claude-fable-5");
     }
 
