@@ -136,7 +136,7 @@
         "requiredHeaders": [],
         "optionalHeaders": [],
         "quirks": [],
-        "docsUrl": null,
+        "docsUrl": "https://platform.openai.com/docs/api-reference/chat/create",
         "verifiedAt": "2026-06-11"
       }
     },
@@ -160,7 +160,7 @@
         "requiredHeaders": [],
         "optionalHeaders": [],
         "quirks": [],
-        "docsUrl": null,
+        "docsUrl": "https://platform.openai.com/docs/api-reference/chat/create",
         "verifiedAt": "2026-06-11"
       }
     },
@@ -190,7 +190,7 @@
         "quirks": [
           "normalizes schema across providers/models"
         ],
-        "docsUrl": null,
+        "docsUrl": "https://openrouter.ai/docs/api-reference/chat-completion",
         "verifiedAt": "2026-06-11"
       }
     },
@@ -222,7 +222,7 @@
           "n must equal 1",
           "temperature 0 is converted to 1e-8"
         ],
-        "docsUrl": null,
+        "docsUrl": "https://console.groq.com/docs/openai",
         "verifiedAt": "2026-06-11"
       }
     },
@@ -249,7 +249,7 @@
           "parallel function calling supported",
           "prediction field supported"
         ],
-        "docsUrl": null,
+        "docsUrl": "https://docs.mistral.ai/api/#tag/chat/operation/chat_completion_v1_chat_completions_post",
         "verifiedAt": "2026-06-11"
       }
     },
@@ -275,7 +275,7 @@
         "quirks": [
           "tools include function and web-search forms"
         ],
-        "docsUrl": null,
+        "docsUrl": "https://docs.x.ai/docs/api-reference#chat-completions",
         "verifiedAt": "2026-06-11"
       }
     },
@@ -302,7 +302,7 @@
           "model IDs encode underlying provider",
           "supports grammars/constraints"
         ],
-        "docsUrl": null,
+        "docsUrl": "https://huggingface.co/docs/api-inference/tasks/chat-completion",
         "verifiedAt": "2026-06-11"
       }
     },
@@ -328,7 +328,7 @@
         "quirks": [
           "Gemini native semantics may differ from OpenAI-compatible baseline"
         ],
-        "docsUrl": null,
+        "docsUrl": "https://ai.google.dev/gemini-api/docs/openai",
         "verifiedAt": "2026-06-11"
       }
     },
