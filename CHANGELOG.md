@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Tightened the model-control redesign plan with adversarial follow-up requirements for Rust-native implementation scope, explicit grade/failover/degradation policies, atomic model-intent tooling, endpoint auth schemes, response/error normalization, and baseline spec cleanup.
 - Documented the 0.27.0 model-control redesign plan: provider-neutral F/D/C/B/A/S grades, separate endpoint/provider selection, protocol-profile-driven upstream provider matrix, and removal of legacy model-tier commands/tool semantics.
 - Strengthened model-facing Workbench/plan guidance so visible plans are treated as the operator's primary awareness surface and must be updated, completed, skipped, or cleared before final replies.
 - Added a runtime final-answer nudge when an assistant turn would end while the visible Workbench plan still has active/todo items.

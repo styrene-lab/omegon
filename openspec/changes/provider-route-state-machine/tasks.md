@@ -68,3 +68,11 @@ delegate/cleave child routing.
 - [ ] 7.8 Add `/model grade`, `/model provider`, `/model policy`, `/model route`, and `/model providers` to the canonical command registry and parser path.
 - [ ] 7.9 Preserve operator intent separately from active route so route failover can change the serving endpoint without erasing requested grade/provider/policy.
 - [ ] 7.10 Add tests proving local is not accepted as a grade, legacy commands/tools are absent, and grade+provider intent resolves through endpoint capability rows.
+
+- [ ] 7.11 Replace stale TypeScript implementation scope in provider-neutral model-control docs with Rust-native files before coding from the design.
+- [ ] 7.12 Define default grade, provider selection, grade policy, failover policy, and degradation policy for interactive sessions and daemon agents.
+- [ ] 7.13 Add exact model override clearing (`/model unpin` or equivalent) and make pinned state visible in route/status projections.
+- [ ] 7.14 Enforce reserved provider selector tokens (`auto`, `local`, `upstream`) in registry/profile validation.
+- [ ] 7.15 Extend OpenAI-compatible endpoint profiles to normalize responses and provider-specific errors, not only request fields.
+- [ ] 7.16 Add data-driven endpoint auth schemes and route credential probing through endpoint metadata.
+- [ ] 7.17 Update or remove baseline routing/effort specs that still require `/local`, `/haiku`, `/sonnet`, `/opus`, or `set_model_tier`.
