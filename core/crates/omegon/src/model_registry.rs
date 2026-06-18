@@ -15,6 +15,9 @@ static REGISTRY: OnceLock<ModelRegistry> = OnceLock::new();
 #[serde(rename_all = "camelCase")]
 struct RegistryFile {
     defaults: HashMap<String, String>,
+    #[serde(default)]
+    grades: HashMap<String, HashMap<String, String>>,
+    #[serde(default)]
     tiers: HashMap<String, HashMap<String, String>>,
     routes: Vec<RouteEntry>,
     models: Vec<ModelEntry>,
@@ -72,7 +75,10 @@ pub struct RouteEntry {
     pub model_id_pattern: String,
     #[serde(rename = "contextCeiling")]
     pub context_ceiling: usize,
-    pub tier: String,
+    #[serde(default)]
+    pub grade: Option<String>,
+    #[serde(default)]
+    pub tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -103,7 +109,7 @@ pub struct PricingEntry {
 
 pub struct ModelRegistry {
     defaults: HashMap<String, String>,
-    tiers: HashMap<String, HashMap<String, String>>,
+    grades: HashMap<String, HashMap<String, String>>,
     routes: Vec<RouteEntry>,
     /// Keyed by "provider:model_id"
     models: HashMap<String, ModelEntry>,
@@ -122,7 +128,11 @@ impl ModelRegistry {
             }
             ModelRegistry {
                 defaults: file.defaults,
-                tiers: file.tiers,
+                grades: if file.grades.is_empty() {
+                    legacy_grades_from_tiers(file.tiers)
+                } else {
+                    file.grades
+                },
                 routes: file.routes,
                 models,
                 inference_defaults: file.inference_defaults,
@@ -135,20 +145,17 @@ impl ModelRegistry {
         self.defaults.get(provider).map(|s| s.as_str())
     }
 
-    /// Model for a given tier + provider (bare model ID).
-    pub fn tier_model(&self, tier: &str, provider: &str) -> Option<&str> {
-        self.tiers
-            .get(tier)
+    /// Model for a provider-neutral capability grade + provider (bare model ID).
+    pub fn grade_model(&self, grade: &str, provider: &str) -> Option<&str> {
+        self.grades
+            .get(&grade.to_ascii_uppercase())
             .and_then(|m| m.get(provider))
             .map(|s| s.as_str())
     }
 
-    /// Model for a provider-neutral capability grade + provider (bare model ID).
-    ///
-    /// This is a migration shim over the legacy JSON `tiers` map until the
-    /// registry is converted to endpoint/model capability rows.
-    pub fn grade_model(&self, grade: &str, provider: &str) -> Option<&str> {
-        self.tier_model(legacy_tier_for_grade(grade)?, provider)
+    /// Compatibility shim for older routing code that still asks for legacy tier keys.
+    pub fn tier_model(&self, tier: &str, provider: &str) -> Option<&str> {
+        self.grade_model(legacy_grade_for_tier(tier)?, provider)
     }
 
     /// Full model entry by qualified ID ("provider:model_id").
@@ -196,8 +203,8 @@ impl ModelRegistry {
         best.map(|(_, c)| c)
     }
 
-    /// Infer capability tier from route patterns.
-    pub fn infer_tier(&self, provider: &str, model_id: &str) -> Option<&str> {
+    /// Infer provider-neutral capability grade from route patterns.
+    pub fn infer_grade(&self, provider: &str, model_id: &str) -> Option<&str> {
         let prov = if provider == "ollama" {
             "local"
         } else {
@@ -211,16 +218,19 @@ impl ModelRegistry {
             if glob_match(&route.model_id_pattern, model_id) {
                 let specificity = route.model_id_pattern.len();
                 if best.is_none_or(|(s, _)| specificity > s) {
-                    best = Some((specificity, route.tier.as_str()));
+                    let Some(grade) = route_grade(route) else {
+                        continue;
+                    };
+                    best = Some((specificity, grade));
                 }
             }
         }
         best.map(|(_, t)| t)
     }
 
-    /// Infer provider-neutral capability grade from route patterns.
-    pub fn infer_grade(&self, provider: &str, model_id: &str) -> Option<&'static str> {
-        legacy_grade_for_tier(self.infer_tier(provider, model_id)?)
+    /// Compatibility shim for older routing code that still asks for legacy tier keys.
+    pub fn infer_tier(&self, provider: &str, model_id: &str) -> Option<&'static str> {
+        legacy_tier_for_grade(self.infer_grade(provider, model_id)?)
     }
 
     /// Whether this model supports reasoning/thinking parameters.
@@ -290,8 +300,19 @@ impl ModelRegistry {
     }
 }
 
+fn legacy_grades_from_tiers(
+    tiers: HashMap<String, HashMap<String, String>>,
+) -> HashMap<String, HashMap<String, String>> {
+    tiers
+        .into_iter()
+        .filter_map(|(tier, models)| {
+            legacy_grade_for_tier(&tier).map(|grade| (grade.to_string(), models))
+        })
+        .collect()
+}
+
 fn legacy_tier_for_grade(grade: &str) -> Option<&'static str> {
-    match grade.to_ascii_uppercase().as_str() {
+    match grade {
         "S" => Some("gloriana"),
         "A" | "B" => Some("victory"),
         "F" | "D" | "C" => Some("retribution"),
@@ -306,6 +327,13 @@ fn legacy_grade_for_tier(tier: &str) -> Option<&'static str> {
         "retribution" => Some("D"),
         _ => None,
     }
+}
+
+fn route_grade(route: &RouteEntry) -> Option<&str> {
+    route
+        .grade
+        .as_deref()
+        .or_else(|| route.tier.as_deref().and_then(legacy_grade_for_tier))
 }
 
 /// Simple glob matching: `*` at end matches any suffix, otherwise exact.
@@ -325,6 +353,7 @@ mod tests {
     fn registry_loads_without_panic() {
         let reg = ModelRegistry::global();
         assert!(!reg.defaults.is_empty());
+        assert!(!reg.grades.is_empty());
         assert!(!reg.models.is_empty());
         assert!(!reg.routes.is_empty());
     }
@@ -425,12 +454,12 @@ mod tests {
                 "default model lacks context constraint: {provider}:{model_id}"
             );
         }
-        for (tier, providers) in &reg.tiers {
+        for (tier, providers) in &reg.grades {
             for (provider, model_id) in providers {
                 let info = reg.model_info_or_infer(provider, model_id);
                 assert!(
                     info.context_input > 0,
-                    "tier model lacks context constraint: {tier} {provider}:{model_id}"
+                    "grade model lacks context constraint: {tier} {provider}:{model_id}"
                 );
             }
         }

@@ -38,6 +38,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Migrated the bundled model registry from legacy tier maps/route fields to grade-based registry data and removed registry tier compatibility shims.
 - Updated the routing baseline delta spec from legacy tier aliases to provider-neutral grade and provider-selector scenarios.
 - Updated baseline context-class routing scenarios from legacy tier names to grade-policy terminology.
 - Updated baseline routing and effort specs from legacy tier commands/tooling to model grades, endpoint selectors, and `set_model_intent`.

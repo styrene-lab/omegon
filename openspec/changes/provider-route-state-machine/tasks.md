@@ -77,6 +77,6 @@ delegate/cleave child routing.
 - [ ] 7.16 Add data-driven endpoint auth schemes and route credential probing through endpoint metadata.
 - [x] 7.17 Update or remove baseline routing/effort specs that still require `/local`, `/haiku`, `/sonnet`, `/opus`, or `set_model_tier`.
 
-- [ ] 7.18 Replace remaining internal `ModelTier` bridge and `data/model-registry.json` `tiers`/`tier` fields with grade/capability-row data.
+- [x] 7.18 Replace remaining internal `ModelTier` bridge and `data/model-registry.json` `tiers`/`tier` fields with grade/capability-row data.
 - [x] 7.19 Update web/status/IPC projections that still expose `capability_tier` and legacy options (`retribution`, `victory`, `gloriana`).
 - [x] 7.20 Rewrite stale long-lived docs that still describe public tiers as stable (`docs/model-routing.md` was patched; baseline specs remain).
