@@ -141,26 +141,101 @@ Canonical command path:
 /model <provider:model>
 ```
 
-Agent-facing tools should align with the new ontology. Prefer `set_model_intent` as the durable target; if incremental tools are needed, use `set_model_grade`, `set_model_provider`, and `set_model_policy`. Do not keep `set_model_tier` as a transitional alias.
+Agent-facing tools should align with the new ontology. `set_model_intent` is the durable target and should update the whole model intent atomically. Avoid separate agent tools for grade/provider/policy unless they are thin command-path helpers over the same atomic reducer. Do not keep `set_model_tier` as a transitional alias.
+
+### Policy semantics to decide before implementation
+
+The current command sketch names `strict-grade`, but implementation must avoid ambiguous semantics. The implementation plan should split three concerns:
+
+```rust
+pub enum GradePolicy {
+    Exact,                         // requested grade only
+    Minimum,                       // requested grade or stronger
+    NearestAllowed { max_downgrade_steps: u8 },
+}
+
+pub enum FailoverPolicy {
+    SameGradeOtherEndpoint,
+    AnyPolicyCompliantEndpoint,
+}
+
+pub enum DegradationPolicy {
+    None,
+    OneStep,
+    BestEffort,
+    Ask,
+}
+```
+
+Exact concrete model switches create a pinned override. The command surface must include an escape hatch such as `/model unpin` or `/model intent clear-exact`; otherwise `/model grade ...` can appear ignored while the exact pin still wins.
+
+### Endpoint profile completeness
+
+OpenAI-compatible endpoint profiles must cover request shaping, response normalization, and error normalization:
+
+```rust
+pub struct EndpointProfile {
+    pub request: RequestProfile,
+    pub response: ResponseProfile,
+    pub error: ErrorProfile,
+    pub metadata: EndpointProfileMetadata,
+}
+```
+
+Profiles should include docs URL, verification date, and confidence so provider API drift is inspectable during future maintenance.
+
+### Auth scheme model
+
+`credential_ref` alone is insufficient. Endpoint definitions need an auth scheme so new upstream providers do not reintroduce provider-specific auth branches:
+
+```rust
+pub enum AuthScheme {
+    None,
+    BearerToken { secret_ref: String },
+    ApiKeyHeader { header: String, secret_ref: String },
+    OAuthProvider { provider: String },
+    Custom { kind: String, secret_ref: Option<String> },
+}
+```
+
+### Provider selector namespace
+
+`auto`, `local`, and `upstream` are reserved provider-selector tokens. Endpoint IDs must not use those names. `local` selects `EndpointClass::LocalDev`; `upstream` selects `EndpointClass::Upstream`; `auto` selects all enabled endpoints allowed by the operator profile and policy.
 
 ## Open Questions
 
-*No open questions.*
+- What is the default grade for new sessions? Candidate: `B` as daily-driver capable.
+- What is the default provider selection? Candidate: `auto`.
+- What is the default grade/failover/degradation policy for interactive sessions versus daemon agents?
+- Should `strict-grade` be replaced in the operator-facing vocabulary with explicit `exact`, `minimum`, and `nearest` grade policy terms?
+- What command clears a pinned exact model override: `/model unpin`, `/model mode auto`, or `/model intent clear-exact`?
+- Does `/model provider local` select all local-dev endpoints or only the default local-dev endpoint? Candidate: all enabled `EndpointClass::LocalDev` endpoints.
+- Should local-dev endpoints participate in `/model provider auto` by default, or only when the operator explicitly chooses local/local-first?
+- How are grade assignments reviewed, and when is `GradeSource::Heuristic` allowed to satisfy high-grade requests?
+- Does the bundled registry hard-break from `tiers` to capability rows, or is there an internal one-release data migration with no user-facing compatibility?
+- How will baseline OpenSpec requirements that still mention `/local`, `/haiku`, `/sonnet`, `/opus`, and `set_model_tier` be modified or removed for 0.27.0?
 
 ## Implementation Notes
 
 ### File Scope
 
-- `extensions/model-budget.ts` (modified) — Provider-aware tier descriptions and concrete provider/model notifications
-- `extensions/effort/index.ts` (modified) — Restore persisted driver model on startup and report resolved provider/model
-- `extensions/lib/model-preferences.ts` (new) — Persist and load last-used concrete driver model from `.omegon/profile.json`
-- `extensions/dashboard/footer.ts` (modified) — Compact footer cleanup to a single dashboard-first line with inline model visibility
-- `extensions/model-budget.test.ts` (new) — Coverage for provider-aware model control copy
-- `extensions/lib/model-preferences.test.ts` (new) — Coverage for last-used model persistence helpers
-- `extensions/dashboard/footer-compact.test.ts` (new) — Coverage for compact footer single-line rendering and inline model display
+- `core/crates/omegon/src/features/model_budget.rs` (modified) — replace `ModelTier` and legacy commands/tooling with model-intent vocabulary.
+- `core/crates/omegon/src/model_registry.rs` (modified) — migrate from provider-tier maps to endpoint/model capability rows.
+- `core/crates/omegon/src/route.rs` (modified) — preserve model intent separately from active route; expose structured resolution/failover reasons.
+- `core/crates/omegon/src/routing.rs` (modified) — resolve grade/provider/policy intent over endpoint capability rows.
+- `core/crates/omegon/src/command_registry.rs` (modified) — advertise canonical `/model grade|provider|policy|route|providers|unpin` subcommands.
+- `core/crates/omegon/src/tui/mod.rs` (modified) — parse new `/model` grammar before exact model fallback; remove legacy tier dispatch.
+- `core/crates/omegon/src/tui/model_catalog.rs` (modified) — project endpoint/model capabilities and provider-selector filters.
+- `core/crates/omegon/src/tui/footer.rs` and `core/crates/omegon/src/tui/segments.rs` (modified) — display intent and active route, including pinned/degraded/failover states.
+- `core/crates/omegon/src/ipc/snapshot.rs` and `core/crates/omegon/src/surfaces/` (modified) — expose renderer-neutral model intent/route projections.
+- `data/model-registry.json` (modified) — endpoint definitions, profiles, and model capability rows.
+- `pkl/` schemas (modified) — validate endpoint IDs, reserved provider-selector tokens, auth schemes, and capability row shape.
+- `openspec/baseline/routing.md` and `openspec/baseline/effort.md` (modified by the 0.27.0 OpenSpec delta) — remove or rewrite legacy tier requirements.
 
 ### Constraints
 
 - Persist only successful explicit model switches; failed switch attempts must not overwrite a working saved model.
-- On session_start, restore the persisted concrete model before falling back to effort-tier default routing.
-- Compact dashboard footer should remain single-line and dashboard-first while still exposing active model/provider at a glance on wide terminals.
+- Store operator intent separately from active route so failover can preserve requested grade/provider/policy while changing the serving endpoint.
+- Exact model overrides are pinned and must be visibly represented until explicitly cleared.
+- Request, response, and error normalization for OpenAI-compatible endpoints must be profile-driven.
+- Route explanations must include rejected candidates and structured reasons for debugging and autonomous recovery.

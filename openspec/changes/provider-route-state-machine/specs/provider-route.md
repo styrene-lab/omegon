@@ -148,3 +148,90 @@ Given the resolver selects an Anthropic model
 When the request is dispatched
 Then the route layer treats it as an endpoint/model capability row
 And the Anthropic adapter handles the native Messages API details below the common route interface
+
+
+### Requirement: Model policy semantics are explicit
+
+Grade selection, endpoint failover, and capability degradation SHALL be separate policy concepts. The route resolver SHALL NOT overload a single `strict-grade` value with both failover and degradation behavior.
+
+#### Scenario: Minimum grade permits stronger models
+Given the operator intent requests minimum grade `B`
+And healthy authenticated `B`, `A`, and `S` candidates exist
+When the resolver ranks candidates
+Then `A` and `S` candidates remain eligible
+And the selected route records that it satisfied a minimum-grade request
+
+#### Scenario: Exact grade rejects adjacent grades
+Given the operator intent requests exact grade `B`
+And only healthy authenticated `A` candidates exist
+When the resolver evaluates candidates
+Then no candidate satisfies the grade policy
+And degradation handling decides whether to ask, degrade, or fail visibly
+
+#### Scenario: Pinned exact override can be cleared
+Given the model intent contains an exact model override
+When the operator invokes the chosen unpin command
+Then the exact override is cleared
+And subsequent resolution uses grade, provider selection, and policy intent
+
+### Requirement: Provider selector namespace is reserved
+
+The provider selector tokens `auto`, `local`, and `upstream` SHALL be reserved and SHALL NOT be valid endpoint IDs.
+
+#### Scenario: Reserved endpoint id is rejected
+Given endpoint configuration declares an endpoint id `local`
+When profile or registry validation runs
+Then validation fails
+And the error explains that `local` is reserved for `EndpointClass::LocalDev` selection
+
+#### Scenario: Local provider selector filters by endpoint class
+Given the operator invokes `/model provider local`
+When model intent is updated
+Then provider selection targets enabled endpoints with `EndpointClass::LocalDev`
+And `local` is not stored as a provider brand or capability grade
+
+### Requirement: Model intent tool updates atomically
+
+Agent-facing model-control tooling SHALL update model intent through one atomic reducer. Partial grade/provider/policy tool updates SHALL NOT leave committed half-valid intent.
+
+#### Scenario: Invalid provider keeps prior intent
+Given current model intent is grade `S`, provider selection `auto`
+When an agent requests model intent grade `A` with provider endpoint `missing-provider`
+Then the request is rejected
+And the prior grade `S`, provider selection `auto` intent remains committed
+
+### Requirement: OpenAI-compatible profiles normalize responses and errors
+
+OpenAI-compatible endpoint profiles SHALL define request shaping, response normalization, and error normalization.
+
+#### Scenario: Provider-specific error becomes route rejection reason
+Given an OpenAI-compatible endpoint returns a provider-specific rate-limit error envelope
+When the shared adapter handles the response
+Then the error profile maps it to `RouteRejectionReason::RateLimited`
+And the resolver can apply endpoint cooldown or failover policy
+
+#### Scenario: Streaming tool-call delta is normalized
+Given an OpenAI-compatible endpoint streams tool-call deltas with endpoint-specific quirks
+When the shared adapter receives the stream
+Then the response profile normalizes the stream into Omegon's common tool-call event shape
+And downstream loop/tool execution code does not branch on endpoint id
+
+### Requirement: Endpoint auth schemes are data-driven
+
+Endpoint definitions SHALL carry auth scheme metadata rather than requiring provider-specific auth branches for every OpenAI-compatible provider.
+
+#### Scenario: Bearer-token endpoint resolves credential reference
+Given endpoint `groq` declares `BearerToken { secret_ref: "GROQ_API_KEY" }`
+When the credential ledger probes `groq`
+Then it reads the declared secret reference
+And no Groq-specific credential branch is required in route resolution
+
+### Requirement: Legacy baseline specs are superseded
+
+The 0.27.0 change SHALL modify or remove baseline requirements that require `/local`, `/haiku`, `/sonnet`, `/opus`, or `set_model_tier` behavior.
+
+#### Scenario: Baseline routing no longer requires legacy tier copy
+Given baseline routing specs are assessed after this change
+When requirements mention legacy model-tier commands or `set_model_tier`
+Then those requirements have been removed or rewritten to the model-intent vocabulary
+And implementation that rejects legacy commands is not considered a regression
