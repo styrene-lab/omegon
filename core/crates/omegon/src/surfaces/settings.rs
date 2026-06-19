@@ -97,6 +97,18 @@ pub enum SettingsPersistenceProjection {
     ReadOnly,
 }
 
+impl SettingsPersistenceProjection {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::RuntimeOnly => "runtime only",
+            Self::PersistedProfile => "profile",
+            Self::ProjectPolicy => "project policy",
+            Self::External => "external",
+            Self::ReadOnly => "read only",
+        }
+    }
+}
+
 impl SettingsSurfaceProjection {
     pub fn from_settings(settings: &Settings) -> Self {
         Self::from_settings_with_profile_drift(settings, None)

@@ -3939,7 +3939,18 @@ impl App {
     }
 
     fn render_settings_screen(&self, area: Rect, frame: &mut Frame) {
-        let projection = self.settings_projection();
+        let settings = self.settings();
+        let loaded_profile = crate::settings::Profile::load_with_source(self.cwd());
+        let profile_drift = crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
+            &loaded_profile.profile,
+            loaded_profile.source.clone(),
+            &settings,
+        );
+        let projection =
+            crate::surfaces::settings::SettingsSurfaceProjection::from_settings_with_profile_drift(
+                &settings,
+                Some(&profile_drift),
+            );
         let Some(screen) = self.settings_screen.as_ref() else {
             return;
         };
@@ -3956,12 +3967,24 @@ impl App {
             })
             .collect::<Vec<_>>()
             .join("  ");
+        let drift_line = if profile_drift.dirty {
+            format!(
+                "profile: {} · runtime drift: Δ{} · /profile save or /profile apply",
+                profile_drift.source, profile_drift.changed_count
+            )
+        } else {
+            format!("profile: {} · runtime drift: clean", profile_drift.source)
+        };
         let mut lines = vec![
             ratatui::text::Line::from(ratatui::text::Span::styled(
                 "Settings",
                 ratatui::style::Style::default()
                     .fg(self.theme.accent())
                     .add_modifier(ratatui::style::Modifier::BOLD),
+            )),
+            ratatui::text::Line::from(ratatui::text::Span::styled(
+                drift_line,
+                ratatui::style::Style::default().fg(self.theme.muted()),
             )),
             ratatui::text::Line::from(ratatui::text::Span::styled(
                 tab_line,
@@ -3986,14 +4009,22 @@ impl App {
                     ratatui::style::Style::default().fg(self.theme.accent_bright()),
                 ),
             ]));
+            let profile_note = row.profile.as_ref().map(|profile| {
+                format!(
+                    " · profile {} → live {} ({})",
+                    profile.profile_value,
+                    profile.runtime_value,
+                    row.persistence.label()
+                )
+            }).unwrap_or_default();
             lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
-                format!("    {}", row.description),
+                format!("    {}{}", row.description, profile_note),
                 ratatui::style::Style::default().fg(self.theme.muted()),
             )));
         }
         lines.push(ratatui::text::Line::from(""));
         lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
-            "↑/↓ navigate · Tab category · Enter edit (coming next) · Esc close",
+            "↑/↓ navigate · Tab category · Enter edit · s /profile save · a /profile apply · Esc close",
             ratatui::style::Style::default().fg(self.theme.dim()),
         )));
 
