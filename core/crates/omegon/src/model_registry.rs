@@ -523,6 +523,13 @@ impl ModelRegistry {
         best.map(|(_, c)| c)
     }
 
+    /// Exact provider-neutral grade assignment for a provider/model pair.
+    pub fn exact_grade(&self, provider: &str, model_id: &str) -> Option<&str> {
+        ["S", "A", "B", "C", "D", "F"]
+            .into_iter()
+            .find(|grade| self.grade_model(grade, provider) == Some(model_id))
+    }
+
     /// Infer provider-neutral capability grade from route patterns.
     pub fn infer_grade(&self, provider: &str, model_id: &str) -> Option<&str> {
         let prov = if provider == "ollama" {
@@ -781,6 +788,7 @@ mod tests {
     fn infer_grade_from_routes() {
         let reg = ModelRegistry::global();
         assert_eq!(reg.infer_grade("openai", "gpt-5.5"), Some("S"));
+        assert_eq!(reg.exact_grade("openai-codex", "gpt-5.5"), Some("S"));
         assert_eq!(
             reg.infer_grade("anthropic", "claude-haiku-4-5-20251001"),
             Some("D")
