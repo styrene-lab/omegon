@@ -2688,27 +2688,14 @@ pub async fn profile_view_response(
     shared_settings: &settings::SharedSettings,
     cwd: &Path,
 ) -> SlashCommandResponse {
-    let profile = settings::Profile::load(cwd);
+    let loaded = settings::Profile::load_with_source(cwd);
     let output = if let Ok(s) = shared_settings.lock() {
-        serde_json::json!({
-            "live": {
-                "model": s.model,
-                "thinkingLevel": s.thinking.as_str(),
-                "contextClass": s.effective_requested_class().label(),
-                "contextWindow": s.context_window,
-                "maxTurns": s.max_turns,
-                "automation": {
-                    "level": s.automation_level.as_str(),
-                    "summary": s.automation_level.summary()
-                },
-                "slimMode": s.is_slim(),
-                "posture": serde_json::to_value(&s.posture).unwrap_or(serde_json::json!(null)),
-                "providerOrder": s.provider_order,
-                "providerConnected": s.provider_connected,
-            },
-            "profile": serde_json::to_value(&profile).unwrap_or(serde_json::json!(null)),
-        })
-        .to_string()
+        let drift = crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
+            &loaded.profile,
+            loaded.source.clone(),
+            &s,
+        );
+        render_profile_view(&loaded.profile, &drift, &s)
     } else {
         "failed to read settings".to_string()
     };
@@ -2716,6 +2703,137 @@ pub async fn profile_view_response(
         accepted: true,
         output: Some(output),
     }
+}
+
+fn render_profile_view(
+    profile: &settings::Profile,
+    drift: &crate::surfaces::profile::ProfileDriftProjection,
+    settings: &settings::Settings,
+) -> String {
+    let mut out = String::new();
+    out.push_str(
+        "## Profile
+
+",
+    );
+    out.push_str(&format!(
+        "Source: {}
+",
+        drift.source
+    ));
+    if drift.dirty {
+        out.push_str(&format!(
+            "Runtime drift: Δ{} unsaved change(s)
+
+",
+            drift.changed_count
+        ));
+        out.push_str(
+            "| Setting | Profile | Runtime | Persistence |
+",
+        );
+        out.push_str(
+            "|---|---:|---:|---|
+",
+        );
+        for row in &drift.rows {
+            out.push_str(&format!(
+                "| {} | `{}` | `{}` | {} |
+",
+                row.label,
+                row.profile_value,
+                row.runtime_value,
+                row.persistence.label()
+            ));
+        }
+        out.push_str(
+            "
+Actions:
+",
+        );
+        out.push_str(
+            "- `/profile save` — save current runtime to the active profile source
+",
+        );
+        out.push_str(
+            "- `/profile save --project` — save current runtime as project defaults
+",
+        );
+        out.push_str(
+            "- `/profile save --user` — save current runtime as user defaults
+",
+        );
+        out.push_str(
+            "- `/profile apply` — revert runtime to profile defaults
+",
+        );
+    } else {
+        out.push_str(
+            "Runtime drift: clean
+
+",
+        );
+        out.push_str(
+            "Actions:
+",
+        );
+        out.push_str(
+            "- `/profile save --project` — save current runtime as project defaults
+",
+        );
+        out.push_str(
+            "- `/profile save --user` — save current runtime as user defaults
+",
+        );
+    }
+
+    out.push_str(
+        "
+### Live runtime
+",
+    );
+    out.push_str(&format!(
+        "- Model: `{}`
+",
+        settings.model
+    ));
+    out.push_str(&format!(
+        "- Thinking: `{}`
+",
+        settings.thinking.as_str()
+    ));
+    out.push_str(&format!(
+        "- Requested context: `{}`
+",
+        settings.effective_requested_class().short().to_lowercase()
+    ));
+    out.push_str(&format!(
+        "- Context window: `{}` tokens
+",
+        settings.context_window
+    ));
+    out.push_str(&format!(
+        "- Max turns: `{}`
+",
+        settings.max_turns
+    ));
+
+    out.push_str(
+        "
+### Saved profile
+",
+    );
+    out.push_str(
+        "```json
+",
+    );
+    out.push_str(&serde_json::to_string_pretty(profile).unwrap_or_else(|_| "null".to_string()));
+    out.push_str(
+        "
+```
+",
+    );
+    out
 }
 
 pub async fn profile_capture_response(
@@ -4379,6 +4497,69 @@ mod tests {
             crate::settings::ThinkingLevel::Minimal,
             "live runtime should not diverge from failed persistence"
         );
+    }
+
+    #[tokio::test]
+    async fn profile_view_response_renders_clean_drift_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon")).unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/profile.json"),
+            r#"{"thinkingLevel":"high","requestedContextClass":"massive"}"#,
+        )
+        .unwrap();
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
+            thinking: crate::settings::ThinkingLevel::High,
+            requested_context_class: Some(crate::settings::ContextClass::Massive),
+            ..Default::default()
+        }));
+
+        let response = profile_view_response(&shared_settings, tmp.path()).await;
+
+        assert!(response.accepted, "{response:?}");
+        let output = response.output.unwrap_or_default();
+        assert!(output.contains("## Profile"), "{output}");
+        assert!(output.contains("Source: project:"), "{output}");
+        assert!(output.contains("Runtime drift: clean"), "{output}");
+    }
+
+    #[tokio::test]
+    async fn profile_view_response_renders_thinking_and_context_drift() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon")).unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/profile.json"),
+            r#"{"thinkingLevel":"medium","requestedContextClass":"extended"}"#,
+        )
+        .unwrap();
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
+            thinking: crate::settings::ThinkingLevel::High,
+            requested_context_class: Some(crate::settings::ContextClass::Massive),
+            ..Default::default()
+        }));
+
+        let response = profile_view_response(&shared_settings, tmp.path()).await;
+
+        assert!(response.accepted, "{response:?}");
+        let output = response.output.unwrap_or_default();
+        assert!(
+            output.contains("Runtime drift: Δ2 unsaved change(s)"),
+            "{output}"
+        );
+        assert!(
+            output.contains("| Thinking | `medium` | `high` | live only |"),
+            "{output}"
+        );
+        assert!(
+            output.contains("| Context class | `extended` | `massive` | live only |"),
+            "{output}"
+        );
+        assert!(output.contains("/profile save`"), "{output}");
+        assert!(output.contains("/profile save --project`"), "{output}");
+        assert!(output.contains("/profile save --user`"), "{output}");
+        assert!(output.contains("/profile apply`"), "{output}");
     }
 
     #[tokio::test]

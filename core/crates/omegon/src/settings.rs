@@ -1045,6 +1045,16 @@ pub enum ProfileSource {
     BuiltInDefault,
 }
 
+impl ProfileSource {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Project(_) => "project",
+            Self::User(_) => "user",
+            Self::BuiltInDefault => "built-in defaults",
+        }
+    }
+}
+
 impl std::fmt::Display for ProfileSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
