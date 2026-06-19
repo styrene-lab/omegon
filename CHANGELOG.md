@@ -44,6 +44,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Completed provider-route-state-machine endpoint normalization lifecycle reconciliation.
 - Wired live route resolution after `/model grade`, `/model provider`, and `/model policy` intent changes while preserving durable model intent.
 - Corrected provider-route OpenSpec task state to keep OpenAI-compatible response/error normalization open until implemented.
 - Added the first durable model-intent state slice so route snapshots carry requested grade/provider intent separately from the active serving route.
