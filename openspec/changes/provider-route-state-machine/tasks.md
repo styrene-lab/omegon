@@ -73,7 +73,7 @@ delegate/cleave child routing.
 - [x] 7.12 Define default grade, provider selection, grade policy, failover policy, and degradation policy for interactive sessions and daemon agents.
 - [x] 7.13 Add exact model override clearing (`/model unpin` or equivalent) and make pinned state visible in route/status projections.
 - [x] 7.14 Enforce reserved provider selector tokens (`auto`, `local`, `upstream`) in registry/profile validation.
-- [ ] 7.15 Extend OpenAI-compatible endpoint profiles to normalize responses and provider-specific errors, not only request fields. (Partial: request shaping is implemented via `shape_openai_request`; error normalization is implemented via 7.21; streaming text/tool-call delta normalization is implemented via 7.22. Remaining: non-streaming/final response-body normalization if needed.)
+- [x] 7.15 Extend OpenAI-compatible endpoint profiles to normalize responses and provider-specific errors, not only request fields. (Implemented: request shaping via `shape_openai_request`; error normalization via 7.21; active streaming text/tool-call normalization via 7.22. No separate non-streaming OpenAI-compatible response path currently requires additional normalization.)
 - [x] 7.16 Add data-driven endpoint auth schemes and route credential probing through endpoint metadata.
 - [x] 7.17 Update or remove baseline routing/effort specs that still require `/local`, `/haiku`, `/sonnet`, `/opus`, or `set_model_tier`.
 
