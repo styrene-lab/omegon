@@ -39,6 +39,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Reused the profile-aware settings projection for TUI settings modal navigation so tab/row bounds stay aligned with profile-drift rendering.
 - Wired TUI settings-modal `s` and `a` shortcuts to the existing `/profile save` and `/profile apply` control paths.
 - Added command-palette persistence hints for `/think`, `/context`, `/profile`, and `/settings`, and rendered command metadata in the TUI slash popup.
 - Rendered profile source, runtime drift, and `/profile save`/`/profile apply` affordances directly in the TUI settings modal so defaults count as the active profile source.

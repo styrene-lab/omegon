@@ -8754,8 +8754,7 @@ pub async fn run_tui(
                                 }
                             }
                             KeyCode::Down => {
-                                let settings = app.settings();
-                                let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+                                let projection = app.settings_projection();
                                 if let Some(screen) = app.settings_screen.as_mut() {
                                     let len = screen.active_rows(&projection).len();
                                     if len > 0 {
@@ -8765,8 +8764,7 @@ pub async fn run_tui(
                                 }
                             }
                             KeyCode::Tab => {
-                                let settings = app.settings();
-                                let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+                                let projection = app.settings_projection();
                                 if let Some(screen) = app.settings_screen.as_mut()
                                     && let Some(current) = projection
                                         .tabs
@@ -8781,8 +8779,7 @@ pub async fn run_tui(
                                 }
                             }
                             KeyCode::BackTab => {
-                                let settings = app.settings();
-                                let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+                                let projection = app.settings_projection();
                                 if let Some(screen) = app.settings_screen.as_mut()
                                     && let Some(current) = projection
                                         .tabs
