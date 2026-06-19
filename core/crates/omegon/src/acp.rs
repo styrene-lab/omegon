@@ -664,7 +664,6 @@ impl OmegonAcpAgent {
         registry_models.sort_by(|a, b| {
             a.provider
                 .cmp(&b.provider)
-                .then_with(|| a.cost_tier.cmp(&b.cost_tier))
                 .then_with(|| a.name.cmp(&b.name))
         });
         for model in registry_models {

@@ -28,8 +28,8 @@ related = []
 2. **Model browser**: Sorted list with:
    - Human name + model ID
    - Context limits (input/output tokens)
-   - Speed/cost tier or pricing info
-   - Brief descriptor (reasoning model, ultra-fast, free-tier eligible, etc.)
+   - Latency/capability hints when known
+   - Brief descriptor (reasoning model, ultra-fast, quota-eligible, etc.)
 3. **Search/filter**: Type to narrow by name or capability
 4. **Select**: Arrow keys or number selection, then saves to session
 

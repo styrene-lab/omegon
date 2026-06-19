@@ -1679,7 +1679,6 @@ mod tests {
                 crate::routing::ProviderEntry {
                     provider_id: "anthropic".into(),
                     capability_grade: crate::routing::CapabilityGradeBand::Max,
-                    cost_tier: crate::routing::CostTier::Premium,
                     has_credentials: true,
                     is_reachable: true,
                     models: vec!["claude-fable-5".into()],
@@ -1687,7 +1686,6 @@ mod tests {
                 crate::routing::ProviderEntry {
                     provider_id: "groq".into(),
                     capability_grade: crate::routing::CapabilityGradeBand::Mid,
-                    cost_tier: crate::routing::CostTier::Cheap,
                     has_credentials: true,
                     is_reachable: true,
                     models: vec!["llama-3.3-70b-versatile".into()],
@@ -1695,7 +1693,6 @@ mod tests {
                 crate::routing::ProviderEntry {
                     provider_id: "ollama".into(),
                     capability_grade: crate::routing::CapabilityGradeBand::Mid,
-                    cost_tier: crate::routing::CostTier::Free,
                     has_credentials: true,
                     is_reachable: true,
                     models: vec!["qwen3:30b".into()],

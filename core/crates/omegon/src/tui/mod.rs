@@ -1893,7 +1893,7 @@ impl App {
         // Group models by provider for visual organization
         for (provider_name, models) in &catalog.providers {
             for model in models {
-                // Format: "Provider: Model Name — description (context, cost tier, capabilities)"
+                // Format: "Provider: Model Name — description (context, capabilities)"
                 let context = model.context_str();
                 let caps = if model.capabilities.is_empty() {
                     String::new()
@@ -1901,13 +1901,7 @@ impl App {
                     format!(", {}", model.capability_str())
                 };
                 let label = format!("{}: {}", provider_name, model.name);
-                let description = format!(
-                    "{} — {} • {}{}",
-                    model.description,
-                    context,
-                    model.cost_tier.as_str(),
-                    caps
-                );
+                let description = format!("{} — {}{}", model.description, context, caps);
 
                 options.push(selector::SelectOption {
                     value: model.id.clone(),

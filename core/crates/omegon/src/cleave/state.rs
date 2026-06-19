@@ -220,7 +220,7 @@ impl CleaveState {
             .enumerate()
             .map(|(i, c)| {
                 // Model priority: child explicit > plan default > None (triggers routing).
-                // When None the orchestrator applies scope-based cost-aware routing.
+                // When None the orchestrator applies scope-based capability-aware routing.
                 // We only fall back to the parent model if neither is set, so that the
                 // orchestrator routing condition (is_none_or(m == config.model)) still fires.
                 let execute_model = c

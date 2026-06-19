@@ -88,7 +88,6 @@ pub struct WebhookTrigger {
 #[derive(Debug, Clone, Deserialize)]
 pub struct BudgetConfig {
     pub max_tokens_per_day: Option<u64>,
-    pub max_cost_per_day_usd: Option<f64>,
 }
 
 pub fn load_config(path: &Path) -> anyhow::Result<SentryConfig> {
@@ -133,7 +132,6 @@ name = "github-pr"
 
 [task.budget]
 max_tokens_per_day = 500000
-max_cost_per_day_usd = 5.00
 
 [[task]]
 name = "staging-monitor"
@@ -168,7 +166,6 @@ schedule = "*/30 * * * *"
 
         let budget = pr.budget.as_ref().unwrap();
         assert_eq!(budget.max_tokens_per_day, Some(500000));
-        assert_eq!(budget.max_cost_per_day_usd, Some(5.0));
     }
 
     #[test]
