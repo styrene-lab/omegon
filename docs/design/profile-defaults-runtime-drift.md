@@ -15,8 +15,9 @@ priority = 2
 parent = "5f83a73e-d20a-4e3b-bf0a-384915e91136"
 dependencies = []
 open_questions = [
-  "[assumption] Project-local .omegon/profile.json remains the primary persistence target for current-profile capture.",
-  "[assumption] A single active repo profile is enough for the first implementation; named profile catalogs can come later.",
+  "[assumption] Project-local .omegon/profile.json remains the primary project override target, while user-level ~/.omegon/profile.json remains the primary user defaults target.",
+  "[assumption] Bare /profile save should write to the active loaded source when that source is project or user, and require an explicit target when the source is built-in defaults.",
+  "[assumption] A single active repo/user profile source is enough for the first implementation; named profile catalogs can come later.",
   "[assumption] Runtime drift can initially compare only settings::Profile fields that already round-trip through capture_from/apply_to.",
   "[assumption] Settings menu and slash command menu projections can consume the same profile-drift DTO without renderer-specific duplication."
 ]
@@ -134,12 +135,73 @@ These changes are valid runtime state even if they are unsaved.
 
 Live runtime changes should not silently overwrite the profile. Saving defaults should flow through profile commands:
 
-- `/profile capture` — existing command; should be the canonical “save current runtime over active profile”.
-- `/profile save` — proposed alias for `/profile capture`.
-- `/profile save --global` — optional future affordance for `Profile::save_global()`.
+- `/profile capture` — existing command; should be the compatibility spelling for saving current runtime over an explicit target.
+- `/profile save` — proposed primary spelling.
+- `/profile save --project` — write the project override at `<project-root>/.omegon/profile.json`.
+- `/profile save --user` — write the user default at `~/.omegon/profile.json`.
+- `/profile save --active` — write back to the active loaded source when that source is project or user.
 - `/profile save as <name>` — future named-profile catalog; not required for v1.
 
+Default target policy must be explicit in output. Recommended v1 policy:
+
+- If the active profile source is project, bare `/profile save` writes project.
+- If the active profile source is user, bare `/profile save` writes user.
+- If the active source is built-in defaults, bare `/profile save` should either require `--project|--user` or choose project with a clear message. Prefer requiring a target to avoid accidentally creating repo policy.
+
 `/think`, `/context`, `/model`, `/provider`, `/skills`, and similar live commands should mutate runtime and mark drift, not persist by default.
+
+### Decision: profile source and save target are first-class
+
+**Status:** proposed
+
+Current implementation has distinct paths but incomplete semantics:
+
+- Project profile: `<project-root>/.omegon/profile.json` via `project_profile_path(cwd)`.
+- User profile: preferred `~/.omegon/profile.json`, falling back to config-dir `omegon/profile.json` only when home is unavailable.
+- `Profile::load(cwd)` currently loads project if present, otherwise user, otherwise default. It does not merge user + project.
+- `Profile::save(cwd)` always writes project.
+- `Profile::save_global()` writes user.
+- Existing `/profile capture` loads whichever profile is active, captures live settings, then calls `save(cwd)`, which means a user profile can be silently materialized into a project override.
+
+That last behavior is the problem to fix.
+
+Introduce explicit source and target concepts:
+
+```rust
+enum ProfileSource {
+    Project(PathBuf),
+    User(PathBuf),
+    BuiltInDefault,
+}
+
+enum ProfileSaveTarget {
+    ActiveSource,
+    Project,
+    User,
+}
+```
+
+`/profile view` should show the active source:
+
+```text
+Profile: project (.omegon/profile.json)
+Profile: user (~/.omegon/profile.json)
+Profile: built-in defaults
+```
+
+`/profile save` must respect user/project distinction. It must not silently turn user-level defaults into repo-local policy unless the operator chooses the project target.
+
+Longer-term, profile resolution should probably become layered merge:
+
+```text
+built-in defaults
+→ user profile
+→ project profile
+→ CLI/env overrides
+→ live runtime drift
+```
+
+But that is a larger semantic change. V1 may preserve current project-overrides-user load behavior if source and save target are made explicit.
 
 ### Decision: drift is computed as runtime minus loaded profile snapshot
 
@@ -189,6 +251,7 @@ Suggested DTO shape:
 struct ProfileDriftProjection {
     profile_label: String,
     source: ProfileSource,
+    save_target: Option<ProfileSaveTarget>,
     dirty: bool,
     changed_count: usize,
     rows: Vec<ProfileDriftRow>,
@@ -348,6 +411,20 @@ These commands should become runtime-only by default once drift is implemented.
 
 The existing view already includes both `live` and `profile`; this is the correct data source. It needs a projection layer that computes and renders drift.
 
+### Gap: `/profile capture` currently collapses user/project distinction
+
+Current `/profile capture` effectively does:
+
+```rust
+let mut profile = settings::Profile::load(cwd);
+profile.capture_from(&settings);
+profile.save(cwd);
+```
+
+Because `Profile::save(cwd)` always writes the project profile, a session that loaded user defaults from `~/.omegon/profile.json` can silently create or overwrite `<project-root>/.omegon/profile.json`. That turns personal defaults into project-local policy without an explicit target choice.
+
+The fix is to make profile load return source metadata and make profile save target explicit. `/profile save --user` should preserve user-level defaults; `/profile save --project` should intentionally create/update project policy; bare `/profile save` should follow the active source only when that is unambiguous.
+
 ### Gap: no active profile baseline is modeled
 
 The system can load/apply a profile, but it does not appear to preserve “this was the baseline at load time” as a first-class runtime object. Without that, drift has to compare runtime against disk, which can be wrong if the profile file changes externally during a session.
@@ -356,9 +433,12 @@ V1 may compare against current `Profile::load(cwd)` for simplicity, but the inte
 
 ## Proposed implementation slices
 
-### Slice 1 — schema and startup correctness
+### Slice 1 — schema, source tracking, and startup correctness
 
 - Add profile support for requested context class.
+- Add profile load source tracking for project/user/built-in defaults.
+- Add explicit save targets for active source, project, and user.
+- Ensure `/profile save` and `/profile capture` respect user/project target semantics instead of always writing project.
 - Ensure `Profile::apply_to()` applies requested context class after posture defaults.
 - Ensure `Profile::capture_from()` captures requested context class only when explicitly set or non-default by policy.
 - Fix startup ordering so slim/full posture defaults do not erase explicit profile resource fields.
@@ -391,6 +471,140 @@ V1 may compare against current `Profile::load(cwd)` for simplicity, but the inte
 - Add the compact `prof:<label> ΔN` cue to status/title chrome.
 - Render drift in amber/dim gold using the existing chrome style vocabulary.
 
+## Cutover and TDD plan
+
+This work is cross-cutting enough that each semantic cutover needs tests landed before behavior flips. The tests should pin the shared contract first, then let UI/chrome work consume that contract without re-litigating persistence semantics.
+
+### Cutover 1 — profile schema, source tracking, and startup precedence
+
+Purpose: make the profile capable of representing the runtime axes we intend to compare while preserving user/project persistence boundaries.
+
+Pre-cutover tests:
+
+- `settings.rs`: profile serde round-trip accepts and emits requested context class.
+- `settings.rs`: `Profile::load_with_source` returns `Project` when `<project-root>/.omegon/profile.json` exists.
+- `settings.rs`: `Profile::load_with_source` returns `User` when no project profile exists and `~/.omegon/profile.json` exists.
+- `settings.rs`: `Profile::load_with_source` returns `BuiltInDefault` when neither profile exists.
+- `settings.rs`: explicit project save target writes only `<project-root>/.omegon/profile.json`.
+- `settings.rs`: explicit user save target writes only `~/.omegon/profile.json`.
+- `settings.rs`: active-source save writes user when the loaded baseline came from the user profile and project when it came from the project profile.
+- `settings.rs`: built-in-default active-source save behavior is explicit: either rejected until `--project|--user` is supplied, or writes project with a clear message.
+- `settings.rs`: `Profile::apply_to()` restores requested context class without changing actual model-derived `context_class`/`context_window`.
+- `settings.rs`: `Profile::capture_from()` captures explicit requested context class and omits or normalizes unset/default state according to the final policy.
+- `bootstrap.rs`: slim/full posture defaults do not erase explicit profile thinking or requested context class.
+- `bootstrap.rs`: CLI posture override remains stronger than profile posture defaults, while explicit profile resource fields are restored only where policy says they should be.
+
+Cutover event:
+
+- Add the profile field and apply/capture behavior.
+- Add source-aware profile loading and target-aware profile saving.
+- Keep existing `/think` and `/context` persistence semantics unchanged until drift projection tests exist.
+
+### Cutover 2 — pure drift projection
+
+Purpose: create the semantic source of truth before changing any operator-facing behavior.
+
+Pre-cutover tests:
+
+- `surfaces/profile.rs` or equivalent: clean profile/runtime pair yields `dirty = false`, `changed_count = 0`, no drift rows.
+- Thinking drift yields one row with stable key, display label, profile value, runtime value, `LiveOnly` persistence, and non-error severity.
+- Requested-context-class drift yields one row and labels the value as requested working-set policy, not actual model window.
+- Multiple drifted axes produce stable ordering for snapshot-style assertions.
+- Ephemeral runtime-only values such as provider connection state and token pressure are excluded.
+- Drift projection actions include view/save/apply affordances only when they are relevant.
+
+Cutover event:
+
+- Introduce `ProfileDriftProjection` and use it in tests only or behind `/profile view` while raw JSON remains available through `/profile export`.
+
+### Cutover 3 — `/profile view`, `/profile save`, and `/profile revert`
+
+Purpose: give operators a reliable drift readout before runtime commands stop auto-saving.
+
+Pre-cutover tests:
+
+- `control_runtime.rs`: `/profile view` renders clean state without a drift warning and includes active source/target information.
+- `control_runtime.rs`: `/profile view` renders drift rows for thinking/context with save/apply actions.
+- `control_runtime.rs`: `/profile export` remains raw JSON/tooling-friendly.
+- TUI parser tests: `/profile save` maps to source-aware capture behavior.
+- TUI parser tests: `/profile save --project` maps to explicit project save target.
+- TUI parser tests: `/profile save --user` maps to explicit user save target.
+- TUI parser tests: `/profile revert` maps to existing apply behavior.
+- Daemon/control tests: aliases route through the same control requests, not TUI-only branches.
+
+Cutover event:
+
+- Make `/profile view` human-first.
+- Add save/revert aliases.
+- Keep capture/apply as stable compatibility spellings.
+
+### Cutover 4 — runtime-only `/think` and `/context`
+
+Purpose: separate tactical runtime mutation from persistence.
+
+Pre-cutover tests:
+
+- `control_runtime.rs`: `set_thinking_response` changes live settings but does not write profile by default.
+- `control_runtime.rs`: `set_context_class_response` changes live requested context class but does not write profile by default.
+- `control_runtime.rs`: failed profile-save rollback tests are removed or replaced with runtime-only success tests plus explicit `/profile save` failure tests.
+- `/profile view` after `/think high` shows thinking drift.
+- `/profile save` after `/think high` clears thinking drift by updating the profile.
+- `/profile apply` after `/think high` restores runtime from profile and clears drift.
+- Equivalent context-class tests cover requested context class.
+
+Cutover event:
+
+- Remove eager `profile.capture_from(&s)` from `/think` and `/context` handlers.
+- Update command output copy to say “live override” or “runtime only” where appropriate.
+
+### Cutover 5 — settings menu row integration
+
+Purpose: let the settings overhaul consume drift semantics row-by-row.
+
+Pre-cutover tests:
+
+- `surfaces/settings.rs`: runtime settings rows can carry optional profile/default metadata.
+- `surfaces/settings.rs`: thinking/context rows render clean when runtime matches profile baseline.
+- `surfaces/settings.rs`: thinking/context rows render drift metadata when runtime differs.
+- `tui/settings_menu.rs`: row navigation/edit dispatch remains unchanged when drift metadata is present.
+- Settings projection tests assert persistence labels: live-only, saved default, next-startup-only.
+
+Cutover event:
+
+- Wire profile drift metadata into `SettingsSurfaceProjection`.
+- Keep the TUI renderer responsible only for visual treatment, filtering, navigation, and edit dispatch.
+
+### Cutover 6 — slash popup and chrome integration
+
+Purpose: make drift visible at command-discovery and ambient-status layers without duplicating logic.
+
+Pre-cutover tests:
+
+- `surfaces/command_menu.rs`: command rows can carry persistence semantics.
+- Command-menu projection labels `/think <level>` and `/context <class>` rows as live overrides.
+- Command-menu projection promotes `/profile view`, `/profile save`, and `/profile apply` when drift exists.
+- TUI autocomplete/slash popup tests prove persistence metadata survives filtering.
+- Chrome/statusline tests render neutral profile cue when clean and amber/delta cue when dirty.
+- ACP/IPC command-discovery tests either preserve existing output or explicitly include the new metadata without breaking compatibility.
+
+Cutover event:
+
+- Add persistence semantics to command-menu rows.
+- Add `prof:<label> ΔN` to chrome from the same profile drift projection.
+
+### Regression suite shape
+
+The suite should be layered by contract:
+
+1. **Profile persistence tests** in `settings.rs` own serde/apply/capture behavior.
+2. **Startup precedence tests** in `bootstrap.rs` own profile/posture/CLI/env ordering.
+3. **Projection tests** in `surfaces/profile.rs`, `surfaces/settings.rs`, and `surfaces/command_menu.rs` own renderer-neutral semantics.
+4. **Control-runtime tests** own slash/control command effects and persistence boundaries.
+5. **TUI parser/render tests** own command parsing, selector dispatch, row filtering, and chrome treatment.
+6. **ACP/IPC/Web tests** own compatibility for non-TUI command/status consumers.
+
+Do not test profile drift by scraping final TUI pixels first. Test the semantic projection first, then add one or two renderer smoke tests per surface.
+
 ## Non-goals for v1
 
 - Named profile catalog and `/profile save as <name>`.
@@ -401,8 +615,9 @@ V1 may compare against current `Profile::load(cwd)` for simplicity, but the inte
 
 ## Open questions
 
-- [assumption] Project-local `.omegon/profile.json` remains the primary persistence target for current-profile capture.
-- [assumption] A single active repo profile is enough for the first implementation; named profile catalogs can come later.
+- [assumption] Project-local `.omegon/profile.json` remains the primary project override target, while user-level `~/.omegon/profile.json` remains the primary user defaults target.
+- [assumption] Bare `/profile save` should write to the active loaded source when that source is project or user, and require an explicit target when the source is built-in defaults.
+- [assumption] A single active repo/user profile source is enough for the first implementation; named profile catalogs can come later.
 - [assumption] Runtime drift can initially compare only fields that already round-trip through `Profile::capture_from()` and `Profile::apply_to()`.
 - [assumption] Settings menu and slash command menu projections can consume the same profile-drift DTO without renderer-specific duplication.
 - Should `/think high --save` and `/context massive --save` be supported for fast one-shot persistence, or should all persistence route through `/profile save`?
