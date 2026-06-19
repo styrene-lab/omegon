@@ -5025,14 +5025,39 @@ fn editor_top_line_shows_engine_block_details() {
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
     app.apply_ui_preset(UiSurfaces::lean());
     app.footer_data.harness.capability_grade = "B".into();
+    app.footer_data.context_window = 1_048_576;
+    app.footer_data.context_percent = 50.0;
+    app.footer_data.estimated_tokens = 524_288;
 
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(rendered.contains("claude-sonnet"), "{rendered}");
     assert!(
-        rendered.contains("anthropic › claude-sonnet ‹B›  │  ψ ●  κ ▰▰▰▰"),
+        rendered
+            .contains("anthropic › claude-sonnet ‹B›  │  ψ ●  │  ctx:msv@1.0M 50% ▕████░░░░▏ 524k"),
         "{rendered}"
     );
+}
+
+#[test]
+fn editor_top_line_uses_single_context_fill_signal() {
+    let mut settings = Settings::new("anthropic:claude-sonnet-4-6");
+    settings.thinking = ThinkingLevel::High;
+    let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
+    app.apply_ui_preset(UiSurfaces::lean());
+    app.footer_data.harness.capability_grade = "B".into();
+    app.footer_data.context_window = 1_048_576;
+    app.footer_data.context_percent = 50.0;
+    app.footer_data.estimated_tokens = 524_288;
+
+    let rendered = render_app_to_string(&mut app, 180, 18);
+
+    assert!(
+        rendered.contains("ctx:msv@1.0M 50% ▕████░░░░▏ 524k"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("κ ▰"), "{rendered}");
+    assert!(!rendered.contains("◆"), "{rendered}");
 }
 
 #[test]

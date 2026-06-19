@@ -94,13 +94,11 @@ use crossterm::event::{
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use omegon_traits::AgentEvent;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
-use unicode_width::UnicodeWidthStr;
-
-use omegon_traits::AgentEvent;
 
 use self::command_surfaces::{
     CommandPanel, CommandPrompt, CommandPromptAction, CommandSeverity, CommandToast,
@@ -1575,6 +1573,59 @@ impl App {
             .or_else(|| registry.infer_grade(model_provider, model))
             .map(str::to_string)
             .unwrap_or_else(|| fallback.to_string())
+    }
+
+    fn context_class_tag(class: crate::settings::ContextClass) -> &'static str {
+        match class {
+            crate::settings::ContextClass::Compact => "cmp",
+            crate::settings::ContextClass::Standard => "std",
+            crate::settings::ContextClass::Extended => "ext",
+            crate::settings::ContextClass::Massive => "msv",
+        }
+    }
+
+    fn context_fill_bar(percent: f32) -> String {
+        let percent = percent.clamp(0.0, 100.0);
+        let filled = ((percent / 100.0) * 8.0).round().clamp(0.0, 8.0) as usize;
+        format!("▕{}{}▏", "█".repeat(filled), "░".repeat(8 - filled))
+    }
+
+    fn editor_context_widget(
+        requested: crate::settings::ContextClass,
+        actual: crate::settings::ContextClass,
+        context_window: usize,
+        estimated_tokens: usize,
+        context_percent: f32,
+    ) -> String {
+        let class = if requested != actual {
+            format!(
+                "{}→{}",
+                Self::context_class_tag(requested),
+                Self::context_class_tag(actual)
+            )
+        } else {
+            Self::context_class_tag(actual).to_string()
+        };
+        let capacity = if context_window > 0 {
+            widgets::format_tokens(context_window)
+        } else {
+            widgets::format_tokens(actual.nominal_tokens())
+        };
+        let used_tokens = if estimated_tokens > 0 {
+            estimated_tokens
+        } else if context_window > 0 {
+            ((context_window as f32 * context_percent.clamp(0.0, 100.0) / 100.0).round() as usize)
+                .min(context_window)
+        } else {
+            0
+        };
+        let percent = context_percent.clamp(0.0, 100.0).round() as u8;
+
+        format!(
+            "ctx:{class}@{capacity} {percent}% {} {}",
+            Self::context_fill_bar(context_percent),
+            widgets::format_tokens(used_tokens)
+        )
     }
 
     fn current_persona_state(&self) -> crate::settings::PersonaState {
@@ -4363,28 +4414,13 @@ impl App {
                 "high" => "●",
                 _ => "◌",
             };
-            let context_bar = match self.footer_data.actual_context_class.ordinal() {
-                0 => "▰▱▱▱",
-                1 => "▰▰▱▱",
-                2 => "▰▰▰▱",
-                _ => "▰▰▰▰",
-            };
-            let title_core_width = format!(
-                " {} › {model_short} ‹{}›  │  ψ {thinking_glyph}  κ {context_bar}  ",
-                self.footer_data.model_provider, self.footer_data.model_tier
-            )
-            .width();
-            let editor_width = editor_area.width.saturating_sub(2) as usize;
-            let rail_width = editor_width.saturating_sub(title_core_width);
-            let context_percent = self.footer_data.context_percent.clamp(0.0, 100.0);
-            let usage_rail = if rail_width >= 2 {
-                let rail_fill = ((rail_width as f32 * context_percent / 100.0).round() as usize)
-                    .min(rail_width.saturating_sub(1));
-                let rail_empty = rail_width.saturating_sub(rail_fill + 1);
-                format!("{}◆{}", "━".repeat(rail_fill), "─".repeat(rail_empty))
-            } else {
-                String::new()
-            };
+            let context_widget = Self::editor_context_widget(
+                self.footer_data.context_class,
+                self.footer_data.actual_context_class,
+                self.footer_data.context_window,
+                self.footer_data.estimated_tokens,
+                self.footer_data.context_percent,
+            );
             let editor_title = if self.agent_active {
                 let verb_display = spinner::maybe_glitch(self.working_verb)
                     .unwrap_or_else(|| self.working_verb.to_string());
@@ -4421,12 +4457,8 @@ impl App {
                     Span::styled("ψ", Style::default().fg(t.dim())),
                     Span::styled(" ", Style::default().fg(t.border_dim())),
                     Span::styled(thinking_glyph, Style::default().fg(t.muted())),
-                    Span::styled("  ", Style::default().fg(t.border_dim())),
-                    Span::styled("κ", Style::default().fg(t.dim())),
-                    Span::styled(" ", Style::default().fg(t.border_dim())),
-                    Span::styled(context_bar, Style::default().fg(t.muted())),
-                    Span::styled("  ", Style::default().fg(t.border_dim())),
-                    Span::styled(usage_rail, Style::default().fg(t.border_dim())),
+                    Span::styled("  │  ", Style::default().fg(t.border_dim())),
+                    Span::styled(context_widget, Style::default().fg(t.muted())),
                 ])
             };
             let editor_block = Block::default()
