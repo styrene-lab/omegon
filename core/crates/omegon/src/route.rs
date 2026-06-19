@@ -701,6 +701,42 @@ impl RouteController {
         self.emit_changed().await
     }
 
+
+    pub async fn resolve_route_from_intent_candidate(
+        &self,
+        candidate: crate::routing::ProviderCandidate,
+        new_bridge: Box<dyn LlmBridge>,
+    ) -> anyhow::Result<RouteSnapshot> {
+        let serving = format!("{}:{}", candidate.provider_id, candidate.model_id);
+        *self.bridge.write().await = new_bridge;
+        let mut state = self.state.write().await;
+        state.route = ProviderRoute::Serving { model: serving };
+        state.warning = None;
+        drop(state);
+        Ok(self.emit_changed().await)
+    }
+
+    pub async fn resolve_route_from_intent_inventory(
+        &self,
+        inventory: &crate::routing::ProviderInventory,
+        new_bridge: Box<dyn LlmBridge>,
+    ) -> anyhow::Result<RouteSnapshot> {
+        let intent = {
+            let state = self.state.read().await;
+            state.intent.clone()
+        };
+        let Some(candidate) = select_candidate_for_intent(&intent, inventory) else {
+            let mut state = self.state.write().await;
+            state.warning = Some(format!(
+                "No provider candidate satisfies model intent: {}",
+                intent.summary()
+            ));
+            drop(state);
+            return Ok(self.emit_changed().await);
+        };
+        self.resolve_route_from_intent_candidate(candidate, new_bridge).await
+    }
+
     pub async fn switch_model(
         &self,
         model: String,
@@ -1697,6 +1733,64 @@ mod tests {
         intent.provider_selection = ProviderSelection::Upstream;
         let candidate = select_candidate_for_intent(&intent, &intent_test_inventory()).unwrap();
         assert_ne!(candidate.provider_id, "ollama");
+    }
+
+    #[tokio::test]
+    async fn resolve_route_from_intent_candidate_preserves_intent() {
+        let controller = RouteController::with_initial_intent(
+            ProviderRoute::Serving {
+                model: "anthropic:claude-sonnet-4-6".into(),
+            },
+            Box::new(NullBridge),
+            None,
+            ModelIntent {
+                grade: Some(ModelGrade::S),
+                provider_selection: ProviderSelection::Local,
+                ..ModelIntent::default()
+            },
+        );
+        let candidate = crate::routing::ProviderCandidate {
+            provider_id: "ollama".into(),
+            model_id: "qwen3:30b".into(),
+            score: 10.0,
+        };
+
+        let snapshot = controller
+            .resolve_route_from_intent_candidate(candidate, Box::new(NullBridge))
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot.serving_model(), Some("ollama:qwen3:30b"));
+        assert_eq!(snapshot.intent.grade, Some(ModelGrade::S));
+        assert_eq!(snapshot.intent.provider_selection, ProviderSelection::Local);
+    }
+
+    #[tokio::test]
+    async fn resolve_route_from_intent_inventory_preserves_route_without_candidate() {
+        let controller = RouteController::with_initial_intent(
+            ProviderRoute::Serving {
+                model: "anthropic:claude-sonnet-4-6".into(),
+            },
+            Box::new(NullBridge),
+            None,
+            ModelIntent {
+                grade: Some(ModelGrade::S),
+                provider_selection: ProviderSelection::Endpoint("missing".into()),
+                ..ModelIntent::default()
+            },
+        );
+
+        let snapshot = controller
+            .resolve_route_from_intent_inventory(&intent_test_inventory(), Box::new(NullBridge))
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot.serving_model(), Some("anthropic:claude-sonnet-4-6"));
+        assert_eq!(
+            snapshot.intent.provider_selection,
+            ProviderSelection::Endpoint("missing".into())
+        );
+        assert!(snapshot.warning.as_deref().unwrap_or("").contains("No provider candidate"));
     }
 
 }
