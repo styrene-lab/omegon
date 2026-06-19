@@ -10,7 +10,6 @@
   "inferenceDefaults": {
     "contextInput": 131072,
     "contextOutput": 32768,
-    "costTier": "free",
     "capabilities": [
       "instruction",
       "coding"
@@ -539,11 +538,6 @@
       "name": "Claude Fable 5",
       "contextInput": 1000000,
       "contextOutput": 131072,
-      "costTier": "premium",
-      "pricing": {
-        "input": 10.0,
-        "output": 50.0
-      },
       "capabilities": [
         "reasoning",
         "coding",
@@ -558,11 +552,6 @@
       "name": "Claude Mythos 5",
       "contextInput": 1000000,
       "contextOutput": 131072,
-      "costTier": "premium",
-      "pricing": {
-        "input": 10.0,
-        "output": 50.0
-      },
       "capabilities": [
         "reasoning",
         "coding",
@@ -578,11 +567,6 @@
       "name": "Claude Opus 4.8",
       "contextInput": 1000000,
       "contextOutput": 131072,
-      "costTier": "premium",
-      "pricing": {
-        "input": 15.0,
-        "output": 75.0
-      },
       "capabilities": [
         "reasoning",
         "coding",
@@ -597,11 +581,6 @@
       "name": "Claude Opus 4.7",
       "contextInput": 1000000,
       "contextOutput": 131072,
-      "costTier": "premium",
-      "pricing": {
-        "input": 15.0,
-        "output": 75.0
-      },
       "capabilities": [
         "reasoning",
         "coding",
@@ -617,17 +596,12 @@
       "name": "Claude Sonnet 4.7",
       "contextInput": 1000000,
       "contextOutput": 65536,
-      "costTier": "standard",
-      "pricing": {
-        "input": 3.0,
-        "output": 15.0
-      },
       "capabilities": [
         "reasoning",
         "coding",
         "vision"
       ],
-      "description": "Latest balanced performance and cost",
+      "description": "Latest balanced performance profile",
       "supportsReasoning": true
     },
     {
@@ -636,11 +610,6 @@
       "name": "Claude Opus 4.6",
       "contextInput": 1000000,
       "contextOutput": 131072,
-      "costTier": "premium",
-      "pricing": {
-        "input": 15.0,
-        "output": 75.0
-      },
       "capabilities": [
         "reasoning",
         "coding",
@@ -655,17 +624,12 @@
       "name": "Claude Sonnet 4.6",
       "contextInput": 1000000,
       "contextOutput": 65536,
-      "costTier": "standard",
-      "pricing": {
-        "input": 3.0,
-        "output": 15.0
-      },
       "capabilities": [
         "reasoning",
         "coding",
         "vision"
       ],
-      "description": "Balanced performance and cost",
+      "description": "Balanced performance profile",
       "supportsReasoning": true
     },
     {
@@ -674,11 +638,6 @@
       "name": "Claude Haiku 4.5",
       "contextInput": 200000,
       "contextOutput": 65536,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.8,
-        "output": 4.0
-      },
       "capabilities": [
         "fast",
         "instruction"
@@ -691,11 +650,6 @@
       "name": "GPT-5.5",
       "contextInput": 1000000,
       "contextOutput": 65536,
-      "costTier": "premium",
-      "pricing": {
-        "input": 2.0,
-        "output": 10.0
-      },
       "capabilities": [
         "reasoning",
         "vision",
@@ -710,11 +664,6 @@
       "name": "GPT-5.4",
       "contextInput": 1000000,
       "contextOutput": 32768,
-      "costTier": "premium",
-      "pricing": {
-        "input": 2.5,
-        "output": 15.0
-      },
       "capabilities": [
         "reasoning",
         "vision",
@@ -729,11 +678,6 @@
       "name": "GPT-5",
       "contextInput": 1000000,
       "contextOutput": 32768,
-      "costTier": "premium",
-      "pricing": {
-        "input": 2.5,
-        "output": 15.0
-      },
       "capabilities": [
         "reasoning",
         "vision",
@@ -748,17 +692,12 @@
       "name": "GPT-5 Mini",
       "contextInput": 1000000,
       "contextOutput": 32768,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.75,
-        "output": 4.5
-      },
       "capabilities": [
         "fast",
         "instruction",
         "coding"
       ],
-      "description": "Fast, cost-effective, 1M context"
+      "description": "Fast, efficient, 1M context"
     },
     {
       "id": "gpt-4.1",
@@ -766,11 +705,6 @@
       "name": "GPT-4.1",
       "contextInput": 1000000,
       "contextOutput": 32768,
-      "costTier": "standard",
-      "pricing": {
-        "input": 2.0,
-        "output": 8.0
-      },
       "capabilities": [
         "reasoning",
         "vision",
@@ -784,11 +718,6 @@
       "name": "o4-mini",
       "contextInput": 200000,
       "contextOutput": 16384,
-      "costTier": "standard",
-      "pricing": {
-        "input": 1.1,
-        "output": 4.4
-      },
       "capabilities": [
         "reasoning",
         "coding"
@@ -802,11 +731,6 @@
       "name": "GPT OSS 120B Cloud",
       "contextInput": 256000,
       "contextOutput": 32768,
-      "costTier": "free",
-      "pricing": {
-        "input": 0.0,
-        "output": 0.0
-      },
       "capabilities": [
         "reasoning",
         "coding"
@@ -819,11 +743,6 @@
       "name": "Qwen3 Coder 480B Cloud",
       "contextInput": 256000,
       "contextOutput": 32768,
-      "costTier": "free",
-      "pricing": {
-        "input": 0.0,
-        "output": 0.0
-      },
       "capabilities": [
         "reasoning",
         "coding"
@@ -836,11 +755,6 @@
       "name": "Llama 3.3 70B",
       "contextInput": 131072,
       "contextOutput": 8192,
-      "costTier": "free",
-      "pricing": {
-        "input": 0.0,
-        "output": 0.0
-      },
       "capabilities": [
         "fast",
         "instruction",
@@ -854,11 +768,6 @@
       "name": "Grok 4",
       "contextInput": 256000,
       "contextOutput": 32768,
-      "costTier": "premium",
-      "pricing": {
-        "input": 3.0,
-        "output": 15.0
-      },
       "capabilities": [
         "reasoning",
         "coding",
@@ -872,11 +781,6 @@
       "name": "Grok 3",
       "contextInput": 131072,
       "contextOutput": 16384,
-      "costTier": "standard",
-      "pricing": {
-        "input": 2.0,
-        "output": 10.0
-      },
       "capabilities": [
         "reasoning",
         "fast"
@@ -889,11 +793,6 @@
       "name": "Mistral Large 3",
       "contextInput": 128000,
       "contextOutput": 16384,
-      "costTier": "standard",
-      "pricing": {
-        "input": 2.0,
-        "output": 6.0
-      },
       "capabilities": [
         "reasoning",
         "coding"
@@ -906,16 +805,11 @@
       "name": "Mistral Small",
       "contextInput": 32000,
       "contextOutput": 8192,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.2,
-        "output": 0.6
-      },
       "capabilities": [
         "fast",
         "instruction"
       ],
-      "description": "Lightweight, cost-effective"
+      "description": "Lightweight, efficient"
     },
     {
       "id": "gemini-3.1-pro-preview",
@@ -923,11 +817,6 @@
       "name": "Gemini 3.1 Pro",
       "contextInput": 1000000,
       "contextOutput": 65536,
-      "costTier": "premium",
-      "pricing": {
-        "input": 2.5,
-        "output": 15.0
-      },
       "capabilities": [
         "reasoning",
         "coding",
@@ -941,11 +830,6 @@
       "name": "Gemini 2.5 Flash",
       "contextInput": 1000000,
       "contextOutput": 65536,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.15,
-        "output": 0.6
-      },
       "capabilities": [
         "reasoning",
         "coding",
@@ -959,11 +843,6 @@
       "name": "Gemini 2.0 Flash Lite",
       "contextInput": 1000000,
       "contextOutput": 8192,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.075,
-        "output": 0.3
-      },
       "capabilities": [
         "fast",
         "instruction"
@@ -976,11 +855,6 @@
       "name": "Qwen QwQ 32B",
       "contextInput": 32768,
       "contextOutput": 8192,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.2,
-        "output": 0.2
-      },
       "capabilities": [
         "reasoning",
         "coding"
@@ -993,11 +867,6 @@
       "name": "Qwen 2.5 72B",
       "contextInput": 131072,
       "contextOutput": 8192,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.35,
-        "output": 0.4
-      },
       "capabilities": [
         "instruction",
         "coding",
@@ -1011,16 +880,11 @@
       "name": "MiniMax M 2.7",
       "contextInput": 8192,
       "contextOutput": 4096,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.28,
-        "output": 1.1
-      },
       "capabilities": [
         "instruction",
         "coding"
       ],
-      "description": "Fast, low-cost inference"
+      "description": "Fast, lightweight inference"
     },
     {
       "id": "deepseek/deepseek-chat",
@@ -1028,11 +892,6 @@
       "name": "DeepSeek Chat",
       "contextInput": 128000,
       "contextOutput": 8192,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.27,
-        "output": 1.1
-      },
       "capabilities": [
         "instruction",
         "coding"
@@ -1045,11 +904,6 @@
       "name": "Llama 2 70B Chat",
       "contextInput": 4096,
       "contextOutput": 2048,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.9,
-        "output": 0.9
-      },
       "capabilities": [
         "instruction"
       ],
@@ -1061,11 +915,6 @@
       "name": "GPT-5.5 (Codex)",
       "contextInput": 1000000,
       "contextOutput": 65536,
-      "costTier": "premium",
-      "pricing": {
-        "input": 2.0,
-        "output": 10.0
-      },
       "capabilities": [
         "reasoning",
         "vision",
@@ -1080,11 +929,6 @@
       "name": "GPT-5.4 (Codex)",
       "contextInput": 1000000,
       "contextOutput": 32768,
-      "costTier": "premium",
-      "pricing": {
-        "input": 2.5,
-        "output": 15.0
-      },
       "capabilities": [
         "reasoning",
         "vision",
@@ -1098,11 +942,6 @@
       "name": "GPT-5.4 Mini (Codex)",
       "contextInput": 400000,
       "contextOutput": 32768,
-      "costTier": "cheap",
-      "pricing": {
-        "input": 0.75,
-        "output": 4.5
-      },
       "capabilities": [
         "fast",
         "instruction",
@@ -1116,7 +955,6 @@
       "name": "DeepSeek V4 Pro",
       "contextInput": 131072,
       "contextOutput": 32768,
-      "costTier": "cheap",
       "capabilities": [
         "reasoning",
         "coding"
@@ -1129,7 +967,6 @@
       "name": "DeepSeek V4 Flash",
       "contextInput": 131072,
       "contextOutput": 32768,
-      "costTier": "cheap",
       "capabilities": [
         "fast",
         "coding"
@@ -1142,7 +979,6 @@
       "name": "Kimi K2.6",
       "contextInput": 131072,
       "contextOutput": 32768,
-      "costTier": "cheap",
       "capabilities": [
         "reasoning",
         "coding"
@@ -1155,7 +991,6 @@
       "name": "Qwen 3.6 Plus",
       "contextInput": 131072,
       "contextOutput": 32768,
-      "costTier": "cheap",
       "capabilities": [
         "reasoning",
         "coding"
@@ -1168,7 +1003,6 @@
       "name": "GLM 5.1",
       "contextInput": 131072,
       "contextOutput": 32768,
-      "costTier": "cheap",
       "capabilities": [
         "reasoning",
         "coding"
@@ -1181,7 +1015,6 @@
       "name": "MiniMax M2.7",
       "contextInput": 131072,
       "contextOutput": 32768,
-      "costTier": "cheap",
       "capabilities": [
         "reasoning",
         "coding"
@@ -1194,7 +1027,6 @@
       "name": "Sonar",
       "contextInput": 200000,
       "contextOutput": 8192,
-      "costTier": "cheap",
       "capabilities": [
         "fast",
         "search",
@@ -1208,7 +1040,6 @@
       "name": "Claude Sonnet 4.6 (via Perplexity)",
       "contextInput": 200000,
       "contextOutput": 8192,
-      "costTier": "standard",
       "capabilities": [
         "reasoning",
         "coding",
@@ -1222,7 +1053,6 @@
       "name": "GPT 5.4 (via Perplexity)",
       "contextInput": 200000,
       "contextOutput": 8192,
-      "costTier": "standard",
       "capabilities": [
         "reasoning",
         "coding",
@@ -1236,7 +1066,6 @@
       "name": "GPT 5.4 Mini (via Perplexity)",
       "contextInput": 200000,
       "contextOutput": 8192,
-      "costTier": "cheap",
       "capabilities": [
         "fast",
         "coding",

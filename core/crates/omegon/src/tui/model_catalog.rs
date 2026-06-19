@@ -5,59 +5,10 @@
 //! - Dynamic discovery (Ollama, OpenRouter live queries)
 //! - Static fallback (hardcoded model lists for known providers)
 //! - Symmetric representation: cloud and local models are peers
-//! - Context limits, capability tags, cost tier, hardware requirements
+//! - Context limits, capability tags, and hardware requirements
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct TokenPricing {
-    /// USD per 1M input/prompt tokens.
-    pub input_per_million_usd: f64,
-    /// USD per 1M output/completion tokens.
-    pub output_per_million_usd: f64,
-}
-
-impl TokenPricing {
-    pub const fn new(input_per_million_usd: f64, output_per_million_usd: f64) -> Self {
-        Self {
-            input_per_million_usd,
-            output_per_million_usd,
-        }
-    }
-
-    pub fn estimate_cost_usd(&self, input_tokens: u64, output_tokens: u64) -> f64 {
-        (input_tokens as f64 / 1_000_000.0) * self.input_per_million_usd
-            + (output_tokens as f64 / 1_000_000.0) * self.output_per_million_usd
-    }
-}
-
-/// A model's availability tier and cost characteristics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum CostTier {
-    /// Free tier (no charge, rate-limited)
-    Free,
-    /// Pay-per-token, low cost (<$1/M input tokens)
-    CheapAPI,
-    /// Pay-per-token, standard cost ($1-10/M)
-    StandardAPI,
-    /// Premium models ($10+/M)
-    Premium,
-    /// Local inference (no API cost)
-    Local,
-}
-
-impl CostTier {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Free => "free",
-            Self::CheapAPI => "cheap",
-            Self::StandardAPI => "standard",
-            Self::Premium => "premium",
-            Self::Local => "local",
-        }
-    }
-}
 
 /// Capability tags for a model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,11 +47,6 @@ pub struct ModelInfo {
     pub context_input: usize,
     /// Max output tokens
     pub context_output: usize,
-    /// Cost tier
-    pub cost_tier: CostTier,
-    /// Explicit token pricing when known. This is the authoritative source for
-    /// footer/session cost calculations; `cost_tier` is only a coarse UX bucket.
-    pub pricing: Option<TokenPricing>,
     /// Capability tags
     pub capabilities: Vec<Capability>,
     /// Brief description
@@ -137,17 +83,6 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
-    pub fn pricing_for_model(model_id: &str) -> Option<TokenPricing> {
-        // Local models are always free
-        if model_id.starts_with("ollama:") {
-            return Some(TokenPricing::new(0.0, 0.0));
-        }
-        // Look up in the centralized model registry
-        let reg = crate::model_registry::ModelRegistry::global();
-        reg.pricing(model_id)
-            .map(|p| TokenPricing::new(p.input, p.output))
-    }
-
     pub fn find_by_id(&self, model_id: &str) -> Option<&ModelInfo> {
         self.providers
             .values()
@@ -215,8 +150,6 @@ impl ModelCatalog {
                 provider: "Ollama".to_string(),
                 context_input: 128_000,
                 context_output: 32_768,
-                cost_tier: CostTier::Local,
-                pricing: Some(TokenPricing::new(0.0, 0.0)),
                 capabilities: vec![Capability::Instruction, Capability::Coding],
                 description,
                 available: true,
@@ -256,14 +189,6 @@ impl ModelCatalog {
                 .models_for_provider(provider_id)
                 .into_iter()
                 .map(|m| {
-                    let cost_tier = match m.cost_tier.as_str() {
-                        "premium" => CostTier::Premium,
-                        "standard" => CostTier::StandardAPI,
-                        "cheap" => CostTier::CheapAPI,
-                        "free" => CostTier::Free,
-                        "local" => CostTier::Local,
-                        _ => CostTier::StandardAPI,
-                    };
                     let capabilities = m
                         .capabilities
                         .iter()
@@ -277,15 +202,12 @@ impl ModelCatalog {
                             _ => None,
                         })
                         .collect();
-                    let pricing = m.pricing.map(|p| TokenPricing::new(p.input, p.output));
                     ModelInfo {
                         id: format!("{}:{}", provider_id, m.id),
                         name: m.name.clone(),
                         provider: display_name.to_string(),
                         context_input: m.context_input,
                         context_output: m.context_output,
-                        cost_tier,
-                        pricing,
                         capabilities,
                         description: m.description.clone(),
                         available: true,
@@ -308,8 +230,6 @@ impl ModelCatalog {
                     provider: "Google Antigravity".to_string(),
                     context_input: m.context_input,
                     context_output: m.context_output,
-                    cost_tier: CostTier::Free,
-                    pricing: Some(TokenPricing::new(0.0, 0.0)),
                     capabilities: m
                         .capabilities
                         .iter()
@@ -436,8 +356,6 @@ mod tests {
                 provider: "OpenRouter".to_string(),
                 context_input: 32768,
                 context_output: 8192,
-                cost_tier: CostTier::CheapAPI,
-                pricing: Some(TokenPricing::new(0.20, 0.20)),
                 capabilities: vec![Capability::Reasoning, Capability::Coding],
                 description: "Qwen reasoning model".to_string(),
                 available: true,
@@ -451,8 +369,6 @@ mod tests {
                 provider: "Anthropic".to_string(),
                 context_input: 1_000_000,
                 context_output: 65536,
-                cost_tier: CostTier::StandardAPI,
-                pricing: Some(TokenPricing::new(3.0, 15.0)),
                 capabilities: vec![
                     Capability::Reasoning,
                     Capability::Coding,
@@ -488,8 +404,6 @@ mod tests {
             provider: "Test".to_string(),
             context_input: 128000,
             context_output: 8192,
-            cost_tier: CostTier::Local,
-            pricing: Some(TokenPricing::new(0.0, 0.0)),
             capabilities: vec![],
             description: "test".to_string(),
             available: true,
@@ -498,28 +412,9 @@ mod tests {
     }
 
     #[test]
-    fn pricing_estimates_cost() {
-        let pricing = TokenPricing::new(3.0, 15.0);
-        let usd = pricing.estimate_cost_usd(100_000, 20_000);
-        assert!((usd - 0.6).abs() < 0.000_001, "got {usd}");
-    }
-
-    #[test]
     fn find_by_id_returns_model() {
         let cat = fixture_catalog();
         let model = cat.find_by_id("anthropic:claude-sonnet-4-6");
         assert!(model.is_some());
-    }
-
-    #[test]
-    fn pricing_for_model_is_not_auth_gated() {
-        let pricing = ModelCatalog::pricing_for_model("openai:gpt-5.4");
-        assert_eq!(pricing, Some(TokenPricing::new(2.5, 15.0)));
-    }
-
-    #[test]
-    fn pricing_for_ollama_cloud_is_defined() {
-        let pricing = ModelCatalog::pricing_for_model("ollama-cloud:gpt-oss:120b-cloud");
-        assert_eq!(pricing, Some(TokenPricing::new(0.0, 0.0)));
     }
 }

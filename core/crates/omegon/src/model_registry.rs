@@ -1,7 +1,7 @@
 //! Centralized model registry loaded from `data/model-registry.json`.
 //!
-//! This is the single source of truth for model metadata: IDs, pricing,
-//! context windows, grade mappings, endpoint profiles, and capabilities. Adding a new model
+//! This is the single source of truth for model metadata: IDs, context windows,
+//! grade mappings, endpoint profiles, and capabilities. Adding a new model
 //! means editing the JSON file — zero Rust changes required.
 
 use serde::Deserialize;
@@ -35,8 +35,6 @@ pub struct InferenceDefaults {
     pub context_input: usize,
     #[serde(default = "default_context_output")]
     pub context_output: usize,
-    #[serde(default = "default_cost_tier")]
-    pub cost_tier: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(default)]
@@ -51,16 +49,12 @@ fn default_context_input() -> usize {
 fn default_context_output() -> usize {
     32_768
 }
-fn default_cost_tier() -> String {
-    "free".into()
-}
 
 impl Default for InferenceDefaults {
     fn default() -> Self {
         Self {
             context_input: default_context_input(),
             context_output: default_context_output(),
-            cost_tier: default_cost_tier(),
             capabilities: vec!["instruction".into(), "coding".into()],
             supports_reasoning: false,
             name_patterns: HashMap::new(),
@@ -327,21 +321,12 @@ pub struct ModelEntry {
     pub context_input: usize,
     #[serde(rename = "contextOutput")]
     pub context_output: usize,
-    #[serde(rename = "costTier")]
-    pub cost_tier: String,
-    pub pricing: Option<PricingEntry>,
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub description: String,
     #[serde(default, rename = "supportsReasoning")]
     pub supports_reasoning: bool,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct PricingEntry {
-    pub input: f64,
-    pub output: f64,
 }
 
 pub struct ModelRegistry {
@@ -503,11 +488,6 @@ impl ModelRegistry {
         self.models.get(qualified_id)
     }
 
-    /// Pricing for a qualified model ID.
-    pub fn pricing(&self, qualified_id: &str) -> Option<PricingEntry> {
-        self.models.get(qualified_id).and_then(|m| m.pricing)
-    }
-
     /// All model entries for a given provider.
     pub fn models_for_provider(&self, provider: &str) -> Vec<&ModelEntry> {
         self.models
@@ -614,11 +594,6 @@ impl ModelRegistry {
             name: model_id.to_string(),
             context_input: d.context_input,
             context_output: d.context_output,
-            cost_tier: d.cost_tier.clone(),
-            pricing: Some(PricingEntry {
-                input: 0.0,
-                output: 0.0,
-            }),
             capabilities: caps,
             description: format!("Dynamically discovered {provider} model"),
             supports_reasoning,
@@ -778,7 +753,6 @@ mod tests {
         assert_eq!(info.name, "Claude Opus 4.8");
         assert_eq!(info.context_input, 1_000_000);
         assert_eq!(info.context_output, 131_072);
-        assert_eq!(info.cost_tier, "premium");
         assert_eq!(reg.infer_grade("anthropic", "claude-opus-4-8"), Some("S"));
     }
 
@@ -789,14 +763,6 @@ mod tests {
         assert_eq!(info.name, "GPT-5.5");
         assert_eq!(info.context_input, 1_000_000);
         assert!(info.supports_reasoning);
-    }
-
-    #[test]
-    fn pricing_lookup() {
-        let reg = ModelRegistry::global();
-        let p = reg.pricing("anthropic:claude-opus-4-6").unwrap();
-        assert!((p.input - 15.0).abs() < 0.01);
-        assert!((p.output - 75.0).abs() < 0.01);
     }
 
     #[test]

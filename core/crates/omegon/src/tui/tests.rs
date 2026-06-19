@@ -936,7 +936,7 @@ fn turn_end_tracks_session_usage_by_model_attribution() {
         app.footer_data.last_turn_output_tokens,
         &app.footer_data.session_usage_slices,
     );
-    assert!(session_text.contains("~$0.55"), "{session_text}");
+    assert_eq!(session_text, "T0 ¤112k/¤23k (turn ¤12k)");
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -5030,7 +5030,7 @@ fn editor_top_line_shows_engine_block_details() {
 
     assert!(rendered.contains("claude-sonnet"), "{rendered}");
     assert!(
-        rendered.contains("anthropic · frontier · think high"),
+        rendered.contains("anthropic · B · think high"),
         "{rendered}"
     );
 }

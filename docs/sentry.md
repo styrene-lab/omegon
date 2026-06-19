@@ -70,7 +70,6 @@ schedule = "*/30 * * * *"
 
 [task.budget]
 max_tokens_per_day = 500000
-max_cost_per_day_usd = 5.00
 ```
 
 Task fields:
@@ -86,13 +85,13 @@ Task fields:
 | `env` | Optional per-task environment values. |
 | `priority` | Optional board priority metadata. |
 | `trigger` | Cron, webhook, file-watch, or git-event trigger config. |
-| `budget` | Daily token and estimated cost limits. |
+| `budget` | Daily token limits. |
 
 ## Auto Routing
 
 When a task sets `model = "auto"` and `[sentry.routing]` is configured, Sentry classifies the prompt and routes simple/moderate tasks to `light_model` and complex tasks to `heavy_model`.
 
-Sentry uses `prefilter_model` through the internal `quick_completion` API for a single-turn classification call. If that call fails, Sentry falls back to local prompt heuristics rather than blocking the task. Routing outcomes are recorded in `.omegon/sentry/state.db` so cost and success rates can be inspected later.
+Sentry uses `prefilter_model` through the internal `quick_completion` API for a single-turn classification call. If that call fails, Sentry falls back to local prompt heuristics rather than blocking the task. Routing outcomes are recorded in `.omegon/sentry/state.db` so token usage and success rates can be inspected later.
 
 ## Code-Act Status
 

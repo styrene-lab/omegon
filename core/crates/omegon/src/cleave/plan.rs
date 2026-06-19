@@ -11,7 +11,7 @@ pub struct CleavePlan {
     pub rationale: String,
     /// Default model for all children. Overrides scope-based heuristic routing.
     /// Individual children can further override with their own `model` field.
-    /// If absent, the orchestrator applies cost-aware routing from the provider inventory.
+    /// If absent, the orchestrator applies capability-aware routing from the provider inventory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
 }

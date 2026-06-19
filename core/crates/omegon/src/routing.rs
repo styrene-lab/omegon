@@ -39,16 +39,6 @@ impl fmt::Display for CapabilityGradeBand {
     }
 }
 
-/// Cost band for rough ordering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CostTier {
-    Free,
-    Cheap,
-    Standard,
-    Premium,
-}
-
 // ── Provider inventory ──────────────────────────────────────────────
 
 /// A single provider entry in the inventory.
@@ -59,7 +49,6 @@ pub struct ProviderEntry {
     pub is_reachable: bool,
     pub capability_grade: CapabilityGradeBand,
     pub models: Vec<String>,
-    pub cost_tier: CostTier,
 }
 
 /// Info about an Ollama model.
@@ -89,14 +78,13 @@ impl ProviderInventory {
                 let has_env = p.env_vars.iter().any(|v| std::env::var(v).is_ok());
                 let has_stored = auth::read_credentials(auth::auth_json_key(p.id)).is_some();
                 let has_credentials = has_env || has_stored;
-                let (capability_grade, cost_tier) = provider_grade(p.id);
+                let capability_grade = provider_grade(p.id);
                 ProviderEntry {
                     provider_id: p.id.to_string(),
                     has_credentials,
                     is_reachable: has_credentials, // Assume reachable if credentialed
                     capability_grade,
                     models: vec![],
-                    cost_tier,
                 }
             })
             .collect();
@@ -214,15 +202,9 @@ impl ProviderInventory {
                 let is_current =
                     session_model.is_some_and(|s| s.starts_with(&format!("{}:", e.provider_id)));
                 let marker = if is_current { " ← current" } else { "" };
-                let cost = match e.cost_tier {
-                    CostTier::Free => "free",
-                    CostTier::Cheap => "cheap",
-                    CostTier::Standard => "standard",
-                    CostTier::Premium => "premium",
-                };
                 lines.push(format!(
-                    "- `{}:{}` — {}, {}{}",
-                    e.provider_id, default_model, e.capability_grade, cost, marker
+                    "- `{}:{}` — {}{}",
+                    e.provider_id, default_model, e.capability_grade, marker
                 ));
             }
             lines.push(String::new());
@@ -255,22 +237,14 @@ fn is_inference_provider(id: &str) -> bool {
     )
 }
 
-/// Map provider ID → (max capability grade band, cost band).
-fn provider_grade(id: &str) -> (CapabilityGradeBand, CostTier) {
+/// Map provider ID → maximum capability grade band.
+fn provider_grade(id: &str) -> CapabilityGradeBand {
     match id {
-        "anthropic" => (CapabilityGradeBand::Max, CostTier::Premium),
-        "openai" => (CapabilityGradeBand::Max, CostTier::Premium),
-        "openai-codex" => (CapabilityGradeBand::Frontier, CostTier::Free),
-        "openrouter" => (CapabilityGradeBand::Frontier, CostTier::Standard),
-        "google" => (CapabilityGradeBand::Frontier, CostTier::Standard),
-        "google-antigravity" => (CapabilityGradeBand::Frontier, CostTier::Free),
-        "groq" => (CapabilityGradeBand::Mid, CostTier::Cheap),
-        "xai" => (CapabilityGradeBand::Frontier, CostTier::Standard),
-        "mistral" => (CapabilityGradeBand::Frontier, CostTier::Standard),
-        "cerebras" => (CapabilityGradeBand::Mid, CostTier::Cheap),
-        "huggingface" => (CapabilityGradeBand::Frontier, CostTier::Cheap),
-        "ollama" => (CapabilityGradeBand::Mid, CostTier::Free),
-        _ => (CapabilityGradeBand::Leaf, CostTier::Standard),
+        "anthropic" | "openai" => CapabilityGradeBand::Max,
+        "openai-codex" | "openrouter" | "google" | "google-antigravity" | "xai" | "mistral"
+        | "huggingface" => CapabilityGradeBand::Frontier,
+        "groq" | "cerebras" | "ollama" => CapabilityGradeBand::Mid,
+        _ => CapabilityGradeBand::Leaf,
     }
 }
 
@@ -321,14 +295,6 @@ pub fn route(req: &CapabilityRequest, inventory: &ProviderInventory) -> Vec<Prov
             if e.capability_grade == req.grade {
                 score += 2.0;
             }
-
-            // Prefer cheaper at same grade
-            score -= match e.cost_tier {
-                CostTier::Free => 0.0,
-                CostTier::Cheap => 0.1,
-                CostTier::Standard => 0.3,
-                CostTier::Premium => 0.5,
-            };
 
             // Local preference
             if req.prefer_local && e.provider_id == "ollama" {
@@ -493,17 +459,16 @@ pub fn infer_capability_grade(scope_len: usize) -> CapabilityGradeBand {
 mod tests {
     use super::*;
 
-    fn mock_inventory(providers: Vec<(&str, CapabilityGradeBand, CostTier)>) -> ProviderInventory {
+    fn mock_inventory(providers: Vec<(&str, CapabilityGradeBand)>) -> ProviderInventory {
         ProviderInventory {
             entries: providers
                 .into_iter()
-                .map(|(id, grade, cost)| ProviderEntry {
+                .map(|(id, grade)| ProviderEntry {
                     provider_id: id.to_string(),
                     has_credentials: true,
                     is_reachable: true,
                     capability_grade: grade,
                     models: vec![],
-                    cost_tier: cost,
                 })
                 .collect(),
             ollama_models: vec![],
@@ -521,8 +486,8 @@ mod tests {
     #[test]
     fn test_route_frontier_prefers_anthropic() {
         let inv = mock_inventory(vec![
-            ("anthropic", CapabilityGradeBand::Max, CostTier::Premium),
-            ("ollama", CapabilityGradeBand::Mid, CostTier::Free),
+            ("anthropic", CapabilityGradeBand::Max),
+            ("ollama", CapabilityGradeBand::Mid),
         ]);
         let req = CapabilityRequest {
             grade: CapabilityGradeBand::Frontier,
@@ -538,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_route_leaf_returns_ollama() {
-        let inv = mock_inventory(vec![("ollama", CapabilityGradeBand::Mid, CostTier::Free)]);
+        let inv = mock_inventory(vec![("ollama", CapabilityGradeBand::Mid)]);
         let req = CapabilityRequest {
             grade: CapabilityGradeBand::Leaf,
             prefer_local: false,
@@ -565,8 +530,8 @@ mod tests {
     #[test]
     fn test_route_prefer_local() {
         let inv = mock_inventory(vec![
-            ("anthropic", CapabilityGradeBand::Max, CostTier::Premium),
-            ("ollama", CapabilityGradeBand::Mid, CostTier::Free),
+            ("anthropic", CapabilityGradeBand::Max),
+            ("ollama", CapabilityGradeBand::Mid),
         ]);
         let req = CapabilityRequest {
             grade: CapabilityGradeBand::Leaf, // Both can satisfy Leaf
@@ -582,8 +547,8 @@ mod tests {
     #[test]
     fn test_route_avoid_provider() {
         let inv = mock_inventory(vec![
-            ("anthropic", CapabilityGradeBand::Max, CostTier::Premium),
-            ("openai", CapabilityGradeBand::Max, CostTier::Premium),
+            ("anthropic", CapabilityGradeBand::Max),
+            ("openai", CapabilityGradeBand::Max),
         ]);
         let req = CapabilityRequest {
             grade: CapabilityGradeBand::Frontier,
@@ -625,7 +590,6 @@ mod tests {
             is_reachable: true,
             capability_grade: CapabilityGradeBand::Max,
             models: vec!["claude-sonnet-4-20250514".to_string()],
-            cost_tier: CostTier::Premium,
         };
         let json = serde_json::to_string(&entry).unwrap();
         let round: ProviderEntry = serde_json::from_str(&json).unwrap();

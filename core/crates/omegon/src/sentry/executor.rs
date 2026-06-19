@@ -43,15 +43,6 @@ impl BudgetLimits {
             ));
         }
 
-        if let Some(cost_limit) = config.max_cost_per_day_usd {
-            let estimated_cost = (used as f64) / 1_000_000.0 * 3.0;
-            if estimated_cost >= cost_limit {
-                return Some(format!(
-                    "cost budget exhausted: ${estimated_cost:.2}/${cost_limit:.2} today (estimated)"
-                ));
-            }
-        }
-
         None
     }
 }

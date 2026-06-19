@@ -3483,7 +3483,7 @@ mod tests {
     fn codex_prefixed_openai_family_models_can_fall_back_to_openai_api_key_status() {
         let dir = tempfile::tempdir().unwrap();
         let override_path = dir.path().join("auth.json");
-        with_auth_json_path_env(Some(&override_path), || {
+        with_auth_json_path_and_home_env(Some(&override_path), dir.path(), || {
             write_credentials(
                 "openai",
                 &OAuthCredentials {

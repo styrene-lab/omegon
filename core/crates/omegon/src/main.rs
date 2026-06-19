@@ -4501,10 +4501,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         });
                     }
                 }
-                if response.accepted
-                    && let Ok(mut bridge_model) = runtime_resources.bridge_model.lock()
-                {
-                    *bridge_model = None;
+                if response.accepted {
+                    if let Ok(mut bridge_model) = runtime_resources.bridge_model.lock() {
+                        *bridge_model = None;
+                    }
                     let snapshot = route_controller.snapshot().await;
                     if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
