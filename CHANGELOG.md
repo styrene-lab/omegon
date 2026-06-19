@@ -37,6 +37,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Expanded the profile-defaults/runtime-drift design with user/project source-target semantics, plus a cutover-oriented TDD plan covering profile schema, drift projection, `/profile` view/save/revert, runtime-only `/think`/`/context`, settings rows, slash popup metadata, and chrome cues.
 - Documented the profile-defaults/runtime-drift design as a shared projection concern for settings menu rows, slash popup command semantics, chrome drift cues, and `/profile` save/apply affordances.
 - Simplified the TUI title context signal to show only the resolved upstream context envelope plus pressure, removing requested-to-actual class deltas from persistent chrome.
 - Removed model pricing ownership from routing, model registry metadata, model catalog UI, footer session summaries, and Sentry budgets so Omegon routes by capability/context/token limits rather than hardcoded dollar heuristics.
