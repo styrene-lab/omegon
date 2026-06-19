@@ -567,12 +567,36 @@ Pre-cutover tests:
 - `surfaces/settings.rs`: thinking/context rows render clean when runtime matches profile baseline.
 - `surfaces/settings.rs`: thinking/context rows render drift metadata when runtime differs.
 - `tui/settings_menu.rs`: row navigation/edit dispatch remains unchanged when drift metadata is present.
+- `tui/settings_menu.rs`: row formatting/rendering includes profile/default metadata when present.
+- `tui/settings_menu.rs`: warning/live-override rows use subtle amber/dim styling without changing selection semantics.
 - Settings projection tests assert persistence labels: live-only, saved default, next-startup-only.
 
 Cutover event:
 
 - Wire profile drift metadata into `SettingsSurfaceProjection`.
-- Keep the TUI renderer responsible only for visual treatment, filtering, navigation, and edit dispatch.
+- Teach the TUI settings renderer to consume `SettingsRowProjection.profile` and `SettingsRowProjection.status`.
+- Keep the TUI renderer responsible only for visual treatment, filtering, navigation, and input dispatch.
+- Do **not** load profile data from disk in the paint loop. Build or refresh a profile-aware settings projection on `/settings` open, after settings edits, and after `/profile save|apply`; render should consume cached/provided projection state.
+
+Implementation staging:
+
+1. Extract a row-formatting/render helper for settings rows and test it with synthetic `SettingsRowProjection` values. This proves visual consumption of profile metadata without changing projection lifecycle.
+2. Add cached profile-aware projection refresh for `/settings` open/refresh paths. Avoid per-frame `Profile::load_with_source` calls.
+3. After save/apply/edit operations, refresh the cached projection so row drift state updates immediately.
+4. Keep selection/navigation row IDs stable. Drift metadata must not change row order, selected index behavior, or edit dispatch.
+
+Target row shape:
+
+```text
+Thinking        high      Δ profile: medium      live override
+Context class   massive   Δ profile: extended    live override
+```
+
+If horizontal space is tight, collapse to:
+
+```text
+Thinking        high      profile: medium · live override
+```
 
 ### Cutover 6 — slash popup and chrome integration
 
@@ -591,6 +615,38 @@ Cutover event:
 
 - Add persistence semantics to command-menu rows.
 - Add `prof:<label> ΔN` to chrome from the same profile drift projection.
+
+Implementation staging:
+
+1. Add persistence/drift metadata to the renderer-neutral command menu projection first. Do not add TUI-only slash popup special cases.
+2. Mark runtime-mutating commands such as `/think <level>` and `/context <class>` as `live override` commands.
+3. When drift exists, surface nearby profile actions: `/profile view`, `/profile save`, `/profile apply`/`/profile revert`.
+4. Only after the shared command projection carries the semantics should the TUI slash popup render badges/copy.
+5. Add the compact chrome cue from the same drift projection. Chrome should not recompute its own drift rules.
+
+Chrome contract:
+
+```text
+prof:project
+prof:project Δ2
+prof:user Δ1
+```
+
+Rendering rules:
+
+- clean profile state: neutral/dim profile label, no warning badge,
+- dirty profile state: amber/dim-gold delta marker,
+- never show requested-vs-actual context deltas in chrome; chrome profile drift is about saved defaults vs live runtime only,
+- keep the cue compact enough to coexist with the existing `ctx:<class>@<capacity>` signal.
+
+Slash popup row examples:
+
+```text
+/think high          Apply high reasoning now          live override
+/context massive     Use massive working set now       live override
+/profile save        Save current drift as defaults    persists
+/profile apply       Revert runtime to profile         destructive/live
+```
 
 ### Regression suite shape
 

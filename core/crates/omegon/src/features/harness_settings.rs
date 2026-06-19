@@ -45,7 +45,9 @@ impl HarnessSettings {
 
     fn settings_overview(&self) -> String {
         let s = self.settings.lock().unwrap();
-        crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&s).render_markdown()
+        let cwd = std::env::current_dir().unwrap_or_default();
+        crate::surfaces::settings::SettingsSurfaceProjection::from_settings_with_profile(&s, &cwd)
+            .render_markdown()
     }
 
     fn session_stats_overview(&self) -> String {
