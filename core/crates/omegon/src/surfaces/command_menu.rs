@@ -136,6 +136,8 @@ fn command_menu_row(
         badges.push(surfaces.join("+"));
     }
 
+    let metadata = command_metadata(&definition.name);
+
     CommandMenuRowProjection {
         command: format!("/{}", definition.name),
         name: definition.name,
@@ -145,7 +147,16 @@ fn command_menu_row(
         availability,
         safety,
         badges,
-        metadata: Vec::new(),
+        metadata,
+    }
+}
+
+fn command_metadata(name: &str) -> Vec<String> {
+    match name {
+        "think" | "context" => vec!["runtime until /profile save".to_string()],
+        "profile" => vec!["save/apply runtime defaults".to_string()],
+        "settings" => vec!["TUI settings modal".to_string()],
+        _ => Vec::new(),
     }
 }
 

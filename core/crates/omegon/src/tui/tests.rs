@@ -3856,6 +3856,18 @@ fn command_palette_renders_while_agent_active() {
     assert!(rendered.contains("/plan"), "{rendered}");
 }
 
+
+#[test]
+fn command_palette_renders_profile_persistence_metadata() {
+    let mut app = test_app();
+    app.editor.set_text("/think");
+
+    let rendered = render_app_to_string(&mut app, 140, 24);
+
+    assert!(rendered.contains("/think"), "{rendered}");
+    assert!(rendered.contains("runtime until /profile save"), "{rendered}");
+}
+
 #[test]
 fn hidden_model_aliases_do_not_appear_in_palette() {
     let mut app = test_app();
