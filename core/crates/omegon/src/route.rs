@@ -209,6 +209,16 @@ impl ModelIntent {
     }
 }
 
+/// Select the highest-ranked provider/model candidate for a durable model intent
+/// without mutating the active route or erasing the intent.
+pub fn select_candidate_for_intent(
+    intent: &ModelIntent,
+    inventory: &crate::routing::ProviderInventory,
+) -> Option<crate::routing::ProviderCandidate> {
+    let req = intent.to_capability_request();
+    crate::routing::route(&req, inventory).into_iter().next()
+}
+
 /// Why the selected model is not the one serving the session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FallbackReason {
@@ -1627,4 +1637,66 @@ mod tests {
         assert_eq!(req.only_providers, vec!["openai-codex"]);
         assert_eq!(req.grade, crate::routing::CapabilityGradeBand::Max);
     }
+    fn intent_test_inventory() -> crate::routing::ProviderInventory {
+        crate::routing::ProviderInventory {
+            entries: vec![
+                crate::routing::ProviderEntry {
+                    provider_id: "anthropic".into(),
+                    capability_grade: crate::routing::CapabilityGradeBand::Max,
+                    cost_tier: crate::routing::CostTier::Premium,
+                    has_credentials: true,
+                    is_reachable: true,
+                    models: vec!["claude-fable-5".into()],
+                },
+                crate::routing::ProviderEntry {
+                    provider_id: "groq".into(),
+                    capability_grade: crate::routing::CapabilityGradeBand::Mid,
+                    cost_tier: crate::routing::CostTier::Cheap,
+                    has_credentials: true,
+                    is_reachable: true,
+                    models: vec!["llama-3.3-70b-versatile".into()],
+                },
+                crate::routing::ProviderEntry {
+                    provider_id: "ollama".into(),
+                    capability_grade: crate::routing::CapabilityGradeBand::Mid,
+                    cost_tier: crate::routing::CostTier::Free,
+                    has_credentials: true,
+                    is_reachable: true,
+                    models: vec!["qwen3:30b".into()],
+                },
+            ],
+            ollama_models: vec![crate::routing::OllamaModelInfo {
+                name: "qwen3:30b".into(),
+                size_bytes: 30_000_000_000,
+                is_running: true,
+                vram_bytes: 20_000_000_000,
+            }],
+            probed_at: std::time::Instant::now(),
+        }
+    }
+
+    #[test]
+    fn select_candidate_for_local_intent_uses_ollama() {
+        let mut intent = ModelIntent::with_grade(ModelGrade::D);
+        intent.provider_selection = ProviderSelection::Local;
+        let candidate = select_candidate_for_intent(&intent, &intent_test_inventory()).unwrap();
+        assert_eq!(candidate.provider_id, "ollama");
+    }
+
+    #[test]
+    fn select_candidate_for_endpoint_intent_uses_endpoint() {
+        let mut intent = ModelIntent::with_grade(ModelGrade::D);
+        intent.provider_selection = ProviderSelection::Endpoint("groq".into());
+        let candidate = select_candidate_for_intent(&intent, &intent_test_inventory()).unwrap();
+        assert_eq!(candidate.provider_id, "groq");
+    }
+
+    #[test]
+    fn select_candidate_for_upstream_intent_excludes_ollama() {
+        let mut intent = ModelIntent::with_grade(ModelGrade::D);
+        intent.provider_selection = ProviderSelection::Upstream;
+        let candidate = select_candidate_for_intent(&intent, &intent_test_inventory()).unwrap();
+        assert_ne!(candidate.provider_id, "ollama");
+    }
+
 }
