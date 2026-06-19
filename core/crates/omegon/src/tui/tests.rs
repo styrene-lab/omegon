@@ -5631,6 +5631,34 @@ fn settings_screen_renders_profile_source_and_drift_actions() {
     assert!(rendered.contains("/profile apply"), "{rendered}");
 }
 
+
+#[test]
+fn settings_profile_shortcuts_queue_existing_profile_commands() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    app.queue_settings_profile_save(&tx);
+    match rx.try_recv().expect("save command") {
+        TuiCommand::ExecuteControl {
+            request:
+                crate::control_runtime::ControlRequest::ProfileCapture {
+                    target: crate::settings::ProfileSaveTarget::ActiveSource,
+                },
+            ..
+        } => {}
+        other => panic!("expected profile capture, got {other:?}"),
+    }
+
+    app.queue_settings_profile_apply(&tx);
+    match rx.try_recv().expect("apply command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::ProfileApply,
+            ..
+        } => {}
+        other => panic!("expected profile apply, got {other:?}"),
+    }
+}
+
 #[test]
 fn slash_settings_opens_settings_screen_without_command_panel() {
     let mut app = test_app();

@@ -2174,6 +2174,30 @@ impl App {
         self.settings_screen = Some(settings_menu::SettingsScreen::from_projection(&projection));
     }
 
+    fn queue_settings_profile_save(&mut self, tx: &mpsc::Sender<TuiCommand>) {
+        let _ = tx.try_send(TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::ProfileCapture {
+                target: crate::settings::ProfileSaveTarget::ActiveSource,
+            },
+            respond_to: None,
+        });
+        self.show_command_toast(CommandToast::new(
+            "Saving runtime drift with /profile save",
+            CommandSeverity::Info,
+        ));
+    }
+
+    fn queue_settings_profile_apply(&mut self, tx: &mpsc::Sender<TuiCommand>) {
+        let _ = tx.try_send(TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::ProfileApply,
+            respond_to: None,
+        });
+        self.show_command_toast(CommandToast::new(
+            "Applying profile defaults with /profile apply",
+            CommandSeverity::Info,
+        ));
+    }
+
     fn open_selected_settings_row(&mut self) {
         let Some(screen) = self.settings_screen.as_ref() else {
             return;
@@ -8924,6 +8948,12 @@ pub async fn run_tui(
                                 }
                             }
                             KeyCode::Enter => app.open_selected_settings_row(),
+                            KeyCode::Char('s') | KeyCode::Char('S') => {
+                                app.queue_settings_profile_save(&command_tx);
+                            }
+                            KeyCode::Char('a') | KeyCode::Char('A') => {
+                                app.queue_settings_profile_apply(&command_tx);
+                            }
                             KeyCode::Esc => {
                                 app.settings_screen = None;
                             }
