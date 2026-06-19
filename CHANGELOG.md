@@ -39,6 +39,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Routed the TUI settings screen through the profile-aware settings projection and added `/profile save` variants to command-palette completions so defaults/runtime drift and explicit save actions share the existing profile command path.
 - Expanded the profile-defaults/runtime-drift design with concrete settings menu renderer and slash popup/chrome staging guidance, including cached projection refresh requirements and profile drift chrome contracts.
 - Added profile-drift metadata to the shared settings surface projection and routed the agent-facing settings overview through profile-aware settings rows.
 - Made thinking and requested-context-class commands runtime-only by default; `/profile view` now shows the resulting drift and `/profile save|capture` is the explicit persistence path.
