@@ -69,7 +69,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a runtime final-answer nudge when an assistant turn would end while the visible Workbench plan still has active/todo items.
 
 ### Fixed
-- Made the TUI model-grade badge reflect the actual displayed model capability from the registry instead of the current route-intent default, so `openai-codex:gpt-5.5` renders as `‹S›`.
+- Made the TUI model-grade badge reflect the actual displayed model capability from the registry instead of the current route-intent default, so `openai-codex:gpt-5.5` renders as `‹S›`, and replaced the duplicate editor context rail with a single `ctx:<class>@<capacity> <pct>% <fill> <used>` signal.
 - Documented the registry-backed slash-command matrix and added drift coverage for canonical parser commands versus intentional hidden compatibility aliases.
 - Gated built-in remote slash execution with command-registry CLI availability metadata so interactive-only commands are rejected consistently.
 - Added explicit built-in remote slash policy for confirmation-required commands while preserving remote logout compatibility.
