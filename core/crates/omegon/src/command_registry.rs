@@ -329,6 +329,10 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
         &[
             "view",
             "capture",
+            "save",
+            "save --active",
+            "save --project",
+            "save --user",
             "apply",
             "mqtt",
             "extension",

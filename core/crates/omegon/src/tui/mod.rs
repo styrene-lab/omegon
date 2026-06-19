@@ -2161,10 +2161,16 @@ impl App {
             .unwrap_or(0)
     }
 
-    fn open_settings_screen(&mut self) {
+    fn settings_projection(&self) -> crate::surfaces::settings::SettingsSurfaceProjection {
         let settings = self.settings();
-        let projection =
-            crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        crate::surfaces::settings::SettingsSurfaceProjection::from_settings_with_profile(
+            &settings,
+            self.cwd(),
+        )
+    }
+
+    fn open_settings_screen(&mut self) {
+        let projection = self.settings_projection();
         self.settings_screen = Some(settings_menu::SettingsScreen::from_projection(&projection));
     }
 
@@ -2172,9 +2178,7 @@ impl App {
         let Some(screen) = self.settings_screen.as_ref() else {
             return;
         };
-        let settings = self.settings();
-        let projection =
-            crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        let projection = self.settings_projection();
         let Some(row) = screen.active_rows(&projection).get(screen.selected_row) else {
             self.show_command_toast(CommandToast::new(
                 "No settings row selected",
@@ -3935,9 +3939,7 @@ impl App {
     }
 
     fn render_settings_screen(&self, area: Rect, frame: &mut Frame) {
-        let settings = self.settings();
-        let projection =
-            crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+        let projection = self.settings_projection();
         let Some(screen) = self.settings_screen.as_ref() else {
             return;
         };
