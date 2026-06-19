@@ -690,7 +690,9 @@ impl IpcConnection {
                             Some(crate::control_runtime::ControlRequest::ProfileExport)
                         }
                         "profile_capture" => {
-                            Some(crate::control_runtime::ControlRequest::ProfileCapture)
+                            Some(crate::control_runtime::ControlRequest::ProfileCapture {
+                                target: crate::settings::ProfileSaveTarget::ActiveSource,
+                            })
                         }
                         "profile_apply" => {
                             Some(crate::control_runtime::ControlRequest::ProfileApply)

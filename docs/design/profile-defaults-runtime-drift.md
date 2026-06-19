@@ -605,6 +605,78 @@ The suite should be layered by contract:
 
 Do not test profile drift by scraping final TUI pixels first. Test the semantic projection first, then add one or two renderer smoke tests per surface.
 
+## Future product line — Armory-published portable profiles
+
+This is explicitly **not** a 0.27.0 line item. It depends on the profile-source, drift, save-target, schema, and trust foundations described above.
+
+Longer-term, Omegon should be able to publish and install portable profile artifacts through the Armory alongside skills and extensions. Skills and extensions will likely remain repo-shaped artifacts because they contain documentation, code, tests, assets, and versioned package structure. Profiles are different: they are small, singular, portable configuration artifacts.
+
+A portable Armory profile could represent:
+
+- a review posture/profile for conservative code audit work,
+- a release-manager profile,
+- a local-first low-cost profile,
+- a high-context architecture profile,
+- a hardened daemon/headless profile,
+- a project-family default profile for a team or organization.
+
+The product goal is not “copy someone else's settings blindly.” The goal is signed, inspectable, portable defaults that an operator can import, diff against current runtime/project/user settings, apply selectively, and save into the appropriate user/project target.
+
+### Trust requirement: signed profiles
+
+GPG or an equivalent signing foundation is mandatory before Armory-published profiles are trusted product surface.
+
+Minimum trust requirements:
+
+- profile artifacts are signed by a maintainer/publisher key,
+- Omegon can verify the signature before install/apply,
+- the operator can inspect the profile contents before applying,
+- profile provenance is visible in `/profile view` or an equivalent profile-detail surface,
+- imported profiles cannot silently grant authority or bypass permissions,
+- profile signatures are separated from runtime identity/authorization claims.
+
+GPG is the likely starting point because it is familiar and portable, but the design should leave room for future Sigstore/minisign/SSH-signature support if the Armory trust model evolves.
+
+### Required foundations before this can ship
+
+This depends on work that does not exist yet:
+
+- a stable profile schema with explicit user/project/source/target semantics,
+- profile drift and projection infrastructure,
+- named/imported profile identity separate from active user/project profile files,
+- Armory artifact metadata for profile artifacts,
+- a key-management and trust-store story for publisher keys,
+- signature verification plumbing,
+- an install/apply flow that previews diffs and supports selective adoption,
+- policy that prevents imported profiles from acting as authorization grants.
+
+### Product shape sketch
+
+Possible future commands:
+
+```text
+/armory profile search review
+/armory profile inspect styrene/release-manager
+/armory profile install styrene/release-manager
+/profile import armory:styrene/release-manager
+/profile apply imported:styrene/release-manager --preview
+/profile save --user --from imported:styrene/release-manager
+```
+
+Possible profile detail fields:
+
+```text
+Profile: styrene/release-manager
+Source: armory
+Publisher: Styrene Labs
+Signature: verified GPG key ABCD1234
+Applies to: user/project/selective
+Contains: posture, thinking, context, model intent, tool detail, extension policy
+Excludes: secrets, credentials, runtime identity, authority grants
+```
+
+The first implementation should bias toward preview/diff/apply rather than automatic activation. Portable profiles are defaults and preferences, not authority envelopes.
+
 ## Non-goals for v1
 
 - Named profile catalog and `/profile save as <name>`.
@@ -612,6 +684,7 @@ Do not test profile drift by scraping final TUI pixels first. Test the semantic 
 - Full extension hot-reload semantics.
 - Treating profile as authorization identity.
 - Replacing authority envelopes, route state, or provider health state.
+- Armory-published portable profiles or signed profile import.
 
 ## Open questions
 

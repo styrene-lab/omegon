@@ -594,7 +594,7 @@ pub enum CanonicalSlashCommand {
     SetThinking(crate::settings::ThinkingLevel),
     ProfileView,
     ProfileExport,
-    ProfileCapture,
+    ProfileCapture(crate::settings::ProfileSaveTarget),
     ProfileApply,
     ProfileSetMqtt(Option<bool>),
     ProfileExtensionAllow(String),
@@ -748,8 +748,28 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             Some(CanonicalSlashCommand::ProfileView)
         }
         "profile" if args == "export" => Some(CanonicalSlashCommand::ProfileExport),
-        "profile" if args == "capture" || args == "save" => {
-            Some(CanonicalSlashCommand::ProfileCapture)
+        "profile"
+            if matches!(
+                args,
+                "capture" | "save" | "capture --active" | "save --active"
+            ) =>
+        {
+            Some(CanonicalSlashCommand::ProfileCapture(
+                crate::settings::ProfileSaveTarget::ActiveSource,
+            ))
+        }
+        "profile" if matches!(args, "capture --project" | "save --project") => Some(
+            CanonicalSlashCommand::ProfileCapture(crate::settings::ProfileSaveTarget::Project),
+        ),
+        "profile"
+            if matches!(
+                args,
+                "capture --user" | "save --user" | "capture --global" | "save --global"
+            ) =>
+        {
+            Some(CanonicalSlashCommand::ProfileCapture(
+                crate::settings::ProfileSaveTarget::User,
+            ))
         }
         "profile" if args == "apply" || args == "load" => Some(CanonicalSlashCommand::ProfileApply),
         "profile" if args == "mqtt" || args == "mqtt status" => {
@@ -9996,7 +10016,39 @@ mod slash_command_parsing_tests {
         );
         assert_eq!(
             canonical_slash_command("profile", "capture"),
-            Some(CanonicalSlashCommand::ProfileCapture)
+            Some(CanonicalSlashCommand::ProfileCapture(
+                crate::settings::ProfileSaveTarget::ActiveSource
+            ))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "save"),
+            Some(CanonicalSlashCommand::ProfileCapture(
+                crate::settings::ProfileSaveTarget::ActiveSource
+            ))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "save --active"),
+            Some(CanonicalSlashCommand::ProfileCapture(
+                crate::settings::ProfileSaveTarget::ActiveSource
+            ))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "save --project"),
+            Some(CanonicalSlashCommand::ProfileCapture(
+                crate::settings::ProfileSaveTarget::Project
+            ))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "save --user"),
+            Some(CanonicalSlashCommand::ProfileCapture(
+                crate::settings::ProfileSaveTarget::User
+            ))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "save --global"),
+            Some(CanonicalSlashCommand::ProfileCapture(
+                crate::settings::ProfileSaveTarget::User
+            ))
         );
         assert_eq!(
             canonical_slash_command("profile", "apply"),
