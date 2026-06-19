@@ -1367,7 +1367,7 @@ fn thinking_level_description(level: crate::settings::ThinkingLevel) -> &'static
 
 pub async fn set_thinking_response(
     shared_settings: &settings::SharedSettings,
-    cwd: &Path,
+    _cwd: &Path,
     level: crate::settings::ThinkingLevel,
 ) -> SlashCommandResponse {
     let Ok(mut s) = shared_settings.lock() else {
@@ -1376,24 +1376,14 @@ pub async fn set_thinking_response(
             output: Some("failed to acquire settings lock".to_string()),
         };
     };
-    let previous = s.thinking;
     s.thinking = level;
-    let mut profile = settings::Profile::load(cwd);
-    profile.capture_from(&s);
-    let save_result = profile.save(cwd);
-
-    match save_result {
-        Ok(()) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!("Thinking → {} {}", level.icon(), level.as_str())),
-        },
-        Err(e) => {
-            s.thinking = previous;
-            SlashCommandResponse {
-                accepted: false,
-                output: Some(format!("failed to save profile: {e}")),
-            }
-        }
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(format!(
+            "Thinking → {} {} (live override; use /profile save to persist)",
+            level.icon(),
+            level.as_str()
+        )),
     }
 }
 
@@ -2259,16 +2249,14 @@ pub async fn set_context_class_response(
     shared_settings: &settings::SharedSettings,
     class: crate::settings::ContextClass,
 ) -> SlashCommandResponse {
+    let _ = agent;
     if let Ok(mut s) = shared_settings.lock() {
         s.set_requested_context_class(class);
-        let mut profile = settings::Profile::load(&agent.cwd);
-        profile.capture_from(&s);
-        let _ = profile.save(&agent.cwd);
     }
     SlashCommandResponse {
         accepted: true,
         output: Some(format!(
-            "Context policy → {} (model capacity unchanged)",
+            "Context policy → {} (live override; model capacity unchanged; use /profile save to persist)",
             class.label()
         )),
     }
@@ -2558,7 +2546,7 @@ pub async fn auth_login_daemon_response(provider: &str) -> SlashCommandResponse 
 
 pub async fn set_thinking_daemon_response(
     shared_settings: &settings::SharedSettings,
-    cwd: &Path,
+    _cwd: &Path,
     level: crate::settings::ThinkingLevel,
 ) -> SlashCommandResponse {
     let Ok(mut s) = shared_settings.lock() else {
@@ -2568,13 +2556,14 @@ pub async fn set_thinking_daemon_response(
         };
     };
     s.thinking = level;
-    let mut profile = settings::Profile::load(cwd);
-    profile.capture_from(&s);
-    let _ = profile.save(cwd);
     drop(s);
     SlashCommandResponse {
         accepted: true,
-        output: Some(format!("Thinking → {} {}", level.icon(), level.as_str())),
+        output: Some(format!(
+            "Thinking → {} {} (live override; use /profile save to persist)",
+            level.icon(),
+            level.as_str()
+        )),
     }
 }
 
@@ -2606,7 +2595,7 @@ pub async fn set_model_daemon_response(
 
 pub async fn set_context_class_daemon_response(
     shared_settings: &settings::SharedSettings,
-    cwd: &Path,
+    _cwd: &Path,
     class: crate::settings::ContextClass,
 ) -> SlashCommandResponse {
     let Ok(mut s) = shared_settings.lock() else {
@@ -2616,13 +2605,13 @@ pub async fn set_context_class_daemon_response(
         };
     };
     s.set_requested_context_class(class);
-    let mut profile = settings::Profile::load(cwd);
-    profile.capture_from(&s);
-    let _ = profile.save(cwd);
     drop(s);
     SlashCommandResponse {
         accepted: true,
-        output: Some(format!("Context policy → {}", class.label())),
+        output: Some(format!(
+            "Context policy → {} (live override; use /profile save to persist)",
+            class.label()
+        )),
     }
 }
 
@@ -4451,9 +4440,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_thinking_response_persists_project_profile() {
+    async fn set_thinking_response_is_runtime_only() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon")).unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/profile.json"),
+            r#"{"thinkingLevel":"medium"}"#,
+        )
+        .unwrap();
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
+            thinking: crate::settings::ThinkingLevel::Minimal,
+            ..Default::default()
+        }));
+
+        let response = set_thinking_response(
+            &shared_settings,
+            tmp.path(),
+            crate::settings::ThinkingLevel::High,
+        )
+        .await;
+
+        assert!(response.accepted);
+        assert!(
+            response
+                .output
+                .unwrap_or_default()
+                .contains("live override")
+        );
+        assert_eq!(
+            shared_settings.lock().unwrap().thinking,
+            crate::settings::ThinkingLevel::High
+        );
+        let profile = settings::Profile::load(tmp.path());
+        assert_eq!(profile.thinking_level.as_deref(), Some("medium"));
+
+        let view = profile_view_response(&shared_settings, tmp.path()).await;
+        let output = view.output.unwrap_or_default();
+        assert!(
+            output.contains("| Thinking | `medium` | `high` | live only |"),
+            "{output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_thinking_response_does_not_roll_back_for_profile_write_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".omegon"), "not a directory").unwrap();
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
             thinking: crate::settings::ThinkingLevel::Minimal,
             ..Default::default()
@@ -4469,33 +4502,91 @@ mod tests {
         assert!(response.accepted);
         assert_eq!(
             shared_settings.lock().unwrap().thinking,
-            crate::settings::ThinkingLevel::High
+            crate::settings::ThinkingLevel::High,
+            "runtime-only changes should not depend on profile persistence"
         );
-        let profile = settings::Profile::load(tmp.path());
-        assert_eq!(profile.thinking_level.as_deref(), Some("high"));
     }
 
     #[tokio::test]
-    async fn set_thinking_response_rolls_back_runtime_when_profile_save_fails() {
+    async fn set_context_class_response_is_runtime_only() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join(".omegon"), "not a directory").unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon")).unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/profile.json"),
+            r#"{"requestedContextClass":"extended"}"#,
+        )
+        .unwrap();
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
-            thinking: crate::settings::ThinkingLevel::Minimal,
+            requested_context_class: Some(crate::settings::ContextClass::Compact),
             ..Default::default()
         }));
 
-        let response = set_thinking_response(
+        let response = set_context_class_daemon_response(
             &shared_settings,
             tmp.path(),
-            crate::settings::ThinkingLevel::High,
+            crate::settings::ContextClass::Massive,
         )
         .await;
 
-        assert!(!response.accepted);
+        assert!(response.accepted);
+        assert!(
+            response
+                .output
+                .unwrap_or_default()
+                .contains("live override")
+        );
         assert_eq!(
-            shared_settings.lock().unwrap().thinking,
-            crate::settings::ThinkingLevel::Minimal,
-            "live runtime should not diverge from failed persistence"
+            shared_settings.lock().unwrap().requested_context_class,
+            Some(crate::settings::ContextClass::Massive)
+        );
+        let profile = settings::Profile::load(tmp.path());
+        assert_eq!(profile.requested_context_class.as_deref(), Some("extended"));
+
+        let view = profile_view_response(&shared_settings, tmp.path()).await;
+        let output = view.output.unwrap_or_default();
+        assert!(
+            output.contains("| Context class | `extended` | `massive` | live only |"),
+            "{output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_save_clears_thinking_and_context_drift() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon")).unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/profile.json"),
+            r#"{"thinkingLevel":"medium","requestedContextClass":"extended"}"#,
+        )
+        .unwrap();
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
+            thinking: crate::settings::ThinkingLevel::High,
+            requested_context_class: Some(crate::settings::ContextClass::Massive),
+            ..Default::default()
+        }));
+
+        let before = profile_view_response(&shared_settings, tmp.path()).await;
+        let before_output = before.output.unwrap_or_default();
+        assert!(
+            before_output.contains("Runtime drift: Δ2"),
+            "{before_output}"
+        );
+
+        let save = profile_capture_response(
+            &shared_settings,
+            tmp.path(),
+            settings::ProfileSaveTarget::ActiveSource,
+        )
+        .await;
+
+        assert!(save.accepted, "{save:?}");
+        let after = profile_view_response(&shared_settings, tmp.path()).await;
+        let after_output = after.output.unwrap_or_default();
+        assert!(
+            after_output.contains("Runtime drift: clean"),
+            "{after_output}"
         );
     }
 

@@ -46,6 +46,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Made thinking and requested-context-class commands runtime-only by default; `/profile view` now shows the resulting drift and `/profile save|capture` is the explicit persistence path.
 - Added a renderer-neutral profile drift projection and routed `/profile view` through a human-readable drift summary with source metadata, save/apply actions, live runtime details, and saved profile JSON.
 - Expanded the profile-defaults/runtime-drift design with user/project source-target semantics, future signed Armory-published portable profile goals, plus a cutover-oriented TDD plan covering profile schema, drift projection, `/profile` view/save/revert, runtime-only `/think`/`/context`, settings rows, slash popup metadata, and chrome cues.
 - Documented the profile-defaults/runtime-drift design as a shared projection concern for settings menu rows, slash popup command semantics, chrome drift cues, and `/profile` save/apply affordances.
