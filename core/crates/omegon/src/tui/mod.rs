@@ -4703,7 +4703,7 @@ impl App {
             let palette_area = Rect {
                 x: editor_area.x,
                 y: editor_area.y.saturating_sub(palette_height),
-                width: editor_area.width.min(50),
+                width: editor_area.width.min(76),
                 height: palette_height,
             };
 
@@ -4715,9 +4715,15 @@ impl App {
                     } else {
                         format!("  [{}]", row.badges.join(" · "))
                     };
+                    let metadata = if row.metadata.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  — {}", row.metadata.join(" · "))
+                    };
                     Line::from(vec![
                         Span::styled(format!(" {}", row.command), t.style_accent()),
                         Span::styled(format!("  {}", row.description), t.style_muted()),
+                        Span::styled(metadata, t.style_dim()),
                         Span::styled(badges, t.style_dim()),
                     ])
                 })
