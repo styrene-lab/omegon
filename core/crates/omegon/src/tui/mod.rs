@@ -98,6 +98,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
+use unicode_width::UnicodeWidthStr;
 
 use omegon_traits::AgentEvent;
 
@@ -1563,6 +1564,19 @@ fn editor_height_for(editor: &Editor, main_area: Rect) -> u16 {
 }
 
 impl App {
+    fn displayed_model_grade(model_provider: &str, model_id: &str, fallback: &str) -> String {
+        let model = model_id
+            .strip_prefix(&format!("{model_provider}:"))
+            .unwrap_or(model_id);
+
+        let registry = crate::model_registry::ModelRegistry::global();
+        registry
+            .exact_grade(model_provider, model)
+            .or_else(|| registry.infer_grade(model_provider, model))
+            .map(str::to_string)
+            .unwrap_or_else(|| fallback.to_string())
+    }
+
     fn current_persona_state(&self) -> crate::settings::PersonaState {
         let persona_id = self
             .plugin_registry
@@ -4110,7 +4124,11 @@ impl App {
             self.footer_data.is_oauth = s.provider_is_oauth;
         }
         {
-            self.footer_data.model_tier = self.footer_data.harness.capability_grade.clone();
+            self.footer_data.model_tier = Self::displayed_model_grade(
+                &self.footer_data.model_provider,
+                &self.footer_data.model_id,
+                &self.footer_data.harness.capability_grade,
+            );
         }
         self.footer_data.turn = self.turn;
         self.footer_data.tool_calls = self.tool_calls;
@@ -4337,12 +4355,36 @@ impl App {
                 .take(2)
                 .collect::<Vec<_>>()
                 .join("-");
-            let engine_detail = format!(
-                "{} · {} · think {}",
-                self.footer_data.model_provider,
-                self.footer_data.model_tier,
-                self.footer_data.thinking_level
-            );
+            let thinking_glyph = match self.footer_data.thinking_level.as_str() {
+                "off" => "○",
+                "minimal" => "◔",
+                "low" => "◑",
+                "medium" => "◕",
+                "high" => "●",
+                _ => "◌",
+            };
+            let context_bar = match self.footer_data.actual_context_class.ordinal() {
+                0 => "▰▱▱▱",
+                1 => "▰▰▱▱",
+                2 => "▰▰▰▱",
+                _ => "▰▰▰▰",
+            };
+            let title_core_width = format!(
+                " {} › {model_short} ‹{}›  │  ψ {thinking_glyph}  κ {context_bar}  ",
+                self.footer_data.model_provider, self.footer_data.model_tier
+            )
+            .width();
+            let editor_width = editor_area.width.saturating_sub(2) as usize;
+            let rail_width = editor_width.saturating_sub(title_core_width);
+            let context_percent = self.footer_data.context_percent.clamp(0.0, 100.0);
+            let usage_rail = if rail_width >= 2 {
+                let rail_fill = ((rail_width as f32 * context_percent / 100.0).round() as usize)
+                    .min(rail_width.saturating_sub(1));
+                let rail_empty = rail_width.saturating_sub(rail_fill + 1);
+                format!("{}◆{}", "━".repeat(rail_fill), "─".repeat(rail_empty))
+            } else {
+                String::new()
+            };
             let editor_title = if self.agent_active {
                 let verb_display = spinner::maybe_glitch(self.working_verb)
                     .unwrap_or_else(|| self.working_verb.to_string());
@@ -4360,8 +4402,31 @@ impl App {
                 ])
             } else {
                 Line::from(vec![
-                    Span::styled(format!(" {model_short} "), t.style_accent()),
-                    Span::styled(format!("{engine_detail} ▸ "), t.style_muted()),
+                    Span::styled(" ", Style::default().fg(t.border_dim())),
+                    Span::styled(
+                        self.footer_data.model_provider.clone(),
+                        t.style_accent().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" › ", Style::default().fg(t.border_dim())),
+                    Span::styled(
+                        model_short.clone(),
+                        t.style_muted().add_modifier(Modifier::ITALIC),
+                    ),
+                    Span::styled(" ‹", Style::default().fg(t.border_dim())),
+                    Span::styled(
+                        self.footer_data.model_tier.clone(),
+                        Style::default().fg(t.fg()).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("›  │  ", Style::default().fg(t.border_dim())),
+                    Span::styled("ψ", Style::default().fg(t.dim())),
+                    Span::styled(" ", Style::default().fg(t.border_dim())),
+                    Span::styled(thinking_glyph, Style::default().fg(t.muted())),
+                    Span::styled("  ", Style::default().fg(t.border_dim())),
+                    Span::styled("κ", Style::default().fg(t.dim())),
+                    Span::styled(" ", Style::default().fg(t.border_dim())),
+                    Span::styled(context_bar, Style::default().fg(t.muted())),
+                    Span::styled("  ", Style::default().fg(t.border_dim())),
+                    Span::styled(usage_rail, Style::default().fg(t.border_dim())),
                 ])
             };
             let editor_block = Block::default()
