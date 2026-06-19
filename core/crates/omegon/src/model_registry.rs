@@ -189,7 +189,6 @@ pub struct NormalizedEndpointError {
     pub message: String,
 }
 
-
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiResponseProfile {
@@ -218,7 +217,10 @@ fn default_openai_tool_call_name_paths() -> Vec<String> {
     ["function.name"].into_iter().map(str::to_string).collect()
 }
 fn default_openai_tool_call_arguments_paths() -> Vec<String> {
-    ["function.arguments"].into_iter().map(str::to_string).collect()
+    ["function.arguments"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -456,7 +458,6 @@ impl ModelRegistry {
             message,
         })
     }
-
 
     pub fn normalize_openai_tool_call_deltas(
         &self,
@@ -1044,7 +1045,9 @@ mod tests {
                 "function": {"name": "bash", "arguments": "{\"command\":"}
             }]}}]
         });
-        let deltas = reg.normalize_openai_tool_call_deltas("openai", &chunk).unwrap();
+        let deltas = reg
+            .normalize_openai_tool_call_deltas("openai", &chunk)
+            .unwrap();
         assert_eq!(deltas.len(), 1);
         assert_eq!(deltas[0].index, 0);
         assert_eq!(deltas[0].id.as_deref(), Some("call_1"));
@@ -1055,9 +1058,9 @@ mod tests {
     #[test]
     fn openai_tool_call_delta_normalization_rejects_non_openai_endpoint() {
         let reg = ModelRegistry::global();
-        assert!(reg
-            .normalize_openai_tool_call_deltas("anthropic", &serde_json::json!({}))
-            .is_err());
+        assert!(
+            reg.normalize_openai_tool_call_deltas("anthropic", &serde_json::json!({}))
+                .is_err()
+        );
     }
-
 }
