@@ -24,6 +24,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Injected the live delegate queue into model context when background delegates are active or have unviewed terminal results, making reconciliation front-and-center for the agent.
 - Strengthened active plan context injection so the Workbench plan remains front-and-center until active/todo items are reconciled.
 - Improved TUI composer history recall to preserve the pre-recall draft and clear history session state when the operator edits recalled input.
+- Added source-aware profile load/save primitives and `/profile save|capture --project|--user|--active` parsing so profile capture preserves project/user persistence boundaries.
+- Added requested-context-class persistence to profiles so saved defaults can restore the operator-requested working-set policy separately from the model-derived context window.
 - Added a pure bridge from durable model intent to provider routing requests, including provider-only filters for endpoint selection.
 - Added endpoint-profile-driven error normalization for OpenAI-compatible non-success responses.
 - Added profile schema support for durable model intent persistence.
@@ -44,7 +46,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
-- Expanded the profile-defaults/runtime-drift design with user/project source-target semantics, plus a cutover-oriented TDD plan covering profile schema, drift projection, `/profile` view/save/revert, runtime-only `/think`/`/context`, settings rows, slash popup metadata, and chrome cues.
+- Expanded the profile-defaults/runtime-drift design with user/project source-target semantics, future signed Armory-published portable profile goals, plus a cutover-oriented TDD plan covering profile schema, drift projection, `/profile` view/save/revert, runtime-only `/think`/`/context`, settings rows, slash popup metadata, and chrome cues.
 - Documented the profile-defaults/runtime-drift design as a shared projection concern for settings menu rows, slash popup command semantics, chrome drift cues, and `/profile` save/apply affordances.
 - Simplified the TUI title context signal to show only the resolved upstream context envelope plus pressure, removing requested-to-actual class deltas from persistent chrome.
 - Removed model pricing ownership from routing, model registry metadata, model catalog UI, footer session summaries, and Sentry budgets so Omegon routes by capability/context/token limits rather than hardcoded dollar heuristics.

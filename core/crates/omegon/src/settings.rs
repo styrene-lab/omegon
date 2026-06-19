@@ -14,6 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 /// Posture preset — behavioral stance for the harness.
@@ -1037,6 +1038,36 @@ pub fn shared(model: &str) -> SharedSettings {
 
 /// Profile: settings that persist with the project in .omegon/profile.json.
 /// Read on startup, written on change. Travels with git.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileSource {
+    Project(PathBuf),
+    User(PathBuf),
+    BuiltInDefault,
+}
+
+impl std::fmt::Display for ProfileSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Project(path) => write!(f, "project:{}", path.display()),
+            Self::User(path) => write!(f, "user:{}", path.display()),
+            Self::BuiltInDefault => f.write_str("built-in defaults"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileSaveTarget {
+    ActiveSource,
+    Project,
+    User,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedProfile {
+    pub profile: Profile,
+    pub source: ProfileSource,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -1046,6 +1077,10 @@ pub struct Profile {
     pub model_intent: Option<ProfileModelIntent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
+    /// Operator-requested working-set policy class. This is distinct from the
+    /// actual model-derived context window/class.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_context_class: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
 
@@ -1326,12 +1361,21 @@ impl Profile {
     /// Load profile. Project-level (`<repo>/.omegon/profile.json`) overrides
     /// user-level (`~/.omegon/profile.json`). Both are optional.
     pub fn load(cwd: &std::path::Path) -> Self {
+        Self::load_with_source(cwd).profile
+    }
+
+    /// Load profile with explicit source metadata so save/apply surfaces can
+    /// preserve user/project distinctions.
+    pub fn load_with_source(cwd: &std::path::Path) -> LoadedProfile {
         let project_path = project_profile_path(cwd);
         if let Ok(content) = std::fs::read_to_string(&project_path)
             && let Ok(profile) = serde_json::from_str(&content)
         {
             tracing::debug!(path = %project_path.display(), "project profile loaded");
-            return profile;
+            return LoadedProfile {
+                profile,
+                source: ProfileSource::Project(project_path),
+            };
         }
 
         // User-level fallback
@@ -1340,37 +1384,75 @@ impl Profile {
             && let Ok(profile) = serde_json::from_str(&content)
         {
             tracing::debug!(path = %global_path.display(), "global profile loaded");
-            return profile;
+            return LoadedProfile {
+                profile,
+                source: ProfileSource::User(global_path),
+            };
         }
 
-        Self::default()
+        LoadedProfile {
+            profile: Self::default(),
+            source: ProfileSource::BuiltInDefault,
+        }
     }
 
-    /// Save to the project-level profile at the repository root.
-    pub fn save(&self, cwd: &std::path::Path) -> anyhow::Result<()> {
-        let path = project_profile_path(cwd);
+    fn save_to_path(&self, path: &std::path::Path, label: &str) -> anyhow::Result<()> {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         let mut profile = self.clone();
         profile.normalize_permissions();
         let json = serde_json::to_string_pretty(&profile)?;
-        crate::filelock::atomic_write_locked(&path, json.as_bytes())?;
-        tracing::debug!(path = %path.display(), "project profile saved");
+        crate::filelock::atomic_write_locked(path, json.as_bytes())?;
+        tracing::debug!(path = %path.display(), label, "profile saved");
         Ok(())
+    }
+
+    /// Save to the project-level profile at the repository root.
+    pub fn save(&self, cwd: &std::path::Path) -> anyhow::Result<()> {
+        let path = project_profile_path(cwd);
+        self.save_to_path(&path, "project")
     }
 
     /// Save to the user-level profile (~/.omegon/profile.json).
     pub fn save_global(&self) -> anyhow::Result<()> {
         let path = global_profile_path()
             .ok_or_else(|| anyhow::anyhow!("Cannot determine config directory"))?;
-        let _ = std::fs::create_dir_all(path.parent().unwrap());
-        let mut profile = self.clone();
-        profile.normalize_permissions();
-        let json = serde_json::to_string_pretty(&profile)?;
-        crate::filelock::atomic_write_locked(&path, json.as_bytes())?;
-        tracing::debug!(path = %path.display(), "global profile saved");
-        Ok(())
+        self.save_to_path(&path, "global")
+    }
+
+    pub fn save_to_target(
+        &self,
+        cwd: &std::path::Path,
+        target: ProfileSaveTarget,
+        active_source: &ProfileSource,
+    ) -> anyhow::Result<ProfileSource> {
+        match target {
+            ProfileSaveTarget::Project => {
+                let path = project_profile_path(cwd);
+                self.save_to_path(&path, "project")?;
+                Ok(ProfileSource::Project(path))
+            }
+            ProfileSaveTarget::User => {
+                let path = global_profile_path()
+                    .ok_or_else(|| anyhow::anyhow!("Cannot determine config directory"))?;
+                self.save_to_path(&path, "global")?;
+                Ok(ProfileSource::User(path))
+            }
+            ProfileSaveTarget::ActiveSource => match active_source {
+                ProfileSource::Project(path) => {
+                    self.save_to_path(path, "project")?;
+                    Ok(ProfileSource::Project(path.clone()))
+                }
+                ProfileSource::User(path) => {
+                    self.save_to_path(path, "global")?;
+                    Ok(ProfileSource::User(path.clone()))
+                }
+                ProfileSource::BuiltInDefault => {
+                    anyhow::bail!("profile save target is ambiguous; use --project or --user")
+                }
+            },
+        }
     }
 
     pub fn effective_trusted_directories(&self) -> Vec<String> {
@@ -1420,6 +1502,11 @@ impl Profile {
             && let Some(level) = ThinkingLevel::parse(t)
         {
             settings.thinking = level;
+        }
+        if let Some(ref class) = self.requested_context_class
+            && let Some(class) = ContextClass::parse(class)
+        {
+            settings.set_requested_context_class(class);
         }
         if let Some(turns) = self.max_turns {
             settings.max_turns = turns;
@@ -1493,6 +1580,9 @@ impl Profile {
             model_id: settings.model_short().to_string(),
         });
         self.thinking_level = Some(settings.thinking.as_str().to_string());
+        self.requested_context_class = settings
+            .requested_context_class
+            .map(|class| class.short().to_lowercase());
         self.max_turns = Some(settings.max_turns);
         if settings.automation_level != AutomationLevel::default()
             || self.automation.level.is_some()
@@ -2362,6 +2452,110 @@ mod tests {
 
         assert!(tmp.path().join(".omegon/profile.json").exists());
         assert!(!nested.join(".omegon/profile.json").exists());
+    }
+
+    #[test]
+    fn profile_requested_context_class_round_trips_and_applies_as_policy() {
+        let profile: Profile =
+            serde_json::from_str(r#"{"requestedContextClass":"massive"}"#).unwrap();
+        let json = serde_json::to_value(&profile).unwrap();
+        assert_eq!(json["requestedContextClass"], "massive");
+
+        let mut settings = Settings::new("anthropic:claude-sonnet-4-6");
+        settings.context_class = ContextClass::Massive;
+        settings.context_window = ContextClass::Massive.nominal_tokens();
+        profile.apply_to(&mut settings);
+
+        assert_eq!(
+            settings.requested_context_class,
+            Some(ContextClass::Massive)
+        );
+        assert_eq!(settings.context_class, ContextClass::Massive);
+        assert_eq!(
+            settings.context_window,
+            ContextClass::Massive.nominal_tokens()
+        );
+    }
+
+    #[test]
+    fn profile_capture_records_requested_context_class() {
+        let mut settings = Settings::new("anthropic:claude-sonnet-4-6");
+        settings.set_requested_context_class(ContextClass::Extended);
+
+        let mut profile = Profile::default();
+        profile.capture_from(&settings);
+
+        assert_eq!(profile.requested_context_class.as_deref(), Some("extended"));
+    }
+
+    #[test]
+    fn profile_load_with_source_reports_project_user_and_default_sources() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let project_profile = tmp
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join(".omegon/profile.json");
+        std::fs::create_dir_all(project_profile.parent().unwrap()).unwrap();
+        std::fs::write(&project_profile, r#"{"thinkingLevel":"high"}"#).unwrap();
+
+        let loaded = Profile::load_with_source(tmp.path());
+        assert!(
+            matches!(loaded.source, ProfileSource::Project(ref path) if path == &project_profile)
+        );
+        assert_eq!(loaded.profile.thinking_level.as_deref(), Some("high"));
+
+        std::fs::remove_file(&project_profile).unwrap();
+        let loaded = Profile::load_with_source(tmp.path());
+        assert!(matches!(
+            loaded.source,
+            ProfileSource::User(_) | ProfileSource::BuiltInDefault
+        ));
+    }
+
+    #[test]
+    fn profile_save_to_active_source_refuses_builtin_default_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let profile = Profile::default();
+
+        let err = profile
+            .save_to_target(
+                tmp.path(),
+                ProfileSaveTarget::ActiveSource,
+                &ProfileSource::BuiltInDefault,
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("ambiguous"));
+        assert!(!tmp.path().join(".omegon/profile.json").exists());
+    }
+
+    #[test]
+    fn profile_save_to_active_project_source_writes_project_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let project_profile = tmp.path().join(".omegon/profile.json");
+        let profile = Profile {
+            thinking_level: Some("high".into()),
+            ..Profile::default()
+        };
+
+        let saved_source = profile
+            .save_to_target(
+                tmp.path(),
+                ProfileSaveTarget::ActiveSource,
+                &ProfileSource::Project(project_profile.clone()),
+            )
+            .unwrap();
+
+        assert!(
+            matches!(saved_source, ProfileSource::Project(ref path) if path == &project_profile)
+        );
+        let saved: Profile =
+            serde_json::from_str(&std::fs::read_to_string(project_profile).unwrap()).unwrap();
+        assert_eq!(saved.thinking_level.as_deref(), Some("high"));
     }
 
     // ─── Regression: posture ↔ slim equivalence ─────────────────────────

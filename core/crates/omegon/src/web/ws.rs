@@ -1568,7 +1568,9 @@ async fn handle_client_command(
                 }
                 "profile_view" => crate::control_runtime::ControlRequest::ProfileView,
                 "profile_export" => crate::control_runtime::ControlRequest::ProfileExport,
-                "profile_capture" => crate::control_runtime::ControlRequest::ProfileCapture,
+                "profile_capture" => crate::control_runtime::ControlRequest::ProfileCapture {
+                    target: crate::settings::ProfileSaveTarget::ActiveSource,
+                },
                 "profile_apply" => crate::control_runtime::ControlRequest::ProfileApply,
                 "profile_mqtt" => crate::control_runtime::ControlRequest::ProfileSetMqtt {
                     enabled: cmd["enabled"].as_bool(),

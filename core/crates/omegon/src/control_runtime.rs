@@ -47,7 +47,9 @@ pub enum ControlRequest {
     SetThinking {
         level: crate::settings::ThinkingLevel,
     },
-    ProfileCapture,
+    ProfileCapture {
+        target: settings::ProfileSaveTarget,
+    },
     ProfileApply,
     ProfileSetMqtt {
         enabled: Option<bool>,
@@ -257,7 +259,9 @@ pub fn control_request_from_slash(
         }
         crate::tui::CanonicalSlashCommand::ProfileView => ControlRequest::ProfileView,
         crate::tui::CanonicalSlashCommand::ProfileExport => ControlRequest::ProfileExport,
-        crate::tui::CanonicalSlashCommand::ProfileCapture => ControlRequest::ProfileCapture,
+        crate::tui::CanonicalSlashCommand::ProfileCapture(target) => {
+            ControlRequest::ProfileCapture { target: *target }
+        }
         crate::tui::CanonicalSlashCommand::ProfileApply => ControlRequest::ProfileApply,
         crate::tui::CanonicalSlashCommand::ProfileSetMqtt(enabled) => {
             ControlRequest::ProfileSetMqtt { enabled: *enabled }
@@ -530,7 +534,9 @@ async fn try_stateless_control(
         ControlRequest::ProfileExport => {
             profile_export_response(shared_settings, cwd, handles).await
         }
-        ControlRequest::ProfileCapture => profile_capture_response(shared_settings, cwd).await,
+        ControlRequest::ProfileCapture { target } => {
+            profile_capture_response(shared_settings, cwd, *target).await
+        }
         ControlRequest::ProfileSetMqtt { enabled } => {
             profile_set_mqtt_response(cwd, *enabled).await
         }
@@ -792,7 +798,7 @@ pub async fn execute_daemon_control(
             | ControlRequest::SetRuntimeMode { .. }
             | ControlRequest::SetMaxTurns { .. }
             | ControlRequest::ProfileApply
-            | ControlRequest::ProfileCapture
+            | ControlRequest::ProfileCapture { .. }
             | ControlRequest::ProfileSetMqtt { .. }
             | ControlRequest::ProfileExtensionAllow { .. }
             | ControlRequest::ProfileExtensionDeny { .. }
@@ -2715,6 +2721,7 @@ pub async fn profile_view_response(
 pub async fn profile_capture_response(
     shared_settings: &settings::SharedSettings,
     cwd: &Path,
+    target: settings::ProfileSaveTarget,
 ) -> SlashCommandResponse {
     let Ok(s) = shared_settings.lock() else {
         return SlashCommandResponse {
@@ -2722,12 +2729,13 @@ pub async fn profile_capture_response(
             output: Some("failed to read settings".into()),
         };
     };
-    let mut profile = settings::Profile::load(cwd);
+    let loaded = settings::Profile::load_with_source(cwd);
+    let mut profile = loaded.profile;
     profile.capture_from(&s);
-    match profile.save(cwd) {
-        Ok(()) => SlashCommandResponse {
+    match profile.save_to_target(cwd, target, &loaded.source) {
+        Ok(source) => SlashCommandResponse {
             accepted: true,
-            output: Some("Profile captured from live runtime.".into()),
+            output: Some(format!("Profile captured from live runtime ({source}).")),
         },
         Err(e) => SlashCommandResponse {
             accepted: false,
@@ -4371,6 +4379,55 @@ mod tests {
             crate::settings::ThinkingLevel::Minimal,
             "live runtime should not diverge from failed persistence"
         );
+    }
+
+    #[tokio::test]
+    async fn profile_capture_response_writes_explicit_project_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
+            thinking: crate::settings::ThinkingLevel::High,
+            requested_context_class: Some(crate::settings::ContextClass::Massive),
+            ..Default::default()
+        }));
+
+        let response = profile_capture_response(
+            &shared_settings,
+            tmp.path(),
+            settings::ProfileSaveTarget::Project,
+        )
+        .await;
+
+        assert!(response.accepted, "{response:?}");
+        let profile_path = tmp.path().join(".omegon/profile.json");
+        assert!(profile_path.exists());
+        let profile = settings::Profile::load(tmp.path());
+        assert_eq!(profile.thinking_level.as_deref(), Some("high"));
+        assert_eq!(profile.requested_context_class.as_deref(), Some("massive"));
+    }
+
+    #[tokio::test]
+    async fn profile_capture_response_active_source_updates_existing_project_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let profile_path = tmp.path().join(".omegon/profile.json");
+        std::fs::create_dir_all(profile_path.parent().unwrap()).unwrap();
+        std::fs::write(&profile_path, r#"{"thinkingLevel":"low"}"#).unwrap();
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
+            thinking: crate::settings::ThinkingLevel::High,
+            ..Default::default()
+        }));
+
+        let response = profile_capture_response(
+            &shared_settings,
+            tmp.path(),
+            settings::ProfileSaveTarget::ActiveSource,
+        )
+        .await;
+
+        assert!(response.accepted, "{response:?}");
+        let profile = settings::Profile::load(tmp.path());
+        assert_eq!(profile.thinking_level.as_deref(), Some("high"));
     }
 
     #[tokio::test]
