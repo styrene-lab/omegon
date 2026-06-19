@@ -1126,6 +1126,21 @@ fn parse_csv_env(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+async fn resolve_current_model_intent_route(
+    route_controller: &std::sync::Arc<route::RouteController>,
+) -> Option<route::RouteSnapshot> {
+    let mut inventory = routing::ProviderInventory::probe();
+    inventory.probe_ollama().await;
+    let intent = route_controller.snapshot().await.intent;
+    let candidate = route::select_candidate_for_intent(&intent, &inventory)?;
+    let target = format!("{}:{}", candidate.provider_id, candidate.model_id);
+    let bridge = providers::auto_detect_bridge(&target).await?;
+    route_controller
+        .resolve_route_from_intent_candidate(candidate, bridge)
+        .await
+        .ok()
+}
+
 fn persist_model_intent(
     cwd: &std::path::Path,
     intent: &crate::route::ModelIntent,
@@ -4511,12 +4526,18 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                     }
+                    let resolved = resolve_current_model_intent_route(&route_controller).await;
+                    let active = resolved
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.serving_model())
+                        .or_else(|| snapshot.serving_model())
+                        .unwrap_or("disconnected");
                     omegon_traits::SlashCommandResponse {
                         accepted: true,
                         output: Some(format!(
-                            "Model intent updated — {}. Active route unchanged: {}",
+                            "Model intent updated — {}. Active route: {}",
                             snapshot.intent.summary(),
-                            snapshot.serving_model().unwrap_or("disconnected")
+                            active
                         )),
                     }
                 } else {
@@ -4548,12 +4569,18 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                     }
+                    let resolved = resolve_current_model_intent_route(&route_controller).await;
+                    let active = resolved
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.serving_model())
+                        .or_else(|| snapshot.serving_model())
+                        .unwrap_or("disconnected");
                     omegon_traits::SlashCommandResponse {
                         accepted: true,
                         output: Some(format!(
-                            "Model provider intent updated — {}. Active route unchanged: {}",
+                            "Model provider intent updated — {}. Active route: {}",
                             snapshot.intent.summary(),
-                            snapshot.serving_model().unwrap_or("disconnected")
+                            active
                         )),
                     }
                 } else {
@@ -4579,12 +4606,18 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                     }
+                    let resolved = resolve_current_model_intent_route(&route_controller).await;
+                    let active = resolved
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.serving_model())
+                        .or_else(|| snapshot.serving_model())
+                        .unwrap_or("disconnected");
                     omegon_traits::SlashCommandResponse {
                         accepted: true,
                         output: Some(format!(
-                            "Model policy intent updated — {}. Active route unchanged: {}",
+                            "Model policy intent updated — {}. Active route: {}",
                             snapshot.intent.summary(),
-                            snapshot.serving_model().unwrap_or("disconnected")
+                            active
                         )),
                     }
                 } else {
