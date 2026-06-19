@@ -701,7 +701,6 @@ impl RouteController {
         self.emit_changed().await
     }
 
-
     pub async fn resolve_route_from_intent_candidate(
         &self,
         candidate: crate::routing::ProviderCandidate,
@@ -734,7 +733,8 @@ impl RouteController {
             drop(state);
             return Ok(self.emit_changed().await);
         };
-        self.resolve_route_from_intent_candidate(candidate, new_bridge).await
+        self.resolve_route_from_intent_candidate(candidate, new_bridge)
+            .await
     }
 
     pub async fn switch_model(
@@ -1785,12 +1785,20 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(snapshot.serving_model(), Some("anthropic:claude-sonnet-4-6"));
+        assert_eq!(
+            snapshot.serving_model(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
         assert_eq!(
             snapshot.intent.provider_selection,
             ProviderSelection::Endpoint("missing".into())
         );
-        assert!(snapshot.warning.as_deref().unwrap_or("").contains("No provider candidate"));
+        assert!(
+            snapshot
+                .warning
+                .as_deref()
+                .unwrap_or("")
+                .contains("No provider candidate")
+        );
     }
-
 }
