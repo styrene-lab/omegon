@@ -11,4 +11,5 @@ pub mod layout;
 pub mod memory_status;
 pub mod operations;
 pub mod palette;
+pub mod profile;
 pub mod settings;
