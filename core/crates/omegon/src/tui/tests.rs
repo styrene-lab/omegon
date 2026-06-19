@@ -5372,6 +5372,26 @@ fn one_shot_context_notifications_toast_without_command_panel() {
     assert!(app.conversation.segments().is_empty());
 }
 
+
+#[test]
+fn settings_screen_renders_profile_source_and_drift_actions() {
+    let mut app = test_app();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
+    app.update_settings(|s| {
+        s.thinking = ThinkingLevel::Minimal;
+        s.set_requested_context_class(ContextClass::Massive);
+    });
+
+    app.open_settings_screen();
+    let rendered = render_app_to_string(&mut app, 120, 32);
+
+    assert!(rendered.contains("profile: built-in defaults"), "{rendered}");
+    assert!(rendered.contains("runtime drift"), "{rendered}");
+    assert!(rendered.contains("/profile save"), "{rendered}");
+    assert!(rendered.contains("/profile apply"), "{rendered}");
+}
+
 #[test]
 fn slash_settings_opens_settings_screen_without_command_panel() {
     let mut app = test_app();
