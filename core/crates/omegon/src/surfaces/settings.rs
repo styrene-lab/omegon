@@ -5,7 +5,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::settings::Settings;
+use std::path::Path;
+
+use crate::settings::{Profile, Settings};
+use crate::surfaces::profile::{ProfileDriftProjection, ProfileDriftRow};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettingsSurfaceProjection {
@@ -27,6 +30,7 @@ pub struct SettingsRowProjection {
     pub description: String,
     pub route: SettingsMutationRouteProjection,
     pub persistence: SettingsPersistenceProjection,
+    pub profile: Option<SettingsProfileProjection>,
     pub editor: SettingsEditorProjection,
     pub status: SettingsStatusProjection,
     pub choices: Vec<SettingsChoiceProjection>,
@@ -37,6 +41,20 @@ pub struct SettingsChoiceProjection {
     pub value: String,
     pub label: String,
     pub active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsProfileProjection {
+    pub profile_value: String,
+    pub runtime_value: String,
+    pub state: SettingsProfileStateProjection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsProfileStateProjection {
+    SavedDefault,
+    LiveOverride,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,7 +99,39 @@ pub enum SettingsPersistenceProjection {
 
 impl SettingsSurfaceProjection {
     pub fn from_settings(settings: &Settings) -> Self {
-        Self {
+        Self::from_settings_with_profile_drift(settings, None)
+    }
+
+    pub fn from_settings_with_profile(settings: &Settings, cwd: &Path) -> Self {
+        let loaded = Profile::load_with_source(cwd);
+        let drift = ProfileDriftProjection::from_profile_and_settings(
+            &loaded.profile,
+            loaded.source,
+            settings,
+        );
+        Self::from_settings_with_profile_drift(settings, Some(&drift))
+    }
+
+    pub fn from_settings_with_profile_drift(
+        settings: &Settings,
+        drift: Option<&ProfileDriftProjection>,
+    ) -> Self {
+        let profile_row = |id: &str| {
+            drift
+                .and_then(|projection| {
+                    projection
+                        .rows
+                        .iter()
+                        .find(|row| settings_row_matches_drift(id, row))
+                })
+                .map(|row| SettingsProfileProjection {
+                    profile_value: row.profile_value.clone(),
+                    runtime_value: row.runtime_value.clone(),
+                    state: SettingsProfileStateProjection::LiveOverride,
+                })
+        };
+
+        let mut projection = Self {
             tabs: vec![
                 SettingsTabProjection {
                     id: "runtime".into(),
@@ -270,7 +320,18 @@ impl SettingsSurfaceProjection {
                     ],
                 },
             ],
+        };
+
+        for tab in &mut projection.tabs {
+            for row in &mut tab.rows {
+                row.profile = profile_row(&row.id);
+                if row.profile.is_some() {
+                    row.status = SettingsStatusProjection::Warning;
+                }
+            }
         }
+
+        projection
     }
 
     pub fn render_markdown(&self) -> String {
@@ -284,6 +345,11 @@ impl SettingsSurfaceProjection {
                 out.push_str(&row.label);
                 out.push_str("**: ");
                 out.push_str(&row.value);
+                if let Some(profile) = &row.profile {
+                    out.push_str(" — profile: ");
+                    out.push_str(&profile.profile_value);
+                    out.push_str(" · live override");
+                }
                 if !row.description.is_empty() {
                     out.push_str(" — ");
                     out.push_str(&row.description);
@@ -311,6 +377,7 @@ fn row(
         description: description.into(),
         route,
         persistence,
+        profile: None,
         editor,
         status: SettingsStatusProjection::Normal,
         choices: vec![],
@@ -339,6 +406,13 @@ fn choice_row(
             SettingsEditorProjection::Choice,
         )
     }
+}
+
+fn settings_row_matches_drift(row_id: &str, drift: &ProfileDriftRow) -> bool {
+    matches!(
+        (row_id, drift.key),
+        ("runtime.thinking", "thinking") | ("runtime.context_class", "requestedContextClass")
+    )
 }
 
 fn trusted_dir_value(settings: &Settings) -> String {
@@ -401,6 +475,56 @@ mod tests {
         assert_eq!(kind.editor, SettingsEditorProjection::Choice);
         assert!(role.choices.iter().any(|choice| choice.value == "primary"));
         assert!(kind.choices.iter().any(|choice| choice.value == "code"));
+    }
+
+    #[test]
+    fn projection_marks_profile_drift_on_runtime_rows() {
+        let profile = crate::settings::Profile {
+            thinking_level: Some("medium".into()),
+            requested_context_class: Some("extended".into()),
+            ..Default::default()
+        };
+        let mut settings = Settings {
+            thinking: crate::settings::ThinkingLevel::High,
+            ..Default::default()
+        };
+        settings.set_requested_context_class(crate::settings::ContextClass::Massive);
+        let drift = ProfileDriftProjection::from_profile_and_settings(
+            &profile,
+            crate::settings::ProfileSource::BuiltInDefault,
+            &settings,
+        );
+
+        let projection =
+            SettingsSurfaceProjection::from_settings_with_profile_drift(&settings, Some(&drift));
+        let runtime = projection
+            .tabs
+            .iter()
+            .find(|tab| tab.id == "runtime")
+            .unwrap();
+        let thinking = runtime
+            .rows
+            .iter()
+            .find(|row| row.id == "runtime.thinking")
+            .unwrap();
+        let context = runtime
+            .rows
+            .iter()
+            .find(|row| row.id == "runtime.context_class")
+            .unwrap();
+
+        assert_eq!(thinking.status, SettingsStatusProjection::Warning);
+        assert_eq!(thinking.profile.as_ref().unwrap().profile_value, "medium");
+        assert_eq!(context.profile.as_ref().unwrap().profile_value, "extended");
+        assert!(
+            runtime
+                .rows
+                .iter()
+                .find(|row| row.id == "runtime.model")
+                .unwrap()
+                .profile
+                .is_none()
+        );
     }
 
     #[test]
