@@ -600,15 +600,7 @@ impl FooterData {
             ContextClass::Extended => t.fg(),
             _ => t.dim(),
         };
-        let context_badge = if self.context_class != self.actual_context_class {
-            format!(
-                "{}→{}",
-                self.context_class.short(),
-                self.actual_context_class.short()
-            )
-        } else {
-            self.actual_context_class.short().to_string()
-        };
+        let context_badge = self.actual_context_class.short().to_string();
 
         lines.push(Line::from(vec![
             Span::styled(format!("{source_icon} "), Style::default().fg(source_color)),
@@ -931,16 +923,11 @@ fn shorten_cwd(cwd: &str, max_chars: usize) -> String {
 }
 
 fn format_context_text(
-    requested_class: ContextClass,
     actual_class: ContextClass,
     context_percent: f32,
     context_window: usize,
 ) -> String {
-    let badge = if requested_class != actual_class {
-        format!("{}→{}", requested_class.short(), actual_class.short())
-    } else {
-        actual_class.short().to_string()
-    };
+    let badge = actual_class.short().to_string();
     if context_window > 0 {
         format!(
             "{} {:.0}% / ¤{}",
@@ -1494,21 +1481,16 @@ mod tests {
     #[test]
     fn context_text_compacts_class_percent_and_window() {
         assert_eq!(
-            format_context_text(
-                ContextClass::Standard,
-                ContextClass::Standard,
-                68.0,
-                272_000
-            ),
+            format_context_text(ContextClass::Standard, 68.0, 272_000),
             "Standard 68% / ¤272k"
         );
         assert_eq!(
-            format_context_text(ContextClass::Extended, ContextClass::Extended, 42.0, 0),
+            format_context_text(ContextClass::Extended, 42.0, 0),
             "Extended 42%"
         );
         assert_eq!(
-            format_context_text(ContextClass::Massive, ContextClass::Compact, 68.0, 131_072),
-            "Massive→Compact 68% / ¤131k"
+            format_context_text(ContextClass::Compact, 68.0, 131_072),
+            "Compact 68% / ¤131k"
         );
     }
 

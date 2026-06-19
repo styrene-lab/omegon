@@ -5046,6 +5046,8 @@ fn editor_top_line_uses_single_context_fill_signal() {
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
     app.apply_ui_preset(UiSurfaces::lean());
     app.footer_data.harness.capability_grade = "B".into();
+    app.footer_data.context_class = ContextClass::Compact;
+    app.footer_data.actual_context_class = ContextClass::Massive;
     app.footer_data.context_window = 1_048_576;
     app.footer_data.context_percent = 50.0;
     app.footer_data.estimated_tokens = 524_288;
@@ -5056,6 +5058,7 @@ fn editor_top_line_uses_single_context_fill_signal() {
         rendered.contains("ctx:msv@1.0M 50% ▕████░░░░▏ 524k"),
         "{rendered}"
     );
+    assert!(!rendered.contains("ctx:cmp→msv"), "{rendered}");
     assert!(!rendered.contains("κ ▰"), "{rendered}");
     assert!(!rendered.contains("◆"), "{rendered}");
 }

@@ -1591,21 +1591,12 @@ impl App {
     }
 
     fn editor_context_widget(
-        requested: crate::settings::ContextClass,
         actual: crate::settings::ContextClass,
         context_window: usize,
         estimated_tokens: usize,
         context_percent: f32,
     ) -> String {
-        let class = if requested != actual {
-            format!(
-                "{}→{}",
-                Self::context_class_tag(requested),
-                Self::context_class_tag(actual)
-            )
-        } else {
-            Self::context_class_tag(actual).to_string()
-        };
+        let class = Self::context_class_tag(actual);
         let capacity = if context_window > 0 {
             widgets::format_tokens(context_window)
         } else {
@@ -4415,7 +4406,6 @@ impl App {
                 _ => "◌",
             };
             let context_widget = Self::editor_context_widget(
-                self.footer_data.context_class,
                 self.footer_data.actual_context_class,
                 self.footer_data.context_window,
                 self.footer_data.estimated_tokens,
