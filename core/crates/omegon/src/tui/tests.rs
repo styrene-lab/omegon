@@ -5612,6 +5612,28 @@ fn one_shot_context_notifications_toast_without_command_panel() {
 }
 
 
+
+#[test]
+fn settings_projection_helper_marks_runtime_profile_drift() {
+    let mut app = test_app();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
+    app.update_settings(|s| {
+        s.thinking = ThinkingLevel::Minimal;
+        s.set_requested_context_class(ContextClass::Massive);
+    });
+
+    let projection = app.settings_projection();
+    let runtime = projection
+        .tabs
+        .iter()
+        .find(|tab| tab.id == "runtime")
+        .expect("runtime tab");
+
+    assert!(runtime.rows.iter().any(|row| row.id == "runtime.thinking" && row.profile.is_some()));
+    assert!(runtime.rows.iter().any(|row| row.id == "runtime.context_class" && row.profile.is_some()));
+}
+
 #[test]
 fn settings_screen_renders_profile_source_and_drift_actions() {
     let mut app = test_app();
