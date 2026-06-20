@@ -5,9 +5,13 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, Wrap};
 
-use crate::surfaces::conversation::{SegmentEmphasis, SegmentPresentation};
+use crate::surfaces::conversation::{
+    SegmentEmphasis, SegmentPresentation, SegmentSurfacePolicy,
+};
 
-use super::super::conversation_render_projection::SegmentRenderContext;
+use super::super::conversation_render_projection::{
+    SegmentRenderContext, terminal_segment_paint,
+};
 use super::super::segments::{
     SegmentMeta, SegmentRenderMode, apply_rendered_links, split_preserving_trailing_empty_lines,
     top_right_timestamp,
@@ -16,6 +20,7 @@ use super::super::segments::{
 pub struct UserPromptRenderProps<'a> {
     pub text: &'a str,
     pub presentation: &'a SegmentPresentation,
+    pub surface: SegmentSurfacePolicy,
     pub meta: &'a SegmentMeta,
     pub mode: SegmentRenderMode,
 }
@@ -31,7 +36,9 @@ pub fn render(
         return;
     }
 
-    let bg = theme.user_msg_bg();
+    let paint = terminal_segment_paint(props.surface, ctx);
+    let bg = paint.text_bg.unwrap_or(paint.clear_bg);
+    let block_bg = paint.surface_bg.unwrap_or(paint.clear_bg);
     let border_color = match props.presentation.emphasis {
         SegmentEmphasis::Strong => theme.accent(),
         SegmentEmphasis::Normal => theme.accent_muted(),
@@ -40,17 +47,17 @@ pub fn render(
     let block = if matches!(props.mode, SegmentRenderMode::Slim) {
         Block::default()
             .padding(Padding::horizontal(0))
-            .style(Style::default().bg(bg))
+            .style(Style::default().bg(block_bg))
     } else {
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color).bg(bg))
+            .border_style(Style::default().fg(border_color).bg(block_bg))
             .title_top(Line::from(Span::styled(
                 format!(" {}", props.presentation.sigil),
                 Style::default()
                     .fg(border_color)
-                    .bg(bg)
+                    .bg(block_bg)
                     .add_modifier(Modifier::BOLD),
             )))
             .title_top(
@@ -59,7 +66,7 @@ pub fn render(
                     .right_aligned(),
             )
             .padding(Padding::horizontal(1))
-            .style(Style::default().bg(bg))
+            .style(Style::default().bg(block_bg))
     };
     let inner = block.inner(area);
     block.render(area, buf);
@@ -114,6 +121,7 @@ mod tests {
         let props = UserPromptRenderProps {
             text: "hello",
             presentation: &presentation,
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
             meta: &meta,
             mode: SegmentRenderMode::Full,
         };
@@ -137,6 +145,7 @@ mod tests {
             UserPromptRenderProps {
                 text: "hello",
                 presentation: &presentation,
+                surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
                 meta: &meta,
                 mode: SegmentRenderMode::Full,
             },

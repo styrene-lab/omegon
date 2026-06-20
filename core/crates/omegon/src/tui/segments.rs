@@ -1805,17 +1805,31 @@ status: {}
         density: crate::settings::ToolDetail,
         pinned: bool,
     ) {
-        use SegmentContent::*;
-        let presentation = self.presentation();
         let render_ctx = super::conversation_render_projection::SegmentRenderContext::new(t, mode)
             .with_density(density)
             .with_pinned(pinned);
+        self.render_with_context(area, buf, &render_ctx);
+    }
+
+    pub fn render_with_context(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        render_ctx: &super::conversation_render_projection::SegmentRenderContext<'_>,
+    ) {
+        use SegmentContent::*;
+        let presentation = self.presentation();
+        let surface = self.projection().presentation_model().surface;
+        let mode = render_ctx.mode;
+        let density = render_ctx.density;
+        let pinned = render_ctx.pinned;
         match &self.content {
             UserPrompt { text } => super::segment_components::user_prompt::render(
                 super::segment_components::user_prompt::UserPromptRenderProps {
                     text,
                     presentation: &presentation,
                     meta: &self.meta,
+                    surface,
                     mode,
                 },
                 area,
@@ -1834,6 +1848,7 @@ status: {}
                         complete: *complete,
                         meta: &self.meta,
                         presentation: &presentation,
+                        surface,
                         mode,
                     },
                     area,
@@ -1849,6 +1864,7 @@ status: {}
                         complete: status.is_terminal(),
                         meta: &self.meta,
                         presentation: &presentation,
+                        surface,
                         mode,
                     },
                     area,
@@ -1889,7 +1905,11 @@ status: {}
                 );
             }
             SystemNotification { text } => super::segment_components::system::render(
-                super::segment_components::system::SystemRenderProps { text, mode },
+                super::segment_components::system::SystemRenderProps {
+                    text,
+                    surface,
+                    mode,
+                },
                 area,
                 buf,
                 &render_ctx,
@@ -1909,9 +1929,7 @@ status: {}
             TurnSeparator => super::segment_components::separator::render(
                 area,
                 buf,
-                &super::conversation_render_projection::SegmentRenderContext::new(t, mode)
-                    .with_density(density)
-                    .with_pinned(pinned),
+                render_ctx,
             ),
         }
     }

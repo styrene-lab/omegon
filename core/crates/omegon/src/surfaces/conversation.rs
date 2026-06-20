@@ -146,6 +146,11 @@ where
                     selectable: true,
                     ..Default::default()
                 },
+                surface: SegmentSurfacePolicy {
+                    surface: SegmentSurfaceTreatment::Transcript,
+                    copy: SegmentCopyPolicy::Body,
+                    selection: SegmentSelectionTreatment::Subtle,
+                },
             },
             ConversationSegmentKind::Assistant(assistant) => SegmentPresentationModel {
                 producer: SegmentProducer::Assistant,
@@ -165,6 +170,11 @@ where
                     copyable: true,
                     selectable: true,
                     ..Default::default()
+                },
+                surface: SegmentSurfacePolicy {
+                    surface: SegmentSurfaceTreatment::Transcript,
+                    copy: SegmentCopyPolicy::Body,
+                    selection: SegmentSelectionTreatment::Subtle,
                 },
             },
             ConversationSegmentKind::PeerAgent(peer) => SegmentPresentationModel {
@@ -193,6 +203,11 @@ where
                     selectable: true,
                     ..Default::default()
                 },
+                surface: SegmentSurfacePolicy {
+                    surface: SegmentSurfaceTreatment::Transcript,
+                    copy: SegmentCopyPolicy::Body,
+                    selection: SegmentSelectionTreatment::Subtle,
+                },
             },
             ConversationSegmentKind::Tool(tool) => SegmentPresentationModel {
                 producer: SegmentProducer::Tool {
@@ -219,6 +234,17 @@ where
                     selectable: true,
                     copyable: tool.detail_result.is_some(),
                 },
+                surface: SegmentSurfacePolicy {
+                    surface: SegmentSurfaceTreatment::Card,
+                    copy: if tool.detail_result.is_some() {
+                        SegmentCopyPolicy::Detail
+                    } else if tool.result_summary.is_some() {
+                        SegmentCopyPolicy::Summary
+                    } else {
+                        SegmentCopyPolicy::None
+                    },
+                    selection: SegmentSelectionTreatment::Explicit,
+                },
             },
             ConversationSegmentKind::System(system) => SegmentPresentationModel {
                 producer: SegmentProducer::System,
@@ -234,6 +260,11 @@ where
                     selectable: true,
                     ..Default::default()
                 },
+                surface: SegmentSurfacePolicy {
+                    surface: SegmentSurfaceTreatment::Transcript,
+                    copy: SegmentCopyPolicy::Body,
+                    selection: SegmentSelectionTreatment::Subtle,
+                },
             },
             ConversationSegmentKind::Lifecycle(lifecycle) => SegmentPresentationModel {
                 producer: SegmentProducer::Lifecycle,
@@ -248,6 +279,11 @@ where
                 affordances: SegmentAffordances {
                     selectable: true,
                     ..Default::default()
+                },
+                surface: SegmentSurfacePolicy {
+                    surface: SegmentSurfaceTreatment::ChromeOnly,
+                    copy: SegmentCopyPolicy::Summary,
+                    selection: SegmentSelectionTreatment::Subtle,
                 },
             },
             ConversationSegmentKind::Image(image) => SegmentPresentationModel {
@@ -265,6 +301,11 @@ where
                     selectable: true,
                     ..Default::default()
                 },
+                surface: SegmentSurfacePolicy {
+                    surface: SegmentSurfaceTreatment::Panel,
+                    copy: SegmentCopyPolicy::None,
+                    selection: SegmentSelectionTreatment::Explicit,
+                },
             },
             ConversationSegmentKind::Separator => SegmentPresentationModel {
                 producer: SegmentProducer::Separator,
@@ -277,6 +318,11 @@ where
                 },
                 metrics: Vec::new(),
                 affordances: SegmentAffordances::default(),
+                surface: SegmentSurfacePolicy {
+                    surface: SegmentSurfaceTreatment::ChromeOnly,
+                    copy: SegmentCopyPolicy::None,
+                    selection: SegmentSelectionTreatment::None,
+                },
             },
         }
     }
@@ -409,12 +455,50 @@ pub struct SegmentAffordances {
     pub copyable: bool,
 }
 
+/// Renderer-neutral surface treatment intent for a conversation segment.
+///
+/// This is semantic presentation policy, not a terminal layout contract: adapters
+/// decide whether transcript/card/panel/chrome-only becomes a Ratatui block, a
+/// web component, an ACP field, or another frontend-specific representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentSurfaceTreatment {
+    Transcript,
+    Card,
+    Panel,
+    ChromeOnly,
+}
+
+/// Renderer-neutral copy/export source for a conversation segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentCopyPolicy {
+    None,
+    Body,
+    Summary,
+    Detail,
+    Full,
+}
+
+/// Renderer-neutral selection affordance intensity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentSelectionTreatment {
+    None,
+    Subtle,
+    Explicit,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SegmentContentPresentation<'a> {
     pub form: ContentForm,
     pub title: Option<&'a str>,
     pub summary: Option<&'a str>,
     pub body: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SegmentSurfacePolicy {
+    pub surface: SegmentSurfaceTreatment,
+    pub copy: SegmentCopyPolicy,
+    pub selection: SegmentSelectionTreatment,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -424,6 +508,7 @@ pub struct SegmentPresentationModel<'a> {
     pub content: SegmentContentPresentation<'a>,
     pub metrics: Vec<SegmentMetric<'a>>,
     pub affordances: SegmentAffordances,
+    pub surface: SegmentSurfacePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -769,6 +854,9 @@ mod tests {
         assert_eq!(model.producer, SegmentProducer::Assistant);
         assert_eq!(model.state, SegmentState::Completed);
         assert_eq!(model.content.form, ContentForm::Markdown);
+        assert_eq!(model.surface.surface, SegmentSurfaceTreatment::Transcript);
+        assert_eq!(model.surface.copy, SegmentCopyPolicy::Body);
+        assert_eq!(model.surface.selection, SegmentSelectionTreatment::Subtle);
         assert_eq!(
             model.content.body,
             Some(
@@ -811,6 +899,37 @@ mod tests {
         assert_eq!(model.content.form, ContentForm::Markdown);
         assert!(model.affordances.detail_available);
         assert!(model.affordances.copyable);
+        assert_eq!(model.surface.surface, SegmentSurfaceTreatment::Card);
+        assert_eq!(model.surface.copy, SegmentCopyPolicy::Detail);
+        assert_eq!(model.surface.selection, SegmentSelectionTreatment::Explicit);
+    }
+
+    #[test]
+    fn presentation_model_marks_separator_as_chrome_only_not_copyable() {
+        let projection = ConversationSegmentProjection::<&str>::new(
+            ConversationSegmentKind::Separator,
+        );
+
+        let model = projection.presentation_model();
+        assert_eq!(model.surface.surface, SegmentSurfaceTreatment::ChromeOnly);
+        assert_eq!(model.surface.copy, SegmentCopyPolicy::None);
+        assert_eq!(model.surface.selection, SegmentSelectionTreatment::None);
+        assert!(!model.affordances.copyable);
+    }
+
+    #[test]
+    fn presentation_model_marks_image_as_panel_without_body_copy() {
+        let projection = ConversationSegmentProjection::new(ConversationSegmentKind::Image(
+            ImageSegment {
+                path: PathBuf::from("/tmp/screenshot.png"),
+                alt: "screenshot".to_string(),
+            },
+        ));
+
+        let model = projection.presentation_model();
+        assert_eq!(model.surface.surface, SegmentSurfaceTreatment::Panel);
+        assert_eq!(model.surface.copy, SegmentCopyPolicy::None);
+        assert_eq!(model.surface.selection, SegmentSelectionTreatment::Explicit);
     }
 
     #[test]
