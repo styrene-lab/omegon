@@ -67,7 +67,17 @@ fn should_toast_slash_response(response: &str) -> bool {
         && trimmed.lines().count() <= 1
         && trimmed.chars().count() <= 120
         && !trimmed.starts_with("Usage:")
-        && !trimmed.contains("Unknown")
+        && !trimmed.starts_with("Unknown")
+}
+
+fn should_modal_slash_response(response: &str) -> bool {
+    let trimmed = response.trim_start();
+    trimmed.starts_with("Usage:")
+        || trimmed.starts_with("Ambiguous command")
+        || trimmed.starts_with("Unknown ")
+        || trimmed.contains(" failed")
+        || trimmed.contains("Failed ")
+        || trimmed.lines().count() > 20
 }
 
 fn is_one_shot_context_notification(message: &str) -> bool {
@@ -5170,10 +5180,15 @@ impl App {
     }
 
     fn show_slash_response(&mut self, command: &str, response: &str) {
-        if should_toast_slash_response(response) {
+        if response.starts_with("Unknown command: /") {
+            self.show_command_toast(CommandToast::new(response, CommandSeverity::Warning));
+        } else if should_toast_slash_response(response) {
             self.show_command_toast(CommandToast::new(response, CommandSeverity::Info));
-        } else {
+        } else if should_modal_slash_response(response) {
             self.open_command_panel(CommandPanel::from_slash(command, response));
+        } else {
+            self.conversation
+                .push_system(&format!("command · {command}\n{response}"));
         }
     }
 
@@ -6843,7 +6858,7 @@ Scroll transcript:
                     } else {
                         // No match at all — show error, do NOT send to agent
                         SlashResult::Display(format!(
-                            "Unknown command: /{cmd}\n\nType /help for available commands."
+                            "Unknown command: /{cmd}. Type /help for commands."
                         ))
                     }
                 }

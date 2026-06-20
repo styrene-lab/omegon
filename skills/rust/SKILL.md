@@ -67,9 +67,27 @@ cargo build                         # Debug build
 cargo build --release               # Release build
 cargo test                          # All tests
 cargo test -- --nocapture            # Show println output
-cargo test test_name                 # Specific test
+cargo test test_name                 # One specific test filter (Cargo accepts only one positional filter)
+cargo test test_a && cargo test test_b # Multiple focused tests require separate invocations
+cargo test common_prefix             # Or use one broader substring/module filter for related tests
 cargo test --lib                     # Unit tests only
 cargo test --test integration_test   # Specific integration test
+```
+
+### Cargo Test Filtering
+
+Cargo accepts only one positional test filter before `--`. Do not pass multiple test
+names as separate arguments; Cargo treats the second as an unexpected argument.
+
+```bash
+# ❌ Wrong
+cargo test test_a test_b
+
+# ✅ Run multiple focused tests with separate invocations
+cargo test test_a && cargo test test_b
+
+# ✅ Or choose one shared substring/module path
+cargo test slash_response
 ```
 
 ### Other Useful Commands
