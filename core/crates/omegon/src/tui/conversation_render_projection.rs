@@ -9,7 +9,9 @@ use ratatui::prelude::*;
 
 use super::segments::{Segment, SegmentRenderMode};
 use super::theme::Theme;
-use crate::surfaces::conversation::ToolCategory;
+use crate::surfaces::conversation::{
+    SegmentSelectionTreatment, SegmentSurfacePolicy, SegmentSurfaceTreatment, ToolCategory,
+};
 
 pub fn tool_category_color(kind: ToolCategory, t: &dyn Theme) -> Color {
     match kind {
@@ -174,6 +176,72 @@ pub fn tool_card_chrome(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalSelectionChrome {
+    None,
+    Subtle,
+    Marker,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalSegmentPaint {
+    pub clear_bg: Color,
+    pub text_bg: Option<Color>,
+    pub surface_bg: Option<Color>,
+    pub full_width_surface: bool,
+    pub selection_chrome: TerminalSelectionChrome,
+}
+
+pub fn terminal_segment_paint(
+    surface: SegmentSurfacePolicy,
+    ctx: &SegmentRenderContext<'_>,
+) -> TerminalSegmentPaint {
+    let transcript = matches!(surface.surface, SegmentSurfaceTreatment::Transcript);
+    let copy_friendly_transcript = ctx.copy_friendly && transcript;
+    let full_width_surface = !copy_friendly_transcript
+        && !matches!(surface.surface, SegmentSurfaceTreatment::ChromeOnly);
+    let clear_bg = if copy_friendly_transcript {
+        ctx.theme.bg()
+    } else {
+        ctx.theme.surface_bg()
+    };
+    let surface_bg = full_width_surface.then_some(match surface.surface {
+        SegmentSurfaceTreatment::Transcript => ctx.theme.surface_bg(),
+        SegmentSurfaceTreatment::Card => ctx.theme.card_bg(),
+        SegmentSurfaceTreatment::Panel => ctx.theme.surface_bg(),
+        SegmentSurfaceTreatment::ChromeOnly => ctx.theme.bg(),
+    });
+    let text_bg = if copy_friendly_transcript {
+        None
+    } else {
+        surface_bg.or(Some(clear_bg))
+    };
+    let selection_chrome = if !ctx.selected {
+        TerminalSelectionChrome::None
+    } else if ctx.copy_friendly {
+        match surface.selection {
+            SegmentSelectionTreatment::None => TerminalSelectionChrome::None,
+            SegmentSelectionTreatment::Subtle | SegmentSelectionTreatment::Explicit => {
+                TerminalSelectionChrome::Subtle
+            }
+        }
+    } else {
+        match surface.selection {
+            SegmentSelectionTreatment::None => TerminalSelectionChrome::None,
+            SegmentSelectionTreatment::Subtle => TerminalSelectionChrome::Subtle,
+            SegmentSelectionTreatment::Explicit => TerminalSelectionChrome::Marker,
+        }
+    };
+
+    TerminalSegmentPaint {
+        clear_bg,
+        text_bg,
+        surface_bg,
+        full_width_surface,
+        selection_chrome,
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct SegmentRenderContext<'a> {
     pub theme: &'a dyn Theme,
@@ -181,6 +249,7 @@ pub struct SegmentRenderContext<'a> {
     pub density: crate::settings::ToolDetail,
     pub pinned: bool,
     pub selected: bool,
+    pub copy_friendly: bool,
 }
 
 impl<'a> SegmentRenderContext<'a> {
@@ -191,6 +260,7 @@ impl<'a> SegmentRenderContext<'a> {
             density: crate::settings::ToolDetail::Detailed,
             pinned: false,
             selected: false,
+            copy_friendly: matches!(mode, SegmentRenderMode::Slim),
         }
     }
 
@@ -206,6 +276,11 @@ impl<'a> SegmentRenderContext<'a> {
 
     pub fn with_selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    pub fn with_copy_friendly(mut self, copy_friendly: bool) -> Self {
+        self.copy_friendly = copy_friendly;
         self
     }
 }
@@ -241,7 +316,7 @@ impl SegmentMeasure for Segment {
 
 impl SegmentRender for Segment {
     fn render_in_context(&self, area: Rect, buf: &mut Buffer, ctx: &SegmentRenderContext<'_>) {
-        self.render_with_pinned(area, buf, ctx.theme, ctx.mode, ctx.density, ctx.pinned);
+        self.render_with_context(area, buf, ctx);
     }
 }
 
@@ -354,5 +429,51 @@ mod tests {
         );
         assert_eq!(chrome.role_label, "memory");
         assert_eq!(chrome.content_color, Alpharius.fg());
+    }
+
+    #[test]
+    fn terminal_paint_keeps_slim_transcript_copy_friendly() {
+        let projection = crate::surfaces::conversation::ConversationSegmentProjection::<&str>::new(
+            crate::surfaces::conversation::ConversationSegmentKind::Assistant(
+                crate::surfaces::conversation::AssistantSegment {
+                    text: "answer",
+                    thinking: "",
+                    complete: true,
+                },
+            ),
+        );
+        let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Slim);
+
+        let paint = terminal_segment_paint(projection.presentation_model().surface, &ctx);
+
+        assert_eq!(paint.clear_bg, Alpharius.bg());
+        assert_eq!(paint.text_bg, None);
+        assert_eq!(paint.surface_bg, None);
+        assert!(!paint.full_width_surface);
+    }
+
+    #[test]
+    fn terminal_paint_keeps_tool_cards_structured_in_slim() {
+        let projection = crate::surfaces::conversation::ConversationSegmentProjection::<&str>::new(
+            crate::surfaces::conversation::ConversationSegmentKind::Tool(
+                crate::surfaces::conversation::ToolSegment {
+                    id: "tool-1",
+                    name: "bash",
+                    args_summary: Some("cargo check"),
+                    detail_args: None,
+                    result_summary: Some("ok"),
+                    detail_result: Some("ok"),
+                    is_error: false,
+                    complete: true,
+                    expanded: false,
+                },
+            ),
+        );
+        let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Slim);
+
+        let paint = terminal_segment_paint(projection.presentation_model().surface, &ctx);
+
+        assert_eq!(paint.surface_bg, Some(Alpharius.card_bg()));
+        assert!(paint.full_width_surface);
     }
 }

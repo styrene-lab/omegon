@@ -5,9 +5,11 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, Wrap};
 
-use crate::surfaces::conversation::SegmentPresentation;
+use crate::surfaces::conversation::{SegmentPresentation, SegmentSurfacePolicy};
 
-use super::super::conversation_render_projection::SegmentRenderContext;
+use super::super::conversation_render_projection::{
+    SegmentRenderContext, terminal_segment_paint,
+};
 use super::super::segments::{
     SegmentMeta, SegmentRenderMode, TableState, apply_rendered_links, build_meta_tag,
     clean_inline_text, compute_table_widths, is_table_separator, render_table_line,
@@ -21,6 +23,7 @@ pub struct AssistantRenderProps<'a> {
     pub complete: bool,
     pub meta: &'a SegmentMeta,
     pub presentation: &'a SegmentPresentation,
+    pub surface: SegmentSurfacePolicy,
     pub mode: SegmentRenderMode,
 }
 
@@ -340,13 +343,15 @@ pub fn render(
     }
 
     let render_plan = plan(&props);
-    let bg = theme.surface_bg();
+    let paint = terminal_segment_paint(props.surface, ctx);
+    let bg = paint.text_bg.unwrap_or(paint.clear_bg);
+    let block_bg = paint.surface_bg.unwrap_or(paint.clear_bg);
     let border_color = if props.complete {
         theme.success()
     } else {
         theme.accent_muted()
     };
-    let block = assistant_block(&props, render_plan, theme, bg, border_color);
+    let block = assistant_block(&props, render_plan, theme, block_bg, border_color);
     let inner = block.inner(area);
     block.render(area, buf);
 
@@ -453,6 +458,7 @@ mod tests {
             complete: false,
             meta: &meta,
             presentation: &presentation,
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
             mode: SegmentRenderMode::Full,
         };
         assert_eq!(props.text, "answer");
@@ -476,6 +482,7 @@ mod tests {
             complete: false,
             meta: &meta,
             presentation: &presentation,
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
             mode: SegmentRenderMode::Slim,
         };
 
@@ -511,6 +518,7 @@ mod tests {
             complete: true,
             meta: &meta,
             presentation: &presentation,
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
             mode: SegmentRenderMode::Full,
         };
 
@@ -542,6 +550,7 @@ mod tests {
             complete: true,
             meta: &meta,
             presentation: &presentation,
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
             mode: SegmentRenderMode::Full,
         };
 
@@ -568,6 +577,7 @@ I need to take a closer look at the actual prefix widths and current assumptions
                 complete: false,
                 meta: &meta,
                 presentation: &presentation,
+                surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
                 mode: SegmentRenderMode::Slim,
             },
             area,
@@ -605,6 +615,7 @@ I need to take a closer look at the actual prefix widths and current assumptions
                 complete: false,
                 meta: &meta,
                 presentation: &presentation,
+                surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
                 mode: SegmentRenderMode::Slim,
             },
             area,
@@ -650,6 +661,7 @@ I need to take a closer look at the actual prefix widths and current assumptions
                 complete: true,
                 meta: &meta,
                 presentation: &presentation,
+                surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
                 mode: SegmentRenderMode::Full,
             },
             area,
