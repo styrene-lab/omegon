@@ -1212,18 +1212,13 @@ impl ConversationView {
     pub fn selected_segment_text_with_mode(&self, mode: SegmentExportMode) -> Option<String> {
         self.selected_or_focused_segment()
             .and_then(|idx| self.segments.get(idx))
-            .map(|segment| segment.export_text(mode))
+            .and_then(|segment| segment.export_copy_text(mode))
     }
 
     pub fn latest_assistant_text_with_mode(&self, mode: SegmentExportMode) -> Option<String> {
         self.segments.iter().rev().find_map(|segment| {
             if matches!(segment.content, SegmentContent::AssistantText { .. }) {
-                let text = segment.export_text(mode);
-                if text.trim().is_empty() {
-                    None
-                } else {
-                    Some(text)
-                }
+                segment.export_copy_text(mode)
             } else {
                 None
             }
@@ -1615,6 +1610,45 @@ mod tests {
         if let SegmentContent::AssistantText { complete, .. } = &cv.segments[0].content {
             assert!(complete);
         }
+    }
+
+
+    #[test]
+    fn selected_assistant_copy_uses_answer_body_without_reasoning() {
+        let mut cv = ConversationView::new();
+        cv.append_streaming("# Final\nanswer");
+        if let SegmentContent::AssistantText { thinking, .. } = &mut cv.segments[0].content {
+            *thinking = "private reasoning\n".to_string();
+        }
+        cv.finalize_message();
+        cv.selected_segment = Some(0);
+
+        assert_eq!(
+            cv.selected_segment_text_with_mode(SegmentExportMode::Raw).as_deref(),
+            Some("# Final\nanswer")
+        );
+    }
+
+    #[test]
+    fn selected_tool_copy_uses_detail_result_without_tool_chrome() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start("t1", "bash", Some("echo hi"), Some("echo hi"));
+        cv.push_tool_end("t1", false, Some("hi\n"));
+        cv.selected_segment = Some(0);
+
+        assert_eq!(
+            cv.selected_segment_text_with_mode(SegmentExportMode::Raw).as_deref(),
+            Some("hi")
+        );
+    }
+
+    #[test]
+    fn selected_image_copy_returns_none_by_policy() {
+        let mut cv = ConversationView::new();
+        cv.push_user_with_attachments("", &[std::path::PathBuf::from("/tmp/paste.png")]);
+        cv.selected_segment = Some(0);
+
+        assert_eq!(cv.selected_segment_text_with_mode(SegmentExportMode::Raw), None);
     }
 
     #[test]
