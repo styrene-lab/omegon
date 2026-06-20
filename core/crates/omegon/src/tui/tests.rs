@@ -1993,7 +1993,7 @@ fn editing_after_history_recall_exits_history_session() {
 }
 
 #[test]
-fn bare_down_does_not_advance_history() {
+fn bare_down_does_not_advance_recalled_history() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into()];
     app.terminal_copy_mode = false;
@@ -2003,7 +2003,19 @@ fn bare_down_does_not_advance_history() {
 
     app.handle_keyboard_down();
 
-    assert_eq!(app.editor.render_text(), "");
+    assert_eq!(app.editor.render_text(), "second");
+    assert_eq!(app.history_idx, Some(1));
+}
+
+#[test]
+fn bare_down_does_not_mutate_draft_or_history_index() {
+    let mut app = test_app();
+    app.history = vec!["first".into(), "second".into()];
+    app.editor.set_text("draft");
+
+    app.handle_keyboard_down();
+
+    assert_eq!(app.editor.render_text(), "draft");
     assert_eq!(app.history_idx, None);
 }
 

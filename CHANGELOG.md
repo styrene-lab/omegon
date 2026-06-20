@@ -83,7 +83,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a runtime final-answer nudge when an assistant turn would end while the visible Workbench plan still has active/todo items.
 
 ### Fixed
-- Split TUI mouse-wheel scrolling from keyboard up/down history handling so native bare-arrow prompt history remains while wheel events cannot mutate the editor buffer or history index.
+- Made bare Down an editor-navigation-only key so Kitty wheel gestures translated to Down cannot advance or clear prompt history; explicit `Ctrl+Up`/`Ctrl+Down` remain the prompt history controls.
+- Split TUI mouse-wheel scrolling from keyboard history handling so crossterm mouse events cannot mutate the editor buffer or history index.
 - Hardened terminal session spawning to prefer an absolute bash path so PTY-backed terminal tests and sessions still start when `PATH` is empty.
 - Made the TUI model-grade badge reflect the actual displayed model capability from the registry instead of the current route-intent default, so `openai-codex:gpt-5.5` renders as `‹S›`, and replaced the duplicate editor context rail with a single `ctx:<class>@<capacity> <pct>% <fill> <used>` signal.
 - Documented the registry-backed slash-command matrix and added drift coverage for canonical parser commands versus intentional hidden compatibility aliases.
