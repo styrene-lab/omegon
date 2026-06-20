@@ -2311,6 +2311,55 @@ fn verbose_or_error_slash_responses_still_use_panel_surface() {
 }
 
 #[test]
+fn unknown_command_uses_compact_warning_toast() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/info", &tx);
+
+    let SlashResult::Display(text) = result else {
+        panic!("unknown command should display feedback");
+    };
+    assert_eq!(text, "Unknown command: /info. Type /help for commands.");
+    assert!(!super::should_toast_slash_response(&text));
+
+    app.show_slash_response("/info", &text);
+    assert!(app.command_panel.is_none());
+    assert_eq!(app.operator_events.len(), 1);
+    let event = app.operator_events.back().expect("warning toast");
+    assert_eq!(event.message, text);
+    assert_eq!(event.icon, "⚠");
+}
+
+#[test]
+fn verbose_informational_slash_responses_become_system_segments() {
+    let mut app = test_app();
+    let response = "Version\nOmegon: 0.27.0\nGit SHA: test\nBuild Date: today";
+
+    app.show_slash_response("/version", response);
+
+    assert!(app.command_panel.is_none());
+    let segment = app.conversation.segments().last().expect("system segment");
+    let SegmentContent::SystemNotification { text } = &segment.content else {
+        panic!("expected system notification segment, got {:?}", segment.content);
+    };
+    assert_eq!(text, "command · /version\nVersion\nOmegon: 0.27.0\nGit SHA: test\nBuild Date: today");
+}
+
+#[test]
+fn usage_slash_responses_still_use_command_panel() {
+    let mut app = test_app();
+    let response = "Usage: /model [list|route]";
+
+    app.show_slash_response("/model nope", response);
+
+    assert!(app.conversation.segments().is_empty());
+    let panel = app.command_panel.as_ref().expect("command panel");
+    assert_eq!(panel.title, "command · /model nope");
+    assert_eq!(panel.body, response);
+}
+
+#[test]
 fn slash_version_displays_multiline_build_info() {
     let mut app = test_app();
     let tx = test_tx();

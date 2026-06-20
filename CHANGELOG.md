@@ -48,6 +48,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Clarified the Rust skill's Cargo test filtering guidance so agents use one positional test filter per invocation or a single broader shared filter.
+- Routed verbose informational slash-command output into conversation system segments while keeping usage/error responses in command panels and unknown commands in compact warning toasts.
 - Projected semantic segment surface policy through ACP conversation DTOs so external clients can distinguish transcript, card, panel, copy, selection, and detail affordances without TUI-specific heuristics.
 - Routed selected/latest conversation copy through semantic segment copy policy so assistant copies exclude reasoning chrome, tool copies prefer result detail, and non-copyable media/chrome segments return no clipboard text.
 - Made slim TUI transcript rendering copy-friendlier by letting assistant, operator, and system message bodies avoid full-width trailing surface paint while keeping tool cards structured.
