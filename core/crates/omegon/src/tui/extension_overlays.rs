@@ -26,7 +26,16 @@ pub fn render_modal(
     frame.render_widget(&Clear, modal_area);
 
     let title = widget_id.to_string();
-    let json_str = serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string());
+    let body = data
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .filter(|_| {
+            data.get("kind")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| kind == "text_copy")
+        })
+        .map(str::to_owned)
+        .unwrap_or_else(|| serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string()));
 
     let modal_bg = theme.card_bg();
     let block = Block::default()
@@ -35,10 +44,10 @@ pub fn render_modal(
         .border_style(Style::default().fg(Color::Cyan).bg(modal_bg))
         .style(Style::default().bg(modal_bg));
 
-    let para = Paragraph::new(json_str)
+    let para = Paragraph::new(body)
         .block(block)
         .style(Style::default().bg(modal_bg))
-        .wrap(Wrap { trim: true });
+        .wrap(Wrap { trim: false });
 
     frame.render_widget(para, modal_area);
 }

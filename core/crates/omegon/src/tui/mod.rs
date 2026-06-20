@@ -3508,13 +3508,16 @@ impl App {
                 "conversation segment is not copyable: {idx}"
             ));
         };
-        if self.copy_text_to_clipboard(&text) {
-            UiActionOutcome::accepted_message(format!("conversation segment copied: {idx}"))
-        } else {
-            UiActionOutcome::rejected(
-                "clipboard unavailable — select text in your terminal or install pbcopy/wl-copy/xclip",
-            )
-        }
+        self.active_modal = Some((
+            "Copy text".to_string(),
+            serde_json::json!({
+                "kind": "text_copy",
+                "text": text,
+            }),
+            None,
+            std::time::Instant::now(),
+        ));
+        UiActionOutcome::accepted_message(format!("conversation segment opened for copy: {idx}"))
     }
 
     fn handle_copy_latest_assistant_response_action(
@@ -8328,9 +8331,10 @@ pub async fn run_tui(
     io::stdout().execute(crossterm::terminal::Clear(
         crossterm::terminal::ClearType::All,
     ))?;
-    // Mouse capture OFF by default — terminal-native text selection must
-    // always work. Scroll via Shift+Up/Down, PageUp/PageDown.
-    // /mouse on available for click/scroll interaction when needed.
+    // Mouse capture is ON by default: trackpad/wheel scrolling must be owned by
+    // the conversation view. `/mouse off` is the explicit opt-in escape hatch
+    // for terminal-native drag selection during the current session.
+    io::stdout().execute(EnableMouseCapture)?;
     io::stdout().execute(crossterm::event::EnableBracketedPaste)?;
 
     // Enable Kitty keyboard protocol when the terminal supports it.
@@ -8378,9 +8382,11 @@ pub async fn run_tui(
         },
     );
 
-    // Mouse capture starts disabled so terminal-native selection works by default.
-    // `/mouse on` enables pane click/scroll interaction for the current session.
+    // Mouse capture starts enabled because two-finger/trackpad scrolling is a
+    // conversation-view invariant. `/mouse off` temporarily gives drag selection
+    // back to the terminal for this session.
     let mut app = App::new(settings.clone());
+    app.mouse_capture_enabled = true;
     app.keyboard_enhancement = has_keyboard_enhancement;
     // Populate extension widgets and receivers from config
     for widget in config.extension_widgets {
