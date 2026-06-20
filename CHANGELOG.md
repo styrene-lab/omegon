@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Injected the live delegate queue into model context when background delegates are active or have unviewed terminal results, making reconciliation front-and-center for the agent.
 - Strengthened active plan context injection so the Workbench plan remains front-and-center until active/todo items are reconciled.
 - Improved TUI composer history recall to preserve the pre-recall draft and clear history session state when the operator edits recalled input.
+- Added a confirm-first empty-prompt history preload: pressing Enter on an empty prompt previews the last prompt as ghost text, and pressing Enter again materializes it for explicit resend.
 - Added source-aware profile load/save primitives and `/profile save|capture --project|--user|--active` parsing so profile capture preserves project/user persistence boundaries.
 - Added requested-context-class persistence to profiles so saved defaults can restore the operator-requested working-set policy separately from the model-derived context window.
 - Added a pure bridge from durable model intent to provider routing requests, including provider-only filters for endpoint selection.
@@ -83,8 +84,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a runtime final-answer nudge when an assistant turn would end while the visible Workbench plan still has active/todo items.
 
 ### Fixed
-- Made bare Up editor-navigation-only as well, so macOS/Kitty wheel gestures translated to Up cannot recall prompt history; explicit `Ctrl+Up`/`Ctrl+Down` remain the prompt history controls.
-- Made bare Down an editor-navigation-only key so Kitty wheel gestures translated to Down cannot advance or clear prompt history; explicit `Ctrl+Up`/`Ctrl+Down` remain the prompt history controls.
+- Moved TUI prompt-history navigation from `Ctrl+Up`/`Ctrl+Down` to macOS-safe `Alt+Up`/`Alt+Down`, avoiding Mission Control and Stage Manager shortcut collisions.
+- Made bare Up editor-navigation-only as well, so macOS/Kitty wheel gestures translated to Up cannot recall prompt history; explicit `Alt+Up`/`Alt+Down` remain the prompt history controls.
+- Made bare Down an editor-navigation-only key so Kitty wheel gestures translated to Down cannot advance or clear prompt history; explicit `Alt+Up`/`Alt+Down` remain the prompt history controls.
 - Split TUI mouse-wheel scrolling from keyboard history handling so crossterm mouse events cannot mutate the editor buffer or history index.
 - Hardened terminal session spawning to prefer an absolute bash path so PTY-backed terminal tests and sessions still start when `PATH` is empty.
 - Made the TUI model-grade badge reflect the actual displayed model capability from the registry instead of the current route-intent default, so `openai-codex:gpt-5.5` renders as `‹S›`, and replaced the duplicate editor context rail with a single `ctx:<class>@<capacity> <pct>% <fill> <used>` signal.
@@ -1358,7 +1360,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - **Default UI is slim with no splash on returning users** — splash screen only shows on first launch (no `~/.omegon/profile.json`). Segment metadata tag line (model/provider/tier/thinking) hidden in slim mode, visible in `/ui full`.
 - **Mouse scroll works without capture** — trackpad/wheel scroll always scrolls the conversation, even in slim mode with mouse capture disabled.
-- **Arrow keys scroll conversation** — bare Up/Down arrows now scroll the conversation instead of recalling history. History recall moved to Ctrl+Up/Down. Welcome messages updated with new keybind hints.
+- **Arrow keys scroll conversation** — bare Up/Down arrows now scroll the conversation instead of recalling history. History recall moved to Alt+Up/Down. Welcome messages updated with new keybind hints.
 - **System prompt: act, don't narrate** — behavior directive updated to instruct the agent to emit tool calls immediately rather than responding with text saying it will act on the next turn.
 
 ### Fixed

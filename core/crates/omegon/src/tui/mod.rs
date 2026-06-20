@@ -423,6 +423,7 @@ struct App {
     history_idx: Option<usize>,
     /// Draft captured before entering history recall, restored after walking back to newest.
     history_draft: Option<String>,
+    pending_history_preload: Option<String>,
     dashboard: DashboardState,
     /// Last on-screen dashboard area for mouse hit-testing.
     dashboard_area: Option<Rect>,
@@ -1769,6 +1770,7 @@ impl App {
             history: Vec::new(),
             history_idx: None,
             history_draft: None,
+            pending_history_preload: None,
             dashboard: DashboardState::default(),
             dashboard_area: None,
             conversation_area: None,
@@ -3630,14 +3632,22 @@ impl App {
         if raw_text.is_empty() && attachments.is_empty() {
             if self.awaiting_continuation && !self.agent_active {
                 // Empty Enter while agent is awaiting confirmation — send continuation.
+                self.pending_history_preload = None;
                 let _ = self
                     .handle_ui_action(UiAction::SubmitContinuation, command_tx)
                     .await;
+            } else if let Some(preloaded) = self.pending_history_preload.take() {
+                self.editor.set_text(&preloaded);
+            } else if !self.agent_active
+                && let Some(last_prompt) = self.history.last().cloned()
+            {
+                self.pending_history_preload = Some(last_prompt);
             }
             return;
         }
-        // User typed something — clear continuation state.
+        // User typed something — clear continuation and ghost-history state.
         self.awaiting_continuation = false;
+        self.pending_history_preload = None;
 
         if let Ok(mut guard) = self.login_prompt_tx.try_lock()
             && let Some(tx) = guard.take()
@@ -3965,11 +3975,12 @@ impl App {
     fn render_settings_screen(&self, area: Rect, frame: &mut Frame) {
         let settings = self.settings();
         let loaded_profile = crate::settings::Profile::load_with_source(self.cwd());
-        let profile_drift = crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
-            &loaded_profile.profile,
-            loaded_profile.source.clone(),
-            &settings,
-        );
+        let profile_drift =
+            crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
+                &loaded_profile.profile,
+                loaded_profile.source.clone(),
+                &settings,
+            );
         let projection =
             crate::surfaces::settings::SettingsSurfaceProjection::from_settings_with_profile_drift(
                 &settings,
@@ -4033,14 +4044,18 @@ impl App {
                     ratatui::style::Style::default().fg(self.theme.accent_bright()),
                 ),
             ]));
-            let profile_note = row.profile.as_ref().map(|profile| {
-                format!(
-                    " · profile {} → live {} ({})",
-                    profile.profile_value,
-                    profile.runtime_value,
-                    row.persistence.label()
-                )
-            }).unwrap_or_default();
+            let profile_note = row
+                .profile
+                .as_ref()
+                .map(|profile| {
+                    format!(
+                        " · profile {} → live {} ({})",
+                        profile.profile_value,
+                        profile.runtime_value,
+                        row.persistence.label()
+                    )
+                })
+                .unwrap_or_default();
             lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
                 format!("    {}{}", row.description, profile_note),
                 ratatui::style::Style::default().fg(self.theme.muted()),
@@ -4593,7 +4608,7 @@ impl App {
                     "⏎ send  ⇧⏎/⌥⏎ newline  ^O/Tab details  /ui surfaces  / commands ".into()
                 }
             } else {
-                "⏎ send  ⇧⏎/⌥⏎ newline  ^↑/^↓ history ".into()
+                "⏎ send  ⇧⏎/⌥⏎ newline  ⌥↑/⌥↓ history ".into()
             };
             let model_short = self
                 .footer_data
@@ -4679,10 +4694,26 @@ impl App {
             let content_width = editor_rect.width.max(1);
             let visible_rows = editor_rect.height.saturating_sub(1).max(1);
             let visual_lines: Vec<Line<'static>> = if self.editor.is_empty() {
-                vec![Line::from(Span::styled(
-                    "Ask anything, or type / for commands",
-                    Style::default().fg(t.dim()),
-                ))]
+                if let Some(preloaded) = self.pending_history_preload.as_ref() {
+                    let preview = preloaded.lines().next().unwrap_or("");
+                    let suffix = if preloaded.lines().count() > 1 {
+                        " …"
+                    } else {
+                        ""
+                    };
+                    vec![Line::from(vec![
+                        Span::styled("history preload: ", Style::default().fg(t.border_dim())),
+                        Span::styled(
+                            format!("{preview}{suffix}"),
+                            Style::default().fg(t.dim()).add_modifier(Modifier::ITALIC),
+                        ),
+                    ])]
+                } else {
+                    vec![Line::from(Span::styled(
+                        "Ask anything, or type / for commands",
+                        Style::default().fg(t.dim()),
+                    ))]
+                }
             } else {
                 self.editor
                     .visible_visual_lines(content_width, visible_rows)
@@ -7089,12 +7120,14 @@ Scroll transcript:
     }
 
     fn history_recall_up(&mut self) {
+        self.pending_history_preload = None;
         if self.history_idx.is_some() || self.editor.is_empty() {
             self.history_up();
         }
     }
 
     fn history_recall_down(&mut self) {
+        self.pending_history_preload = None;
         if self.history_idx.is_some() {
             self.history_down();
         }
@@ -8767,6 +8800,7 @@ pub async fn run_tui(
                             app.editor.secret_insert(c);
                         }
                     } else if text.is_empty() {
+                        app.pending_history_preload = None;
                         app.try_paste_clipboard_image();
                     } else {
                         let _ = app
@@ -9361,9 +9395,11 @@ pub async fn run_tui(
                                 }
                             } else if !app.editor.is_empty() {
                                 // Clear the line first (like a real terminal)
+                                app.pending_history_preload = None;
                                 app.editor.clear_line();
                                 app.last_ctrl_c = None;
                             } else {
+                                app.pending_history_preload = None;
                                 // Empty editor — double Ctrl+C to quit
                                 let now = std::time::Instant::now();
                                 if let Some(last) = app.last_ctrl_c {
@@ -9698,10 +9734,10 @@ pub async fn run_tui(
                         (KeyCode::Down, KeyModifiers::SHIFT) => {
                             app.conversation.scroll_down(3);
                         }
-                        (KeyCode::Up, KeyModifiers::CONTROL) => {
+                        (KeyCode::Up, KeyModifiers::ALT) => {
                             app.history_recall_up();
                         }
-                        (KeyCode::Down, KeyModifiers::CONTROL) => {
+                        (KeyCode::Down, KeyModifiers::ALT) => {
                             app.history_recall_down();
                         }
                         (KeyCode::PageUp, _) => {

@@ -1771,7 +1771,6 @@ fn mouse_wheel_over_conversation_never_enters_history_recall() {
     assert_eq!(app.editor.render_text(), "draft");
 }
 
-
 #[test]
 fn mouse_wheel_over_editor_never_enters_history_recall() {
     let mut app = test_app();
@@ -1899,8 +1898,39 @@ fn mouse_slash_command_toggles_interaction_mode() {
     assert!(!app.mouse_capture_enabled);
 }
 
+#[tokio::test]
+async fn empty_enter_preloads_last_history_prompt_before_send() {
+    let mut app = test_app();
+    app.history = vec!["first".into(), "last prompt".into()];
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+    app.submit_editor_buffer(&tx).await;
+    assert_eq!(app.editor.render_text(), "");
+    assert_eq!(app.pending_history_preload.as_deref(), Some("last prompt"));
+    assert!(rx.try_recv().is_err());
+
+    app.submit_editor_buffer(&tx).await;
+    assert_eq!(app.editor.render_text(), "last prompt");
+    assert_eq!(app.pending_history_preload, None);
+    assert!(rx.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn typing_after_history_preload_starts_fresh_prompt() {
+    let mut app = test_app();
+    app.history = vec!["last prompt".into()];
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+    app.submit_editor_buffer(&tx).await;
+    assert_eq!(app.pending_history_preload.as_deref(), Some("last prompt"));
+
+    app.pending_history_preload = None;
+    app.editor.insert('n');
+    assert_eq!(app.editor.render_text(), "n");
+}
+
 #[test]
-fn ctrl_up_recalls_latest_history_entry() {
+fn alt_up_recalls_latest_history_entry() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
 
@@ -1913,7 +1943,7 @@ fn ctrl_up_recalls_latest_history_entry() {
 }
 
 #[test]
-fn ctrl_up_walks_back_multiple_entries_after_recall_starts() {
+fn alt_up_walks_back_multiple_entries_after_recall_starts() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
 
@@ -1943,7 +1973,7 @@ fn bare_up_does_not_recall_history_from_empty_editor() {
 }
 
 #[test]
-fn non_empty_editor_ctrl_up_does_not_start_history_recall() {
+fn non_empty_editor_alt_up_does_not_start_history_recall() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into()];
     app.editor.set_text("draft");
@@ -1955,7 +1985,7 @@ fn non_empty_editor_ctrl_up_does_not_start_history_recall() {
 }
 
 #[test]
-fn history_down_restores_draft_after_latest_entry() {
+fn alt_down_clears_editor_after_latest_entry() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into()];
 
@@ -4107,7 +4137,6 @@ fn command_palette_renders_while_agent_active() {
     assert!(rendered.contains("/plan"), "{rendered}");
 }
 
-
 #[test]
 fn command_palette_renders_profile_persistence_metadata() {
     let mut app = test_app();
@@ -4116,7 +4145,10 @@ fn command_palette_renders_profile_persistence_metadata() {
     let rendered = render_app_to_string(&mut app, 140, 24);
 
     assert!(rendered.contains("/think"), "{rendered}");
-    assert!(rendered.contains("runtime until /profile save"), "{rendered}");
+    assert!(
+        rendered.contains("runtime until /profile save"),
+        "{rendered}"
+    );
 }
 
 #[test]
@@ -5635,8 +5667,6 @@ fn one_shot_context_notifications_toast_without_command_panel() {
     assert!(app.conversation.segments().is_empty());
 }
 
-
-
 #[test]
 fn settings_projection_helper_marks_runtime_profile_drift() {
     let mut app = test_app();
@@ -5654,10 +5684,12 @@ fn settings_projection_helper_marks_runtime_profile_drift() {
         .find(|tab| tab.id == "runtime")
         .expect("runtime tab");
 
-    assert!(runtime
-        .rows
-        .iter()
-        .any(|row| row.id == "runtime.thinking" && row.profile.is_some()));
+    assert!(
+        runtime
+            .rows
+            .iter()
+            .any(|row| row.id == "runtime.thinking" && row.profile.is_some())
+    );
 }
 
 #[test]
@@ -5678,7 +5710,6 @@ fn settings_screen_renders_profile_source_and_drift_actions() {
     assert!(rendered.contains("/profile save"), "{rendered}");
     assert!(rendered.contains("/profile apply"), "{rendered}");
 }
-
 
 #[test]
 fn settings_profile_shortcuts_queue_existing_profile_commands() {
