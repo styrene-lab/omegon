@@ -42,6 +42,10 @@ pub enum UiAction {
     EditComposer(EditComposerAction),
     /// Insert frontend-provided text at the current composer insertion point.
     InsertComposerText(InsertComposerTextAction),
+    /// Copy a conversation segment using its semantic copy policy.
+    CopyConversationSegment(CopyConversationSegmentAction),
+    /// Copy the latest assistant response using semantic body-copy policy.
+    CopyLatestAssistantResponse(CopyLatestAssistantResponseAction),
 }
 
 /// Prompt submission intent independent of a concrete editor widget.
@@ -182,6 +186,23 @@ pub enum ComposerEditOperation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InsertComposerTextAction {
     pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopyConversationSegmentAction {
+    pub segment: ConversationSegmentRef,
+    pub mode: SegmentCopyMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopyLatestAssistantResponseAction {
+    pub mode: SegmentCopyMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentCopyMode {
+    Raw,
+    Plaintext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

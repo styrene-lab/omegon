@@ -121,11 +121,12 @@ use crate::surfaces::layout::UiSurfaces;
 use crate::surfaces::operations::OperationMilestoneProjection;
 use crate::ui_runtime::actions::{
     AttachComposerPathAction, ComposerCursorDirection, ComposerCursorUnit, ComposerEditOperation,
-    ConversationSegmentRef, EditComposerAction, InsertComposerTextAction, MoveComposerCursorAction,
+    ConversationSegmentRef, CopyConversationSegmentAction, CopyLatestAssistantResponseAction,
+    EditComposerAction, InsertComposerTextAction, MoveComposerCursorAction,
     OpenConversationSegmentDetailAction, OperatorWaitAction, PermissionAction, PromptSource,
-    ReplaceComposerDraftAction, SelectConversationSegmentAction, SetSurfaceVisibleAction,
-    SetUiPresetAction, SlashCommandAction, SubmitPromptAction, UiAction, UiActionOutcome,
-    UiSurfaceToggle,
+    ReplaceComposerDraftAction, SegmentCopyMode, SelectConversationSegmentAction,
+    SetSurfaceVisibleAction, SetUiPresetAction, SlashCommandAction, SubmitPromptAction, UiAction,
+    UiActionOutcome, UiSurfaceToggle,
 };
 
 /// Get current process RSS in megabytes (platform-specific).
@@ -3434,6 +3435,12 @@ impl App {
             UiAction::MoveComposerCursor(action) => self.handle_move_composer_cursor_action(action),
             UiAction::EditComposer(action) => self.handle_edit_composer_action(action),
             UiAction::InsertComposerText(action) => self.handle_insert_composer_text_action(action),
+            UiAction::CopyConversationSegment(action) => {
+                self.handle_copy_conversation_segment_action(action)
+            }
+            UiAction::CopyLatestAssistantResponse(action) => {
+                self.handle_copy_latest_assistant_response_action(action)
+            }
         }
     }
 
@@ -3550,6 +3557,62 @@ impl App {
         }
         self.conversation.toggle_timeline_expanded_segment(idx);
         UiActionOutcome::accepted_message(format!("conversation segment detail toggled: {idx}"))
+    }
+
+    fn segment_export_mode(mode: SegmentCopyMode) -> SegmentExportMode {
+        match mode {
+            SegmentCopyMode::Raw => SegmentExportMode::Raw,
+            SegmentCopyMode::Plaintext => SegmentExportMode::Plaintext,
+        }
+    }
+
+    fn segment_copy_mode(mode: SegmentExportMode) -> SegmentCopyMode {
+        match mode {
+            SegmentExportMode::Raw => SegmentCopyMode::Raw,
+            SegmentExportMode::Plaintext => SegmentCopyMode::Plaintext,
+        }
+    }
+
+    fn handle_copy_conversation_segment_action(
+        &mut self,
+        action: CopyConversationSegmentAction,
+    ) -> UiActionOutcome {
+        let idx = action.segment.index;
+        let Some(segment) = self.conversation.segments().get(idx) else {
+            return UiActionOutcome::rejected(format!(
+                "conversation segment index out of range: {idx}"
+            ));
+        };
+        let mode = Self::segment_export_mode(action.mode);
+        let Some(text) = segment.export_copy_text(mode) else {
+            return UiActionOutcome::rejected(format!(
+                "conversation segment is not copyable: {idx}"
+            ));
+        };
+        if self.copy_text_to_clipboard(&text) {
+            UiActionOutcome::accepted_message(format!("conversation segment copied: {idx}"))
+        } else {
+            UiActionOutcome::rejected(
+                "clipboard unavailable — select text in your terminal or install pbcopy/wl-copy/xclip",
+            )
+        }
+    }
+
+    fn handle_copy_latest_assistant_response_action(
+        &mut self,
+        action: CopyLatestAssistantResponseAction,
+    ) -> UiActionOutcome {
+        let mode = Self::segment_export_mode(action.mode);
+        let Some(text) = self.conversation.latest_assistant_text_with_mode(mode) else {
+            return UiActionOutcome::rejected("no assistant response to copy");
+        };
+        if self.copy_text_to_clipboard(&text) {
+            UiActionOutcome::accepted_message("latest assistant response copied")
+        } else {
+            UiActionOutcome::rejected(
+                "clipboard unavailable — select text in your terminal or install pbcopy/wl-copy/xclip",
+            )
+        }
     }
 
     fn handle_ui_preset_action(&mut self, action: SetUiPresetAction) -> UiActionOutcome {
@@ -4990,24 +5053,30 @@ impl App {
     }
 
     fn copy_selected_conversation_segment_with_mode(&mut self, mode: SegmentExportMode) {
-        let Some(text) = self.conversation.selected_segment_text_with_mode(mode) else {
+        let Some(idx) = self.conversation.selected_or_focused_segment() else {
             self.show_toast(
                 "Nothing selected to copy",
                 ratatui_toaster::ToastType::Warning,
             );
             return;
         };
-        if self.copy_text_to_clipboard(&text) {
-            let label = match mode {
-                SegmentExportMode::Raw => "Copied selected conversation segment",
-                SegmentExportMode::Plaintext => "Copied selected conversation segment as plaintext",
-            };
-            self.show_toast(label, ratatui_toaster::ToastType::Success);
-        } else {
-            self.show_toast(
-                "Clipboard unavailable — select text in your terminal or install pbcopy/wl-copy/xclip",
-                ratatui_toaster::ToastType::Warning,
-            );
+        let outcome = self.handle_copy_conversation_segment_action(CopyConversationSegmentAction {
+            segment: ConversationSegmentRef::by_index(idx),
+            mode: Self::segment_copy_mode(mode),
+        });
+        match outcome {
+            UiActionOutcome::Accepted { .. } => {
+                let label = match mode {
+                    SegmentExportMode::Raw => "Copied selected conversation segment",
+                    SegmentExportMode::Plaintext => "Copied selected conversation segment as plaintext",
+                };
+                self.show_toast(label, ratatui_toaster::ToastType::Success);
+            }
+            UiActionOutcome::Rejected { reason }
+            | UiActionOutcome::Noop { reason }
+            | UiActionOutcome::Deferred { reason } => {
+                self.show_toast(&reason, ratatui_toaster::ToastType::Warning);
+            }
         }
     }
 
@@ -5016,24 +5085,24 @@ impl App {
     }
 
     fn copy_latest_assistant_response(&mut self, mode: SegmentExportMode) {
-        let Some(text) = self.conversation.latest_assistant_text_with_mode(mode) else {
-            self.show_toast(
-                "No assistant response to copy",
-                ratatui_toaster::ToastType::Warning,
-            );
-            return;
-        };
-        if self.copy_text_to_clipboard(&text) {
-            let label = match mode {
-                SegmentExportMode::Raw => "Copied latest assistant response",
-                SegmentExportMode::Plaintext => "Copied latest assistant response as plaintext",
-            };
-            self.show_toast(label, ratatui_toaster::ToastType::Success);
-        } else {
-            self.show_toast(
-                "Clipboard unavailable — use /transcript for terminal-native selection",
-                ratatui_toaster::ToastType::Warning,
-            );
+        let outcome = self.handle_copy_latest_assistant_response_action(
+            CopyLatestAssistantResponseAction {
+                mode: Self::segment_copy_mode(mode),
+            },
+        );
+        match outcome {
+            UiActionOutcome::Accepted { .. } => {
+                let label = match mode {
+                    SegmentExportMode::Raw => "Copied latest assistant response",
+                    SegmentExportMode::Plaintext => "Copied latest assistant response as plaintext",
+                };
+                self.show_toast(label, ratatui_toaster::ToastType::Success);
+            }
+            UiActionOutcome::Rejected { reason }
+            | UiActionOutcome::Noop { reason }
+            | UiActionOutcome::Deferred { reason } => {
+                self.show_toast(&reason, ratatui_toaster::ToastType::Warning);
+            }
         }
     }
 

@@ -487,6 +487,72 @@ async fn ui_action_open_conversation_segment_detail_toggles_expansion() {
 }
 
 #[tokio::test]
+async fn ui_action_copy_conversation_segment_rejects_invalid_index() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.conversation.push_user("only");
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::CopyConversationSegment(CopyConversationSegmentAction {
+                segment: ConversationSegmentRef::by_index(9),
+                mode: SegmentCopyMode::Raw,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::rejected("conversation segment index out of range: 9")
+    );
+}
+
+#[tokio::test]
+async fn ui_action_copy_conversation_segment_rejects_noncopyable_image() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.conversation
+        .push_user_with_attachments("", &[PathBuf::from("/tmp/paste.png")]);
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::CopyConversationSegment(CopyConversationSegmentAction {
+                segment: ConversationSegmentRef::by_index(0),
+                mode: SegmentCopyMode::Plaintext,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::rejected("conversation segment is not copyable: 0")
+    );
+}
+
+#[tokio::test]
+async fn ui_action_copy_latest_assistant_response_rejects_when_missing() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.conversation.push_user("only user text");
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::CopyLatestAssistantResponse(CopyLatestAssistantResponseAction {
+                mode: SegmentCopyMode::Raw,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::rejected("no assistant response to copy")
+    );
+}
+
+#[tokio::test]
 async fn ui_action_submit_prompt_sends_local_tui_prompt() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
