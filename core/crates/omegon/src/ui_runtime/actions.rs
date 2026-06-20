@@ -30,6 +30,10 @@ pub enum UiAction {
     SelectConversationSegment(SelectConversationSegmentAction),
     /// Open/toggle a conversation segment detail affordance.
     OpenConversationSegmentDetail(OpenConversationSegmentDetailAction),
+    /// Copy a conversation segment using its semantic copy policy.
+    CopyConversationSegment(CopyConversationSegmentAction),
+    /// Copy the latest assistant response using semantic body-copy policy.
+    CopyLatestAssistantResponse(CopyLatestAssistantResponseAction),
 }
 
 /// Prompt submission intent independent of a concrete editor widget.
@@ -119,6 +123,23 @@ pub struct SelectConversationSegmentAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenConversationSegmentDetailAction {
     pub segment: ConversationSegmentRef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopyConversationSegmentAction {
+    pub segment: ConversationSegmentRef,
+    pub mode: SegmentCopyMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopyLatestAssistantResponseAction {
+    pub mode: SegmentCopyMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentCopyMode {
+    Raw,
+    Plaintext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
