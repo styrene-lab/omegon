@@ -1769,6 +1769,23 @@ fn mouse_wheel_over_conversation_never_enters_history_recall() {
     assert_eq!(app.editor.render_text(), "draft");
 }
 
+
+#[test]
+fn mouse_wheel_over_editor_never_enters_history_recall() {
+    let mut app = test_app();
+    app.history = vec!["first".into(), "second".into(), "third".into()];
+    app.editor.set_text("draft");
+    app.editor_area = Some(Rect::new(0, 20, 80, 3));
+
+    app.handle_mouse_scroll_up(1, 21);
+    assert_eq!(app.editor.render_text(), "draft");
+    assert_eq!(app.history_idx, None);
+
+    app.handle_mouse_scroll_down(1, 21);
+    assert_eq!(app.editor.render_text(), "draft");
+    assert_eq!(app.history_idx, None);
+}
+
 #[test]
 fn ctrl_y_keeps_editor_yank_available() {
     let mut app = test_app();
@@ -1912,18 +1929,15 @@ fn ctrl_up_walks_back_multiple_entries_after_recall_starts() {
 }
 
 #[test]
-fn bare_up_does_not_recall_history_from_empty_editor() {
+fn bare_up_recalls_history_from_empty_editor() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
     app.terminal_copy_mode = false;
 
-    // Arrow-up on a single-line empty editor is a no-op (no history recall).
-    if app.editor.line_count() > 1 && app.editor.cursor_row() > 0 {
-        app.editor.move_up();
-    }
+    app.handle_keyboard_up();
 
-    assert_eq!(app.editor.render_text(), "");
-    assert_eq!(app.history_idx, None);
+    assert_eq!(app.editor.render_text(), "third");
+    assert_eq!(app.history_idx, Some(2));
 }
 
 #[test]
@@ -1987,14 +2001,10 @@ fn bare_down_does_not_advance_history() {
     app.history_recall_up();
     assert_eq!(app.editor.render_text(), "second");
 
-    // Arrow-down on a single-line editor is a no-op (no history recall).
-    if app.editor.line_count() > 1 && app.editor.cursor_row() < app.editor.line_count() - 1 {
-        app.editor.move_down();
-    }
+    app.handle_keyboard_down();
 
-    // Editor still shows the recalled text — arrow-down didn't clear it.
-    assert_eq!(app.editor.render_text(), "second");
-    assert_eq!(app.history_idx, Some(1));
+    assert_eq!(app.editor.render_text(), "");
+    assert_eq!(app.history_idx, None);
 }
 
 #[test]
