@@ -23,6 +23,16 @@ const MAX_COMMAND_BYTES: usize = 8 * 1024;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const MAX_TRANSCRIPT_BYTES: u64 = 10 * 1024 * 1024;
 
+fn terminal_shell() -> &'static str {
+    if Path::new("/bin/bash").exists() {
+        "/bin/bash"
+    } else if Path::new("/usr/bin/bash").exists() {
+        "/usr/bin/bash"
+    } else {
+        "bash"
+    }
+}
+
 static TERMINALS: OnceLock<Mutex<HashMap<String, Arc<TerminalSession>>>> = OnceLock::new();
 
 fn registry() -> &'static Mutex<HashMap<String, Arc<TerminalSession>>> {
@@ -342,7 +352,7 @@ async fn start(
         .take_writer()
         .context("failed to take terminal pty writer")?;
 
-    let mut cmd = CommandBuilder::new("bash");
+    let mut cmd = CommandBuilder::new(terminal_shell());
     cmd.args(["-lc", command]);
     cmd.cwd(cwd.as_os_str());
     for (key, value) in bash::git_discovery_env(cwd) {
