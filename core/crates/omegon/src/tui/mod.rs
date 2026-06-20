@@ -6873,6 +6873,58 @@ Scroll transcript:
         }
     }
 
+    fn handle_mouse_scroll_up(&mut self, column: u16, row: u16) {
+        let over_dashboard = self.mouse_capture_enabled
+            && self.dashboard_area.is_some_and(|area| {
+                column >= area.x
+                    && column < area.x + area.width
+                    && row >= area.y
+                    && row < area.y + area.height
+            });
+        if over_dashboard {
+            self.dashboard.scroll_up(3);
+        } else {
+            self.conversation.scroll_up(3);
+        }
+    }
+
+    fn handle_mouse_scroll_down(&mut self, column: u16, row: u16) {
+        let over_dashboard = self.mouse_capture_enabled
+            && self.dashboard_area.is_some_and(|area| {
+                column >= area.x
+                    && column < area.x + area.width
+                    && row >= area.y
+                    && row < area.y + area.height
+            });
+        if over_dashboard {
+            self.dashboard.scroll_down(3);
+        } else {
+            self.conversation.scroll_down(3);
+        }
+    }
+
+    fn handle_keyboard_up(&mut self) {
+        if let Some(ref mut picker) = self.at_picker {
+            picker.move_up();
+        } else if self.editor.line_count() > 1 && self.editor.cursor_row() > 0 {
+            self.editor.move_up();
+        } else {
+            self.history_recall_up();
+        }
+    }
+
+    fn handle_keyboard_down(&mut self) {
+        if let Some(ref mut picker) = self.at_picker {
+            picker.move_down();
+        } else if self.editor.line_count() > 1
+            && self.editor.cursor_row() < self.editor.line_count() - 1
+        {
+            self.editor.move_down();
+        } else {
+            self.history_down();
+        }
+    }
+
     fn history_up(&mut self) {
         if self.history.is_empty() {
             return;
@@ -8557,34 +8609,14 @@ pub async fn run_tui(
                         }
                     }
                     MouseEventKind::ScrollUp => {
-                        // Scroll always works — doesn't interfere with
-                        // terminal text selection (the reason capture gets disabled).
-                        let over_dashboard = app.mouse_capture_enabled
-                            && app.dashboard_area.is_some_and(|area| {
-                                mouse.column >= area.x
-                                    && mouse.column < area.x + area.width
-                                    && mouse.row >= area.y
-                                    && mouse.row < area.y + area.height
-                            });
-                        if over_dashboard {
-                            app.dashboard.scroll_up(3);
-                        } else {
-                            app.conversation.scroll_up(3);
-                        }
+                        // Mouse wheel is scroll provenance, not keyboard Up.
+                        // It must never route through editor history recall.
+                        app.handle_mouse_scroll_up(mouse.column, mouse.row);
                     }
                     MouseEventKind::ScrollDown => {
-                        let over_dashboard = app.mouse_capture_enabled
-                            && app.dashboard_area.is_some_and(|area| {
-                                mouse.column >= area.x
-                                    && mouse.column < area.x + area.width
-                                    && mouse.row >= area.y
-                                    && mouse.row < area.y + area.height
-                            });
-                        if over_dashboard {
-                            app.dashboard.scroll_down(3);
-                        } else {
-                            app.conversation.scroll_down(3);
-                        }
+                        // Mouse wheel is scroll provenance, not keyboard Down.
+                        // It must never route through editor history advance/clear.
+                        app.handle_mouse_scroll_down(mouse.column, mouse.row);
                     }
                     _ => {}
                 },
@@ -9404,26 +9436,10 @@ pub async fn run_tui(
                             app.conversation.scroll_down(20);
                         }
                         (KeyCode::Up, _) => {
-                            if let Some(ref mut picker) = app.at_picker {
-                                picker.move_up();
-                            } else if app.editor.line_count() > 1 && app.editor.cursor_row() > 0 {
-                                app.editor.move_up();
-                            } else {
-                                // Single-line editor: Up navigates history (like shell/Claude Code)
-                                app.history_recall_up();
-                            }
+                            app.handle_keyboard_up();
                         }
                         (KeyCode::Down, _) => {
-                            if let Some(ref mut picker) = app.at_picker {
-                                picker.move_down();
-                            } else if app.editor.line_count() > 1
-                                && app.editor.cursor_row() < app.editor.line_count() - 1
-                            {
-                                app.editor.move_down();
-                            } else {
-                                // Single-line editor: Down navigates history forward
-                                app.history_down();
-                            }
+                            app.handle_keyboard_down();
                         }
                         _ => {}
                     }
