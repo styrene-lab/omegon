@@ -1754,16 +1754,18 @@ fn mouse_wheel_over_conversation_never_enters_history_recall() {
     app.conversation
         .append_streaming("line 1\nline 2\nline 3\nline 4\nline 5\nline 6");
 
+    app.conversation_area = Some(Rect::new(0, 0, 80, 12));
+
     // Model the event-loop wheel routing contract directly: wheel over conversation
     // should scroll the conversation even if the editor currently owns focus.
-    app.conversation.scroll_up(3);
+    app.handle_mouse_scroll_up(1, 1);
     assert_eq!(app.history_idx, None);
     assert_eq!(app.editor.render_text(), "draft");
 
     let after_up = app.conversation.conv_state.scroll_offset;
     assert!(after_up > 0, "wheel-up should move into history");
 
-    app.conversation.scroll_down(3);
+    app.handle_mouse_scroll_down(1, 1);
     assert!(app.conversation.conv_state.scroll_offset < after_up);
     assert_eq!(app.history_idx, None);
     assert_eq!(app.editor.render_text(), "draft");
@@ -1929,15 +1931,15 @@ fn ctrl_up_walks_back_multiple_entries_after_recall_starts() {
 }
 
 #[test]
-fn bare_up_recalls_history_from_empty_editor() {
+fn bare_up_does_not_recall_history_from_empty_editor() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
     app.terminal_copy_mode = false;
 
     app.handle_keyboard_up();
 
-    assert_eq!(app.editor.render_text(), "third");
-    assert_eq!(app.history_idx, Some(2));
+    assert_eq!(app.editor.render_text(), "");
+    assert_eq!(app.history_idx, None);
 }
 
 #[test]

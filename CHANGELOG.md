@@ -83,6 +83,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a runtime final-answer nudge when an assistant turn would end while the visible Workbench plan still has active/todo items.
 
 ### Fixed
+- Made bare Up editor-navigation-only as well, so macOS/Kitty wheel gestures translated to Up cannot recall prompt history; explicit `Ctrl+Up`/`Ctrl+Down` remain the prompt history controls.
 - Made bare Down an editor-navigation-only key so Kitty wheel gestures translated to Down cannot advance or clear prompt history; explicit `Ctrl+Up`/`Ctrl+Down` remain the prompt history controls.
 - Split TUI mouse-wheel scrolling from keyboard history handling so crossterm mouse events cannot mutate the editor buffer or history index.
 - Hardened terminal session spawning to prefer an absolute bash path so PTY-backed terminal tests and sessions still start when `PATH` is empty.

@@ -7039,8 +7039,6 @@ Scroll transcript:
             picker.move_up();
         } else if self.editor.line_count() > 1 && self.editor.cursor_row() > 0 {
             self.editor.move_up();
-        } else {
-            self.history_recall_up();
         }
     }
 
