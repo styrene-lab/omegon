@@ -509,7 +509,7 @@ async fn ui_action_copy_conversation_segment_rejects_invalid_index() {
 }
 
 #[tokio::test]
-async fn ui_action_copy_conversation_segment_rejects_noncopyable_image() {
+async fn ui_action_copy_conversation_segment_opens_plaintext_detail_for_image() {
     let mut app = test_app();
     let tx = test_tx();
     app.conversation
@@ -527,7 +527,16 @@ async fn ui_action_copy_conversation_segment_rejects_noncopyable_image() {
 
     assert_eq!(
         outcome,
-        UiActionOutcome::rejected("conversation segment is not copyable: 0")
+        UiActionOutcome::accepted_message("conversation segment opened for copy: 0")
+    );
+    let Some((title, data, _, _)) = app.active_modal.as_ref() else {
+        panic!("expected plaintext detail modal");
+    };
+    assert_eq!(title, "Copy text");
+    assert_eq!(data.get("kind").and_then(serde_json::Value::as_str), Some("text_copy"));
+    assert_eq!(
+        data.get("text").and_then(serde_json::Value::as_str),
+        Some("image: /tmp/paste.png\nalt: [image0] paste.png")
     );
 }
 

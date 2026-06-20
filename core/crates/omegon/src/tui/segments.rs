@@ -1691,6 +1691,18 @@ impl Segment {
         self.export_text(SegmentExportMode::Raw)
     }
 
+    /// Return the full human-readable plaintext detail representation for this segment.
+    ///
+    /// This is the canonical accessor for detail/view surfaces that need selectable
+    /// text for operators or external clients. Unlike `export_copy_text`, this is
+    /// not constrained by copy policy and should preserve enough context to inspect
+    /// the segment's content.
+    pub fn human_plaintext_detail(&self) -> String {
+        self.export_text(SegmentExportMode::Plaintext)
+            .trim_end()
+            .to_string()
+    }
+
     pub fn export_text(&self, mode: SegmentExportMode) -> String {
         match &self.content {
             SegmentContent::UserPrompt { text } => text.clone(),
@@ -6407,6 +6419,130 @@ After fence text.
         };
         let tag = build_meta_tag(&meta);
         assert!(!tag.contains("think"), "should omit think:off: {tag}");
+    }
+
+    #[test]
+    fn human_plaintext_detail_returns_user_prompt_text() {
+        let segment = Segment::user_prompt("hello **operator**\n");
+
+        assert_eq!(segment.human_plaintext_detail(), "hello **operator**");
+    }
+
+    #[test]
+    fn human_plaintext_detail_normalizes_assistant_markdown_and_thinking() {
+        let mut segment = Segment::assistant_text();
+        if let SegmentContent::AssistantText {
+            text,
+            thinking,
+            complete,
+        } = &mut segment.content
+        {
+            *thinking = "```\ninternal **notes**\n```\n".to_string();
+            *text = "Result:\n```rust\nlet x = 1;\n```\nDone.\n".to_string();
+            *complete = true;
+        }
+
+        assert_eq!(
+            segment.human_plaintext_detail(),
+            "[thinking]\ninternal **notes**\n\n[text]\nResult:\nlet x = 1;\nDone."
+        );
+    }
+
+    #[test]
+    fn human_plaintext_detail_formats_peer_agent_with_provenance() {
+        let segment = Segment::peer_agent(
+            "Analyzer",
+            PeerAgentSource::Delegate,
+            PeerAgentStatus::Completed,
+            "Found `target`.\n",
+        );
+
+        assert_eq!(
+            segment.human_plaintext_detail(),
+            "peer agent: Analyzer\nsource: delegate\nstatus: completed\n\nFound `target`."
+        );
+    }
+
+    #[test]
+    fn human_plaintext_detail_formats_running_tool_with_args_and_result() {
+        let mut segment = Segment::tool_card("call-1", "bash");
+        if let SegmentContent::ToolCard {
+            detail_args,
+            detail_result,
+            complete,
+            ..
+        } = &mut segment.content
+        {
+            *detail_args = Some("cargo test -p omegon\n".to_string());
+            *detail_result = Some("2 passed\n".to_string());
+            *complete = false;
+        }
+
+        assert_eq!(
+            segment.human_plaintext_detail(),
+            "tool: bash\nstatus: running\n\nargs:\ncargo test -p omegon\n\nresult:\n2 passed"
+        );
+    }
+
+    #[test]
+    fn human_plaintext_detail_formats_completed_error_tool() {
+        let mut segment = Segment::tool_card("call-2", "bash");
+        if let SegmentContent::ToolCard {
+            detail_result,
+            is_error,
+            complete,
+            ..
+        } = &mut segment.content
+        {
+            *detail_result = Some("command failed\n".to_string());
+            *is_error = true;
+            *complete = true;
+        }
+
+        assert_eq!(
+            segment.human_plaintext_detail(),
+            "tool: bash\nstatus: error\n\nresult:\ncommand failed"
+        );
+    }
+
+    #[test]
+    fn human_plaintext_detail_formats_system_lifecycle_image_and_separator() {
+        assert_eq!(Segment::system("notice").human_plaintext_detail(), "notice");
+        assert_eq!(
+            Segment::lifecycle("✓", "done").human_plaintext_detail(),
+            "✓ done"
+        );
+        assert_eq!(
+            Segment::image(std::path::PathBuf::from("/tmp/paste.png"), "alt text")
+                .human_plaintext_detail(),
+            "image: /tmp/paste.png\nalt: alt text"
+        );
+        assert_eq!(Segment::separator().human_plaintext_detail(), "───");
+    }
+
+    #[test]
+    fn export_copy_text_remains_policy_filtered_for_tool_detail() {
+        let mut segment = Segment::tool_card("call-3", "bash");
+        if let SegmentContent::ToolCard {
+            detail_args,
+            detail_result,
+            complete,
+            ..
+        } = &mut segment.content
+        {
+            *detail_args = Some("secret-ish args\n".to_string());
+            *detail_result = Some("copyable result\n".to_string());
+            *complete = true;
+        }
+
+        assert_eq!(
+            segment.human_plaintext_detail(),
+            "tool: bash\nstatus: complete\n\nargs:\nsecret-ish args\n\nresult:\ncopyable result"
+        );
+        assert_eq!(
+            segment.export_copy_text(SegmentExportMode::Plaintext),
+            Some("copyable result".to_string())
+        );
     }
 
     #[test]

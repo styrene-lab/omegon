@@ -3593,12 +3593,12 @@ impl App {
                 "conversation segment index out of range: {idx}"
             ));
         };
-        let mode = Self::segment_export_mode(action.mode);
-        let Some(text) = segment.export_copy_text(mode) else {
+        let text = segment.human_plaintext_detail();
+        if text.trim().is_empty() {
             return UiActionOutcome::rejected(format!(
-                "conversation segment is not copyable: {idx}"
+                "conversation segment has no plaintext detail: {idx}"
             ));
-        };
+        }
         self.active_modal = Some((
             "Copy text".to_string(),
             serde_json::json!({
