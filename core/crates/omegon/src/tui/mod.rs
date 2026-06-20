@@ -4462,7 +4462,7 @@ impl App {
                     "⏎ send  ⇧⏎/⌥⏎ newline  ^O/Tab details  /ui surfaces  / commands ".into()
                 }
             } else {
-                "⏎ send  ⇧⏎/⌥⏎ newline  ↑/↓ history ".into()
+                "⏎ send  ⇧⏎/⌥⏎ newline  ^↑/^↓ history ".into()
             };
             let model_short = self
                 .footer_data
@@ -6920,8 +6920,6 @@ Scroll transcript:
             && self.editor.cursor_row() < self.editor.line_count() - 1
         {
             self.editor.move_down();
-        } else {
-            self.history_down();
         }
     }
 
