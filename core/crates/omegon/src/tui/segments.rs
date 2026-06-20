@@ -16,8 +16,8 @@ use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
     ConversationSegmentProjection, ImageSegment, LifecycleSegment, PeerAgentSegment,
-    PeerAgentSource, PeerAgentStatus, ProjectConversationSegment, SegmentPresentation, SegmentRole,
-    SystemSegment, ToolSegment, UserSegment,
+    PeerAgentSource, PeerAgentStatus, ProjectConversationSegment, SegmentCopyPolicy,
+    SegmentPresentation, SegmentRole, SystemSegment, ToolSegment, UserSegment,
 };
 
 const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
@@ -67,6 +67,13 @@ fn normalize_markdown_for_plaintext(text: &str) -> String {
     }
     let normalized = out.join("\n");
     normalized.trim_end().to_string()
+}
+
+fn export_text_fragment(text: &str, mode: SegmentExportMode) -> String {
+    match mode {
+        SegmentExportMode::Raw => text.trim_end().to_string(),
+        SegmentExportMode::Plaintext => normalize_markdown_for_plaintext(text),
+    }
 }
 
 pub(crate) fn split_preserving_trailing_empty_lines(text: &str) -> Vec<&str> {
@@ -1770,6 +1777,44 @@ status: {}
             }
             SegmentContent::TurnSeparator => "───".to_string(),
         }
+    }
+
+    pub fn export_copy_text(&self, mode: SegmentExportMode) -> Option<String> {
+        let projection = self.projection();
+        let model = projection.presentation_model();
+        let text = match model.surface.copy {
+            SegmentCopyPolicy::None => return None,
+            SegmentCopyPolicy::Body => match &self.content {
+                SegmentContent::UserPrompt { text }
+                | SegmentContent::SystemNotification { text }
+                | SegmentContent::LifecycleEvent { text, .. }
+                | SegmentContent::PeerAgentText { text, .. } => export_text_fragment(text, mode),
+                SegmentContent::AssistantText { text, .. } => export_text_fragment(text, mode),
+                SegmentContent::ToolCard { detail_result, result_summary, .. } => detail_result
+                    .as_deref()
+                    .or(result_summary.as_deref())
+                    .map(|text| export_text_fragment(text, mode))?,
+                SegmentContent::Image { alt, .. } => export_text_fragment(alt, mode),
+                SegmentContent::TurnSeparator => return None,
+            },
+            SegmentCopyPolicy::Summary => model
+                .content
+                .summary
+                .map(|text| export_text_fragment(text, mode))?,
+            SegmentCopyPolicy::Detail => match &self.content {
+                SegmentContent::ToolCard { detail_result, result_summary, .. } => detail_result
+                    .as_deref()
+                    .or(result_summary.as_deref())
+                    .map(|text| export_text_fragment(text, mode))?,
+                _ => model
+                    .content
+                    .body
+                    .or(model.content.summary)
+                    .map(|text| export_text_fragment(text, mode))?,
+            },
+            SegmentCopyPolicy::Full => self.export_text(mode),
+        };
+        (!text.trim().is_empty()).then_some(text)
     }
 
     pub fn projection(&self) -> BorrowedConversationSegmentProjection<'_> {

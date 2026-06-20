@@ -47,6 +47,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Routed selected/latest conversation copy through semantic segment copy policy so assistant copies exclude reasoning chrome, tool copies prefer result detail, and non-copyable media/chrome segments return no clipboard text.
 - Made slim TUI transcript rendering copy-friendlier by letting assistant, operator, and system message bodies avoid full-width trailing surface paint while keeping tool cards structured.
 - Reused the profile-aware settings projection for TUI settings modal navigation so tab/row bounds stay aligned with profile-drift rendering.
 - Wired TUI settings-modal `s` and `a` shortcuts to the existing `/profile save` and `/profile apply` control paths.
