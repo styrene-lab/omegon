@@ -9,7 +9,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::surfaces::conversation::{
-    ConversationSegmentKind, ConversationSegmentProjection, SegmentRole, ToolCategory,
+    ConversationSegmentKind, ConversationSegmentProjection, SegmentCopyPolicy,
+    SegmentSelectionTreatment, SegmentSurfaceTreatment, SegmentRole, ToolCategory,
 };
 
 pub const ACP_SURFACE_SCHEMA_VERSION: u32 = 1;
@@ -67,7 +68,19 @@ pub struct AcpConversationSegment {
     pub emphasis: String,
     pub tool_category: Option<String>,
     pub complete: bool,
+    pub surface: AcpSegmentSurface,
     pub kind: AcpConversationSegmentKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcpSegmentSurface {
+    pub treatment: String,
+    pub copy_policy: String,
+    pub selection: String,
+    pub copyable: bool,
+    pub selectable: bool,
+    pub detail_available: bool,
+    pub expandable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +136,7 @@ impl AcpConversationSegment {
         F: Fn(&str) -> String,
     {
         let kind = project_kind(&projection.kind, policy, &redact);
+        let model = projection.presentation_model();
         Self {
             schema_version: ACP_SURFACE_SCHEMA_VERSION,
             identity,
@@ -134,7 +148,22 @@ impl AcpConversationSegment {
                 .tool_category
                 .map(|kind| tool_category_name(kind).to_string()),
             complete: segment_complete(&projection.kind),
+            surface: AcpSegmentSurface::from_model(&model),
             kind,
+        }
+    }
+}
+
+impl AcpSegmentSurface {
+    fn from_model(model: &crate::surfaces::conversation::SegmentPresentationModel<'_>) -> Self {
+        Self {
+            treatment: surface_treatment_name(model.surface.surface).to_string(),
+            copy_policy: copy_policy_name(model.surface.copy).to_string(),
+            selection: selection_treatment_name(model.surface.selection).to_string(),
+            copyable: model.affordances.copyable,
+            selectable: model.affordances.selectable,
+            detail_available: model.affordances.detail_available,
+            expandable: model.affordances.expandable,
         }
     }
 }
@@ -257,6 +286,33 @@ fn tool_category_name(kind: ToolCategory) -> &'static str {
         ToolCategory::Search => "search",
         ToolCategory::Subagent => "subagent",
         ToolCategory::Generic => "generic",
+    }
+}
+
+fn surface_treatment_name(treatment: SegmentSurfaceTreatment) -> &'static str {
+    match treatment {
+        SegmentSurfaceTreatment::Transcript => "transcript",
+        SegmentSurfaceTreatment::Card => "card",
+        SegmentSurfaceTreatment::Panel => "panel",
+        SegmentSurfaceTreatment::ChromeOnly => "chrome_only",
+    }
+}
+
+fn copy_policy_name(policy: SegmentCopyPolicy) -> &'static str {
+    match policy {
+        SegmentCopyPolicy::None => "none",
+        SegmentCopyPolicy::Body => "body",
+        SegmentCopyPolicy::Summary => "summary",
+        SegmentCopyPolicy::Detail => "detail",
+        SegmentCopyPolicy::Full => "full",
+    }
+}
+
+fn selection_treatment_name(treatment: SegmentSelectionTreatment) -> &'static str {
+    match treatment {
+        SegmentSelectionTreatment::None => "none",
+        SegmentSelectionTreatment::Subtle => "subtle",
+        SegmentSelectionTreatment::Explicit => "explicit",
     }
 }
 
@@ -900,6 +956,86 @@ stack [REDACTED]"
             }
             other => panic!("expected tool DTO, got {other:?}"),
         }
+    }
+
+
+    #[test]
+    fn acp_assistant_projection_includes_transcript_surface_policy() {
+        let projection = ConversationSegmentProjection::new(
+            ConversationSegmentKind::<&str, &Path>::Assistant(AssistantSegment {
+                text: "hello",
+                thinking: "hidden",
+                complete: true,
+            }),
+        );
+        let dto = AcpConversationSegment::from_projection(
+            AcpConversationIdentity::new("assistant-2", 10),
+            &projection,
+            SurfaceRedaction::LocalUi,
+            redact_secret,
+        );
+
+        assert_eq!(dto.surface.treatment, "transcript");
+        assert_eq!(dto.surface.copy_policy, "body");
+        assert_eq!(dto.surface.selection, "subtle");
+        assert!(dto.surface.copyable);
+        assert!(dto.surface.selectable);
+        assert!(!dto.surface.detail_available);
+        assert!(!dto.surface.expandable);
+    }
+
+    #[test]
+    fn acp_tool_projection_includes_card_detail_surface_policy() {
+        let projection = ConversationSegmentProjection::new(
+            ConversationSegmentKind::<&str, &Path>::Tool(ToolSegment {
+                id: "tool-2",
+                name: "bash",
+                args_summary: Some("echo hi"),
+                detail_args: Some("echo hi"),
+                result_summary: Some("ok"),
+                detail_result: Some("hi"),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            }),
+        );
+        let dto = AcpConversationSegment::from_projection(
+            AcpConversationIdentity::new("tool-2", 11),
+            &projection,
+            SurfaceRedaction::ExternalClient,
+            redact_secret,
+        );
+
+        assert_eq!(dto.surface.treatment, "card");
+        assert_eq!(dto.surface.copy_policy, "detail");
+        assert_eq!(dto.surface.selection, "explicit");
+        assert!(dto.surface.copyable);
+        assert!(dto.surface.selectable);
+        assert!(dto.surface.detail_available);
+        assert!(dto.surface.expandable);
+    }
+
+    #[test]
+    fn acp_image_projection_includes_panel_noncopyable_surface_policy() {
+        let projection = ConversationSegmentProjection::new(ConversationSegmentKind::Image(
+            ImageSegment {
+                path: Path::new("/private/tmp/screenshot.png"),
+                alt: "screen",
+            },
+        ));
+        let dto = AcpConversationSegment::from_projection(
+            AcpConversationIdentity::new("image-2", 12),
+            &projection,
+            SurfaceRedaction::ExternalClient,
+            redact_secret,
+        );
+
+        assert_eq!(dto.surface.treatment, "panel");
+        assert_eq!(dto.surface.copy_policy, "none");
+        assert_eq!(dto.surface.selection, "explicit");
+        assert!(!dto.surface.copyable);
+        assert!(dto.surface.selectable);
+        assert!(dto.surface.detail_available);
     }
 
     #[test]
