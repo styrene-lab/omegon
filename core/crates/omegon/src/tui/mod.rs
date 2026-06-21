@@ -4879,6 +4879,10 @@ impl App {
             self.render_copy_text_modal(frame);
         }
 
+        // Render operator toast above normal TUI surfaces and copy text surfaces, but below
+        // blocking extension overlays/prompts so confirmations never obscure required choices.
+        self.render_operator_event_toast(frame);
+
         // Render modal overlay if active
         if let Some((widget_id, data, auto_dismiss_ms, spawn_time)) = &self.active_modal {
             // Check if modal should auto-dismiss
@@ -4892,7 +4896,6 @@ impl App {
                 extension_overlays::render_modal(frame, self.theme.as_ref(), widget_id, data);
             }
         }
-
         // Render action prompt if active
         if let Some((widget_id, actions)) = &self.active_action_prompt {
             extension_overlays::render_action_prompt(
@@ -4902,9 +4905,6 @@ impl App {
                 actions,
             );
         }
-
-        // Render operator toast last so copy/expand confirmations are visible above overlays.
-        self.render_operator_event_toast(frame);
     }
 
     fn render_operator_event_toast(&self, frame: &mut Frame<'_>) {
