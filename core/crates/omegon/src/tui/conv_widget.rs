@@ -391,6 +391,12 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                         segment.render_in_context(content_area, buf, &render_ctx);
                     },
                 );
+                render_segment_copy_affordance(
+                    seg_area,
+                    buf,
+                    self.theme,
+                    segment.capabilities().copyable,
+                );
             } else {
                 // Segment starts ABOVE the viewport — partially visible.
                 // Render into a temp buffer at full size, then copy the
@@ -427,6 +433,12 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                         segment.render_in_context(content_area, buf, &render_ctx);
                     },
                 );
+                render_segment_copy_affordance(
+                    temp_area,
+                    &mut temp_buf,
+                    self.theme,
+                    segment.capabilities().copyable,
+                );
 
                 // Copy the visible portion from temp_buf to main buf
                 for row in 0..visible_rows {
@@ -457,6 +469,36 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                 .is_some_and(|segment| segment.capabilities().detail_openable)
         {
             render_detail_affordance_hint(area, buf, self.theme);
+        }
+    }
+}
+
+fn render_segment_copy_affordance(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: &dyn Theme,
+    copyable: bool,
+) {
+    if !copyable || area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let label = " copy ";
+    let label_width = label.chars().count() as u16;
+    if label_width > area.width {
+        return;
+    }
+
+    let x = area.right().saturating_sub(label_width);
+    let y = area.y;
+    let style = Style::default()
+        .fg(Color::Black)
+        .bg(theme.accent())
+        .add_modifier(Modifier::BOLD);
+    for (idx, ch) in label.chars().enumerate() {
+        if let Some(cell) = buf.cell_mut((x + idx as u16, y)) {
+            cell.set_char(ch);
+            cell.set_style(style);
         }
     }
 }

@@ -416,6 +416,42 @@ impl ToolInspectionTarget {
     }
 }
 
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CopyTextModal {
+    title: String,
+    text: String,
+    scroll_y: u16,
+    wrap: bool,
+}
+
+impl CopyTextModal {
+    fn new(title: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            text: text.into(),
+            scroll_y: 0,
+            wrap: true,
+        }
+    }
+
+    fn scroll_up(&mut self, rows: u16) {
+        self.scroll_y = self.scroll_y.saturating_sub(rows);
+    }
+
+    fn scroll_down(&mut self, rows: u16) {
+        self.scroll_y = self.scroll_y.saturating_add(rows);
+    }
+
+    fn scroll_top(&mut self) {
+        self.scroll_y = 0;
+    }
+
+    fn scroll_bottom(&mut self) {
+        self.scroll_y = u16::MAX;
+    }
+}
+
 struct App {
     editor: Editor,
     conversation: ConversationView,
@@ -562,6 +598,10 @@ struct App {
     /// Voice notification receivers owned by this TUI process/session.
     voice_notification_receivers:
         Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
+    /// First-class selectable plaintext copy surface.
+    copy_text_modal: Option<CopyTextModal>,
+    /// Last rendered copy-all button area for mouse hit-testing when app mouse is enabled.
+    copy_text_copy_button_area: Option<Rect>,
     /// Active ephemeral modal from extension widget (widget_id, data, auto_dismiss_ms, spawn_time).
     active_modal: Option<(String, serde_json::Value, Option<u64>, std::time::Instant)>,
     /// Active action prompt from extension widget (widget_id, actions).
@@ -1843,6 +1883,8 @@ impl App {
             extension_widgets: std::collections::HashMap::new(),
             widget_receivers: Vec::new(),
             voice_notification_receivers: Vec::new(),
+            copy_text_modal: None,
+            copy_text_copy_button_area: None,
             active_modal: None,
             active_action_prompt: None,
             oauth_tos_notice_shown: false,
@@ -3508,16 +3550,13 @@ impl App {
                 "conversation segment has no plaintext detail: {idx}"
             ));
         }
-        self.active_modal = Some((
-            "Copy text".to_string(),
-            serde_json::json!({
-                "kind": "text_copy",
-                "text": text,
-            }),
-            None,
-            std::time::Instant::now(),
-        ));
-        UiActionOutcome::accepted_message(format!("conversation segment opened for copy: {idx}"))
+        if self.copy_text_to_clipboard(&text) {
+            UiActionOutcome::accepted_message(format!("conversation segment copied: {idx}"))
+        } else {
+            UiActionOutcome::rejected(
+                "clipboard unavailable — install pbcopy, wl-copy, xclip, or xsel",
+            )
+        }
     }
 
     fn handle_copy_latest_assistant_response_action(
@@ -4830,6 +4869,11 @@ impl App {
             command_surfaces::render_prompt(area, frame.buffer_mut(), self.theme.as_ref(), prompt);
         }
 
+        // Render first-class copy text surface above command prompts/panels.
+        if self.copy_text_modal.is_some() {
+            self.render_copy_text_modal(frame);
+        }
+
         // Render modal overlay if active
         if let Some((widget_id, data, auto_dismiss_ms, spawn_time)) = &self.active_modal {
             // Check if modal should auto-dismiss
@@ -4853,6 +4897,118 @@ impl App {
                 actions,
             );
         }
+    }
+
+    fn close_copy_text_modal(&mut self) {
+        self.copy_text_modal = None;
+        self.copy_text_copy_button_area = None;
+        if self.terminal_copy_mode {
+            self.set_terminal_copy_mode(false);
+        }
+    }
+
+    fn copy_all_from_copy_text_modal(&mut self) -> bool {
+        let Some(text) = self.copy_text_modal.as_ref().map(|modal| modal.text.clone()) else {
+            return false;
+        };
+        if self.copy_text_to_clipboard(&text) {
+            self.show_toast("Copied all text", ratatui_toaster::ToastType::Success);
+            true
+        } else {
+            self.show_toast(
+                "Clipboard unavailable — terminal selection still available",
+                ratatui_toaster::ToastType::Warning,
+            );
+            false
+        }
+    }
+
+    fn render_copy_text_modal(&mut self, frame: &mut Frame<'_>) {
+        let Some(modal) = &mut self.copy_text_modal else {
+            return;
+        };
+        let area = frame.area();
+        let modal_width = ((area.width as f32 * 0.9) as u16).max(20).min(area.width);
+        let modal_height = ((area.height as f32 * 0.85) as u16).max(8).min(area.height);
+        let x = (area.width.saturating_sub(modal_width)) / 2;
+        let y = (area.height.saturating_sub(modal_height)) / 2;
+        let modal_area = Rect {
+            x,
+            y,
+            width: modal_width,
+            height: modal_height,
+        };
+        let button_label = " Copy all ";
+        let button_width = button_label.len() as u16;
+        self.copy_text_copy_button_area = Some(Rect {
+            x: modal_area
+                .x
+                .saturating_add(modal_area.width.saturating_sub(button_width + 2)),
+            y: modal_area.y,
+            width: button_width,
+            height: 1,
+        });
+        let inner_height = modal_area.height.saturating_sub(2);
+        let body_height = inner_height.saturating_sub(1);
+        let max_scroll = modal.text.lines().count().saturating_sub(body_height as usize) as u16;
+        modal.scroll_y = modal.scroll_y.min(max_scroll);
+
+        frame.render_widget(&Clear, modal_area);
+
+        let modal_bg = self.theme.card_bg();
+        let block = Block::default()
+            .title(format!(" {} ", modal.title))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan).bg(modal_bg))
+            .style(Style::default().bg(modal_bg));
+        let inner = block.inner(modal_area);
+        frame.render_widget(block, modal_area);
+        if let Some(button_area) = self.copy_text_copy_button_area {
+            frame.render_widget(
+                Paragraph::new(button_label).style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                button_area,
+            );
+        }
+
+        let body_area = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: body_height,
+        };
+        let footer_area = Rect {
+            x: inner.x,
+            y: inner.y.saturating_add(body_height),
+            width: inner.width,
+            height: inner.height.saturating_sub(body_height),
+        };
+
+        let mut paragraph = Paragraph::new(modal.text.as_str())
+            .style(Style::default().bg(modal_bg))
+            .scroll((modal.scroll_y, 0));
+        if modal.wrap {
+            paragraph = paragraph.wrap(ratatui::widgets::Wrap { trim: false });
+        }
+        frame.render_widget(paragraph, body_area);
+
+        let footer = format!(
+            "Esc close · ↑/↓/PgUp/PgDn scroll · terminal drag selects text · lines {}-{} of {}",
+            modal.scroll_y.saturating_add(1),
+            modal
+                .scroll_y
+                .saturating_add(body_height)
+                .min(modal.text.lines().count() as u16),
+            modal.text.lines().count()
+        );
+        frame.render_widget(
+            Paragraph::new(footer).style(Style::default().fg(Color::DarkGray).bg(modal_bg)),
+            footer_area,
+        );
     }
 
     fn try_paste_clipboard_image(&mut self) {
@@ -8702,9 +8858,26 @@ pub async fn run_tui(
                             app.dashboard.sidebar_active = true;
                         } else if point_in(app.conversation_area) {
                             app.dashboard.sidebar_active = false;
-                            if let Some(area) = app.conversation_area
-                                && let Some(idx) = app.conversation.segment_at(area, mouse.row)
-                            {
+                            if let Some(area) = app.conversation_area {
+                                if let Some(idx) = app.conversation.segment_copy_button_at(
+                                    area,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    let _ = app
+                                        .handle_ui_action(
+                                            UiAction::CopyConversationSegment(
+                                                CopyConversationSegmentAction {
+                                                    segment: ConversationSegmentRef::by_index(idx),
+                                                    mode: SegmentCopyMode::Plaintext,
+                                                },
+                                            ),
+                                            &command_tx,
+                                        )
+                                        .await;
+                                    continue;
+                                }
+                                if let Some(idx) = app.conversation.segment_at(area, mouse.row) {
                                 let now = std::time::Instant::now();
                                 let is_double = app.last_left_click.is_some_and(|(col, row, t)| {
                                     row == mouse.row
@@ -8721,6 +8894,7 @@ pub async fn run_tui(
                                     app.conversation.toggle_expand(idx);
                                 }
                                 app.last_left_click = Some((mouse.column, mouse.row, now));
+                            }
                             }
                         } else if point_in(app.editor_area) {
                             app.dashboard.sidebar_active = false;
@@ -8813,6 +8987,44 @@ pub async fn run_tui(
                                 .await;
                         }
                         continue;
+                    }
+
+                    if let Some(copy_modal) = app.copy_text_modal.as_mut() {
+                        match (key.code, key.modifiers) {
+                            (KeyCode::Esc, _) => {
+                                app.close_copy_text_modal();
+                                continue;
+                            }
+                            (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+                                let _ = app.copy_all_from_copy_text_modal();
+                                continue;
+                            }
+                            (KeyCode::Up, _) => {
+                                copy_modal.scroll_up(1);
+                                continue;
+                            }
+                            (KeyCode::Down, _) => {
+                                copy_modal.scroll_down(1);
+                                continue;
+                            }
+                            (KeyCode::PageUp, _) => {
+                                copy_modal.scroll_up(20);
+                                continue;
+                            }
+                            (KeyCode::PageDown, _) => {
+                                copy_modal.scroll_down(20);
+                                continue;
+                            }
+                            (KeyCode::Home, _) => {
+                                copy_modal.scroll_top();
+                                continue;
+                            }
+                            (KeyCode::End, _) => {
+                                copy_modal.scroll_bottom();
+                                continue;
+                            }
+                            _ => {}
+                        }
                     }
 
                     if let Some(panel) = app.command_panel.as_mut() {
@@ -9297,10 +9509,15 @@ pub async fn run_tui(
                         // ── Interrupt: Escape or Ctrl+C ─────────────────
                         (KeyCode::Esc, _) => {
                             // Dismiss modal if active, otherwise interrupt agent
-                            if app.command_panel.is_some() {
+                            if app.copy_text_modal.is_some() {
+                                app.close_copy_text_modal();
+                            } else if app.command_panel.is_some() {
                                 app.command_panel = None;
                             } else if app.active_modal.is_some() {
                                 app.active_modal = None;
+                                if app.terminal_copy_mode {
+                                    app.set_terminal_copy_mode(false);
+                                }
                             } else if app.active_action_prompt.is_some() {
                                 app.active_action_prompt = None;
                             } else if app.agent_active {
