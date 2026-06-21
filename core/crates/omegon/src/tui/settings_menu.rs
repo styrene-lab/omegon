@@ -130,6 +130,7 @@ pub(crate) enum SelectorKind {
     WorkspaceKind,
     Preferences,
     ToolDetail,
+    MaxTurns,
 }
 
 /// Coarse settings categories for the future settings surface.
@@ -382,6 +383,26 @@ pub(crate) fn preferences_selector_options(
     ]
 }
 
+pub(crate) fn max_turns_selector_options(current: u32) -> Vec<selector::SelectOption> {
+    [0, 10, 25, 50, 100, 200]
+        .into_iter()
+        .map(|turns| selector::SelectOption {
+            value: turns.to_string(),
+            label: if turns == 0 {
+                "unlimited".into()
+            } else {
+                turns.to_string()
+            },
+            description: if turns == 0 {
+                "No autonomous turn cap".into()
+            } else {
+                format!("Stop after {turns} autonomous turns")
+            },
+            active: turns == current,
+        })
+        .collect()
+}
+
 pub(crate) fn tool_detail_selector_options(
     current: crate::settings::ToolDetail,
 ) -> Vec<selector::SelectOption> {
@@ -479,6 +500,7 @@ pub(crate) enum SettingApplyOutcome {
     UpdateChannel(crate::update::UpdateChannel),
     WorkspaceRole(crate::workspace::types::WorkspaceRole),
     WorkspaceKind(crate::workspace::types::WorkspaceKind),
+    MaxTurns(u32),
     Invalid { label: &'static str, value: String },
 }
 
@@ -494,9 +516,27 @@ impl SettingApplyOutcome {
             ),
             Self::WorkspaceRole(role) => format!("Workspace role → {}", role.as_str()),
             Self::WorkspaceKind(kind) => format!("Workspace kind → {}", kind.as_str()),
+            Self::MaxTurns(max_turns) => format!(
+                "Max turns → {}",
+                if *max_turns == 0 {
+                    "unlimited".to_string()
+                } else {
+                    max_turns.to_string()
+                }
+            ),
             Self::Invalid { label, value } => format!("Unknown {label}: {value}"),
         }
     }
+}
+
+pub(crate) fn apply_max_turns_selection(value: &str) -> SettingApplyOutcome {
+    value
+        .parse::<u32>()
+        .map(SettingApplyOutcome::MaxTurns)
+        .unwrap_or_else(|_| SettingApplyOutcome::Invalid {
+            label: "max turns",
+            value: value.to_string(),
+        })
 }
 
 pub(crate) fn apply_thinking_selection(value: &str) -> SettingApplyOutcome {
@@ -667,6 +707,23 @@ mod tests {
             SettingApplyOutcome::ToolDetail(crate::settings::ToolDetail::Compact)
         );
         assert_eq!(outcome.message(), "Tool density → compact");
+    }
+
+    #[test]
+    fn max_turns_options_and_selection_support_unlimited() {
+        let options = max_turns_selector_options(0);
+        assert!(
+            options.iter().any(|option| {
+                option.value == "0" && option.label == "unlimited" && option.active
+            })
+        );
+
+        let outcome = apply_max_turns_selection("100");
+        assert_eq!(outcome, SettingApplyOutcome::MaxTurns(100));
+        assert_eq!(outcome.message(), "Max turns → 100");
+
+        let unlimited = apply_max_turns_selection("0");
+        assert_eq!(unlimited.message(), "Max turns → unlimited");
     }
 
     #[test]

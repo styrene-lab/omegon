@@ -5753,6 +5753,59 @@ fn settings_screen_navigation_helpers_bound_rows_and_wrap_tabs() {
 }
 
 #[test]
+fn settings_screen_max_turns_row_queues_existing_control_request() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    app.open_settings_screen();
+    app.settings_screen.as_mut().unwrap().selected_row = 3;
+    app.open_selected_settings_row();
+    app.selector.as_mut().unwrap().cursor = 4;
+
+    let message = app.confirm_selector(&tx).expect("max turns message");
+
+    assert_eq!(message, "Max turns → 100");
+    match rx.try_recv().expect("max turns command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::SetMaxTurns { max_turns },
+            ..
+        } => assert_eq!(max_turns, 100),
+        other => panic!("expected max turns control request, got {other:?}"),
+    }
+}
+
+#[test]
+fn settings_screen_auto_update_row_toggles_persisted_setting() {
+    let mut app = test_app();
+
+    app.open_settings_screen();
+    {
+        let screen = app.settings_screen.as_mut().unwrap();
+        screen.active_tab = "updates".into();
+        screen.selected_row = 1;
+    }
+    app.open_selected_settings_row();
+
+    assert!(app.settings().auto_update);
+}
+
+#[test]
+fn settings_screen_sandbox_row_disables_persisted_setting() {
+    let mut app = test_app();
+    app.update_settings(|s| s.sandbox = true);
+
+    app.open_settings_screen();
+    {
+        let screen = app.settings_screen.as_mut().unwrap();
+        screen.active_tab = "workspace".into();
+        screen.selected_row = 1;
+    }
+    app.open_selected_settings_row();
+
+    assert!(!app.settings().sandbox);
+}
+
+#[test]
 fn model_grade_slash_command_parses_and_rejects_local_grade() {
     assert_eq!(
         crate::tui::canonical_slash_command("model", "route"),

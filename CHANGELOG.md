@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Wired settings-screen max-turn, sandbox, and auto-update rows to existing control/persistence paths instead of showing placeholder toasts.
 - Moved settings-screen row selection and tab switching into reusable screen helpers and routed choice rows through their semantic projection metadata instead of hard-coded per-row selector builders.
 - Replaced the hard-to-discover inline conversation `Copy` button with a double-click copy flow: double-click a collapsed tool card to expand it, then double-click the expanded/copyable segment to copy plaintext.
 - Added selected conversation segment hints for double-click copy/expand actions and a visible centered action toast with conversation/footer pulses on successful copy.
