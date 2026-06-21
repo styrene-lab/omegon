@@ -48,6 +48,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
 
 ### Changed
+- Added a scrollable copy-text modal as an intermediate selected-segment detail surface before replacing selected-segment copy with inline transcript copy buttons.
+
+### Fixed
+- Made inline conversation-segment copy affordances use a terminal-safe `copy` label so the target remains readable when a terminal font cannot render the original glyph.
+- Made inline conversation-segment `⧉` copy affordances copy segment plaintext directly from the main transcript without opening the copy modal or entering terminal drag-selection mode.
 - Added a shared `Segment::human_plaintext_detail()` accessor for full operator/client-readable plaintext segment detail, and routed the selected-segment modal through it instead of copy-policy export.
 - Clarified the Rust skill's Cargo test filtering guidance so agents use one positional test filter per invocation or a single broader shared filter.
 - Routed verbose informational slash-command output into conversation system segments while keeping usage/error responses in command panels and unknown commands in compact warning toasts.

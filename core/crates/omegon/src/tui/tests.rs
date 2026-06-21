@@ -509,7 +509,7 @@ async fn ui_action_copy_conversation_segment_rejects_invalid_index() {
 }
 
 #[tokio::test]
-async fn ui_action_copy_conversation_segment_opens_plaintext_detail_for_image() {
+async fn ui_action_copy_conversation_segment_copies_plaintext_detail_without_modal() {
     let mut app = test_app();
     let tx = test_tx();
     app.conversation
@@ -525,19 +525,12 @@ async fn ui_action_copy_conversation_segment_opens_plaintext_detail_for_image() 
         )
         .await;
 
-    assert_eq!(
-        outcome,
-        UiActionOutcome::accepted_message("conversation segment opened for copy: 0")
+    assert!(
+        matches!(outcome, UiActionOutcome::Accepted { .. } | UiActionOutcome::Rejected { .. }),
+        "{outcome:?}"
     );
-    let Some((title, data, _, _)) = app.active_modal.as_ref() else {
-        panic!("expected plaintext detail modal");
-    };
-    assert_eq!(title, "Copy text");
-    assert_eq!(data.get("kind").and_then(serde_json::Value::as_str), Some("text_copy"));
-    assert_eq!(
-        data.get("text").and_then(serde_json::Value::as_str),
-        Some("image: /tmp/paste.png\nalt: [image0] paste.png")
-    );
+    assert!(app.copy_text_modal.is_none());
+    assert!(!app.terminal_copy_mode);
 }
 
 #[tokio::test]
@@ -1950,6 +1943,66 @@ fn terminal_copy_mode_disables_mouse_capture() {
     assert!(!app.terminal_copy_mode);
     assert!(app.mouse_capture_enabled);
 }
+#[test]
+fn text_copy_modal_uses_wide_copy_surface_with_non_copy_footer() {
+    let mut app = test_app();
+    app.copy_text_modal = Some(CopyTextModal::new("Copy text", "alpha beta gamma"));
+
+    let rendered = render_app_to_string(&mut app, 100, 30);
+
+    assert!(rendered.contains("alpha beta gamma"), "got {rendered}");
+    assert!(rendered.contains("Copy all"), "got {rendered}");
+    assert!(rendered.contains("terminal drag selects text"), "got {rendered}");
+    assert!(app.copy_text_copy_button_area.is_some());
+    assert_eq!(
+        app.copy_text_modal.as_ref().map(|modal| modal.text.as_str()),
+        Some("alpha beta gamma")
+    );
+}
+
+#[test]
+fn conversation_renders_copy_affordance_and_maps_click_target() {
+    let mut cv = ConversationView::new();
+    cv.push_user("alpha beta gamma");
+
+    let t = crate::tui::theme::Alpharius;
+    let area = Rect::new(0, 0, 80, 8);
+    let mut buf = Buffer::empty(area);
+    {
+        let (segments, state) = cv.segments_and_state();
+        let widget = crate::tui::conv_widget::ConversationWidget::new(segments, &t);
+        widget.render(area, &mut buf, state);
+    }
+
+    let rendered = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("copy"), "got {rendered}");
+    assert_eq!(cv.segment_copy_button_at(area, area.right() - 3, area.y), Some(0));
+}
+
+#[test]
+fn copy_text_modal_scrolls_markdown_and_code_without_mutating_payload() {
+    let mut modal = CopyTextModal::new(
+        "Copy text",
+        "```rust\nfn main() { println!(\"hello\"); }\n```\n\n# Notes\nbody",
+    );
+
+    modal.scroll_down(2);
+    assert_eq!(modal.scroll_y, 2);
+    modal.scroll_up(1);
+    assert_eq!(modal.scroll_y, 1);
+    assert_eq!(
+        modal.text,
+        "```rust\nfn main() { println!(\"hello\"); }\n```\n\n# Notes\nbody"
+    );
+}
+
 
 #[test]
 fn mouse_slash_command_toggles_interaction_mode() {

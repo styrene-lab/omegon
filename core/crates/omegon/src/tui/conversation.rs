@@ -1256,7 +1256,11 @@ impl ConversationView {
         Some(idx)
     }
 
-    pub fn segment_at(&self, viewport: ratatui::prelude::Rect, row: u16) -> Option<usize> {
+    fn segment_bounds_at(
+        &self,
+        viewport: ratatui::prelude::Rect,
+        row: u16,
+    ) -> Option<(usize, u16, u16)> {
         let heights = &self.conv_state.heights;
         if heights.len() != self.segments.len() || row < viewport.y || row >= viewport.bottom() {
             return None;
@@ -1281,11 +1285,40 @@ impl ConversationView {
             let seg_top = y_cursor;
             let seg_bottom = y_cursor + seg_height;
             if target_y >= seg_top && target_y < seg_bottom {
-                return Some(idx);
+                return Some((idx, seg_top, top_offset));
             }
             y_cursor = seg_bottom;
         }
         None
+    }
+
+    pub fn segment_at(&self, viewport: ratatui::prelude::Rect, row: u16) -> Option<usize> {
+        self.segment_bounds_at(viewport, row)
+            .map(|(idx, _, _)| idx)
+    }
+
+    pub fn segment_copy_button_at(
+        &self,
+        viewport: ratatui::prelude::Rect,
+        column: u16,
+        row: u16,
+    ) -> Option<usize> {
+        const COPY_LABEL_WIDTH: u16 = 3;
+        if column < viewport.right().saturating_sub(COPY_LABEL_WIDTH) || column >= viewport.right() {
+            return None;
+        }
+        let (idx, seg_top, top_offset) = self.segment_bounds_at(viewport, row)?;
+        let visible_top = viewport.y + seg_top.saturating_sub(top_offset);
+        if row == visible_top
+            && self
+                .segments
+                .get(idx)
+                .is_some_and(|segment| segment.capabilities().copyable)
+        {
+            Some(idx)
+        } else {
+            None
+        }
     }
 
     /// Clear all segments (for /clear command).

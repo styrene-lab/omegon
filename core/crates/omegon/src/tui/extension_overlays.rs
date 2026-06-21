@@ -12,8 +12,20 @@ pub fn render_modal(
     data: &serde_json::Value,
 ) {
     let area = frame.area();
-    let modal_width = (area.width as f32 * 0.4) as u16;
-    let modal_height = (area.height as f32 * 0.5) as u16;
+    let is_text_copy = data
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|kind| kind == "text_copy");
+    let modal_width = if is_text_copy {
+        (area.width as f32 * 0.9) as u16
+    } else {
+        (area.width as f32 * 0.4) as u16
+    };
+    let modal_height = if is_text_copy {
+        (area.height as f32 * 0.85) as u16
+    } else {
+        (area.height as f32 * 0.5) as u16
+    };
     let x = (area.width.saturating_sub(modal_width)) / 2;
     let y = (area.height.saturating_sub(modal_height)) / 2;
     let modal_area = Rect {
@@ -29,11 +41,7 @@ pub fn render_modal(
     let body = data
         .get("text")
         .and_then(serde_json::Value::as_str)
-        .filter(|_| {
-            data.get("kind")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|kind| kind == "text_copy")
-        })
+        .filter(|_| is_text_copy)
         .map(str::to_owned)
         .unwrap_or_else(|| serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string()));
 
