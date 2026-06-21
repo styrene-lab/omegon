@@ -1802,7 +1802,11 @@ status: {}
                 | SegmentContent::LifecycleEvent { text, .. }
                 | SegmentContent::PeerAgentText { text, .. } => export_text_fragment(text, mode),
                 SegmentContent::AssistantText { text, .. } => export_text_fragment(text, mode),
-                SegmentContent::ToolCard { detail_result, result_summary, .. } => detail_result
+                SegmentContent::ToolCard {
+                    detail_result,
+                    result_summary,
+                    ..
+                } => detail_result
                     .as_deref()
                     .or(result_summary.as_deref())
                     .map(|text| export_text_fragment(text, mode))?,
@@ -1814,7 +1818,11 @@ status: {}
                 .summary
                 .map(|text| export_text_fragment(text, mode))?,
             SegmentCopyPolicy::Detail => match &self.content {
-                SegmentContent::ToolCard { detail_result, result_summary, .. } => detail_result
+                SegmentContent::ToolCard {
+                    detail_result,
+                    result_summary,
+                    ..
+                } => detail_result
                     .as_deref()
                     .or(result_summary.as_deref())
                     .map(|text| export_text_fragment(text, mode))?,
@@ -1983,11 +1991,7 @@ status: {}
                 buf,
                 &render_ctx,
             ),
-            TurnSeparator => super::segment_components::separator::render(
-                area,
-                buf,
-                render_ctx,
-            ),
+            TurnSeparator => super::segment_components::separator::render(area, buf, render_ctx),
         }
     }
 

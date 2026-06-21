@@ -5,13 +5,9 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, Wrap};
 
-use crate::surfaces::conversation::{
-    SegmentEmphasis, SegmentPresentation, SegmentSurfacePolicy,
-};
+use crate::surfaces::conversation::{SegmentEmphasis, SegmentPresentation, SegmentSurfacePolicy};
 
-use super::super::conversation_render_projection::{
-    SegmentRenderContext, terminal_segment_paint,
-};
+use super::super::conversation_render_projection::{SegmentRenderContext, terminal_segment_paint};
 use super::super::segments::{
     SegmentMeta, SegmentRenderMode, apply_rendered_links, split_preserving_trailing_empty_lines,
     top_right_timestamp,
@@ -121,7 +117,11 @@ mod tests {
         let props = UserPromptRenderProps {
             text: "hello",
             presentation: &presentation,
-            surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+            },
             meta: &meta,
             mode: SegmentRenderMode::Full,
         };
@@ -145,7 +145,11 @@ mod tests {
             UserPromptRenderProps {
                 text: "hello",
                 presentation: &presentation,
-                surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
+                surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                    surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                    copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                    selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+                },
                 meta: &meta,
                 mode: SegmentRenderMode::Full,
             },

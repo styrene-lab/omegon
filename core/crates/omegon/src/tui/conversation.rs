@@ -1293,8 +1293,7 @@ impl ConversationView {
     }
 
     pub fn segment_at(&self, viewport: ratatui::prelude::Rect, row: u16) -> Option<usize> {
-        self.segment_bounds_at(viewport, row)
-            .map(|(idx, _, _)| idx)
+        self.segment_bounds_at(viewport, row).map(|(idx, _, _)| idx)
     }
 
     pub fn segment_copy_button_at(
@@ -1304,7 +1303,8 @@ impl ConversationView {
         row: u16,
     ) -> Option<usize> {
         const COPY_LABEL_WIDTH: u16 = 1;
-        if column < viewport.right().saturating_sub(COPY_LABEL_WIDTH) || column >= viewport.right() {
+        if column < viewport.right().saturating_sub(COPY_LABEL_WIDTH) || column >= viewport.right()
+        {
             return None;
         }
         let (idx, seg_top, top_offset) = self.segment_bounds_at(viewport, row)?;
@@ -1645,7 +1645,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn selected_assistant_copy_uses_answer_body_without_reasoning() {
         let mut cv = ConversationView::new();
@@ -1657,7 +1656,8 @@ mod tests {
         cv.selected_segment = Some(0);
 
         assert_eq!(
-            cv.selected_segment_text_with_mode(SegmentExportMode::Raw).as_deref(),
+            cv.selected_segment_text_with_mode(SegmentExportMode::Raw)
+                .as_deref(),
             Some("# Final\nanswer")
         );
     }
@@ -1670,7 +1670,8 @@ mod tests {
         cv.selected_segment = Some(0);
 
         assert_eq!(
-            cv.selected_segment_text_with_mode(SegmentExportMode::Raw).as_deref(),
+            cv.selected_segment_text_with_mode(SegmentExportMode::Raw)
+                .as_deref(),
             Some("hi")
         );
     }
@@ -1681,7 +1682,10 @@ mod tests {
         cv.push_user_with_attachments("", &[std::path::PathBuf::from("/tmp/paste.png")]);
         cv.selected_segment = Some(0);
 
-        assert_eq!(cv.selected_segment_text_with_mode(SegmentExportMode::Raw), None);
+        assert_eq!(
+            cv.selected_segment_text_with_mode(SegmentExportMode::Raw),
+            None
+        );
     }
 
     #[test]
