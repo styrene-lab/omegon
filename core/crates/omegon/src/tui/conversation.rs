@@ -1296,29 +1296,20 @@ impl ConversationView {
         self.segment_bounds_at(viewport, row).map(|(idx, _, _)| idx)
     }
 
-    pub fn segment_copy_button_at(
-        &self,
-        viewport: ratatui::prelude::Rect,
-        column: u16,
-        row: u16,
-    ) -> Option<usize> {
-        const COPY_LABEL_WIDTH: u16 = 6;
-        if column < viewport.right().saturating_sub(COPY_LABEL_WIDTH) || column >= viewport.right()
-        {
-            return None;
-        }
-        let (idx, seg_top, top_offset) = self.segment_bounds_at(viewport, row)?;
-        let visible_top = viewport.y + seg_top.saturating_sub(top_offset);
-        if row == visible_top
-            && self
-                .segments
-                .get(idx)
-                .is_some_and(|segment| segment.capabilities().copyable)
-        {
-            Some(idx)
-        } else {
-            None
-        }
+    pub fn is_segment_collapsed_tool_card(&self, segment_idx: usize) -> bool {
+        matches!(
+            self.segments.get(segment_idx).map(|seg| &seg.content),
+            Some(SegmentContent::ToolCard {
+                expanded: false,
+                ..
+            })
+        )
+    }
+
+    pub fn is_segment_copyable(&self, segment_idx: usize) -> bool {
+        self.segments
+            .get(segment_idx)
+            .is_some_and(|segment| segment.capabilities().copyable)
     }
 
     /// Clear all segments (for /clear command).

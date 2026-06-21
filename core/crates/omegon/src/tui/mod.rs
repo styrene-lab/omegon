@@ -8871,17 +8871,6 @@ pub async fn run_tui(
                         } else if point_in(app.conversation_area) {
                             app.dashboard.sidebar_active = false;
                             if let Some(area) = app.conversation_area {
-                                if let Some(idx) = app.conversation.segment_copy_button_at(
-                                    area,
-                                    mouse.column,
-                                    mouse.row,
-                                ) {
-                                    app.conversation.select_segment(idx);
-                                    app.copy_selected_conversation_segment_with_mode(
-                                        SegmentExportMode::Plaintext,
-                                    );
-                                    continue;
-                                }
                                 if let Some(idx) = app.conversation.segment_at(area, mouse.row) {
                                     let now = std::time::Instant::now();
                                     let is_double =
@@ -8898,7 +8887,13 @@ pub async fn run_tui(
                                         },
                                     );
                                     if is_double {
-                                        app.conversation.toggle_expand(idx);
+                                        if app.conversation.is_segment_collapsed_tool_card(idx) {
+                                            app.conversation.toggle_expand(idx);
+                                        } else if app.conversation.is_segment_copyable(idx) {
+                                            app.copy_selected_conversation_segment_with_mode(
+                                                SegmentExportMode::Plaintext,
+                                            );
+                                        }
                                     }
                                     app.last_left_click = Some((mouse.column, mouse.row, now));
                                 }
