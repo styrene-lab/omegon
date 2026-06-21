@@ -1899,7 +1899,7 @@ status: {}
                 },
                 area,
                 buf,
-                &render_ctx,
+                render_ctx,
             ),
             AssistantText {
                 text,
@@ -1918,7 +1918,7 @@ status: {}
                     },
                     area,
                     buf,
-                    &render_ctx,
+                    render_ctx,
                 );
             }
             PeerAgentText { text, status, .. } => {
@@ -1934,7 +1934,7 @@ status: {}
                     },
                     area,
                     buf,
-                    &render_ctx,
+                    render_ctx,
                 );
             }
             ToolCard {
@@ -1966,7 +1966,7 @@ status: {}
                     },
                     area,
                     buf,
-                    &render_ctx,
+                    render_ctx,
                 );
             }
             SystemNotification { text } => super::segment_components::system::render(
@@ -1977,19 +1977,19 @@ status: {}
                 },
                 area,
                 buf,
-                &render_ctx,
+                render_ctx,
             ),
             LifecycleEvent { icon, text } => super::segment_components::lifecycle::render(
                 super::segment_components::lifecycle::LifecycleRenderProps { icon, text },
                 area,
                 buf,
-                &render_ctx,
+                render_ctx,
             ),
             Image { path, alt } => super::segment_components::image::render(
                 super::segment_components::image::ImageRenderProps { path, alt },
                 area,
                 buf,
-                &render_ctx,
+                render_ctx,
             ),
             TurnSeparator => super::segment_components::separator::render(area, buf, render_ctx),
         }

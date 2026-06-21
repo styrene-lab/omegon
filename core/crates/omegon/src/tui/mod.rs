@@ -2251,7 +2251,7 @@ impl App {
             return;
         };
         let projection = self.settings_projection();
-        let Some(row) = screen.active_rows(&projection).get(screen.selected_row) else {
+        let Some(row) = screen.selected_row(&projection) else {
             self.show_command_toast(CommandToast::new(
                 "No settings row selected",
                 CommandSeverity::Warning,
@@ -2259,15 +2259,28 @@ impl App {
             return;
         };
         let row_id = row.id.clone();
+        let row_label = row.label.clone();
+        let row_choices = row.choices.clone();
+
+        if let Some(kind) = Self::selector_kind_for_settings_row(&row_id)
+            && !row_choices.is_empty()
+        {
+            let options = row_choices
+                .into_iter()
+                .map(|choice| selector::SelectOption {
+                    value: choice.value,
+                    label: choice.label,
+                    description: row_label.clone(),
+                    active: choice.active,
+                })
+                .collect();
+            self.selector = Some(selector::Selector::new(&row_label, options));
+            self.selector_kind = Some(kind);
+            return;
+        }
 
         match row_id.as_str() {
             "runtime.model" => self.open_model_selector(),
-            "runtime.thinking" => self.open_thinking_selector(),
-            "runtime.context_class" => self.open_context_selector(),
-            "ui.tool_detail" => self.open_tool_detail_selector(),
-            "updates.channel" => self.open_update_channel_selector(),
-            "workspace.role" => self.open_workspace_role_selector(),
-            "workspace.kind" => self.open_workspace_kind_selector(),
             "workspace.trusted_directories" => {
                 let settings = self.settings();
                 if settings.trusted_directories.is_empty() {
@@ -2292,6 +2305,18 @@ impl App {
                 format!("No editor registered for {}", row.label),
                 CommandSeverity::Warning,
             )),
+        }
+    }
+
+    fn selector_kind_for_settings_row(row_id: &str) -> Option<SelectorKind> {
+        match row_id {
+            "runtime.thinking" => Some(SelectorKind::ThinkingLevel),
+            "runtime.context_class" => Some(SelectorKind::ContextClass),
+            "ui.tool_detail" => Some(SelectorKind::ToolDetail),
+            "updates.channel" => Some(SelectorKind::UpdateChannel),
+            "workspace.role" => Some(SelectorKind::WorkspaceRole),
+            "workspace.kind" => Some(SelectorKind::WorkspaceKind),
+            _ => None,
         }
     }
 
@@ -8922,38 +8947,36 @@ pub async fn run_tui(
                             app.dashboard.sidebar_active = true;
                         } else if point_in(app.conversation_area) {
                             app.dashboard.sidebar_active = false;
-                            if let Some(area) = app.conversation_area {
-                                if let Some(idx) = app.conversation.segment_at(area, mouse.row) {
-                                    let now = std::time::Instant::now();
-                                    let is_double =
-                                        app.last_left_click.is_some_and(|(col, row, t)| {
-                                            row == mouse.row
-                                                && col.abs_diff(mouse.column) <= 1
-                                                && row.abs_diff(mouse.row) <= 1
-                                                && now.duration_since(t)
-                                                    <= Duration::from_millis(400)
-                                        });
-                                    let _ = app.handle_select_conversation_segment_action(
-                                        SelectConversationSegmentAction {
-                                            segment: ConversationSegmentRef::by_index(idx),
-                                        },
-                                    );
-                                    if is_double {
-                                        if app.conversation.is_segment_collapsed_tool_card(idx) {
-                                            app.conversation.toggle_expand(idx);
-                                            app.show_toast(
-                                                "Expanded selected tool result",
-                                                ratatui_toaster::ToastType::Success,
-                                            );
-                                            app.effects.pulse_conversation_action();
-                                        } else if app.conversation.is_segment_copyable(idx) {
-                                            app.copy_selected_conversation_segment_with_mode(
-                                                SegmentExportMode::Plaintext,
-                                            );
-                                        }
+                            if let Some(area) = app.conversation_area
+                                && let Some(idx) = app.conversation.segment_at(area, mouse.row)
+                            {
+                                let now = std::time::Instant::now();
+                                let is_double = app.last_left_click.is_some_and(|(col, row, t)| {
+                                    row == mouse.row
+                                        && col.abs_diff(mouse.column) <= 1
+                                        && row.abs_diff(mouse.row) <= 1
+                                        && now.duration_since(t) <= Duration::from_millis(400)
+                                });
+                                let _ = app.handle_select_conversation_segment_action(
+                                    SelectConversationSegmentAction {
+                                        segment: ConversationSegmentRef::by_index(idx),
+                                    },
+                                );
+                                if is_double {
+                                    if app.conversation.is_segment_collapsed_tool_card(idx) {
+                                        app.conversation.toggle_expand(idx);
+                                        app.show_toast(
+                                            "Expanded selected tool result",
+                                            ratatui_toaster::ToastType::Success,
+                                        );
+                                        app.effects.pulse_conversation_action();
+                                    } else if app.conversation.is_segment_copyable(idx) {
+                                        app.copy_selected_conversation_segment_with_mode(
+                                            SegmentExportMode::Plaintext,
+                                        );
                                     }
-                                    app.last_left_click = Some((mouse.column, mouse.row, now));
                                 }
+                                app.last_left_click = Some((mouse.column, mouse.row, now));
                             }
                         } else if point_in(app.editor_area) {
                             app.dashboard.sidebar_active = false;
@@ -9173,51 +9196,25 @@ pub async fn run_tui(
                         match key.code {
                             KeyCode::Up => {
                                 if let Some(screen) = app.settings_screen.as_mut() {
-                                    screen.selected_row = screen.selected_row.saturating_sub(1);
+                                    screen.move_up();
                                 }
                             }
                             KeyCode::Down => {
                                 let projection = app.settings_projection();
                                 if let Some(screen) = app.settings_screen.as_mut() {
-                                    let len = screen.active_rows(&projection).len();
-                                    if len > 0 {
-                                        screen.selected_row =
-                                            (screen.selected_row + 1).min(len - 1);
-                                    }
+                                    screen.move_down(&projection);
                                 }
                             }
                             KeyCode::Tab => {
                                 let projection = app.settings_projection();
-                                if let Some(screen) = app.settings_screen.as_mut()
-                                    && let Some(current) = projection
-                                        .tabs
-                                        .iter()
-                                        .position(|tab| tab.id == screen.active_tab)
-                                {
-                                    let next = (current + 1) % projection.tabs.len().max(1);
-                                    if let Some(tab) = projection.tabs.get(next) {
-                                        screen.active_tab = tab.id.clone();
-                                        screen.selected_row = 0;
-                                    }
+                                if let Some(screen) = app.settings_screen.as_mut() {
+                                    screen.next_tab(&projection);
                                 }
                             }
                             KeyCode::BackTab => {
                                 let projection = app.settings_projection();
-                                if let Some(screen) = app.settings_screen.as_mut()
-                                    && let Some(current) = projection
-                                        .tabs
-                                        .iter()
-                                        .position(|tab| tab.id == screen.active_tab)
-                                {
-                                    let prev = if current == 0 {
-                                        projection.tabs.len().saturating_sub(1)
-                                    } else {
-                                        current - 1
-                                    };
-                                    if let Some(tab) = projection.tabs.get(prev) {
-                                        screen.active_tab = tab.id.clone();
-                                        screen.selected_row = 0;
-                                    }
+                                if let Some(screen) = app.settings_screen.as_mut() {
+                                    screen.previous_tab(&projection);
                                 }
                             }
                             KeyCode::Enter => app.open_selected_settings_row(),
