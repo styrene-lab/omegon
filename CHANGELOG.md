@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added a visibly button-like `Copy` conversation affordance with a wider click target for segment copy actions.
 - Added semantic UI actions for copying a selected conversation segment or the latest assistant response so frontend adapters can route copy through the shared action seam.
 - Added a confirm-first empty-prompt history preload: pressing Enter on an empty prompt previews the last prompt as ghost text, and pressing Enter again materializes it for explicit resend.
 - Added source-aware profile load/save primitives and `/profile save|capture --project|--user|--active` parsing so profile capture preserves project/user persistence boundaries.
