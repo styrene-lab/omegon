@@ -35,6 +35,7 @@ pub enum EditorSlot {
 pub enum ConversationSlot {
     #[default]
     CardEffect,
+    ActionPulse,
     ContextPressure,
 }
 
@@ -221,6 +222,25 @@ impl Effects {
         self.conversation.add_effect(flash);
     }
 
+    /// Conversation action confirmation — short cyan pulse after selected-item actions.
+    pub fn pulse_conversation_action(&mut self) {
+        let pulse = self.conversation.unique(
+            ConversationSlot::ActionPulse,
+            fx::sequence(&[
+                fx::hsl_shift_fg(
+                    [0.0, 0.05, 0.18],
+                    EffectTimer::from_ms(120, Interpolation::QuadOut),
+                ),
+                fx::hsl_shift_fg(
+                    [0.0, -0.05, -0.18],
+                    EffectTimer::from_ms(260, Interpolation::QuadIn),
+                ),
+            ])
+            .with_filter(CellFilter::Text),
+        );
+        self.conversation.add_effect(pulse);
+    }
+
     /// Context pressure gradient — subtly desaturate the upper conversation
     /// as context usage increases. Creates a "pressure from above" metaphor.
     pub fn set_context_pressure(&mut self, percent: f32) {
@@ -282,6 +302,13 @@ mod tests {
         let t = Alpharius;
         fx.ping_footer(&t);
         assert!(fx.footer.is_running());
+    }
+
+    #[test]
+    fn conversation_action_pulse_activates_conversation_effects() {
+        let mut fx = Effects::new();
+        fx.pulse_conversation_action();
+        assert!(fx.conversation.is_running());
     }
 
     #[test]

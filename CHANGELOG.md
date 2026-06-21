@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 - Replaced the hard-to-discover inline conversation `Copy` button with a double-click copy flow: double-click a collapsed tool card to expand it, then double-click the expanded/copyable segment to copy plaintext.
+- Added selected conversation segment hints for double-click copy/expand actions and a visible conversation pulse plus footer pulse on successful copy.
 
 ### Added
 - Added semantic UI actions for copying a selected conversation segment or the latest assistant response so frontend adapters can route copy through the shared action seam.

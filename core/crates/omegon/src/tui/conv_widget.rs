@@ -206,6 +206,8 @@ impl ConvState {
                 let content_area = SelectedSegmentFrame::new(
                     self.cached_selected_segment == Some(i),
                     segment.capabilities().detail_openable,
+                    segment.capabilities().copyable,
+                    is_collapsed_expandable_tool_card(segment),
                 )
                 .content_area(segment_area);
                 let available_height = viewport.bottom().saturating_sub(render_y);
@@ -383,14 +385,15 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     .with_density(self.density)
                     .with_pinned(self.pinned_segment == Some(i))
                     .with_selected(selected);
-                SelectedSegmentFrame::new(selected, segment.capabilities().detail_openable).render(
-                    seg_area,
-                    buf,
-                    self.theme,
-                    |content_area, buf| {
-                        segment.render_in_context(content_area, buf, &render_ctx);
-                    },
-                );
+                SelectedSegmentFrame::new(
+                    selected,
+                    segment.capabilities().detail_openable,
+                    segment.capabilities().copyable,
+                    is_collapsed_expandable_tool_card(segment),
+                )
+                .render(seg_area, buf, self.theme, |content_area, buf| {
+                    segment.render_in_context(content_area, buf, &render_ctx);
+                });
             } else {
                 // Segment starts ABOVE the viewport — partially visible.
                 // Render into a temp buffer at full size, then copy the
@@ -419,7 +422,13 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     .with_density(self.density)
                     .with_pinned(self.pinned_segment == Some(i))
                     .with_selected(selected);
-                SelectedSegmentFrame::new(selected, segment.capabilities().detail_openable).render(
+                SelectedSegmentFrame::new(
+                    selected,
+                    segment.capabilities().detail_openable,
+                    segment.capabilities().copyable,
+                    is_collapsed_expandable_tool_card(segment),
+                )
+                .render(
                     temp_area,
                     &mut temp_buf,
                     self.theme,
@@ -491,22 +500,48 @@ fn measured_segment_height(
     ctx: &SegmentRenderContext<'_>,
     selected: bool,
 ) -> u16 {
-    let content_width = SelectedSegmentFrame::new(selected, segment.capabilities().detail_openable)
-        .content_area(Rect::new(0, 0, width, 1))
-        .width;
+    let content_width = SelectedSegmentFrame::new(
+        selected,
+        segment.capabilities().detail_openable,
+        segment.capabilities().copyable,
+        is_collapsed_expandable_tool_card(segment),
+    )
+    .content_area(Rect::new(0, 0, width, 1))
+    .width;
     segment.height_in_context(content_width, ctx)
+}
+
+fn is_collapsed_expandable_tool_card(segment: &Segment) -> bool {
+    matches!(
+        &segment.content,
+        super::segments::SegmentContent::ToolCard {
+            expanded: false,
+            complete: true,
+            detail_result: Some(_),
+            ..
+        }
+    )
 }
 
 struct SelectedSegmentFrame {
     selected: bool,
     detail_openable: bool,
+    copyable: bool,
+    collapsed_expandable: bool,
 }
 
 impl SelectedSegmentFrame {
-    fn new(selected: bool, detail_openable: bool) -> Self {
+    fn new(
+        selected: bool,
+        detail_openable: bool,
+        copyable: bool,
+        collapsed_expandable: bool,
+    ) -> Self {
         Self {
             selected,
             detail_openable,
+            copyable,
+            collapsed_expandable,
         }
     }
 
@@ -553,6 +588,38 @@ impl SelectedSegmentFrame {
             };
             if let Some(cell) = buf.cell_mut((area.x, y)) {
                 cell.set_char(marker);
+                cell.set_style(style);
+            }
+        }
+        self.render_hint(area, buf, theme);
+    }
+
+    fn render_hint(&self, area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
+        if area.width < 24 || area.height == 0 {
+            return;
+        }
+        let label = if self.collapsed_expandable {
+            " dbl-click expand "
+        } else if self.copyable {
+            " dbl-click copy "
+        } else if self.detail_openable {
+            " Enter details "
+        } else {
+            " selected "
+        };
+        let label_width = label.chars().count() as u16;
+        if label_width.saturating_add(2) >= area.width {
+            return;
+        }
+        let x = area.right().saturating_sub(label_width);
+        let y = area.y;
+        let style = Style::default()
+            .fg(theme.bg())
+            .bg(theme.accent_bright())
+            .add_modifier(Modifier::BOLD);
+        for (idx, ch) in label.chars().enumerate() {
+            if let Some(cell) = buf.cell_mut((x + idx as u16, y)) {
+                cell.set_char(ch);
                 cell.set_style(style);
             }
         }
@@ -984,8 +1051,8 @@ mod tests {
 
         let rendered = buffer_text(&buf, area);
         assert!(
-            rendered.contains("Enter: details"),
-            "selected detail-openable segment should advertise the detail action: {rendered}"
+            rendered.contains("dbl-click copy"),
+            "selected copyable segment should advertise double-click copy: {rendered}"
         );
         assert!(
             rendered
@@ -1012,12 +1079,40 @@ mod tests {
             .render(area, &mut buf, &mut state);
 
         let rendered = buffer_text(&buf, area);
-        assert!(!rendered.contains("Enter: details"), "{rendered}");
+        assert!(!rendered.contains("dbl-click copy"), "{rendered}");
         assert!(
             rendered
                 .lines()
                 .any(|line| line.starts_with("│ ") || line.starts_with("│─")),
             "selected non-openable segment should still show focus without replacing content: {rendered}"
+        );
+    }
+
+    #[test]
+    fn selected_collapsed_tool_card_advertises_double_click_expand() {
+        let mut segment = Segment::tool_card("call-1", "read");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_result,
+            ..
+        } = &mut segment.content
+        {
+            *complete = true;
+            *detail_result = Some("file contents".into());
+        }
+        let segments = vec![segment];
+        let area = Rect::new(0, 0, 72, 6);
+        let mut buf = Buffer::empty(area);
+        let mut state = ConvState::new();
+
+        ConversationWidget::new(&segments, &Alpharius)
+            .with_selected_segment(Some(0))
+            .render(area, &mut buf, &mut state);
+
+        let rendered = buffer_text(&buf, area);
+        assert!(
+            rendered.contains("dbl-click expand"),
+            "selected collapsed tool card should advertise double-click expand: {rendered}"
         );
     }
 

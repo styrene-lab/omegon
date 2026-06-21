@@ -3551,7 +3551,9 @@ impl App {
             SegmentExportMode::Plaintext => segment.human_plaintext_detail(),
         };
         if text.trim().is_empty() {
-            return UiActionOutcome::rejected(format!("conversation segment has no copyable text: {idx}"));
+            return UiActionOutcome::rejected(format!(
+                "conversation segment has no copyable text: {idx}"
+            ));
         }
         if self.copy_text_to_clipboard(&text) {
             UiActionOutcome::accepted_message(format!("conversation segment copied: {idx}"))
@@ -5121,6 +5123,8 @@ impl App {
                     }
                 };
                 self.show_toast(label, ratatui_toaster::ToastType::Success);
+                self.effects.ping_footer(self.theme.as_ref());
+                self.effects.pulse_conversation_action();
             }
             UiActionOutcome::Rejected { reason }
             | UiActionOutcome::Noop { reason }
@@ -5146,6 +5150,8 @@ impl App {
                     SegmentExportMode::Plaintext => "Copied latest assistant response as plaintext",
                 };
                 self.show_toast(label, ratatui_toaster::ToastType::Success);
+                self.effects.ping_footer(self.theme.as_ref());
+                self.effects.pulse_conversation_action();
             }
             UiActionOutcome::Rejected { reason }
             | UiActionOutcome::Noop { reason }
@@ -8889,6 +8895,11 @@ pub async fn run_tui(
                                     if is_double {
                                         if app.conversation.is_segment_collapsed_tool_card(idx) {
                                             app.conversation.toggle_expand(idx);
+                                            app.show_toast(
+                                                "Expanded selected tool result",
+                                                ratatui_toaster::ToastType::Success,
+                                            );
+                                            app.effects.pulse_conversation_action();
                                         } else if app.conversation.is_segment_copyable(idx) {
                                             app.copy_selected_conversation_segment_with_mode(
                                                 SegmentExportMode::Plaintext,
