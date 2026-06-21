@@ -483,7 +483,7 @@ fn render_segment_copy_affordance(
         return;
     }
 
-    let label = " copy ";
+    let label = "⧉";
     let label_width = label.chars().count() as u16;
     if label_width > area.width {
         return;
@@ -492,8 +492,8 @@ fn render_segment_copy_affordance(
     let x = area.right().saturating_sub(label_width);
     let y = area.y;
     let style = Style::default()
-        .fg(Color::Black)
-        .bg(theme.accent())
+        .fg(theme.accent_bright())
+        .bg(theme.bg())
         .add_modifier(Modifier::BOLD);
     for (idx, ch) in label.chars().enumerate() {
         if let Some(cell) = buf.cell_mut((x + idx as u16, y)) {

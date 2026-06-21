@@ -1790,8 +1790,8 @@ fn conversation_renders_copy_affordance_and_maps_click_target() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("copy"), "got {rendered}");
-    assert_eq!(cv.segment_copy_button_at(area, area.right() - 3, area.y), Some(0));
+    assert!(rendered.contains("⧉"), "got {rendered}");
+    assert_eq!(cv.segment_copy_button_at(area, area.right() - 1, area.y), Some(0));
 }
 
 #[test]

@@ -1303,7 +1303,7 @@ impl ConversationView {
         column: u16,
         row: u16,
     ) -> Option<usize> {
-        const COPY_LABEL_WIDTH: u16 = 3;
+        const COPY_LABEL_WIDTH: u16 = 1;
         if column < viewport.right().saturating_sub(COPY_LABEL_WIDTH) || column >= viewport.right() {
             return None;
         }
