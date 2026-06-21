@@ -1990,13 +1990,17 @@ fn conversation_renders_copy_affordance_and_maps_click_target() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("⧉"), "got {rendered}");
+    assert!(rendered.contains(" Copy "), "got {rendered}");
     assert_eq!(
         cv.segment_copy_button_at(area, area.right() - 1, area.y),
         Some(0)
     );
     assert_eq!(
-        cv.segment_copy_button_at(area, area.right() - 2, area.y),
+        cv.segment_copy_button_at(area, area.right() - 6, area.y),
+        Some(0)
+    );
+    assert_eq!(
+        cv.segment_copy_button_at(area, area.right() - 7, area.y),
         None
     );
     assert_eq!(
