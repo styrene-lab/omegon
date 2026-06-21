@@ -473,12 +473,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
     }
 }
 
-fn render_segment_copy_affordance(
-    area: Rect,
-    buf: &mut Buffer,
-    theme: &dyn Theme,
-    copyable: bool,
-) {
+fn render_segment_copy_affordance(area: Rect, buf: &mut Buffer, theme: &dyn Theme, copyable: bool) {
     if !copyable || area.width == 0 || area.height == 0 {
         return;
     }

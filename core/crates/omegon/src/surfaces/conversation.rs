@@ -906,9 +906,8 @@ mod tests {
 
     #[test]
     fn presentation_model_marks_separator_as_chrome_only_not_copyable() {
-        let projection = ConversationSegmentProjection::<&str>::new(
-            ConversationSegmentKind::Separator,
-        );
+        let projection =
+            ConversationSegmentProjection::<&str>::new(ConversationSegmentKind::Separator);
 
         let model = projection.presentation_model();
         assert_eq!(model.surface.surface, SegmentSurfaceTreatment::ChromeOnly);
@@ -919,12 +918,11 @@ mod tests {
 
     #[test]
     fn presentation_model_marks_image_as_panel_without_body_copy() {
-        let projection = ConversationSegmentProjection::new(ConversationSegmentKind::Image(
-            ImageSegment {
+        let projection =
+            ConversationSegmentProjection::new(ConversationSegmentKind::Image(ImageSegment {
                 path: PathBuf::from("/tmp/screenshot.png"),
                 alt: "screenshot".to_string(),
-            },
-        ));
+            }));
 
         let model = projection.presentation_model();
         assert_eq!(model.surface.surface, SegmentSurfaceTreatment::Panel);

@@ -7,9 +7,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, W
 
 use crate::surfaces::conversation::SegmentSurfacePolicy;
 
-use super::super::conversation_render_projection::{
-    SegmentRenderContext, terminal_segment_paint,
-};
+use super::super::conversation_render_projection::{SegmentRenderContext, terminal_segment_paint};
 use super::super::segments::{SegmentRenderMode, apply_rendered_links};
 
 pub struct SystemRenderProps<'a> {
@@ -175,7 +173,11 @@ mod tests {
     #[test]
     fn system_props_preserve_render_inputs() {
         let props = SystemRenderProps {
-            surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+            },
             text: "notice",
             mode: SegmentRenderMode::Full,
         };
@@ -186,7 +188,11 @@ mod tests {
     #[test]
     fn system_plan_slim_omits_chrome() {
         let props = SystemRenderProps {
-            surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+            },
             text: "notice",
             mode: SegmentRenderMode::Slim,
         };
@@ -201,7 +207,11 @@ mod tests {
     #[test]
     fn system_plan_full_includes_chrome() {
         let props = SystemRenderProps {
-            surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+            },
             text: "notice",
             mode: SegmentRenderMode::Full,
         };
@@ -215,7 +225,11 @@ mod tests {
     #[test]
     fn system_plan_classifies_brand_and_warning_first_lines() {
         let brand = super::plan(&SystemRenderProps {
-            surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+            },
             text: "Ω status",
             mode: SegmentRenderMode::Full,
         });
@@ -223,7 +237,11 @@ mod tests {
 
         for text in ["⚠ warning", "⟳ retry", "✓ complete"] {
             let warning = super::plan(&SystemRenderProps {
-                surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
+                surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                    surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                    copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                    selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+                },
                 text,
                 mode: SegmentRenderMode::Full,
             });
@@ -238,7 +256,11 @@ mod tests {
         let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Full);
         render(
             SystemRenderProps {
-                surface: crate::surfaces::conversation::SegmentSurfacePolicy { surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript, copy: crate::surfaces::conversation::SegmentCopyPolicy::Body, selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle },
+                surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                    surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                    copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                    selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+                },
                 text: "notice",
                 mode: SegmentRenderMode::Full,
             },

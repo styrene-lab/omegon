@@ -52,7 +52,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 - Restored the inline conversation-segment copy affordance to the high-contrast `⧉` glyph and aligned its click target with the one-cell label.
-- Made inline conversation-segment `⧉` copy affordances copy segment plaintext directly from the main transcript without opening the copy modal or entering terminal drag-selection mode.
+- Made inline conversation-segment `⧉` copy affordances use the same selected-segment copy path as keyboard shortcuts, including visible success/failure toasts.
 - Added a shared `Segment::human_plaintext_detail()` accessor for full operator/client-readable plaintext segment detail, and routed the selected-segment modal through it instead of copy-policy export.
 - Clarified the Rust skill's Cargo test filtering guidance so agents use one positional test filter per invocation or a single broader shared filter.
 - Routed verbose informational slash-command output into conversation system segments while keeping usage/error responses in command panels and unknown commands in compact warning toasts.

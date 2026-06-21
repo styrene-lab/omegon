@@ -526,7 +526,10 @@ async fn ui_action_copy_conversation_segment_copies_plaintext_detail_without_mod
         .await;
 
     assert!(
-        matches!(outcome, UiActionOutcome::Accepted { .. } | UiActionOutcome::Rejected { .. }),
+        matches!(
+            outcome,
+            UiActionOutcome::Accepted { .. } | UiActionOutcome::Rejected { .. }
+        ),
         "{outcome:?}"
     );
     assert!(app.copy_text_modal.is_none());
@@ -1952,10 +1955,15 @@ fn text_copy_modal_uses_wide_copy_surface_with_non_copy_footer() {
 
     assert!(rendered.contains("alpha beta gamma"), "got {rendered}");
     assert!(rendered.contains("Copy all"), "got {rendered}");
-    assert!(rendered.contains("terminal drag selects text"), "got {rendered}");
+    assert!(
+        rendered.contains("terminal drag selects text"),
+        "got {rendered}"
+    );
     assert!(app.copy_text_copy_button_area.is_some());
     assert_eq!(
-        app.copy_text_modal.as_ref().map(|modal| modal.text.as_str()),
+        app.copy_text_modal
+            .as_ref()
+            .map(|modal| modal.text.as_str()),
         Some("alpha beta gamma")
     );
 }
@@ -1983,7 +1991,18 @@ fn conversation_renders_copy_affordance_and_maps_click_target() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("⧉"), "got {rendered}");
-    assert_eq!(cv.segment_copy_button_at(area, area.right() - 1, area.y), Some(0));
+    assert_eq!(
+        cv.segment_copy_button_at(area, area.right() - 1, area.y),
+        Some(0)
+    );
+    assert_eq!(
+        cv.segment_copy_button_at(area, area.right() - 2, area.y),
+        None
+    );
+    assert_eq!(
+        cv.segment_copy_button_at(area, area.right() - 1, area.y + 1),
+        None
+    );
 }
 
 #[test]
@@ -2002,7 +2021,6 @@ fn copy_text_modal_scrolls_markdown_and_code_without_mutating_payload() {
         "```rust\nfn main() { println!(\"hello\"); }\n```\n\n# Notes\nbody"
     );
 }
-
 
 #[test]
 fn mouse_slash_command_toggles_interaction_mode() {
@@ -2403,9 +2421,15 @@ fn verbose_informational_slash_responses_become_system_segments() {
     assert!(app.command_panel.is_none());
     let segment = app.conversation.segments().last().expect("system segment");
     let SegmentContent::SystemNotification { text } = &segment.content else {
-        panic!("expected system notification segment, got {:?}", segment.content);
+        panic!(
+            "expected system notification segment, got {:?}",
+            segment.content
+        );
     };
-    assert_eq!(text, "command · /version\nVersion\nOmegon: 0.27.0\nGit SHA: test\nBuild Date: today");
+    assert_eq!(
+        text,
+        "command · /version\nVersion\nOmegon: 0.27.0\nGit SHA: test\nBuild Date: today"
+    );
 }
 
 #[test]

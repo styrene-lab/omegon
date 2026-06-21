@@ -419,7 +419,6 @@ impl ToolInspectionTarget {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CopyTextModal {
     title: String,
@@ -3635,11 +3634,15 @@ impl App {
                 "conversation segment index out of range: {idx}"
             ));
         };
-        let text = segment.human_plaintext_detail();
+        let text = match Self::segment_export_mode(action.mode) {
+            SegmentExportMode::Raw => segment
+                .export_text(SegmentExportMode::Raw)
+                .trim_end()
+                .to_string(),
+            SegmentExportMode::Plaintext => segment.human_plaintext_detail(),
+        };
         if text.trim().is_empty() {
-            return UiActionOutcome::rejected(format!(
-                "conversation segment has no plaintext detail: {idx}"
-            ));
+            return UiActionOutcome::rejected(format!("conversation segment has no copyable text: {idx}"));
         }
         if self.copy_text_to_clipboard(&text) {
             UiActionOutcome::accepted_message(format!("conversation segment copied: {idx}"))
@@ -5040,7 +5043,11 @@ impl App {
     }
 
     fn copy_all_from_copy_text_modal(&mut self) -> bool {
-        let Some(text) = self.copy_text_modal.as_ref().map(|modal| modal.text.clone()) else {
+        let Some(text) = self
+            .copy_text_modal
+            .as_ref()
+            .map(|modal| modal.text.clone())
+        else {
             return false;
         };
         if self.copy_text_to_clipboard(&text) {
@@ -5082,7 +5089,11 @@ impl App {
         });
         let inner_height = modal_area.height.saturating_sub(2);
         let body_height = inner_height.saturating_sub(1);
-        let max_scroll = modal.text.lines().count().saturating_sub(body_height as usize) as u16;
+        let max_scroll = modal
+            .text
+            .lines()
+            .count()
+            .saturating_sub(body_height as usize) as u16;
         modal.scroll_y = modal.scroll_y.min(max_scroll);
 
         frame.render_widget(&Clear, modal_area);
@@ -5237,7 +5248,9 @@ impl App {
             UiActionOutcome::Accepted { .. } => {
                 let label = match mode {
                     SegmentExportMode::Raw => "Copied selected conversation segment",
-                    SegmentExportMode::Plaintext => "Copied selected conversation segment as plaintext",
+                    SegmentExportMode::Plaintext => {
+                        "Copied selected conversation segment as plaintext"
+                    }
                 };
                 self.show_toast(label, ratatui_toaster::ToastType::Success);
             }
@@ -5254,11 +5267,10 @@ impl App {
     }
 
     fn copy_latest_assistant_response(&mut self, mode: SegmentExportMode) {
-        let outcome = self.handle_copy_latest_assistant_response_action(
-            CopyLatestAssistantResponseAction {
+        let outcome =
+            self.handle_copy_latest_assistant_response_action(CopyLatestAssistantResponseAction {
                 mode: Self::segment_copy_mode(mode),
-            },
-        );
+            });
         match outcome {
             UiActionOutcome::Accepted { .. } => {
                 let label = match mode {
@@ -9005,37 +9017,32 @@ pub async fn run_tui(
                                     mouse.column,
                                     mouse.row,
                                 ) {
-                                    let _ = app
-                                        .handle_ui_action(
-                                            UiAction::CopyConversationSegment(
-                                                CopyConversationSegmentAction {
-                                                    segment: ConversationSegmentRef::by_index(idx),
-                                                    mode: SegmentCopyMode::Plaintext,
-                                                },
-                                            ),
-                                            &command_tx,
-                                        )
-                                        .await;
+                                    app.conversation.select_segment(idx);
+                                    app.copy_selected_conversation_segment_with_mode(
+                                        SegmentExportMode::Plaintext,
+                                    );
                                     continue;
                                 }
                                 if let Some(idx) = app.conversation.segment_at(area, mouse.row) {
-                                let now = std::time::Instant::now();
-                                let is_double = app.last_left_click.is_some_and(|(col, row, t)| {
-                                    row == mouse.row
-                                        && col.abs_diff(mouse.column) <= 1
-                                        && row.abs_diff(mouse.row) <= 1
-                                        && now.duration_since(t) <= Duration::from_millis(400)
-                                });
-                                let _ = app.handle_select_conversation_segment_action(
-                                    SelectConversationSegmentAction {
-                                        segment: ConversationSegmentRef::by_index(idx),
-                                    },
-                                );
-                                if is_double {
-                                    app.conversation.toggle_expand(idx);
+                                    let now = std::time::Instant::now();
+                                    let is_double =
+                                        app.last_left_click.is_some_and(|(col, row, t)| {
+                                            row == mouse.row
+                                                && col.abs_diff(mouse.column) <= 1
+                                                && row.abs_diff(mouse.row) <= 1
+                                                && now.duration_since(t)
+                                                    <= Duration::from_millis(400)
+                                        });
+                                    let _ = app.handle_select_conversation_segment_action(
+                                        SelectConversationSegmentAction {
+                                            segment: ConversationSegmentRef::by_index(idx),
+                                        },
+                                    );
+                                    if is_double {
+                                        app.conversation.toggle_expand(idx);
+                                    }
+                                    app.last_left_click = Some((mouse.column, mouse.row, now));
                                 }
-                                app.last_left_click = Some((mouse.column, mouse.row, now));
-                            }
                             }
                         } else if point_in(app.editor_area) {
                             app.dashboard.sidebar_active = false;

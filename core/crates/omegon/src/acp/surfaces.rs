@@ -9,8 +9,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::surfaces::conversation::{
-    ConversationSegmentKind, ConversationSegmentProjection, SegmentCopyPolicy,
-    SegmentSelectionTreatment, SegmentSurfaceTreatment, SegmentRole, ToolCategory,
+    ConversationSegmentKind, ConversationSegmentProjection, SegmentCopyPolicy, SegmentRole,
+    SegmentSelectionTreatment, SegmentSurfaceTreatment, ToolCategory,
 };
 
 pub const ACP_SURFACE_SCHEMA_VERSION: u32 = 1;
@@ -958,7 +958,6 @@ stack [REDACTED]"
         }
     }
 
-
     #[test]
     fn acp_assistant_projection_includes_transcript_surface_policy() {
         let projection = ConversationSegmentProjection::new(
@@ -1017,12 +1016,11 @@ stack [REDACTED]"
 
     #[test]
     fn acp_image_projection_includes_panel_noncopyable_surface_policy() {
-        let projection = ConversationSegmentProjection::new(ConversationSegmentKind::Image(
-            ImageSegment {
+        let projection =
+            ConversationSegmentProjection::new(ConversationSegmentKind::Image(ImageSegment {
                 path: Path::new("/private/tmp/screenshot.png"),
                 alt: "screen",
-            },
-        ));
+            }));
         let dto = AcpConversationSegment::from_projection(
             AcpConversationIdentity::new("image-2", 12),
             &projection,
