@@ -4902,6 +4902,52 @@ impl App {
                 actions,
             );
         }
+
+        // Render operator toast last so copy/expand confirmations are visible above overlays.
+        self.render_operator_event_toast(frame);
+    }
+
+    fn render_operator_event_toast(&self, frame: &mut Frame<'_>) {
+        let Some(event) = self.operator_events.back() else {
+            return;
+        };
+        let area = frame.area();
+        if area.width < 24 || area.height < 6 {
+            return;
+        }
+
+        let text = format!("{} {}", event.icon, event.message);
+        let text_width = text.chars().count() as u16;
+        let toast_width = text_width
+            .saturating_add(4)
+            .clamp(24, area.width.saturating_sub(4).max(24));
+        let toast_height = 3;
+        let x = area.x + area.width.saturating_sub(toast_width) / 2;
+        let y = area.y + area.height.saturating_sub(toast_height + 3);
+        let toast_area = Rect::new(x, y, toast_width, toast_height);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_style(
+                Style::default()
+                    .fg(event.color)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .style(Style::default().bg(self.theme.card_bg()))
+            .title(Span::styled(" action ", Style::default().fg(event.color)));
+        let paragraph = Paragraph::new(Line::from(Span::styled(
+            text,
+            Style::default()
+                .fg(self.theme.fg())
+                .bg(self.theme.card_bg())
+                .add_modifier(Modifier::BOLD),
+        )))
+        .alignment(Alignment::Center)
+        .block(block);
+
+        frame.render_widget(Clear, toast_area);
+        frame.render_widget(paragraph, toast_area);
     }
 
     fn close_copy_text_modal(&mut self) {
