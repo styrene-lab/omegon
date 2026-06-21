@@ -16,6 +16,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Changed
+- Replaced the hard-to-discover inline conversation `Copy` button with a double-click copy flow: double-click a collapsed tool card to expand it, then double-click the expanded/copyable segment to copy plaintext.
+
 ### Added
 - Added semantic composer draft UI actions for replacing, clearing, and attaching paths to the TUI editor through the shared `UiAction` seam.
 - Added semantic composer cursor/edit UI actions for character/word movement and bounded edit operations without exposing frontend key events.

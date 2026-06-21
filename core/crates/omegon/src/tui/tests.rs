@@ -1969,7 +1969,7 @@ fn text_copy_modal_uses_wide_copy_surface_with_non_copy_footer() {
 }
 
 #[test]
-fn conversation_renders_copy_affordance_and_maps_click_target() {
+fn conversation_omits_inline_copy_affordance() {
     let mut cv = ConversationView::new();
     cv.push_user("alpha beta gamma");
 
@@ -1990,23 +1990,7 @@ fn conversation_renders_copy_affordance_and_maps_click_target() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains(" Copy "), "got {rendered}");
-    assert_eq!(
-        cv.segment_copy_button_at(area, area.right() - 1, area.y),
-        Some(0)
-    );
-    assert_eq!(
-        cv.segment_copy_button_at(area, area.right() - 6, area.y),
-        Some(0)
-    );
-    assert_eq!(
-        cv.segment_copy_button_at(area, area.right() - 7, area.y),
-        None
-    );
-    assert_eq!(
-        cv.segment_copy_button_at(area, area.right() - 1, area.y + 1),
-        None
-    );
+    assert!(!rendered.contains(" Copy "), "got {rendered}");
 }
 
 #[test]
