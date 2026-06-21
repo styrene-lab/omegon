@@ -5939,6 +5939,47 @@ fn slash_settings_opens_settings_screen_without_command_panel() {
 }
 
 #[test]
+fn settings_screen_opens_choice_rows_from_projection_metadata() {
+    let mut app = test_app();
+
+    app.open_settings_screen();
+    app.settings_screen.as_mut().unwrap().selected_row = 1;
+    app.open_selected_settings_row();
+
+    assert_eq!(app.selector_kind, Some(SelectorKind::ThinkingLevel));
+    let selector = app.selector.as_ref().expect("thinking selector");
+    assert!(selector.options.iter().any(|option| option.value == "high"));
+}
+
+#[test]
+fn settings_screen_navigation_helpers_bound_rows_and_wrap_tabs() {
+    let settings = Settings::new("test-model");
+    let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+    let mut screen = settings_menu::SettingsScreen::from_projection(&projection);
+
+    screen.move_up();
+    assert_eq!(screen.selected_row, 0);
+
+    for _ in 0..10 {
+        screen.move_down(&projection);
+    }
+    assert_eq!(
+        screen.selected_row,
+        screen.active_rows(&projection).len().saturating_sub(1)
+    );
+
+    screen.next_tab(&projection);
+    assert_eq!(screen.active_tab, "ui");
+    assert_eq!(screen.selected_row, 0);
+
+    screen.previous_tab(&projection);
+    assert_eq!(screen.active_tab, "runtime");
+
+    screen.previous_tab(&projection);
+    assert_eq!(screen.active_tab, "updates");
+}
+
+#[test]
 fn model_grade_slash_command_parses_and_rejects_local_grade() {
     assert_eq!(
         crate::tui::canonical_slash_command("model", "route"),

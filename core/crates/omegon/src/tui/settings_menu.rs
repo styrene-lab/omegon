@@ -57,6 +57,61 @@ impl SettingsScreen {
             .map(|tab| tab.rows.as_slice())
             .unwrap_or(&[])
     }
+
+    pub(crate) fn selected_row<'a>(
+        &self,
+        projection: &'a crate::surfaces::settings::SettingsSurfaceProjection,
+    ) -> Option<&'a crate::surfaces::settings::SettingsRowProjection> {
+        self.active_rows(projection).get(self.selected_row)
+    }
+
+    pub(crate) fn move_up(&mut self) {
+        self.selected_row = self.selected_row.saturating_sub(1);
+    }
+
+    pub(crate) fn move_down(
+        &mut self,
+        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
+    ) {
+        let len = self.active_rows(projection).len();
+        if len > 0 {
+            self.selected_row = (self.selected_row + 1).min(len - 1);
+        }
+    }
+
+    pub(crate) fn next_tab(
+        &mut self,
+        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
+    ) {
+        self.switch_tab(projection, 1);
+    }
+
+    pub(crate) fn previous_tab(
+        &mut self,
+        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
+    ) {
+        self.switch_tab(projection, -1);
+    }
+
+    fn switch_tab(
+        &mut self,
+        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
+        direction: isize,
+    ) {
+        if projection.tabs.is_empty() {
+            self.selected_row = 0;
+            return;
+        }
+        let current = projection
+            .tabs
+            .iter()
+            .position(|tab| tab.id == self.active_tab)
+            .unwrap_or(0);
+        let len = projection.tabs.len() as isize;
+        let next = (current as isize + direction).rem_euclid(len) as usize;
+        self.active_tab = projection.tabs[next].id.clone();
+        self.selected_row = 0;
+    }
 }
 
 /// What the active selector is editing.
