@@ -2287,6 +2287,9 @@ impl App {
 
         match row_id.as_str() {
             "runtime.model" => self.open_model_selector(),
+            "runtime.max_turns" => self.open_max_turns_selector(),
+            "workspace.sandbox" => self.toggle_settings_sandbox(),
+            "updates.auto_update" => self.toggle_settings_auto_update(),
             "workspace.trusted_directories" => {
                 let settings = self.settings();
                 if settings.trusted_directories.is_empty() {
@@ -2301,12 +2304,6 @@ impl App {
                     ));
                 }
             }
-            "runtime.max_turns" | "workspace.sandbox" | "updates.auto_update" => {
-                self.show_command_toast(CommandToast::new(
-                    format!("{} editing is not wired yet", row.label),
-                    CommandSeverity::Info,
-                ));
-            }
             _ => self.show_command_toast(CommandToast::new(
                 format!("No editor registered for {}", row.label),
                 CommandSeverity::Warning,
@@ -2318,6 +2315,7 @@ impl App {
         match row_id {
             "runtime.thinking" => Some(SelectorKind::ThinkingLevel),
             "runtime.context_class" => Some(SelectorKind::ContextClass),
+            "runtime.max_turns" => Some(SelectorKind::MaxTurns),
             "ui.tool_detail" => Some(SelectorKind::ToolDetail),
             "updates.channel" => Some(SelectorKind::UpdateChannel),
             "workspace.role" => Some(SelectorKind::WorkspaceRole),
@@ -2338,6 +2336,49 @@ impl App {
         let options = settings_menu::tool_detail_selector_options(current);
         self.selector = Some(selector::Selector::new("Tool Density", options));
         self.selector_kind = Some(SelectorKind::ToolDetail);
+    }
+
+    fn open_max_turns_selector(&mut self) {
+        let current = self.settings().max_turns;
+        let options = settings_menu::max_turns_selector_options(current);
+        self.selector = Some(selector::Selector::new("Max Turns", options));
+        self.selector_kind = Some(SelectorKind::MaxTurns);
+    }
+
+    fn toggle_settings_sandbox(&mut self) {
+        let enabled = self.settings().sandbox;
+        if enabled {
+            self.update_and_persist(|s| s.sandbox = false);
+            self.show_command_toast(CommandToast::new(
+                "Sandbox disabled. Children run as local subprocesses.",
+                CommandSeverity::Info,
+            ));
+            return;
+        }
+
+        let runtime = crate::nex::spawn::detect_container_runtime_public();
+        if let Some(rt) = runtime {
+            self.update_and_persist(|s| s.sandbox = true);
+            self.show_command_toast(CommandToast::new(
+                format!("Sandbox enabled ({rt})"),
+                CommandSeverity::Info,
+            ));
+        } else {
+            self.show_command_toast(CommandToast::new(
+                "No container runtime found. Sandbox requires podman or docker.",
+                CommandSeverity::Warning,
+            ));
+        }
+    }
+
+    fn toggle_settings_auto_update(&mut self) {
+        let enabled = self.settings().auto_update;
+        let next = !enabled;
+        self.update_and_persist(|s| s.auto_update = next);
+        self.show_command_toast(CommandToast::new(
+            format!("Auto update → {}", if next { "on" } else { "off" }),
+            CommandSeverity::Info,
+        ));
     }
 
     fn open_login_selector(&mut self) {
@@ -2710,6 +2751,16 @@ impl App {
                 if let settings_menu::SettingApplyOutcome::WorkspaceKind(kind) = outcome {
                     let _ = tx.try_send(TuiCommand::ExecuteControl {
                         request: crate::control_runtime::ControlRequest::WorkspaceKindSet { kind },
+                        respond_to: None,
+                    });
+                }
+                Some(outcome.message())
+            }
+            SelectorKind::MaxTurns => {
+                let outcome = settings_menu::apply_max_turns_selection(&value);
+                if let settings_menu::SettingApplyOutcome::MaxTurns(max_turns) = outcome {
+                    let _ = tx.try_send(TuiCommand::ExecuteControl {
+                        request: crate::control_runtime::ControlRequest::SetMaxTurns { max_turns },
                         respond_to: None,
                     });
                 }
