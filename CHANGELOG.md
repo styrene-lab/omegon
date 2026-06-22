@@ -21,6 +21,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
 
 ### Fixed
+- Collapsed the lean editor ribbon context segment to text-only summary so the context meter no longer consumes the remaining title width and hides the active model on narrow terminals.
 - Render the lean editor engine ribbon's pinned route as a single provider/model label with an explicit missing-provider fallback, so provider identity cannot disappear silently behind separator math or empty provider state.
 - Scoped OAuth expiry toasts to the active provider route so stale non-active provider credentials remain visible in auth status without interrupting healthy conversations.
 - Removed duplicate workspace dir/git metadata from the compact TUI session row now that the workbench row owns workspace context.
