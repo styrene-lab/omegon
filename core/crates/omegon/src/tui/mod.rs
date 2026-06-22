@@ -7283,13 +7283,14 @@ Scroll transcript:
             "editor" => SlashResult::Display(handle_editor_command(args)),
 
             "cleave" => {
-                // Warn, but do not block or silently reroute. Operator agency wins.
+                // /cleave starts background workers from an interactive session, so disclose
+                // subscription-credential automation risk there without warning on normal TUI use.
                 if self.footer_data.is_oauth
                     && crate::providers::anthropic_credential_mode()
                         == crate::providers::AnthropicCredentialMode::OAuthOnly
                 {
                     self.show_toast(
-                        "Anthropic subscription is active. /cleave may violate Anthropic's \
+                        "Anthropic subscription is active. /cleave starts background workers, which may be restricted by Anthropic's \
                          Consumer Terms for Claude.ai / Claude Pro automation. Omegon will \
                          proceed with your requested provider/model; the risk is yours. \
                          Reference: https://www.anthropic.com/legal/consumer-terms",
@@ -9082,23 +9083,6 @@ pub async fn run_tui(
             // Classify startup capability tier from ALL collected results
             app.capability_grade = Some(crate::startup::classify_tier(&collected_probes));
         }
-    }
-
-    // ── Anthropic subscription ToS one-time startup notice ──────────────────
-    // Shown once per session when only an OAuth/subscription token is present.
-    // Warns early, but does not remove operator agency.
-    if app.footer_data.is_oauth
-        && crate::providers::anthropic_credential_mode()
-            == crate::providers::AnthropicCredentialMode::OAuthOnly
-        && !app.oauth_tos_notice_shown
-    {
-        app.oauth_tos_notice_shown = true;
-        app.show_toast(
-            "Claude.ai subscription active. Anthropic's Consumer Terms may restrict \
-             automated/background use for this credential. Omegon will warn and disclose, \
-             but your provider choice remains yours. See: anthropic.com/legal/consumer-terms",
-            ratatui_toaster::ToastType::Warning,
-        );
     }
 
     // Queue startup reveal effects (footer sweep-in, conversation fade)
