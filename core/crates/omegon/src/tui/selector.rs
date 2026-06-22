@@ -60,36 +60,11 @@ impl Selector {
 
     /// Render the selector popup centered in the given area.
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        let popup_area = super::settings_menu::settings_modal_area(area);
+        let inner_height = popup_area.height.saturating_sub(2) as usize;
+
         // Two-line layout: label on line 1, description on line 2 (indented)
         // This ensures proper alignment regardless of label length.
-
-        // Calculate popup dimensions
-        let max_label_w = self
-            .options
-            .iter()
-            .map(|o| o.label.len())
-            .max()
-            .unwrap_or(10);
-        let max_desc_w = self
-            .options
-            .iter()
-            .map(|o| o.description.len())
-            .max()
-            .unwrap_or(0);
-
-        // Width: max of (label + marker) or (description + indent)
-        // Height: 2 lines per option (label + desc) + borders
-        let label_line_w = max_label_w + 2; // +2 for marker
-        let desc_line_w = max_desc_w + 4; // +4 for indent
-        let content_w = label_line_w.max(desc_line_w).min(area.width as usize - 4);
-        let popup_w = (content_w + 4) as u16; // +4 for padding
-        let popup_h = ((self.options.len() * 2) as u16 + 2).min(area.height.saturating_sub(1));
-
-        // Center the popup, but keep it within bounds
-        let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
-        let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
-        let popup_area = Rect::new(x, y, popup_w, popup_h);
-
         let mut items: Vec<Line<'static>> = Vec::new();
 
         for (i, opt) in self.options.iter().enumerate() {
@@ -138,6 +113,18 @@ impl Selector {
                 // Empty line to maintain spacing
                 items.push(Line::from(""));
             }
+
+            if items.len() >= inner_height {
+                break;
+            }
+        }
+
+        if self.options.len().saturating_mul(2) > inner_height {
+            items.push(Line::from(Span::styled(
+                "  … more options; use ↑/↓ to navigate",
+                Style::default().fg(t.dim()),
+            )));
+            items.truncate(inner_height);
         }
 
         let block = Block::default()
