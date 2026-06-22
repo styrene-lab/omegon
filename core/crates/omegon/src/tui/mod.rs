@@ -1773,7 +1773,7 @@ impl App {
     fn editor_context_widget(
         actual: crate::settings::ContextClass,
         context_window: usize,
-        estimated_tokens: usize,
+        _estimated_tokens: usize,
         context_percent: f32,
     ) -> String {
         let class = Self::context_class_tag(actual);
@@ -1782,21 +1782,9 @@ impl App {
         } else {
             widgets::format_tokens(actual.nominal_tokens())
         };
-        let used_tokens = if estimated_tokens > 0 {
-            estimated_tokens
-        } else if context_window > 0 {
-            ((context_window as f32 * context_percent.clamp(0.0, 100.0) / 100.0).round() as usize)
-                .min(context_window)
-        } else {
-            0
-        };
         let percent = context_percent.clamp(0.0, 100.0).round() as u8;
 
-        format!(
-            "ctx:{class}@{capacity} {percent}% {} {}",
-            Self::context_fill_bar(context_percent),
-            widgets::format_tokens(used_tokens)
-        )
+        format!("ctx:{class}@{capacity} {percent}%")
     }
 
     fn current_persona_state(&self) -> crate::settings::PersonaState {
@@ -4939,19 +4927,17 @@ impl App {
                     },
                     self.footer_data.context_percent
                 );
-                let mut title_spans = vec![
-                    Span::styled(" ", Style::default().fg(t.border_dim())),
-                    Span::styled(
-                        format!(
-                            "{} {provider_glyph} {route_label} ",
-                            glyphs.engine(EngineGlyphRole::RibbonMark),
-                        ),
-                        Style::default()
-                            .fg(t.bg())
-                            .bg(t.accent_muted())
-                            .add_modifier(Modifier::BOLD),
+                let route_span = Span::styled(
+                    format!(
+                        " {} {provider_glyph} {route_label} ",
+                        glyphs.engine(EngineGlyphRole::RibbonMark),
                     ),
-                ];
+                    Style::default()
+                        .fg(t.bg())
+                        .bg(t.accent_muted())
+                        .add_modifier(Modifier::BOLD),
+                );
+                let route_width = route_span.width() + Span::raw(route_glyph).width() + 1;
                 let push_tail = |spans: &mut Vec<Span<'static>>, text: String, style: Style| {
                     spans.push(Span::styled(
                         route_glyph,
@@ -4959,7 +4945,9 @@ impl App {
                     ));
                     spans.push(Span::styled(format!(" {text} "), style));
                 };
+                let mut title_spans = vec![Span::styled(" ", Style::default().fg(t.border_dim()))];
                 let tail_fields = [
+                    (context_text, Style::default().fg(t.muted()).bg(t.card_bg())),
                     (
                         grade_text,
                         Style::default()
@@ -4971,27 +4959,25 @@ impl App {
                         thinking_text,
                         Style::default().fg(t.accent_muted()).bg(t.card_bg()),
                     ),
-                    (context_text, Style::default().fg(t.muted()).bg(t.card_bg())),
                 ];
                 for (text, style) in tail_fields {
                     let mut candidate = title_spans.clone();
                     push_tail(&mut candidate, text, style);
                     let candidate_width = candidate.iter().map(|span| span.width()).sum::<usize>()
-                        + Span::raw(route_glyph).width();
+                        + route_width;
                     if candidate_width <= title_budget {
                         title_spans = candidate;
                     }
                 }
-                if !title_spans
-                    .last()
-                    .map(|span| span.content.as_ref() == route_glyph)
-                    .unwrap_or(false)
-                {
-                    title_spans.push(Span::styled(
-                        route_glyph,
-                        Style::default().fg(t.card_bg()).bg(t.surface_bg()),
-                    ));
-                }
+                title_spans.push(Span::styled(
+                    route_glyph,
+                    Style::default().fg(t.card_bg()).bg(t.surface_bg()),
+                ));
+                title_spans.push(route_span);
+                title_spans.push(Span::styled(
+                    route_glyph,
+                    Style::default().fg(t.card_bg()).bg(t.surface_bg()),
+                ));
                 Line::from(title_spans)
             };
             let editor_block = Block::default()
