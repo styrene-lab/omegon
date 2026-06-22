@@ -17,7 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
-- Added TUI glyph profiles with Nerd Font detection and portable fallback icons for terminals without compatible fonts.
+- Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
 
 ### Fixed
 - Removed duplicate workspace dir/git metadata from the compact TUI session row now that the workbench row owns workspace context.

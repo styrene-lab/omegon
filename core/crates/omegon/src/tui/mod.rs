@@ -5695,12 +5695,22 @@ impl App {
     }
 
     fn show_startup_notice(&mut self) {
-        let glyphs = crate::tui::glyphs::glyphs();
-        if glyphs.profile != crate::tui::glyphs::GlyphProfile::NerdFont {
+        let capability = crate::tui::glyphs::glyph_capability();
+        if capability.should_show_fallback_notice() {
             let link = crate::tui::glyphs::nerd_font_install_help_url();
             self.show_toast(
                 &format!(
                     "Nerd Font not detected; using portable glyph fallback. Install support: {link}"
+                ),
+                ratatui_toaster::ToastType::Info,
+            );
+        } else if capability.profile == crate::tui::glyphs::GlyphProfile::Unicode
+            && capability.confidence == crate::tui::glyphs::GlyphConfidence::Medium
+        {
+            self.show_toast(
+                &format!(
+                    "Using portable glyphs; Nerd Font support is partially detected ({})",
+                    capability.summary()
                 ),
                 ratatui_toaster::ToastType::Info,
             );

@@ -309,37 +309,226 @@ pub fn tool_state_role_for_status(status: &str) -> ToolStateGlyphRole {
     }
 }
 
-pub fn glyphs() -> &'static GlyphSet {
-    static GLYPHS: std::sync::OnceLock<GlyphSet> = std::sync::OnceLock::new();
-    GLYPHS.get_or_init(detect_glyph_set)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlyphConfidence {
+    Explicit,
+    High,
+    Medium,
+    Low,
 }
 
-fn detect_glyph_set() -> GlyphSet {
-    if std::env::var_os("OMEGON_ASCII_GLYPHS").is_some() || std::env::var_os("NO_COLOR").is_some() {
-        return ASCII_GLYPHS;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlyphCapability {
+    pub profile: GlyphProfile,
+    pub confidence: GlyphConfidence,
+    pub signals: Vec<&'static str>,
+}
+
+impl GlyphCapability {
+    pub fn should_show_fallback_notice(&self) -> bool {
+        self.profile != GlyphProfile::NerdFont && self.confidence == GlyphConfidence::Low
     }
-    if std::env::var_os("OMEGON_NERD_FONT").is_some() || terminal_looks_nerd_font_compatible() {
-        return NERD_FONT_GLYPHS;
+
+    pub fn summary(&self) -> String {
+        if self.signals.is_empty() {
+            format!("{:?}/{:?}", self.profile, self.confidence)
+        } else {
+            format!(
+                "{:?}/{:?}: {}",
+                self.profile,
+                self.confidence,
+                self.signals.join(", ")
+            )
+        }
     }
-    UNICODE_GLYPHS
+}
+
+pub fn glyphs() -> &'static GlyphSet {
+    static GLYPHS: std::sync::OnceLock<GlyphSet> = std::sync::OnceLock::new();
+    GLYPHS.get_or_init(|| glyph_capability().glyphs())
+}
+
+impl GlyphCapability {
+    pub fn glyphs(&self) -> GlyphSet {
+        match self.profile {
+            GlyphProfile::Ascii => ASCII_GLYPHS,
+            GlyphProfile::Unicode => UNICODE_GLYPHS,
+            GlyphProfile::NerdFont => NERD_FONT_GLYPHS,
+        }
+    }
+}
+
+pub fn glyph_capability() -> &'static GlyphCapability {
+    static CAPABILITY: std::sync::OnceLock<GlyphCapability> = std::sync::OnceLock::new();
+    CAPABILITY.get_or_init(detect_glyph_capability)
+}
+
+fn detect_glyph_capability() -> GlyphCapability {
+    let mut signals = Vec::new();
+
+    if std::env::var_os("OMEGON_ASCII_GLYPHS").is_some() {
+        signals.push("env:OMEGON_ASCII_GLYPHS");
+        return GlyphCapability {
+            profile: GlyphProfile::Ascii,
+            confidence: GlyphConfidence::Explicit,
+            signals,
+        };
+    }
+    if std::env::var_os("NO_COLOR").is_some() {
+        signals.push("env:NO_COLOR");
+        return GlyphCapability {
+            profile: GlyphProfile::Ascii,
+            confidence: GlyphConfidence::Explicit,
+            signals,
+        };
+    }
+    if std::env::var_os("OMEGON_NERD_FONT").is_some() {
+        signals.push("env:OMEGON_NERD_FONT");
+        return GlyphCapability {
+            profile: GlyphProfile::NerdFont,
+            confidence: GlyphConfidence::Explicit,
+            signals,
+        };
+    }
+
+    let kitty = terminal_looks_like_kitty();
+    if kitty {
+        signals.push("terminal:kitty");
+    }
+    if terminal_font_env_mentions_nerd() {
+        signals.push("env:font-mentions-nerd");
+    }
+    let installed = known_nerd_font_installed();
+    if installed {
+        signals.push("font:known-nerd-font-installed");
+    }
+    let kitty_config = kitty_config_mentions_nerd_font();
+    if kitty_config {
+        signals.push("kitty:config-mentions-nerd-font");
+    }
+
+    if kitty && (kitty_config || installed) {
+        return GlyphCapability {
+            profile: GlyphProfile::NerdFont,
+            confidence: GlyphConfidence::High,
+            signals,
+        };
+    }
+    if terminal_font_env_mentions_nerd() && installed {
+        return GlyphCapability {
+            profile: GlyphProfile::NerdFont,
+            confidence: GlyphConfidence::High,
+            signals,
+        };
+    }
+    if kitty || installed || terminal_font_env_mentions_nerd() {
+        return GlyphCapability {
+            profile: GlyphProfile::Unicode,
+            confidence: GlyphConfidence::Medium,
+            signals,
+        };
+    }
+
+    GlyphCapability {
+        profile: GlyphProfile::Unicode,
+        confidence: GlyphConfidence::Low,
+        signals,
+    }
 }
 
 pub fn terminal_looks_nerd_font_compatible() -> bool {
+    let capability = detect_glyph_capability();
+    capability.profile == GlyphProfile::NerdFont
+}
+
+fn terminal_looks_like_kitty() -> bool {
     let term = std::env::var("TERM")
         .unwrap_or_default()
         .to_ascii_lowercase();
     let program = std::env::var("TERM_PROGRAM")
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let font = std::env::var("KITTY_FONT")
-        .or_else(|_| std::env::var("OMEGON_TERMINAL_FONT"))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
     std::env::var_os("KITTY_WINDOW_ID").is_some()
         || term.contains("kitty")
         || program.contains("kitty")
-        || font.contains("nerd")
+}
+
+fn terminal_font_env_mentions_nerd() -> bool {
+    std::env::var("KITTY_FONT")
+        .or_else(|_| std::env::var("OMEGON_TERMINAL_FONT"))
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .contains("nerd")
+}
+
+fn known_nerd_font_installed() -> bool {
+    known_font_dirs().iter().any(|dir| {
+        std::fs::read_dir(dir).ok().is_some_and(|entries| {
+            entries.filter_map(Result::ok).any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .contains("nerdfont")
+            })
+        })
+    })
+}
+
+fn known_font_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        dirs.push(home.join("Library/Fonts"));
+        dirs.push(home.join(".local/share/fonts"));
+        dirs.push(home.join(".fonts"));
+    }
+    dirs.push(std::path::PathBuf::from("/Library/Fonts"));
+    dirs.push(std::path::PathBuf::from("/usr/local/share/fonts"));
+    dirs.push(std::path::PathBuf::from("/usr/share/fonts"));
+    dirs
+}
+
+fn kitty_config_mentions_nerd_font() -> bool {
+    kitty_config_paths()
+        .iter()
+        .any(|path| kitty_config_file_mentions_nerd_font(path, 0))
+}
+
+fn kitty_config_paths() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("KITTY_CONFIG_DIRECTORY") {
+        paths.push(std::path::PathBuf::from(dir).join("kitty.conf"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".config/kitty/kitty.conf"));
+    }
+    paths
+}
+
+fn kitty_config_file_mentions_nerd_font(path: &std::path::Path, depth: usize) -> bool {
+    if depth > 2 {
+        return false;
+    }
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let lower = contents.to_ascii_lowercase();
+    if lower.contains("nerd font") || lower.contains("symbols nerd") {
+        return true;
+    }
+    contents.lines().any(|line| {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || !trimmed.starts_with("include ") {
+            return false;
+        }
+        let include = trimmed.trim_start_matches("include ").trim();
+        let include_path = if let Some(parent) = path.parent() {
+            parent.join(include)
+        } else {
+            std::path::PathBuf::from(include)
+        };
+        kitty_config_file_mentions_nerd_font(&include_path, depth + 1)
+    })
 }
 
 pub fn nerd_font_install_help_url() -> &'static str {
@@ -381,6 +570,32 @@ mod tests {
             tool_state_role_for_status("failed"),
             ToolStateGlyphRole::Failed
         );
+    }
+
+    #[test]
+    fn kitty_config_probe_follows_simple_includes() {
+        let temp =
+            std::env::temp_dir().join(format!("omegon-kitty-config-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(
+            temp.join("kitty.conf"),
+            "include fonts.conf
+",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.join("fonts.conf"),
+            "symbol_map U+E000-U+F8FF Symbols Nerd Font Mono
+",
+        )
+        .unwrap();
+
+        assert!(kitty_config_file_mentions_nerd_font(
+            &temp.join("kitty.conf"),
+            0
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]
