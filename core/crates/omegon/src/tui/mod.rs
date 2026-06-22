@@ -4937,7 +4937,8 @@ impl App {
                         .bg(t.accent_muted())
                         .add_modifier(Modifier::BOLD),
                 );
-                let route_width = route_span.width() + Span::raw(route_glyph).width() + 1;
+                let mut title_spans = vec![Span::styled(" ", Style::default().fg(t.border_dim()))];
+                title_spans.push(route_span);
                 let push_tail = |spans: &mut Vec<Span<'static>>, text: String, style: Style| {
                     spans.push(Span::styled(
                         route_glyph,
@@ -4945,9 +4946,7 @@ impl App {
                     ));
                     spans.push(Span::styled(format!(" {text} "), style));
                 };
-                let mut title_spans = vec![Span::styled(" ", Style::default().fg(t.border_dim()))];
                 let tail_fields = [
-                    (context_text, Style::default().fg(t.muted()).bg(t.card_bg())),
                     (
                         grade_text,
                         Style::default()
@@ -4959,21 +4958,17 @@ impl App {
                         thinking_text,
                         Style::default().fg(t.accent_muted()).bg(t.card_bg()),
                     ),
+                    (context_text, Style::default().fg(t.muted()).bg(t.card_bg())),
                 ];
                 for (text, style) in tail_fields {
                     let mut candidate = title_spans.clone();
                     push_tail(&mut candidate, text, style);
                     let candidate_width = candidate.iter().map(|span| span.width()).sum::<usize>()
-                        + route_width;
+                        + Span::raw(route_glyph).width();
                     if candidate_width <= title_budget {
                         title_spans = candidate;
                     }
                 }
-                title_spans.push(Span::styled(
-                    route_glyph,
-                    Style::default().fg(t.card_bg()).bg(t.surface_bg()),
-                ));
-                title_spans.push(route_span);
                 title_spans.push(Span::styled(
                     route_glyph,
                     Style::default().fg(t.card_bg()).bg(t.surface_bg()),
