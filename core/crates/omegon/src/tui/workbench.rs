@@ -681,7 +681,7 @@ fn render_workspace_context_panel(
     if !state.workspace.dir.is_empty() {
         spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
         spans.push(Span::styled(
-            format!("▣ {}", state.workspace.dir),
+            format!("▱ {}", state.workspace.dir),
             Style::default().fg(t.muted()).bg(bg),
         ));
     }
@@ -693,7 +693,7 @@ fn render_workspace_context_panel(
     {
         spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
         spans.push(Span::styled(
-            format!(" {branch}"),
+            format!("⑂ {branch}"),
             Style::default().fg(t.muted()).bg(bg),
         ));
     }
@@ -1013,6 +1013,46 @@ mod tests {
         };
 
         assert_eq!(workbench_preferred_height(&state, 120), 1);
+    }
+
+    #[test]
+    fn workspace_context_uses_width_stable_text_glyphs() {
+        let state = WorkbenchState {
+            workspace: WorkbenchWorkspaceContext {
+                repo: Some("omegon-secundus".to_string()),
+                dir: "omegon-secundus".to_string(),
+                git_branch: Some("feature/ui-improvements-polish".to_string()),
+            },
+            ..WorkbenchState::default()
+        };
+
+        let backend = ratatui::backend::TestBackend::new(120, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_workspace_context_panel(
+                    frame.area(),
+                    frame,
+                    &super::super::theme::Alpharius,
+                    &state,
+                )
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let mut text = String::new();
+        for x in 0..120 {
+            text.push_str(buf[(x, 0)].symbol());
+        }
+
+        assert!(text.contains("⌂ omegon-secundus"), "{text}");
+        assert!(text.contains("▱ omegon-secundus"), "{text}");
+        assert!(
+            text.contains("⑂ feature/ui-improvements-polish"),
+            "{text}"
+        );
+        assert!(!text.contains("repo omegon-secundus"), "{text}");
+        assert!(!text.contains("dir omegon-secundus"), "{text}");
+        assert!(!text.contains("git feature/ui-improvements-polish"), "{text}");
     }
 
     #[test]
