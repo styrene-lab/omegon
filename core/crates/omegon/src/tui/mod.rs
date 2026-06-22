@@ -5273,16 +5273,14 @@ impl App {
             .collect();
 
         // ── Final bg cleanup pass ───────────────────────────────────
-        // Force every cell to have a known-good background color.
-        // Skip the instrument panel area — it renders its own pixels
-        // with half-block characters where bg carries color data.
+        // Normalize unowned/default background leakage without erasing
+        // intentional theme-backed badges or panels. This pass started as a
+        // guard against Color::Reset bleed-through from widgets/temp buffers;
+        // keep that fence, but make the allow-list semantic instead of a stale
+        // hand-picked subset of theme colors.
         {
             let base = self.theme.surface_bg();
-            let card = self.theme.card_bg();
-            let footer = self.theme.footer_bg();
-            let err_bg = Color::Rgb(30, 8, 16);
-            let diff_add = Color::Rgb(4, 22, 12);
-            let diff_rm = Color::Rgb(22, 4, 4);
+            let intentional_backgrounds = self.theme.intentional_backgrounds();
             // inst_area already computed above — no duplicate layout calc
             let buf = frame.buffer_mut();
             for y in area.top()..area.bottom() {
@@ -5297,13 +5295,8 @@ impl App {
                         continue;
                     }
                     let cell = &mut buf[(x, y)];
-                    let bg = cell.bg;
-                    match bg {
-                        c if c == base || c == card || c == footer => {}
-                        c if c == err_bg || c == diff_add || c == diff_rm => {}
-                        _ => {
-                            cell.set_bg(base);
-                        }
+                    if cell.bg == Color::Reset || !intentional_backgrounds.contains(&cell.bg) {
+                        cell.set_bg(base);
                     }
                 }
             }

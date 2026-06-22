@@ -21,6 +21,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
 
 ### Fixed
+- Preserve intentional theme badge backgrounds during final TUI background cleanup so the lean editor provider/model route remains visible as dark-on-accent text instead of being flattened to black-on-black.
 - Render the lean editor ribbon in route-first order (`provider/model`, grade, thinking, context) so `openai-codex/gpt-5.5` appears directly before the S-tier badge instead of after optional context fields.
 - Keep the lean editor ribbon provider/model route anchored at the right edge after optional context/grade/thinking segments so narrow terminals still show the active provider and model.
 - Collapsed the lean editor ribbon context segment to text-only summary so the context meter no longer consumes the remaining title width and hides the active model on narrow terminals.
