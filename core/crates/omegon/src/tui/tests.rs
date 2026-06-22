@@ -6,6 +6,7 @@
 use super::settings_menu::build_model_selector_options;
 use super::*;
 use crate::settings::{ContextClass, Settings, ThinkingLevel};
+use crate::tui::theme::Theme;
 use crate::update::UpdateInfo;
 use crate::web::WebDaemonStatus;
 use ratatui::Terminal;
@@ -74,6 +75,40 @@ fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
         text.push('\n');
     }
     text
+}
+
+fn rendered_cell_styles_for_text(
+    app: &mut App,
+    width: u16,
+    height: u16,
+    needle: &str,
+) -> Vec<(Color, Color)> {
+    let backend = ratatui::backend::TestBackend::new(width, height);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+
+    let buf = terminal.backend().buffer();
+    for y in 0..buf.area.height {
+        let row_symbols: Vec<&str> = (0..buf.area.width)
+            .map(|x| buf[(x, y)].symbol())
+            .collect();
+        for start in 0..row_symbols.len() {
+            let candidate: String = row_symbols[start..]
+                .iter()
+                .take(needle.chars().count())
+                .copied()
+                .collect();
+            if candidate == needle {
+                return (start as u16..start as u16 + needle.chars().count() as u16)
+                    .map(|x| {
+                        let cell = &buf[(x, y)];
+                        (cell.fg, cell.bg)
+                    })
+                    .collect();
+            }
+        }
+    }
+    panic!("needle {needle:?} not found in rendered buffer");
 }
 
 fn draw_app_with_dirty_background(app: &mut App, width: u16, height: u16, dirty: char) -> String {
@@ -5454,6 +5489,25 @@ fn editor_top_line_preserves_route_when_context_would_overflow() {
     let rendered = render_app_to_string(&mut app, 80, 18);
 
     assert!(rendered.contains("openai-codex/gpt-5.5"), "{rendered}");
+}
+
+#[test]
+fn editor_top_line_preserves_route_badge_contrast_after_bg_cleanup() {
+    let mut settings = Settings::new("openai-codex:gpt-5.5");
+    settings.thinking = ThinkingLevel::Minimal;
+    let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
+    app.apply_ui_preset(UiSurfaces::lean());
+    app.footer_data.context_window = 1_048_576;
+    app.footer_data.context_percent = 0.0;
+
+    let styles = rendered_cell_styles_for_text(&mut app, 140, 18, "openai-codex/gpt-5.5");
+
+    assert!(
+        styles
+            .iter()
+            .all(|(fg, bg)| *fg == crate::tui::theme::Alpharius.bg() && *bg == crate::tui::theme::Alpharius.accent_muted()),
+        "route text should remain dark-on-accent after final bg cleanup, got {styles:?}"
+    );
 }
 
 #[test]

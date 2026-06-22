@@ -105,6 +105,33 @@ pub trait Theme: Send + Sync {
     fn style_border_dim(&self) -> Style {
         Style::default().fg(self.border_dim())
     }
+
+    /// Background colors that widgets may intentionally paint into the final
+    /// frame. The TUI has a post-render cleanup pass to normalize accidental
+    /// terminal/default-color bleed-through; this list keeps that pass from
+    /// erasing deliberate badge, panel, diff, and signal backgrounds.
+    fn intentional_backgrounds(&self) -> Vec<Color> {
+        vec![
+            self.bg(),
+            self.surface_bg(),
+            self.card_bg(),
+            self.footer_bg(),
+            self.user_msg_bg(),
+            self.tool_success_bg(),
+            self.tool_error_bg(),
+            self.diff_added_bg(),
+            self.diff_removed_bg(),
+            self.accent(),
+            self.accent_muted(),
+            self.accent_bright(),
+            self.border(),
+            self.border_dim(),
+            self.success(),
+            self.error(),
+            self.warning(),
+            self.caution(),
+        ]
+    }
 }
 
 /// Parse a hex color string (#RRGGBB or RRGGBB) to a ratatui Color.
