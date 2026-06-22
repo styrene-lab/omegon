@@ -1631,6 +1631,18 @@ fn editor_height_for(editor: &Editor, main_area: Rect) -> u16 {
     (editor_rows + 2).clamp(3, max_editor) // +2 for border
 }
 
+fn settings_profile_source_line(source: &crate::settings::ProfileSource) -> String {
+    match source {
+        crate::settings::ProfileSource::Project(path) => {
+            format!("profile: project · file: {}", path.display())
+        }
+        crate::settings::ProfileSource::User(path) => {
+            format!("profile: user · file: {}", path.display())
+        }
+        crate::settings::ProfileSource::BuiltInDefault => "profile: built-in defaults".to_string(),
+    }
+}
+
 impl App {
     fn displayed_model_grade(model_provider: &str, model_id: &str, fallback: &str) -> String {
         let model = model_id
@@ -4071,13 +4083,15 @@ impl App {
             })
             .collect::<Vec<_>>()
             .join("  ");
+        let profile_source_line = settings_profile_source_line(&profile_drift.source);
+        // TODO(settings): add a selectable button/action for opening the active profile file.
         let drift_line = if profile_drift.dirty {
             format!(
-                "profile: {} · runtime drift: Δ{} · /profile save or /profile apply",
-                profile_drift.source, profile_drift.changed_count
+                "{profile_source_line} · runtime drift: Δ{} · /profile save or /profile apply",
+                profile_drift.changed_count
             )
         } else {
-            format!("profile: {} · runtime drift: clean", profile_drift.source)
+            format!("{profile_source_line} · runtime drift: clean")
         };
         let mut lines = vec![
             ratatui::text::Line::from(ratatui::text::Span::styled(
