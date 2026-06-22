@@ -450,7 +450,16 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::acp_destructive(
         "secrets",
         "manage stored secrets",
-        &["list", "set", "get", "delete"],
+        &[
+            "list",
+            "status",
+            "configure",
+            "set",
+            "get",
+            "delete",
+            "remove",
+            "rm",
+        ],
     ),
     BuiltinCommandSpec::state_changing(
         "vault",
