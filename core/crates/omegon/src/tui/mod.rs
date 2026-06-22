@@ -1250,17 +1250,22 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "secrets" => {
             let parts: Vec<&str> = args.splitn(3, ' ').collect();
             match parts.first().copied().unwrap_or("") {
-                "" | "list" => Some(CanonicalSlashCommand::SecretsView),
-                "set" if parts.len() >= 3 => Some(CanonicalSlashCommand::SecretsSet {
-                    name: parts[1].trim().to_string(),
-                    value: parts[2].trim().to_string(),
-                }),
-                "get" if parts.len() >= 2 => Some(CanonicalSlashCommand::SecretsGet(
-                    parts[1].trim().to_string(),
-                )),
-                "delete" if parts.len() >= 2 => Some(CanonicalSlashCommand::SecretsDelete(
-                    parts[1].trim().to_string(),
-                )),
+                "" | "list" | "status" => Some(CanonicalSlashCommand::SecretsView),
+                "configure" => Some(CanonicalSlashCommand::SecretsView),
+                "set" if parts.len() >= 3 && !parts[1].trim().is_empty() => {
+                    Some(CanonicalSlashCommand::SecretsSet {
+                        name: parts[1].trim().to_string(),
+                        value: parts[2].trim().to_string(),
+                    })
+                }
+                "get" if parts.len() >= 2 && !parts[1].trim().is_empty() => Some(
+                    CanonicalSlashCommand::SecretsGet(parts[1].trim().to_string()),
+                ),
+                "delete" | "remove" | "rm" if parts.len() >= 2 && !parts[1].trim().is_empty() => {
+                    Some(CanonicalSlashCommand::SecretsDelete(
+                        parts[1].trim().to_string(),
+                    ))
+                }
                 _ => None,
             }
         }
@@ -2636,6 +2641,28 @@ impl App {
                     Some(format!("Tone '{value}' no longer available."))
                 }
             }
+            SelectorKind::SecretAction => match value.as_str() {
+                "list" => {
+                    if let Some(request) = crate::control_runtime::control_request_from_slash(
+                        &CanonicalSlashCommand::SecretsView,
+                    ) {
+                        let _ = tx.try_send(TuiCommand::ExecuteControl {
+                            request,
+                            respond_to: None,
+                        });
+                    }
+                    Some("Listing configured secrets…".to_string())
+                }
+                "set" => {
+                    self.open_secret_name_selector();
+                    Some("Pick a secret to configure.".to_string())
+                }
+                "delete" => {
+                    self.editor.set_text("/secrets delete ");
+                    Some("Type the secret name to delete, then press Enter.".to_string())
+                }
+                _ => Some(format!("Unknown secrets action: {value}")),
+            },
             SelectorKind::LoginProvider => {
                 // OAuth providers go through the auth login flow (opens browser)
                 // API key providers go through secret input mode (hidden input)
@@ -2946,10 +2973,60 @@ impl App {
         ("(custom)", "", "Enter a custom secret name"),
     ];
 
+    fn open_secret_name_selector(&mut self) {
+        let options: Vec<selector::SelectOption> = Self::SECRET_CATALOG
+            .iter()
+            .map(|(name, recipe, desc)| selector::SelectOption {
+                value: name.to_string(),
+                label: if *name == "(custom)" {
+                    "➕ Custom secret...".to_string()
+                } else {
+                    format!("{name:<30} {desc}")
+                },
+                description: if recipe.is_empty() {
+                    "direct value → OS keyring".to_string()
+                } else {
+                    format!("suggested: {recipe}")
+                },
+                active: false,
+            })
+            .collect();
+        self.selector = Some(selector::Selector::new("Set Secret — pick a name", options));
+        self.selector_kind = Some(SelectorKind::SecretName);
+    }
+
     /// Handle /secrets — interactive secret management.
     fn handle_secrets(&mut self, args: &str, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
         let parts: Vec<&str> = args.splitn(3, ' ').collect();
         match parts.first().copied().unwrap_or("") {
+            "" => {
+                let options = vec![
+                    selector::SelectOption {
+                        value: "list".to_string(),
+                        label: "List configured secrets".to_string(),
+                        description: "show secret names and readiness without revealing values"
+                            .to_string(),
+                        active: true,
+                    },
+                    selector::SelectOption {
+                        value: "set".to_string(),
+                        label: "Set or configure a secret".to_string(),
+                        description: "pick a known provider secret or enter a custom name"
+                            .to_string(),
+                        active: false,
+                    },
+                    selector::SelectOption {
+                        value: "delete".to_string(),
+                        label: "Delete a secret".to_string(),
+                        description: "type /secrets delete NAME; values are never displayed"
+                            .to_string(),
+                        active: false,
+                    },
+                ];
+                self.selector = Some(selector::Selector::new("Secrets", options));
+                self.selector_kind = Some(SelectorKind::SecretAction);
+                SlashResult::Handled
+            }
             // /secrets set NAME → enter hidden input mode for arbitrary operator secrets.
             "set" if parts.len() == 2 && !parts[1].trim().is_empty() => {
                 let name = parts[1].trim();
@@ -2960,32 +3037,8 @@ impl App {
             }
             // /secrets configure and /secrets set with no name/value → open selector
             "configure" | "set" if parts.len() < 3 => {
-                let existing: Vec<String> = {
-                    let _ = tx; // suppress unused warning in this branch
-                    Vec::new()
-                };
-                let options: Vec<selector::SelectOption> = Self::SECRET_CATALOG
-                    .iter()
-                    .map(|(name, recipe, desc)| {
-                        let is_configured = existing.contains(&name.to_string());
-                        selector::SelectOption {
-                            value: name.to_string(),
-                            label: if *name == "(custom)" {
-                                "➕ Custom secret...".to_string()
-                            } else {
-                                format!("{name:<30} {desc}")
-                            },
-                            description: if recipe.is_empty() {
-                                "direct value → OS keyring".to_string()
-                            } else {
-                                format!("suggested: {recipe}")
-                            },
-                            active: is_configured,
-                        }
-                    })
-                    .collect();
-                self.selector = Some(selector::Selector::new("Set Secret — pick a name", options));
-                self.selector_kind = Some(SelectorKind::SecretName);
+                let _ = tx;
+                self.open_secret_name_selector();
                 SlashResult::Handled
             }
             _ => {

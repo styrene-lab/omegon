@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Strengthened active plan context injection so the Workbench plan remains front-and-center until active/todo items are reconciled.
 - Improved TUI composer history recall to preserve the pre-recall draft and clear history session state when the operator edits recalled input.
 - Added a visibly button-like `Copy` conversation affordance with a wider click target for segment copy actions.
+- Added a first-class `/secrets` action selector with list/set/delete choices, shared set-secret picker behavior, and aliases for status/remove/rm so the secrets menu matches the newer command-selector flows.
 - Added semantic UI actions for copying a selected conversation segment or the latest assistant response so frontend adapters can route copy through the shared action seam.
 - Added a confirm-first empty-prompt history preload: pressing Enter on an empty prompt previews the last prompt as ghost text, and pressing Enter again materializes it for explicit resend.
 - Added source-aware profile load/save primitives and `/profile save|capture --project|--user|--active` parsing so profile capture preserves project/user persistence boundaries.
