@@ -22,6 +22,24 @@ pub enum CommandSeverity {
     Error,
 }
 
+pub(crate) const COMMAND_MODAL_WIDTH: u16 = 96;
+pub(crate) const COMMAND_MODAL_HEIGHT: u16 = 24;
+pub(crate) const COMMAND_MODAL_MARGIN: u16 = 4;
+
+pub(crate) fn command_modal_area(area: Rect) -> Rect {
+    let max_width = area.width.saturating_sub(COMMAND_MODAL_MARGIN).max(1);
+    let max_height = area.height.saturating_sub(COMMAND_MODAL_MARGIN).max(1);
+    let width = COMMAND_MODAL_WIDTH.min(max_width);
+    let height = COMMAND_MODAL_HEIGHT.min(max_height);
+
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CommandPanel {
     pub title: String,
@@ -79,7 +97,29 @@ impl CommandPanel {
 
 #[cfg(test)]
 mod tests {
-    use super::CommandPanel;
+    use super::{COMMAND_MODAL_HEIGHT, COMMAND_MODAL_WIDTH, CommandPanel, command_modal_area};
+
+    #[test]
+    fn command_modal_area_uses_stable_centered_geometry() {
+        let area = ratatui::layout::Rect::new(0, 0, 140, 40);
+        let modal = command_modal_area(area);
+
+        assert_eq!(modal.width, COMMAND_MODAL_WIDTH);
+        assert_eq!(modal.height, COMMAND_MODAL_HEIGHT);
+        assert_eq!(modal.x, 22);
+        assert_eq!(modal.y, 8);
+    }
+
+    #[test]
+    fn command_modal_area_clamps_to_small_terminals() {
+        let area = ratatui::layout::Rect::new(0, 0, 50, 18);
+        let modal = command_modal_area(area);
+
+        assert_eq!(modal.width, 46);
+        assert_eq!(modal.height, 14);
+        assert_eq!(modal.x, 2);
+        assert_eq!(modal.y, 2);
+    }
 
     #[test]
     fn slash_panel_preserves_command_source_and_body() {
