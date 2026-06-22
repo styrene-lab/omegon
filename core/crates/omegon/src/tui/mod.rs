@@ -522,12 +522,12 @@ struct App {
     replay_splash: bool,
     /// Plugin registry — manages active persona, tone, and memory layers.
     plugin_registry: Option<crate::plugins::registry::PluginRegistry>,
-    /// Slim-mode status line — persistent telemetry bar.
-    status_line: statusline::StatusLine,
+    /// Slim-mode session row — bottom telemetry below composer/workbench.
+    session_row: statusline::SessionRow,
     /// Structured session plan snapshot for the active Workbench panel.
     workbench_state: WorkbenchState,
     tool_inspection_target: Option<ToolInspectionTarget>,
-    /// Explicit Slim turn state rendered in the status line.
+    /// Explicit Slim turn state rendered in the session row.
     slim_turn_state: SlimTurnState,
     /// Visual effects manager (tachyonfx).
     effects: effects::Effects,
@@ -1869,7 +1869,7 @@ impl App {
             plugin_registry: Some(crate::plugins::registry::PluginRegistry::new(
                 crate::prompt::load_lex_imperialis(),
             )),
-            status_line: statusline::StatusLine::default(),
+            session_row: statusline::SessionRow::default(),
             workbench_state: WorkbenchState::default(),
             completed_plan_history_available: false,
             tool_inspection_target: None,
@@ -4198,11 +4198,11 @@ impl App {
     /// Render the bottom footer surface and return the instrument-owned area
     /// that the later cleanup pass must not repaint.
     ///
-    /// In compact mode, engine telemetry is rendered by `StatusLine` above this
-    /// footer. When instruments are visible, this footer owns only live
-    /// instrumentation panels: inference and tools. When instruments are hidden,
-    /// it falls back to the compact engine panel so non-instrument layouts still
-    /// expose provider/model state.
+    /// In compact mode, the engine row above the composer owns provider/model
+    /// and context telemetry. When instruments are visible, this footer owns
+    /// only live instrumentation panels: inference and tools. When instruments
+    /// are hidden, it falls back to the compact engine panel so non-instrument
+    /// layouts still expose provider/model state.
     fn render_bottom_footer(&self, area: Rect, frame: &mut Frame, t: &dyn theme::Theme) -> Rect {
         if !self.ui_surfaces.footer {
             return Rect::ZERO;
@@ -4492,8 +4492,8 @@ impl App {
             0
         };
         let raw_workbench_height = workbench_preferred_height(&workbench_state, area.width);
-        self.status_line.sync_from_footer(&self.footer_data);
-        let status_height = self.status_line.preferred_height_for(area.width);
+        self.session_row.sync_from_footer(&self.footer_data);
+        let session_height = self.session_row.preferred_height_for(area.width);
         let layout_plan = plan_tui_layout(TuiLayoutInputs {
             area,
             surfaces: self.ui_surfaces,
@@ -4501,7 +4501,7 @@ impl App {
             editor_height,
             editor_info_height,
             instrument_footer_height: self.instrument_panel.preferred_height(),
-            status_height,
+            session_height,
             pending_permission: false,
             tool_inspection_height: raw_tool_inspection_height,
             workbench_height: raw_workbench_height,
@@ -4516,7 +4516,7 @@ impl App {
         let _segment_detail_area = layout_plan.segment_detail_area;
         let editor_area = layout_plan.editor_area;
         let editor_info_area = layout_plan.editor_info_area;
-        let status_area = layout_plan.status_area;
+        let session_area = layout_plan.session_area;
         let footer_area = layout_plan.footer_area;
         let dash_area = if show_dashboard {
             Rect::new(
@@ -4672,9 +4672,9 @@ impl App {
         self.footer_data.tool_calls = self.tool_calls;
         self.footer_data.compactions = self.dashboard.compactions;
 
-        // ── Status line (slim mode only) ────────────────────────
-        if status_area.height > 0 {
-            self.status_line.viewport_hint = if self.conversation.conv_state.scroll_offset > 0 {
+        // ── Session row (slim mode only, below workbench) ───────
+        if session_area.height > 0 {
+            self.session_row.viewport_hint = if self.conversation.conv_state.scroll_offset > 0 {
                 Some(format!(
                     "view detached ↑{} · End tail",
                     self.conversation.conv_state.scroll_offset
@@ -4682,7 +4682,7 @@ impl App {
             } else {
                 None
             };
-            self.status_line.turn_state = Some(self.slim_turn_state.label());
+            self.session_row.turn_state = Some(self.slim_turn_state.label());
             let plan_state = workbench_state
                 .active
                 .as_ref()
@@ -4699,15 +4699,15 @@ impl App {
                 &self.dashboard.active_changes,
                 self.dashboard.focused_node.as_ref(),
             );
-            self.status_line.operator_hint = Some(slim_operator_hint(
+            self.session_row.operator_hint = Some(slim_operator_hint(
                 self.pending_permission.is_some(),
                 self.pending_operator_wait.is_some(),
                 self.terminal_copy_mode,
                 plan_state,
                 &plan_context,
             ));
-            self.status_line
-                .render(status_area, frame, self.theme.as_ref());
+            self.session_row
+                .render(session_area, frame, self.theme.as_ref());
         }
 
         // Project dashboard strip (above footer/tooling/instruments)
@@ -7631,11 +7631,11 @@ Scroll transcript:
                     // the visible work plan between turns.
                     self.workbench_state.active = None;
                 }
-                // Update status line with behavioral signals
-                self.status_line.phase = te.dominant_phase;
-                self.status_line.drift = te.drift_kind;
-                self.status_line.files_read = te.files_read_count;
-                self.status_line.files_modified = te.files_modified_count;
+                // Update session row with behavioral signals
+                self.session_row.phase = te.dominant_phase;
+                self.session_row.drift = te.drift_kind;
+                self.session_row.files_read = te.files_read_count;
+                self.session_row.files_modified = te.files_modified_count;
                 // Accumulate session-long token counts
                 self.footer_data.session_input_tokens += te.actual_input_tokens;
                 self.footer_data.session_output_tokens += te.actual_output_tokens;

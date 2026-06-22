@@ -1,10 +1,11 @@
-//! Slim-mode status line — single row of persistent operational telemetry.
+//! Slim-mode session row — persistent operational telemetry below the composer.
 //!
-//! Renders between conversation and editor in slim mode only.
-//! Fields shed right-to-left as terminal width shrinks, ensuring the
-//! line never wraps. The leftmost fields (context %, turn, model, tokens)
-//! are always visible; workspace, branch, file activity, OODA phase,
-//! drift warnings, and persona appear when space allows.
+//! The engine row above the composer owns provider/model/context capacity.
+//! The workbench row directly below the composer owns active plan/workstream
+//! progress. This row is the very bottom slim session row: turn lifecycle,
+//! transcript state, token I/O, workspace evidence, and version.
+//! Fields shed right-to-left as terminal width shrinks, ensuring the line never
+//! wraps.
 
 use omegon_traits::{DriftKind, OodaPhase};
 use ratatui::Frame;
@@ -18,7 +19,7 @@ use super::widgets;
 use crate::surfaces::footer::ProjectFooterSurface;
 
 #[derive(Debug, Default)]
-pub struct StatusLine {
+pub struct SessionRow {
     pub context_percent: f32,
     pub turn: u32,
     pub model_short: String,
@@ -44,7 +45,7 @@ pub struct StatusLine {
     pub operator_hint: Option<String>,
 }
 
-impl StatusLine {
+impl SessionRow {
     /// Update fields from footer_data at the start of each draw cycle.
     pub fn sync_from_footer(&mut self, footer: &super::footer::FooterData) {
         let projection = footer.project_footer_surface();
@@ -73,14 +74,14 @@ impl StatusLine {
     pub fn preferred_height_for(&self, width: u16) -> u16 {
         if width < 20 {
             0
-        } else if self.engine_row_needed() {
+        } else if self.runtime_warning_row_needed() {
             2
         } else {
             1
         }
     }
 
-    fn engine_row_needed(&self) -> bool {
+    fn runtime_warning_row_needed(&self) -> bool {
         !self.provider_connected || self.drift.is_some()
     }
 
@@ -89,15 +90,15 @@ impl StatusLine {
         if height == 0 {
             return;
         }
-        let lifecycle_area = Rect::new(area.x, area.y, area.width, 1);
-        self.render_lifecycle_row(lifecycle_area, frame, t);
-        if height > 1 && self.engine_row_needed() {
-            let engine_area = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);
-            self.render_engine_row(engine_area, frame, t);
+        let session_area = Rect::new(area.x, area.y, area.width, 1);
+        self.render_session_row(session_area, frame, t);
+        if height > 1 && self.runtime_warning_row_needed() {
+            let warning_area = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);
+            self.render_runtime_warning_row(warning_area, frame, t);
         }
     }
 
-    fn render_lifecycle_row(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+    fn render_session_row(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let w = area.width as usize;
         if w < 20 {
             return;
@@ -106,22 +107,17 @@ impl StatusLine {
         let sep = Span::styled(" · ", Style::default().fg(t.dim()));
         let sect = Span::styled(" │ ", Style::default().fg(t.dim()));
 
-        // ── Pinned fields (always shown) ────────────────────────
+        // ── Pinned session fields (always shown) ─────────────────
 
-        let pct_str = format!("{}%", self.context_percent as u32);
-        let pct_color = widgets::percent_color(self.context_percent, t);
-
-        let turn_str = format!("t{}", self.turn);
+        let turn_str = format!("turn {}", self.turn);
         let in_str = format!("↑{}", fmt_tokens(self.session_input_tokens));
         let out_str = format!("↓{}", fmt_tokens(self.session_output_tokens));
-        let tok_str = format!("{in_str} {out_str}");
+        let tok_str = format!("io {in_str} {out_str}");
 
         let mut spans: Vec<Span<'static>> = vec![
-            Span::styled(format!(" {pct_str}"), Style::default().fg(pct_color)),
+            Span::styled(" session", Style::default().fg(t.accent_muted())),
             sep.clone(),
             Span::styled(turn_str, Style::default().fg(t.muted())),
-            sep.clone(),
-            Span::styled(self.model_short.clone(), Style::default().fg(t.muted())),
             sep.clone(),
             Span::styled(tok_str, Style::default().fg(t.dim())),
         ];
@@ -277,13 +273,13 @@ impl StatusLine {
         );
     }
 
-    fn render_engine_row(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+    fn render_runtime_warning_row(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         if area.width < 20 {
             return;
         }
 
         let text = crate::tui::inline_render::render_inline_text_row(
-            &self.project_engine_row(),
+            &self.project_runtime_warning_row(),
             area.width,
         );
         frame.render_widget(Clear, area);
@@ -297,7 +293,7 @@ impl StatusLine {
         );
     }
 
-    fn project_engine_row(&self) -> crate::surfaces::inline::InlineRow<String> {
+    fn project_runtime_warning_row(&self) -> crate::surfaces::inline::InlineRow<String> {
         let connection = if self.provider_connected {
             "online"
         } else {
@@ -306,7 +302,7 @@ impl StatusLine {
         crate::surfaces::inline::InlineRow::new(
             vec![
                 crate::surfaces::inline::InlineCell::new(
-                    "engine".to_string(),
+                    "runtime".to_string(),
                     crate::surfaces::inline::InlineCellRole::Label,
                 ),
                 crate::surfaces::inline::InlineCell::new(
@@ -418,8 +414,8 @@ mod tests {
     }
 
     #[test]
-    fn default_status_line() {
-        let sl = StatusLine::default();
+    fn default_session_row() {
+        let sl = SessionRow::default();
         assert_eq!(sl.turn, 0);
         assert_eq!(sl.context_percent, 0.0);
         assert!(sl.phase.is_none());
@@ -431,14 +427,14 @@ mod tests {
 
     #[test]
     fn preferred_height_matches_render_contract() {
-        assert_eq!(StatusLine::preferred_height(0), 0);
-        assert_eq!(StatusLine::preferred_height(19), 0);
-        assert_eq!(StatusLine::preferred_height(20), 1);
+        assert_eq!(SessionRow::preferred_height(0), 0);
+        assert_eq!(SessionRow::preferred_height(19), 0);
+        assert_eq!(SessionRow::preferred_height(20), 1);
     }
 
     #[test]
-    fn preferred_height_for_collapses_online_engine_row() {
-        let sl = StatusLine {
+    fn preferred_height_for_collapses_online_runtime_warning_row() {
+        let sl = SessionRow {
             provider_connected: true,
             ..Default::default()
         };
@@ -446,8 +442,8 @@ mod tests {
     }
 
     #[test]
-    fn preferred_height_for_keeps_disconnected_engine_row() {
-        let sl = StatusLine {
+    fn preferred_height_for_keeps_disconnected_runtime_warning_row() {
+        let sl = SessionRow {
             provider_connected: false,
             ..Default::default()
         };
@@ -471,8 +467,8 @@ mod tests {
     }
 
     #[test]
-    fn status_line_icons_label_directory_branch_and_ooda() {
-        let mut sl = StatusLine {
+    fn session_row_labels_directory_branch_and_ooda_without_engine_duplicates() {
+        let mut sl = SessionRow {
             context_percent: 50.0,
             turn: 8,
             model_short: "gpt".into(),
@@ -496,9 +492,14 @@ mod tests {
             text.push_str(buf[(x, 0)].symbol());
         }
 
+        assert!(text.contains("session"), "{text}");
+        assert!(text.contains("turn 8"), "{text}");
+        assert!(text.contains("io ↑32k ↓2k"), "{text}");
         assert!(text.contains("dir omegon"), "{text}");
         assert!(text.contains("git fix/footer"), "{text}");
         assert!(text.contains("oodA Act"), "{text}");
+        assert!(!text.contains("50%"), "{text}");
+        assert!(!text.contains("gpt"), "{text}");
     }
 
     #[test]
@@ -525,8 +526,8 @@ mod tests {
     }
 
     #[test]
-    fn engine_row_projection_preserves_left_identity_and_right_metadata() {
-        let sl = StatusLine {
+    fn runtime_warning_row_projection_preserves_left_identity_and_right_metadata() {
+        let sl = SessionRow {
             runtime_brand: "omegon".into(),
             posture: "agent".into(),
             model_provider: "anthropic".into(),
@@ -538,8 +539,8 @@ mod tests {
             ..Default::default()
         };
 
-        let row = sl.project_engine_row();
-        assert_eq!(row.left[0].text, "engine");
+        let row = sl.project_runtime_warning_row();
+        assert_eq!(row.left[0].text, "runtime");
         assert_eq!(row.left[1].text, "omegon");
         assert!(
             row.left

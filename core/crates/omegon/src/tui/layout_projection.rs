@@ -16,7 +16,7 @@ pub struct TuiLayoutInputs {
     pub editor_height: u16,
     pub editor_info_height: u16,
     pub instrument_footer_height: u16,
-    pub status_height: u16,
+    pub session_height: u16,
     pub pending_permission: bool,
     pub tool_inspection_height: u16,
     pub workbench_height: u16,
@@ -36,7 +36,7 @@ pub struct TuiLayoutPlan {
     pub segment_detail_area: Rect,
     pub editor_area: Rect,
     pub editor_info_area: Rect,
-    pub status_area: Rect,
+    pub session_area: Rect,
     pub footer_area: Rect,
     pub footer_height: u16,
     pub tool_inspection_height: u16,
@@ -63,7 +63,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     };
 
     let is_slim = inputs.surfaces.is_compact();
-    let status_height = if is_slim { inputs.status_height } else { 0 };
+    let session_height = if is_slim { inputs.session_height } else { 0 };
     let permission_lane_height = if is_slim && inputs.pending_permission {
         2
     } else {
@@ -85,7 +85,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     let fixed_without_conversation = inputs
         .editor_height
         .saturating_add(inputs.editor_info_height)
-        .saturating_add(status_height)
+        .saturating_add(session_height)
         .saturating_add(footer_height)
         .saturating_add(permission_lane_height)
         .saturating_add(segment_detail_height);
@@ -112,7 +112,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
             Constraint::Length(inputs.editor_height),
             Constraint::Length(inputs.editor_info_height),
             Constraint::Length(workbench_height),
-            Constraint::Length(status_height),
+            Constraint::Length(session_height),
             Constraint::Length(project_dashboard_height(inputs, show_dashboard)),
             Constraint::Length(footer_height),
         ])
@@ -130,7 +130,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         editor_area: chunks[4],
         editor_info_area: chunks[5],
         workbench_area: chunks[6],
-        status_area: chunks[7],
+        session_area: chunks[7],
         footer_area: chunks[9],
         footer_height,
         tool_inspection_height,
@@ -153,7 +153,7 @@ mod tests {
             editor_height: 3,
             editor_info_height: 0,
             instrument_footer_height: 4,
-            status_height: 2,
+            session_height: 2,
             pending_permission: false,
             tool_inspection_height: 0,
             workbench_height: 0,
@@ -162,7 +162,7 @@ mod tests {
         assert!(!plan.show_dashboard);
         assert!(plan.is_slim);
         assert_eq!(plan.footer_height, 0);
-        assert_eq!(plan.status_area.height, 2);
+        assert_eq!(plan.session_area.height, 2);
     }
 
     #[test]
@@ -174,7 +174,7 @@ mod tests {
             editor_height: 3,
             editor_info_height: 0,
             instrument_footer_height: 4,
-            status_height: 2,
+            session_height: 2,
             pending_permission: false,
             tool_inspection_height: 0,
             workbench_height: 0,
@@ -185,7 +185,7 @@ mod tests {
         assert_eq!(plan.dashboard_area, None);
         assert_eq!(plan.main_area, Rect::new(0, 0, 140, 40));
         assert_eq!(plan.footer_height, 4);
-        assert_eq!(plan.status_area.height, 0);
+        assert_eq!(plan.session_area.height, 0);
         assert_eq!(plan.footer_area.y, 36);
         assert_eq!(plan.footer_area.height, 4);
         assert_eq!(plan.conversation_area.y, 0);
@@ -200,19 +200,19 @@ mod tests {
             editor_height: 4,
             editor_info_height: 1,
             instrument_footer_height: 3,
-            status_height: 2,
+            session_height: 2,
             pending_permission: false,
             tool_inspection_height: 6,
             workbench_height: 4,
             segment_detail_height: 3,
         });
         assert_eq!(plan.footer_height, 0);
-        assert_eq!(plan.status_area.height, 2);
+        assert_eq!(plan.session_area.height, 2);
         assert_eq!(plan.workbench_area.height, 4);
         assert!(plan.segment_detail_area.y < plan.editor_area.y);
         assert!(plan.editor_area.y < plan.editor_info_area.y);
         assert!(plan.editor_info_area.y < plan.workbench_area.y);
-        assert!(plan.workbench_area.y < plan.status_area.y);
+        assert!(plan.workbench_area.y < plan.session_area.y);
     }
 
     #[test]
@@ -228,7 +228,7 @@ mod tests {
             editor_height: 3,
             editor_info_height: 0,
             instrument_footer_height: 4,
-            status_height: 2,
+            session_height: 2,
             pending_permission: true,
             tool_inspection_height: 20,
             workbench_height: 20,
@@ -249,7 +249,7 @@ mod tests {
             editor_height: 3,
             editor_info_height: 0,
             instrument_footer_height: 4,
-            status_height: 2,
+            session_height: 2,
             pending_permission: false,
             tool_inspection_height: 0,
             workbench_height: 0,
@@ -269,7 +269,7 @@ mod tests {
             editor_height: 4,
             editor_info_height: 1,
             instrument_footer_height: 4,
-            status_height: 2,
+            session_height: 2,
             pending_permission: false,
             tool_inspection_height: 5,
             workbench_height: 5,
@@ -281,7 +281,7 @@ mod tests {
         assert!(plan.segment_detail_area.y < plan.editor_area.y);
         assert!(plan.editor_area.y < plan.editor_info_area.y);
         assert!(plan.editor_info_area.y < plan.workbench_area.y);
-        assert!(plan.workbench_area.y < plan.status_area.y);
+        assert!(plan.workbench_area.y < plan.session_area.y);
     }
 
     #[test]
@@ -293,7 +293,7 @@ mod tests {
             editor_height: 4,
             editor_info_height: 1,
             instrument_footer_height: 4,
-            status_height: 2,
+            session_height: 2,
             pending_permission: false,
             tool_inspection_height: 12,
             workbench_height: 5,
@@ -303,9 +303,9 @@ mod tests {
         assert!(plan.conversation_area.height >= 3);
         assert_eq!(plan.editor_area.height, 4);
         assert_eq!(plan.editor_info_area.height, 1);
-        assert_eq!(plan.status_area.height, 2);
+        assert_eq!(plan.session_area.height, 2);
         assert!(plan.segment_detail_area.y < plan.editor_area.y);
         assert!(plan.editor_info_area.y < plan.workbench_area.y);
-        assert!(plan.workbench_area.y < plan.status_area.y);
+        assert!(plan.workbench_area.y < plan.session_area.y);
     }
 }
