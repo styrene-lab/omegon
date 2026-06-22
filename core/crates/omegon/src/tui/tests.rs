@@ -5885,6 +5885,9 @@ fn settings_projection_helper_marks_runtime_profile_drift() {
 fn settings_screen_renders_profile_source_and_drift_actions() {
     let mut app = test_app();
     let tmp = tempfile::tempdir().expect("tempdir");
+    let profile_path = tmp.path().join(".omegon/profile.json");
+    std::fs::create_dir_all(profile_path.parent().unwrap()).expect("profile dir");
+    std::fs::write(&profile_path, r#"{"thinkingLevel":"medium"}"#).expect("profile");
     app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
     app.update_settings(|s| {
         s.thinking = ThinkingLevel::Minimal;
@@ -5894,10 +5897,20 @@ fn settings_screen_renders_profile_source_and_drift_actions() {
     app.open_settings_screen();
     let rendered = render_app_to_string(&mut app, 120, 32);
 
-    assert!(rendered.contains("profile:"), "{rendered}");
+    assert!(rendered.contains("profile: project"), "{rendered}");
+    assert!(rendered.contains("file:"), "{rendered}");
     assert!(rendered.contains("runtime drift"), "{rendered}");
     assert!(rendered.contains("/profile save"), "{rendered}");
     assert!(rendered.contains("/profile apply"), "{rendered}");
+}
+
+#[test]
+fn settings_profile_source_line_separates_source_from_full_path() {
+    let path = std::path::PathBuf::from("/tmp/omegon-project/.omegon/profile.json");
+    let line = settings_profile_source_line(&crate::settings::ProfileSource::Project(path.clone()));
+
+    assert_eq!(line, format!("profile: project · file: {}", path.display()));
+    assert!(!line.contains("project:/tmp"));
 }
 
 #[test]
