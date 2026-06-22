@@ -763,7 +763,14 @@ impl FooterData {
             self.cwd.clone()
         };
         lines.push(Line::from(vec![
-            Span::styled("⌂ ", Style::default().fg(t.dim())),
+            Span::styled(
+                format!(
+                    "{} ",
+                    crate::tui::glyphs::glyphs()
+                        .workspace(crate::tui::glyphs::WorkspaceGlyphRole::Directory)
+                ),
+                Style::default().fg(t.dim()),
+            ),
             Span::styled(display_cwd, Style::default().fg(t.muted())),
         ]));
 

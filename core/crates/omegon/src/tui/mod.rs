@@ -5826,6 +5826,19 @@ impl App {
         self.show_toast(&toast.message, toast_type);
     }
 
+    fn show_startup_notice(&mut self) {
+        let glyphs = crate::tui::glyphs::glyphs();
+        if glyphs.profile != crate::tui::glyphs::GlyphProfile::NerdFont {
+            let link = crate::tui::glyphs::nerd_font_install_help_url();
+            self.show_toast(
+                &format!(
+                    "Nerd Font not detected; using portable glyph fallback. Install support: {link}"
+                ),
+                ratatui_toaster::ToastType::Info,
+            );
+        }
+    }
+
     fn show_toast(&mut self, message: &str, toast_type: ratatui_toaster::ToastType) {
         let (icon, color) = match toast_type {
             ratatui_toaster::ToastType::Error => ("✖", self.theme.error()),
@@ -9015,6 +9028,7 @@ pub async fn run_tui(
     let mut app = App::new(settings.clone());
     app.mouse_capture_enabled = true;
     app.keyboard_enhancement = has_keyboard_enhancement;
+    app.show_startup_notice();
     // Populate extension widgets and receivers from config
     for widget in config.extension_widgets {
         app.extension_widgets

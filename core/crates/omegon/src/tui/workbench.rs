@@ -674,7 +674,11 @@ fn render_workspace_context_panel(
     {
         spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
         spans.push(Span::styled(
-            format!("⌂ {repo}"),
+            format!(
+                "{} {repo}",
+                crate::tui::glyphs::glyphs()
+                    .workspace(crate::tui::glyphs::WorkspaceGlyphRole::Repo)
+            ),
             Style::default().fg(t.muted()).bg(bg),
         ));
     }
@@ -683,7 +687,12 @@ fn render_workspace_context_panel(
     if show_dir {
         spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
         spans.push(Span::styled(
-            format!("▱ {}", state.workspace.dir),
+            format!(
+                "{} {}",
+                crate::tui::glyphs::glyphs()
+                    .workspace(crate::tui::glyphs::WorkspaceGlyphRole::Directory),
+                state.workspace.dir
+            ),
             Style::default().fg(t.muted()).bg(bg),
         ));
     }
@@ -695,7 +704,11 @@ fn render_workspace_context_panel(
     {
         spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
         spans.push(Span::styled(
-            format!(" {branch}"),
+            format!(
+                "{} {branch}",
+                crate::tui::glyphs::glyphs()
+                    .workspace(crate::tui::glyphs::WorkspaceGlyphRole::Branch)
+            ),
             Style::default().fg(t.muted()).bg(bg),
         ));
     }
@@ -1049,9 +1062,30 @@ mod tests {
             text.push_str(buf[(x, 0)].symbol());
         }
 
-        assert!(text.contains(&format!("⌂ {repo}")), "{text}");
-        assert!(text.contains(&format!("▱ {cwd}")), "{text}");
-        assert!(text.contains(&format!(" {branch}")), "{text}");
+        assert!(
+            text.contains(&format!(
+                "{} {repo}",
+                crate::tui::glyphs::glyphs()
+                    .workspace(crate::tui::glyphs::WorkspaceGlyphRole::Repo)
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains(&format!(
+                "{} {cwd}",
+                crate::tui::glyphs::glyphs()
+                    .workspace(crate::tui::glyphs::WorkspaceGlyphRole::Directory)
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains(&format!(
+                "{} {branch}",
+                crate::tui::glyphs::glyphs()
+                    .workspace(crate::tui::glyphs::WorkspaceGlyphRole::Branch)
+            )),
+            "{text}"
+        );
         assert!(!text.contains(&format!("repo {repo}")), "{text}");
         assert!(!text.contains(&format!("dir {cwd}")), "{text}");
         assert!(!text.contains(&format!("git {branch}")), "{text}");
@@ -1088,9 +1122,30 @@ mod tests {
             text.push_str(buf[(x, 0)].symbol());
         }
 
-        assert!(text.contains(&format!("⌂ {repo}")), "{text}");
-        assert!(!text.contains(&format!("▱ {repo}")), "{text}");
-        assert!(text.contains(&format!(" {branch}")), "{text}");
+        assert!(
+            text.contains(&format!(
+                "{} {repo}",
+                crate::tui::glyphs::glyphs()
+                    .workspace(crate::tui::glyphs::WorkspaceGlyphRole::Repo)
+            )),
+            "{text}"
+        );
+        assert!(
+            !text.contains(&format!(
+                "{} {repo}",
+                crate::tui::glyphs::glyphs()
+                    .workspace(crate::tui::glyphs::WorkspaceGlyphRole::Directory)
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains(&format!(
+                "{} {branch}",
+                crate::tui::glyphs::glyphs()
+                    .workspace(crate::tui::glyphs::WorkspaceGlyphRole::Branch)
+            )),
+            "{text}"
+        );
     }
 
     #[test]

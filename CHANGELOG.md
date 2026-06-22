@@ -16,6 +16,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Changed
+- Added TUI glyph profiles with Nerd Font detection and portable fallback icons for terminals without compatible fonts.
+
 ### Fixed
 - Removed duplicate workspace dir/git metadata from the compact TUI session row now that the workbench row owns workspace context.
 - Populate the compact TUI workbench row with known workspace context (repo, dir, and git branch) even before a tool, plan, delegate, or cleave run is active.

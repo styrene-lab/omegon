@@ -4,8 +4,22 @@
 //! keeps visual policy replaceable without coupling independent surfaces.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlyphProfile {
+    Ascii,
+    Unicode,
+    NerdFont,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleGlyphRole {
     Horizontal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceGlyphRole {
+    Repo,
+    Directory,
+    Branch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +59,13 @@ pub struct RuleGlyphMatrix {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct WorkspaceGlyphMatrix {
+    pub repo: &'static str,
+    pub directory: &'static str,
+    pub branch: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct ToolStateGlyphMatrix {
     pub running: &'static str,
     pub completed: &'static str,
@@ -77,14 +98,57 @@ pub struct ToolGlyphMatrix {
 
 #[derive(Debug, Clone, Copy)]
 pub struct GlyphSet {
+    pub profile: GlyphProfile,
     pub rule: RuleGlyphMatrix,
+    pub workspace: WorkspaceGlyphMatrix,
     pub tool: ToolGlyphMatrix,
     pub tool_state: ToolStateGlyphMatrix,
     pub tool_category: ToolCategoryGlyphMatrix,
 }
 
+pub const ASCII_GLYPHS: GlyphSet = GlyphSet {
+    profile: GlyphProfile::Ascii,
+    rule: RuleGlyphMatrix { horizontal: "-" },
+    workspace: WorkspaceGlyphMatrix {
+        repo: "repo",
+        directory: "dir",
+        branch: "branch",
+    },
+    tool: ToolGlyphMatrix {
+        running: "*",
+        completed: "ok",
+        failed: "x",
+        detail: ">",
+    },
+    tool_state: ToolStateGlyphMatrix {
+        running: "*",
+        completed: "ok",
+        failed: "x",
+        waiting: "o",
+        cancelled: "-",
+        detail: ">",
+    },
+    tool_category: ToolCategoryGlyphMatrix {
+        shell: "$",
+        read: "read",
+        write: "write",
+        search: "find",
+        design: "design",
+        memory: "mem",
+        network: "net",
+        subagent: "agent",
+        generic: "*",
+    },
+};
+
 pub const UNICODE_GLYPHS: GlyphSet = GlyphSet {
+    profile: GlyphProfile::Unicode,
     rule: RuleGlyphMatrix { horizontal: "─" },
+    workspace: WorkspaceGlyphMatrix {
+        repo: "⌂",
+        directory: "▱",
+        branch: "⎇",
+    },
     tool: ToolGlyphMatrix {
         running: "◐",
         completed: "✓",
@@ -112,10 +176,53 @@ pub const UNICODE_GLYPHS: GlyphSet = GlyphSet {
     },
 };
 
+pub const NERD_FONT_GLYPHS: GlyphSet = GlyphSet {
+    profile: GlyphProfile::NerdFont,
+    rule: RuleGlyphMatrix { horizontal: "─" },
+    workspace: WorkspaceGlyphMatrix {
+        repo: "󰏗",
+        directory: "",
+        branch: "",
+    },
+    tool: ToolGlyphMatrix {
+        running: "󰦖",
+        completed: "",
+        failed: "",
+        detail: "󰌑",
+    },
+    tool_state: ToolStateGlyphMatrix {
+        running: "󰦖",
+        completed: "",
+        failed: "",
+        waiting: "󰔟",
+        cancelled: "",
+        detail: "󰌑",
+    },
+    tool_category: ToolCategoryGlyphMatrix {
+        shell: "",
+        read: "󰈙",
+        write: "󰷈",
+        search: "󰍉",
+        design: "󰙴",
+        memory: "󰍛",
+        network: "󰖟",
+        subagent: "󰚩",
+        generic: "󰧑",
+    },
+};
+
 impl GlyphSet {
     pub fn rule(self, role: RuleGlyphRole) -> &'static str {
         match role {
             RuleGlyphRole::Horizontal => self.rule.horizontal,
+        }
+    }
+
+    pub fn workspace(self, role: WorkspaceGlyphRole) -> &'static str {
+        match role {
+            WorkspaceGlyphRole::Repo => self.workspace.repo,
+            WorkspaceGlyphRole::Directory => self.workspace.directory,
+            WorkspaceGlyphRole::Branch => self.workspace.branch,
         }
     }
 
@@ -203,7 +310,40 @@ pub fn tool_state_role_for_status(status: &str) -> ToolStateGlyphRole {
 }
 
 pub fn glyphs() -> &'static GlyphSet {
-    &UNICODE_GLYPHS
+    static GLYPHS: std::sync::OnceLock<GlyphSet> = std::sync::OnceLock::new();
+    GLYPHS.get_or_init(detect_glyph_set)
+}
+
+fn detect_glyph_set() -> GlyphSet {
+    if std::env::var_os("OMEGON_ASCII_GLYPHS").is_some() || std::env::var_os("NO_COLOR").is_some() {
+        return ASCII_GLYPHS;
+    }
+    if std::env::var_os("OMEGON_NERD_FONT").is_some() || terminal_looks_nerd_font_compatible() {
+        return NERD_FONT_GLYPHS;
+    }
+    UNICODE_GLYPHS
+}
+
+pub fn terminal_looks_nerd_font_compatible() -> bool {
+    let term = std::env::var("TERM")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let program = std::env::var("TERM_PROGRAM")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let font = std::env::var("KITTY_FONT")
+        .or_else(|_| std::env::var("OMEGON_TERMINAL_FONT"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    std::env::var_os("KITTY_WINDOW_ID").is_some()
+        || term.contains("kitty")
+        || program.contains("kitty")
+        || font.contains("nerd")
+}
+
+pub fn nerd_font_install_help_url() -> &'static str {
+    "https://www.nerdfonts.com/font-downloads"
 }
 
 #[cfg(test)]
