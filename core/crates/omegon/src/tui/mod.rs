@@ -110,9 +110,6 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use self::command_surfaces::{
-    CommandPanel, CommandPrompt, CommandPromptAction, CommandSeverity, CommandToast,
-};
 use self::conversation::{ConversationView, Tab};
 use self::dashboard::DashboardState;
 use self::editor::Editor;
@@ -126,6 +123,9 @@ use self::workbench::{
     PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, WorkbenchState,
     active_workbench_snapshot, render_workbench_panel, slim_completed_plan_hint_available,
     slim_operator_hint, upstream_retry_hint, workbench_preferred_height,
+};
+use crate::surfaces::command::{
+    CommandPanel, CommandPrompt, CommandPromptAction, CommandSeverity, CommandToast,
 };
 use crate::surfaces::layout::UiSurfaces;
 use crate::surfaces::operations::OperationMilestoneProjection;
@@ -5652,7 +5652,7 @@ impl App {
         self.command_panel = Some(panel);
     }
 
-    fn show_command_toast(&mut self, toast: command_surfaces::CommandToast) {
+    fn show_command_toast(&mut self, toast: CommandToast) {
         let toast_type = match toast.severity {
             CommandSeverity::Info => ratatui_toaster::ToastType::Info,
             CommandSeverity::Success => ratatui_toaster::ToastType::Success,

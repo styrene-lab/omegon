@@ -794,7 +794,7 @@ async fn ui_action_permission_response_unblocks_pending_permission() {
         permission_tx,
     ))));
     app.pending_permission_context = Some(("write".into(), "src/lib.rs".into()));
-    app.command_prompt = Some(super::command_surfaces::CommandPrompt::new(
+    app.command_prompt = Some(crate::surfaces::command::CommandPrompt::new(
         "Permission required",
         "Allow write?",
     ));
@@ -829,7 +829,7 @@ async fn ui_action_operator_wait_response_unblocks_pending_wait() {
     let (wait_tx, wait_rx) = std::sync::mpsc::channel();
     app.pending_operator_wait = Some(std::sync::Arc::new(std::sync::Mutex::new(Some(wait_tx))));
     app.pending_operator_wait_context = Some("deploy smoke test".into());
-    app.command_prompt = Some(super::command_surfaces::CommandPrompt::new(
+    app.command_prompt = Some(crate::surfaces::command::CommandPrompt::new(
         "Manual action required",
         "deploy smoke test",
     ));
