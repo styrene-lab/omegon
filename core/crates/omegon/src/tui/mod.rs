@@ -5020,12 +5020,6 @@ impl App {
                 provider_label
             };
             let route_label = format!("{provider_label}/{model_short}");
-            let context_widget = Self::editor_context_widget(
-                self.footer_data.actual_context_class,
-                self.footer_data.context_window,
-                self.footer_data.estimated_tokens,
-                self.footer_data.context_percent,
-            );
             let editor_title = if self.agent_active {
                 let verb_display = spinner::maybe_glitch(self.working_verb)
                     .unwrap_or_else(|| self.working_verb.to_string());
@@ -5067,9 +5061,15 @@ impl App {
                     self.footer_data.thinking_level
                 );
                 let context_text = format!(
-                    "{} {}",
+                    "{} ctx:{}@{} {:.0}%",
                     glyphs.engine(EngineGlyphRole::Context),
-                    context_widget
+                    Self::context_class_tag(self.footer_data.actual_context_class),
+                    if self.footer_data.context_window > 0 {
+                        widgets::format_tokens(self.footer_data.context_window)
+                    } else {
+                        widgets::format_tokens(self.footer_data.actual_context_class.nominal_tokens())
+                    },
+                    self.footer_data.context_percent
                 );
                 let mut title_spans = vec![
                     Span::styled(" ", Style::default().fg(t.border_dim())),
