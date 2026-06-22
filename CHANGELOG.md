@@ -21,7 +21,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
 
 ### Fixed
-- Kept the provider/model segment pinned in the lean editor engine ribbon by sizing optional grade, thinking, and context fields before handing the title to ratatui, instead of letting title overflow clip the provider off the left edge.
+- Render the lean editor engine ribbon's pinned route as a single provider/model label with an explicit missing-provider fallback, so provider identity cannot disappear silently behind separator math or empty provider state.
 - Scoped OAuth expiry toasts to the active provider route so stale non-active provider credentials remain visible in auth status without interrupting healthy conversations.
 - Removed duplicate workspace dir/git metadata from the compact TUI session row now that the workbench row owns workspace context.
 - Populate the compact TUI workbench row with known workspace context (repo, dir, and git branch) even before a tool, plan, delegate, or cleave run is active.

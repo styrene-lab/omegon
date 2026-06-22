@@ -4863,16 +4863,31 @@ impl App {
             } else {
                 "⏎ send  ⇧⏎/⌥⏎ newline  ⌥↑/⌥↓ history ".into()
             };
-            let model_short = self
-                .footer_data
-                .model_id
+            let model_id = self.footer_data.model_id.as_str();
+            let model_short = model_id
                 .split(':')
                 .next_back()
-                .unwrap_or(&self.footer_data.model_id)
+                .unwrap_or(model_id)
                 .split('-')
                 .take(2)
                 .collect::<Vec<_>>()
                 .join("-");
+            let provider_label = self
+                .footer_data
+                .model_provider
+                .trim()
+                .split(':')
+                .next()
+                .unwrap_or("");
+            let provider_label = if provider_label.is_empty() {
+                model_id
+                    .split_once(':')
+                    .map(|(provider, _)| provider)
+                    .unwrap_or("provider?")
+            } else {
+                provider_label
+            };
+            let route_label = format!("{provider_label}/{model_short}");
             let context_widget = Self::editor_context_widget(
                 self.footer_data.actual_context_class,
                 self.footer_data.context_window,
@@ -4898,7 +4913,7 @@ impl App {
                 use crate::tui::glyphs::EngineGlyphRole;
                 let glyphs = crate::tui::glyphs::glyphs();
                 let is_local_provider = matches!(
-                    self.footer_data.model_provider.as_str(),
+                    provider_label,
                     "ollama" | "llama.cpp" | "local"
                 );
                 let provider_glyph = if is_local_provider {
@@ -4928,22 +4943,13 @@ impl App {
                     Span::styled(" ", Style::default().fg(t.border_dim())),
                     Span::styled(
                         format!(
-                            "{} {provider_glyph} {} ",
+                            "{} {provider_glyph} {route_label} ",
                             glyphs.engine(EngineGlyphRole::RibbonMark),
-                            self.footer_data.model_provider
                         ),
                         Style::default()
                             .fg(t.bg())
                             .bg(t.accent_muted())
                             .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        route_glyph,
-                        Style::default().fg(t.accent_muted()).bg(t.surface_bg()),
-                    ),
-                    Span::styled(
-                        format!(" {model_short} "),
-                        Style::default().fg(t.fg()).bg(t.surface_bg()),
                     ),
                 ];
                 let push_tail = |spans: &mut Vec<Span<'static>>, text: String, style: Style| {
