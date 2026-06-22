@@ -21,6 +21,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Removed inline `^O details` affordances from slim tool rows now that single-click selects and double-click expands or copies segments.
 
 ### Changed
+- Renamed the compact TUI rows internally around the engine/workbench/session contract and removed duplicated model/context fields from the bottom session row.
 - Moved command panel, prompt, toast, modal, and severity DTOs into renderer-neutral surface projections so TUI command modals share backend-decoupled state with future clients.
 - Unified TUI command/modal geometry across the persistent settings surface and slash-command selectors so tabs and nested command editors keep a cohesive footprint.
 - Added settings-screen search/filter mode so operators can narrow visible rows before editing.
