@@ -5039,6 +5039,7 @@ impl App {
                     glyphs.engine(EngineGlyphRole::ProviderCloud)
                 };
                 let route_glyph = glyphs.engine(EngineGlyphRole::Route);
+                let title_budget = editor_area.width.saturating_sub(2) as usize;
                 let grade = self.footer_data.model_tier.trim();
                 let grade_text = if grade.is_empty() {
                     glyphs.engine(EngineGlyphRole::GradeEmblem).to_string()
@@ -5055,10 +5056,11 @@ impl App {
                     glyphs.engine(EngineGlyphRole::Context),
                     context_widget
                 );
-                Line::from(vec![
+                let mut title_spans = vec![
                     Span::styled(" ", Style::default().fg(t.border_dim())),
                     Span::styled(
-                        format!("{} {provider_glyph} {} ",
+                        format!(
+                            "{} {provider_glyph} {} ",
                             glyphs.engine(EngineGlyphRole::RibbonMark),
                             self.footer_data.model_provider
                         ),
@@ -5075,38 +5077,48 @@ impl App {
                         format!(" {model_short} "),
                         Style::default().fg(t.fg()).bg(t.surface_bg()),
                     ),
-                    Span::styled(
+                ];
+                let push_tail = |spans: &mut Vec<Span<'static>>, text: String, style: Style| {
+                    spans.push(Span::styled(
                         route_glyph,
                         Style::default().fg(t.surface_bg()).bg(t.card_bg()),
-                    ),
-                    Span::styled(
-                        format!(" {grade_text} "),
+                    ));
+                    spans.push(Span::styled(format!(" {text} "), style));
+                };
+                let tail_fields = [
+                    (
+                        grade_text,
                         Style::default()
                             .fg(t.accent_bright())
                             .bg(t.card_bg())
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
+                    (
+                        thinking_text,
+                        Style::default().fg(t.accent_muted()).bg(t.card_bg()),
+                    ),
+                    (context_text, Style::default().fg(t.muted()).bg(t.card_bg())),
+                ];
+                for (text, style) in tail_fields {
+                    let mut candidate = title_spans.clone();
+                    push_tail(&mut candidate, text, style);
+                    let candidate_width = candidate.iter().map(|span| span.width()).sum::<usize>()
+                        + Span::raw(route_glyph).width();
+                    if candidate_width <= title_budget {
+                        title_spans = candidate;
+                    }
+                }
+                if !title_spans
+                    .last()
+                    .map(|span| span.content.as_ref() == route_glyph)
+                    .unwrap_or(false)
+                {
+                    title_spans.push(Span::styled(
                         route_glyph,
                         Style::default().fg(t.card_bg()).bg(t.surface_bg()),
-                    ),
-                    Span::styled(
-                        format!(" {thinking_text} "),
-                        Style::default().fg(t.accent_muted()).bg(t.surface_bg()),
-                    ),
-                    Span::styled(
-                        route_glyph,
-                        Style::default().fg(t.surface_bg()).bg(t.card_bg()),
-                    ),
-                    Span::styled(
-                        format!(" {context_text} "),
-                        Style::default().fg(t.muted()).bg(t.card_bg()),
-                    ),
-                    Span::styled(
-                        route_glyph,
-                        Style::default().fg(t.card_bg()).bg(t.surface_bg()),
-                    ),
-                ])
+                    ));
+                }
+                Line::from(title_spans)
             };
             let editor_block = Block::default()
                 .borders(Borders::TOP)
