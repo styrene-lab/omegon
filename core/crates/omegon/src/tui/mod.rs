@@ -1653,6 +1653,99 @@ fn settings_profile_source_line(source: &crate::settings::ProfileSource) -> Stri
     }
 }
 
+fn workbench_repo_display_name(cwd: &std::path::Path) -> Option<String> {
+    let repo = git2::Repository::discover(cwd).ok()?;
+    git_remote_repo_name(&repo)
+}
+
+fn git_remote_repo_name(repo: &git2::Repository) -> Option<String> {
+    let remote = repo
+        .find_remote("upstream")
+        .or_else(|_| repo.find_remote("origin"))
+        .ok()?;
+    remote.url().and_then(repo_name_from_git_remote_url)
+}
+
+fn repo_name_from_git_remote_url(url: &str) -> Option<String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let without_git = trimmed.strip_suffix(".git").unwrap_or(trimmed);
+    let tail = without_git
+        .rsplit(['/', ':'])
+        .next()
+        .unwrap_or(without_git)
+        .trim();
+
+    if tail.is_empty() {
+        None
+    } else {
+        Some(tail.to_string())
+    }
+}
+
+fn workspace_dir_basename(path: &std::path::Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+#[cfg(test)]
+mod workspace_context_tests {
+    use super::*;
+
+    #[test]
+    fn repo_name_from_remote_url_handles_common_forms() {
+        assert_eq!(
+            repo_name_from_git_remote_url("git@github.com:styrene-labs/omegon.git"),
+            Some("omegon".to_string())
+        );
+        assert_eq!(
+            repo_name_from_git_remote_url("https://github.com/styrene-labs/omegon.git"),
+            Some("omegon".to_string())
+        );
+        assert_eq!(
+            repo_name_from_git_remote_url("ssh://git@github.com/styrene-labs/omegon"),
+            Some("omegon".to_string())
+        );
+        assert_eq!(repo_name_from_git_remote_url(""), None);
+    }
+
+    #[test]
+    fn git_remote_repo_name_prefers_upstream_over_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        repo.remote("origin", "git@github.com:fork/local-checkout-name.git")
+            .unwrap();
+        repo.remote("upstream", "git@github.com:styrene-labs/canonical-name.git")
+            .unwrap();
+
+        assert_eq!(
+            git_remote_repo_name(&repo),
+            Some("canonical-name".to_string())
+        );
+    }
+
+    #[test]
+    fn workbench_repo_display_name_uses_remote_not_checkout_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let checkout = dir.path().join("local-checkout-name");
+        std::fs::create_dir(&checkout).unwrap();
+        let repo = git2::Repository::init(&checkout).unwrap();
+        repo.remote("origin", "git@github.com:styrene-labs/canonical-name.git")
+            .unwrap();
+
+        assert_eq!(
+            workbench_repo_display_name(&checkout),
+            Some("canonical-name".to_string())
+        );
+        assert_eq!(workspace_dir_basename(&checkout), "local-checkout-name");
+    }
+}
+
 impl App {
     fn displayed_model_grade(model_provider: &str, model_id: &str, fallback: &str) -> String {
         let model = model_id
@@ -2155,15 +2248,13 @@ impl App {
 
     fn current_workbench_workspace_context(&self) -> WorkbenchWorkspaceContext {
         let cwd = self.cwd();
-        let dir = cwd
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("")
-            .to_string();
-        let repo = crate::setup::find_project_root(cwd)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(str::to_string);
+        let dir = workspace_dir_basename(cwd);
+        let repo = workbench_repo_display_name(cwd).or_else(|| {
+            crate::setup::find_project_root(cwd)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        });
         WorkbenchWorkspaceContext {
             repo,
             dir,
