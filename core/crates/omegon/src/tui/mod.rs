@@ -1246,7 +1246,6 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             let parts: Vec<&str> = args.splitn(3, ' ').collect();
             match parts.first().copied().unwrap_or("") {
                 "" | "list" | "status" => Some(CanonicalSlashCommand::SecretsView),
-                "configure" => Some(CanonicalSlashCommand::SecretsView),
                 "set" if parts.len() >= 3 && !parts[1].trim().is_empty() => {
                     Some(CanonicalSlashCommand::SecretsSet {
                         name: parts[1].trim().to_string(),

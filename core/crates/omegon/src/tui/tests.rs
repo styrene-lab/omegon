@@ -3873,6 +3873,119 @@ fn slash_secrets_enqueues_execute_control() {
 }
 
 #[test]
+fn secret_action_selector_list_enqueues_execute_control() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    app.handle_slash_command("/secrets", &tx);
+    let selector = app.selector.as_mut().expect("selector should be open");
+    let index = selector
+        .options
+        .iter()
+        .position(|o| o.value == "list")
+        .expect("list option present");
+    selector.cursor = index;
+
+    let message = app
+        .confirm_selector(&tx)
+        .expect("selector confirmation should return message");
+
+    assert!(message.contains("Listing"), "unexpected message: {message}");
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::SecretsView,
+            ..
+        } => {}
+        other => panic!("expected secrets view control request, got: {other:?}"),
+    }
+}
+
+#[test]
+fn secret_action_selector_set_opens_secret_name_selector() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    app.handle_slash_command("/secrets", &tx);
+    let selector = app.selector.as_mut().expect("selector should be open");
+    let index = selector
+        .options
+        .iter()
+        .position(|o| o.value == "set")
+        .expect("set option present");
+    selector.cursor = index;
+
+    let message = app
+        .confirm_selector(&tx)
+        .expect("selector confirmation should return message");
+
+    assert!(
+        message.contains("Pick a secret"),
+        "unexpected message: {message}"
+    );
+    assert!(
+        app.selector.is_some(),
+        "expected secret-name selector to open"
+    );
+    assert_eq!(app.selector_kind, Some(SelectorKind::SecretName));
+}
+
+#[test]
+fn secret_action_selector_delete_primes_editor() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    app.handle_slash_command("/secrets", &tx);
+    let selector = app.selector.as_mut().expect("selector should be open");
+    let index = selector
+        .options
+        .iter()
+        .position(|o| o.value == "delete")
+        .expect("delete option present");
+    selector.cursor = index;
+
+    let message = app
+        .confirm_selector(&tx)
+        .expect("selector confirmation should return message");
+
+    assert_eq!(app.editor.render_text(), "/secrets delete ");
+    assert!(
+        message.contains("secret name"),
+        "unexpected message: {message}"
+    );
+}
+
+#[test]
+fn secret_aliases_are_advertised_and_canonical() {
+    let secrets = crate::command_registry::BUILTIN_COMMANDS
+        .iter()
+        .find(|entry| entry.name == "secrets")
+        .expect("secrets command advertised");
+    for subcommand in ["status", "configure", "remove", "rm"] {
+        assert!(
+            secrets.subcommands.contains(&subcommand),
+            "/secrets {subcommand} should be advertised"
+        );
+    }
+
+    assert!(matches!(
+        canonical_slash_command("secrets", "status"),
+        Some(CanonicalSlashCommand::SecretsView)
+    ));
+    assert!(matches!(
+        canonical_slash_command("secrets", "remove FOO"),
+        Some(CanonicalSlashCommand::SecretsDelete(name)) if name == "FOO"
+    ));
+    assert!(matches!(
+        canonical_slash_command("secrets", "rm FOO"),
+        Some(CanonicalSlashCommand::SecretsDelete(name)) if name == "FOO"
+    ));
+    assert!(
+        canonical_slash_command("secrets", "configure").is_none(),
+        "/secrets configure is interactive-only, not canonical SecretsView"
+    );
+}
+
+#[test]
 fn slash_vault_status_enqueues_execute_control() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
