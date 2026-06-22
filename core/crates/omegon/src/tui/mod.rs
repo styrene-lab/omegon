@@ -121,8 +121,9 @@ use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode};
 use self::settings_menu::SelectorKind;
 use self::workbench::{
     PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, WorkbenchState,
-    active_workbench_snapshot, render_workbench_panel, slim_completed_plan_hint_available,
-    slim_operator_hint, upstream_retry_hint, workbench_preferred_height,
+    WorkbenchWorkspaceContext, active_workbench_snapshot, render_workbench_panel,
+    slim_completed_plan_hint_available, slim_operator_hint, upstream_retry_hint,
+    workbench_preferred_height,
 };
 use crate::surfaces::command::{
     CommandPanel, CommandPrompt, CommandPromptAction, CommandSeverity, CommandToast,
@@ -2144,6 +2145,24 @@ impl App {
     /// Shorthand for the current working directory as a Path.
     fn cwd(&self) -> &std::path::Path {
         std::path::Path::new(&self.footer_data.cwd)
+    }
+
+    fn current_workbench_workspace_context(&self) -> WorkbenchWorkspaceContext {
+        let cwd = self.cwd();
+        let dir = cwd
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_string();
+        let repo = crate::setup::find_project_root(cwd)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string);
+        WorkbenchWorkspaceContext {
+            repo,
+            dir,
+            git_branch: self.footer_data.harness.git_branch.clone(),
+        }
     }
 
     /// Generate a recovery hint for a tool error, if one applies.
@@ -4350,6 +4369,7 @@ impl App {
             cleave: live_cleave,
             delegate: live_delegate,
             workstreams: self.workbench_state.workstreams.clone(),
+            workspace: self.current_workbench_workspace_context(),
         };
         let raw_tool_inspection_height = if self.ui_surfaces.is_compact() {
             self.tool_inspection_target

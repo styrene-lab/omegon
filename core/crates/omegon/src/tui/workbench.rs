@@ -35,7 +35,7 @@ pub fn workbench_preferred_height(state: &WorkbenchState, width: u16) -> u16 {
             .is_some_and(|p| p.active || p.running > 0)
     {
         5
-    } else if !state.workstreams.is_empty() {
+    } else if !state.workstreams.is_empty() || state.workspace.has_visible_context() {
         1
     } else {
         0
@@ -48,6 +48,25 @@ pub struct WorkbenchState {
     pub cleave: Option<CleaveProgress>,
     pub delegate: Option<DelegateProgress>,
     pub workstreams: Vec<WorkstreamSummary>,
+    pub workspace: WorkbenchWorkspaceContext,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkbenchWorkspaceContext {
+    pub repo: Option<String>,
+    pub dir: String,
+    pub git_branch: Option<String>,
+}
+
+impl WorkbenchWorkspaceContext {
+    pub fn has_visible_context(&self) -> bool {
+        self.repo.as_ref().is_some_and(|value| !value.is_empty())
+            || !self.dir.is_empty()
+            || self
+                .git_branch
+                .as_ref()
+                .is_some_and(|value| !value.is_empty())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -612,7 +631,6 @@ pub fn render_workbench_panel(
         return;
     }
 
-    let bg = t.surface_bg();
     if let Some(snapshot) = state.active.as_ref() {
         render_active_workbench_panel(area, frame, t, snapshot, state.workstreams.len());
     } else if let Some(cleave) = state.cleave.as_ref().filter(|p| p.active) {
@@ -628,9 +646,75 @@ pub fn render_workbench_panel(
         .filter(|p| p.active || p.running > 0)
     {
         render_delegate_workbench_panel(area, frame, t, delegate);
+    } else if !state.workstreams.is_empty() {
+        render_workstream_summary(area, frame, t, state.workstreams.as_slice(), t.surface_bg());
     } else {
-        render_workstream_summary(area, frame, t, state.workstreams.as_slice(), bg);
+        render_workspace_context_panel(area, frame, t, state);
     }
+}
+
+fn render_workspace_context_panel(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    state: &WorkbenchState,
+) {
+    let bg = t.surface_bg();
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::styled(
+        " workbench",
+        Style::default().fg(t.accent_muted()).bg(bg),
+    ));
+
+    if let Some(repo) = state
+        .workspace
+        .repo
+        .as_ref()
+        .filter(|value| !value.is_empty())
+    {
+        spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
+        spans.push(Span::styled(
+            format!("repo {repo}"),
+            Style::default().fg(t.muted()).bg(bg),
+        ));
+    }
+    if !state.workspace.dir.is_empty() {
+        spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
+        spans.push(Span::styled(
+            format!("dir {}", state.workspace.dir),
+            Style::default().fg(t.muted()).bg(bg),
+        ));
+    }
+    if let Some(branch) = state
+        .workspace
+        .git_branch
+        .as_ref()
+        .filter(|value| !value.is_empty())
+    {
+        spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
+        spans.push(Span::styled(
+            format!("git {branch}"),
+            Style::default().fg(t.muted()).bg(bg),
+        ));
+    }
+
+    if state.workspace.has_visible_context() {
+        let used = spans.iter().map(|span| span.width()).sum::<usize>() as u16;
+        if area.width > used.saturating_add(1) {
+            spans.push(Span::styled(
+                format!(
+                    " {}",
+                    "─".repeat(area.width.saturating_sub(used + 1) as usize)
+                ),
+                Style::default().fg(t.border_dim()).bg(bg),
+            ));
+        }
+    }
+
+    Paragraph::new(Line::from(spans))
+        .style(Style::default().bg(bg))
+        .wrap(Wrap { trim: false })
+        .render(area, frame.buffer_mut());
 }
 
 fn render_active_workbench_panel(
@@ -893,5 +977,27 @@ mod tests {
         );
 
         assert!(rendered.contains("tasks 1/3"), "{rendered}");
+    }
+
+    #[test]
+    fn workbench_height_includes_workspace_context_without_active_work() {
+        let state = WorkbenchState {
+            workspace: WorkbenchWorkspaceContext {
+                repo: Some("omegon-secundus".to_string()),
+                dir: "omegon-secundus".to_string(),
+                git_branch: Some("feature/ui-improvements-polish".to_string()),
+            },
+            ..WorkbenchState::default()
+        };
+
+        assert_eq!(workbench_preferred_height(&state, 120), 1);
+    }
+
+    #[test]
+    fn empty_workbench_without_workspace_context_has_no_height() {
+        assert_eq!(
+            workbench_preferred_height(&WorkbenchState::default(), 120),
+            0
+        );
     }
 }
