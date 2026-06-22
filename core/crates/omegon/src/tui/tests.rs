@@ -5753,6 +5753,49 @@ fn settings_screen_navigation_helpers_bound_rows_and_wrap_tabs() {
 }
 
 #[test]
+fn settings_screen_filter_matches_row_metadata_and_exit_search_clears_in_browse() {
+    let settings = Settings::new("test-model");
+    let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+    let mut screen = settings_menu::SettingsScreen::from_projection(&projection);
+
+    screen.enter_search();
+    for ch in "auto".chars() {
+        screen.push_filter_char(&projection, ch);
+    }
+
+    let rows = screen.active_rows(&projection);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "runtime.max_turns");
+
+    assert!(screen.exit_search());
+    assert_eq!(screen.mode, settings_menu::SettingsScreenMode::Browse);
+    assert_eq!(screen.filter, "auto");
+
+    assert!(screen.exit_search());
+    assert!(screen.filter.is_empty());
+}
+
+#[test]
+fn settings_screen_filter_backspace_clamps_empty_results() {
+    let settings = Settings::new("test-model");
+    let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
+    let mut screen = settings_menu::SettingsScreen::from_projection(&projection);
+
+    screen.selected_row = 3;
+    screen.enter_search();
+    for ch in "zzzz".chars() {
+        screen.push_filter_char(&projection, ch);
+    }
+    assert!(screen.active_rows(&projection).is_empty());
+    assert_eq!(screen.selected_row, 0);
+
+    for _ in 0..4 {
+        screen.pop_filter_char(&projection);
+    }
+    assert_eq!(screen.active_rows(&projection).len(), 4);
+}
+
+#[test]
 fn settings_screen_max_turns_row_queues_existing_control_request() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();

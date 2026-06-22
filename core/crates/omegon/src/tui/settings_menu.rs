@@ -49,20 +49,32 @@ impl SettingsScreen {
     pub(crate) fn active_rows<'a>(
         &self,
         projection: &'a crate::surfaces::settings::SettingsSurfaceProjection,
-    ) -> &'a [crate::surfaces::settings::SettingsRowProjection] {
-        projection
+    ) -> Vec<&'a crate::surfaces::settings::SettingsRowProjection> {
+        let rows = projection
             .tabs
             .iter()
             .find(|tab| tab.id == self.active_tab)
             .map(|tab| tab.rows.as_slice())
-            .unwrap_or(&[])
+            .unwrap_or(&[]);
+        let filter = self.filter.trim().to_lowercase();
+        if filter.is_empty() {
+            return rows.iter().collect();
+        }
+        rows.iter()
+            .filter(|row| {
+                row.label.to_lowercase().contains(&filter)
+                    || row.value.to_lowercase().contains(&filter)
+                    || row.description.to_lowercase().contains(&filter)
+                    || row.id.to_lowercase().contains(&filter)
+            })
+            .collect()
     }
 
     pub(crate) fn selected_row<'a>(
         &self,
         projection: &'a crate::surfaces::settings::SettingsSurfaceProjection,
     ) -> Option<&'a crate::surfaces::settings::SettingsRowProjection> {
-        self.active_rows(projection).get(self.selected_row)
+        self.active_rows(projection).get(self.selected_row).copied()
     }
 
     pub(crate) fn move_up(&mut self) {
@@ -76,6 +88,55 @@ impl SettingsScreen {
         let len = self.active_rows(projection).len();
         if len > 0 {
             self.selected_row = (self.selected_row + 1).min(len - 1);
+        }
+    }
+
+    pub(crate) fn enter_search(&mut self) {
+        self.mode = SettingsScreenMode::Search;
+        self.selected_row = 0;
+    }
+
+    pub(crate) fn push_filter_char(
+        &mut self,
+        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
+        ch: char,
+    ) {
+        self.filter.push(ch);
+        self.clamp_selection(projection);
+    }
+
+    pub(crate) fn pop_filter_char(
+        &mut self,
+        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
+    ) {
+        self.filter.pop();
+        self.clamp_selection(projection);
+    }
+
+    pub(crate) fn exit_search(&mut self) -> bool {
+        match self.mode {
+            SettingsScreenMode::Search => {
+                self.mode = SettingsScreenMode::Browse;
+                true
+            }
+            SettingsScreenMode::Browse if !self.filter.is_empty() => {
+                self.filter.clear();
+                self.selected_row = 0;
+                true
+            }
+            SettingsScreenMode::Browse => false,
+        }
+    }
+
+    fn clamp_selection(
+        &mut self,
+        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
+    ) {
+        let len = self.active_rows(projection).len();
+        if len == 0 {
+            self.selected_row = 0;
+        } else {
+            self.selected_row = self.selected_row.min(len - 1);
         }
     }
 

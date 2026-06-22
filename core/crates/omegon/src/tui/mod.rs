@@ -4054,6 +4054,11 @@ impl App {
             return;
         };
         let rows = screen.active_rows(&projection);
+        let search_line = if screen.filter.is_empty() {
+            "search: / to filter settings".to_string()
+        } else {
+            format!("search: {}", screen.filter)
+        };
         let tab_line = projection
             .tabs
             .iter()
@@ -4088,6 +4093,16 @@ impl App {
             ratatui::text::Line::from(ratatui::text::Span::styled(
                 tab_line,
                 ratatui::style::Style::default().fg(self.theme.muted()),
+            )),
+            ratatui::text::Line::from(ratatui::text::Span::styled(
+                search_line,
+                ratatui::style::Style::default().fg(
+                    if screen.mode == settings_menu::SettingsScreenMode::Search {
+                        self.theme.accent_bright()
+                    } else {
+                        self.theme.dim()
+                    },
+                ),
             )),
             ratatui::text::Line::from(""),
         ];
@@ -4127,7 +4142,13 @@ impl App {
         }
         lines.push(ratatui::text::Line::from(""));
         lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
-            "↑/↓ navigate · Tab category · Enter edit · s /profile save · a /profile apply · Esc close",
+            if screen.mode == settings_menu::SettingsScreenMode::Search {
+                "type to filter · Backspace edit · Esc browse · Enter edit"
+            } else if screen.filter.is_empty() {
+                "↑/↓ navigate · Tab category · / search · Enter edit · s /profile save · a /profile apply · Esc close"
+            } else {
+                "↑/↓ navigate · Tab category · / edit search · Esc clear filter · Enter edit"
+            },
             ratatui::style::Style::default().fg(self.theme.dim()),
         )));
 
@@ -9275,8 +9296,40 @@ pub async fn run_tui(
                             KeyCode::Char('a') | KeyCode::Char('A') => {
                                 app.queue_settings_profile_apply(&command_tx);
                             }
+                            KeyCode::Char('/') => {
+                                if let Some(screen) = app.settings_screen.as_mut() {
+                                    screen.enter_search();
+                                }
+                            }
+                            KeyCode::Char(ch)
+                                if app.settings_screen.as_ref().is_some_and(|screen| {
+                                    screen.mode == settings_menu::SettingsScreenMode::Search
+                                }) && !key.modifiers.contains(KeyModifiers::CONTROL)
+                                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+                            {
+                                let projection = app.settings_projection();
+                                if let Some(screen) = app.settings_screen.as_mut() {
+                                    screen.push_filter_char(&projection, ch);
+                                }
+                            }
+                            KeyCode::Backspace
+                                if app.settings_screen.as_ref().is_some_and(|screen| {
+                                    screen.mode == settings_menu::SettingsScreenMode::Search
+                                }) =>
+                            {
+                                let projection = app.settings_projection();
+                                if let Some(screen) = app.settings_screen.as_mut() {
+                                    screen.pop_filter_char(&projection);
+                                }
+                            }
                             KeyCode::Esc => {
-                                app.settings_screen = None;
+                                let handled = app
+                                    .settings_screen
+                                    .as_mut()
+                                    .is_some_and(|screen| screen.exit_search());
+                                if !handled {
+                                    app.settings_screen = None;
+                                }
                             }
                             KeyCode::Char('c') | KeyCode::Char('C')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
