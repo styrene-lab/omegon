@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Restyled the lean editor engine block as an angular Nerd Font/Powerline ribbon with an omega mark, provider glyphs, grade emblem, thinking icon, and context database glyph.
 - Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
 
 ### Fixed

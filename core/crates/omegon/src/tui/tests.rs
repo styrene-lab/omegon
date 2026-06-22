@@ -5661,8 +5661,7 @@ fn editor_top_line_shows_engine_block_details() {
 
     assert!(rendered.contains("claude-sonnet"), "{rendered}");
     assert!(
-        rendered
-            .contains("anthropic › claude-sonnet ‹B›  │  ψ ●  │  ctx:msv@1.0M 50% ▕████░░░░▏ 524k"),
+        rendered.contains("󰏉  anthropic  claude-sonnet  󰿃 B   high   ctx:msv@1.0M 50% ▕████░░░░▏ 524k "),
         "{rendered}"
     );
 }
@@ -5702,7 +5701,7 @@ fn editor_top_line_grades_actual_model_not_route_intent() {
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(
-        rendered.contains("openai-codex › gpt-5.5 ‹S›"),
+        rendered.contains("󰏉  openai-codex  gpt-5.5  󰿃 S "),
         "{rendered}"
     );
 }

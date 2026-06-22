@@ -53,6 +53,22 @@ pub enum ToolGlyphRole {
     Detail,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineGlyphRole {
+    RibbonMark,
+    ProviderCloud,
+    ProviderLocal,
+    Route,
+    GradeEmblem,
+    Thinking,
+    Context,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DividerGlyphRole {
+    SegmentRight,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RuleGlyphMatrix {
     pub horizontal: &'static str,
@@ -97,6 +113,22 @@ pub struct ToolGlyphMatrix {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct EngineGlyphMatrix {
+    pub ribbon_mark: &'static str,
+    pub provider_cloud: &'static str,
+    pub provider_local: &'static str,
+    pub route: &'static str,
+    pub grade_emblem: &'static str,
+    pub thinking: &'static str,
+    pub context: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DividerGlyphMatrix {
+    pub segment_right: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct GlyphSet {
     pub profile: GlyphProfile,
     pub rule: RuleGlyphMatrix,
@@ -104,6 +136,8 @@ pub struct GlyphSet {
     pub tool: ToolGlyphMatrix,
     pub tool_state: ToolStateGlyphMatrix,
     pub tool_category: ToolCategoryGlyphMatrix,
+    pub engine: EngineGlyphMatrix,
+    pub divider: DividerGlyphMatrix,
 }
 
 pub const ASCII_GLYPHS: GlyphSet = GlyphSet {
@@ -139,6 +173,16 @@ pub const ASCII_GLYPHS: GlyphSet = GlyphSet {
         subagent: "agent",
         generic: "*",
     },
+    engine: EngineGlyphMatrix {
+        ribbon_mark: "eng",
+        provider_cloud: "cloud",
+        provider_local: "local",
+        route: ">",
+        grade_emblem: "grade",
+        thinking: "think",
+        context: "ctx",
+    },
+    divider: DividerGlyphMatrix { segment_right: ">" },
 };
 
 pub const UNICODE_GLYPHS: GlyphSet = GlyphSet {
@@ -174,6 +218,16 @@ pub const UNICODE_GLYPHS: GlyphSet = GlyphSet {
         subagent: "⬡",
         generic: "•",
     },
+    engine: EngineGlyphMatrix {
+        ribbon_mark: "◇",
+        provider_cloud: "☁",
+        provider_local: "▣",
+        route: "›",
+        grade_emblem: "◆",
+        thinking: "ψ",
+        context: "ctx",
+    },
+    divider: DividerGlyphMatrix { segment_right: "▶" },
 };
 
 pub const NERD_FONT_GLYPHS: GlyphSet = GlyphSet {
@@ -209,6 +263,16 @@ pub const NERD_FONT_GLYPHS: GlyphSet = GlyphSet {
         subagent: "󰚩",
         generic: "󰧑",
     },
+    engine: EngineGlyphMatrix {
+        ribbon_mark: "󰏉",
+        provider_cloud: "",
+        provider_local: "󰍹",
+        route: "",
+        grade_emblem: "󰿃",
+        thinking: "",
+        context: "",
+    },
+    divider: DividerGlyphMatrix { segment_right: "" },
 };
 
 impl GlyphSet {
@@ -257,6 +321,24 @@ impl GlyphSet {
             ToolCategoryGlyphRole::Network => self.tool_category.network,
             ToolCategoryGlyphRole::Subagent => self.tool_category.subagent,
             ToolCategoryGlyphRole::Generic => self.tool_category.generic,
+        }
+    }
+
+    pub fn engine(self, role: EngineGlyphRole) -> &'static str {
+        match role {
+            EngineGlyphRole::RibbonMark => self.engine.ribbon_mark,
+            EngineGlyphRole::ProviderCloud => self.engine.provider_cloud,
+            EngineGlyphRole::ProviderLocal => self.engine.provider_local,
+            EngineGlyphRole::Route => self.engine.route,
+            EngineGlyphRole::GradeEmblem => self.engine.grade_emblem,
+            EngineGlyphRole::Thinking => self.engine.thinking,
+            EngineGlyphRole::Context => self.engine.context,
+        }
+    }
+
+    pub fn divider(self, role: DividerGlyphRole) -> &'static str {
+        match role {
+            DividerGlyphRole::SegmentRight => self.divider.segment_right,
         }
     }
 }

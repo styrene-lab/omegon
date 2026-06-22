@@ -5005,14 +5005,6 @@ impl App {
                 .take(2)
                 .collect::<Vec<_>>()
                 .join("-");
-            let thinking_glyph = match self.footer_data.thinking_level.as_str() {
-                "off" => "○",
-                "minimal" => "◔",
-                "low" => "◑",
-                "medium" => "◕",
-                "high" => "●",
-                _ => "◌",
-            };
             let context_widget = Self::editor_context_widget(
                 self.footer_data.actual_context_class,
                 self.footer_data.context_window,
@@ -5035,28 +5027,85 @@ impl App {
                     ),
                 ])
             } else {
+                use crate::tui::glyphs::EngineGlyphRole;
+                let glyphs = crate::tui::glyphs::glyphs();
+                let is_local_provider = matches!(
+                    self.footer_data.model_provider.as_str(),
+                    "ollama" | "llama.cpp" | "local"
+                );
+                let provider_glyph = if is_local_provider {
+                    glyphs.engine(EngineGlyphRole::ProviderLocal)
+                } else {
+                    glyphs.engine(EngineGlyphRole::ProviderCloud)
+                };
+                let route_glyph = glyphs.engine(EngineGlyphRole::Route);
+                let grade = self.footer_data.model_tier.trim();
+                let grade_text = if grade.is_empty() {
+                    glyphs.engine(EngineGlyphRole::GradeEmblem).to_string()
+                } else {
+                    format!("{} {grade}", glyphs.engine(EngineGlyphRole::GradeEmblem))
+                };
+                let thinking_text = format!(
+                    "{} {}",
+                    glyphs.engine(EngineGlyphRole::Thinking),
+                    self.footer_data.thinking_level
+                );
+                let context_text = format!(
+                    "{} {}",
+                    glyphs.engine(EngineGlyphRole::Context),
+                    context_widget
+                );
                 Line::from(vec![
                     Span::styled(" ", Style::default().fg(t.border_dim())),
                     Span::styled(
-                        self.footer_data.model_provider.clone(),
-                        t.style_accent().add_modifier(Modifier::BOLD),
+                        format!("{} {provider_glyph} {} ",
+                            glyphs.engine(EngineGlyphRole::RibbonMark),
+                            self.footer_data.model_provider
+                        ),
+                        Style::default()
+                            .fg(t.bg())
+                            .bg(t.accent_muted())
+                            .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(" › ", Style::default().fg(t.border_dim())),
                     Span::styled(
-                        model_short.clone(),
-                        t.style_muted().add_modifier(Modifier::ITALIC),
+                        route_glyph,
+                        Style::default().fg(t.accent_muted()).bg(t.surface_bg()),
                     ),
-                    Span::styled(" ‹", Style::default().fg(t.border_dim())),
                     Span::styled(
-                        self.footer_data.model_tier.clone(),
-                        Style::default().fg(t.fg()).add_modifier(Modifier::BOLD),
+                        format!(" {model_short} "),
+                        Style::default().fg(t.fg()).bg(t.surface_bg()),
                     ),
-                    Span::styled("›  │  ", Style::default().fg(t.border_dim())),
-                    Span::styled("ψ", Style::default().fg(t.dim())),
-                    Span::styled(" ", Style::default().fg(t.border_dim())),
-                    Span::styled(thinking_glyph, Style::default().fg(t.muted())),
-                    Span::styled("  │  ", Style::default().fg(t.border_dim())),
-                    Span::styled(context_widget, Style::default().fg(t.muted())),
+                    Span::styled(
+                        route_glyph,
+                        Style::default().fg(t.surface_bg()).bg(t.card_bg()),
+                    ),
+                    Span::styled(
+                        format!(" {grade_text} "),
+                        Style::default()
+                            .fg(t.accent_bright())
+                            .bg(t.card_bg())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        route_glyph,
+                        Style::default().fg(t.card_bg()).bg(t.surface_bg()),
+                    ),
+                    Span::styled(
+                        format!(" {thinking_text} "),
+                        Style::default().fg(t.accent_muted()).bg(t.surface_bg()),
+                    ),
+                    Span::styled(
+                        route_glyph,
+                        Style::default().fg(t.surface_bg()).bg(t.card_bg()),
+                    ),
+                    Span::styled(
+                        format!(" {context_text} "),
+                        Style::default().fg(t.muted()).bg(t.card_bg()),
+                    ),
+                    Span::styled(
+                        route_glyph,
+                        Style::default().fg(t.card_bg()).bg(t.surface_bg()),
+                    ),
                 ])
             };
             let editor_block = Block::default()
