@@ -462,16 +462,25 @@ fn terminal_font_env_mentions_nerd() -> bool {
 }
 
 fn known_nerd_font_installed() -> bool {
-    known_font_dirs().iter().any(|dir| {
-        std::fs::read_dir(dir).ok().is_some_and(|entries| {
-            entries.filter_map(Result::ok).any(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .to_ascii_lowercase()
-                    .contains("nerdfont")
-            })
-        })
+    known_font_dirs()
+        .iter()
+        .any(|dir| path_tree_contains_nerd_font(dir, 0))
+}
+
+fn path_tree_contains_nerd_font(path: &std::path::Path, depth: usize) -> bool {
+    if depth > 3 {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        let file_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if file_name.contains("nerdfont") || file_name.contains("nerd font") {
+            return true;
+        }
+        entry.file_type().ok().is_some_and(|ty| ty.is_dir())
+            && path_tree_contains_nerd_font(&entry.path(), depth + 1)
     })
 }
 
@@ -512,23 +521,37 @@ fn kitty_config_file_mentions_nerd_font(path: &std::path::Path, depth: usize) ->
     let Ok(contents) = std::fs::read_to_string(path) else {
         return false;
     };
-    let lower = contents.to_ascii_lowercase();
-    if lower.contains("nerd font") || lower.contains("symbols nerd") {
-        return true;
-    }
     contents.lines().any(|line| {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') || !trimmed.starts_with("include ") {
+        let trimmed = line.split('#').next().unwrap_or_default().trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.contains("nerd font") || lower.contains("symbols nerd") {
+            return true;
+        }
+        if !trimmed.starts_with("include ") {
             return false;
         }
         let include = trimmed.trim_start_matches("include ").trim();
-        let include_path = if let Some(parent) = path.parent() {
-            parent.join(include)
-        } else {
-            std::path::PathBuf::from(include)
-        };
+        let include_path = expand_kitty_include_path(path, include);
         kitty_config_file_mentions_nerd_font(&include_path, depth + 1)
     })
+}
+
+fn expand_kitty_include_path(base: &std::path::Path, include: &str) -> std::path::PathBuf {
+    if let Some(rest) = include.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
+    }
+    let path = std::path::PathBuf::from(include);
+    if path.is_absolute() {
+        return path;
+    }
+    base.parent()
+        .unwrap_or_else(|| std::path::Path::new(""))
+        .join(path)
 }
 
 pub fn nerd_font_install_help_url() -> &'static str {
@@ -592,6 +615,49 @@ mod tests {
         .unwrap();
 
         assert!(kitty_config_file_mentions_nerd_font(
+            &temp.join("kitty.conf"),
+            0
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn font_probe_recurses_into_font_subdirectories() {
+        let temp =
+            std::env::temp_dir().join(format!("omegon-font-probe-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(temp.join("nested/font-family")).unwrap();
+        std::fs::write(
+            temp.join("nested/font-family/SymbolsNerdFontMono-Regular.ttf"),
+            b"",
+        )
+        .unwrap();
+
+        assert!(path_tree_contains_nerd_font(&temp, 0));
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn kitty_config_probe_ignores_comments_and_expands_relative_includes() {
+        let temp =
+            std::env::temp_dir().join(format!("omegon-kitty-comment-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(temp.join("conf.d")).unwrap();
+        std::fs::write(
+            temp.join("kitty.conf"),
+            "# font_family Fake Nerd Font
+include conf.d/fonts.conf # inline comment
+",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.join("conf.d/fonts.conf"),
+            "font_family Cascadia
+",
+        )
+        .unwrap();
+
+        assert!(!kitty_config_file_mentions_nerd_font(
             &temp.join("kitty.conf"),
             0
         ));
