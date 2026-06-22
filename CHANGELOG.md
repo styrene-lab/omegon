@@ -53,6 +53,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a scrollable copy-text modal as an intermediate selected-segment detail surface before replacing selected-segment copy with inline transcript copy buttons.
 
 ### Fixed
+- Routed command-panel rendering through the shared command modal geometry so slash-command output panels do not keep a separate ad hoc modal size.
 - Kept overflowing command selectors scroll-aligned around the cursor after standardizing modal height, so long menus remain navigable instead of rendering only their first page.
 - Clarified TUI settings profile-source chrome by rendering `profile: project|user · file: <full path>` instead of formatting the profile file as the project label; noted a future affordance for opening the active profile file.
 - Restored the inline conversation-segment copy affordance to the high-contrast `⧉` glyph and aligned its click target with the one-cell label.

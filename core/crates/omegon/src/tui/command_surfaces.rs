@@ -54,18 +54,7 @@ pub fn render_panel(area: Rect, buf: &mut Buffer, theme: &dyn Theme, panel: &Com
         return;
     }
 
-    let width = area
-        .width
-        .saturating_mul(4)
-        .saturating_div(5)
-        .clamp(20, 100);
-    let height = area.height.saturating_mul(3).saturating_div(4).clamp(6, 28);
-    let panel_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    };
+    let panel_area = command_modal_area(area);
 
     Clear.render(panel_area, buf);
     let border = match panel.severity {
