@@ -16,6 +16,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+- Removed the Anthropic subscription ToS startup toast from normal interactive TUI sessions; the disclosure now stays scoped to headless automation and explicit `/cleave` background-worker launches.
+
 ### Changed
 - Moved command panel, prompt, toast, modal, and severity DTOs into renderer-neutral surface projections so TUI command modals share backend-decoupled state with future clients.
 - Unified TUI command/modal geometry across the persistent settings surface and slash-command selectors so tabs and nested command editors keep a cohesive footprint.
