@@ -3,7 +3,7 @@
 //! The engine row above the composer owns provider/model/context capacity.
 //! The workbench row directly below the composer owns active plan/workstream
 //! progress. This row is the very bottom slim session row: turn lifecycle,
-//! transcript state, token I/O, workspace evidence, and version.
+//! transcript state, token I/O, file activity, and version.
 //! Fields shed right-to-left as terminal width shrinks, ensuring the line never
 //! wraps.
 
@@ -150,7 +150,7 @@ impl SessionRow {
         }
 
         // Contextual operator hint. This is fed from real session/profile state
-        // in the TUI draw pass and sheds before workspace metadata.
+        // in the TUI draw pass and sheds before activity metadata.
         if let Some(ref hint) = self.operator_hint {
             let field = Span::styled(hint.clone(), Style::default().fg(t.accent_muted()));
             let cost = sect.width() + field.width();
@@ -163,36 +163,9 @@ impl SessionRow {
 
         // ── Responsive fields (shed right-to-left) ──────────────
 
-        // CWD basename (≥55)
-        if w >= 55 && !self.cwd_basename.is_empty() {
-            let field = Span::styled(
-                format!("dir {}", self.cwd_basename),
-                Style::default().fg(t.muted()),
-            );
-            let cost = sect.width() + field.width();
-            if used + cost < w {
-                spans.push(sect.clone());
-                spans.push(field);
-                used += cost;
-            }
-        }
-
-        // Git branch (≥65)
-        if w >= 65
-            && let Some(ref branch) = self.git_branch
-        {
-            let field = Span::styled(format!("git {branch}"), Style::default().fg(t.muted()));
-            let cost = sep.width() + field.width();
-            if used + cost < w {
-                spans.push(sep.clone());
-                spans.push(field);
-                used += cost;
-            }
-        }
-
         // File activity (≥75). Keep the default Slim wording semantic; the
         // older "12r 4w" shorthand was compact but opaque (r = read, w =
-        // written/modified), especially next to git branch metadata.
+        // written/modified).
         if w >= 75 && (self.files_read > 0 || self.files_modified > 0) {
             let label = file_activity_label(self.files_read, self.files_modified, w);
             let field = Span::styled(label, Style::default().fg(t.muted()));
@@ -467,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn session_row_labels_directory_branch_and_ooda_without_engine_duplicates() {
+    fn session_row_omits_workspace_context_owned_by_workbench() {
         let mut sl = SessionRow {
             context_percent: 50.0,
             turn: 8,
@@ -476,6 +449,8 @@ mod tests {
             session_output_tokens: 2_000,
             cwd_basename: "omegon".into(),
             git_branch: Some("fix/footer".into()),
+            files_read: 12,
+            files_modified: 4,
             phase: Some(OodaPhase::Act),
             ..Default::default()
         };
@@ -495,9 +470,10 @@ mod tests {
         assert!(text.contains("session"), "{text}");
         assert!(text.contains("turn 8"), "{text}");
         assert!(text.contains("io ↑32k ↓2k"), "{text}");
-        assert!(text.contains("dir omegon"), "{text}");
-        assert!(text.contains("git fix/footer"), "{text}");
+        assert!(text.contains("files: 16 touched"), "{text}");
         assert!(text.contains("oodA Act"), "{text}");
+        assert!(!text.contains("dir omegon"), "{text}");
+        assert!(!text.contains("git fix/footer"), "{text}");
         assert!(!text.contains("50%"), "{text}");
         assert!(!text.contains("gpt"), "{text}");
     }
