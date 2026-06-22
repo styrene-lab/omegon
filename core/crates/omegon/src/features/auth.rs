@@ -24,6 +24,9 @@ pub struct AuthFeature {
     cached_providers: Vec<crate::status::ProviderStatus>,
     /// Timestamp when providers were last probed.
     last_probe_time: Option<SystemTime>,
+    /// Shared runtime settings used to scope interruptive auth notifications
+    /// to the active provider route.
+    settings: Option<crate::settings::SharedSettings>,
 }
 
 impl Default for AuthFeature {
@@ -38,7 +41,30 @@ impl AuthFeature {
             last_expiry_check: 0,
             cached_providers: Vec::new(),
             last_probe_time: None,
+            settings: None,
         }
+    }
+
+    pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
+        self.settings = Some(settings);
+        self
+    }
+
+    fn active_provider_id(&self) -> Option<String> {
+        let settings = self.settings.as_ref()?;
+        settings
+            .lock()
+            .ok()
+            .map(|settings| crate::providers::infer_provider_id(&settings.model))
+    }
+
+    fn provider_matches_active_route(&self, provider: &crate::status::ProviderStatus) -> bool {
+        let Some(active_provider) = self.active_provider_id() else {
+            return true;
+        };
+        provider.name.eq_ignore_ascii_case(&active_provider)
+            || crate::auth::provider_by_id(&active_provider)
+                .is_some_and(|credential| provider.name == credential.display_name)
     }
 
     /// Probe all providers with caching (5 min TTL).
@@ -362,6 +388,10 @@ impl AuthFeature {
         let mut requests = Vec::new();
 
         for provider in &self.cached_providers {
+            if !self.provider_matches_active_route(provider) {
+                continue;
+            }
+
             if provider.auth_method.as_deref() == Some("oauth") && provider.authenticated {
                 let provider_lower = provider.name.to_lowercase();
                 let auth_key = crate::auth::auth_json_key(&provider_lower);
@@ -571,6 +601,60 @@ mod tests {
             },
         )));
         assert_eq!(feature.last_expiry_check, EXPIRY_CHECK_INTERVAL); // unchanged
+    }
+
+    #[test]
+    fn expiry_notifications_only_include_active_provider_when_settings_available() {
+        let settings = std::sync::Arc::new(std::sync::Mutex::new(crate::settings::Settings::new(
+            "openai-codex:gpt-5.5",
+        )));
+
+        let mut feature = AuthFeature::new().with_settings(settings);
+        feature.cached_providers = vec![
+            crate::status::ProviderStatus {
+                name: "Anthropic/Claude".into(),
+                authenticated: true,
+                auth_method: Some("oauth".into()),
+                auth_state: Some(crate::status::ProviderAuthState::Configured),
+                model: None,
+                runtime_status: None,
+                recent_failure_count: None,
+                last_failure_kind: None,
+                last_failure_at: None,
+            },
+            crate::status::ProviderStatus {
+                name: "OpenAI/Codex".into(),
+                authenticated: true,
+                auth_method: Some("oauth".into()),
+                auth_state: Some(crate::status::ProviderAuthState::Configured),
+                model: None,
+                runtime_status: None,
+                recent_failure_count: None,
+                last_failure_kind: None,
+                last_failure_at: None,
+            },
+        ];
+
+        assert!(!feature.provider_matches_active_route(&feature.cached_providers[0]));
+        assert!(feature.provider_matches_active_route(&feature.cached_providers[1]));
+    }
+
+    #[test]
+    fn expiry_notifications_remain_global_without_settings() {
+        let feature = AuthFeature::new();
+        let provider = crate::status::ProviderStatus {
+            name: "Anthropic/Claude".into(),
+            authenticated: true,
+            auth_method: Some("oauth".into()),
+            auth_state: Some(crate::status::ProviderAuthState::Configured),
+            model: None,
+            runtime_status: None,
+            recent_failure_count: None,
+            last_failure_kind: None,
+            last_failure_at: None,
+        };
+
+        assert!(feature.provider_matches_active_route(&provider));
     }
 
     #[test]

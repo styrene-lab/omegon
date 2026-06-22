@@ -680,7 +680,13 @@ impl AgentSetup {
         bus.register(Box::new(manage_tools));
 
         // ─── Auth (credential probing + status) ───────────────────────
-        bus.register(Box::new(features::auth::AuthFeature::new()));
+        let auth_feature = features::auth::AuthFeature::new();
+        let auth_feature = if let Some(ref settings) = settings {
+            auth_feature.with_settings(settings.clone())
+        } else {
+            auth_feature
+        };
+        bus.register(Box::new(auth_feature));
 
         // ─── Native features ────────────────────────────────────────────
         // ─── Persona system ────────────────────────────────────────────
