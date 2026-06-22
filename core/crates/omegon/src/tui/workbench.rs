@@ -674,14 +674,14 @@ fn render_workspace_context_panel(
     {
         spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
         spans.push(Span::styled(
-            format!("repo {repo}"),
+            format!("⌂ {repo}"),
             Style::default().fg(t.muted()).bg(bg),
         ));
     }
     if !state.workspace.dir.is_empty() {
         spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
         spans.push(Span::styled(
-            format!("dir {}", state.workspace.dir),
+            format!("▣ {}", state.workspace.dir),
             Style::default().fg(t.muted()).bg(bg),
         ));
     }
@@ -693,7 +693,7 @@ fn render_workspace_context_panel(
     {
         spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
         spans.push(Span::styled(
-            format!("git {branch}"),
+            format!(" {branch}"),
             Style::default().fg(t.muted()).bg(bg),
         ));
     }
