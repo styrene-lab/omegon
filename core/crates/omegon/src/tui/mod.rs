@@ -2999,7 +2999,7 @@ impl App {
                         label: "List configured secrets".to_string(),
                         description: "show secret names and readiness without revealing values"
                             .to_string(),
-                        active: true,
+                        active: false,
                     },
                     selector::SelectOption {
                         value: "set".to_string(),
@@ -3046,13 +3046,13 @@ impl App {
                         SlashResult::Handled
                     } else {
                         SlashResult::Display(
-                            "Usage: /secrets [list|set <name> [value-or-recipe]|delete <name>]"
+                            "Usage: /secrets [list|status|set <name> [value-or-recipe]|get <name>|delete|remove|rm <name>]"
                                 .into(),
                         )
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /secrets [list|set <name> [value-or-recipe]|delete <name>]".into(),
+                        "Usage: /secrets [list|status|set <name> [value-or-recipe]|get <name>|delete|remove|rm <name>]".into(),
                     )
                 }
             }
