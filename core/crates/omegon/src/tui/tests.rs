@@ -4096,6 +4096,11 @@ fn slash_secrets_enqueues_execute_control() {
         "/secrets opens the secrets action selector"
     );
     assert!(app.selector.is_some());
+    let selector = app.selector.as_ref().expect("selector should be open");
+    assert!(
+        selector.options.iter().all(|option| !option.active),
+        "secret action selector should not mark an arbitrary default active"
+    );
     assert_eq!(app.selector_kind, Some(SelectorKind::SecretAction));
 }
 
@@ -4179,6 +4184,33 @@ fn secret_action_selector_delete_primes_editor() {
         message.contains("secret name"),
         "unexpected message: {message}"
     );
+}
+
+#[test]
+fn slash_secrets_unknown_usage_mentions_aliases() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/secrets nope", &tx);
+
+    match result {
+        SlashResult::Display(message) => {
+            assert!(
+                message.contains("status"),
+                "usage missing status: {message}"
+            );
+            assert!(
+                message.contains("get <name>"),
+                "usage missing get: {message}"
+            );
+            assert!(
+                message.contains("remove"),
+                "usage missing remove: {message}"
+            );
+            assert!(message.contains("rm"), "usage missing rm: {message}");
+        }
+        other => panic!("expected usage display, got: {other:?}"),
+    }
 }
 
 #[test]
