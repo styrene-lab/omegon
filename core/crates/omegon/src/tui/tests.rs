@@ -3864,13 +3864,12 @@ fn slash_secrets_enqueues_execute_control() {
     let result = app.handle_slash_command("/secrets", &tx);
     assert!(matches!(result, SlashResult::Handled));
 
-    match rx.try_recv().expect("queued command") {
-        TuiCommand::ExecuteControl {
-            request: crate::control_runtime::ControlRequest::SecretsView,
-            ..
-        } => {}
-        other => panic!("expected secrets view control request, got: {other:?}"),
-    }
+    assert!(
+        rx.try_recv().is_err(),
+        "/secrets opens the secrets action selector"
+    );
+    assert!(app.selector.is_some());
+    assert_eq!(app.selector_kind, Some(SelectorKind::SecretAction));
 }
 
 #[test]

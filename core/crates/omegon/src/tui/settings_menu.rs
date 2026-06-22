@@ -183,6 +183,7 @@ pub(crate) enum SelectorKind {
     ContextClass,
     Persona,
     Tone,
+    SecretAction,
     SecretName,
     LoginProvider,
     VaultConfigure,

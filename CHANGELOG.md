@@ -26,6 +26,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added selected conversation segment hints for double-click copy/expand actions and a visible centered action toast with conversation/footer pulses on successful copy.
 
 ### Added
+- Added a first-class `/secrets` action selector with list/set/delete choices, shared set-secret picker behavior, and aliases for status/remove/rm so the secrets menu matches the newer command-selector flows.
 - Added semantic UI actions for copying a selected conversation segment or the latest assistant response so frontend adapters can route copy through the shared action seam.
 - Added a confirm-first empty-prompt history preload: pressing Enter on an empty prompt previews the last prompt as ghost text, and pressing Enter again materializes it for explicit resend.
 - Added source-aware profile load/save primitives and `/profile save|capture --project|--user|--active` parsing so profile capture preserves project/user persistence boundaries.
