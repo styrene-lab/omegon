@@ -5661,9 +5661,26 @@ fn editor_top_line_shows_engine_block_details() {
 
     assert!(rendered.contains("claude-sonnet"), "{rendered}");
     assert!(
-        rendered.contains("󰏉  anthropic/claude-sonnet  󰿃 B   high   ctx:msv@1.0M 50% "),
+        rendered.contains(" anthropic/claude-sonnet"),
         "{rendered}"
     );
+    assert!(rendered.contains("󰿃 B"), "{rendered}");
+    assert!(rendered.contains(" high"), "{rendered}");
+    assert!(rendered.contains(" ctx:msv@1.0M 50%"), "{rendered}");
+}
+
+#[test]
+fn editor_top_line_preserves_route_when_context_would_overflow() {
+    let mut settings = Settings::new("openai-codex:gpt-5.5");
+    settings.thinking = ThinkingLevel::Minimal;
+    let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
+    app.apply_ui_preset(UiSurfaces::lean());
+    app.footer_data.context_window = 1_048_576;
+    app.footer_data.context_percent = 0.0;
+
+    let rendered = render_app_to_string(&mut app, 80, 18);
+
+    assert!(rendered.contains("openai-codex/gpt-5.5"), "{rendered}");
 }
 
 #[test]
@@ -5702,9 +5719,10 @@ fn editor_top_line_grades_actual_model_not_route_intent() {
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(
-        rendered.contains("󰏉  openai-codex/gpt-5.5  󰿃 S "),
+        rendered.contains("openai-codex/gpt-5.5"),
         "{rendered}"
     );
+    assert!(rendered.contains("󰿃 S"), "{rendered}");
 }
 
 #[test]
