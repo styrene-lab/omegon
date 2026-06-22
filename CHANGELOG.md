@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 - Removed the Anthropic subscription ToS startup toast from normal interactive TUI sessions; the disclosure now stays scoped to headless automation and explicit `/cleave` background-worker launches.
+- Removed inline `^O details` affordances from slim tool rows now that single-click selects and double-click expands or copies segments.
 
 ### Changed
 - Moved command panel, prompt, toast, modal, and severity DTOs into renderer-neutral surface projections so TUI command modals share backend-decoupled state with future clients.
@@ -159,7 +160,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Expanded upstream provider failure classification for Anthropic, OpenAI/Codex, Gemini, Groq, Mistral, OpenRouter, xAI, and Cerebras degradation signals, with explicit false-positive guards for generic quota, capacity, and not-found prose.
 - Clarified that policy prompts are allow-once until durable policy grants exist, and documented default-open unknown-tool behavior plus lexical permission-pattern matching.
 - Strengthened Lex Imperialis operator-agency guidance to require interactive background terminal/session handling for OAuth, browser, device-code, approval, and other human-blocking workflows when that tooling is available.
-- Improved slim TUI memory tool rows so recall, query, episode, archive-search, and memory mutation operations expose richer structured result summaries while keeping the `^O details` affordance right-aligned.
+- Improved slim TUI memory tool rows so recall, query, episode, archive-search, and memory mutation operations expose richer structured result summaries.
 - Moved delegate child prompt files under `.omegon/delegate-prompts/` and cleave child prompt files under `.omegon/cleave-prompts/`; child prompt writing now creates nested state directories and rejects absolute or parent-directory escape paths.
 - Shared delegate/cleave child-agent substrate for prompt path routing, runtime profile deserialization, child activity/task parsing, and sandboxed Nex profile resolution.
 - Shortened common compound tool names in slim TUI rows, including search, memory, context, wait, and browser tools.
