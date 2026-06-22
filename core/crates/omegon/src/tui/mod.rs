@@ -4650,7 +4650,8 @@ impl App {
         if (workbench_state.active.is_some()
             || workbench_state.cleave.is_some()
             || workbench_state.delegate.is_some()
-            || !workbench_state.workstreams.is_empty())
+            || !workbench_state.workstreams.is_empty()
+            || workbench_state.workspace.has_visible_context())
             && workbench_area.height > 0
         {
             render_workbench_panel(workbench_area, frame, self.theme.as_ref(), &workbench_state);
