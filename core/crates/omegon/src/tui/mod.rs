@@ -4166,7 +4166,7 @@ impl App {
             ratatui::style::Style::default().fg(self.theme.dim()),
         )));
 
-        let popup = settings_menu::settings_modal_area(area);
+        let popup = command_surfaces::command_modal_area(area);
         let block = ratatui::widgets::Block::default()
             .borders(ratatui::widgets::Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)

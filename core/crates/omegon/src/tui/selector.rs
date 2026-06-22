@@ -60,7 +60,7 @@ impl Selector {
 
     /// Render the selector popup centered in the given area.
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
-        let popup_area = super::settings_menu::settings_modal_area(area);
+        let popup_area = super::command_surfaces::command_modal_area(area);
         let inner_height = popup_area.height.saturating_sub(2) as usize;
 
         // Two-line layout: label on line 1, description on line 2 (indented)
