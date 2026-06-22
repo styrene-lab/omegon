@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Unified TUI settings modal geometry across the persistent settings surface and settings-launched selectors so tabs and nested setting editors keep a cohesive footprint.
 - Added settings-screen search/filter mode so operators can narrow visible rows before editing.
 - Wired settings-screen max-turn, sandbox, and auto-update rows to existing control/persistence paths instead of showing placeholder toasts.
 - Moved settings-screen row selection and tab switching into reusable screen helpers and routed choice rows through their semantic projection metadata instead of hard-coded per-row selector builders.

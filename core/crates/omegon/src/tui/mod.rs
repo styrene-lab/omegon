@@ -4166,17 +4166,7 @@ impl App {
             ratatui::style::Style::default().fg(self.theme.dim()),
         )));
 
-        let width = area.width.min(88);
-        let height = area
-            .height
-            .saturating_sub(4)
-            .min((lines.len() as u16).saturating_add(2));
-        let popup = ratatui::layout::Rect {
-            x: area.x + area.width.saturating_sub(width) / 2,
-            y: area.y + area.height.saturating_sub(height.max(8)) / 2,
-            width,
-            height: height.max(8),
-        };
+        let popup = settings_menu::settings_modal_area(area);
         let block = ratatui::widgets::Block::default()
             .borders(ratatui::widgets::Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
