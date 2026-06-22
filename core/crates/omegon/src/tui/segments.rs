@@ -11,7 +11,7 @@ use tui_syntax_highlight::Highlighter;
 use unicode_width::UnicodeWidthStr;
 
 use super::conversation_render_projection::SegmentRenderMetadata;
-use super::inline_render::{DETAILS_HINT_LABEL, details_hint_cell};
+use super::inline_render::DETAILS_HINT_LABEL;
 use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
@@ -909,21 +909,11 @@ pub(crate) fn slim_tool_summary_cells(
     } else {
         cells.push(summarize_live_tool_progress(live_partial, started_at));
     }
-    if tool_has_expandable_detail(detail_args, detail_result, live_partial) {
-        cells.push(details_hint_cell().text);
-    }
     cells
 }
 
-fn slim_tool_overflow_hint(hidden_count: usize, hidden_cells: &[&String]) -> String {
-    let has_expandable_hidden_cell = hidden_cells
-        .iter()
-        .any(|cell| cell.contains(DETAILS_HINT_LABEL));
-    if has_expandable_hidden_cell {
-        format!("+{hidden_count} more · {DETAILS_HINT_LABEL}")
-    } else {
-        format!("+{hidden_count} more")
-    }
+fn slim_tool_overflow_hint(hidden_count: usize, _hidden_cells: &[&String]) -> String {
+    format!("+{hidden_count} more")
 }
 
 pub(crate) fn slim_tool_first_detail_for_prefix(
@@ -931,7 +921,12 @@ pub(crate) fn slim_tool_first_detail_for_prefix(
     prefix_width: u16,
     cells: &[String],
 ) -> String {
-    let joined = cells.join(" · ");
+    let visible_cells = cells
+        .iter()
+        .filter(|cell| !cell.contains(DETAILS_HINT_LABEL))
+        .cloned()
+        .collect::<Vec<_>>();
+    let joined = visible_cells.join(" · ");
     crate::tui::segment_components::compact_row::first_detail_row(area_width, prefix_width, &joined)
 }
 
@@ -2973,7 +2968,7 @@ mod tests {
     }
 
     #[test]
-    fn slim_tool_overflow_hint_keeps_details_when_expandable_cell_is_hidden() {
+    fn slim_tool_overflow_hint_omits_hidden_details_affordance() {
         let cells = vec![
             "alpha running".to_string(),
             "beta".to_string(),
@@ -2985,19 +2980,12 @@ mod tests {
 
         let live_rows = slim_tool_live_rows(12, &cells);
 
-        assert_eq!(
-            slim_tool_overflow_hint(1, &[&cells[5]]),
-            format!("+1 more · {DETAILS_HINT_LABEL}")
-        );
-        assert!(
-            live_rows
-                .iter()
-                .any(|row| row.contains(&format!("+1 more · {DETAILS_HINT_LABEL}")))
-        );
+        assert_eq!(slim_tool_overflow_hint(1, &[&cells[5]]), "+1 more");
+        assert!(!live_rows.iter().any(|row| row.contains(DETAILS_HINT_LABEL)));
     }
 
     #[test]
-    fn slim_tool_first_detail_keeps_details_affordance_inline() {
+    fn slim_tool_first_detail_does_not_render_details_affordance() {
         let cells = vec![
             "bash".to_string(),
             "git status --short".to_string(),
@@ -3005,23 +2993,12 @@ mod tests {
         ];
         let rendered = slim_tool_first_detail_for_prefix(56, 16, &cells);
 
-        assert_eq!(
-            rendered,
-            format!("bash · git status --short   {DETAILS_HINT_LABEL}")
-        );
-        assert!(rendered.ends_with(DETAILS_HINT_LABEL), "{rendered:?}");
-        assert!(
-            UnicodeWidthStr::width(rendered.as_str()) <= 56usize.saturating_sub(16 + 2),
-            "{rendered:?}"
-        );
-        assert!(
-            rendered.contains("  ^O details"),
-            "affordance should be right-aligned in the detail budget: {rendered:?}"
-        );
+        assert_eq!(rendered, "bash · git status --short");
+        assert!(!rendered.contains(DETAILS_HINT_LABEL), "{rendered:?}");
     }
 
     #[test]
-    fn slim_tool_first_detail_preserves_details_when_left_truncates() {
+    fn slim_tool_first_detail_truncates_without_details_affordance() {
         let cells = vec![
             "bash".to_string(),
             "very long command summary with enough tokens to overflow".to_string(),
@@ -3034,7 +3011,7 @@ mod tests {
             "{rendered:?}"
         );
         assert!(rendered.contains('…'), "{rendered:?}");
-        assert!(rendered.ends_with(DETAILS_HINT_LABEL), "{rendered:?}");
+        assert!(!rendered.contains(DETAILS_HINT_LABEL), "{rendered:?}");
     }
 
     #[test]
@@ -3173,7 +3150,7 @@ mod tests {
         assert_eq!(cells[3], "Decisions 1");
         assert_eq!(cells[4], "top: First fact");
         assert_eq!(cells[5], "0.0s");
-        assert_eq!(cells[6], DETAILS_HINT_LABEL);
+        assert_eq!(cells.len(), 6);
     }
 
     #[test]
@@ -3188,7 +3165,6 @@ mod tests {
                 "18 facts across 3 sections",
                 "Architecture (11 facts)",
                 "Decisions (4 facts)",
-                DETAILS_HINT_LABEL,
             ]
         );
     }
@@ -3210,7 +3186,7 @@ mod tests {
         for (tool, result) in cases {
             let cells = slim_tool_summary_cells(tool, None, Some(result), true, None, None, None);
             assert_eq!(cells[0], crate::util::truncate(result, 96), "{tool}");
-            assert_eq!(cells[1], DETAILS_HINT_LABEL, "{tool}");
+            assert_eq!(cells.len(), 1, "{tool}");
         }
     }
 
@@ -3227,7 +3203,7 @@ mod tests {
         );
         assert_eq!(episode_cells[0], "2 episodes");
         assert_eq!(episode_cells[1], "top: 2026-06-17: UI polish");
-        assert_eq!(episode_cells[2], DETAILS_HINT_LABEL);
+        assert_eq!(episode_cells.len(), 2);
 
         let archive_cells = slim_tool_summary_cells(
             "memory_search_archive",
@@ -3240,7 +3216,7 @@ mod tests {
         );
         assert_eq!(archive_cells[0], "2 archived facts");
         assert_eq!(archive_cells[1], "top: [abc] (Architecture) Archived fact");
-        assert_eq!(archive_cells[2], DETAILS_HINT_LABEL);
+        assert_eq!(archive_cells.len(), 2);
     }
 
     #[test]
@@ -3538,7 +3514,7 @@ mod tests {
         assert!(text.contains("git"), "{text}");
         assert!(text.contains("git status --short"), "{text}");
         assert!(text.contains("2 lines · M src/tui/segments.rs"), "{text}");
-        assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
+        assert!(!text.contains(DETAILS_HINT_LABEL), "{text}");
     }
 
     #[test]
@@ -3618,10 +3594,7 @@ mod tests {
         let text = buf_text(&buf, area);
         assert!(text.contains("git"), "{text}");
         assert!(!text.contains("├") && !text.contains("└"), "{text}");
-        assert!(
-            text.contains(DETAILS_HINT_LABEL) || text.contains("…"),
-            "{text}"
-        );
+        assert!(text.contains("…"), "{text}");
     }
 
     #[test]
@@ -3651,7 +3624,7 @@ mod tests {
         assert!(text.contains("diskutil"), "{text}");
         assert!(text.contains("diskutil list /dev/disk4"), "{text}");
         assert!(text.contains("3 li"), "{text}");
-        assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
+        assert!(!text.contains(DETAILS_HINT_LABEL), "{text}");
     }
 
     #[test]
@@ -3688,7 +3661,7 @@ mod tests {
         assert!(text.contains("@40"), "{text}");
         assert!(text.contains("limit"), "{text}");
         assert!(text.contains("3 lines"), "{text}");
-        assert!(text.contains(DETAILS_HINT_LABEL), "{text}");
+        assert!(!text.contains(DETAILS_HINT_LABEL), "{text}");
     }
 
     #[test]

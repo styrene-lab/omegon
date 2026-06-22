@@ -23,7 +23,7 @@ use super::super::segments::{
 };
 use super::super::theme::Theme;
 use super::compact_row;
-use crate::tui::inline_render::{DETAILS_HINT_LABEL, details_hint_cell, expand_hint_cell};
+use crate::tui::inline_render::{DETAILS_HINT_LABEL, expand_hint_cell};
 use crate::tui::widgets;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,12 +141,7 @@ fn slim_tool_header_cells(
 ) -> Vec<String> {
     let mut cells = Vec::new();
     cells.extend(legacy_cells);
-    if include_detail_hint
-        && header.affordances.detail_available
-        && !cells.iter().any(|cell| cell.contains(DETAILS_HINT_LABEL))
-    {
-        cells.push(details_hint_cell().text);
-    }
+    let _ = (header, include_detail_hint);
     cells
 }
 
