@@ -26,6 +26,28 @@ pub struct Selector {
     pub visible: bool,
 }
 
+fn selector_visible_window(
+    cursor: usize,
+    len: usize,
+    inner_height: usize,
+) -> std::ops::Range<usize> {
+    if len == 0 || inner_height == 0 {
+        return 0..0;
+    }
+
+    let needs_overflow_hint = len.saturating_mul(2) > inner_height;
+    let option_lines = if needs_overflow_hint {
+        inner_height.saturating_sub(1)
+    } else {
+        inner_height
+    };
+    let capacity = (option_lines / 2).max(1).min(len);
+    let cursor = cursor.min(len - 1);
+    let start = cursor.saturating_add(1).saturating_sub(capacity);
+    let end = (start + capacity).min(len);
+    start..end
+}
+
 impl Selector {
     pub fn new(title: &str, options: Vec<SelectOption>) -> Self {
         // Start cursor on the active option if one exists
@@ -62,12 +84,15 @@ impl Selector {
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let popup_area = super::command_surfaces::command_modal_area(area);
         let inner_height = popup_area.height.saturating_sub(2) as usize;
+        let visible_window = selector_visible_window(self.cursor, self.options.len(), inner_height);
+        let truncated = visible_window.len() < self.options.len();
 
         // Two-line layout: label on line 1, description on line 2 (indented)
         // This ensures proper alignment regardless of label length.
         let mut items: Vec<Line<'static>> = Vec::new();
 
-        for (i, opt) in self.options.iter().enumerate() {
+        for i in visible_window {
+            let opt = &self.options[i];
             let is_cursor = i == self.cursor;
             let marker = if opt.active && is_cursor {
                 "● "
@@ -119,7 +144,7 @@ impl Selector {
             }
         }
 
-        if self.options.len().saturating_mul(2) > inner_height {
+        if truncated {
             items.push(Line::from(Span::styled(
                 "  … more options; use ↑/↓ to navigate",
                 Style::default().fg(t.dim()),
@@ -169,6 +194,19 @@ mod tests {
                 active: false,
             },
         ]
+    }
+
+    #[test]
+    fn visible_window_keeps_cursor_in_view_when_selector_overflows() {
+        assert_eq!(selector_visible_window(0, 20, 22), 0..10);
+        assert_eq!(selector_visible_window(10, 20, 22), 1..11);
+        assert_eq!(selector_visible_window(19, 20, 22), 10..20);
+    }
+
+    #[test]
+    fn visible_window_handles_tiny_or_empty_selector_areas() {
+        assert_eq!(selector_visible_window(0, 0, 22), 0..0);
+        assert_eq!(selector_visible_window(5, 20, 1), 5..6);
     }
 
     #[test]
