@@ -678,7 +678,9 @@ fn render_workspace_context_panel(
             Style::default().fg(t.muted()).bg(bg),
         ));
     }
-    if !state.workspace.dir.is_empty() {
+    let show_dir = !state.workspace.dir.is_empty()
+        && state.workspace.repo.as_deref() != Some(state.workspace.dir.as_str());
+    if show_dir {
         spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
         spans.push(Span::styled(
             format!("▱ {}", state.workspace.dir),
@@ -693,7 +695,7 @@ fn render_workspace_context_panel(
     {
         spans.push(Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)));
         spans.push(Span::styled(
-            format!("⑂ {branch}"),
+            format!(" {branch}"),
             Style::default().fg(t.muted()).bg(bg),
         ));
     }
@@ -1016,12 +1018,15 @@ mod tests {
     }
 
     #[test]
-    fn workspace_context_uses_width_stable_text_glyphs() {
+    fn workspace_context_uses_tui_workspace_glyphs() {
+        let repo = "repo-name";
+        let cwd = "nested-dir";
+        let branch = "branch/name";
         let state = WorkbenchState {
             workspace: WorkbenchWorkspaceContext {
-                repo: Some("omegon-secundus".to_string()),
-                dir: "omegon-secundus".to_string(),
-                git_branch: Some("feature/ui-improvements-polish".to_string()),
+                repo: Some(repo.to_string()),
+                dir: cwd.to_string(),
+                git_branch: Some(branch.to_string()),
             },
             ..WorkbenchState::default()
         };
@@ -1044,15 +1049,48 @@ mod tests {
             text.push_str(buf[(x, 0)].symbol());
         }
 
-        assert!(text.contains("⌂ omegon-secundus"), "{text}");
-        assert!(text.contains("▱ omegon-secundus"), "{text}");
-        assert!(
-            text.contains("⑂ feature/ui-improvements-polish"),
-            "{text}"
-        );
-        assert!(!text.contains("repo omegon-secundus"), "{text}");
-        assert!(!text.contains("dir omegon-secundus"), "{text}");
-        assert!(!text.contains("git feature/ui-improvements-polish"), "{text}");
+        assert!(text.contains(&format!("⌂ {repo}")), "{text}");
+        assert!(text.contains(&format!("▱ {cwd}")), "{text}");
+        assert!(text.contains(&format!(" {branch}")), "{text}");
+        assert!(!text.contains(&format!("repo {repo}")), "{text}");
+        assert!(!text.contains(&format!("dir {cwd}")), "{text}");
+        assert!(!text.contains(&format!("git {branch}")), "{text}");
+    }
+
+    #[test]
+    fn workspace_context_omits_duplicate_dir_when_it_matches_repo() {
+        let repo = "same-name";
+        let branch = "branch/name";
+        let state = WorkbenchState {
+            workspace: WorkbenchWorkspaceContext {
+                repo: Some(repo.to_string()),
+                dir: repo.to_string(),
+                git_branch: Some(branch.to_string()),
+            },
+            ..WorkbenchState::default()
+        };
+
+        let backend = ratatui::backend::TestBackend::new(120, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_workspace_context_panel(
+                    frame.area(),
+                    frame,
+                    &super::super::theme::Alpharius,
+                    &state,
+                )
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let mut text = String::new();
+        for x in 0..120 {
+            text.push_str(buf[(x, 0)].symbol());
+        }
+
+        assert!(text.contains(&format!("⌂ {repo}")), "{text}");
+        assert!(!text.contains(&format!("▱ {repo}")), "{text}");
+        assert!(text.contains(&format!(" {branch}")), "{text}");
     }
 
     #[test]
