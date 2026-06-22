@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Fixed
+- Populate the compact TUI workbench row with known workspace context (repo, dir, and git branch) even before a tool, plan, delegate, or cleave run is active.
 - Removed the Anthropic subscription ToS startup toast from normal interactive TUI sessions; the disclosure now stays scoped to headless automation and explicit `/cleave` background-worker launches.
 - Removed inline `^O details` affordances from slim tool rows now that single-click selects and double-click expands or copies segments.
 
