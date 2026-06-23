@@ -790,10 +790,15 @@ pub fn tool_visual_identity(name: &str, detail_args: Option<&str>) -> ToolVisual
         "validate" => (ToolRealm::Filesystem, ToolFamily::Validate, "validate"),
         "commit" | "git_login" => (ToolRealm::Execution, ToolFamily::Git, "git"),
         "codebase_search" => (ToolRealm::Retrieval, ToolFamily::CodebaseSearch, "codebase"),
-        "search_documents" | "list_documents" | "find_document_by_slug" | "get_document"
+        "search_documents"
+        | "list_documents"
+        | "find_document_by_slug"
+        | "get_document"
         | "get_backlinks" => (ToolRealm::Retrieval, ToolFamily::DocumentSearch, "docs"),
         "web_search" | "web_fetch" => (ToolRealm::Retrieval, ToolFamily::WebSearch, "web"),
-        "browser_search" | "browser_search_receive" | "browser_record_receive"
+        "browser_search"
+        | "browser_search_receive"
+        | "browser_record_receive"
         | "browser_recipe_draft" => (ToolRealm::Retrieval, ToolFamily::BrowserSearch, "browser"),
         "browser_google_workspace_open" | "browser_google_workspace_probe" => {
             (ToolRealm::External, ToolFamily::GoogleWorkspace, "google")
@@ -810,16 +815,20 @@ pub fn tool_visual_identity(name: &str, detail_args: Option<&str>) -> ToolVisual
             (ToolRealm::Orchestration, ToolFamily::Delegate, "delegate")
         }
         "cleave_assess" | "cleave_run" => (ToolRealm::Orchestration, ToolFamily::Cleave, "cleave"),
-        "list_tasks" | "get_task" | "create_task" | "update_task" | "list_boards"
-        | "get_board" | "create_board" | "delete_board" => {
+        "list_tasks" | "get_task" | "create_task" | "update_task" | "list_boards" | "get_board"
+        | "create_board" | "delete_board" => {
             (ToolRealm::Orchestration, ToolFamily::Kanban, "kanban")
         }
-        "design_tree" | "design_tree_update" | "list_design_nodes" | "convert_to_design_node"
-        | "openspec_manage" | "lifecycle_doctor" => {
-            (ToolRealm::Design, ToolFamily::DesignTree, "design")
-        }
+        "design_tree"
+        | "design_tree_update"
+        | "list_design_nodes"
+        | "convert_to_design_node"
+        | "openspec_manage"
+        | "lifecycle_doctor" => (ToolRealm::Design, ToolFamily::DesignTree, "design"),
         "create_drawing" => (ToolRealm::Design, ToolFamily::Drawing, "drawing"),
-        "create_d2_diagram" | "render_diagram" => (ToolRealm::Design, ToolFamily::Diagram, "diagram"),
+        "create_d2_diagram" | "render_diagram" => {
+            (ToolRealm::Design, ToolFamily::Diagram, "diagram")
+        }
         "get_ui_state" | "flynt_surface_guide" => (ToolRealm::Design, ToolFamily::FlyntUi, "ui"),
         "manage_tools" => (ToolRealm::Harness, ToolFamily::ToolRegistry, "tools"),
         "ask_local_model" | "list_local_models" | "manage_ollama" => {
@@ -830,7 +839,9 @@ pub fn tool_visual_identity(name: &str, detail_args: Option<&str>) -> ToolVisual
             (ToolRealm::Knowledge, ToolFamily::Memory, "memory")
         }
         name if name.starts_with("drawing_") => (ToolRealm::Design, ToolFamily::Drawing, "drawing"),
-        name if name.starts_with("design_board_") => (ToolRealm::Design, ToolFamily::DesignBoard, "board"),
+        name if name.starts_with("design_board_") => {
+            (ToolRealm::Design, ToolFamily::DesignBoard, "board")
+        }
         name if name.starts_with("flow_") => (ToolRealm::Design, ToolFamily::Flow, "flow"),
         name if name.starts_with("engagement_") || name.starts_with("forge_") => {
             (ToolRealm::Orchestration, ToolFamily::Engagement, "engage")
@@ -900,13 +911,12 @@ fn shell_tool_visual_identity(name: &str, detail_args: Option<&str>) -> ToolVisu
 }
 
 fn shell_command_from_args(args: &str) -> Option<String> {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(args)
-        && let Some(command) = value
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(args) {
+        return value
             .get("command")
             .or_else(|| value.get("cmd"))
             .and_then(serde_json::Value::as_str)
-    {
-        return Some(command.split_whitespace().collect::<Vec<_>>().join(" "));
+            .map(|command| command.split_whitespace().collect::<Vec<_>>().join(" "));
     }
     let raw = args.lines().next()?.trim();
     (!raw.is_empty()).then(|| raw.to_string())
@@ -1010,7 +1020,6 @@ mod tests {
             assert_eq!(tool_category_for_name(name), expected, "{name}");
         }
     }
-
 
     #[test]
     fn tool_visual_identity_resolves_core_and_shell_families() {

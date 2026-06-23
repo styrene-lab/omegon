@@ -3478,10 +3478,13 @@ mod tests {
         );
         let text = buf_text(&buf, area);
         assert!(
-            text.contains("✎ edit"),
+            text.contains("󰷈 write"),
             "should preserve category identity: {text}"
         );
-        assert!(text.contains("edit"), "should name the tool: {text}");
+        assert!(
+            text.contains("write"),
+            "should name the tool family: {text}"
+        );
         assert!(
             !text.contains("─"),
             "slim error cards should not render full bordered cards: {text}"
@@ -3725,7 +3728,7 @@ mod tests {
             crate::settings::ToolDetail::Lean,
         );
         let text = buf_text(&buf, area);
-        assert!(text.contains("terminal"), "{text}");
+        assert!(text.contains(""), "{text}");
         assert!(text.contains("read · forge-build · 4096 bytes"), "{text}");
         assert!(text.contains("/tmp/t.log"), "{text}");
     }
@@ -5388,7 +5391,7 @@ mod tests {
         assert!(text.contains("╭"), "should have top border: {text}");
         assert!(text.contains("╰"), "should have bottom border: {text}");
         assert!(
-            text.contains("list"),
+            text.contains("read"),
             "should have display name for ls: {text}"
         );
         assert!(
@@ -5615,7 +5618,7 @@ mod tests {
             crate::settings::ToolDetail::Detailed,
         );
         let text = buf_text(&buf, area);
-        assert!(text.contains("✗"), "should have error icon: {text}");
+        assert!(text.contains(""), "should have error icon: {text}");
         assert!(
             text.contains("write"),
             "error cards should use the full tool name in conversation view: {text}"

@@ -34,6 +34,7 @@ pub(crate) struct SlimSegmentHeader<'a> {
     pub metrics: Vec<SegmentMetric<'a>>,
     pub affordances: SegmentAffordances,
     pub display_name: String,
+    pub category_icon: &'static str,
 }
 
 impl<'a> SlimSegmentHeader<'a> {
@@ -57,6 +58,11 @@ impl<'a> SlimSegmentHeader<'a> {
         };
         let category = tool_category
             .unwrap_or_else(|| crate::surfaces::conversation::tool_category_for_name(name));
+        let visual_identity =
+            crate::surfaces::conversation::tool_visual_identity(name, detail_args);
+        let category_icon = crate::tui::glyphs::glyphs().tool_category(
+            crate::tui::glyphs::tool_category_role_for_identity(&visual_identity),
+        );
         let form = if name == "bash" {
             ContentForm::Log
         } else if matches!(name, "edit" | "change") {
@@ -103,6 +109,7 @@ impl<'a> SlimSegmentHeader<'a> {
                 copyable: detail_result.is_some(),
             },
             display_name,
+            category_icon,
         }
     }
 }
@@ -115,17 +122,6 @@ fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) -> Color {
         SegmentState::Failed => t.error(),
         SegmentState::Cancelled => t.muted(),
     }
-}
-
-fn category_icon_for_segment_producer(producer: SegmentProducer<'_>) -> &'static str {
-    let role = match producer {
-        SegmentProducer::Tool { name, category } => match category {
-            ToolCategory::Generic => crate::tui::glyphs::tool_category_role_for_name(name),
-            category => crate::tui::glyphs::tool_category_role_for_category(category),
-        },
-        _ => crate::tui::glyphs::ToolCategoryGlyphRole::Generic,
-    };
-    crate::tui::glyphs::glyphs().tool_category(role)
 }
 
 fn slim_tool_header_cells(
@@ -816,7 +812,7 @@ fn render_tool_card(
             buf,
             t,
             bg,
-            category_icon_for_segment_producer(header.producer),
+            header.category_icon,
             state_color_for_segment_state(header.state, t),
             &header.display_name,
             &detail_rows,
@@ -852,7 +848,7 @@ fn render_tool_card(
         let detail_rows = vec![segments::slim_tool_first_detail_for_prefix(
             area.width,
             crate::tui::segment_components::compact_row::prefix_width(
-                category_icon_for_segment_producer(header.producer),
+                header.category_icon,
                 &header.display_name,
                 pinned,
             ),
@@ -863,7 +859,7 @@ fn render_tool_card(
             buf,
             t,
             bg,
-            category_icon_for_segment_producer(header.producer),
+            header.category_icon,
             state_color_for_segment_state(header.state, t),
             &header.display_name,
             &detail_rows,
