@@ -1404,6 +1404,7 @@ required = ["BRAVE_API_KEY"]
                         supervision_mode: None,
                         pid: None,
                         last_tool: None,
+                        last_tool_activity: None,
                         last_turn: None,
                         tasks: Vec::new(),
                         tasks_done: 0,
