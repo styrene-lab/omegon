@@ -25,7 +25,9 @@ use crate::child_agent::{
     parse_child_activity, spawn_headless_child_agent, spawn_sandboxed_child_agent,
     write_child_prompt_file,
 };
-use crate::surfaces::{conversation::ToolActivitySummary, operations::OperationWorkbenchProjection};
+use crate::surfaces::{
+    conversation::ToolActivitySummary, operations::OperationWorkbenchProjection,
+};
 use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -3012,7 +3014,12 @@ This agent runs in write mode and can modify files.
             last_turn: None,
             tasks: extract_task_items("- [ ] Inspect files\n- [ ] Report findings"),
         });
-        store.update_task_live_state("delegate_1", Some("read".into()), Some("core/lib.rs".into()), Some(2));
+        store.update_task_live_state(
+            "delegate_1",
+            Some("read".into()),
+            Some("core/lib.rs".into()),
+            Some(2),
+        );
         store.store_task(DelegateTask {
             task_id: "delegate_2".into(),
             agent_name: Some("verify".into()),
@@ -3060,7 +3067,12 @@ This agent runs in write mode and can modify files.
         assert_eq!(running.status, "running");
         assert_eq!(running.last_tool.as_deref(), Some("read"));
         assert_eq!(
-            running.last_tool_activity.as_ref().unwrap().args_summary.as_deref(),
+            running
+                .last_tool_activity
+                .as_ref()
+                .unwrap()
+                .args_summary
+                .as_deref(),
             Some("core/lib.rs")
         );
         assert_eq!(running.last_turn, Some(2));

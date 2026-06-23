@@ -227,7 +227,9 @@ pub const UNICODE_GLYPHS: GlyphSet = GlyphSet {
         thinking: "ψ",
         context: "ctx",
     },
-    divider: DividerGlyphMatrix { segment_right: "▶" },
+    divider: DividerGlyphMatrix {
+        segment_right: "▶"
+    },
 };
 
 pub const NERD_FONT_GLYPHS: GlyphSet = GlyphSet {
@@ -272,7 +274,9 @@ pub const NERD_FONT_GLYPHS: GlyphSet = GlyphSet {
         thinking: "",
         context: "",
     },
-    divider: DividerGlyphMatrix { segment_right: "" },
+    divider: DividerGlyphMatrix {
+        segment_right: ""
+    },
 };
 
 impl GlyphSet {
@@ -704,12 +708,13 @@ mod tests {
             "bash",
             Some("cargo test -p omegon"),
         );
-        assert_eq!(tool_category_role_for_identity(&cargo), ToolCategoryGlyphRole::Shell);
-
-        let unknown_shell = crate::surfaces::conversation::tool_visual_identity(
-            "bash",
-            Some("python3 script.py"),
+        assert_eq!(
+            tool_category_role_for_identity(&cargo),
+            ToolCategoryGlyphRole::Shell
         );
+
+        let unknown_shell =
+            crate::surfaces::conversation::tool_visual_identity("bash", Some("python3 script.py"));
         assert_eq!(
             tool_category_role_for_identity(&unknown_shell),
             ToolCategoryGlyphRole::Shell
@@ -722,7 +727,10 @@ mod tests {
         );
 
         let docs = crate::surfaces::conversation::tool_visual_identity("search_documents", None);
-        assert_eq!(tool_category_role_for_identity(&docs), ToolCategoryGlyphRole::Search);
+        assert_eq!(
+            tool_category_role_for_identity(&docs),
+            ToolCategoryGlyphRole::Search
+        );
     }
 
     #[test]

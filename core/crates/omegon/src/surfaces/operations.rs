@@ -6,8 +6,8 @@
 //! event text.
 
 use crate::features::cleave::{CleaveChildFailureKind, CleaveProgress};
-use crate::surfaces::conversation::ToolActivitySummary;
 use crate::features::delegate::{DelegateChildFailureKind, DelegateProgress};
+use crate::surfaces::conversation::ToolActivitySummary;
 use omegon_traits::{OperationKind, OperationRef};
 use serde_json::{Value, json};
 

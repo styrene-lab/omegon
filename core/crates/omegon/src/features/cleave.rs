@@ -449,7 +449,8 @@ pub(crate) fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &
                     }
                 }
                 if let Some(t) = tool {
-                    c.last_tool_activity = Some(ToolActivitySummary::new(t.clone(), target.clone()));
+                    c.last_tool_activity =
+                        Some(ToolActivitySummary::new(t.clone(), target.clone()));
                     c.last_tool = Some(t.clone());
                 }
                 c.last_activity_at = Some(std::time::Instant::now());
@@ -2344,7 +2345,12 @@ mod tests {
         let child = &progress.children[0];
         assert_eq!(child.last_tool.as_deref(), Some("bash"));
         assert_eq!(
-            child.last_tool_activity.as_ref().unwrap().args_summary.as_deref(),
+            child
+                .last_tool_activity
+                .as_ref()
+                .unwrap()
+                .args_summary
+                .as_deref(),
             Some("cargo test -p omegon")
         );
         assert_eq!(child.last_turn, Some(3));
