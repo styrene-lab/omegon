@@ -1096,6 +1096,13 @@ impl crate::conversation::IntentDocument {
         self.work_plan_snapshot_json_with_registry_entries(self.plan_registry().entries)
     }
 
+    pub fn work_plan_snapshot_json_for_repo(&self, repo_root: &Path) -> serde_json::Value {
+        PlanSurfaceProjection::from_intent(self, repo_root)
+            .active_lane(self)
+            .map(|lane| lane.to_snapshot_json())
+            .unwrap_or_else(|| self.detached_work_plan_snapshot_json())
+    }
+
     pub fn work_plan_snapshot_json_with_registry_entries<I>(
         &self,
         registry_entries: I,
@@ -1112,32 +1119,34 @@ impl crate::conversation::IntentDocument {
         projection
             .active_lane(self)
             .map(|lane| lane.to_snapshot_json())
-            .unwrap_or_else(|| {
-                serde_json::json!({
-                    "mode": self.plan_mode.label(),
-                    "guidance": self.plan_mode.guidance(),
-                    "completed": 0,
-                    "total": 0,
-                    "items": [],
-                    "status": "detached",
-                    "plan_id": self
-                        .visible_plan
-                        .as_ref()
-                        .map(|plan| plan.plan_id.as_str())
-                        .unwrap_or("session:current"),
-                    "scope": self
-                        .visible_plan
-                        .as_ref()
-                        .map(|plan| plan.scope.label())
-                        .unwrap_or("session"),
-                    "source": self
-                        .visible_plan
-                        .as_ref()
-                        .map(|plan| plan.source.label())
-                        .unwrap_or("session"),
-                    "workstreams": [],
-                })
-            })
+            .unwrap_or_else(|| self.detached_work_plan_snapshot_json())
+    }
+
+    fn detached_work_plan_snapshot_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "mode": self.plan_mode.label(),
+            "guidance": self.plan_mode.guidance(),
+            "completed": 0,
+            "total": 0,
+            "items": [],
+            "status": "detached",
+            "plan_id": self
+                .visible_plan
+                .as_ref()
+                .map(|plan| plan.plan_id.as_str())
+                .unwrap_or("session:current"),
+            "scope": self
+                .visible_plan
+                .as_ref()
+                .map(|plan| plan.scope.label())
+                .unwrap_or("session"),
+            "source": self
+                .visible_plan
+                .as_ref()
+                .map(|plan| plan.source.label())
+                .unwrap_or("session"),
+            "workstreams": [],
+        })
     }
 
     pub fn visible_plan_registry_entry(&self) -> Option<PlanRegistryEntry> {

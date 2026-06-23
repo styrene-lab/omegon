@@ -8,6 +8,7 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 use super::{dashboard, theme};
 use crate::features::cleave::CleaveProgress;
 use crate::features::delegate::DelegateProgress;
+use crate::plan::{PlanLaneProjection, PlanLaneWorkstreamProjection};
 use crate::surfaces::operations::{
     OperationChildRow, OperationChildStatus, OperationWorkbenchProjection,
 };
@@ -102,6 +103,24 @@ impl WorkstreamStatus {
 }
 
 impl WorkstreamSummary {
+    pub fn from_projection(value: &PlanLaneWorkstreamProjection) -> Option<Self> {
+        let id = value.id.trim().to_string();
+        if id.is_empty() {
+            return None;
+        }
+        Some(Self {
+            id: id.clone(),
+            title: if value.title.trim().is_empty() {
+                id
+            } else {
+                value.title.trim().to_string()
+            },
+            status: WorkstreamStatus::from_label(&value.status),
+            completed: value.completed,
+            total: value.total,
+        })
+    }
+
     pub fn from_json(value: &serde_json::Value) -> Option<Self> {
         let id = value.get("id")?.as_str()?.trim().to_string();
         if id.is_empty() {
@@ -132,6 +151,18 @@ impl WorkstreamSummary {
 }
 
 impl WorkbenchState {
+    pub fn from_plan_lane_projection(lane: &PlanLaneProjection) -> Self {
+        Self {
+            active: PlanDisplaySnapshot::from_plan_lane_projection(lane),
+            workstreams: lane
+                .workstreams
+                .iter()
+                .filter_map(WorkstreamSummary::from_projection)
+                .collect(),
+            ..Self::default()
+        }
+    }
+
     pub fn from_plan_update_json(value: serde_json::Value) -> Self {
         let workstreams = value
             .get("workstreams")
@@ -272,6 +303,15 @@ impl PlanDisplayStatus {
         }
     }
 
+    fn from_work_item_status(value: crate::conversation::WorkItemStatus) -> Self {
+        match value {
+            crate::conversation::WorkItemStatus::Done => Self::Done,
+            crate::conversation::WorkItemStatus::Active => Self::Active,
+            crate::conversation::WorkItemStatus::Skipped => Self::Skipped,
+            crate::conversation::WorkItemStatus::Pending => Self::Todo,
+        }
+    }
+
     fn glyph(self) -> char {
         match self {
             Self::Done => '●',
@@ -298,6 +338,25 @@ impl PlanDisplayStatus {
 }
 
 impl PlanDisplaySnapshot {
+    pub fn from_plan_lane_projection(lane: &PlanLaneProjection) -> Option<Self> {
+        if lane.total == 0 || lane.items.is_empty() {
+            return None;
+        }
+        Some(Self {
+            mode: lane.mode.clone(),
+            completed: lane.completed,
+            total: lane.total,
+            items: lane
+                .items
+                .iter()
+                .map(|item| PlanDisplayItem {
+                    status: PlanDisplayStatus::from_work_item_status(item.status),
+                    description: item.label.clone(),
+                })
+                .collect(),
+        })
+    }
+
     pub fn from_json(value: serde_json::Value) -> Option<Self> {
         let mode = value.get("mode")?.as_str()?.to_string();
         let total = value.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -829,43 +888,114 @@ fn render_operation_workbench_panel(
         .render(area, frame.buffer_mut());
 }
 
-fn operation_worker_chrome_line(child: &OperationChildRow, width: u16) -> String {
-    let task_progress = child
-        .progress
-        .as_ref()
-        .map(|progress| format!(" · tasks {}/{}", progress.done, progress.total))
-        .unwrap_or_default();
-    let result_hint = if !child.result_viewed
-        && !matches!(
-            child.status,
-            OperationChildStatus::Running
-                | OperationChildStatus::Queued
-                | OperationChildStatus::Starting
-                | OperationChildStatus::Waiting
-        ) {
-        format!(" · result ready: /delegate result {}", child.id)
-    } else {
-        String::new()
-    };
-    let failure = child
-        .failure
-        .as_ref()
-        .and_then(|failure| failure.message.as_deref())
-        .map(|message| format!(" · {message}"))
-        .unwrap_or_default();
-    let last_tool = child.last_activity.as_ref().filter(|activity| {
-        matches!(
-            activity.kind,
-            crate::surfaces::operations::OperationActivityKind::Tool
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorkerChromeRowProjection {
+    state: String,
+    label: String,
+    status: String,
+    tool: Option<String>,
+    detail: Option<String>,
+}
+
+impl WorkerChromeRowProjection {
+    fn from_operation_child(child: &OperationChildRow) -> Self {
+        let task_progress = child
+            .progress
+            .as_ref()
+            .map(|progress| format!("tasks {}/{}", progress.done, progress.total));
+        let result_hint = if !child.result_viewed
+            && !matches!(
+                child.status,
+                OperationChildStatus::Running
+                    | OperationChildStatus::Queued
+                    | OperationChildStatus::Starting
+                    | OperationChildStatus::Waiting
+            ) {
+            Some(format!("result ready: /delegate result {}", child.id))
+        } else {
+            None
+        };
+        let failure = child
+            .failure
+            .as_ref()
+            .and_then(|failure| failure.message.as_deref())
+            .map(str::to_string);
+        let detail = [task_progress, result_hint, failure]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let last_tool = child.last_activity.as_ref().filter(|activity| {
+            matches!(
+                activity.kind,
+                crate::surfaces::operations::OperationActivityKind::Tool
+            )
+        });
+        Self::new(
+            &child.label,
+            child.status.label(),
+            last_tool,
+            (!detail.is_empty()).then_some(detail),
         )
-    });
-    worker_chrome_line(
-        &child.label,
-        child.status.label(),
-        last_tool,
-        &format!("{task_progress}{result_hint}{failure}"),
-        width,
-    )
+    }
+
+    fn new(
+        label: &str,
+        status: &str,
+        last_tool: Option<&crate::surfaces::operations::OperationActivity>,
+        detail: Option<String>,
+    ) -> Self {
+        let glyphs = crate::tui::glyphs::glyphs();
+        let state_glyph = glyphs.tool_state(crate::tui::glyphs::tool_state_role_for_status(status));
+        let tool = last_tool.map(|activity| {
+            let identity = crate::surfaces::conversation::tool_visual_identity(
+                &activity.label,
+                activity.args_summary.as_deref(),
+            );
+            let category = glyphs.tool_category(
+                crate::tui::glyphs::tool_category_role_for_identity(&identity),
+            );
+            format!("{category} {}", identity.label)
+        });
+        Self {
+            state: state_glyph.to_string(),
+            label: label.to_string(),
+            status: status.to_string(),
+            tool,
+            detail,
+        }
+    }
+
+    fn inline_row(&self) -> crate::surfaces::inline::InlineRow<String> {
+        crate::surfaces::inline::InlineRow::new(
+            vec![
+                crate::surfaces::inline::InlineCell::new(
+                    format!("{} {}", self.state, self.label),
+                    crate::surfaces::inline::InlineCellRole::Status,
+                ),
+                crate::surfaces::inline::InlineCell::new(
+                    self.status.clone(),
+                    crate::surfaces::inline::InlineCellRole::Value,
+                ),
+            ],
+            self.tool
+                .iter()
+                .cloned()
+                .chain(self.detail.iter().cloned())
+                .map(|cell| {
+                    crate::surfaces::inline::InlineCell::new(
+                        cell,
+                        crate::surfaces::inline::InlineCellRole::Metadata,
+                    )
+                })
+                .collect(),
+        )
+    }
+}
+
+fn operation_worker_chrome_line(child: &OperationChildRow, width: u16) -> String {
+    let row = WorkerChromeRowProjection::from_operation_child(child).inline_row();
+    crate::tui::inline_render::render_inline_text_row(&row, width.saturating_sub(1))
 }
 
 fn operation_worker_status_style(
@@ -892,7 +1022,9 @@ fn worker_chrome_line(
     task_progress: &str,
     width: u16,
 ) -> String {
-    let row = project_worker_chrome_row(label, status, last_tool, task_progress);
+    let detail =
+        (!task_progress.is_empty()).then(|| task_progress.trim_start_matches(" · ").to_string());
+    let row = WorkerChromeRowProjection::new(label, status, last_tool, detail).inline_row();
     crate::tui::inline_render::render_inline_text_row(&row, width.saturating_sub(1))
 }
 
@@ -902,42 +1034,9 @@ fn project_worker_chrome_row(
     last_tool: Option<&crate::surfaces::operations::OperationActivity>,
     task_progress: &str,
 ) -> crate::surfaces::inline::InlineRow<String> {
-    let glyphs = crate::tui::glyphs::glyphs();
-    let state = glyphs.tool_state(crate::tui::glyphs::tool_state_role_for_status(status));
-    let tool = last_tool.map(|activity| {
-        let identity = crate::surfaces::conversation::tool_visual_identity(
-            &activity.label,
-            activity.args_summary.as_deref(),
-        );
-        let category = glyphs.tool_category(crate::tui::glyphs::tool_category_role_for_identity(
-            &identity,
-        ));
-        format!("{category} {}", identity.label)
-    });
-    crate::surfaces::inline::InlineRow::new(
-        vec![
-            crate::surfaces::inline::InlineCell::new(
-                format!("{state} {label}"),
-                crate::surfaces::inline::InlineCellRole::Status,
-            ),
-            crate::surfaces::inline::InlineCell::new(
-                status.to_string(),
-                crate::surfaces::inline::InlineCellRole::Value,
-            ),
-        ],
-        tool.into_iter()
-            .chain(
-                (!task_progress.is_empty())
-                    .then(|| task_progress.trim_start_matches(" · ").to_string()),
-            )
-            .map(|cell| {
-                crate::surfaces::inline::InlineCell::new(
-                    cell,
-                    crate::surfaces::inline::InlineCellRole::Metadata,
-                )
-            })
-            .collect(),
-    )
+    let detail =
+        (!task_progress.is_empty()).then(|| task_progress.trim_start_matches(" · ").to_string());
+    WorkerChromeRowProjection::new(label, status, last_tool, detail).inline_row()
 }
 
 fn workbench_rule_line<'a>(
@@ -997,6 +1096,67 @@ mod tests {
     use super::*;
 
     #[test]
+    fn operation_worker_projection_maps_structured_child_row() {
+        let child = OperationChildRow {
+            operation_kind: omegon_traits::OperationKind::Delegate,
+            id: "task-1".into(),
+            label: "delegate-1".into(),
+            status: OperationChildStatus::Running,
+            status_label: "running".into(),
+            last_activity: Some(crate::surfaces::operations::OperationActivity {
+                kind: crate::surfaces::operations::OperationActivityKind::Tool,
+                label: "bash".into(),
+                args_summary: Some("cargo test -p omegon".into()),
+                turn: Some(3),
+            }),
+            progress: Some(crate::surfaces::operations::OperationChildProgress {
+                done: 1,
+                total: 4,
+            }),
+            result_summary: None,
+            failure: None,
+        };
+
+        let row = WorkerChromeRowProjection::from_operation_child(&child);
+        assert_eq!(row.label, "delegate-1");
+        assert_eq!(row.status, "running");
+        assert!(
+            row.tool
+                .as_deref()
+                .is_some_and(|tool| tool.contains("cargo")),
+            "{row:?}"
+        );
+        assert_eq!(row.detail.as_deref(), Some("tasks 1/4"));
+    }
+
+    #[test]
+    fn operation_worker_projection_combines_progress_and_failure_detail() {
+        let child = OperationChildRow {
+            operation_kind: omegon_traits::OperationKind::Delegate,
+            id: "task-2".into(),
+            label: "delegate-2".into(),
+            status: OperationChildStatus::Failed,
+            status_label: "failed".into(),
+            last_activity: None,
+            progress: Some(crate::surfaces::operations::OperationChildProgress {
+                done: 2,
+                total: 5,
+            }),
+            result_summary: None,
+            failure: Some(crate::surfaces::operations::OperationFailure {
+                kind: crate::surfaces::operations::OperationFailureKind::ToolExecutionFailed,
+                message: Some("validator failed".into()),
+                recoverable: true,
+            }),
+        };
+
+        let row = WorkerChromeRowProjection::from_operation_child(&child);
+        assert_eq!(row.status, "failed");
+        assert!(row.tool.is_none());
+        assert_eq!(row.detail.as_deref(), Some("tasks 2/5 · validator failed"));
+    }
+
+    #[test]
     fn worker_chrome_projection_separates_identity_from_metadata() {
         let activity = crate::surfaces::operations::OperationActivity {
             kind: crate::surfaces::operations::OperationActivityKind::Tool,
@@ -1045,6 +1205,71 @@ mod tests {
         };
 
         assert_eq!(workbench_preferred_height(&state, 120), 1);
+    }
+
+    #[test]
+    fn workbench_state_projects_typed_plan_lane_without_json() {
+        let lane = PlanLaneProjection {
+            plan_id: "session:current".into(),
+            mode: "executing".into(),
+            guidance: "keep working".into(),
+            status: crate::plan::PlanStatus::Active,
+            scope: crate::conversation::PlanScope::Session,
+            source: crate::conversation::PlanSource::Ephemeral,
+            completed: 1,
+            total: 2,
+            items: vec![
+                crate::plan::PlanLaneItemProjection {
+                    label: "done task".into(),
+                    status: crate::conversation::WorkItemStatus::Done,
+                },
+                crate::plan::PlanLaneItemProjection {
+                    label: "active task".into(),
+                    status: crate::conversation::WorkItemStatus::Active,
+                },
+            ],
+            workstreams: vec![crate::plan::PlanLaneWorkstreamProjection {
+                id: "openspec:demo".into(),
+                title: "demo change".into(),
+                status: "paused".into(),
+                completed: 3,
+                total: 5,
+            }],
+        };
+
+        let state = WorkbenchState::from_plan_lane_projection(&lane);
+        let active = state.active.expect("active lane should project");
+        assert_eq!(active.mode, "executing");
+        assert_eq!(active.completed, 1);
+        assert_eq!(active.total, 2);
+        assert_eq!(active.items.len(), 2);
+        assert_eq!(active.items[0].status, PlanDisplayStatus::Done);
+        assert_eq!(active.items[1].status, PlanDisplayStatus::Active);
+        assert_eq!(active.items[1].description, "active task");
+        assert_eq!(state.workstreams.len(), 1);
+        assert_eq!(state.workstreams[0].id, "openspec:demo");
+        assert_eq!(state.workstreams[0].status, WorkstreamStatus::Paused);
+        assert_eq!(state.workstreams[0].progress(), "3/5");
+    }
+
+    #[test]
+    fn workbench_state_ignores_empty_typed_plan_lane() {
+        let lane = PlanLaneProjection {
+            plan_id: "session:current".into(),
+            mode: "off".into(),
+            guidance: "none".into(),
+            status: crate::plan::PlanStatus::Detached,
+            scope: crate::conversation::PlanScope::Session,
+            source: crate::conversation::PlanSource::Ephemeral,
+            completed: 0,
+            total: 0,
+            items: Vec::new(),
+            workstreams: Vec::new(),
+        };
+
+        let state = WorkbenchState::from_plan_lane_projection(&lane);
+        assert!(state.active.is_none());
+        assert!(state.workstreams.is_empty());
     }
 
     #[test]

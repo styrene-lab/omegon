@@ -1860,11 +1860,8 @@ fn work_plan_snapshot_with_lifecycle(
     intent: &IntentDocument,
     cwd: &std::path::Path,
 ) -> serde_json::Value {
-    let mut registry = intent.plan_registry();
     let repo_root = crate::setup::find_project_root(cwd);
-    let lifecycle = crate::tools::lifecycle_plan_projection(&repo_root);
-    registry.entries.extend(lifecycle.entries);
-    intent.work_plan_snapshot_json_with_registry_entries(registry.entries)
+    intent.work_plan_snapshot_json_for_repo(&repo_root)
 }
 
 fn work_plan_snapshot_changed(before: &serde_json::Value, after: &serde_json::Value) -> bool {
