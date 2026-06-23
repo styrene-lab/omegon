@@ -42,6 +42,7 @@ pub enum ToolCategoryGlyphRole {
     Memory,
     Network,
     Subagent,
+    Git,
     Generic,
 }
 
@@ -101,6 +102,7 @@ pub struct ToolCategoryGlyphMatrix {
     pub memory: &'static str,
     pub network: &'static str,
     pub subagent: &'static str,
+    pub git: &'static str,
     pub generic: &'static str,
 }
 
@@ -171,6 +173,7 @@ pub const ASCII_GLYPHS: GlyphSet = GlyphSet {
         memory: "mem",
         network: "net",
         subagent: "agent",
+        git: "git",
         generic: "*",
     },
     engine: EngineGlyphMatrix {
@@ -216,6 +219,7 @@ pub const UNICODE_GLYPHS: GlyphSet = GlyphSet {
         memory: "◎",
         network: "⇄",
         subagent: "⬡",
+        git: "⑂",
         generic: "·",
     },
     engine: EngineGlyphMatrix {
@@ -263,6 +267,7 @@ pub const NERD_FONT_GLYPHS: GlyphSet = GlyphSet {
         memory: "󰧑",
         network: "󰖟",
         subagent: "󰚩",
+        git: "",
         generic: "·",
     },
     engine: EngineGlyphMatrix {
@@ -324,6 +329,7 @@ impl GlyphSet {
             ToolCategoryGlyphRole::Memory => self.tool_category.memory,
             ToolCategoryGlyphRole::Network => self.tool_category.network,
             ToolCategoryGlyphRole::Subagent => self.tool_category.subagent,
+            ToolCategoryGlyphRole::Git => self.tool_category.git,
             ToolCategoryGlyphRole::Generic => self.tool_category.generic,
         }
     }
@@ -369,8 +375,8 @@ pub fn tool_category_role_for_identity(
     match identity.family {
         crate::surfaces::conversation::ToolFamily::Shell => ToolCategoryGlyphRole::Shell,
         crate::surfaces::conversation::ToolFamily::FileRead => ToolCategoryGlyphRole::Read,
-        crate::surfaces::conversation::ToolFamily::FileWrite
-        | crate::surfaces::conversation::ToolFamily::Git => ToolCategoryGlyphRole::Write,
+        crate::surfaces::conversation::ToolFamily::FileWrite => ToolCategoryGlyphRole::Write,
+        crate::surfaces::conversation::ToolFamily::Git => ToolCategoryGlyphRole::Git,
         crate::surfaces::conversation::ToolFamily::CodebaseSearch
         | crate::surfaces::conversation::ToolFamily::DocumentSearch
         | crate::surfaces::conversation::ToolFamily::WebSearch
@@ -410,7 +416,8 @@ pub fn tool_category_role_for_name(name: &str) -> ToolCategoryGlyphRole {
     match lower.as_str() {
         "bash" | "terminal" | "shell" => ToolCategoryGlyphRole::Shell,
         "read" | "view" => ToolCategoryGlyphRole::Read,
-        "write" | "edit" | "change" | "commit" => ToolCategoryGlyphRole::Write,
+        "write" | "edit" | "change" => ToolCategoryGlyphRole::Write,
+        "commit" | "git" | "git_login" => ToolCategoryGlyphRole::Git,
         "codebase_search" | "search_documents" | "web_search" | "browser_search" | "rg" => {
             ToolCategoryGlyphRole::Search
         }
@@ -731,6 +738,12 @@ mod tests {
             tool_category_role_for_identity(&docs),
             ToolCategoryGlyphRole::Search
         );
+
+        let git = crate::surfaces::conversation::tool_visual_identity("commit", None);
+        assert_eq!(
+            tool_category_role_for_identity(&git),
+            ToolCategoryGlyphRole::Git
+        );
     }
 
     #[test]
@@ -746,6 +759,10 @@ mod tests {
         assert_eq!(
             tool_category_role_for_name("memory_recall"),
             ToolCategoryGlyphRole::Memory
+        );
+        assert_eq!(
+            tool_category_role_for_name("commit"),
+            ToolCategoryGlyphRole::Git
         );
         assert_eq!(
             tool_category_role_for_name("unknown"),
@@ -856,6 +873,7 @@ include conf.d/fonts.conf # inline comment
             glyphs.tool_category(ToolCategoryGlyphRole::Design),
             glyphs.tool_category(ToolCategoryGlyphRole::Memory),
             glyphs.tool_category(ToolCategoryGlyphRole::Network),
+            glyphs.tool_category(ToolCategoryGlyphRole::Git),
             glyphs.tool_category(ToolCategoryGlyphRole::Generic),
         ];
         for value in values {
