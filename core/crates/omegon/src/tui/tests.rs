@@ -5764,8 +5764,8 @@ fn editor_top_line_dividers_blend_with_preceding_segment_backgrounds() {
     }
 
     assert!(
-        divider_styles.len() >= 2,
-        "missing ribbon dividers: {divider_styles:?}"
+        divider_styles.len() >= 4,
+        "full-width ribbon should render route, grade, thinking, context, and terminal dividers: {divider_styles:?}"
     );
     assert_eq!(
         divider_styles.first(),
@@ -5774,6 +5774,16 @@ fn editor_top_line_dividers_blend_with_preceding_segment_backgrounds() {
             crate::tui::theme::Alpharius.card_bg()
         )),
         "first divider should bridge route accent into card background: {divider_styles:?}"
+    );
+    assert!(
+        divider_styles[1..divider_styles.len() - 1]
+            .iter()
+            .all(|style| *style
+                == (
+                    crate::tui::theme::Alpharius.card_bg(),
+                    crate::tui::theme::Alpharius.card_bg()
+                )),
+        "interstitial dividers should inherit the preceding card background: {divider_styles:?}"
     );
     assert_eq!(
         divider_styles.last(),
