@@ -209,14 +209,14 @@ pub const UNICODE_GLYPHS: GlyphSet = GlyphSet {
     },
     tool_category: ToolCategoryGlyphMatrix {
         shell: "$",
-        read: "◰",
+        read: "▤",
         write: "✎",
         search: "⌕",
-        design: "◇",
-        memory: "◈",
+        design: "✦",
+        memory: "◎",
         network: "⇄",
         subagent: "⬡",
-        generic: "•",
+        generic: "·",
     },
     engine: EngineGlyphMatrix {
         ribbon_mark: "◇",
