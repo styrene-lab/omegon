@@ -2081,10 +2081,21 @@ status: {}
                     *started_at,
                     self.meta.duration_ms,
                 );
+                let identity = crate::surfaces::conversation::tool_visual_identity(
+                    name,
+                    detail_args.as_deref(),
+                );
+                let category_icon = crate::tui::glyphs::glyphs().tool_category(
+                    crate::tui::glyphs::tool_category_role_for_identity(&identity),
+                );
                 let detail_rows = if *complete {
                     vec![slim_tool_first_detail_for_prefix(
                         width,
-                        crate::tui::segment_components::compact_row::prefix_width("", name, false),
+                        crate::tui::segment_components::compact_row::prefix_width(
+                            category_icon,
+                            &identity.label,
+                            false,
+                        ),
                         &cells,
                     )]
                 } else {
@@ -2093,8 +2104,8 @@ status: {}
                 crate::tui::segment_components::compact_row::measured_height(
                     width,
                     &crate::tui::segment_components::compact_row::CompactRows::tool(
-                        "",
-                        name,
+                        category_icon,
+                        &identity.label,
                         Color::Reset,
                         &detail_rows,
                         false,
