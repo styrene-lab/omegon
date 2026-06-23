@@ -89,9 +89,7 @@ fn rendered_cell_styles_for_text(
 
     let buf = terminal.backend().buffer();
     for y in 0..buf.area.height {
-        let row_symbols: Vec<&str> = (0..buf.area.width)
-            .map(|x| buf[(x, y)].symbol())
-            .collect();
+        let row_symbols: Vec<&str> = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
         for start in 0..row_symbols.len() {
             let candidate: String = row_symbols[start..]
                 .iter()
@@ -5699,13 +5697,13 @@ fn editor_top_line_shows_engine_block_details() {
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(rendered.contains("claude-sonnet"), "{rendered}");
-    assert!(
-        rendered.contains(" anthropic/claude-sonnet"),
-        "{rendered}"
-    );
+    assert!(rendered.contains(" anthropic/claude-sonnet"), "{rendered}");
     assert!(rendered.contains("󰿃 B"), "{rendered}");
     assert!(rendered.contains(" high"), "{rendered}");
-    assert!(rendered.contains(" ctx:msv@1.0M ▕████░░░░▏ 50%"), "{rendered}");
+    assert!(
+        rendered.contains(" ctx:msv@1.0M ▕████░░░░▏ 50%"),
+        "{rendered}"
+    );
 }
 
 #[test]
@@ -5736,8 +5734,54 @@ fn editor_top_line_preserves_route_badge_contrast_after_bg_cleanup() {
     assert!(
         styles
             .iter()
-            .all(|(fg, bg)| *fg == crate::tui::theme::Alpharius.bg() && *bg == crate::tui::theme::Alpharius.accent_muted()),
+            .all(|(fg, bg)| *fg == crate::tui::theme::Alpharius.bg()
+                && *bg == crate::tui::theme::Alpharius.accent_muted()),
         "route text should remain dark-on-accent after final bg cleanup, got {styles:?}"
+    );
+}
+
+#[test]
+fn editor_top_line_dividers_blend_with_preceding_segment_backgrounds() {
+    let mut settings = Settings::new("openai-codex:gpt-5.5");
+    settings.thinking = ThinkingLevel::Minimal;
+    let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
+    app.apply_ui_preset(UiSurfaces::lean());
+    app.footer_data.context_window = 1_048_576;
+    app.footer_data.context_percent = 0.0;
+
+    let backend = ratatui::backend::TestBackend::new(140, 18);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let buf = terminal.backend().buffer();
+    let mut divider_styles = Vec::new();
+    for y in 0..buf.area.height {
+        for x in 0..buf.area.width {
+            let cell = &buf[(x, y)];
+            if cell.symbol() == "" {
+                divider_styles.push((cell.fg, cell.bg));
+            }
+        }
+    }
+
+    assert!(
+        divider_styles.len() >= 2,
+        "missing ribbon dividers: {divider_styles:?}"
+    );
+    assert_eq!(
+        divider_styles.first(),
+        Some(&(
+            crate::tui::theme::Alpharius.accent_muted(),
+            crate::tui::theme::Alpharius.card_bg()
+        )),
+        "first divider should bridge route accent into card background: {divider_styles:?}"
+    );
+    assert_eq!(
+        divider_styles.last(),
+        Some(&(
+            crate::tui::theme::Alpharius.card_bg(),
+            crate::tui::theme::Alpharius.surface_bg()
+        )),
+        "terminal divider should bridge card background into editor surface: {divider_styles:?}"
     );
 }
 
