@@ -10415,18 +10415,29 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn workbench_contract_renders_structured_snapshot() {
-        let snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
-            "mode": "executing",
-            "completed": 2,
-            "total": 4,
-            "items": [
-                {"description": "Inspect repo", "status": "done"},
-                {"description": "Patch UI", "status": "active"},
-                {"description": "Skip old path", "status": "skipped"},
-                {"description": "Validate", "status": "todo"}
-            ]
-        }))
-        .unwrap();
+        let snapshot = PlanDisplaySnapshot {
+            mode: "executing".into(),
+            completed: 2,
+            total: 4,
+            items: vec![
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "Inspect repo".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Active,
+                    description: "Patch UI".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Skipped,
+                    description: "Skip old path".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Todo,
+                    description: "Validate".into(),
+                },
+            ],
+        };
         assert_eq!(snapshot.summary(), "plan 2/4 · executing");
         let rows = workbench_rows(&snapshot, 80, 5);
         assert_eq!(
@@ -10443,16 +10454,21 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn workbench_contract_marks_hidden_rows() {
-        let snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
-            "mode": "executing",
-            "completed": 1,
-            "total": 8,
-            "items": (0..8).map(|idx| serde_json::json!({
-                "description": format!("Step {idx}"),
-                "status": if idx == 0 { "done" } else { "todo" },
-            })).collect::<Vec<_>>()
-        }))
-        .unwrap();
+        let snapshot = PlanDisplaySnapshot {
+            mode: "executing".into(),
+            completed: 1,
+            total: 8,
+            items: (0..8)
+                .map(|idx| PlanDisplayItem {
+                    status: if idx == 0 {
+                        PlanDisplayStatus::Done
+                    } else {
+                        PlanDisplayStatus::Todo
+                    },
+                    description: format!("Step {idx}"),
+                })
+                .collect(),
+        };
         let rows = workbench_rows(&snapshot, 40, 4);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
@@ -10462,19 +10478,33 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn slim_plan_overflow_count_matches_actual_hidden_rows() {
-        let snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
-            "mode": "executing",
-            "completed": 3,
-            "total": 5,
-            "items": [
-                {"description": "done one", "status": "done"},
-                {"description": "done two", "status": "done"},
-                {"description": "done three", "status": "done"},
-                {"description": "active", "status": "active"},
-                {"description": "todo", "status": "todo"}
-            ]
-        }))
-        .unwrap();
+        let snapshot = PlanDisplaySnapshot {
+            mode: "executing".into(),
+            completed: 3,
+            total: 5,
+            items: vec![
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "done one".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "done two".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "done three".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Active,
+                    description: "active".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Todo,
+                    description: "todo".into(),
+                },
+            ],
+        };
 
         let rows = workbench_rows(&snapshot, 80, 4);
         assert_eq!(
@@ -10485,20 +10515,37 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn slim_plan_overflow_hides_done_before_active_or_todo() {
-        let snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
-            "mode": "executing",
-            "completed": 3,
-            "total": 6,
-            "items": [
-                {"description": "Copy release handoff docs", "status": "done"},
-                {"description": "Normalize changelog", "status": "done"},
-                {"description": "Inspect release state", "status": "done"},
-                {"description": "Record lint blocker", "status": "active"},
-                {"description": "Commit mechanics docs", "status": "todo"},
-                {"description": "Push branch", "status": "todo"}
-            ]
-        }))
-        .unwrap();
+        let snapshot = PlanDisplaySnapshot {
+            mode: "executing".into(),
+            completed: 3,
+            total: 6,
+            items: vec![
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "Copy release handoff docs".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "Normalize changelog".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "Inspect release state".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Active,
+                    description: "Record lint blocker".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Todo,
+                    description: "Commit mechanics docs".into(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Todo,
+                    description: "Push branch".into(),
+                },
+            ],
+        };
 
         let rows = workbench_rows(&snapshot, 80, 4);
         let text = rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>();
