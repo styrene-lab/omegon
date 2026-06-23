@@ -130,6 +130,7 @@ fn append_visible_tail(
 
 pub struct ToolInspection<'a> {
     pub name: &'a str,
+    pub args_summary: Option<&'a str>,
     pub state: crate::tui::glyphs::ToolStateGlyphRole,
     pub title_prefix: &'a str,
     pub elapsed: Option<std::time::Duration>,
@@ -189,8 +190,12 @@ pub fn render_tool_inspection_panel(
     let bg = t.surface_bg();
     let mut lines = Vec::new();
     let glyphs = crate::tui::glyphs::glyphs();
-    let category = glyphs.tool_category(crate::tui::glyphs::tool_category_role_for_name(
+    let identity = crate::surfaces::conversation::tool_visual_identity(
         inspection.name,
+        inspection.args_summary,
+    );
+    let category = glyphs.tool_category(crate::tui::glyphs::tool_category_role_for_identity(
+        &identity,
     ));
     let state = glyphs.tool_state(inspection.state);
     let title = match inspection.content_form {
@@ -269,6 +274,17 @@ mod tests {
         width: u16,
         height: u16,
     ) -> String {
+        render_inspection_to_string_with_args(name, None, content_form, lines, width, height)
+    }
+
+    fn render_inspection_to_string_with_args(
+        name: &str,
+        args_summary: Option<&str>,
+        content_form: crate::surfaces::conversation::ContentForm,
+        lines: &[String],
+        width: u16,
+        height: u16,
+    ) -> String {
         let backend = ratatui::backend::TestBackend::new(width, height);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
@@ -279,6 +295,7 @@ mod tests {
                     &theme::Alpharius,
                     ToolInspection {
                         name,
+                        args_summary,
                         state: crate::tui::glyphs::ToolStateGlyphRole::Running,
                         title_prefix: "live",
                         elapsed: None,
@@ -308,6 +325,23 @@ mod tests {
         assert_eq!(tool_inspection_height(20), 16);
         let lines = (0..20).map(|i| format!("line {i}")).collect::<Vec<_>>();
         assert_eq!(visible_tail(&lines, 3), &["line 17", "line 18", "line 19"]);
+    }
+
+    #[test]
+    fn tool_inspection_uses_args_summary_for_category_glyph() {
+        let rendered = render_inspection_to_string_with_args(
+            "bash",
+            Some("rg needle src"),
+            crate::surfaces::conversation::ContentForm::Log,
+            &[],
+            80,
+            3,
+        );
+        let glyphs = crate::tui::glyphs::glyphs();
+        assert!(
+            rendered.contains(glyphs.tool_category(crate::tui::glyphs::ToolCategoryGlyphRole::Search)),
+            "inspection header should use resolved search glyph for shell-mediated rg: {rendered}"
+        );
     }
 
     #[test]
