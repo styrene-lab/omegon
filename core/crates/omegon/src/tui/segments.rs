@@ -4562,6 +4562,18 @@ mod tests {
                 "read",
             ),
             (
+                "commit",
+                None,
+                crate::tui::glyphs::ToolCategoryGlyphRole::Git,
+                "git",
+            ),
+            (
+                "bash",
+                Some(r#"{"command":"git status --short"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Git,
+                "git",
+            ),
+            (
                 "bash",
                 Some(r#"{"command":"python3 script.py"}"#),
                 crate::tui::glyphs::ToolCategoryGlyphRole::Shell,
