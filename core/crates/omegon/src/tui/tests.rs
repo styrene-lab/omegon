@@ -4,6 +4,7 @@
 //! No terminal rendering — uses App::new() with test settings.
 
 use super::settings_menu::build_model_selector_options;
+use super::workbench::{PlanDisplayItem, PlanDisplayStatus};
 use super::*;
 use crate::settings::{ContextClass, Settings, ThinkingLevel};
 use crate::tui::theme::Theme;
@@ -1699,15 +1700,21 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
     let mut app = test_app();
     app.conversation.conv_state.scroll_offset = 46;
     app.conversation.conv_state.user_scrolled = true;
-    app.workbench_state.active = PlanDisplaySnapshot::from_json(serde_json::json!({
-        "mode": "executing",
-        "completed": 1,
-        "total": 2,
-        "items": [
-            {"status": "done", "description": "one"},
-            {"status": "active", "description": "two"}
-        ]
-    }));
+    app.workbench_state.active = Some(PlanDisplaySnapshot {
+        mode: "executing".into(),
+        completed: 1,
+        total: 2,
+        items: vec![
+            PlanDisplayItem {
+                status: PlanDisplayStatus::Done,
+                description: "one".into(),
+            },
+            PlanDisplayItem {
+                status: PlanDisplayStatus::Active,
+                description: "two".into(),
+            },
+        ],
+    });
 
     app.handle_agent_event(AgentEvent::PlanUpdated {
         projection: omegon_traits::PlanSurfaceProjection {
