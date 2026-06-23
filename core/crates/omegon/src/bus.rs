@@ -115,6 +115,8 @@ pub struct EventBus {
     command_defs: Vec<(usize, CommandDefinition)>,
     /// Handle to the disabled tools set from ManageTools.
     disabled_tools: Option<crate::features::manage_tools::DisabledTools>,
+    /// Handle to the registered tool inventory from ManageTools.
+    tool_inventory: Option<crate::features::manage_tools::ToolInventory>,
     /// Per-tool execution timeouts. Tools not listed use DEFAULT_TOOL_TIMEOUT.
     tool_timeouts: HashMap<String, Duration>,
     /// Internal tool owners — maps tool names that may NOT be in tool_defs
@@ -132,6 +134,7 @@ impl EventBus {
             command_defs: Vec::new(),
             disabled_tools: None,
             internal_tool_owners: HashMap::new(),
+            tool_inventory: None,
             tool_timeouts: HashMap::from([
                 ("bash".into(), Duration::from_secs(600)),
                 ("web_search".into(), Duration::from_secs(30)),
@@ -223,6 +226,13 @@ impl EventBus {
         self.disabled_tools = Some(handle);
     }
 
+    /// Set the ManageTools inventory handle so finalize can keep its list in
+    /// sync with the bus's current model-visible tool cache.
+    pub fn set_tool_inventory(&mut self, handle: crate::features::manage_tools::ToolInventory) {
+        self.tool_inventory = Some(handle);
+        self.refresh_tool_inventory();
+    }
+
     /// Register a feature. Call during setup before the agent loop starts.
     pub fn register(&mut self, feature: Box<dyn Feature>) {
         tracing::info!(feature = feature.name(), "registered feature");
@@ -292,6 +302,8 @@ impl EventBus {
             }
         }
 
+        self.refresh_tool_inventory();
+
         let tool_names: Vec<&str> = self
             .tool_defs
             .iter()
@@ -304,6 +316,31 @@ impl EventBus {
             tool_names = ?tool_names,
             "event bus finalized"
         );
+    }
+
+    fn refresh_tool_inventory(&self) {
+        let Some(handle) = &self.tool_inventory else {
+            return;
+        };
+        let mut names: Vec<String> = self
+            .tool_defs
+            .iter()
+            .filter(|(_, def)| !is_model_hidden_tool(&def.name))
+            .map(|(_, def)| def.name.clone())
+            .collect();
+        names.sort();
+        if let Ok(mut inventory) = handle.lock() {
+            *inventory = names;
+        }
+    }
+
+    /// Visible tool names captured by ManageTools, ignoring disabled state.
+    #[cfg(test)]
+    fn tool_inventory_names(&self) -> Vec<String> {
+        self.tool_inventory
+            .as_ref()
+            .and_then(|handle| handle.lock().ok().map(|names| names.clone()))
+            .unwrap_or_default()
     }
 
     // ─── Event delivery ─────────────────────────────────────────────
@@ -887,6 +924,19 @@ mod tests {
 
         // Should have only 1 tool (deduped), not 2
         assert_eq!(bus.tool_definitions().len(), 1);
+    }
+
+    #[test]
+    fn set_tool_inventory_tracks_finalized_tools() {
+        let mut bus = EventBus::new();
+        bus.register(Box::new(CounterFeature { event_count: 0 }));
+
+        let inventory = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        bus.set_tool_inventory(inventory);
+        assert!(bus.tool_inventory_names().is_empty());
+
+        bus.finalize();
+        assert_eq!(bus.tool_inventory_names(), vec!["count".to_string()]);
     }
 
     #[test]

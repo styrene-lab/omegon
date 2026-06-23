@@ -13,6 +13,9 @@ use omegon_traits::{ContentBlock, Feature, ToolDefinition, ToolResult};
 /// Shared set of disabled tool names.
 pub type DisabledTools = Arc<Mutex<HashSet<String>>>;
 
+/// Shared snapshot of registered model-visible tool names.
+pub type ToolInventory = Arc<Mutex<Vec<String>>>;
+
 /// Predefined tool groups — named sets that can be toggled together.
 ///
 /// Groups represent coherent capability clusters. Operators enable/disable
@@ -56,7 +59,7 @@ pub static TOOL_GROUPS: &[(&str, &[&str])] = &[
 pub struct ManageTools {
     disabled: DisabledTools,
     /// Snapshot of all tool names (set during init).
-    all_tools: Arc<Mutex<Vec<String>>>,
+    all_tools: ToolInventory,
 }
 
 impl Default for ManageTools {
@@ -78,7 +81,13 @@ impl ManageTools {
         self.disabled.clone()
     }
 
+    /// Get a handle to the registered tool inventory for the bus to populate.
+    pub fn inventory_handle(&self) -> ToolInventory {
+        self.all_tools.clone()
+    }
+
     /// Set the full tool list (called after bus finalize).
+    #[cfg(test)]
     pub fn set_all_tools(&self, names: Vec<String>) {
         *self.all_tools.lock().unwrap() = names;
     }

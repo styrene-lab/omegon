@@ -28,6 +28,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
 
 ### Fixed
+- Kept `manage_tools list` synchronized with the EventBus's finalized model-visible tool inventory so it no longer reports `0 total` tools while directly callable tools are available.
 - Render git tool rows with a dedicated git category glyph instead of reusing the file-write/edit document glyph.
 - Render lean editor engine ribbon tail fields as distinct gradient-style badge segments so grade, thinking, and context keep visible backgrounds and Powerline divider bridges instead of falling back to plain metadata text.
 - Routed slim tool segment category glyphs through the locked structured tool identity matrix, including shell-mediated read/search/write classifications, so compact tool rows no longer show stale generic/status symbols for context, codebase, search, and read tools.
