@@ -1692,6 +1692,12 @@ fn build_family_vital_signs(progress: &CleaveProgress) -> omegon_traits::FamilyV
             last_activity_unix_ms: c.last_activity_at.map(to_unix_ms),
             duration_secs: c.duration_secs,
             last_tool: c.last_tool.clone(),
+            last_tool_activity: c.last_tool_activity.as_ref().map(|activity| {
+                omegon_traits::ToolActivityVitalSigns {
+                    raw_name: activity.raw_name.clone(),
+                    args_summary: activity.args_summary.clone(),
+                }
+            }),
             last_turn: c.last_turn,
             tokens_in: c.tokens_in,
             tokens_out: c.tokens_out,
@@ -2046,6 +2052,7 @@ mod tests {
                 last_activity_unix_ms: Some(2),
                 duration_secs: None,
                 last_tool: Some("bash".into()),
+                last_tool_activity: None,
                 last_turn: Some(1),
                 tokens_in: 0,
                 tokens_out: 0,

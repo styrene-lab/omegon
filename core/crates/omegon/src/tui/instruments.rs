@@ -31,6 +31,15 @@ fn panel_bg(t: &dyn Theme) -> Color {
     t.footer_bg()
 }
 
+fn child_activity_label(
+    raw_tool: Option<&str>,
+    activity: Option<&crate::surfaces::conversation::ToolActivitySummary>,
+) -> Option<String> {
+    activity
+        .map(|activity| activity.visual_identity().label)
+        .or_else(|| raw_tool.map(|tool| crate::surfaces::conversation::tool_visual_identity(tool, None).label))
+}
+
 /// Write `text` left-to-right starting at `(x, y)`, clipped to `max_x`.
 /// Each character advances by its display cell width. Wide chars consume 2
 /// cells and the overflow cell is blanked so subsequent characters land in
@@ -1560,7 +1569,10 @@ impl InstrumentPanel {
             // accidental gap disappeared. The space is now explicit
             // in the source, which both renders correctly and matches
             // operator expectations.
-            let activity = if let Some(ref tool) = child.last_tool {
+            let activity = if let Some(tool) = child_activity_label(
+                child.last_tool.as_deref(),
+                child.last_tool_activity.as_ref(),
+            ) {
                 format!("→ {tool}")
             } else if let Some(turn) = child.last_turn {
                 format!("T{turn}")
@@ -1801,7 +1813,10 @@ impl InstrumentPanel {
             }
             // Show live tool activity for running children, result summary for completed
             let activity = if child.status == "running" {
-                if let Some(ref tool) = child.last_tool {
+                if let Some(tool) = child_activity_label(
+                    child.last_tool.as_deref(),
+                    child.last_tool_activity.as_ref(),
+                ) {
                     format!("→ {tool}")
                 } else if let Some(turn) = child.last_turn {
                     format!("T{turn}")
@@ -2287,6 +2302,55 @@ mod tests {
             !text.contains("✗ alpha"),
             "salvaged merge should not render as hard failure: {text}"
         );
+    }
+
+
+    #[test]
+    fn cleave_panel_resolves_structured_shell_activity_label() {
+        let mut panel = InstrumentPanel::default();
+        panel.set_cleave_progress(Some(CleaveProgress {
+            active: true,
+            run_id: "run-1".into(),
+            total_children: 1,
+            completed: 0,
+            failed: 0,
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+            children: vec![crate::features::cleave::ChildProgress {
+                label: "alpha".into(),
+                status: "running".into(),
+                failure_kind: None,
+                duration_secs: Some(3.2),
+                supervision_mode: None,
+                pid: None,
+                last_tool: Some("bash".into()),
+                last_tool_activity: Some(crate::surfaces::conversation::ToolActivitySummary::new(
+                    "bash",
+                    Some("cargo test -p omegon".into()),
+                )),
+                last_turn: Some(4),
+                tasks: Vec::new(),
+                tasks_done: 0,
+                started_at: None,
+                last_activity_at: None,
+                tokens_in: 0,
+                tokens_out: 0,
+                runtime: None,
+            }],
+        }));
+
+        let area = Rect::new(0, 0, 64, 8);
+        let backend = ratatui::backend::TestBackend::new(64, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let t = crate::tui::theme::Alpharius;
+        terminal
+            .draw(|f| panel.render_tools_panel(area, f, &t))
+            .unwrap();
+
+        let buf = terminal.backend().buffer().clone();
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("→ cargo"), "expected resolved cargo label: {text}");
+        assert!(!text.contains("→ bash"), "raw shell label leaked: {text}");
     }
 
     #[test]

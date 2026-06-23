@@ -2237,6 +2237,10 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
                     "last_activity_unix_ms": c.last_activity_unix_ms,
                     "duration_secs": c.duration_secs,
                     "last_tool": c.last_tool,
+                    "last_tool_activity": c.last_tool_activity.as_ref().map(|activity| json!({
+                        "raw_name": activity.raw_name,
+                        "args_summary": activity.args_summary,
+                    })),
                     "last_turn": c.last_turn,
                     "tokens_in": c.tokens_in,
                     "tokens_out": c.tokens_out,
@@ -2986,6 +2990,7 @@ mod tests {
                         last_activity_unix_ms: Some(1_700_000_005_000),
                         duration_secs: Some(5.0),
                         last_tool: Some("bash".into()),
+                        last_tool_activity: None,
                         last_turn: Some(3),
                         tokens_in: 60,
                         tokens_out: 30,
@@ -3094,6 +3099,7 @@ mod tests {
                         last_activity_unix_ms: Some(1_700_000_010_000),
                         duration_secs: Some(10.0),
                         last_tool: Some("commit".into()),
+                        last_tool_activity: None,
                         last_turn: Some(5),
                         tokens_in: 600,
                         tokens_out: 300,
@@ -3107,6 +3113,10 @@ mod tests {
                         last_activity_unix_ms: Some(1_700_000_012_000),
                         duration_secs: None,
                         last_tool: Some("write".into()),
+                        last_tool_activity: Some(omegon_traits::ToolActivityVitalSigns {
+                            raw_name: "bash".into(),
+                            args_summary: Some("cargo test -p omegon".into()),
+                        }),
                         last_turn: Some(2),
                         tokens_in: 400,
                         tokens_out: 200,
@@ -3120,6 +3130,7 @@ mod tests {
                         last_activity_unix_ms: None,
                         duration_secs: None,
                         last_tool: None,
+                        last_tool_activity: None,
                         last_turn: None,
                         tokens_in: 0,
                         tokens_out: 0,
@@ -3143,6 +3154,15 @@ mod tests {
         assert_eq!(json["signs"]["children"][0]["label"], "auth");
         assert_eq!(json["signs"]["children"][0]["status"], "completed");
         assert_eq!(json["signs"]["children"][1]["status"], "running");
+        assert_eq!(json["signs"]["children"][1]["last_tool"], "write");
+        assert_eq!(
+            json["signs"]["children"][1]["last_tool_activity"]["raw_name"],
+            "bash"
+        );
+        assert_eq!(
+            json["signs"]["children"][1]["last_tool_activity"]["args_summary"],
+            "cargo test -p omegon"
+        );
         assert_eq!(
             json["signs"]["children"][1]["duration_secs"],
             serde_json::Value::Null
