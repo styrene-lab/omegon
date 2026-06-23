@@ -1090,6 +1090,7 @@ mod tests {
                             duration_secs: None,
                             pid: Some(4242),
                             last_tool: None,
+                            last_tool_activity: None,
                             last_turn: None,
                             tasks: Vec::new(),
                             tasks_done: 0,
