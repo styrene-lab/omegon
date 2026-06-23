@@ -739,6 +739,25 @@ pub struct ToolVisualIdentity {
     pub transport: ToolTransport,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolActivitySummary {
+    pub raw_name: String,
+    pub args_summary: Option<String>,
+}
+
+impl ToolActivitySummary {
+    pub fn new(raw_name: impl Into<String>, args_summary: Option<String>) -> Self {
+        Self {
+            raw_name: raw_name.into(),
+            args_summary,
+        }
+    }
+
+    pub fn visual_identity(&self) -> ToolVisualIdentity {
+        tool_visual_identity(&self.raw_name, self.args_summary.as_deref())
+    }
+}
+
 impl ToolVisualIdentity {
     pub fn category(&self) -> ToolCategory {
         match self.realm {

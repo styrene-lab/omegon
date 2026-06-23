@@ -21,6 +21,7 @@ use crate::autonomy::{
     subagent_policy_for_automation,
 };
 use crate::child_agent::ChildTaskItem;
+use crate::surfaces::conversation::ToolActivitySummary;
 use crate::surfaces::operations::OperationWorkbenchProjection;
 
 use omegon_traits::{
@@ -344,6 +345,7 @@ pub struct ChildProgress {
     pub pid: Option<u32>,
     /// Most recent tool active inside this child (e.g. "bash", "write").
     pub last_tool: Option<String>,
+    pub last_tool_activity: Option<ToolActivitySummary>,
     /// Most recent turn number reported by this child.
     pub last_turn: Option<u32>,
     /// Task checklist items extracted from the child's prompt.
@@ -413,6 +415,7 @@ pub(crate) fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &
                     supervision_mode: Some(ChildSupervisionMode::Attached),
                     pid: Some(*pid),
                     last_tool: None,
+                    last_tool_activity: None,
                     last_turn: None,
                     tasks: Vec::new(),
                     tasks_done: 0,
@@ -426,7 +429,10 @@ pub(crate) fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &
             }
         }
         ProgressEvent::ChildActivity {
-            child, turn, tool, ..
+            child,
+            turn,
+            tool,
+            target,
         } => {
             if let Some(c) = progress.children.iter_mut().find(|c| c.label == *child) {
                 if let Some(t) = turn {
@@ -443,6 +449,7 @@ pub(crate) fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &
                     }
                 }
                 if let Some(t) = tool {
+                    c.last_tool_activity = Some(ToolActivitySummary::new(t.clone(), target.clone()));
                     c.last_tool = Some(t.clone());
                 }
                 c.last_activity_at = Some(std::time::Instant::now());
@@ -505,6 +512,7 @@ pub(crate) fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &
                     supervision_mode: None,
                     pid: None,
                     last_tool: None,
+                    last_tool_activity: None,
                     last_turn: None,
                     tasks: Vec::new(),
                     tasks_done: 0,
@@ -761,6 +769,7 @@ impl CleaveFeature {
                         c.pid
                     },
                     last_tool: None,
+                    last_tool_activity: None,
                     last_turn: None,
                     tasks: Vec::new(),
                     tasks_done: 0,
@@ -984,6 +993,7 @@ impl CleaveFeature {
                     supervision_mode: None,
                     pid: None,
                     last_tool: None,
+                    last_tool_activity: None,
                     last_turn: None,
                     tasks: Vec::new(),
                     tasks_done: 0,
@@ -1093,6 +1103,7 @@ impl CleaveFeature {
                     supervision_mode: None,
                     pid: None,
                     last_tool: None,
+                    last_tool_activity: None,
                     last_turn: None,
                     tasks: Vec::new(),
                     tasks_done: 0,
@@ -1924,6 +1935,7 @@ mod tests {
                 supervision_mode: None,
                 pid: None,
                 last_tool: Some("commit".into()),
+                last_tool_activity: None,
                 last_turn: Some(8),
                 tasks: Vec::new(),
                 tasks_done: 0,
@@ -1941,6 +1953,7 @@ mod tests {
                 supervision_mode: None,
                 pid: Some(42_u32),
                 last_tool: Some("write".into()),
+                last_tool_activity: None,
                 last_turn: Some(3),
                 tasks: Vec::new(),
                 tasks_done: 0,
@@ -1958,6 +1971,7 @@ mod tests {
                 supervision_mode: None,
                 pid: None,
                 last_tool: None,
+                last_tool_activity: None,
                 last_turn: None,
                 tasks: Vec::new(),
                 tasks_done: 0,
@@ -2322,6 +2336,10 @@ mod tests {
         let progress = feature.progress();
         let child = &progress.children[0];
         assert_eq!(child.last_tool.as_deref(), Some("bash"));
+        assert_eq!(
+            child.last_tool_activity.as_ref().unwrap().args_summary.as_deref(),
+            Some("cargo test -p omegon")
+        );
         assert_eq!(child.last_turn, Some(3));
         assert_eq!(
             child.supervision_mode,
@@ -2357,6 +2375,7 @@ mod tests {
                 supervision_mode: None,
                 pid: None,
                 last_tool: None,
+                last_tool_activity: None,
                 last_turn: None,
                 tasks: Vec::new(),
                 tasks_done: 0,
@@ -2425,6 +2444,7 @@ mod tests {
                 supervision_mode: None,
                 pid: None,
                 last_tool: None,
+                last_tool_activity: None,
                 last_turn: None,
                 tasks: Vec::new(),
                 tasks_done: 0,
@@ -2471,6 +2491,7 @@ mod tests {
                 supervision_mode: None,
                 pid: Some(42),
                 last_tool: None,
+                last_tool_activity: None,
                 last_turn: None,
                 tasks: Vec::new(),
                 tasks_done: 0,
@@ -2517,6 +2538,7 @@ mod tests {
                 supervision_mode: None,
                 pid: None,
                 last_tool: None,
+                last_tool_activity: None,
                 last_turn: None,
                 tasks: Vec::new(),
                 tasks_done: 0,
@@ -2866,6 +2888,7 @@ mod assessment_tests {
                 supervision_mode: Some(ChildSupervisionMode::Attached),
                 pid: Some(1234),
                 last_tool: Some("bash".into()),
+                last_tool_activity: None,
                 last_turn: Some(3),
                 tasks: vec![
                     ChildTaskItem {
