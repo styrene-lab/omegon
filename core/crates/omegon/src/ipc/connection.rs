@@ -1073,6 +1073,8 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
             })
         }
         AgentEvent::PlanUpdated { projection } => Some(IpcEventPayload::PlanUpdated {
+            // External IPC payload remains the legacy snapshot JSON envelope;
+            // the runtime event already carries the typed plan projection.
             snapshot: projection.legacy_snapshot_json(),
         }),
         AgentEvent::RouteChanged {

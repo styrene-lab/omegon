@@ -251,6 +251,8 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
             })
         }
         AgentEvent::PlanUpdated { projection } => Some(IpcEventPayload::PlanUpdated {
+            // MQTT reuses the IPC compatibility envelope, so keep publishing the
+            // legacy snapshot JSON derived from the typed runtime projection.
             snapshot: projection.legacy_snapshot_json(),
         }),
         AgentEvent::RouteChanged {
