@@ -343,6 +343,59 @@ impl GlyphSet {
     }
 }
 
+pub fn tool_category_role_for_category(
+    category: crate::surfaces::conversation::ToolCategory,
+) -> ToolCategoryGlyphRole {
+    match category {
+        crate::surfaces::conversation::ToolCategory::CommandExec => ToolCategoryGlyphRole::Shell,
+        crate::surfaces::conversation::ToolCategory::FileRead => ToolCategoryGlyphRole::Read,
+        crate::surfaces::conversation::ToolCategory::FileMutation => ToolCategoryGlyphRole::Write,
+        crate::surfaces::conversation::ToolCategory::DesignTree => ToolCategoryGlyphRole::Design,
+        crate::surfaces::conversation::ToolCategory::Memory => ToolCategoryGlyphRole::Memory,
+        crate::surfaces::conversation::ToolCategory::Search => ToolCategoryGlyphRole::Search,
+        crate::surfaces::conversation::ToolCategory::Subagent => ToolCategoryGlyphRole::Subagent,
+        crate::surfaces::conversation::ToolCategory::Network => ToolCategoryGlyphRole::Network,
+        crate::surfaces::conversation::ToolCategory::Generic => ToolCategoryGlyphRole::Generic,
+    }
+}
+
+pub fn tool_category_role_for_identity(
+    identity: &crate::surfaces::conversation::ToolVisualIdentity,
+) -> ToolCategoryGlyphRole {
+    match identity.family {
+        crate::surfaces::conversation::ToolFamily::Shell => ToolCategoryGlyphRole::Shell,
+        crate::surfaces::conversation::ToolFamily::FileRead => ToolCategoryGlyphRole::Read,
+        crate::surfaces::conversation::ToolFamily::FileWrite
+        | crate::surfaces::conversation::ToolFamily::Git => ToolCategoryGlyphRole::Write,
+        crate::surfaces::conversation::ToolFamily::CodebaseSearch
+        | crate::surfaces::conversation::ToolFamily::DocumentSearch
+        | crate::surfaces::conversation::ToolFamily::WebSearch
+        | crate::surfaces::conversation::ToolFamily::BrowserSearch
+        | crate::surfaces::conversation::ToolFamily::ShellSearch
+        | crate::surfaces::conversation::ToolFamily::ProjectGraph => ToolCategoryGlyphRole::Search,
+        crate::surfaces::conversation::ToolFamily::Memory
+        | crate::surfaces::conversation::ToolFamily::Context
+        | crate::surfaces::conversation::ToolFamily::Time => ToolCategoryGlyphRole::Memory,
+        crate::surfaces::conversation::ToolFamily::Delegate
+        | crate::surfaces::conversation::ToolFamily::Cleave
+        | crate::surfaces::conversation::ToolFamily::Plan
+        | crate::surfaces::conversation::ToolFamily::Kanban
+        | crate::surfaces::conversation::ToolFamily::Engagement => ToolCategoryGlyphRole::Subagent,
+        crate::surfaces::conversation::ToolFamily::DesignTree
+        | crate::surfaces::conversation::ToolFamily::Drawing
+        | crate::surfaces::conversation::ToolFamily::Diagram
+        | crate::surfaces::conversation::ToolFamily::DesignBoard
+        | crate::surfaces::conversation::ToolFamily::Flow
+        | crate::surfaces::conversation::ToolFamily::FlyntUi => ToolCategoryGlyphRole::Design,
+        crate::surfaces::conversation::ToolFamily::Network
+        | crate::surfaces::conversation::ToolFamily::Browser
+        | crate::surfaces::conversation::ToolFamily::GoogleWorkspace
+        | crate::surfaces::conversation::ToolFamily::Forge
+        | crate::surfaces::conversation::ToolFamily::Remote => ToolCategoryGlyphRole::Network,
+        _ => tool_category_role_for_category(identity.category()),
+    }
+}
+
 /// Classify a tool name into a visual category glyph role.
 ///
 /// This is intentionally a presentation helper only: it does not import tool
@@ -644,6 +697,33 @@ pub fn nerd_font_install_help_url() -> &'static str {
 mod tests {
     use super::*;
     use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn structured_tool_identity_maps_to_stable_glyph_roles() {
+        let cargo = crate::surfaces::conversation::tool_visual_identity(
+            "bash",
+            Some("cargo test -p omegon"),
+        );
+        assert_eq!(tool_category_role_for_identity(&cargo), ToolCategoryGlyphRole::Shell);
+
+        let unknown_shell = crate::surfaces::conversation::tool_visual_identity(
+            "bash",
+            Some("python3 script.py"),
+        );
+        assert_eq!(
+            tool_category_role_for_identity(&unknown_shell),
+            ToolCategoryGlyphRole::Shell
+        );
+
+        let codebase = crate::surfaces::conversation::tool_visual_identity("codebase_search", None);
+        assert_eq!(
+            tool_category_role_for_identity(&codebase),
+            ToolCategoryGlyphRole::Search
+        );
+
+        let docs = crate::surfaces::conversation::tool_visual_identity("search_documents", None);
+        assert_eq!(tool_category_role_for_identity(&docs), ToolCategoryGlyphRole::Search);
+    }
 
     #[test]
     fn tool_name_and_status_helpers_are_decoupled_presentation_fallbacks() {

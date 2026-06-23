@@ -885,8 +885,8 @@ fn project_worker_chrome_row(
             &activity.label,
             activity.args_summary.as_deref(),
         );
-        let category = glyphs.tool_category(crate::tui::glyphs::tool_category_role_for_name(
-            identity.label.as_str(),
+        let category = glyphs.tool_category(crate::tui::glyphs::tool_category_role_for_identity(
+            &identity,
         ));
         format!("{category} {}", identity.label)
     });
