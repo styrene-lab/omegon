@@ -4963,13 +4963,15 @@ impl App {
                     ),
                     (context_text, Style::default().fg(t.muted()).bg(t.card_bg())),
                 ];
+                let mut previous_bg = t.accent_muted();
                 for (text, style) in tail_fields {
                     let mut candidate = title_spans.clone();
-                    push_tail(&mut candidate, text, style, t.accent_muted());
+                    push_tail(&mut candidate, text, style, previous_bg);
                     let candidate_width = candidate.iter().map(|span| span.width()).sum::<usize>()
                         + Span::raw(route_glyph).width();
                     if candidate_width <= title_budget {
                         title_spans = candidate;
+                        previous_bg = t.card_bg();
                     }
                 }
                 title_spans.push(Span::styled(
