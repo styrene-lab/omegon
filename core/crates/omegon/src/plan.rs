@@ -528,6 +528,148 @@ impl Default for PlanItemProjection {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanSurfaceProjection {
+    pub visible: Option<PlanRegistryEntry>,
+    pub visible_items: Vec<PlanItemProjection>,
+    pub completed_session: Option<ProgressSummary>,
+    pub reconciliation_issues: Vec<PlanReconciliationIssue>,
+    pub promotion_nudges: Vec<String>,
+    pub resume_candidates: Vec<ResumeCandidate>,
+    pub lifecycle_entries: Vec<PlanRegistryEntry>,
+    pub lifecycle_tasks: Vec<PlanItemProjection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanLaneProjection {
+    pub plan_id: String,
+    pub mode: String,
+    pub guidance: String,
+    pub status: PlanStatus,
+    pub scope: PlanScope,
+    pub source: PlanSource,
+    pub completed: usize,
+    pub total: usize,
+    pub items: Vec<PlanLaneItemProjection>,
+    pub workstreams: Vec<PlanLaneWorkstreamProjection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanLaneItemProjection {
+    pub label: String,
+    pub status: WorkItemStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanLaneWorkstreamProjection {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub completed: usize,
+    pub total: usize,
+}
+
+impl PlanSurfaceProjection {
+    pub fn from_intent(intent: &crate::conversation::IntentDocument, repo_root: &Path) -> Self {
+        let lifecycle = crate::tools::lifecycle_plan_projection(repo_root);
+        let completed_session =
+            intent
+                .last_completed_work_plan()
+                .map(|completed| ProgressSummary {
+                    completed: completed.items.len(),
+                    total: completed.items.len(),
+                });
+        Self {
+            visible: intent.visible_plan_registry_entry(),
+            visible_items: intent.visible_plan_items(),
+            completed_session,
+            reconciliation_issues: intent.reconcile_plan_registry(&lifecycle.entries),
+            promotion_nudges: intent.promotion_nudges(),
+            resume_candidates: intent.ranked_resume_candidates(lifecycle.entries.clone()),
+            lifecycle_entries: lifecycle.entries,
+            lifecycle_tasks: lifecycle.tasks,
+        }
+    }
+
+    pub fn active_lane(
+        &self,
+        intent: &crate::conversation::IntentDocument,
+    ) -> Option<PlanLaneProjection> {
+        let visible = self.visible.as_ref()?;
+        if visible.progress.total == 0 {
+            return None;
+        }
+        let visible_plan = intent.visible_plan.as_ref();
+        Some(PlanLaneProjection {
+            plan_id: visible.plan_id.clone(),
+            mode: visible_plan
+                .map(|plan| plan.mode.label().to_string())
+                .unwrap_or_else(|| intent.plan_mode.label().to_string()),
+            guidance: visible_plan
+                .map(|plan| plan.mode.guidance().to_string())
+                .unwrap_or_else(|| intent.plan_mode.guidance().to_string()),
+            status: visible.status,
+            scope: visible.scope,
+            source: visible.source,
+            completed: visible.progress.completed,
+            total: visible.progress.total,
+            items: self
+                .visible_items
+                .iter()
+                .map(|item| PlanLaneItemProjection {
+                    label: item.label.clone(),
+                    status: item.status,
+                })
+                .collect(),
+            workstreams: self
+                .lifecycle_entries
+                .iter()
+                .filter(|entry| entry.plan_id != visible.plan_id)
+                .filter_map(|entry| {
+                    let status = entry.status.workstream_label()?;
+                    Some(PlanLaneWorkstreamProjection {
+                        id: entry.plan_id.clone(),
+                        title: entry.title.clone(),
+                        status: status.to_string(),
+                        completed: entry.progress.completed,
+                        total: entry.progress.total,
+                    })
+                })
+                .collect(),
+        })
+    }
+}
+
+impl PlanLaneProjection {
+    pub fn to_snapshot_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "mode": self.mode,
+            "guidance": self.guidance,
+            "completed": self.completed,
+            "total": self.total,
+            "items": self.items.iter().map(|item| serde_json::json!({
+                "description": item.label,
+                "status": item.status.label(),
+            })).collect::<Vec<_>>(),
+            "status": self.status.label(),
+            "plan_id": self.plan_id,
+            "scope": self.scope.label(),
+            "source": self.source.label(),
+            "workstreams": self.workstreams.iter().map(|stream| serde_json::json!({
+                "id": stream.id,
+                "title": stream.title,
+                "status": stream.status,
+                "completed": stream.completed,
+                "total": stream.total,
+            })).collect::<Vec<_>>(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanAction {
     View,
@@ -961,399 +1103,41 @@ impl crate::conversation::IntentDocument {
     where
         I: IntoIterator<Item = PlanRegistryEntry>,
     {
-        let done = self
-            .work_plan
-            .iter()
-            .filter(|w| matches!(w.status, WorkItemStatus::Done))
-            .count();
-        let items: Vec<serde_json::Value> = self
-            .work_plan
-            .iter()
-            .map(|item| {
+        let mut projection = PlanSurfaceProjection {
+            visible: self.visible_plan_registry_entry(),
+            visible_items: self.visible_plan_items(),
+            ..PlanSurfaceProjection::default()
+        };
+        projection.lifecycle_entries = registry_entries.into_iter().collect();
+        projection
+            .active_lane(self)
+            .map(|lane| lane.to_snapshot_json())
+            .unwrap_or_else(|| {
                 serde_json::json!({
-                    "description": item.description,
-                    "status": item.status.label(),
+                    "mode": self.plan_mode.label(),
+                    "guidance": self.plan_mode.guidance(),
+                    "completed": 0,
+                    "total": 0,
+                    "items": [],
+                    "status": "detached",
+                    "plan_id": self
+                        .visible_plan
+                        .as_ref()
+                        .map(|plan| plan.plan_id.as_str())
+                        .unwrap_or("session:current"),
+                    "scope": self
+                        .visible_plan
+                        .as_ref()
+                        .map(|plan| plan.scope.label())
+                        .unwrap_or("session"),
+                    "source": self
+                        .visible_plan
+                        .as_ref()
+                        .map(|plan| plan.source.label())
+                        .unwrap_or("session"),
+                    "workstreams": [],
                 })
             })
-            .collect();
-
-        let plan_status = self
-            .visible_plan_registry_entry()
-            .map(|entry| entry.status.label())
-            .unwrap_or("detached");
-        let visible_plan_id = self
-            .visible_plan
-            .as_ref()
-            .map(|plan| plan.plan_id.as_str())
-            .unwrap_or("session:current");
-        let workstreams: Vec<serde_json::Value> = registry_entries
-            .into_iter()
-            .filter(|entry| entry.plan_id != visible_plan_id)
-            .filter_map(|entry| {
-                let status = entry.status.workstream_label()?;
-                Some(serde_json::json!({
-                    "id": entry.plan_id,
-                    "title": entry.title,
-                    "status": status,
-                    "completed": entry.progress.completed,
-                    "total": entry.progress.total,
-                }))
-            })
-            .collect();
-
-        serde_json::json!({
-            "mode": self.plan_mode.label(),
-            "guidance": self.plan_mode.guidance(),
-            "completed": done,
-            "total": self.work_plan.len(),
-            "items": items,
-            "status": plan_status,
-            "plan_id": visible_plan_id,
-            "scope": self
-                .visible_plan
-                .as_ref()
-                .map(|plan| plan.scope.label())
-                .unwrap_or("session"),
-            "source": self
-                .visible_plan
-                .as_ref()
-                .map(|plan| plan.source.label())
-                .unwrap_or("session"),
-            "workstreams": workstreams,
-        })
-    }
-}
-
-pub fn render_plan_show_text(
-    intent: &crate::conversation::IntentDocument,
-    repo_root: &Path,
-    plan_id: &str,
-) -> String {
-    let mut registry = intent.plan_registry();
-    let lifecycle = crate::tools::lifecycle_plan_projection(repo_root);
-    registry.entries.extend(lifecycle.entries);
-    registry.tasks.extend(lifecycle.tasks);
-
-    let mut lines = vec![format!("Plan {plan_id}")];
-    if let Some(entry) = registry
-        .entries
-        .iter()
-        .find(|entry| entry.plan_id == plan_id)
-    {
-        lines.push(format!(
-            "{} · {} · {} · {}/{}",
-            entry.source.label(),
-            entry.scope.label(),
-            entry.status.label(),
-            entry.progress.completed,
-            entry.progress.total
-        ));
-    } else {
-        lines.push("stale".to_string());
-        lines.push(STALE_PLAN_COPY.to_string());
-    }
-    for task in registry.tasks.iter().filter(|task| task.plan_id == plan_id) {
-        lines.push(format!("- {} {}", task.status.icon(), task.label));
-    }
-    lines.join("\n")
-}
-
-pub fn render_plan_list_text(
-    intent: &crate::conversation::IntentDocument,
-    repo_root: &Path,
-) -> String {
-    let mut lines = vec!["Plans".to_string(), String::new()];
-
-    lines.push("Visible".to_string());
-    if let Some(entry) = intent.visible_plan_registry_entry() {
-        lines.push(format!(
-            "- {} · {} · {} · {}/{}",
-            entry.plan_id,
-            entry.scope.label(),
-            entry.status.label(),
-            entry.progress.completed,
-            entry.progress.total
-        ));
-        let visible_items = intent.visible_plan_items();
-        let visible_total = visible_items.len();
-        for item in visible_items
-            .into_iter()
-            .take(crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT)
-        {
-            lines.push(format!("  - {} {}", item.status.icon(), item.label));
-        }
-        if visible_total > crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT {
-            lines.push(format!(
-                "  - … and {} more items",
-                visible_total - crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT
-            ));
-        }
-    } else {
-        lines.push("- none".to_string());
-    }
-
-    if let Some(completed) = intent.last_completed_work_plan() {
-        lines.push(String::new());
-        lines.push("Completed".to_string());
-        lines.push(format!(
-            "- last session plan · {}/{}",
-            completed.items.len(),
-            completed.items.len()
-        ));
-    }
-
-    let lifecycle_projection = crate::tools::lifecycle_plan_projection(repo_root);
-    let reconciliation_issues = intent.reconcile_plan_registry(&lifecycle_projection.entries);
-    if !reconciliation_issues.is_empty() {
-        lines.push(String::new());
-        lines.push("Reconciliation".to_string());
-        for issue in &reconciliation_issues {
-            lines.push(format!(
-                "- {} · {:?} · {}",
-                issue.plan_id, issue.kind, issue.message
-            ));
-        }
-    }
-
-    let promotion_nudges = intent.promotion_nudges();
-    if !promotion_nudges.is_empty() {
-        lines.push(String::new());
-        lines.push("Promotion nudges".to_string());
-        for nudge in &promotion_nudges {
-            lines.push(format!("- {nudge}"));
-        }
-    }
-
-    let resume_candidates = intent.ranked_resume_candidates(lifecycle_projection.entries.clone());
-    if !resume_candidates.is_empty() {
-        lines.push(String::new());
-        lines.push("Resume candidates".to_string());
-        lines.push("Explicit only: use /plan resume <id> or /plan switch <id>.".to_string());
-        for candidate in resume_candidates.iter().take(5) {
-            lines.push(format!(
-                "- {} · {} · {} · {}",
-                candidate.plan_id,
-                candidate.status.label(),
-                candidate.source.label(),
-                candidate.hint
-            ));
-        }
-    }
-    lines.push(String::new());
-    lines.push(crate::tools::render_lifecycle_plan_list(repo_root));
-    if !lifecycle_projection.tasks.is_empty() {
-        lines.push(String::new());
-        lines.push("Tasks".to_string());
-        for task in lifecycle_projection
-            .tasks
-            .iter()
-            .take(crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT)
-        {
-            lines.push(format!(
-                "- {} · {} · {} {}",
-                task.id,
-                task.plan_id,
-                task.intent.label(),
-                task.label
-            ));
-        }
-        if lifecycle_projection.tasks.len() > crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT {
-            lines.push(format!(
-                "- … and {} more tasks",
-                lifecycle_projection.tasks.len() - crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT
-            ));
-        }
-    }
-
-    lines.join("\n")
-}
-
-impl crate::conversation::IntentDocument {
-    pub fn reconcile_plan_registry(
-        &self,
-        entries: &[PlanRegistryEntry],
-    ) -> Vec<PlanReconciliationIssue> {
-        let mut issues = Vec::new();
-        if let Some(visible) = self.visible_plan.as_ref() {
-            if let Some(projected) = entries
-                .iter()
-                .find(|entry| entry.plan_id == visible.plan_id)
-            {
-                let runtime_total = visible.items.len();
-                if runtime_total > 0
-                    && projected.progress.total > 0
-                    && runtime_total != projected.progress.total
-                {
-                    issues.push(PlanReconciliationIssue {
-                        plan_id: visible.plan_id.clone(),
-                        kind: PlanReconciliationIssueKind::ProgressDiverged,
-                        message: format!(
-                            "Runtime plan has {runtime_total} item(s), backing projection has {}.",
-                            projected.progress.total
-                        ),
-                    });
-                }
-            } else if visible.binding.openspec_change.is_some() {
-                issues.push(PlanReconciliationIssue {
-                    plan_id: visible.plan_id.clone(),
-                    kind: PlanReconciliationIssueKind::MissingTasks,
-                    message: "OpenSpec-backed plan is missing from the current task projection."
-                        .to_string(),
-                });
-            } else if visible.binding.design_node_id.is_some() {
-                issues.push(PlanReconciliationIssue {
-                    plan_id: visible.plan_id.clone(),
-                    kind: PlanReconciliationIssueKind::MissingDesignNode,
-                    message: "Design-bound plan is missing from the current design projection."
-                        .to_string(),
-                });
-            }
-        }
-        issues
-    }
-
-    pub fn promotion_nudges(&self) -> Vec<String> {
-        let mut nudges = Vec::new();
-        if self.work_plan.len() >= 4
-            && self
-                .visible_plan
-                .as_ref()
-                .is_none_or(|plan| plan.scope == PlanScope::Session)
-        {
-            nudges.push("Session plan has durable-work shape; consider /plan promote openspec:<change> or /plan bind design:<node>.".to_string());
-        }
-        if self
-            .work_plan
-            .iter()
-            .any(|item| matches!(item.intent, Some(TaskIntent::Research | TaskIntent::Design)))
-        {
-            nudges.push("Research/design work is question-heavy; consider binding to a design node for evidence and decisions.".to_string());
-        }
-        if self.work_plan.iter().any(|item| {
-            matches!(
-                item.intent,
-                Some(TaskIntent::Validation | TaskIntent::Operations)
-            )
-        }) {
-            nudges.push("Operations/validation work can record evidence refs for branches, tests, tags, remotes, or assessments.".to_string());
-        }
-        nudges
-    }
-
-    pub fn ranked_resume_candidates(
-        &self,
-        mut entries: Vec<PlanRegistryEntry>,
-    ) -> Vec<ResumeCandidate> {
-        if let Some(visible) = self.visible_plan_registry_entry() {
-            entries.push(visible);
-        }
-        let mut candidates: Vec<ResumeCandidate> = entries
-            .into_iter()
-            .filter(|entry| !matches!(entry.status, PlanStatus::Archived))
-            .map(|entry| {
-                let rank = match (entry.status, entry.scope, entry.source) {
-                    (PlanStatus::Active, _, _) => 0,
-                    (PlanStatus::Blocked | PlanStatus::Backgrounded, PlanScope::Repo, _) => 1,
-                    (PlanStatus::Stale, _, _) => 3,
-                    (PlanStatus::Completed, _, _) => 4,
-                    (
-                        _,
-                        PlanScope::Repo,
-                        PlanSource::OpenSpec | PlanSource::Design | PlanSource::Hybrid,
-                    ) => 2,
-                    _ => 5,
-                };
-                ResumeCandidate {
-                    plan_id: entry.plan_id,
-                    title: entry.title,
-                    status: entry.status,
-                    source: entry.source,
-                    scope: entry.scope,
-                    rank,
-                    hint: entry
-                        .resume_hint
-                        .unwrap_or_else(|| "resume explicitly with /plan resume".to_string()),
-                }
-            })
-            .collect();
-        candidates.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.plan_id.cmp(&b.plan_id)));
-        candidates.dedup_by(|a, b| a.plan_id == b.plan_id);
-        candidates
-    }
-
-    pub fn plan_registry(&self) -> PlanRegistry {
-        let mut registry = PlanRegistry::default();
-        if let Some(entry) = self.visible_plan_registry_entry() {
-            registry.entries.push(entry);
-            registry.tasks.extend(self.visible_plan_items());
-        }
-        if let Some(completed) = self.last_completed_work_plan() {
-            let plan_id = "session:last-completed".to_string();
-            registry.entries.push(PlanRegistryEntry {
-                plan_id: plan_id.clone(),
-                title: completed
-                    .items
-                    .first()
-                    .map(|item| item.description.clone())
-                    .unwrap_or_else(|| "Last completed session plan".to_string()),
-                scope: PlanScope::Session,
-                source: PlanSource::Ephemeral,
-                status: PlanStatus::Completed,
-                binding: PlanBinding::default(),
-                progress: ProgressSummary {
-                    completed: completed.items.len(),
-                    total: completed.items.len(),
-                },
-                resume_hint: Some("completed session context".to_string()),
-            });
-            registry.tasks.extend(Self::project_items_for_plan(
-                &plan_id,
-                &completed.items,
-                PlanScope::Session,
-                &PlanBinding::default(),
-            ));
-        }
-        registry
-    }
-
-    fn project_items_for_plan(
-        plan_id: &str,
-        items: &[WorkItem],
-        scope: PlanScope,
-        binding: &PlanBinding,
-    ) -> Vec<PlanItemProjection> {
-        items
-            .iter()
-            .enumerate()
-            .map(|(idx, item)| PlanItemProjection {
-                id: format!("{}:{}", plan_id, idx + 1),
-                stable_id: format!("{}:{}", plan_id, idx + 1),
-                stable_id_quality: PlanTaskStableIdQuality::Fallback,
-                revision: format!("session:{}:{}", plan_id, idx + 1),
-                source: PlanTaskSourceRef {
-                    kind: "session".to_string(),
-                    path: None,
-                    anchor: Some(format!("item:{}", idx + 1)),
-                },
-                supported_mutations: vec![
-                    PlanTaskMutation::BindExternalRef,
-                    PlanTaskMutation::SetStatus,
-                    PlanTaskMutation::AppendEvidence,
-                    PlanTaskMutation::Complete,
-                    PlanTaskMutation::Reopen,
-                ],
-                plan_id: plan_id.to_string(),
-                label: item.description.clone(),
-                status: item.status,
-                intent: item
-                    .intent
-                    .unwrap_or_else(|| TaskIntent::infer(&item.description)),
-                completion_policy: item.completion_policy,
-                evidence: item.evidence.clone(),
-                external_task_refs: binding.external_task_refs.clone(),
-                writable: scope == PlanScope::Session,
-            })
-            .collect()
     }
 
     pub fn visible_plan_registry_entry(&self) -> Option<PlanRegistryEntry> {
@@ -1556,6 +1340,177 @@ impl crate::conversation::IntentDocument {
         Some(task_id)
     }
 
+    pub fn ranked_resume_candidates(
+        &self,
+        external_entries: Vec<PlanRegistryEntry>,
+    ) -> Vec<ResumeCandidate> {
+        let mut candidates = Vec::new();
+        if let Some(entry) = self.visible_plan_registry_entry() {
+            candidates.push(ResumeCandidate {
+                plan_id: entry.plan_id.clone(),
+                title: entry.title.clone(),
+                status: entry.status,
+                source: entry.source,
+                scope: entry.scope,
+                rank: 0,
+                hint: entry
+                    .resume_hint
+                    .unwrap_or_else(|| "visible plan".to_string()),
+            });
+        }
+        candidates.extend(external_entries.into_iter().map(|entry| {
+            let rank = match entry.status {
+                PlanStatus::Active | PlanStatus::Backgrounded => 1,
+                PlanStatus::Stale | PlanStatus::Blocked | PlanStatus::Detached => 2,
+                PlanStatus::Completed => 3,
+                PlanStatus::Archived => 4,
+            };
+            ResumeCandidate {
+                plan_id: entry.plan_id,
+                title: entry.title,
+                status: entry.status,
+                source: entry.source,
+                scope: entry.scope,
+                rank,
+                hint: entry
+                    .resume_hint
+                    .unwrap_or_else(|| entry.status.label().to_string()),
+            }
+        }));
+        candidates.sort_by_key(|candidate| (candidate.rank, candidate.plan_id.clone()));
+        candidates
+    }
+
+    pub fn reconcile_plan_registry(
+        &self,
+        external_entries: &[PlanRegistryEntry],
+    ) -> Vec<PlanReconciliationIssue> {
+        let Some(visible) = self.visible_plan.as_ref() else {
+            return Vec::new();
+        };
+        if visible.source == PlanSource::OpenSpec
+            && !external_entries
+                .iter()
+                .any(|entry| entry.plan_id == visible.plan_id)
+        {
+            return vec![PlanReconciliationIssue {
+                plan_id: visible.plan_id.clone(),
+                kind: PlanReconciliationIssueKind::MissingTasks,
+                message: "visible OpenSpec plan is missing from lifecycle projection".to_string(),
+            }];
+        }
+        Vec::new()
+    }
+
+    pub fn promotion_nudges(&self) -> Vec<String> {
+        if self
+            .visible_plan
+            .as_ref()
+            .is_some_and(|plan| plan.scope == PlanScope::Repo)
+        {
+            return Vec::new();
+        }
+        let mut nudges = Vec::new();
+        let has_evidence_required = self.work_plan.iter().any(|item| {
+            matches!(
+                item.completion_policy,
+                TaskCompletionPolicy::EvidenceRequired
+            )
+        });
+        let has_design = self
+            .work_plan
+            .iter()
+            .any(|item| matches!(item.intent, Some(TaskIntent::Design)));
+        let has_validation = self
+            .work_plan
+            .iter()
+            .any(|item| matches!(item.intent, Some(TaskIntent::Validation)));
+        if has_evidence_required || has_design || has_validation {
+            nudges.push(
+                "durable-work: session plan has research/design/validation work; consider binding it to a design node or OpenSpec change".to_string(),
+            );
+        }
+        if has_design {
+            nudges.push("design node: promote design work into the design tree".to_string());
+        }
+        if has_validation {
+            nudges.push(
+                "Operations/validation: preserve validation evidence before completing the plan"
+                    .to_string(),
+            );
+        }
+        nudges
+    }
+
+    pub fn plan_registry(&self) -> PlanRegistry {
+        let mut entries = Vec::new();
+        if let Some(entry) = self.visible_plan_registry_entry() {
+            entries.push(entry);
+        }
+        for entry in &self.plan_registry_view.entries {
+            if entries
+                .iter()
+                .any(|existing| existing.plan_id == entry.plan_id)
+            {
+                continue;
+            }
+            entries.push(PlanRegistryEntry {
+                plan_id: entry.plan_id.clone(),
+                title: entry
+                    .resume_hint
+                    .clone()
+                    .unwrap_or_else(|| entry.plan_id.clone()),
+                scope: PlanScope::Session,
+                source: PlanSource::Ephemeral,
+                status: entry.status,
+                binding: PlanBinding::default(),
+                progress: ProgressSummary::default(),
+                resume_hint: entry.resume_hint.clone(),
+            });
+        }
+        PlanRegistry {
+            entries,
+            tasks: self.visible_plan_items(),
+        }
+    }
+
+    fn project_items_for_plan(
+        plan_id: &str,
+        items: &[WorkItem],
+        scope: PlanScope,
+        binding: &PlanBinding,
+    ) -> Vec<PlanItemProjection> {
+        let writable = scope == PlanScope::Session;
+        items
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| PlanItemProjection {
+                id: format!("{}:{}", plan_id, idx + 1),
+                stable_id: format!("{}:{}", plan_id, idx + 1),
+                stable_id_quality: PlanTaskStableIdQuality::Fallback,
+                revision: "session".to_string(),
+                source: PlanTaskSourceRef {
+                    kind: scope.label().to_string(),
+                    path: None,
+                    anchor: Some((idx + 1).to_string()),
+                },
+                supported_mutations: if writable {
+                    vec![PlanTaskMutation::SetStatus, PlanTaskMutation::Complete]
+                } else {
+                    Vec::new()
+                },
+                plan_id: plan_id.to_string(),
+                label: item.description.clone(),
+                status: item.status,
+                intent: item.intent.unwrap_or(TaskIntent::Unspecified),
+                completion_policy: item.completion_policy,
+                evidence: item.evidence.clone(),
+                external_task_refs: binding.external_task_refs.clone(),
+                writable,
+            })
+            .collect()
+    }
+
     pub fn visible_plan_items(&self) -> Vec<PlanItemProjection> {
         self.visible_plan
             .as_ref()
@@ -1580,6 +1535,125 @@ impl crate::conversation::IntentDocument {
 // on that state directly. That would let conversation.rs own only intent and
 // transcript-derived context while plan.rs owns all plan lifecycle/session view
 // behavior without reaching across the full IntentDocument shape.
+
+pub fn render_plan_show_text(
+    intent: &crate::conversation::IntentDocument,
+    repo_root: &Path,
+    plan_id: &str,
+) -> String {
+    let projection = PlanSurfaceProjection::from_intent(intent, repo_root);
+    let mut entries = intent.plan_registry().entries;
+    entries.extend(projection.lifecycle_entries.clone());
+    if let Some(entry) = entries.iter().find(|entry| entry.plan_id == plan_id) {
+        let mut lines = vec![format!(
+            "Plan {} · {} · {} · {}",
+            entry.plan_id,
+            entry.status.label(),
+            entry.source.label(),
+            entry.scope.label()
+        )];
+        lines.push(format!(
+            "Progress: {}/{}",
+            entry.progress.completed, entry.progress.total
+        ));
+        if let Some(hint) = &entry.resume_hint {
+            lines.push(format!("Resume: {hint}"));
+        }
+        let mut items = Vec::new();
+        if let Some(visible) = &projection.visible
+            && visible.plan_id == entry.plan_id
+        {
+            items.extend(projection.visible_items.clone());
+        }
+        items.extend(
+            projection
+                .lifecycle_tasks
+                .iter()
+                .filter(|task| task.plan_id == entry.plan_id)
+                .cloned(),
+        );
+        if !items.is_empty() {
+            lines.push(String::new());
+            lines.push("Items".to_string());
+            for item in items {
+                lines.push(format!("- {} {}", item.status.icon(), item.label));
+            }
+        }
+        return lines.join("\n");
+    }
+
+    format!("Plan {plan_id} · stale\n{STALE_PLAN_COPY}")
+}
+
+pub fn render_plan_list_text(
+    intent: &crate::conversation::IntentDocument,
+    repo_root: &Path,
+) -> String {
+    let projection = PlanSurfaceProjection::from_intent(intent, repo_root);
+    let mut lines = vec!["Plans".to_string()];
+
+    if let Some(visible) = &projection.visible {
+        lines.push(String::new());
+        lines.push(format!(
+            "Visible: {} · {} · {}/{}",
+            visible.plan_id,
+            visible.status.label(),
+            visible.progress.completed,
+            visible.progress.total
+        ));
+        for item in &projection.visible_items {
+            lines.push(format!("- {} {}", item.status.icon(), item.label));
+        }
+    } else if let Some(completed) = &projection.completed_session {
+        lines.push(String::new());
+        lines.push(format!(
+            "Completed session: {}/{}",
+            completed.completed, completed.total
+        ));
+    } else {
+        lines.push(String::new());
+        lines.push("Visible: none".to_string());
+    }
+
+    if !projection.lifecycle_entries.is_empty() {
+        lines.push(String::new());
+        lines.push("OpenSpec".to_string());
+        for entry in &projection.lifecycle_entries {
+            lines.push(format!(
+                "- {} · {} · {}/{}",
+                entry.title,
+                entry.status.label(),
+                entry.progress.completed,
+                entry.progress.total
+            ));
+        }
+    }
+
+    if !projection.lifecycle_tasks.is_empty() {
+        lines.push(String::new());
+        lines.push("OpenSpec tasks".to_string());
+        for task in projection
+            .lifecycle_tasks
+            .iter()
+            .take(crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT)
+        {
+            lines.push(format!(
+                "- {} {} · {}",
+                task.status.icon(),
+                task.label,
+                task.plan_id
+            ));
+        }
+        if projection.lifecycle_tasks.len() > crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT {
+            lines.push(format!(
+                "- … and {} more tasks",
+                projection.lifecycle_tasks.len() - crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT
+            ));
+        }
+    }
+
+    lines.join("\n")
+}
 
 #[cfg(test)]
 mod render_tests {
@@ -1610,8 +1684,8 @@ mod render_tests {
         assert!(output.contains("Visible"), "{output}");
         assert!(output.contains("visible work"), "{output}");
         assert!(output.contains("OpenSpec"), "{output}");
-        assert!(output.contains("example · proposed · 1/2"), "{output}");
-        assert!(output.contains("Runtime · 1/2"), "{output}");
+        assert!(output.contains("example · active · 1/2"), "{output}");
+        assert!(output.contains("1.1 Done"), "{output}");
     }
 
     #[test]
