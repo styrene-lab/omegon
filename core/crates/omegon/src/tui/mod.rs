@@ -478,6 +478,8 @@ struct App {
     conversation_area: Option<Rect>,
     /// Last on-screen editor area for mouse hit-testing.
     editor_area: Option<Rect>,
+    /// Last on-screen workbench area for mouse hit-testing.
+    workbench_area: Option<Rect>,
     footer_data: FooterData,
     /// CIC instrument panel for telemetry visualization
     instrument_panel: InstrumentPanel,
@@ -1924,6 +1926,7 @@ impl App {
             dashboard_area: None,
             conversation_area: None,
             editor_area: None,
+            workbench_area: None,
             footer_data: FooterData {
                 model_id,
                 model_provider,
@@ -4710,6 +4713,7 @@ impl App {
 
         self.conversation_area = Some(conversation_area);
         self.editor_area = Some(editor_area);
+        self.workbench_area = (workbench_area.height > 0).then_some(workbench_area);
 
         if let Some(target) = self.tool_inspection_target.as_ref()
             && tool_inspection_area.height > 0
@@ -5394,6 +5398,18 @@ impl App {
 
         frame.render_widget(Clear, toast_area);
         frame.render_widget(paragraph, toast_area);
+    }
+
+    fn expand_workbench_plan_details(&mut self) -> bool {
+        let Some(snapshot) = self.workbench_state.active.as_ref().cloned() else {
+            return false;
+        };
+        self.conversation
+            .push_system(&snapshot.system_notification_text("Plan details"));
+        self.conversation.snap_to_bottom();
+        self.show_toast("Expanded plan details", ratatui_toaster::ToastType::Success);
+        self.effects.pulse_conversation_action();
+        true
     }
 
     fn close_copy_text_modal(&mut self) {
@@ -9383,6 +9399,19 @@ pub async fn run_tui(
 
                         if point_in(app.dashboard_area) {
                             app.dashboard.sidebar_active = true;
+                        } else if point_in(app.workbench_area) {
+                            app.dashboard.sidebar_active = false;
+                            let now = std::time::Instant::now();
+                            let is_double = app.last_left_click.is_some_and(|(col, row, t)| {
+                                row == mouse.row
+                                    && col.abs_diff(mouse.column) <= 1
+                                    && row.abs_diff(mouse.row) <= 1
+                                    && now.duration_since(t) <= Duration::from_millis(400)
+                            });
+                            if is_double {
+                                app.expand_workbench_plan_details();
+                            }
+                            app.last_left_click = Some((mouse.column, mouse.row, now));
                         } else if point_in(app.conversation_area) {
                             app.dashboard.sidebar_active = false;
                             if let Some(area) = app.conversation_area
@@ -10717,10 +10746,10 @@ mod slash_command_parsing_tests {
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
             vec![
-                "1. ● done    Inspect repo",
-                "2. ◐ active  Patch UI",
-                "3. ⊘ skipped Skip old path",
-                "4. ○ todo    Validate"
+                "● done  1  Inspect repo",
+                "▶ next  2/4  Patch UI",
+                "⊘ skip  3  Skip old path",
+                "○ todo  4  Validate"
             ]
         );
         assert_eq!(rows[2].status, Some(PlanDisplayStatus::Skipped));
@@ -10746,7 +10775,7 @@ mod slash_command_parsing_tests {
         let rows = workbench_rows(&snapshot, 40, 4);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
-            vec!["2. ○ todo    Step 1", "3. ○ todo    Step 2", "+6 more"]
+            vec!["○ todo  2  Step 1", "○ todo  3  Step 2", "⋯ 6 hidden"]
         );
     }
 
@@ -10783,7 +10812,7 @@ mod slash_command_parsing_tests {
         let rows = workbench_rows(&snapshot, 80, 4);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
-            vec!["4. ◐ active  active", "5. ○ todo    todo", "+3 more"]
+            vec!["▶ next  4/5  active", "○ todo  5  todo", "⋯ 3 hidden"]
         );
     }
 
@@ -10826,9 +10855,9 @@ mod slash_command_parsing_tests {
         assert_eq!(
             text,
             vec![
-                "4. ◐ active  Record lint blocker",
-                "5. ○ todo    Commit mechanics docs",
-                "+4 more"
+                "▶ next  4/6  Record lint blocker",
+                "○ todo  5  Commit mechanics docs",
+                "⋯ 4 hidden"
             ]
         );
         assert!(snapshot.hint_state(4).matches_active_next_visible());
@@ -11018,8 +11047,8 @@ mod slash_command_parsing_tests {
         let text = snapshot.system_notification_text("Plan progress");
         assert!(text.contains("Plan mode: complete"), "{text}");
         assert!(text.contains("Progress: 2/2"), "{text}");
-        assert!(text.contains("1. ● one"), "{text}");
-        assert!(text.contains("2. ● two"), "{text}");
+        assert!(text.contains("● done  1  one"), "{text}");
+        assert!(text.contains("● done  2  two"), "{text}");
     }
 
     #[test]
