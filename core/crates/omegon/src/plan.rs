@@ -1,6 +1,7 @@
 //! Plan registry, projections, evidence, and session-local plan view state.
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 use crate::conversation::{
     CompletedWorkPlan, PlanMode, PlanScope, PlanSource, VisiblePlanState, WorkItem, WorkItemStatus,
@@ -1023,6 +1024,150 @@ impl crate::conversation::IntentDocument {
     }
 }
 
+pub fn render_plan_show_text(
+    intent: &crate::conversation::IntentDocument,
+    repo_root: &Path,
+    plan_id: &str,
+) -> String {
+    let mut registry = intent.plan_registry();
+    let lifecycle = crate::tools::lifecycle_plan_projection(repo_root);
+    registry.entries.extend(lifecycle.entries);
+    registry.tasks.extend(lifecycle.tasks);
+
+    let mut lines = vec![format!("Plan {plan_id}")];
+    if let Some(entry) = registry
+        .entries
+        .iter()
+        .find(|entry| entry.plan_id == plan_id)
+    {
+        lines.push(format!(
+            "{} · {} · {} · {}/{}",
+            entry.source.label(),
+            entry.scope.label(),
+            entry.status.label(),
+            entry.progress.completed,
+            entry.progress.total
+        ));
+    } else {
+        lines.push("stale".to_string());
+        lines.push(STALE_PLAN_COPY.to_string());
+    }
+    for task in registry.tasks.iter().filter(|task| task.plan_id == plan_id) {
+        lines.push(format!("- {} {}", task.status.icon(), task.label));
+    }
+    lines.join("\n")
+}
+
+pub fn render_plan_list_text(
+    intent: &crate::conversation::IntentDocument,
+    repo_root: &Path,
+) -> String {
+    let mut lines = vec!["Plans".to_string(), String::new()];
+
+    lines.push("Visible".to_string());
+    if let Some(entry) = intent.visible_plan_registry_entry() {
+        lines.push(format!(
+            "- {} · {} · {} · {}/{}",
+            entry.plan_id,
+            entry.scope.label(),
+            entry.status.label(),
+            entry.progress.completed,
+            entry.progress.total
+        ));
+        let visible_items = intent.visible_plan_items();
+        let visible_total = visible_items.len();
+        for item in visible_items
+            .into_iter()
+            .take(crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT)
+        {
+            lines.push(format!("  - {} {}", item.status.icon(), item.label));
+        }
+        if visible_total > crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT {
+            lines.push(format!(
+                "  - … and {} more items",
+                visible_total - crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT
+            ));
+        }
+    } else {
+        lines.push("- none".to_string());
+    }
+
+    if let Some(completed) = intent.last_completed_work_plan() {
+        lines.push(String::new());
+        lines.push("Completed".to_string());
+        lines.push(format!(
+            "- last session plan · {}/{}",
+            completed.items.len(),
+            completed.items.len()
+        ));
+    }
+
+    let lifecycle_projection = crate::tools::lifecycle_plan_projection(repo_root);
+    let reconciliation_issues = intent.reconcile_plan_registry(&lifecycle_projection.entries);
+    if !reconciliation_issues.is_empty() {
+        lines.push(String::new());
+        lines.push("Reconciliation".to_string());
+        for issue in &reconciliation_issues {
+            lines.push(format!(
+                "- {} · {:?} · {}",
+                issue.plan_id, issue.kind, issue.message
+            ));
+        }
+    }
+
+    let promotion_nudges = intent.promotion_nudges();
+    if !promotion_nudges.is_empty() {
+        lines.push(String::new());
+        lines.push("Promotion nudges".to_string());
+        for nudge in &promotion_nudges {
+            lines.push(format!("- {nudge}"));
+        }
+    }
+
+    let resume_candidates = intent.ranked_resume_candidates(lifecycle_projection.entries.clone());
+    if !resume_candidates.is_empty() {
+        lines.push(String::new());
+        lines.push("Resume candidates".to_string());
+        lines.push("Explicit only: use /plan resume <id> or /plan switch <id>.".to_string());
+        for candidate in resume_candidates.iter().take(5) {
+            lines.push(format!(
+                "- {} · {} · {} · {}",
+                candidate.plan_id,
+                candidate.status.label(),
+                candidate.source.label(),
+                candidate.hint
+            ));
+        }
+    }
+    lines.push(String::new());
+    lines.push(crate::tools::render_lifecycle_plan_list(repo_root));
+    if !lifecycle_projection.tasks.is_empty() {
+        lines.push(String::new());
+        lines.push("Tasks".to_string());
+        for task in lifecycle_projection
+            .tasks
+            .iter()
+            .take(crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT)
+        {
+            lines.push(format!(
+                "- {} · {} · {} {}",
+                task.id,
+                task.plan_id,
+                task.intent.label(),
+                task.label
+            ));
+        }
+        if lifecycle_projection.tasks.len() > crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT {
+            lines.push(format!(
+                "- … and {} more tasks",
+                lifecycle_projection.tasks.len() - crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT
+            ));
+        }
+    }
+
+    lines.join("\n")
+}
+
 impl crate::conversation::IntentDocument {
     pub fn reconcile_plan_registry(
         &self,
@@ -1435,6 +1580,52 @@ impl crate::conversation::IntentDocument {
 // on that state directly. That would let conversation.rs own only intent and
 // transcript-derived context while plan.rs owns all plan lifecycle/session view
 // behavior without reaching across the full IntentDocument shape.
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use crate::conversation::IntentDocument;
+
+    #[test]
+    fn render_plan_list_text_includes_visible_and_lifecycle_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        std::fs::create_dir_all(repo.join("openspec/changes/example/specs/lifecycle")).unwrap();
+        std::fs::write(
+            repo.join("openspec/changes/example/proposal.md"),
+            "# Example\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.join("openspec/changes/example/tasks.md"),
+            "# Tasks\n\n## 1. Runtime\n<!-- specs: lifecycle/example -->\n\n- [x] 1.1 Done\n- [ ] 1.2 Pending\n",
+        )
+        .unwrap();
+
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["visible work".into()]);
+
+        let output = render_plan_list_text(&intent, repo);
+
+        assert!(output.contains("Visible"), "{output}");
+        assert!(output.contains("visible work"), "{output}");
+        assert!(output.contains("OpenSpec"), "{output}");
+        assert!(output.contains("example · proposed · 1/2"), "{output}");
+        assert!(output.contains("Runtime · 1/2"), "{output}");
+    }
+
+    #[test]
+    fn render_plan_show_text_reports_stale_missing_plan() {
+        let dir = tempfile::tempdir().unwrap();
+        let intent = IntentDocument::default();
+
+        let output = render_plan_show_text(&intent, dir.path(), "missing:plan");
+
+        assert!(output.contains("Plan missing:plan"), "{output}");
+        assert!(output.contains("stale"), "{output}");
+        assert!(output.contains(STALE_PLAN_COPY), "{output}");
+    }
+}
 
 #[cfg(test)]
 mod binding_store_tests {
