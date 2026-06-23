@@ -108,6 +108,10 @@ lint:
 headroom-eval *args:
     {{cargo}} run -p omegon-headroom --bin headroom-eval -- {{args}}
 
+# Run deterministic understanding checks over native headroom fixtures.
+headroom-understanding-eval *args:
+    {{cargo}} run -p omegon-headroom --bin headroom-understanding-eval -- {{args}}
+
 # Create an ignored dogfood fixture JSON file from a UTF-8 text sample.
 headroom-fixture name kind input_file:
     python3 scripts/headroom_fixture.py "{{name}}" "{{kind}}" "{{input_file}}"

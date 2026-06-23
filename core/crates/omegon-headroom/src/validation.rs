@@ -37,8 +37,18 @@ pub struct ValidationFixture {
     pub kind_hint: Option<ContentKind>,
     pub input: String,
     pub required_facts: Vec<String>,
+    pub questions: Vec<UnderstandingQuestion>,
     pub min_savings_percent: u8,
     pub expected_compressed: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnderstandingQuestion {
+    pub id: String,
+    pub question: String,
+    pub expected_contains: Vec<String>,
+    #[serde(default)]
+    pub requires_original: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -515,6 +525,8 @@ struct FileValidationFixture {
     input: String,
     #[serde(default)]
     required_facts: Vec<String>,
+    #[serde(default)]
+    questions: Vec<UnderstandingQuestion>,
     #[serde(default = "default_file_min_savings_percent")]
     min_savings_percent: u8,
     #[serde(default)]
@@ -534,6 +546,7 @@ impl From<FileValidationFixture> for ValidationFixture {
             kind_hint: value.kind_hint,
             input: value.input,
             required_facts: value.required_facts,
+            questions: value.questions,
             min_savings_percent: value.min_savings_percent,
             expected_compressed: value.expected_compressed,
         }
@@ -618,6 +631,7 @@ fn json_error_fixture() -> ValidationFixture {
             "affected_count".into(),
             "42".into(),
         ],
+        questions: Vec::new(),
         min_savings_percent: 70,
         expected_compressed: Some(true),
     }
@@ -655,6 +669,7 @@ fn cargo_failure_fixture() -> ValidationFixture {
             "PAYMENT_TIMEOUT".into(),
             "499 passed; 1 failed".into(),
         ],
+        questions: Vec::new(),
         min_savings_percent: 70,
         expected_compressed: Some(true),
     }
@@ -672,6 +687,7 @@ fn compact_grep_passthrough_fixture() -> ValidationFixture {
         kind_hint: Some(ContentKind::PlainText),
         input,
         required_facts: vec!["src/module_7.rs:17:fn target_7() {}".into()],
+        questions: Vec::new(),
         min_savings_percent: 0,
         expected_compressed: Some(false),
     }
@@ -698,6 +714,7 @@ impl Compressor {
         kind_hint: Some(ContentKind::Code),
         input,
         required_facts: vec!["pub fn compress".into()],
+        questions: Vec::new(),
         min_savings_percent: 0,
         expected_compressed: Some(false),
     }
@@ -740,6 +757,7 @@ fn json_schema_signal_fixture() -> ValidationFixture {
             "exit_code".into(),
             "101".into(),
         ],
+        questions: Vec::new(),
         min_savings_percent: 70,
         expected_compressed: Some(true),
     }
@@ -765,6 +783,7 @@ fn threshold_plaintext_fixture() -> ValidationFixture {
         kind_hint: Some(ContentKind::PlainText),
         input: lines.join("\n"),
         required_facts: vec!["keep compression default-off".into()],
+        questions: Vec::new(),
         min_savings_percent: 60,
         expected_compressed: Some(true),
     }
@@ -810,6 +829,7 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n"),
             required_facts: vec!["DOES_NOT_EXIST".into()],
+            questions: Vec::new(),
             min_savings_percent: 0,
             expected_compressed: Some(true),
         };
