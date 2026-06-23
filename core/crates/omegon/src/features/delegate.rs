@@ -1435,6 +1435,12 @@ impl DelegateFeature {
                         .last_tool
                         .clone()
                         .or_else(|| child.result_summary.clone()),
+                    last_tool_activity: child.last_tool_activity.as_ref().map(|activity| {
+                        omegon_traits::ToolActivityVitalSigns {
+                            raw_name: activity.raw_name.clone(),
+                            args_summary: activity.args_summary.clone(),
+                        }
+                    }),
                     last_turn: child.last_turn,
                     tokens_in: 0,
                     tokens_out: 0,

@@ -2309,6 +2309,12 @@ pub struct ChildVitalSigns {
     /// `"write"`). `None` until first activity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_tool: Option<String>,
+    /// Structured form of the most recent tool activity. This preserves the
+    /// raw tool transport plus a redacted/compact argument summary so rich
+    /// clients can resolve semantic labels like `cargo` from `bash` without
+    /// losing backward-compatible `last_tool`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_tool_activity: Option<ToolActivityVitalSigns>,
     /// Most recent turn number reported by the child. `None` until first
     /// turn-end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2325,6 +2331,16 @@ pub struct ChildVitalSigns {
     /// Number of tasks marked done.
     #[serde(default)]
     pub tasks_done: usize,
+}
+
+/// Structured tool activity carried by child vital signs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolActivityVitalSigns {
+    /// Raw tool name observed from the child loop, e.g. `bash` or `read`.
+    pub raw_name: String,
+    /// Redacted/compact argument or target summary, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args_summary: Option<String>,
 }
 
 /// A task item for the vital signs wire format.
