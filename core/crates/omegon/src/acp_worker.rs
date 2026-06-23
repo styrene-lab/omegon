@@ -385,9 +385,7 @@ async fn worker_loop(
                                 None
                             }
                             omegon_traits::AgentEvent::PlanUpdated { projection } => {
-                                let snapshot_json = projection.legacy_snapshot_json();
-                                let entries =
-                                    crate::acp::plan_entries_from_snapshot_json(&snapshot_json);
+                                let entries = crate::acp::plan_entries_from_projection(&projection);
                                 Some(WorkerEvent::PlanUpdate { entries })
                             }
                             omegon_traits::AgentEvent::SystemNotification { message } => {

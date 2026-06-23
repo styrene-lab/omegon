@@ -413,6 +413,38 @@ async fn handle_acp_notification(
     Ok(())
 }
 
+pub(crate) fn plan_entries_from_projection(
+    projection: &omegon_traits::PlanSurfaceProjection,
+) -> Vec<acp_worker::PlanEntryData> {
+    projection
+        .active
+        .as_ref()
+        .map(|lane| {
+            lane.items
+                .iter()
+                .filter_map(|item| {
+                    let content = item.label.trim();
+                    if content.is_empty() {
+                        return None;
+                    }
+                    let status = match item.status.as_str() {
+                        "active" | "in_progress" | "executing" => {
+                            acp_worker::PlanEntryState::InProgress
+                        }
+                        "done" | "completed" => acp_worker::PlanEntryState::Completed,
+                        "skipped" | "failed" => acp_worker::PlanEntryState::Failed,
+                        _ => acp_worker::PlanEntryState::Pending,
+                    };
+                    Some(acp_worker::PlanEntryData {
+                        content: content.to_string(),
+                        status,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub(crate) fn plan_entries_from_snapshot_json(
     snapshot_json: &serde_json::Value,
 ) -> Vec<acp_worker::PlanEntryData> {
@@ -5703,22 +5735,48 @@ mod tests {
     }
 
     #[test]
-    fn plan_snapshot_json_maps_work_plan_items() {
+    fn plan_projection_maps_work_plan_items() {
         use crate::acp_worker::PlanEntryState;
 
-        let snapshot = serde_json::json!({
-            "mode": "executing",
-            "completed": 1,
-            "total": 4,
-            "items": [
-                { "description": "Inspect", "status": "done" },
-                { "description": "Patch", "status": "active" },
-                { "description": "Validate", "status": "todo" },
-                { "description": "Deferred", "status": "skipped" }
-            ]
-        });
+        let projection = omegon_traits::PlanSurfaceProjection {
+            active: Some(omegon_traits::PlanLaneProjection {
+                plan_id: "session:current".into(),
+                mode: "executing".into(),
+                guidance: "keep going".into(),
+                status: "active".into(),
+                scope: "session".into(),
+                source: "session".into(),
+                progress: omegon_traits::PlanProgressProjection {
+                    completed: 1,
+                    total: 4,
+                },
+                items: vec![
+                    omegon_traits::PlanItemProjection {
+                        label: "Inspect".into(),
+                        status: "done".into(),
+                        ..Default::default()
+                    },
+                    omegon_traits::PlanItemProjection {
+                        label: "Patch".into(),
+                        status: "active".into(),
+                        ..Default::default()
+                    },
+                    omegon_traits::PlanItemProjection {
+                        label: "Validate".into(),
+                        status: "todo".into(),
+                        ..Default::default()
+                    },
+                    omegon_traits::PlanItemProjection {
+                        label: "Deferred".into(),
+                        status: "skipped".into(),
+                        ..Default::default()
+                    },
+                ],
+            }),
+            ..Default::default()
+        };
 
-        let entries = plan_entries_from_snapshot_json(&snapshot);
+        let entries = plan_entries_from_projection(&projection);
 
         assert_eq!(entries.len(), 4);
         assert_eq!(entries[0].content, "Inspect");
@@ -5729,15 +5787,22 @@ mod tests {
     }
 
     #[test]
-    fn plan_snapshot_json_empty_items_clears_state() {
-        let snapshot = serde_json::json!({
-            "mode": "off",
-            "completed": 0,
-            "total": 0,
-            "items": []
-        });
+    fn plan_projection_empty_items_clears_state() {
+        let projection = omegon_traits::PlanSurfaceProjection {
+            active: Some(omegon_traits::PlanLaneProjection {
+                plan_id: "session:current".into(),
+                mode: "off".into(),
+                guidance: "No active work plan.".into(),
+                status: "detached".into(),
+                scope: "session".into(),
+                source: "session".into(),
+                progress: omegon_traits::PlanProgressProjection::default(),
+                items: Vec::new(),
+            }),
+            ..Default::default()
+        };
 
-        let entries = plan_entries_from_snapshot_json(&snapshot);
+        let entries = plan_entries_from_projection(&projection);
 
         assert!(entries.is_empty());
     }
