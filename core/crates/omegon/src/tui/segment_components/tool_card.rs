@@ -120,15 +120,8 @@ fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) -> Color {
 fn category_icon_for_segment_producer(producer: SegmentProducer<'_>) -> &'static str {
     let role = match producer {
         SegmentProducer::Tool { name, category } => match category {
-            ToolCategory::CommandExec => crate::tui::glyphs::ToolCategoryGlyphRole::Shell,
-            ToolCategory::FileRead => crate::tui::glyphs::ToolCategoryGlyphRole::Read,
-            ToolCategory::FileMutation => crate::tui::glyphs::ToolCategoryGlyphRole::Write,
-            ToolCategory::DesignTree => crate::tui::glyphs::ToolCategoryGlyphRole::Design,
-            ToolCategory::Memory => crate::tui::glyphs::ToolCategoryGlyphRole::Memory,
-            ToolCategory::Search => crate::tui::glyphs::ToolCategoryGlyphRole::Search,
-            ToolCategory::Subagent => crate::tui::glyphs::ToolCategoryGlyphRole::Subagent,
-            ToolCategory::Network => crate::tui::glyphs::ToolCategoryGlyphRole::Network,
             ToolCategory::Generic => crate::tui::glyphs::tool_category_role_for_name(name),
+            category => crate::tui::glyphs::tool_category_role_for_category(category),
         },
         _ => crate::tui::glyphs::ToolCategoryGlyphRole::Generic,
     };
