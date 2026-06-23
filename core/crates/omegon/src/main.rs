@@ -7663,12 +7663,9 @@ Last completed plan
 fn work_plan_snapshot_with_lifecycle(
     intent: &crate::conversation::IntentDocument,
 ) -> serde_json::Value {
-    let mut registry = intent.plan_registry();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let repo_root = setup::find_project_root(&cwd);
-    let lifecycle = crate::tools::lifecycle_plan_projection(&repo_root);
-    registry.entries.extend(lifecycle.entries);
-    intent.work_plan_snapshot_json_with_registry_entries(registry.entries)
+    intent.work_plan_snapshot_json_for_repo(&repo_root)
 }
 
 fn render_plan_show(runtime_state: &InteractiveAgentState, plan_id: &str) -> String {
