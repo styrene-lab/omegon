@@ -4895,10 +4895,7 @@ impl App {
             } else {
                 use crate::tui::glyphs::EngineGlyphRole;
                 let glyphs = crate::tui::glyphs::glyphs();
-                let is_local_provider = matches!(
-                    provider_label,
-                    "ollama" | "llama.cpp" | "local"
-                );
+                let is_local_provider = matches!(provider_label, "ollama" | "llama.cpp" | "local");
                 let provider_glyph = if is_local_provider {
                     glyphs.engine(EngineGlyphRole::ProviderLocal)
                 } else {
@@ -4937,12 +4934,18 @@ impl App {
                         .bg(t.accent_muted())
                         .add_modifier(Modifier::BOLD),
                 );
-                let mut title_spans = vec![Span::styled(" ", Style::default().fg(t.border_dim()))];
+                let mut title_spans = vec![Span::styled(
+                    " ",
+                    Style::default().fg(t.border_dim()).bg(t.surface_bg()),
+                )];
                 title_spans.push(route_span);
-                let push_tail = |spans: &mut Vec<Span<'static>>, text: String, style: Style| {
+                let push_tail = |spans: &mut Vec<Span<'static>>,
+                                 text: String,
+                                 style: Style,
+                                 previous_bg: Color| {
                     spans.push(Span::styled(
                         route_glyph,
-                        Style::default().fg(t.accent_muted()).bg(t.card_bg()),
+                        Style::default().fg(previous_bg).bg(t.card_bg()),
                     ));
                     spans.push(Span::styled(format!(" {text} "), style));
                 };
@@ -4962,7 +4965,7 @@ impl App {
                 ];
                 for (text, style) in tail_fields {
                     let mut candidate = title_spans.clone();
-                    push_tail(&mut candidate, text, style);
+                    push_tail(&mut candidate, text, style, t.accent_muted());
                     let candidate_width = candidate.iter().map(|span| span.width()).sum::<usize>()
                         + Span::raw(route_glyph).width();
                     if candidate_width <= title_budget {
