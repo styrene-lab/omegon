@@ -5056,59 +5056,62 @@ impl App {
                         self.footer_data.context_percent,
                     )
                 );
-                let route_span = Span::styled(
+                let route_bg = t.accent_muted();
+                let grade_bg = t.accent();
+                let thinking_bg = t.surface_bg();
+                let context_bg = t.card_bg();
+                let mut title_spans = vec![Span::styled(
+                    " ",
+                    Style::default().fg(t.border_dim()).bg(t.surface_bg()),
+                )];
+                title_spans.push(Span::styled(
                     format!(
                         " {} {provider_glyph} {route_label} ",
                         glyphs.engine(EngineGlyphRole::RibbonMark),
                     ),
                     Style::default()
                         .fg(t.bg())
-                        .bg(t.accent_muted())
+                        .bg(route_bg)
                         .add_modifier(Modifier::BOLD),
-                );
-                let mut title_spans = vec![Span::styled(
-                    " ",
-                    Style::default().fg(t.border_dim()).bg(t.surface_bg()),
-                )];
-                title_spans.push(route_span);
-                let push_tail = |spans: &mut Vec<Span<'static>>,
-                                 text: String,
-                                 style: Style,
-                                 previous_bg: Color| {
+                ));
+                let push_segment = |spans: &mut Vec<Span<'static>>,
+                                    text: String,
+                                    style: Style,
+                                    previous_bg: Color,
+                                    segment_bg: Color| {
                     spans.push(Span::styled(
                         route_glyph,
-                        Style::default().fg(previous_bg).bg(t.card_bg()),
+                        Style::default().fg(previous_bg).bg(segment_bg),
                     ));
-                    spans.push(Span::styled(format!(" {text} "), style));
+                    spans.push(Span::styled(format!(" {text} "), style.bg(segment_bg)));
                 };
                 let tail_fields = [
                     (
                         grade_text,
-                        Style::default()
-                            .fg(t.accent_bright())
-                            .bg(t.card_bg())
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(t.bg()).add_modifier(Modifier::BOLD),
+                        grade_bg,
                     ),
                     (
                         thinking_text,
-                        Style::default().fg(t.accent_muted()).bg(t.card_bg()),
+                        Style::default().fg(t.accent_bright()),
+                        thinking_bg,
                     ),
-                    (context_text, Style::default().fg(t.muted()).bg(t.card_bg())),
+                    (context_text, Style::default().fg(t.fg()), context_bg),
                 ];
-                let mut previous_bg = t.accent_muted();
-                for (text, style) in tail_fields {
+                let mut previous_bg = route_bg;
+                for (text, style, segment_bg) in tail_fields {
                     let mut candidate = title_spans.clone();
-                    push_tail(&mut candidate, text, style, previous_bg);
+                    push_segment(&mut candidate, text, style, previous_bg, segment_bg);
                     let candidate_width = candidate.iter().map(|span| span.width()).sum::<usize>()
                         + Span::raw(route_glyph).width();
                     if candidate_width <= title_budget {
                         title_spans = candidate;
-                        previous_bg = t.card_bg();
+                        previous_bg = segment_bg;
                     }
                 }
                 title_spans.push(Span::styled(
                     route_glyph,
-                    Style::default().fg(t.card_bg()).bg(t.surface_bg()),
+                    Style::default().fg(previous_bg).bg(t.surface_bg()),
                 ));
                 Line::from(title_spans)
             };

@@ -28,6 +28,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
 
 ### Fixed
+- Render lean editor engine ribbon tail fields as distinct gradient-style badge segments so grade, thinking, and context keep visible backgrounds and Powerline divider bridges instead of falling back to plain metadata text.
 - Routed slim tool segment category glyphs through the locked structured tool identity matrix, including shell-mediated read/search/write classifications, so compact tool rows no longer show stale generic/status symbols for context, codebase, search, and read tools.
 - Filled lean editor engine ribbon divider backgrounds so Powerline separators blend with the preceding route/card segments instead of rendering as floating triangles.
 - Preserve intentional theme badge backgrounds during final TUI background cleanup so the lean editor provider/model route remains visible as dark-on-accent text instead of being flattened to black-on-black.
