@@ -530,7 +530,7 @@ impl Default for PlanItemProjection {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
-pub struct PlanSurfaceProjection {
+pub struct PlanSurfaceInputs {
     pub visible: Option<PlanRegistryEntry>,
     pub visible_items: Vec<PlanItemProjection>,
     pub completed_session: Option<ProgressSummary>,
@@ -541,39 +541,7 @@ pub struct PlanSurfaceProjection {
     pub lifecycle_tasks: Vec<PlanItemProjection>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default)]
-pub struct PlanLaneProjection {
-    pub plan_id: String,
-    pub mode: String,
-    pub guidance: String,
-    pub status: PlanStatus,
-    pub scope: PlanScope,
-    pub source: PlanSource,
-    pub completed: usize,
-    pub total: usize,
-    pub items: Vec<PlanLaneItemProjection>,
-    pub workstreams: Vec<PlanLaneWorkstreamProjection>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default)]
-pub struct PlanLaneItemProjection {
-    pub label: String,
-    pub status: WorkItemStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default)]
-pub struct PlanLaneWorkstreamProjection {
-    pub id: String,
-    pub title: String,
-    pub status: String,
-    pub completed: usize,
-    pub total: usize,
-}
-
-impl PlanSurfaceProjection {
+impl PlanSurfaceInputs {
     pub fn from_intent(intent: &crate::conversation::IntentDocument, repo_root: &Path) -> Self {
         let lifecycle = crate::tools::lifecycle_plan_projection(repo_root);
         let completed_session =
@@ -598,13 +566,13 @@ impl PlanSurfaceProjection {
     pub fn active_lane(
         &self,
         intent: &crate::conversation::IntentDocument,
-    ) -> Option<PlanLaneProjection> {
+    ) -> Option<omegon_traits::PlanLaneProjection> {
         let visible = self.visible.as_ref()?;
         if visible.progress.total == 0 {
             return None;
         }
         let visible_plan = intent.visible_plan.as_ref();
-        Some(PlanLaneProjection {
+        Some(omegon_traits::PlanLaneProjection {
             plan_id: visible.plan_id.clone(),
             mode: visible_plan
                 .map(|plan| plan.mode.label().to_string())
@@ -612,46 +580,34 @@ impl PlanSurfaceProjection {
             guidance: visible_plan
                 .map(|plan| plan.mode.guidance().to_string())
                 .unwrap_or_else(|| intent.plan_mode.guidance().to_string()),
-            status: visible.status,
-            scope: visible.scope,
-            source: visible.source,
-            completed: visible.progress.completed,
-            total: visible.progress.total,
+            status: visible.status.label().to_string(),
+            scope: visible.scope.label().to_string(),
+            source: visible.source.label().to_string(),
+            progress: omegon_traits::PlanProgressProjection {
+                completed: visible.progress.completed,
+                total: visible.progress.total,
+            },
             items: self
                 .visible_items
                 .iter()
-                .map(|item| PlanLaneItemProjection {
+                .map(|item| omegon_traits::PlanItemProjection {
+                    id: None,
                     label: item.label.clone(),
-                    status: item.status,
-                })
-                .collect(),
-            workstreams: self
-                .lifecycle_entries
-                .iter()
-                .filter(|entry| entry.plan_id != visible.plan_id)
-                .filter_map(|entry| {
-                    let status = entry.status.workstream_label()?;
-                    Some(PlanLaneWorkstreamProjection {
-                        id: entry.plan_id.clone(),
-                        title: entry.title.clone(),
-                        status: status.to_string(),
-                        completed: entry.progress.completed,
-                        total: entry.progress.total,
-                    })
+                    status: item.status.label().to_string(),
+                    intent: None,
+                    writable: item.writable,
                 })
                 .collect(),
         })
     }
 }
 
-impl PlanSurfaceProjection {
+impl PlanSurfaceInputs {
     pub fn to_agent_projection(
         &self,
         intent: &crate::conversation::IntentDocument,
     ) -> omegon_traits::PlanSurfaceProjection {
-        let active = self
-            .active_lane(intent)
-            .map(|lane| lane.to_agent_projection());
+        let active = self.active_lane(intent);
         omegon_traits::PlanSurfaceProjection {
             version: 1,
             active,
@@ -699,60 +655,6 @@ impl PlanSurfaceProjection {
                 })
                 .collect(),
         }
-    }
-}
-
-impl PlanLaneProjection {
-    pub fn to_agent_projection(&self) -> omegon_traits::PlanLaneProjection {
-        omegon_traits::PlanLaneProjection {
-            plan_id: self.plan_id.clone(),
-            mode: self.mode.clone(),
-            guidance: self.guidance.clone(),
-            status: self.status.label().to_string(),
-            scope: self.scope.label().to_string(),
-            source: self.source.label().to_string(),
-            progress: omegon_traits::PlanProgressProjection {
-                completed: self.completed,
-                total: self.total,
-            },
-            items: self
-                .items
-                .iter()
-                .map(|item| omegon_traits::PlanItemProjection {
-                    id: None,
-                    label: item.label.clone(),
-                    status: item.status.label().to_string(),
-                    intent: None,
-                    writable: true,
-                })
-                .collect(),
-        }
-    }
-}
-
-impl PlanLaneProjection {
-    pub fn to_snapshot_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "mode": self.mode,
-            "guidance": self.guidance,
-            "completed": self.completed,
-            "total": self.total,
-            "items": self.items.iter().map(|item| serde_json::json!({
-                "description": item.label,
-                "status": item.status.label(),
-            })).collect::<Vec<_>>(),
-            "status": self.status.label(),
-            "plan_id": self.plan_id,
-            "scope": self.scope.label(),
-            "source": self.source.label(),
-            "workstreams": self.workstreams.iter().map(|stream| serde_json::json!({
-                "id": stream.id,
-                "title": stream.title,
-                "status": stream.status,
-                "completed": stream.completed,
-                "total": stream.total,
-            })).collect::<Vec<_>>(),
-        })
     }
 }
 
@@ -1186,14 +1088,12 @@ impl crate::conversation::IntentDocument {
         &self,
         repo_root: &Path,
     ) -> omegon_traits::PlanSurfaceProjection {
-        PlanSurfaceProjection::from_intent(self, repo_root).to_agent_projection(self)
+        PlanSurfaceInputs::from_intent(self, repo_root).to_agent_projection(self)
     }
 
     pub fn work_plan_snapshot_json_for_repo(&self, repo_root: &Path) -> serde_json::Value {
-        PlanSurfaceProjection::from_intent(self, repo_root)
-            .active_lane(self)
-            .map(|lane| lane.to_snapshot_json())
-            .unwrap_or_else(|| self.detached_work_plan_snapshot_json())
+        self.plan_surface_projection_for_repo(repo_root)
+            .legacy_snapshot_json()
     }
 
     pub fn work_plan_snapshot_json_with_registry_entries<I>(
@@ -1203,16 +1103,13 @@ impl crate::conversation::IntentDocument {
     where
         I: IntoIterator<Item = PlanRegistryEntry>,
     {
-        let mut projection = PlanSurfaceProjection {
+        let mut projection = PlanSurfaceInputs {
             visible: self.visible_plan_registry_entry(),
             visible_items: self.visible_plan_items(),
-            ..PlanSurfaceProjection::default()
+            ..PlanSurfaceInputs::default()
         };
         projection.lifecycle_entries = registry_entries.into_iter().collect();
-        projection
-            .active_lane(self)
-            .map(|lane| lane.to_snapshot_json())
-            .unwrap_or_else(|| self.detached_work_plan_snapshot_json())
+        projection.to_agent_projection(self).legacy_snapshot_json()
     }
 
     fn detached_work_plan_snapshot_json(&self) -> serde_json::Value {
@@ -1643,7 +1540,7 @@ pub fn render_plan_show_text(
     repo_root: &Path,
     plan_id: &str,
 ) -> String {
-    let projection = PlanSurfaceProjection::from_intent(intent, repo_root);
+    let projection = PlanSurfaceInputs::from_intent(intent, repo_root);
     let mut entries = intent.plan_registry().entries;
     entries.extend(projection.lifecycle_entries.clone());
     if let Some(entry) = entries.iter().find(|entry| entry.plan_id == plan_id) {
@@ -1691,7 +1588,7 @@ pub fn render_plan_list_text(
     intent: &crate::conversation::IntentDocument,
     repo_root: &Path,
 ) -> String {
-    let projection = PlanSurfaceProjection::from_intent(intent, repo_root);
+    let projection = PlanSurfaceInputs::from_intent(intent, repo_root);
     let mut lines = vec!["Plans".to_string()];
 
     if let Some(visible) = &projection.visible {
