@@ -677,6 +677,7 @@ impl AgentSetup {
         // ─── Tool management ─────────────────────────────────────────────
         let manage_tools = features::manage_tools::ManageTools::new();
         let disabled_handle = manage_tools.disabled_handle();
+        let tool_inventory = manage_tools.inventory_handle();
         bus.register(Box::new(manage_tools));
 
         // ─── Auth (credential probing + status) ───────────────────────
@@ -875,8 +876,10 @@ impl AgentSetup {
         // ─── Finalize bus (caches tool/command definitions) ─────────────
         bus.finalize();
 
-        // Wire disabled-tools handle so tool_definitions() filters at runtime
+        // Wire ManageTools state so runtime filtering and list output reflect
+        // the bus's finalized model-visible tool cache.
         bus.set_disabled_tools(disabled_handle.clone());
+        bus.set_tool_inventory(tool_inventory.clone());
 
         // ─── Default tool profile — disable rarely-used tools ───────────
         {
