@@ -127,6 +127,7 @@ fn category_icon_for_segment_producer(producer: SegmentProducer<'_>) -> &'static
             ToolCategory::Memory => crate::tui::glyphs::ToolCategoryGlyphRole::Memory,
             ToolCategory::Search => crate::tui::glyphs::ToolCategoryGlyphRole::Search,
             ToolCategory::Subagent => crate::tui::glyphs::ToolCategoryGlyphRole::Subagent,
+            ToolCategory::Network => crate::tui::glyphs::ToolCategoryGlyphRole::Network,
             ToolCategory::Generic => crate::tui::glyphs::tool_category_role_for_name(name),
         },
         _ => crate::tui::glyphs::ToolCategoryGlyphRole::Generic,

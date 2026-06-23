@@ -630,6 +630,7 @@ pub enum ToolCategory {
     Memory,
     Search,
     Subagent,
+    Network,
     Generic,
 }
 
@@ -644,29 +645,257 @@ impl ToolCategory {
             Self::Memory => "memory",
             Self::Search => "search",
             Self::Subagent => "subagent",
+            Self::Network => "network",
             Self::Generic => "tool",
         }
     }
 }
 
 pub fn tool_category_for_name(name: &str) -> ToolCategory {
-    match name {
-        "bash" => ToolCategory::CommandExec,
-        "read" | "view" => ToolCategory::FileRead,
-        "write" | "edit" | "change" => ToolCategory::FileMutation,
-        "design_tree" | "design_tree_update" | "openspec_manage" | "lifecycle_doctor" => {
-            ToolCategory::DesignTree
+    tool_visual_identity(name, None).category()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolRealm {
+    Execution,
+    Filesystem,
+    Retrieval,
+    Knowledge,
+    Orchestration,
+    Design,
+    Harness,
+    External,
+    Diagnostics,
+    Generic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolFamily {
+    Shell,
+    Cargo,
+    Git,
+    Package,
+    Container,
+    Kubernetes,
+    Remote,
+    Build,
+    FileRead,
+    FileWrite,
+    Validate,
+    Archive,
+    CodebaseSearch,
+    DocumentSearch,
+    WebSearch,
+    BrowserSearch,
+    ShellSearch,
+    Memory,
+    Context,
+    ProjectGraph,
+    Time,
+    Plan,
+    Delegate,
+    Cleave,
+    Kanban,
+    Engagement,
+    DesignTree,
+    Drawing,
+    Diagram,
+    DesignBoard,
+    Flow,
+    FlyntUi,
+    ToolRegistry,
+    ModelRuntime,
+    Settings,
+    Identity,
+    Secrets,
+    Nex,
+    Reader,
+    Network,
+    Browser,
+    GoogleWorkspace,
+    Forge,
+    SecurityScan,
+    Doctor,
+    Status,
+    Generic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolTransport {
+    HarnessTool,
+    Shell,
+    Terminal,
+    Browser,
+    Extension,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolVisualIdentity {
+    pub raw_name: String,
+    pub label: String,
+    pub realm: ToolRealm,
+    pub family: ToolFamily,
+    pub transport: ToolTransport,
+}
+
+impl ToolVisualIdentity {
+    pub fn category(&self) -> ToolCategory {
+        match self.realm {
+            ToolRealm::Execution => ToolCategory::CommandExec,
+            ToolRealm::Filesystem => match self.family {
+                ToolFamily::FileRead => ToolCategory::FileRead,
+                ToolFamily::FileWrite => ToolCategory::FileMutation,
+                _ => ToolCategory::Generic,
+            },
+            ToolRealm::Retrieval => ToolCategory::Search,
+            ToolRealm::Knowledge => ToolCategory::Memory,
+            ToolRealm::Orchestration => ToolCategory::Subagent,
+            ToolRealm::Design => ToolCategory::DesignTree,
+            ToolRealm::External => ToolCategory::Network,
+            _ => ToolCategory::Generic,
         }
-        name if name.starts_with("memory_") || name.contains("memory") => ToolCategory::Memory,
-        "web_search" | "browser_search" | "codebase_search" | "search_documents" => {
-            ToolCategory::Search
-        }
-        name if name.contains("search") => ToolCategory::Search,
-        "delegate" | "delegate_result" | "delegate_status" | "delegate_cancel"
-        | "cleave_assess" | "cleave_run" => ToolCategory::Subagent,
-        name if name.contains("delegate") || name.contains("cleave") => ToolCategory::Subagent,
-        _ => ToolCategory::Generic,
     }
+}
+
+pub fn tool_visual_identity(name: &str, detail_args: Option<&str>) -> ToolVisualIdentity {
+    if matches!(name, "bash" | "terminal" | "shell") {
+        return shell_tool_visual_identity(name, detail_args);
+    }
+
+    let (realm, family, label) = match name {
+        "read" | "view" | "reader_open" | "reader_open_dry_run" => {
+            (ToolRealm::Filesystem, ToolFamily::FileRead, "read")
+        }
+        "write" | "edit" | "change" => (ToolRealm::Filesystem, ToolFamily::FileWrite, "write"),
+        "validate" => (ToolRealm::Filesystem, ToolFamily::Validate, "validate"),
+        "commit" | "git_login" => (ToolRealm::Execution, ToolFamily::Git, "git"),
+        "codebase_search" => (ToolRealm::Retrieval, ToolFamily::CodebaseSearch, "codebase"),
+        "search_documents" | "list_documents" | "find_document_by_slug" | "get_document"
+        | "get_backlinks" => (ToolRealm::Retrieval, ToolFamily::DocumentSearch, "docs"),
+        "web_search" | "web_fetch" => (ToolRealm::Retrieval, ToolFamily::WebSearch, "web"),
+        "browser_search" | "browser_search_receive" | "browser_record_receive"
+        | "browser_recipe_draft" => (ToolRealm::Retrieval, ToolFamily::BrowserSearch, "browser"),
+        "browser_google_workspace_open" | "browser_google_workspace_probe" => {
+            (ToolRealm::External, ToolFamily::GoogleWorkspace, "google")
+        }
+        "context_status" | "request_context" | "context_compact" | "context_clear" => {
+            (ToolRealm::Knowledge, ToolFamily::Context, "context")
+        }
+        "get_graph" | "get_graph_filtered" | "get_node_neighbors" => {
+            (ToolRealm::Knowledge, ToolFamily::ProjectGraph, "graph")
+        }
+        "chronos" => (ToolRealm::Knowledge, ToolFamily::Time, "time"),
+        "plan" => (ToolRealm::Orchestration, ToolFamily::Plan, "plan"),
+        "delegate" | "delegate_result" | "delegate_status" | "delegate_cancel" => {
+            (ToolRealm::Orchestration, ToolFamily::Delegate, "delegate")
+        }
+        "cleave_assess" | "cleave_run" => (ToolRealm::Orchestration, ToolFamily::Cleave, "cleave"),
+        "list_tasks" | "get_task" | "create_task" | "update_task" | "list_boards"
+        | "get_board" | "create_board" | "delete_board" => {
+            (ToolRealm::Orchestration, ToolFamily::Kanban, "kanban")
+        }
+        "design_tree" | "design_tree_update" | "list_design_nodes" | "convert_to_design_node"
+        | "openspec_manage" | "lifecycle_doctor" => {
+            (ToolRealm::Design, ToolFamily::DesignTree, "design")
+        }
+        "create_drawing" => (ToolRealm::Design, ToolFamily::Drawing, "drawing"),
+        "create_d2_diagram" | "render_diagram" => (ToolRealm::Design, ToolFamily::Diagram, "diagram"),
+        "get_ui_state" | "flynt_surface_guide" => (ToolRealm::Design, ToolFamily::FlyntUi, "ui"),
+        "manage_tools" => (ToolRealm::Harness, ToolFamily::ToolRegistry, "tools"),
+        "ask_local_model" | "list_local_models" | "manage_ollama" => {
+            (ToolRealm::Harness, ToolFamily::ModelRuntime, "model")
+        }
+        "whoami" => (ToolRealm::Harness, ToolFamily::Identity, "identity"),
+        name if name.starts_with("memory_") || name.contains("memory") => {
+            (ToolRealm::Knowledge, ToolFamily::Memory, "memory")
+        }
+        name if name.starts_with("drawing_") => (ToolRealm::Design, ToolFamily::Drawing, "drawing"),
+        name if name.starts_with("design_board_") => (ToolRealm::Design, ToolFamily::DesignBoard, "board"),
+        name if name.starts_with("flow_") => (ToolRealm::Design, ToolFamily::Flow, "flow"),
+        name if name.starts_with("engagement_") || name.starts_with("forge_") => {
+            (ToolRealm::Orchestration, ToolFamily::Engagement, "engage")
+        }
+        name if name.starts_with("secret_") => (ToolRealm::Harness, ToolFamily::Secrets, "secret"),
+        name if name.starts_with("nex_") => (ToolRealm::Harness, ToolFamily::Nex, "nex"),
+        name if name.starts_with("reader_") => (ToolRealm::Harness, ToolFamily::Reader, "reader"),
+        name if name.starts_with("lipstyk_") => {
+            (ToolRealm::Diagnostics, ToolFamily::SecurityScan, "scan")
+        }
+        name if name.contains("status") || name.contains("doctor") => {
+            (ToolRealm::Diagnostics, ToolFamily::Doctor, "status")
+        }
+        name if name.contains("search") => (ToolRealm::Retrieval, ToolFamily::Generic, "search"),
+        _ => (ToolRealm::Generic, ToolFamily::Generic, "tool"),
+    };
+
+    ToolVisualIdentity {
+        raw_name: name.to_string(),
+        label: label.to_string(),
+        realm,
+        family,
+        transport: ToolTransport::HarnessTool,
+    }
+}
+
+fn shell_tool_visual_identity(name: &str, detail_args: Option<&str>) -> ToolVisualIdentity {
+    let command = detail_args.and_then(shell_command_from_args);
+    let first_word = command
+        .as_deref()
+        .unwrap_or(name)
+        .split_whitespace()
+        .next()
+        .unwrap_or(name);
+    let (realm, family, label) = match first_word {
+        "grep" | "rg" | "find" => (ToolRealm::Retrieval, ToolFamily::ShellSearch, "search"),
+        "ls" | "dir" | "cat" | "head" | "tail" | "bat" => {
+            (ToolRealm::Filesystem, ToolFamily::FileRead, "read")
+        }
+        "sed" | "awk" | "mkdir" | "rm" | "mv" | "cp" | "chmod" | "chown" => {
+            (ToolRealm::Filesystem, ToolFamily::FileWrite, "write")
+        }
+        "git" => (ToolRealm::Execution, ToolFamily::Git, "git"),
+        "cargo" => (ToolRealm::Execution, ToolFamily::Cargo, "cargo"),
+        "npm" | "npx" | "pnpm" | "yarn" | "bun" => {
+            (ToolRealm::Execution, ToolFamily::Package, "npm")
+        }
+        "docker" | "podman" => (ToolRealm::Execution, ToolFamily::Container, "container"),
+        "kubectl" | "k" => (ToolRealm::Execution, ToolFamily::Kubernetes, "kubectl"),
+        "make" | "cmake" => (ToolRealm::Execution, ToolFamily::Build, "build"),
+        "curl" | "wget" | "dig" | "nslookup" | "host" => {
+            (ToolRealm::External, ToolFamily::Network, "network")
+        }
+        "ssh" | "scp" | "rsync" => (ToolRealm::Execution, ToolFamily::Remote, "remote"),
+        "tar" | "zip" | "unzip" | "gzip" => (ToolRealm::Filesystem, ToolFamily::Archive, "archive"),
+        "python" | "python3" | "pip" => (ToolRealm::Execution, ToolFamily::Package, "python"),
+        "go" => (ToolRealm::Execution, ToolFamily::Package, "go"),
+        "test" | "[" => (ToolRealm::Diagnostics, ToolFamily::Status, "test"),
+        "sh" | "bash" | "zsh" | "shell" | "terminal" => {
+            (ToolRealm::Execution, ToolFamily::Shell, "shell")
+        }
+        other => (ToolRealm::Execution, ToolFamily::Shell, other),
+    };
+
+    ToolVisualIdentity {
+        raw_name: name.to_string(),
+        label: label.to_string(),
+        realm,
+        family,
+        transport: ToolTransport::Shell,
+    }
+}
+
+fn shell_command_from_args(args: &str) -> Option<String> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(args)
+        && let Some(command) = value
+            .get("command")
+            .or_else(|| value.get("cmd"))
+            .and_then(serde_json::Value::as_str)
+    {
+        return Some(command.split_whitespace().collect::<Vec<_>>().join(" "));
+    }
+    let raw = args.lines().next()?.trim();
+    (!raw.is_empty()).then(|| raw.to_string())
 }
 
 pub fn presentation_for_role(
@@ -766,6 +995,36 @@ mod tests {
         for (name, expected) in cases {
             assert_eq!(tool_category_for_name(name), expected, "{name}");
         }
+    }
+
+
+    #[test]
+    fn tool_visual_identity_resolves_core_and_shell_families() {
+        let cargo = tool_visual_identity("bash", Some(r#"{"command":"cargo test -p omegon"}"#));
+        assert_eq!(cargo.realm, ToolRealm::Execution);
+        assert_eq!(cargo.family, ToolFamily::Cargo);
+        assert_eq!(cargo.transport, ToolTransport::Shell);
+        assert_eq!(cargo.label, "cargo");
+
+        let rg = tool_visual_identity("bash", Some("rg needle core"));
+        assert_eq!(rg.realm, ToolRealm::Retrieval);
+        assert_eq!(rg.family, ToolFamily::ShellSearch);
+        assert_eq!(rg.label, "search");
+
+        let codebase = tool_visual_identity("codebase_search", None);
+        assert_eq!(codebase.realm, ToolRealm::Retrieval);
+        assert_eq!(codebase.family, ToolFamily::CodebaseSearch);
+        assert_eq!(codebase.transport, ToolTransport::HarnessTool);
+        assert_eq!(codebase.label, "codebase");
+
+        let docs = tool_visual_identity("search_documents", None);
+        assert_eq!(docs.family, ToolFamily::DocumentSearch);
+        assert_eq!(docs.label, "docs");
+
+        let context = tool_visual_identity("context_status", None);
+        assert_eq!(context.realm, ToolRealm::Knowledge);
+        assert_eq!(context.family, ToolFamily::Context);
+        assert_eq!(context.label, "context");
     }
 
     #[test]

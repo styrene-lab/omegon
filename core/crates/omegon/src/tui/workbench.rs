@@ -880,12 +880,12 @@ fn project_worker_chrome_row(
 ) -> crate::surfaces::inline::InlineRow<String> {
     let glyphs = crate::tui::glyphs::glyphs();
     let state = glyphs.tool_state(crate::tui::glyphs::tool_state_role_for_status(status));
-    let category = last_tool
-        .map(crate::tui::glyphs::tool_category_role_for_name)
-        .map(|role| glyphs.tool_category(role));
-    let tool = last_tool.map(|tool| match category {
-        Some(category) => format!("{category} {tool}"),
-        None => tool.to_string(),
+    let tool = last_tool.map(|tool| {
+        let identity = crate::surfaces::conversation::tool_visual_identity(tool, None);
+        let category = glyphs.tool_category(crate::tui::glyphs::tool_category_role_for_name(
+            identity.label.as_str(),
+        ));
+        format!("{category} {}", identity.label)
     });
     crate::surfaces::inline::InlineRow::new(
         vec![

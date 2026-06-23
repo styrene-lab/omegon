@@ -285,6 +285,7 @@ fn tool_category_name(kind: ToolCategory) -> &'static str {
         ToolCategory::Memory => "memory",
         ToolCategory::Search => "search",
         ToolCategory::Subagent => "subagent",
+        ToolCategory::Network => "network",
         ToolCategory::Generic => "generic",
     }
 }

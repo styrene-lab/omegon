@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Added a shared tool visual identity resolver for hierarchical tool realm/family/transport labels and routed transcript/workbench tool chrome through it.
 - Updated the TUI glyph matrix workspace, tool, and tool-state domains with the selected ASCII, Noto Symbols 2 Unicode, and Nerd Font symbols.
 - Restyled the lean editor engine block as an angular Nerd Font/Powerline ribbon with an omega mark, provider glyphs, grade emblem, thinking icon, and context database glyph.
 - Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.

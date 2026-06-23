@@ -22,6 +22,7 @@ pub fn tool_category_color(kind: ToolCategory, t: &dyn Theme) -> Color {
         ToolCategory::Memory => t.accent(),
         ToolCategory::Search => t.accent_muted(),
         ToolCategory::Subagent => t.accent(),
+        ToolCategory::Network => t.accent_muted(),
         ToolCategory::Generic => t.border_dim(),
     }
 }
@@ -78,57 +79,8 @@ pub struct ToolCardChrome {
 }
 
 pub fn tool_display_name(name: &str, detail_args: Option<&str>) -> String {
-    if name == "bash" {
-        if let Some(args) = detail_args {
-            let command = crate::tui::segments::shell_command_from_args(args);
-            let cmd = command
-                .as_deref()
-                .unwrap_or(args.lines().next().unwrap_or(args));
-            let first_word = cmd.split_whitespace().next().unwrap_or("bash");
-            match first_word {
-                "grep" | "rg" => "search".to_string(),
-                "find" => "find".to_string(),
-                "ls" | "dir" => "list".to_string(),
-                "cat" | "head" | "tail" | "bat" => "read".to_string(),
-                "sed" | "awk" => "transform".to_string(),
-                "curl" | "wget" => "fetch".to_string(),
-                "git" => "git".to_string(),
-                "cargo" => "cargo".to_string(),
-                "npm" | "npx" | "pnpm" | "yarn" | "bun" => "npm".to_string(),
-                "docker" | "podman" => "container".to_string(),
-                "kubectl" | "k" => "kubectl".to_string(),
-                "make" | "cmake" => "build".to_string(),
-                "python" | "python3" | "pip" => "python".to_string(),
-                "rustc" | "rustup" => "rust".to_string(),
-                "go" => "go".to_string(),
-                "dig" | "nslookup" | "host" => "dns".to_string(),
-                "ssh" | "scp" | "rsync" => "remote".to_string(),
-                "tar" | "zip" | "unzip" | "gzip" => "archive".to_string(),
-                "wc" => "count".to_string(),
-                "sort" | "uniq" => "sort".to_string(),
-                "diff" | "patch" => "diff".to_string(),
-                "mkdir" | "rm" | "mv" | "cp" | "chmod" | "chown" => "fs".to_string(),
-                "echo" | "printf" => "echo".to_string(),
-                "test" | "[" => "test".to_string(),
-                "vault" => "vault".to_string(),
-                "sh" | "bash" | "zsh" => "shell".to_string(),
-                _ => first_word.to_string(),
-            }
-        } else {
-            "shell".to_string()
-        }
-    } else {
-        match name {
-            "codebase_search" | "search_documents" => "search".to_string(),
-            "memory_recall" | "memory_query" => "memory".to_string(),
-            "request_context" => "context".to_string(),
-            "wait_for_operator" => "wait".to_string(),
-            "browser_search" => "browser".to_string(),
-            other => other.replace('_', " "),
-        }
-    }
+    crate::surfaces::conversation::tool_visual_identity(name, detail_args).label
 }
-
 pub fn tool_card_chrome(
     name: &str,
     detail_args: Option<&str>,
@@ -349,11 +301,11 @@ mod tests {
 
     #[test]
     fn tool_display_name_shortens_common_compound_tools() {
-        assert_eq!(tool_display_name("codebase_search", None), "search");
-        assert_eq!(tool_display_name("search_documents", None), "search");
+        assert_eq!(tool_display_name("codebase_search", None), "codebase");
+        assert_eq!(tool_display_name("search_documents", None), "docs");
         assert_eq!(tool_display_name("memory_recall", None), "memory");
         assert_eq!(tool_display_name("request_context", None), "context");
-        assert_eq!(tool_display_name("wait_for_operator", None), "wait");
+        assert_eq!(tool_display_name("wait_for_operator", None), "tool");
         assert_eq!(tool_display_name("browser_search", None), "browser");
     }
 
