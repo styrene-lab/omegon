@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Promoted internal `PlanUpdated` events to typed plan surface projections while keeping web/IPC/MQTT legacy snapshot adapters for external compatibility.
 - Added a shared tool visual identity resolver for hierarchical tool realm/family/transport labels and routed transcript/workbench tool chrome through it, with unknown shell-mediated commands honestly retained as shell-family labels instead of expanding an exhaustive command taxonomy.
 - Added structured child vital-sign tool activity so instruments and websocket projections can preserve shell args summaries while keeping legacy `last_tool` compatibility.
 - Routed TUI tool category glyph selection through structured tool identity/category mappings instead of raw display-name matching where identity is available.

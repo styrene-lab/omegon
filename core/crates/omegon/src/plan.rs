@@ -644,6 +644,92 @@ impl PlanSurfaceProjection {
     }
 }
 
+impl PlanSurfaceProjection {
+    pub fn to_agent_projection(
+        &self,
+        intent: &crate::conversation::IntentDocument,
+    ) -> omegon_traits::PlanSurfaceProjection {
+        let active = self
+            .active_lane(intent)
+            .map(|lane| lane.to_agent_projection());
+        omegon_traits::PlanSurfaceProjection {
+            version: 1,
+            active,
+            workstreams: self
+                .lifecycle_entries
+                .iter()
+                .filter_map(|entry| {
+                    let status = entry.status.workstream_label()?;
+                    Some(omegon_traits::PlanWorkstreamProjection {
+                        id: entry.plan_id.clone(),
+                        title: entry.title.clone(),
+                        status: status.to_string(),
+                        progress: omegon_traits::PlanProgressProjection {
+                            completed: entry.progress.completed,
+                            total: entry.progress.total,
+                        },
+                    })
+                })
+                .collect(),
+            completed_session: self.completed_session.as_ref().map(|progress| {
+                omegon_traits::PlanProgressProjection {
+                    completed: progress.completed,
+                    total: progress.total,
+                }
+            }),
+            reconciliation_issues: self
+                .reconciliation_issues
+                .iter()
+                .map(|issue| omegon_traits::PlanReconciliationProjection {
+                    plan_id: issue.plan_id.clone(),
+                    kind: format!("{:?}", issue.kind),
+                    message: issue.message.clone(),
+                })
+                .collect(),
+            promotion_nudges: self.promotion_nudges.clone(),
+            resume_candidates: self
+                .resume_candidates
+                .iter()
+                .map(|candidate| omegon_traits::PlanResumeCandidateProjection {
+                    plan_id: candidate.plan_id.clone(),
+                    status: candidate.status.label().to_string(),
+                    source: candidate.source.label().to_string(),
+                    hint: candidate.hint.clone(),
+                    rank: candidate.rank as usize,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl PlanLaneProjection {
+    pub fn to_agent_projection(&self) -> omegon_traits::PlanLaneProjection {
+        omegon_traits::PlanLaneProjection {
+            plan_id: self.plan_id.clone(),
+            mode: self.mode.clone(),
+            guidance: self.guidance.clone(),
+            status: self.status.label().to_string(),
+            scope: self.scope.label().to_string(),
+            source: self.source.label().to_string(),
+            progress: omegon_traits::PlanProgressProjection {
+                completed: self.completed,
+                total: self.total,
+            },
+            items: self
+                .items
+                .iter()
+                .map(|item| omegon_traits::PlanItemProjection {
+                    id: None,
+                    label: item.label.clone(),
+                    status: item.status.label().to_string(),
+                    intent: None,
+                    writable: true,
+                })
+                .collect(),
+        }
+    }
+}
+
 impl PlanLaneProjection {
     pub fn to_snapshot_json(&self) -> serde_json::Value {
         serde_json::json!({
@@ -1094,6 +1180,13 @@ impl crate::conversation::IntentDocument {
 
     pub fn work_plan_snapshot_json(&self) -> serde_json::Value {
         self.work_plan_snapshot_json_with_registry_entries(self.plan_registry().entries)
+    }
+
+    pub fn plan_surface_projection_for_repo(
+        &self,
+        repo_root: &Path,
+    ) -> omegon_traits::PlanSurfaceProjection {
+        PlanSurfaceProjection::from_intent(self, repo_root).to_agent_projection(self)
     }
 
     pub fn work_plan_snapshot_json_for_repo(&self, repo_root: &Path) -> serde_json::Value {

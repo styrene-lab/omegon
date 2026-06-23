@@ -2247,10 +2247,10 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
                 })).collect::<Vec<_>>(),
             },
         }),
-        AgentEvent::PlanUpdated { snapshot_json } => json!({
+        AgentEvent::PlanUpdated { projection } => json!({
             "type": "plan_updated",
             "event_name": "plan.updated",
-            "snapshot": snapshot_json,
+            "snapshot": projection.legacy_snapshot_json(),
         }),
         AgentEvent::RouteChanged {
             state,
@@ -2708,6 +2708,59 @@ mod tests {
     }
 
     #[test]
+    fn serialize_plan_updated_uses_typed_projection_legacy_snapshot() {
+        let event = AgentEvent::PlanUpdated {
+            projection: omegon_traits::PlanSurfaceProjection {
+                active: Some(omegon_traits::PlanLaneProjection {
+                    plan_id: "session:current".into(),
+                    mode: "executing".into(),
+                    guidance: "keep going".into(),
+                    status: "active".into(),
+                    scope: "session".into(),
+                    source: "session".into(),
+                    progress: omegon_traits::PlanProgressProjection {
+                        completed: 1,
+                        total: 2,
+                    },
+                    items: vec![
+                        omegon_traits::PlanItemProjection {
+                            label: "Read".into(),
+                            status: "done".into(),
+                            ..Default::default()
+                        },
+                        omegon_traits::PlanItemProjection {
+                            label: "Patch".into(),
+                            status: "active".into(),
+                            ..Default::default()
+                        },
+                    ],
+                }),
+                workstreams: vec![omegon_traits::PlanWorkstreamProjection {
+                    id: "openspec:demo".into(),
+                    title: "demo".into(),
+                    status: "paused".into(),
+                    progress: omegon_traits::PlanProgressProjection {
+                        completed: 3,
+                        total: 5,
+                    },
+                }],
+                ..Default::default()
+            },
+        };
+
+        let json = serialize_agent_event(&event);
+        assert_eq!(json["type"], "plan_updated");
+        assert_eq!(json["event_name"], "plan.updated");
+        assert_eq!(json["snapshot"]["mode"], "executing");
+        assert_eq!(json["snapshot"]["completed"], 1);
+        assert_eq!(json["snapshot"]["total"], 2);
+        assert_eq!(json["snapshot"]["items"][0]["description"], "Read");
+        assert_eq!(json["snapshot"]["items"][1]["status"], "active");
+        assert_eq!(json["snapshot"]["workstreams"][0]["id"], "openspec:demo");
+        assert_eq!(json["snapshot"]["workstreams"][0]["completed"], 3);
+    }
+
+    #[test]
     fn serialize_turn_start() {
         let event = AgentEvent::TurnStart { turn: 5 };
         let json = serialize_agent_event(&event);
@@ -3000,15 +3053,29 @@ mod tests {
                 },
             },
             AgentEvent::PlanUpdated {
-                snapshot_json: serde_json::json!({
-                    "mode": "executing",
-                    "completed": 1,
-                    "total": 2,
-                    "items": [
-                        {"description": "Read", "status": "done"},
-                        {"description": "Patch", "status": "active"}
-                    ]
-                }),
+                projection: omegon_traits::PlanSurfaceProjection {
+                    active: Some(omegon_traits::PlanLaneProjection {
+                        mode: "executing".into(),
+                        progress: omegon_traits::PlanProgressProjection {
+                            completed: 1,
+                            total: 2,
+                        },
+                        items: vec![
+                            omegon_traits::PlanItemProjection {
+                                label: "Read".into(),
+                                status: "done".into(),
+                                ..Default::default()
+                            },
+                            omegon_traits::PlanItemProjection {
+                                label: "Patch".into(),
+                                status: "active".into(),
+                                ..Default::default()
+                            },
+                        ],
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
             },
             AgentEvent::RouteChanged {
                 state: "fallback".into(),

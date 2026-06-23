@@ -1410,9 +1410,10 @@ pub async fn run(
             let _ = events.send(AgentEvent::SystemNotification { message });
         }
         if work_plan_snapshot_changed(&plan_snapshot_before, &plan_snapshot_after) {
-            let _ = events.send(AgentEvent::PlanUpdated {
-                snapshot_json: plan_snapshot_after,
-            });
+            let projection = conversation
+                .intent
+                .plan_surface_projection_for_repo(&config.cwd);
+            let _ = events.send(AgentEvent::PlanUpdated { projection });
         }
 
         let dominant_phase = classify_turn_phase(&tool_catalog, dispatch_calls, &results);

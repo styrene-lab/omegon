@@ -1072,8 +1072,8 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                 signs: signs.clone(),
             })
         }
-        AgentEvent::PlanUpdated { snapshot_json } => Some(IpcEventPayload::PlanUpdated {
-            snapshot: snapshot_json.clone(),
+        AgentEvent::PlanUpdated { projection } => Some(IpcEventPayload::PlanUpdated {
+            snapshot: projection.legacy_snapshot_json(),
         }),
         AgentEvent::RouteChanged {
             state,

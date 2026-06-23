@@ -8,10 +8,10 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 use super::{dashboard, theme};
 use crate::features::cleave::CleaveProgress;
 use crate::features::delegate::DelegateProgress;
-use crate::plan::{PlanLaneProjection, PlanLaneWorkstreamProjection};
 use crate::surfaces::operations::{
     OperationChildRow, OperationChildStatus, OperationWorkbenchProjection,
 };
+use omegon_traits::{PlanLaneProjection, PlanWorkstreamProjection};
 
 pub fn workbench_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 {
     if width == 0 || snapshot.items.is_empty() {
@@ -103,7 +103,7 @@ impl WorkstreamStatus {
 }
 
 impl WorkstreamSummary {
-    pub fn from_projection(value: &PlanLaneWorkstreamProjection) -> Option<Self> {
+    pub fn from_projection(value: &PlanWorkstreamProjection) -> Option<Self> {
         let id = value.id.trim().to_string();
         if id.is_empty() {
             return None;
@@ -116,8 +116,8 @@ impl WorkstreamSummary {
                 value.title.trim().to_string()
             },
             status: WorkstreamStatus::from_label(&value.status),
-            completed: value.completed,
-            total: value.total,
+            completed: value.progress.completed,
+            total: value.progress.total,
         })
     }
 
@@ -151,14 +151,24 @@ impl WorkstreamSummary {
 }
 
 impl WorkbenchState {
-    pub fn from_plan_lane_projection(lane: &PlanLaneProjection) -> Self {
+    pub fn from_plan_projection(projection: &omegon_traits::PlanSurfaceProjection) -> Self {
         Self {
-            active: PlanDisplaySnapshot::from_plan_lane_projection(lane),
-            workstreams: lane
+            active: projection
+                .active
+                .as_ref()
+                .and_then(PlanDisplaySnapshot::from_plan_lane_projection),
+            workstreams: projection
                 .workstreams
                 .iter()
                 .filter_map(WorkstreamSummary::from_projection)
                 .collect(),
+            ..Self::default()
+        }
+    }
+
+    pub fn from_plan_lane_projection(lane: &PlanLaneProjection) -> Self {
+        Self {
+            active: PlanDisplaySnapshot::from_plan_lane_projection(lane),
             ..Self::default()
         }
     }
@@ -339,18 +349,18 @@ impl PlanDisplayStatus {
 
 impl PlanDisplaySnapshot {
     pub fn from_plan_lane_projection(lane: &PlanLaneProjection) -> Option<Self> {
-        if lane.total == 0 || lane.items.is_empty() {
+        if lane.progress.total == 0 || lane.items.is_empty() {
             return None;
         }
         Some(Self {
             mode: lane.mode.clone(),
-            completed: lane.completed,
-            total: lane.total,
+            completed: lane.progress.completed,
+            total: lane.progress.total,
             items: lane
                 .items
                 .iter()
                 .map(|item| PlanDisplayItem {
-                    status: PlanDisplayStatus::from_work_item_status(item.status),
+                    status: PlanDisplayStatus::from_label(&item.status),
                     description: item.label.clone(),
                 })
                 .collect(),
@@ -1191,31 +1201,42 @@ mod tests {
             plan_id: "session:current".into(),
             mode: "executing".into(),
             guidance: "keep working".into(),
-            status: crate::plan::PlanStatus::Active,
-            scope: crate::conversation::PlanScope::Session,
-            source: crate::conversation::PlanSource::Ephemeral,
-            completed: 1,
-            total: 2,
+            status: "active".into(),
+            scope: "session".into(),
+            source: "session".into(),
+            progress: omegon_traits::PlanProgressProjection {
+                completed: 1,
+                total: 2,
+            },
             items: vec![
-                crate::plan::PlanLaneItemProjection {
+                omegon_traits::PlanItemProjection {
                     label: "done task".into(),
-                    status: crate::conversation::WorkItemStatus::Done,
+                    status: "done".into(),
+                    ..Default::default()
                 },
-                crate::plan::PlanLaneItemProjection {
+                omegon_traits::PlanItemProjection {
                     label: "active task".into(),
-                    status: crate::conversation::WorkItemStatus::Active,
+                    status: "active".into(),
+                    ..Default::default()
                 },
             ],
-            workstreams: vec![crate::plan::PlanLaneWorkstreamProjection {
+        };
+
+        let projection = omegon_traits::PlanSurfaceProjection {
+            active: Some(lane),
+            workstreams: vec![omegon_traits::PlanWorkstreamProjection {
                 id: "openspec:demo".into(),
                 title: "demo change".into(),
                 status: "paused".into(),
-                completed: 3,
-                total: 5,
+                progress: omegon_traits::PlanProgressProjection {
+                    completed: 3,
+                    total: 5,
+                },
             }],
+            ..Default::default()
         };
 
-        let state = WorkbenchState::from_plan_lane_projection(&lane);
+        let state = WorkbenchState::from_plan_projection(&projection);
         let active = state.active.expect("active lane should project");
         assert_eq!(active.mode, "executing");
         assert_eq!(active.completed, 1);
@@ -1236,13 +1257,14 @@ mod tests {
             plan_id: "session:current".into(),
             mode: "off".into(),
             guidance: "none".into(),
-            status: crate::plan::PlanStatus::Detached,
-            scope: crate::conversation::PlanScope::Session,
-            source: crate::conversation::PlanSource::Ephemeral,
-            completed: 0,
-            total: 0,
+            status: "detached".into(),
+            scope: "session".into(),
+            source: "session".into(),
+            progress: omegon_traits::PlanProgressProjection {
+                completed: 0,
+                total: 0,
+            },
             items: Vec::new(),
-            workstreams: Vec::new(),
         };
 
         let state = WorkbenchState::from_plan_lane_projection(&lane);
