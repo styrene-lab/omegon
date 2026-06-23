@@ -20,6 +20,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Renamed the internal plan surface aggregate to `PlanSurfaceInputs` and removed the local lane projection mirror so active plan lanes use the shared `omegon_traits` projection DTO end-to-end.
 - Promoted internal `PlanUpdated` events to typed plan surface projections while keeping web/IPC/MQTT legacy snapshot adapters for external compatibility.
 - Added a shared tool visual identity resolver for hierarchical tool realm/family/transport labels and routed transcript/workbench tool chrome through it, with unknown shell-mediated commands honestly retained as shell-family labels instead of expanding an exhaustive command taxonomy.
+- Routed TUI workbench plan projection tests through typed `omegon_traits` plan DTOs and tightened active-plan row copy around the next actionable item.
+- Added double-click expansion for the compact workbench plan row so operators can open full plan details from the workbench surface.
 - Added structured child vital-sign tool activity so instruments and websocket projections can preserve shell args summaries while keeping legacy `last_tool` compatibility.
 - Routed TUI tool category glyph selection through structured tool identity/category mappings instead of raw display-name matching where identity is available.
 - Updated tool inspection detail headers to use tool args summaries when resolving category glyphs for shell-mediated commands.

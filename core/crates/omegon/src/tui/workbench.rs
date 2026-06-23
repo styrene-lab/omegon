@@ -1,7 +1,6 @@
 //! Workbench snapshot surface rendering and hint policy.
 
 use ratatui::prelude::*;
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
@@ -164,6 +163,14 @@ pub struct PlanDisplayItem {
 pub struct PlanDisplayRow {
     pub text: String,
     pub status: Option<PlanDisplayStatus>,
+    pub kind: PlanDisplayRowKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanDisplayRowKind {
+    NextAction,
+    Normal,
+    Overflow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,6 +283,15 @@ impl PlanDisplayStatus {
         }
     }
 
+    fn short_label(self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Active => "next",
+            Self::Skipped => "skip",
+            Self::Todo => "todo",
+        }
+    }
+
     fn glyph(self) -> char {
         match self {
             Self::Done => '●',
@@ -285,18 +301,24 @@ impl PlanDisplayStatus {
         }
     }
 
-    fn style(self, t: &dyn theme::Theme, bg: ratatui::style::Color) -> Style {
+    fn row_style(self, t: &dyn theme::Theme, bg: ratatui::style::Color) -> Style {
         let color = match self {
-            Self::Done => t.success(),
-            Self::Active => t.warning(),
-            Self::Skipped => t.dim(),
-            Self::Todo => t.accent_muted(),
+            Self::Active => t.fg(),
+            Self::Todo => t.muted(),
+            Self::Done | Self::Skipped => t.dim(),
         };
-        let style = Style::default().fg(color).bg(bg);
-        if matches!(self, Self::Done | Self::Active) {
-            style.add_modifier(Modifier::BOLD)
-        } else {
-            style
+        Style::default().fg(color).bg(bg)
+    }
+}
+
+impl PlanDisplayRowKind {
+    fn style(self, status: Option<PlanDisplayStatus>, t: &dyn theme::Theme, bg: Color) -> Style {
+        match self {
+            Self::NextAction => Style::default().fg(t.accent_muted()).bg(bg),
+            Self::Overflow => Style::default().fg(t.dim()).bg(bg),
+            Self::Normal => status
+                .map(|status| status.row_style(t, bg))
+                .unwrap_or_else(|| Style::default().fg(t.dim()).bg(bg)),
         }
     }
 }
@@ -447,18 +469,33 @@ pub fn workbench_rows(
     let mut rows = Vec::new();
     for idx in visible {
         let item = &snapshot.items[idx];
-        let label = item.status.label();
-        let glyph = item.status.glyph();
-        let line = format!("{}. {glyph} {label:<7} {}", idx + 1, item.description);
+        let line = if item.status == PlanDisplayStatus::Active {
+            format!(
+                "▶ next  {}/{}  {}",
+                idx + 1,
+                snapshot.total,
+                item.description
+            )
+        } else {
+            let label = item.status.short_label();
+            let glyph = item.status.glyph();
+            format!("{glyph} {label:<4} {:>2}  {}", idx + 1, item.description)
+        };
         rows.push(PlanDisplayRow {
             text: crate::util::truncate(&line, text_budget),
             status: Some(item.status),
+            kind: if item.status == PlanDisplayStatus::Active {
+                PlanDisplayRowKind::NextAction
+            } else {
+                PlanDisplayRowKind::Normal
+            },
         });
     }
     if hidden_count > 0 {
         rows.push(PlanDisplayRow {
-            text: format!("+{hidden_count} more"),
+            text: format!("⋯ {hidden_count} hidden"),
             status: None,
+            kind: PlanDisplayRowKind::Overflow,
         });
     }
     rows
@@ -733,13 +770,7 @@ fn render_active_workbench_panel(
     let rule_width = area.width.saturating_sub(summary.len() as u16 + 4) as usize;
     lines.push(Line::from(vec![
         Span::styled("─ ", Style::default().fg(t.border_dim()).bg(bg)),
-        Span::styled(
-            summary,
-            Style::default()
-                .fg(t.accent_muted())
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(summary, Style::default().fg(t.muted()).bg(bg)),
         Span::styled(
             format!(" {}", "─".repeat(rule_width)),
             Style::default().fg(t.border_dim()).bg(bg),
@@ -747,10 +778,7 @@ fn render_active_workbench_panel(
     ]));
 
     for row in workbench_rows(snapshot, area.width, area.height) {
-        let style = row
-            .status
-            .map(|status| status.style(t, bg))
-            .unwrap_or_else(|| Style::default().fg(t.dim()).bg(bg));
+        let style = row.kind.style(row.status, t, bg);
         lines.push(Line::from(Span::styled(row.text, style)));
     }
 
