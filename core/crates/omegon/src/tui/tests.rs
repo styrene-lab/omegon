@@ -5478,7 +5478,7 @@ fn editor_top_line_shows_engine_block_details() {
     );
     assert!(rendered.contains("󰿃 B"), "{rendered}");
     assert!(rendered.contains(" high"), "{rendered}");
-    assert!(rendered.contains(" ctx:msv@1.0M 50%"), "{rendered}");
+    assert!(rendered.contains(" ctx:msv@1.0M ▕████░░░░▏ 50%"), "{rendered}");
 }
 
 #[test]
@@ -5515,7 +5515,7 @@ fn editor_top_line_preserves_route_badge_contrast_after_bg_cleanup() {
 }
 
 #[test]
-fn editor_top_line_uses_single_context_fill_signal() {
+fn editor_top_line_restores_context_fill_bar() {
     let mut settings = Settings::new("anthropic:claude-sonnet-4-6");
     settings.thinking = ThinkingLevel::High;
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
@@ -5530,10 +5530,10 @@ fn editor_top_line_uses_single_context_fill_signal() {
     let rendered = render_app_to_string(&mut app, 180, 18);
 
     assert!(
-        rendered.contains("ctx:msv@1.0M 50%"),
+        rendered.contains("ctx:msv@1.0M ▕████░░░░▏ 50%"),
         "{rendered}"
     );
-    assert!(!rendered.contains("▕"), "{rendered}");
+    assert!(rendered.contains("▕████░░░░▏"), "{rendered}");
     assert!(!rendered.contains("ctx:cmp→msv"), "{rendered}");
     assert!(!rendered.contains("κ ▰"), "{rendered}");
     assert!(!rendered.contains("◆"), "{rendered}");
