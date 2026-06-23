@@ -4486,6 +4486,127 @@ mod tests {
     }
 
     #[test]
+    fn slim_rendered_tool_rows_use_locked_identity_glyphs() {
+        let glyphs = crate::tui::glyphs::glyphs();
+        let cases = [
+            (
+                "context_status",
+                None,
+                crate::tui::glyphs::ToolCategoryGlyphRole::Memory,
+                "context",
+            ),
+            (
+                "request_context",
+                None,
+                crate::tui::glyphs::ToolCategoryGlyphRole::Memory,
+                "context",
+            ),
+            (
+                "read",
+                Some(r#"{"path":"core/crates/omegon/src/tui/segments.rs"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Read,
+                "read",
+            ),
+            (
+                "write",
+                Some(r#"{"path":"/tmp/out.txt"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Write,
+                "write",
+            ),
+            (
+                "codebase_search",
+                Some(r#"{"query":"tool glyph"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Search,
+                "codebase",
+            ),
+            (
+                "search_documents",
+                Some(r#"{"query":"glyph matrix"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Search,
+                "docs",
+            ),
+            (
+                "memory_recall",
+                Some(r#"{"query":"glyph"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Memory,
+                "memory",
+            ),
+            (
+                "design_tree",
+                None,
+                crate::tui::glyphs::ToolCategoryGlyphRole::Design,
+                "design",
+            ),
+            (
+                "delegate",
+                None,
+                crate::tui::glyphs::ToolCategoryGlyphRole::Subagent,
+                "delegate",
+            ),
+            (
+                "web_search",
+                Some(r#"{"query":"glyph"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Search,
+                "web",
+            ),
+            (
+                "bash",
+                Some(r#"{"command":"rg glyph core/crates/omegon/src"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Search,
+                "search",
+            ),
+            (
+                "bash",
+                Some(r#"{"command":"cat CHANGELOG.md"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Read,
+                "read",
+            ),
+            (
+                "bash",
+                Some(r#"{"command":"python3 script.py"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Shell,
+                "python3",
+            ),
+            (
+                "terminal",
+                Some(r#"{"action":"read","session_id":"forge-build"}"#),
+                crate::tui::glyphs::ToolCategoryGlyphRole::Shell,
+                "shell",
+            ),
+        ];
+
+        for (idx, (name, args, role, label)) in cases.into_iter().enumerate() {
+            let mut seg = Segment::tool_card(format!("tool-{idx}"), name);
+            if let SegmentContent::ToolCard {
+                complete,
+                detail_args,
+                detail_result,
+                ..
+            } = &mut seg.content
+            {
+                *complete = true;
+                *detail_args = args.map(str::to_string);
+                *detail_result = Some("ok".into());
+            }
+
+            let (area, mut buf) = make_buf(160, 1);
+            seg.render(
+                area,
+                &mut buf,
+                &Alpharius,
+                SegmentRenderMode::Slim,
+                crate::settings::ToolDetail::Lean,
+            );
+            let text = buf_text(&buf, area);
+            let expected = format!("{} {label}", glyphs.tool_category(role));
+            assert!(
+                text.contains(&expected),
+                "{name} should render locked glyph+label {expected:?}, got: {text}"
+            );
+        }
+    }
+
+    #[test]
     fn assistant_render_includes_identity_header() {
         let seg = Segment {
             meta: SegmentMeta::default(),
