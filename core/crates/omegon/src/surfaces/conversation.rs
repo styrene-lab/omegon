@@ -856,9 +856,6 @@ fn shell_tool_visual_identity(name: &str, detail_args: Option<&str>) -> ToolVisu
         }
         "git" => (ToolRealm::Execution, ToolFamily::Git, "git"),
         "cargo" => (ToolRealm::Execution, ToolFamily::Cargo, "cargo"),
-        "npm" | "npx" | "pnpm" | "yarn" | "bun" => {
-            (ToolRealm::Execution, ToolFamily::Package, "npm")
-        }
         "docker" | "podman" => (ToolRealm::Execution, ToolFamily::Container, "container"),
         "kubectl" | "k" => (ToolRealm::Execution, ToolFamily::Kubernetes, "kubectl"),
         "make" | "cmake" => (ToolRealm::Execution, ToolFamily::Build, "build"),
@@ -867,8 +864,6 @@ fn shell_tool_visual_identity(name: &str, detail_args: Option<&str>) -> ToolVisu
         }
         "ssh" | "scp" | "rsync" => (ToolRealm::Execution, ToolFamily::Remote, "remote"),
         "tar" | "zip" | "unzip" | "gzip" => (ToolRealm::Filesystem, ToolFamily::Archive, "archive"),
-        "python" | "python3" | "pip" => (ToolRealm::Execution, ToolFamily::Package, "python"),
-        "go" => (ToolRealm::Execution, ToolFamily::Package, "go"),
         "test" | "[" => (ToolRealm::Diagnostics, ToolFamily::Status, "test"),
         "sh" | "bash" | "zsh" | "shell" | "terminal" => {
             (ToolRealm::Execution, ToolFamily::Shell, "shell")
@@ -1025,6 +1020,18 @@ mod tests {
         assert_eq!(context.realm, ToolRealm::Knowledge);
         assert_eq!(context.family, ToolFamily::Context);
         assert_eq!(context.label, "context");
+
+        let unknown_shell = tool_visual_identity("bash", Some("python3 script.py"));
+        assert_eq!(unknown_shell.realm, ToolRealm::Execution);
+        assert_eq!(unknown_shell.family, ToolFamily::Shell);
+        assert_eq!(unknown_shell.transport, ToolTransport::Shell);
+        assert_eq!(unknown_shell.label, "python3");
+
+        let unknown_harness = tool_visual_identity("unknown_internal_tool", None);
+        assert_eq!(unknown_harness.realm, ToolRealm::Generic);
+        assert_eq!(unknown_harness.family, ToolFamily::Generic);
+        assert_eq!(unknown_harness.transport, ToolTransport::HarnessTool);
+        assert_eq!(unknown_harness.label, "tool");
     }
 
     #[test]
