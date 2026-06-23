@@ -49,6 +49,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Populate the compact TUI workbench row with known workspace context (repo, dir, and git branch) even before a tool, plan, delegate, or cleave run is active.
 
 ### Changed
+- Documented IPC/MQTT `plan.updated` as a legacy compatibility envelope over the typed internal plan projection contract.
 - Removed legacy JSON workbench adapters from TUI plan state tests and routed workbench state through typed plan projections instead.
 - Polished the compact TUI workbench row with symbolic workspace labels for repo, directory, and git branch, deriving the repo label from git remote metadata instead of the local checkout directory and omitting duplicate directory labels when the repo and current directory share the same name.
 - Removed the Anthropic subscription ToS startup toast from normal interactive TUI sessions; the disclosure now stays scoped to headless automation and explicit `/cleave` background-worker launches.

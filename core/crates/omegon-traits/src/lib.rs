@@ -1238,7 +1238,12 @@ pub enum IpcEventPayload {
     FamilyVitalSignsUpdated { signs: FamilyVitalSigns },
 
     // ── Plan ────────────────────────────────────────────────────────────────
-    /// Structured current session plan snapshot.
+    /// External IPC compatibility envelope for plan updates.
+    ///
+    /// Runtime-internal plan events use [`AgentEvent::PlanUpdated`] with a typed
+    /// [`PlanSurfaceProjection`]. This payload intentionally keeps the legacy
+    /// JSON `snapshot` field for IPC/WebSocket/MQTT clients that have not yet
+    /// moved to the typed projection contract.
     #[serde(rename = "plan.updated")]
     PlanUpdated { snapshot: Value },
 
