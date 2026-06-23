@@ -21,6 +21,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added structured child vital-sign tool activity so instruments and websocket projections can preserve shell args summaries while keeping legacy `last_tool` compatibility.
 - Routed TUI tool category glyph selection through structured tool identity/category mappings instead of raw display-name matching where identity is available.
 - Updated tool inspection detail headers to use tool args summaries when resolving category glyphs for shell-mediated commands.
+- Refined Unicode TUI tool category glyphs to reduce box/diamond collisions across read, design, memory, and generic roles.
 - Updated the TUI glyph matrix workspace, tool, and tool-state domains with the selected ASCII, Noto Symbols 2 Unicode, and Nerd Font symbols.
 - Restyled the lean editor engine block as an angular Nerd Font/Powerline ribbon with an omega mark, provider glyphs, grade emblem, thinking icon, and context database glyph.
 - Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
