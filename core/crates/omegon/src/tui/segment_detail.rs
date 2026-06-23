@@ -116,6 +116,7 @@ pub fn render_tool_card(
 ) {
     if let SegmentContent::ToolCard {
         name,
+        args_summary,
         is_error,
         complete,
         started_at,
@@ -137,6 +138,7 @@ pub fn render_tool_card(
             theme,
             crate::tui::tool_inspection::ToolInspection {
                 name,
+                args_summary: args_summary.as_deref(),
                 state,
                 title_prefix: mode.title_prefix(),
                 elapsed: started_at.map(|instant| instant.elapsed()),
