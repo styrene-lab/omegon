@@ -5074,7 +5074,7 @@ impl App {
                 let push_tail = |spans: &mut Vec<Span<'static>>, text: String, style: Style| {
                     spans.push(Span::styled(
                         route_glyph,
-                        Style::default().fg(t.surface_bg()).bg(t.card_bg()),
+                        Style::default().fg(t.accent_muted()).bg(t.card_bg()),
                     ));
                     spans.push(Span::styled(format!(" {text} "), style));
                 };
