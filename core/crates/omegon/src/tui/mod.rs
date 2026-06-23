@@ -1789,7 +1789,8 @@ impl App {
         };
         let percent = context_percent.clamp(0.0, 100.0).round() as u8;
 
-        format!("ctx:{class}@{capacity} {percent}%")
+        let bar = Self::context_fill_bar(context_percent);
+        format!("ctx:{class}@{capacity} {bar} {percent}%")
     }
 
     fn current_persona_state(&self) -> crate::settings::PersonaState {
@@ -5049,15 +5050,14 @@ impl App {
                     self.footer_data.thinking_level
                 );
                 let context_text = format!(
-                    "{} ctx:{}@{} {:.0}%",
+                    "{} {}",
                     glyphs.engine(EngineGlyphRole::Context),
-                    Self::context_class_tag(self.footer_data.actual_context_class),
-                    if self.footer_data.context_window > 0 {
-                        widgets::format_tokens(self.footer_data.context_window)
-                    } else {
-                        widgets::format_tokens(self.footer_data.actual_context_class.nominal_tokens())
-                    },
-                    self.footer_data.context_percent
+                    Self::editor_context_widget(
+                        self.footer_data.actual_context_class,
+                        self.footer_data.context_window,
+                        self.footer_data.estimated_tokens,
+                        self.footer_data.context_percent,
+                    )
                 );
                 let route_span = Span::styled(
                     format!(
