@@ -25,7 +25,7 @@ use crate::child_agent::{
     parse_child_activity, spawn_headless_child_agent, spawn_sandboxed_child_agent,
     write_child_prompt_file,
 };
-use crate::surfaces::operations::OperationWorkbenchProjection;
+use crate::surfaces::{conversation::ToolActivitySummary, operations::OperationWorkbenchProjection};
 use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -52,6 +52,7 @@ pub struct DelegateProgressChild {
     pub label: String,
     pub status: String,
     pub last_tool: Option<String>,
+    pub last_tool_activity: Option<ToolActivitySummary>,
     pub last_turn: Option<u32>,
     pub started_at: Option<std::time::SystemTime>,
     pub completed_at: Option<std::time::SystemTime>,
@@ -98,6 +99,7 @@ pub struct DelegateTask {
     pub completed_at: Option<SystemTime>,
     /// Live tool activity (updated during streaming).
     pub last_tool: Option<String>,
+    pub last_tool_activity: Option<ToolActivitySummary>,
     /// Live turn number (updated during streaming).
     pub last_turn: Option<u32>,
     /// Task checklist items extracted from the delegate prompt.
@@ -200,11 +202,16 @@ impl DelegateResultStore {
         &self,
         task_id: &str,
         last_tool: Option<String>,
+        last_tool_args_summary: Option<String>,
         last_turn: Option<u32>,
     ) {
         let mut tasks = self.tasks.lock().unwrap();
         if let Some(task) = tasks.get_mut(task_id) {
             if let Some(tool) = last_tool {
+                task.last_tool_activity = Some(ToolActivitySummary::new(
+                    tool.clone(),
+                    last_tool_args_summary.clone(),
+                ));
                 task.last_tool = Some(tool);
             }
             if let Some(turn) = last_turn {
@@ -312,6 +319,7 @@ impl DelegateResultStore {
                     .unwrap_or_else(|| task.task_id.clone()),
                 status: status.to_string(),
                 last_tool: task.last_tool.clone(),
+                last_tool_activity: task.last_tool_activity.clone(),
                 last_turn: task.last_turn,
                 started_at: Some(task.started_at),
                 completed_at: task.completed_at,
@@ -919,11 +927,11 @@ If blocked, say the blocker plainly.\n",
                             {
                                 last_activity_event = std::time::Instant::now();
                                 match activity {
-                                    ChildAgentActivity::Tool { tool, .. } => {
-                                        store.update_task_live_state(&tid, Some(tool), None);
+                                    ChildAgentActivity::Tool { tool, target } => {
+                                        store.update_task_live_state(&tid, Some(tool), target, None);
                                     }
                                     ChildAgentActivity::Turn { turn } => {
-                                        store.update_task_live_state(&tid, None, Some(turn));
+                                        store.update_task_live_state(&tid, None, None, Some(turn));
                                     }
                                     ChildAgentActivity::TaskDone { task_index } => {
                                         store.mark_task_done(&tid, task_index);
@@ -1064,6 +1072,7 @@ If blocked, say the blocker plainly.\n",
             started_at: SystemTime::now(),
             completed_at: None,
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             tasks,
         };
@@ -2682,6 +2691,7 @@ This agent runs in write mode and can modify files.
             started_at: SystemTime::now(),
             completed_at: Some(SystemTime::now()),
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
         });
@@ -2718,6 +2728,7 @@ This agent runs in write mode and can modify files.
             started_at: SystemTime::now(),
             completed_at: Some(SystemTime::now()),
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
         });
@@ -2780,6 +2791,7 @@ This agent runs in write mode and can modify files.
             started_at: now,
             completed_at: None,
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
         });
@@ -2835,6 +2847,7 @@ This agent runs in write mode and can modify files.
             started_at: now,
             completed_at: Some(now),
             last_tool: Some("bash".into()),
+            last_tool_activity: None,
             last_turn: Some(1),
             tasks: Vec::new(),
         });
@@ -2866,10 +2879,11 @@ This agent runs in write mode and can modify files.
             started_at: now,
             completed_at: None,
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             tasks: extract_task_items("- [ ] Inspect files\n- [ ] Report findings"),
         });
-        store.update_task_live_state("delegate_1", Some("read".into()), Some(2));
+        store.update_task_live_state("delegate_1", Some("read".into()), Some("core/lib.rs".into()), Some(2));
         store.store_task(DelegateTask {
             task_id: "delegate_2".into(),
             agent_name: Some("verify".into()),
@@ -2879,6 +2893,7 @@ This agent runs in write mode and can modify files.
             started_at: now,
             completed_at: Some(now),
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
         });
@@ -2894,6 +2909,7 @@ This agent runs in write mode and can modify files.
             started_at: now,
             completed_at: Some(now),
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
         });
@@ -2912,6 +2928,10 @@ This agent runs in write mode and can modify files.
             .unwrap();
         assert_eq!(running.status, "running");
         assert_eq!(running.last_tool.as_deref(), Some("read"));
+        assert_eq!(
+            running.last_tool_activity.as_ref().unwrap().args_summary.as_deref(),
+            Some("core/lib.rs")
+        );
         assert_eq!(running.last_turn, Some(2));
         assert_eq!(running.tasks_done, 1);
         let completed = snapshot
@@ -3043,6 +3063,7 @@ This agent runs in write mode and can modify files.
             started_at: SystemTime::now(),
             completed_at: None,
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
         });
@@ -3122,6 +3143,7 @@ exec sleep 10
             started_at: SystemTime::now(),
             completed_at: None,
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
         });

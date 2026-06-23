@@ -834,7 +834,7 @@ fn operation_worker_chrome_line(child: &OperationChildRow, width: u16) -> String
     let last_tool = child
         .last_activity
         .as_ref()
-        .map(|activity| activity.label.as_str());
+        .filter(|activity| matches!(activity.kind, crate::surfaces::operations::OperationActivityKind::Tool));
     worker_chrome_line(
         &child.label,
         child.status.label(),
@@ -864,7 +864,7 @@ fn operation_worker_status_style(
 fn worker_chrome_line(
     label: &str,
     status: &str,
-    last_tool: Option<&str>,
+    last_tool: Option<&crate::surfaces::operations::OperationActivity>,
     task_progress: &str,
     width: u16,
 ) -> String {
@@ -875,13 +875,16 @@ fn worker_chrome_line(
 fn project_worker_chrome_row(
     label: &str,
     status: &str,
-    last_tool: Option<&str>,
+    last_tool: Option<&crate::surfaces::operations::OperationActivity>,
     task_progress: &str,
 ) -> crate::surfaces::inline::InlineRow<String> {
     let glyphs = crate::tui::glyphs::glyphs();
     let state = glyphs.tool_state(crate::tui::glyphs::tool_state_role_for_status(status));
-    let tool = last_tool.map(|tool| {
-        let identity = crate::surfaces::conversation::tool_visual_identity(tool, None);
+    let tool = last_tool.map(|activity| {
+        let identity = crate::surfaces::conversation::tool_visual_identity(
+            &activity.label,
+            activity.args_summary.as_deref(),
+        );
         let category = glyphs.tool_category(crate::tui::glyphs::tool_category_role_for_name(
             identity.label.as_str(),
         ));
@@ -971,13 +974,24 @@ mod tests {
 
     #[test]
     fn worker_chrome_projection_separates_identity_from_metadata() {
-        let row = project_worker_chrome_row("delegate-1", "running", Some("bash"), " · tasks 1/3");
+        let activity = crate::surfaces::operations::OperationActivity {
+            kind: crate::surfaces::operations::OperationActivityKind::Tool,
+            label: "bash".into(),
+            args_summary: Some("cargo test -p omegon".into()),
+            turn: None,
+        };
+        let row = project_worker_chrome_row(
+            "delegate-1",
+            "running",
+            Some(&activity),
+            " · tasks 1/3",
+        );
 
         assert_eq!(row.left.len(), 2);
         assert!(row.left[0].text.contains("delegate-1"));
         assert_eq!(row.left[1].text, "running");
         assert_eq!(row.right.len(), 2);
-        assert!(row.right[0].text.contains("bash"));
+        assert!(row.right[0].text.contains("cargo"));
         assert_eq!(row.right[1].text, "tasks 1/3");
     }
 
@@ -986,7 +1000,12 @@ mod tests {
         let rendered = worker_chrome_line(
             "very-long-worker-label-that-will-overflow",
             "running",
-            Some("bash"),
+            Some(&crate::surfaces::operations::OperationActivity {
+                kind: crate::surfaces::operations::OperationActivityKind::Tool,
+                label: "bash".into(),
+                args_summary: Some("cargo test -p omegon".into()),
+                turn: None,
+            }),
             " · tasks 1/3",
             42,
         );

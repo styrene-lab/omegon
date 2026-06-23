@@ -6,6 +6,7 @@
 //! event text.
 
 use crate::features::cleave::{CleaveChildFailureKind, CleaveProgress};
+use crate::surfaces::conversation::ToolActivitySummary;
 use crate::features::delegate::{DelegateChildFailureKind, DelegateProgress};
 use omegon_traits::{OperationKind, OperationRef};
 use serde_json::{Value, json};
@@ -149,6 +150,7 @@ impl OperationChildRow {
             "status": self.status.as_str(),
             "status_label": self.status_label,
             "last_tool": self.last_activity.as_ref().map(|activity| activity.label.as_str()),
+            "last_tool_args_summary": self.last_activity.as_ref().and_then(|activity| activity.args_summary.as_deref()),
             "last_turn": self.last_activity.as_ref().and_then(|activity| activity.turn),
             "result_summary": self.result_summary.as_deref(),
             "tasks_done": self.progress.as_ref().map(|progress| progress.done).unwrap_or(0),
@@ -169,11 +171,16 @@ impl OperationChildRow {
             label: child.label.clone(),
             status,
             status_label: child.status.clone(),
-            last_activity: child.last_tool.as_ref().map(|tool| OperationActivity {
-                kind: OperationActivityKind::Tool,
-                label: tool.clone(),
-                turn: child.last_turn,
-            }),
+            last_activity: child
+                .last_tool_activity
+                .clone()
+                .or_else(|| child.last_tool.as_ref().map(|tool| ToolActivitySummary::new(tool.clone(), None)))
+                .map(|activity| OperationActivity {
+                    kind: OperationActivityKind::Tool,
+                    label: activity.raw_name,
+                    args_summary: activity.args_summary,
+                    turn: child.last_turn,
+                }),
             progress: (!child.tasks.is_empty()).then_some(OperationChildProgress {
                 done: child.tasks_done,
                 total: child.tasks.len(),
@@ -222,11 +229,16 @@ impl OperationChildRow {
             label: child.label.clone(),
             status,
             status_label: child.status.clone(),
-            last_activity: child.last_tool.as_ref().map(|tool| OperationActivity {
-                kind: OperationActivityKind::Tool,
-                label: tool.clone(),
-                turn: child.last_turn,
-            }),
+            last_activity: child
+                .last_tool_activity
+                .clone()
+                .or_else(|| child.last_tool.as_ref().map(|tool| ToolActivitySummary::new(tool.clone(), None)))
+                .map(|activity| OperationActivity {
+                    kind: OperationActivityKind::Tool,
+                    label: activity.raw_name,
+                    args_summary: activity.args_summary,
+                    turn: child.last_turn,
+                }),
             progress: (!child.tasks.is_empty()).then_some(OperationChildProgress {
                 done: child.tasks_done,
                 total: child.tasks.len(),
@@ -321,6 +333,7 @@ impl OperationChildStatus {
 pub struct OperationActivity {
     pub kind: OperationActivityKind,
     pub label: String,
+    pub args_summary: Option<String>,
     pub turn: Option<u32>,
 }
 
@@ -470,6 +483,7 @@ mod tests {
             label: "delegate_1".into(),
             status: status.into(),
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             started_at: None,
             completed_at: None,
@@ -523,6 +537,10 @@ mod tests {
     fn delegate_child_maps_task_progress_and_last_tool() {
         let mut child = delegate_child("running");
         child.last_tool = Some("bash".into());
+        child.last_tool_activity = Some(ToolActivitySummary::new(
+            "bash",
+            Some("cargo test -p omegon".into()),
+        ));
         child.last_turn = Some(3);
         child.tasks_done = 1;
         child.tasks = vec![
@@ -546,6 +564,10 @@ mod tests {
         let projection = OperationWorkbenchProjection::from_delegate(&progress);
         let row = &projection.children[0];
         assert_eq!(row.last_activity.as_ref().unwrap().label, "bash");
+        assert_eq!(
+            row.last_activity.as_ref().unwrap().args_summary.as_deref(),
+            Some("cargo test -p omegon")
+        );
         assert_eq!(row.last_activity.as_ref().unwrap().turn, Some(3));
         assert_eq!(row.progress.as_ref().unwrap().done, 1);
         assert_eq!(row.progress.as_ref().unwrap().total, 2);
@@ -624,6 +646,7 @@ mod tests {
             supervision_mode: None,
             pid: None,
             last_tool: None,
+            last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
             tasks_done: 0,
