@@ -831,10 +831,12 @@ fn operation_worker_chrome_line(child: &OperationChildRow, width: u16) -> String
         .and_then(|failure| failure.message.as_deref())
         .map(|message| format!(" · {message}"))
         .unwrap_or_default();
-    let last_tool = child
-        .last_activity
-        .as_ref()
-        .filter(|activity| matches!(activity.kind, crate::surfaces::operations::OperationActivityKind::Tool));
+    let last_tool = child.last_activity.as_ref().filter(|activity| {
+        matches!(
+            activity.kind,
+            crate::surfaces::operations::OperationActivityKind::Tool
+        )
+    });
     worker_chrome_line(
         &child.label,
         child.status.label(),
@@ -980,12 +982,8 @@ mod tests {
             args_summary: Some("cargo test -p omegon".into()),
             turn: None,
         };
-        let row = project_worker_chrome_row(
-            "delegate-1",
-            "running",
-            Some(&activity),
-            " · tasks 1/3",
-        );
+        let row =
+            project_worker_chrome_row("delegate-1", "running", Some(&activity), " · tasks 1/3");
 
         assert_eq!(row.left.len(), 2);
         assert!(row.left[0].text.contains("delegate-1"));

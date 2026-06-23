@@ -6,8 +6,8 @@
 //! event text.
 
 use crate::features::cleave::{CleaveChildFailureKind, CleaveProgress};
-use crate::surfaces::conversation::ToolActivitySummary;
 use crate::features::delegate::{DelegateChildFailureKind, DelegateProgress};
+use crate::surfaces::conversation::ToolActivitySummary;
 use omegon_traits::{OperationKind, OperationRef};
 use serde_json::{Value, json};
 
@@ -174,7 +174,12 @@ impl OperationChildRow {
             last_activity: child
                 .last_tool_activity
                 .clone()
-                .or_else(|| child.last_tool.as_ref().map(|tool| ToolActivitySummary::new(tool.clone(), None)))
+                .or_else(|| {
+                    child
+                        .last_tool
+                        .as_ref()
+                        .map(|tool| ToolActivitySummary::new(tool.clone(), None))
+                })
                 .map(|activity| OperationActivity {
                     kind: OperationActivityKind::Tool,
                     label: activity.raw_name,
@@ -232,7 +237,12 @@ impl OperationChildRow {
             last_activity: child
                 .last_tool_activity
                 .clone()
-                .or_else(|| child.last_tool.as_ref().map(|tool| ToolActivitySummary::new(tool.clone(), None)))
+                .or_else(|| {
+                    child
+                        .last_tool
+                        .as_ref()
+                        .map(|tool| ToolActivitySummary::new(tool.clone(), None))
+                })
                 .map(|activity| OperationActivity {
                     kind: OperationActivityKind::Tool,
                     label: activity.raw_name,

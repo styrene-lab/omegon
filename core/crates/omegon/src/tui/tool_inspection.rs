@@ -339,7 +339,8 @@ mod tests {
         );
         let glyphs = crate::tui::glyphs::glyphs();
         assert!(
-            rendered.contains(glyphs.tool_category(crate::tui::glyphs::ToolCategoryGlyphRole::Search)),
+            rendered
+                .contains(glyphs.tool_category(crate::tui::glyphs::ToolCategoryGlyphRole::Search)),
             "inspection header should use resolved search glyph for shell-mediated rg: {rendered}"
         );
     }

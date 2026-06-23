@@ -37,7 +37,10 @@ fn child_activity_label(
 ) -> Option<String> {
     activity
         .map(|activity| activity.visual_identity().label)
-        .or_else(|| raw_tool.map(|tool| crate::surfaces::conversation::tool_visual_identity(tool, None).label))
+        .or_else(|| {
+            raw_tool
+                .map(|tool| crate::surfaces::conversation::tool_visual_identity(tool, None).label)
+        })
 }
 
 /// Write `text` left-to-right starting at `(x, y)`, clipped to `max_x`.
@@ -2304,7 +2307,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn cleave_panel_resolves_structured_shell_activity_label() {
         let mut panel = InstrumentPanel::default();
@@ -2349,7 +2351,10 @@ mod tests {
 
         let buf = terminal.backend().buffer().clone();
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
-        assert!(text.contains("→ cargo"), "expected resolved cargo label: {text}");
+        assert!(
+            text.contains("→ cargo"),
+            "expected resolved cargo label: {text}"
+        );
         assert!(!text.contains("→ bash"), "raw shell label leaked: {text}");
     }
 
