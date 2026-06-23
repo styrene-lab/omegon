@@ -28,6 +28,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
 
 ### Fixed
+- Routed `plan list` and `plan show` text through shared plan renderers so direct command output and tool-result enrichment cannot drift across harness surfaces.
 - Kept `manage_tools list` synchronized with the EventBus's finalized model-visible tool inventory so it no longer reports `0 total` tools while directly callable tools are available.
 - Render git tool rows with a dedicated git category glyph instead of reusing the file-write/edit document glyph.
 - Render lean editor engine ribbon tail fields as distinct gradient-style badge segments so grade, thinking, and context keep visible backgrounds and Powerline divider bridges instead of falling back to plain metadata text.

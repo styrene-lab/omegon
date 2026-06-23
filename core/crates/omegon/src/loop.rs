@@ -2761,6 +2761,8 @@ fn enrich_plan_list_tool_results(
     calls: &[ToolCall],
     intent: &IntentDocument,
 ) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let repo_root = crate::setup::find_project_root(&cwd);
     for (call, result) in calls.iter().zip(results.iter_mut()) {
         if call.name != crate::tool_registry::core::PLAN {
             continue;
@@ -2773,51 +2775,16 @@ fn enrich_plan_list_tool_results(
         if action != "list" {
             continue;
         }
-        let mut text = String::from("Plans\n\nVisible\n");
-        if let Some(entry) = intent.visible_plan_registry_entry() {
-            text.push_str(&format!(
-                "- {} · {} · {} · {}/{}\n",
-                entry.plan_id,
-                entry.scope.label(),
-                entry.status.label(),
-                entry.progress.completed,
-                entry.progress.total
-            ));
-            let visible_items = intent.visible_plan_items();
-            let visible_total = visible_items.len();
-            for item in visible_items
-                .into_iter()
-                .take(crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT)
-            {
-                text.push_str(&format!("  - {} {}\n", item.status.icon(), item.label));
-            }
-            if visible_total > crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT {
-                text.push_str(&format!(
-                    "  - … and {} more items\n",
-                    visible_total - crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT
-                ));
-            }
-        } else {
-            text.push_str("- none\n");
-        }
-
-        if let Some(completed) = intent.last_completed_work_plan() {
-            text.push_str("\nCompleted\n");
-            text.push_str(&format!(
-                "- last session plan · {}/{}\n",
-                completed.items.len(),
-                completed.items.len()
-            ));
-        }
-
+        let mut text = crate::plan::render_plan_list_text(intent, &repo_root);
         text.push('\n');
-        let existing = result
-            .content
-            .iter()
-            .filter_map(ContentBlock::as_text)
-            .collect::<Vec<_>>()
-            .join("\n");
-        text.push_str(&existing);
+        text.push_str(
+            &result
+                .content
+                .iter()
+                .filter_map(ContentBlock::as_text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
         result.content = vec![ContentBlock::Text { text }];
     }
 }
