@@ -20,7 +20,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -2422,6 +2422,128 @@ pub struct AgentEventTurnEnd {
     pub streaks: ControllerStreaks,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanSurfaceProjection {
+    pub version: u32,
+    pub active: Option<PlanLaneProjection>,
+    pub workstreams: Vec<PlanWorkstreamProjection>,
+    pub completed_session: Option<PlanProgressProjection>,
+    pub reconciliation_issues: Vec<PlanReconciliationProjection>,
+    pub promotion_nudges: Vec<String>,
+    pub resume_candidates: Vec<PlanResumeCandidateProjection>,
+}
+
+impl PlanSurfaceProjection {
+    pub fn legacy_snapshot_json(&self) -> Value {
+        if let Some(active) = &self.active {
+            active.legacy_snapshot_json(&self.workstreams)
+        } else {
+            json!({
+                "mode": "off",
+                "guidance": "No active work plan.",
+                "completed": 0,
+                "total": 0,
+                "items": [],
+                "status": "detached",
+                "plan_id": "session:current",
+                "scope": "session",
+                "source": "session",
+                "workstreams": self.workstreams.iter().map(PlanWorkstreamProjection::legacy_json).collect::<Vec<_>>(),
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanLaneProjection {
+    pub plan_id: String,
+    pub mode: String,
+    pub guidance: String,
+    pub status: String,
+    pub scope: String,
+    pub source: String,
+    pub progress: PlanProgressProjection,
+    pub items: Vec<PlanItemProjection>,
+}
+
+impl PlanLaneProjection {
+    pub fn legacy_snapshot_json(&self, workstreams: &[PlanWorkstreamProjection]) -> Value {
+        json!({
+            "mode": self.mode,
+            "guidance": self.guidance,
+            "completed": self.progress.completed,
+            "total": self.progress.total,
+            "items": self.items.iter().map(|item| json!({
+                "description": item.label,
+                "status": item.status,
+            })).collect::<Vec<_>>(),
+            "status": self.status,
+            "plan_id": self.plan_id,
+            "scope": self.scope,
+            "source": self.source,
+            "workstreams": workstreams.iter().map(PlanWorkstreamProjection::legacy_json).collect::<Vec<_>>(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanProgressProjection {
+    pub completed: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanItemProjection {
+    pub id: Option<String>,
+    pub label: String,
+    pub status: String,
+    pub intent: Option<String>,
+    pub writable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanWorkstreamProjection {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub progress: PlanProgressProjection,
+}
+
+impl PlanWorkstreamProjection {
+    pub fn legacy_json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "title": self.title,
+            "status": self.status,
+            "completed": self.progress.completed,
+            "total": self.progress.total,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanReconciliationProjection {
+    pub plan_id: String,
+    pub kind: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanResumeCandidateProjection {
+    pub plan_id: String,
+    pub status: String,
+    pub source: String,
+    pub hint: String,
+    pub rank: usize,
+}
+
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     TurnStart {
@@ -2538,7 +2660,7 @@ pub enum AgentEvent {
     /// Structured session plan snapshot. Renderers should prefer this over
     /// reparsing human-readable plan notifications.
     PlanUpdated {
-        snapshot_json: Value,
+        projection: PlanSurfaceProjection,
     },
     /// Harness status changed — persona switch, MCP connect, secret unlock, etc.
     /// Serialized HarnessStatus JSON. Web dashboard renders the snapshot.

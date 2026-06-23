@@ -8297,8 +8297,8 @@ Scroll transcript:
                     self.conversation.push_system(&message);
                 }
             }
-            AgentEvent::PlanUpdated { snapshot_json } => {
-                let dock_state = WorkbenchState::from_plan_update_json(snapshot_json);
+            AgentEvent::PlanUpdated { projection } => {
+                let dock_state = WorkbenchState::from_plan_projection(&projection);
                 self.completed_plan_history_available = dock_state
                     .active
                     .as_ref()

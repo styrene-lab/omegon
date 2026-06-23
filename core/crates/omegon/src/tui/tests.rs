@@ -1666,12 +1666,22 @@ fn slim_status_line_marks_detached_conversation_viewport() {
 fn completed_plan_update_enables_done_view_hint_without_pinning() {
     let mut app = test_app();
     app.handle_agent_event(AgentEvent::PlanUpdated {
-        snapshot_json: serde_json::json!({
-            "mode": "complete",
-            "completed": 1,
-            "total": 1,
-            "items": [{"status": "done", "description": "remember me"}]
-        }),
+        projection: omegon_traits::PlanSurfaceProjection {
+            active: Some(omegon_traits::PlanLaneProjection {
+                mode: "complete".into(),
+                progress: omegon_traits::PlanProgressProjection {
+                    completed: 1,
+                    total: 1,
+                },
+                items: vec![omegon_traits::PlanItemProjection {
+                    status: "done".into(),
+                    label: "remember me".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
     });
 
     assert!(app.completed_plan_history_available);
@@ -1700,15 +1710,29 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
     }));
 
     app.handle_agent_event(AgentEvent::PlanUpdated {
-        snapshot_json: serde_json::json!({
-            "mode": "complete",
-            "completed": 2,
-            "total": 2,
-            "items": [
-                {"status": "done", "description": "one"},
-                {"status": "done", "description": "two"}
-            ]
-        }),
+        projection: omegon_traits::PlanSurfaceProjection {
+            active: Some(omegon_traits::PlanLaneProjection {
+                mode: "complete".into(),
+                progress: omegon_traits::PlanProgressProjection {
+                    completed: 2,
+                    total: 2,
+                },
+                items: vec![
+                    omegon_traits::PlanItemProjection {
+                        status: "done".into(),
+                        label: "one".into(),
+                        ..Default::default()
+                    },
+                    omegon_traits::PlanItemProjection {
+                        status: "done".into(),
+                        label: "two".into(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
     });
 
     assert_eq!(app.conversation.conv_state.scroll_offset, 0);
@@ -1731,17 +1755,39 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
 fn assistant_completed_turn_keeps_incomplete_live_plan_lane() {
     let mut app = test_app();
     app.handle_agent_event(AgentEvent::PlanUpdated {
-        snapshot_json: serde_json::json!({
-            "mode": "planning",
-            "completed": 3,
-            "total": 4,
-            "items": [
-                {"status": "active", "description": "Harden set_recipe"},
-                {"status": "done", "description": "Add regression test"},
-                {"status": "done", "description": "Validate tests"},
-                {"status": "done", "description": "Update changelog"}
-            ]
-        }),
+        projection: omegon_traits::PlanSurfaceProjection {
+            active: Some(omegon_traits::PlanLaneProjection {
+                mode: "planning".into(),
+                progress: omegon_traits::PlanProgressProjection {
+                    completed: 3,
+                    total: 4,
+                },
+                items: vec![
+                    omegon_traits::PlanItemProjection {
+                        status: "active".into(),
+                        label: "Harden set_recipe".into(),
+                        ..Default::default()
+                    },
+                    omegon_traits::PlanItemProjection {
+                        status: "done".into(),
+                        label: "Add regression test".into(),
+                        ..Default::default()
+                    },
+                    omegon_traits::PlanItemProjection {
+                        status: "done".into(),
+                        label: "Validate tests".into(),
+                        ..Default::default()
+                    },
+                    omegon_traits::PlanItemProjection {
+                        status: "done".into(),
+                        label: "Update changelog".into(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
     });
     assert!(app.workbench_state.active.is_some());
 

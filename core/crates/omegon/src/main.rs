@@ -4292,11 +4292,16 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 respond_to,
             } => {
                 let response = execute_plan_slash_command(&mut runtime_state, command);
-                let snapshot_json = work_plan_snapshot_with_lifecycle(&runtime_state.conversation.intent);
+                let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                let repo_root = setup::find_project_root(&cwd);
+                let projection = runtime_state
+                    .conversation
+                    .intent
+                    .plan_surface_projection_for_repo(&repo_root);
                 if let Some(output) = response.output.clone() {
                     let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
                 }
-                let _ = events_tx.send(AgentEvent::PlanUpdated { snapshot_json });
+                let _ = events_tx.send(AgentEvent::PlanUpdated { projection });
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
                         accepted: response.accepted,
