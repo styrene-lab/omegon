@@ -258,10 +258,10 @@ pub const NERD_FONT_GLYPHS: GlyphSet = GlyphSet {
         write: "󰷈",
         search: "󰍉",
         design: "󰙴",
-        memory: "󰍛",
+        memory: "󰧑",
         network: "󰖟",
         subagent: "󰚩",
-        generic: "󰧑",
+        generic: "·",
     },
     engine: EngineGlyphMatrix {
         ribbon_mark: "󰏉",
