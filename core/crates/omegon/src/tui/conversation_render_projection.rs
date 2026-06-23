@@ -341,7 +341,10 @@ mod tests {
             Some(ToolCategory::FileMutation),
             &Alpharius,
         );
-        assert_eq!(chrome.status_icon, "✗");
+        assert_eq!(
+            chrome.status_icon,
+            crate::tui::glyphs::glyphs().tool(crate::tui::glyphs::ToolGlyphRole::Failed)
+        );
         assert_eq!(chrome.status_color, Alpharius.error());
         assert_eq!(chrome.border_color, Alpharius.error());
         assert_eq!(chrome.background, Alpharius.tool_error_bg());
