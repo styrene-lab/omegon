@@ -358,3 +358,180 @@ Likely file scope:
 - Do not require recompilation to update plaintext skills.
 
 ## Open Questions
+
+## Ecosystem Superset Decision
+
+Omegon skills are not an Omegon-only ecosystem. The skill registry is a resolver/projection over portable agent skill bundles from many providers:
+
+- bundled Omegon skills;
+- extension-provided skills;
+- Claude-compatible user/project skill directories;
+- Codex/Cursor/VS Code-style instruction or skill bundles when they can be projected safely;
+- upstream Git/directory skill repositories such as `awesome-agent-skills`;
+- user-local and project-local Omegon overrides.
+
+Strategic goal: operators should keep using upstream community and company skill repositories while Omegon adds provenance, conflict detection, activation safety, and merge/adopt workflows.
+
+### Portable Bundle Contract
+
+The preferred portable bundle shape is:
+
+```text
+<skill-name>/
+  SKILL.md
+  scripts/
+  resources/
+```
+
+`SKILL.md` uses YAML frontmatter for portability. Omegon must tolerate unknown metadata and preserve it during copy/adopt flows. Omegon-specific metadata should live under `x-omegon` when writing portable files, while legacy top-level fields remain accepted.
+
+```yaml
+---
+name: rust
+description: Rust development workflow
+tags: [rust, coding]
+
+x-claude:
+  allowed-tools: [Bash, Read, Edit]
+
+x-omegon:
+  activation: project_detected
+  profile: [coding]
+  project_signals: [Cargo.toml]
+---
+```
+
+Projection rule: known portable fields are indexed; `x-omegon` controls Omegon behavior; unknown and foreign namespaced fields are preserved but not executed.
+
+### Source / Installation / Activation Are Separate
+
+Do not collapse provenance into filesystem location.
+
+- Source: where the skill came from (`bundled`, `extension:recro`, `claude:user`, `git:awesome-agent-skills#rev/path`).
+- Installation: where Omegon reads it from (`~/.omegon/skills`, `.omegon/skills`, `~/.omegon/skill-sources/<id>`, `.claude/skills`, a Git checkout).
+- Activation: current resolved state (`active`, `shadowed`, `conflicting`, `disabled`, `candidate`).
+
+The operator-facing registry must expose all three.
+
+### Upstream Skill Sources
+
+Omegon should support upstream skill repositories as first-class sources:
+
+```bash
+omegon skills source add awesome-agent-skills https://github.com/example/awesome-agent-skills
+omegon skills source sync awesome-agent-skills
+omegon skills source sync --all
+omegon skills search rust
+omegon skills install awesome-agent-skills/rust --link
+omegon skills adopt awesome-agent-skills/rust --project
+```
+
+Sources must be syncable individually and collectively. The TUI/menu affordance should expose per-source actions (`sync`, `disable`, `remove`, `view provenance`) and a top-level `Sync all` action for operators who want to refresh every configured source in one step. CLI parity:
+
+```bash
+omegon skills source sync awesome-agent-skills
+omegon skills source sync --all
+```
+
+Initial source kinds:
+
+- `directory` — local checkout or shared filesystem path.
+- `git` — clone/sync at a pinned ref.
+- `claude-user` / `claude-project` — compatibility discovery for existing Claude skill roots.
+- `extension` — installed Omegon extension packages.
+
+Install modes:
+
+- `link`: read from source checkout; fast and update-friendly.
+- `copy`: copy into Omegon-managed storage; stable/offline.
+- `adopt`: create editable project-local derivative under `.omegon/skills/<name>/` with provenance.
+
+### Lock and Provenance
+
+Project-level reproducibility should use a source lockfile such as `.omegon/skill-sources.lock`:
+
+```toml
+[[sources]]
+id = "awesome-agent-skills"
+kind = "git"
+repo = "https://github.com/example/awesome-agent-skills"
+rev = "4f3a91c8"
+path = "skills"
+
+[[skills]]
+name = "rust"
+source = "awesome-agent-skills"
+path = "rust/SKILL.md"
+rev = "4f3a91c8"
+mode = "link"
+checksum = "sha256:..."
+```
+
+Project-local adopted skills should include provenance, either in sidecar `provenance.toml` or preserved frontmatter metadata.
+
+### Upstream Scripts and Helpers
+
+Scripts/resources from upstream bundles are skill-local resources, not automatically global tools. Default policy:
+
+- readable as skill resources;
+- executable only through normal process/tool approval and sandboxing;
+- not registered as stable callable tools unless projected through the extension/tool registry or a future reviewed helper declaration path.
+
+This keeps Claude-style script ergonomics without creating an unreviewed parallel tool system.
+
+### Conflict Resolution With Upstream Repositories
+
+Same-name overlap is shadowing/precedence. Different-name activation overlap is conflict.
+
+Examples:
+
+```text
+awesome-agent-skills/rust + bundled/rust
+  => same-name shadow/override candidate
+
+awesome-agent-skills/rust-advanced + bundled/rust + extension:recro/recro-rust-dev
+  => activation-slot conflict if they claim the same profile/signals/triggers
+```
+
+Invariant: one activation slot injects at most one skill directive. `allow both` is not a valid resolution for a conflicting slot.
+
+Valid resolutions:
+
+- use one participant and suppress others for the slot;
+- disable all participants for the slot;
+- narrow activation metadata so they no longer overlap;
+- create/adopt a project-local merged skill that becomes the single directive for the slot.
+
+Recommended default for non-1:1 upstream conflicts: create a project-local merged skill with explicit provenance.
+
+### Onboarding Goal
+
+A Claude Code-heavy operator should be productive quickly:
+
+```bash
+cd existing-project
+omegon skills doctor
+omegon skills source add awesome-agent-skills ~/src/awesome-agent-skills --link
+omegon skills resolve
+omegon
+```
+
+`skills doctor` must be read-only and should report:
+
+- detected Claude-compatible user/project skills;
+- configured upstream sources;
+- compatible bundles;
+- missing metadata/scripts;
+- same-name shadows;
+- activation conflicts;
+- recommended next commands.
+
+No manual moving or rewriting is required for the first productive session.
+
+### Implementation Sequence
+
+1. Add read-only `omegon skills doctor` for local/project ecosystem discovery.
+2. Add source registry files for user/project skill sources, with per-source sync and `sync all` affordances in both CLI and menu surfaces.
+3. Add directory/Git source providers and source indexing for `SKILL.md` bundles.
+4. Add link/copy/adopt workflows with provenance.
+5. Add `/skills resolve` / `omegon skills resolve` for persisted conflict decisions and merge recommendations.
