@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added prompt skill conflict resolution so overlapping activation/trigger skills inject only one provider by default and user-facing output recommends project-local merge resolution.
 
 ### Changed
+- Surfaced startup skill activation events in the runtime event stream and mirrored them into audit logs so operators can see and review skill activation/provenance.
 - Added `omegon skills import <path> [--project] [--force]` for copying Claude/Omegon skill bundles or direct `SKILL.md` files into user or project skill roots, and updated `skills doctor` to recommend those import commands.
 - Renamed the abstract runtime guidance registry from `PluginRegistry` to `AugmentRegistry` to distinguish prompt/persona/skill augmentation from extension/plugin package concepts.
 - Included skill source/editability/reload/shadow metadata in `/skills get` and CLI `omegon skills get` output.
