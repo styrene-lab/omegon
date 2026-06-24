@@ -623,8 +623,12 @@ fn doctor_candidate_conflicts(
     entries
         .iter()
         .filter(|entry| skill_sources_conflict(&candidate_entry, entry))
-        .map(|entry| format!("{} ({})", entry.name, entry.source))
+        .map(|entry| skill_ref(&entry.source, &entry.name))
         .collect()
+}
+
+fn skill_ref(source: &str, name: &str) -> String {
+    format!("{source}/{name}")
 }
 
 pub fn doctor_report() -> anyhow::Result<String> {
@@ -1008,7 +1012,7 @@ fn finalize_skill_entries(pending: Vec<PendingSkillEntry>) -> Vec<SkillEntry> {
             .filter(|(other_index, other)| {
                 *other_index != index && skill_sources_conflict(&entries[index], other)
             })
-            .map(|(_, other)| format!("{} ({})", other.name, other.source))
+            .map(|(_, other)| skill_ref(&other.source, &other.name))
             .collect();
         entries[index].conflicts = conflicts;
     }
@@ -1967,7 +1971,7 @@ path = "{skill_path}"
             recro
                 .conflicts
                 .iter()
-                .any(|conflict| conflict == "rust (bundled)")
+                .any(|conflict| conflict == "bundled/rust")
         );
     }
 
