@@ -32,6 +32,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
 
 ### Fixed
+- Converted the slim turn-state TUI test away from brittle glyph/text assertions to semantic `SlimTurnState` and tool-card state checks.
 - Preserve structured Codex SSE error details in operator-facing failures instead of manufacturing bare `unknown error`, including upstream status/code/type context and tracing logs for raw error events.
 - Added semantic Workbench projection tests for typed operation worker rows so delegate/cleave coverage can assert structured status/tool/detail mapping before terminal rendering.
 - Added semantic Workbench projection tests for typed plan lanes so TUI coverage can assert DTO mapping without brittle terminal text matching.
