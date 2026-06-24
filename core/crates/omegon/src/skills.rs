@@ -519,9 +519,21 @@ fn find_script_references(body: &str) -> Vec<String> {
         .split(|ch: char| ch.is_whitespace() || matches!(ch, '`' | '\'' | '"' | ')' | '(' | ','))
     {
         let token = token.trim_matches(|ch: char| matches!(ch, ':' | ';' | '.'));
-        if (token.starts_with("scripts/") || token.contains("/scripts/"))
-            && !refs.iter().any(|existing| existing == token)
+        if !token.starts_with("scripts/") {
+            continue;
+        }
+        let relative = std::path::Path::new(token);
+        if relative.is_absolute()
+            || relative.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir | std::path::Component::Prefix(_)
+                )
+            })
         {
+            continue;
+        }
+        if !refs.iter().any(|existing| existing == token) {
             refs.push(token.to_string());
         }
     }
@@ -617,7 +629,7 @@ fn doctor_candidate_conflicts(
 
 pub fn doctor_report() -> anyhow::Result<String> {
     let cwd = std::env::current_dir()?;
-    let entries = list_structured().unwrap_or_default();
+    let entries = list_structured()?;
     let mut lines = vec!["# Skills doctor".to_string(), String::new()];
     lines.push("Detected compatible skill roots:".into());
     let mut total = 0usize;
@@ -1837,6 +1849,14 @@ path = "{skill_path}"
                 None => unsafe { std::env::remove_var(self.key) },
             }
         }
+    }
+
+    #[test]
+    fn doctor_script_references_are_bundle_relative_only() {
+        let refs = find_script_references(
+            "Use scripts/local.py and ../scripts/escape.py and docs/scripts/not-local.py",
+        );
+        assert_eq!(refs, vec!["scripts/local.py"]);
     }
 
     #[test]
