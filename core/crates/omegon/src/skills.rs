@@ -1058,6 +1058,28 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
     Ok(entries)
 }
 
+#[derive(Debug, Clone)]
+pub struct SkillDetails {
+    pub manifest: SkillManifest,
+    pub body: String,
+    pub path: std::path::PathBuf,
+    pub entry: Option<SkillEntry>,
+}
+
+/// Read a single skill's resolved manifest, body content, and listing metadata.
+pub fn get_skill_details(name: &str) -> anyhow::Result<SkillDetails> {
+    let (manifest, body, path) = get_skill(name)?;
+    let entry = list_structured()
+        .ok()
+        .and_then(|entries| entries.into_iter().find(|entry| entry.name == name));
+    Ok(SkillDetails {
+        manifest,
+        body,
+        path,
+        entry,
+    })
+}
+
 /// Read a single skill's manifest and body content.
 pub fn get_skill(name: &str) -> anyhow::Result<(SkillManifest, String, std::path::PathBuf)> {
     if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {

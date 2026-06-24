@@ -3656,14 +3656,24 @@ pub async fn plugin_update_response(name: Option<&str>) -> SlashCommandResponse 
 // ── Skill response handlers ──────────────────────────────────────
 
 pub async fn skill_get_response(name: &str) -> SlashCommandResponse {
-    match crate::skills::get_skill(name) {
-        Ok((manifest, body, path)) => {
+    match crate::skills::get_skill_details(name) {
+        Ok(details) => {
+            let manifest = &details.manifest;
+            let body = &details.body;
             let mut out = format!("Skill: {}\n", manifest.name);
             if !manifest.description.is_empty() {
                 out.push_str(&format!("Description: {}\n", manifest.description));
             }
             if let Some(ref version) = manifest.version {
                 out.push_str(&format!("Version: {version}\n"));
+            }
+            if let Some(ref entry) = details.entry {
+                out.push_str(&format!("Source: {}\n", entry.source));
+                out.push_str(&format!("Editable: {}\n", entry.editable));
+                out.push_str(&format!("Reloadable: {}\n", entry.reloadable));
+                if !entry.shadows.is_empty() {
+                    out.push_str(&format!("Shadows: {}\n", entry.shadows.join(", ")));
+                }
             }
             if !manifest.tags.is_empty() {
                 out.push_str(&format!("Tags: {}\n", manifest.tags.join(", ")));
@@ -3680,8 +3690,8 @@ pub async fn skill_get_response(name: &str) -> SlashCommandResponse {
             if let Some(turns) = manifest.max_turns {
                 out.push_str(&format!("Max turns: {turns}\n"));
             }
-            out.push_str(&format!("Path: {}\n", path.display()));
-            let preview = crate::util::truncate_str(&body, 500);
+            out.push_str(&format!("Path: {}\n", details.path.display()));
+            let preview = crate::util::truncate_str(body, 500);
             out.push_str(&format!("\n{preview}"));
             if body.len() > 500 {
                 out.push_str("...");

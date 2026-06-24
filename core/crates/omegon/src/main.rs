@@ -1620,14 +1620,23 @@ async fn main() -> anyhow::Result<()> {
                     skills::cmd_install()
                 }
             }
-            SkillsAction::Get { name } => match skills::get_skill(name) {
-                Ok((manifest, body, path)) => {
+            SkillsAction::Get { name } => match skills::get_skill_details(name) {
+                Ok(details) => {
+                    let manifest = &details.manifest;
                     println!("Skill: {}", manifest.name);
                     if !manifest.description.is_empty() {
                         println!("Description: {}", manifest.description);
                     }
                     if let Some(ref v) = manifest.version {
                         println!("Version: {v}");
+                    }
+                    if let Some(ref entry) = details.entry {
+                        println!("Source: {}", entry.source);
+                        println!("Editable: {}", entry.editable);
+                        println!("Reloadable: {}", entry.reloadable);
+                        if !entry.shadows.is_empty() {
+                            println!("Shadows: {}", entry.shadows.join(", "));
+                        }
                     }
                     if !manifest.tags.is_empty() {
                         println!("Tags: {}", manifest.tags.join(", "));
@@ -1638,8 +1647,8 @@ async fn main() -> anyhow::Result<()> {
                     if let Some(ref p) = manifest.posture {
                         println!("Posture: {p}");
                     }
-                    println!("Path: {}", path.display());
-                    println!("\n{body}");
+                    println!("Path: {}", details.path.display());
+                    println!("\n{}", details.body);
                     Ok(())
                 }
                 Err(e) => Err(e),

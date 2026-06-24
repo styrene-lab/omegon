@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Changed
+- Included skill source/editability/reload/shadow metadata in `/skills get` and CLI `omegon skills get` output.
 - Rendered skill source/editability/reload/shadow metadata in the `/skills` palette so override provenance is visible without opening each skill.
 - Added source/editability/reload/shadow metadata to structured skill listings so project overrides expose the lower-precedence skills they shadow.
 - Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
