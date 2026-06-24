@@ -857,11 +857,24 @@ impl crate::conversation::IntentDocument {
             });
             return;
         }
+        let completed_active = self
+            .work_plan
+            .get(index)
+            .is_some_and(|item| item.status == WorkItemStatus::Active);
         if let Some(item) = self.work_plan.get_mut(index) {
             item.status = WorkItemStatus::Done;
         }
-        // If no active item remains, activate the first pending
-        if !self
+
+        if completed_active {
+            if let Some(next) = self
+                .work_plan
+                .iter_mut()
+                .skip(index.saturating_add(1))
+                .find(|w| w.status == WorkItemStatus::Pending)
+            {
+                next.status = WorkItemStatus::Active;
+            }
+        } else if !self
             .work_plan
             .iter()
             .any(|w| w.status == WorkItemStatus::Active)
