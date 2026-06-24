@@ -121,9 +121,9 @@ use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode};
 use self::settings_menu::SelectorKind;
 use self::workbench::{
     PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, WorkbenchState,
-    WorkbenchWorkspaceContext, active_workbench_snapshot, render_workbench_panel,
-    slim_completed_plan_hint_available, slim_operator_hint, upstream_retry_hint,
-    workbench_preferred_height,
+    WorkbenchWorkspaceContext, active_plan_workspace_context_height, active_workbench_snapshot,
+    render_workbench_panel, slim_completed_plan_hint_available, slim_operator_hint,
+    upstream_retry_hint, workbench_preferred_height,
 };
 use crate::surfaces::command::{
     CommandPanel, CommandPrompt, CommandPromptAction, CommandSeverity, CommandToast,
@@ -4668,7 +4668,13 @@ impl App {
             let plan_state = workbench_state
                 .active
                 .as_ref()
-                .map(|snapshot| snapshot.hint_state(workbench_area.height))
+                .map(|snapshot| {
+                    snapshot.hint_state(
+                        workbench_area
+                            .height
+                            .saturating_sub(active_plan_workspace_context_height(&workbench_state)),
+                    )
+                })
                 .unwrap_or_else(|| {
                     if slim_completed_plan_hint_available(self.completed_plan_history_available) {
                         SlimPlanHintState::Complete

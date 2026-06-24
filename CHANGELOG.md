@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Fixed
+- Kept the Workbench context line reserved above active plan rows so expanded plans render below the Workbench instead of covering it.
 - Fixed direct plan item completion so completing the active item advances/reconciles the visible Workbench pointer even when later items were already marked done.
 - Made turn cancellation phase-aware: early interrupted submissions are forgotten from canonical replay, while interrupts after assistant/tool output keep the prompt for the next turn; the session bar now exposes interrupt/keep/forget disposition.
 - Fixed upstream LLM error recovery so a provider rejection is surfaced in the transcript without leaving the rejected active prompt in canonical replay and poisoning subsequent sends.
