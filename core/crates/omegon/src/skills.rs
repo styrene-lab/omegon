@@ -6,46 +6,45 @@
 //!
 //! Two-tier load order (established by PluginRegistry::load_skills):
 //!   1. ~/.omegon/skills/*/SKILL.md   — bundled / user-installed
-//!   2. <cwd>/.omegon/skills/*/SKILL.md — project-local (overrides bundled)
+//!   2. <cwd>/.omegon/skills/*/SKILL.md — project-local (overrides same-named user skills)
 //!
 //! ## Skill Schema
 //!
-//! SKILL.md files use TOML (`+++`) or YAML (`---`) frontmatter with these fields:
+//! SKILL.md files use YAML (`---`) frontmatter canonically, with TOML (`+++`)
+//! retained as a compatibility format for existing Omegon skills:
 //!
-//! ```toml
-//! +++
+//! ```yaml
+//! ---
 //! # ── Required ─────────────────────────────────────────
-//! name = "my-skill"
-//! description = "What this skill does"
+//! name: my-skill
+//! description: What this skill does
 //!
 //! # ── Identity (auto-generated) ────────────────────────
-//! id = "uuid"                          # unique identifier
-//! version = "1.0.0"                    # skill version
-//! tags = ["domain", "category"]        # discovery/filtering
-//! aliases = ["shortname"]              # alternative invocation names
+//! id: uuid                          # unique identifier
+//! version: 1.0.0                    # skill version
+//! tags: [domain, category]          # discovery/filtering
+//! aliases: [shortname]              # alternative invocation names
 //!
 //! # ── Invocation ───────────────────────────────────────
-//! triggers = [                         # phrases that activate this skill
-//!   "evaluate this opportunity",
-//!   "assess this solicitation",
-//! ]
-//! activation = "intent_detected"       # always | intent_detected | project_detected | domain_detected | lifecycle_gated
-//! profile = ["coding"]                 # coding | lifecycle | docs | infra | design
-//! project_signals = ["Cargo.toml"]     # files/globs that suggest activation
+//! triggers:                         # phrases that activate this skill
+//!   - evaluate this opportunity
+//!   - assess this solicitation
+//! activation: intent_detected       # always | intent_detected | project_detected | domain_detected | lifecycle_gated
+//! profile: [coding]                 # coding | lifecycle | docs | infra | design
+//! project_signals: [Cargo.toml]     # files/globs that suggest activation
 //!
 //! # ── Access ───────────────────────────────────────────
-//! trusted_paths = [                    # auto-trusted on load
-//!   "~/Documents/data/",
-//! ]
+//! trusted_paths:                    # auto-trusted on load
+//!   - ~/Documents/data/
 //!
 //! # ── Output ───────────────────────────────────────────
-//! output_path = "~/Documents/output/"  # where results are written
-//! output_format = "markdown"           # markdown | json
+//! output_path: ~/Documents/output/  # where results are written
+//! output_format: markdown           # markdown | json
 //!
 //! # ── Constraints ──────────────────────────────────────
-//! max_turns = 100                      # override session default
-//! posture = "architect"                # recommended posture
-//! +++
+//! max_turns: 100                    # override session default
+//! posture: architect                # recommended posture
+//! ---
 //! ```
 //!
 //! All fields except `name` and `description` are optional.
