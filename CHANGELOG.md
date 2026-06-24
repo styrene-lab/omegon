@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 
 - Add deterministic `headroom-understanding-eval` tooling for checking whether compressed headroom fixtures can answer required-fact and authored understanding questions with CCR retrieval when needed.
+- Add understanding-evaluator coverage to headroom pack evaluation so pack artifacts report question pass/fail counts alongside compression savings and restoration metrics.
 - Add a native `omegon-headroom` crate with deterministic content routing, structured compression summaries, and in-memory CCR retrieval primitives for future context/tool-output compression.
 - Add `just headroom-fixture` for creating ignored dogfood fixture JSON files from local UTF-8 samples.
 - Add a restoration-budget gate to `headroom-eval` so automated dogfood can fail when required facts rely too heavily on evaluator restoration.

@@ -64,6 +64,19 @@ def load_pack(pack_dir: Path) -> dict[str, Any]:
     return data
 
 
+def parse_json_report(stdout: str, label: str) -> tuple[dict[str, Any] | None, str | None]:
+    if not stdout.strip():
+        return None, f"{label} JSON output missing"
+    try:
+        loaded = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        return None, f"{label} JSON parse failed: {exc}"
+    if not isinstance(loaded, dict):
+        return None, f"{label} JSON root was not an object"
+    report = loaded.get("report") if isinstance(loaded.get("report"), dict) else loaded
+    return report, None
+
+
 def evaluate_pack(pack_dir: Path, *, strict: bool) -> dict[str, Any]:
     pack = load_pack(pack_dir)
     policy = pack["policy"]
@@ -76,7 +89,9 @@ def evaluate_pack(pack_dir: Path, *, strict: bool) -> dict[str, Any]:
     token_counter = policy["token_counter"]
     min_savings = policy["min_evaluated_savings_percent"]
 
-    collect = run(["python3", "scripts/headroom_corpus_collect.py", str(corpus_manifest.relative_to(ROOT))])
+    collect = run(
+        ["python3", "scripts/headroom_corpus_collect.py", str(corpus_manifest.relative_to(ROOT))]
+    )
     if collect.returncode != 0:
         raise RuntimeError(f"corpus collection failed:\n{collect.stderr}\n{collect.stdout}")
 
@@ -101,24 +116,34 @@ def evaluate_pack(pack_dir: Path, *, strict: bool) -> dict[str, Any]:
         "--token-counter",
         token_counter,
     ]
+    understanding_cmd = [
+        "cargo",
+        "run",
+        "-p",
+        "omegon-headroom",
+        "--bin",
+        "headroom-understanding-eval",
+        "--",
+        "--json",
+        "--fixtures",
+        ".tmp/headroom/fixtures",
+    ]
     evaluated = run(eval_cmd)
-    report: dict[str, Any] | None = None
-    parse_error: str | None = None
-    if evaluated.stdout.strip():
-        try:
-            loaded = json.loads(evaluated.stdout)
-            if isinstance(loaded, dict):
-                report = loaded.get("report") if isinstance(loaded.get("report"), dict) else loaded
-            else:
-                parse_error = "headroom-eval JSON root was not an object"
-        except json.JSONDecodeError as exc:
-            parse_error = str(exc)
+    understanding = run(understanding_cmd)
+    report, parse_error = parse_json_report(evaluated.stdout, "headroom-eval")
+    understanding_report, understanding_parse_error = parse_json_report(
+        understanding.stdout, "headroom-understanding-eval"
+    )
 
     failures: list[str] = []
     if evaluated.returncode != 0:
         failures.append(f"headroom-eval exited {evaluated.returncode}")
     if parse_error:
-        failures.append(f"headroom-eval JSON parse failed: {parse_error}")
+        failures.append(parse_error)
+    if understanding.returncode != 0:
+        failures.append(f"headroom-understanding-eval exited {understanding.returncode}")
+    if understanding_parse_error:
+        failures.append(understanding_parse_error)
     savings = None
     restored = None
     eval_passed = None
@@ -132,7 +157,10 @@ def evaluate_pack(pack_dir: Path, *, strict: bool) -> dict[str, Any]:
             restored = sum(
                 fixture.get("restored_fact_count", 0)
                 for fixture in report["fixtures"]
-                if isinstance(fixture, dict) and isinstance(fixture.get("restored_fact_count", 0), int)
+                if (
+                    isinstance(fixture, dict)
+                    and isinstance(fixture.get("restored_fact_count", 0), int)
+                )
             )
         if eval_passed is False:
             failures.append("headroom-eval report failed")
@@ -140,6 +168,24 @@ def evaluate_pack(pack_dir: Path, *, strict: bool) -> dict[str, Any]:
             failures.append(f"evaluated savings {savings}% below pack minimum {min_savings}%")
         if not isinstance(restored, int) or restored > max_restored:
             failures.append(f"restored facts {restored} above pack maximum {max_restored}")
+
+    understanding_passed = None
+    question_count = None
+    failed_questions = None
+    retrieval_required = None
+    retrieval_available = None
+    if understanding_report is None:
+        failures.append("headroom-understanding-eval report missing")
+    else:
+        understanding_passed = bool(understanding_report.get("passed"))
+        question_count = understanding_report.get("question_count")
+        failed_questions = understanding_report.get("failed_questions")
+        retrieval_required = understanding_report.get("retrieval_required")
+        retrieval_available = understanding_report.get("retrieval_available")
+        if understanding_passed is False:
+            failures.append("headroom-understanding-eval report failed")
+        if failed_questions not in (None, 0):
+            failures.append(f"understanding failed questions {failed_questions}")
 
     result = {
         "pack": {
@@ -159,16 +205,23 @@ def evaluate_pack(pack_dir: Path, *, strict: bool) -> dict[str, Any]:
             "passed": eval_passed,
             "evaluated_savings_percent": savings,
             "restored_fact_count": restored,
+            "understanding_passed": understanding_passed,
+            "understanding_question_count": question_count,
+            "understanding_failed_questions": failed_questions,
+            "understanding_retrieval_required": retrieval_required,
+            "understanding_retrieval_available": retrieval_available,
         },
         "commands": {
             "collect": collect.args,
             "dogfood": dogfood.args,
             "eval": eval_cmd,
+            "understanding_eval": understanding_cmd,
         },
         "stderr": {
             "collect": collect.stderr,
             "dogfood": dogfood.stderr,
             "eval": evaluated.stderr,
+            "understanding_eval": understanding.stderr,
         },
     }
     out_dir = TMP_PACKS / pack_name
