@@ -741,6 +741,15 @@ pub struct SkillEntry {
     pub installed: bool,
     pub bundled: bool,
     pub project_local: bool,
+    /// Provider source for the resolved entry: bundled, user, project, or extension.
+    pub source: String,
+    /// Whether the operator can edit this skill source directly.
+    pub editable: bool,
+    /// Whether an explicit skills reload can refresh this source without rebuilding Omegon.
+    pub reloadable: bool,
+    /// Lower-precedence provider labels shadowed by this entry.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shadows: Vec<String>,
     pub path: String,
 }
 
@@ -953,6 +962,10 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
             installed,
             bundled: true,
             project_local: false,
+            source: "bundled".into(),
+            editable: false,
+            reloadable: false,
+            shadows: Vec::new(),
             path,
         });
         seen.insert(name.to_string());
@@ -989,6 +1002,10 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
                 installed: true,
                 bundled: false,
                 project_local: false,
+                source: "user".into(),
+                editable: true,
+                reloadable: true,
+                shadows: Vec::new(),
                 path: dir.join(&name).display().to_string(),
             });
             seen.insert(name);
@@ -1007,27 +1024,34 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
             let skill_path = project_skills.join(&name).join("SKILL.md");
             let content = std::fs::read_to_string(&skill_path).unwrap_or_default();
             let (manifest, _body) = parse_skill_file(&content);
-            let already_seen = seen.contains(&name);
-            if !already_seen {
-                entries.push(SkillEntry {
-                    name: name.clone(),
-                    description: manifest.description.clone(),
-                    id: manifest.id.clone(),
-                    version: manifest.version.clone(),
-                    tags: manifest.tags.clone(),
-                    aliases: manifest.aliases.clone(),
-                    triggers: manifest.triggers.clone(),
-                    activation: manifest.activation.clone(),
-                    profile: manifest.profile.clone(),
-                    project_signals: manifest.project_signals.clone(),
-                    posture: manifest.posture.clone(),
-                    max_turns: manifest.max_turns,
-                    installed: true,
-                    bundled: false,
-                    project_local: true,
-                    path: project_skills.join(&name).display().to_string(),
-                });
-            }
+            let shadows = entries
+                .iter()
+                .filter(|entry| entry.name == name)
+                .map(|entry| entry.source.clone())
+                .collect();
+            entries.push(SkillEntry {
+                name: name.clone(),
+                description: manifest.description.clone(),
+                id: manifest.id.clone(),
+                version: manifest.version.clone(),
+                tags: manifest.tags.clone(),
+                aliases: manifest.aliases.clone(),
+                triggers: manifest.triggers.clone(),
+                activation: manifest.activation.clone(),
+                profile: manifest.profile.clone(),
+                project_signals: manifest.project_signals.clone(),
+                posture: manifest.posture.clone(),
+                max_turns: manifest.max_turns,
+                installed: true,
+                bundled: false,
+                project_local: true,
+                source: "project".into(),
+                editable: true,
+                reloadable: true,
+                shadows,
+                path: project_skills.join(&name).display().to_string(),
+            });
+            seen.insert(name);
         }
     }
 
@@ -1367,8 +1391,44 @@ mod tests {
             .find(|e| e.name == "rust" && e.bundled)
             .expect("bundled rust skill should be listed");
         assert_eq!(rust.activation.as_deref(), Some("project_detected"));
+        assert_eq!(rust.source, "bundled");
+        assert!(!rust.editable);
+        assert!(!rust.reloadable);
+        assert!(rust.shadows.is_empty());
         assert!(rust.profile.iter().any(|p| p == "coding"));
         assert!(rust.project_signals.iter().any(|s| s == "Cargo.toml"));
+    }
+
+    #[test]
+    fn list_structured_includes_project_override_shadow_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_skill = dir.path().join(".omegon/skills/git");
+        std::fs::create_dir_all(&project_skill).unwrap();
+        std::fs::write(
+            project_skill.join("SKILL.md"),
+            "---
+name: git
+description: Project git override
+---
+
+# Git override
+",
+        )
+        .unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let entries = list_structured().unwrap();
+        std::env::set_current_dir(original).unwrap();
+
+        let project_git = entries
+            .iter()
+            .find(|entry| entry.name == "git" && entry.project_local)
+            .expect("project git override should be listed");
+        assert_eq!(project_git.source, "project");
+        assert!(project_git.editable);
+        assert!(project_git.reloadable);
+        assert!(project_git.shadows.iter().any(|source| source == "bundled"));
     }
 
     #[test]

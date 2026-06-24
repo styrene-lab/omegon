@@ -4742,6 +4742,10 @@ mod tests {
                 installed: false,
                 bundled: true,
                 project_local: false,
+                source: "bundled".into(),
+                editable: false,
+                reloadable: false,
+                shadows: vec![],
                 path: String::new(),
             },
             crate::skills::SkillEntry {
@@ -4760,6 +4764,10 @@ mod tests {
                 installed: true,
                 bundled: false,
                 project_local: true,
+                source: "project".into(),
+                editable: true,
+                reloadable: true,
+                shadows: vec!["bundled".into()],
                 path: ".omegon/skills/team".into(),
             },
         ];
