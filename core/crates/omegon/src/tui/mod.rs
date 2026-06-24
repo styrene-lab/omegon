@@ -523,8 +523,8 @@ struct App {
     working_verb: &'static str,
     /// When true, replay the splash animation.
     replay_splash: bool,
-    /// Plugin registry — manages active persona, tone, and memory layers.
-    plugin_registry: Option<crate::plugins::registry::PluginRegistry>,
+    /// Augment registry — manages active persona, tone, and memory layers.
+    augment_registry: Option<crate::plugins::registry::AugmentRegistry>,
     /// Slim-mode session row — bottom telemetry below composer/workbench.
     session_row: statusline::SessionRow,
     /// Structured session plan snapshot for the active Workbench panel.
@@ -1797,7 +1797,7 @@ impl App {
 
     fn current_persona_state(&self) -> crate::settings::PersonaState {
         let persona_id = self
-            .plugin_registry
+            .augment_registry
             .as_ref()
             .and_then(|r| r.active_persona().map(|p| p.id.clone()));
         let mind_id = persona_id.as_ref().map(|id| format!("persona:{id}"));
@@ -1817,7 +1817,7 @@ impl App {
             actual_tokens: None, // stamped on TurnEnd via stamp_turn_tokens
             context_percent: Some(self.footer_data.context_percent),
             persona: self
-                .plugin_registry
+                .augment_registry
                 .as_ref()
                 .and_then(|r| r.active_persona().map(|p| p.id.clone())),
             branch: None,      // populated lazily if needed
@@ -1952,7 +1952,7 @@ impl App {
             completed_tool_name: None,
             working_verb: "Working",
             replay_splash: false,
-            plugin_registry: Some(crate::plugins::registry::PluginRegistry::new(
+            augment_registry: Some(crate::plugins::registry::AugmentRegistry::new(
                 crate::prompt::load_lex_imperialis(),
             )),
             session_row: statusline::SessionRow::default(),
@@ -2190,7 +2190,7 @@ impl App {
         }
 
         let active_id = self
-            .plugin_registry
+            .augment_registry
             .as_ref()
             .and_then(|registry| registry.active_persona().map(|persona| persona.id.clone()));
         let options = personas
@@ -2217,7 +2217,7 @@ impl App {
         }
 
         let active_id = self
-            .plugin_registry
+            .augment_registry
             .as_ref()
             .and_then(|registry| registry.active_tone().map(|tone| tone.id.clone()));
         let options = tones
@@ -2712,7 +2712,7 @@ impl App {
                             let name = persona.name.clone();
                             let badge = persona.badge.clone().unwrap_or_else(|| "⚙".into());
                             let fact_count = persona.mind_facts.len();
-                            if let Some(ref mut registry) = self.plugin_registry {
+                            if let Some(ref mut registry) = self.augment_registry {
                                 registry.activate_persona(persona);
                             }
                             Some(format!(
@@ -2731,7 +2731,7 @@ impl App {
                     match crate::plugins::persona_loader::load_tone(&available.path) {
                         Ok(tone) => {
                             let name = tone.name.clone();
-                            if let Some(ref mut registry) = self.plugin_registry {
+                            if let Some(ref mut registry) = self.augment_registry {
                                 registry.activate_tone(tone);
                             }
                             Some(format!("♪ Tone activated: {name}"))
@@ -6589,14 +6589,14 @@ Scroll transcript:
                     }
                     SlashResult::Display("Usage: /persona [list|create|off|<name>]".into())
                 } else if args == "off" {
-                    if let Some(ref mut registry) = self.plugin_registry {
+                    if let Some(ref mut registry) = self.augment_registry {
                         let result = registry.deactivate_persona();
                         match result.removed_id {
                             Some(id) => SlashResult::Display(format!("Persona deactivated: {id}")),
                             None => SlashResult::Display("No persona active.".into()),
                         }
                     } else {
-                        SlashResult::Display("Plugin registry not initialized.".into())
+                        SlashResult::Display("Augment registry not initialized.".into())
                     }
                 } else if args.is_empty() {
                     self.open_persona_selector();
@@ -6614,7 +6614,7 @@ Scroll transcript:
                                     let name = persona.name.clone();
                                     let badge = persona.badge.clone().unwrap_or_else(|| "⚙".into());
                                     let fact_count = persona.mind_facts.len();
-                                    if let Some(ref mut registry) = self.plugin_registry {
+                                    if let Some(ref mut registry) = self.augment_registry {
                                         registry.activate_persona(persona);
                                     }
                                     SlashResult::Display(format!(
@@ -6635,14 +6635,14 @@ Scroll transcript:
 
             "tone" => {
                 if args == "off" {
-                    if let Some(ref mut registry) = self.plugin_registry {
+                    if let Some(ref mut registry) = self.augment_registry {
                         let result = registry.deactivate_tone();
                         match result {
                             Some(id) => SlashResult::Display(format!("Tone deactivated: {id}")),
                             None => SlashResult::Display("No tone active.".into()),
                         }
                     } else {
-                        SlashResult::Display("Plugin registry not initialized.".into())
+                        SlashResult::Display("Augment registry not initialized.".into())
                     }
                 } else if args.is_empty() {
                     self.open_tone_selector();
@@ -6657,7 +6657,7 @@ Scroll transcript:
                             match crate::plugins::persona_loader::load_tone(&available.path) {
                                 Ok(tone) => {
                                     let name = tone.name.clone();
-                                    if let Some(ref mut registry) = self.plugin_registry {
+                                    if let Some(ref mut registry) = self.augment_registry {
                                         registry.activate_tone(tone);
                                     }
                                     SlashResult::Display(format!("♪ Tone activated: {name}"))
@@ -9163,7 +9163,7 @@ pub async fn run_tui(
     app.history = App::load_history(&config.cwd);
     app.footer_data.cwd = config.cwd.clone();
     // Load skills from ~/.omegon/skills/ (bundled) and .omegon/skills/ (project-local).
-    if let Some(ref mut registry) = app.plugin_registry {
+    if let Some(ref mut registry) = app.augment_registry {
         registry.load_skills(std::path::Path::new(&config.cwd));
     }
     app.footer_data.is_oauth = config.is_oauth;

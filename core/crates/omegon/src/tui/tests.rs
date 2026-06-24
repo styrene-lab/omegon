@@ -3609,7 +3609,7 @@ directive = "PERSONA.md"
         Some("⚙ Persona activated: Test Persona (0 mind facts)")
     );
     let active = app
-        .plugin_registry
+        .augment_registry
         .as_ref()
         .and_then(|registry| registry.active_persona())
         .map(|persona| persona.id.as_str());
@@ -3647,7 +3647,7 @@ directive = "TONE.md"
 
     assert_eq!(message.as_deref(), Some("♪ Tone activated: Test Tone"));
     let active = app
-        .plugin_registry
+        .augment_registry
         .as_ref()
         .and_then(|registry| registry.active_tone())
         .map(|tone| tone.id.as_str());

@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added prompt skill conflict resolution so overlapping activation/trigger skills inject only one provider by default and user-facing output recommends project-local merge resolution.
 
 ### Changed
+- Renamed the abstract runtime guidance registry from `PluginRegistry` to `AugmentRegistry` to distinguish prompt/persona/skill augmentation from extension/plugin package concepts.
 - Included skill source/editability/reload/shadow metadata in `/skills get` and CLI `omegon skills get` output.
 - Rendered skill source/editability/reload/shadow metadata in the `/skills` palette so override provenance is visible without opening each skill.
 - Added source/editability/reload/shadow metadata to structured skill listings so project overrides expose the lower-precedence skills they shadow.
