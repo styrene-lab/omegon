@@ -4807,7 +4807,7 @@ mod tests {
                 editable: true,
                 reloadable: true,
                 shadows: vec!["bundled".into()],
-                conflicts: vec!["rust (bundled)".into()],
+                conflicts: vec!["bundled/rust".into()],
                 path: ".omegon/skills/team".into(),
             },
         ];
@@ -4823,7 +4823,7 @@ mod tests {
             "- `rust` — bundled · available · project_detected · profile:coding · tags:lang · read-only"
         ));
         assert!(rendered.contains(
-            "- `team` — project · local · always · editable · reloadable · shadows:bundled · conflicts:rust (bundled) · resolve:merge-recommended"
+            "- `team` — project · local · always · editable · reloadable · shadows:bundled · conflicts:bundled/rust · resolve:merge-recommended"
         ));
         assert!(!rendered.contains("+ = installed"));
         assert!(rendered.contains("Details stay behind `/skills get <name>`"));
