@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
 
 ### Fixed
+- Matched `/skills get` provenance metadata to the resolved skill path so project-local overrides do not accidentally inherit bundled metadata.
 - Kept the Workbench context line reserved above active plan rows so expanded plans render below the Workbench instead of covering it.
 - Fixed direct plan item completion so completing the active item advances/reconciles the visible Workbench pointer even when later items were already marked done.
 - Made turn cancellation phase-aware: early interrupted submissions are forgotten from canonical replay, while interrupts after assistant/tool output keep the prompt for the next turn; the session bar now exposes interrupt/keep/forget disposition.
