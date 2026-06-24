@@ -58,6 +58,22 @@ pub struct ExtensionManifest {
     pub capabilities: omegon_extension::Capabilities,
     #[serde(default)]
     pub permissions: omegon_extension::ManifestPermissions,
+    /// Skill bundles contributed by this extension. These are projected into the
+    /// skill registry as read-only extension-provided skills; extension lifecycle
+    /// remains owned by the extension registry.
+    #[serde(default)]
+    pub skills: Vec<ExtensionSkillConfig>,
+}
+
+/// A skill bundle exposed by an extension package.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExtensionSkillConfig {
+    /// Canonical skill name. If omitted, the parsed SKILL.md manifest name or
+    /// containing directory name is used.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Path to SKILL.md relative to the extension root.
+    pub path: String,
 }
 
 impl ExtensionManifest {

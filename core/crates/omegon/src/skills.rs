@@ -746,10 +746,67 @@ pub struct SkillEntry {
     pub editable: bool,
     /// Whether an explicit skills reload can refresh this source without rebuilding Omegon.
     pub reloadable: bool,
-    /// Lower-precedence provider labels shadowed by this entry.
+    /// Same-name lower-precedence provider labels shadowed by this entry.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub shadows: Vec<String>,
+    /// Non-overriding activation/trigger conflicts with other skills.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub conflicts: Vec<String>,
     pub path: String,
+}
+
+#[derive(Debug, Clone)]
+struct PendingSkillEntry {
+    entry: SkillEntry,
+    provider_rank: u8,
+}
+
+fn skill_entry_provider_rank(source: &str) -> u8 {
+    match source {
+        "bundled" => 0,
+        source if source.starts_with("extension:") => 1,
+        "user" => 2,
+        "project" => 3,
+        _ => 1,
+    }
+}
+
+fn skill_sources_conflict(a: &SkillEntry, b: &SkillEntry) -> bool {
+    if a.name == b.name {
+        return false;
+    }
+    let trigger_overlap = a
+        .triggers
+        .iter()
+        .any(|left| b.triggers.iter().any(|right| left == right));
+    let alias_overlap = a
+        .aliases
+        .iter()
+        .any(|left| b.aliases.iter().any(|right| left == right));
+    let activation_overlap = a.activation.is_some()
+        && a.activation == b.activation
+        && (!a.profile.is_empty() && a.profile.iter().any(|profile| b.profile.contains(profile))
+            || !a.project_signals.is_empty()
+                && a.project_signals
+                    .iter()
+                    .any(|signal| b.project_signals.contains(signal)));
+    trigger_overlap || alias_overlap || activation_overlap
+}
+
+fn finalize_skill_entries(pending: Vec<PendingSkillEntry>) -> Vec<SkillEntry> {
+    let mut entries: Vec<SkillEntry> = pending.into_iter().map(|pending| pending.entry).collect();
+    for index in 0..entries.len() {
+        let conflicts = entries
+            .iter()
+            .enumerate()
+            .filter(|(other_index, other)| {
+                *other_index != index && skill_sources_conflict(&entries[index], other)
+            })
+            .map(|(_, other)| format!("{} ({})", other.name, other.source))
+            .collect();
+        entries[index].conflicts = conflicts;
+    }
+    entries
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -926,6 +983,105 @@ fn split_frontmatter(content: &str) -> (Option<(FrontmatterFormat, String)>, &st
 
 /// List all skills as structured entries for the ACP settings surface.
 ///
+
+fn read_extension_skill_entry(
+    extension_dir: &std::path::Path,
+    extension_name: &str,
+    skill: &crate::extensions::manifest::ExtensionSkillConfig,
+    existing_entries: &[SkillEntry],
+) -> Option<SkillEntry> {
+    let skill_path = extension_dir.join(&skill.path);
+    if !skill_path.exists() {
+        return None;
+    }
+    let content = std::fs::read_to_string(&skill_path).ok()?;
+    if content.trim().is_empty() {
+        return None;
+    }
+    let (manifest, _body) = parse_skill_file(&content);
+    let name = skill
+        .name
+        .clone()
+        .filter(|name| !name.is_empty())
+        .or_else(|| (!manifest.name.is_empty()).then(|| manifest.name.clone()))
+        .or_else(|| {
+            skill_path
+                .parent()
+                .and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().to_string())
+        })?;
+    let source = format!("extension:{extension_name}");
+    let shadows = existing_entries
+        .iter()
+        .filter(|entry| {
+            entry.name == name
+                && skill_entry_provider_rank(&source) >= skill_entry_provider_rank(&entry.source)
+        })
+        .map(|entry| entry.source.clone())
+        .collect();
+    Some(SkillEntry {
+        name,
+        description: manifest.description.clone(),
+        id: manifest.id.clone(),
+        version: manifest.version.clone(),
+        tags: manifest.tags.clone(),
+        aliases: manifest.aliases.clone(),
+        triggers: manifest.triggers.clone(),
+        activation: manifest.activation.clone(),
+        profile: manifest.profile.clone(),
+        project_signals: manifest.project_signals.clone(),
+        posture: manifest.posture.clone(),
+        max_turns: manifest.max_turns,
+        installed: true,
+        bundled: false,
+        project_local: false,
+        source,
+        editable: false,
+        reloadable: true,
+        shadows,
+        conflicts: Vec::new(),
+        path: skill_path
+            .parent()
+            .unwrap_or(extension_dir)
+            .display()
+            .to_string(),
+    })
+}
+
+fn load_extension_skill_entries(existing_entries: &[SkillEntry]) -> Vec<SkillEntry> {
+    let Ok(extensions_dir) = crate::extension_cli::extensions_dir() else {
+        return Vec::new();
+    };
+    let Ok(read_dir) = std::fs::read_dir(extensions_dir) else {
+        return Vec::new();
+    };
+    let mut entries = Vec::new();
+    for dir_entry in read_dir
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_dir())
+    {
+        let extension_dir = dir_entry.path();
+        let Ok(manifest) =
+            crate::extensions::manifest::ExtensionManifest::from_extension_dir(&extension_dir)
+        else {
+            continue;
+        };
+        for skill in &manifest.skills {
+            let mut visible = existing_entries.to_vec();
+            visible.extend(entries.clone());
+            if let Some(entry) = read_extension_skill_entry(
+                &extension_dir,
+                &manifest.extension.name,
+                skill,
+                &visible,
+            ) {
+                entries.push(entry);
+            }
+        }
+    }
+    entries
+}
+
 /// Returns bundled skills (with installation status), user-installed skills,
 /// and project-local skills in a single sorted list.
 pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
@@ -965,10 +1121,14 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
             editable: false,
             reloadable: false,
             shadows: Vec::new(),
+            conflicts: Vec::new(),
             path,
         });
         seen.insert(name.to_string());
     }
+
+    // Extension-provided skills sit above bundled defaults and below operator-owned user/project skills.
+    entries.extend(load_extension_skill_entries(&entries));
 
     // User-installed skills (non-bundled)
     if let Some(ref dir) = home_skills
@@ -1005,6 +1165,7 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
                 editable: true,
                 reloadable: true,
                 shadows: Vec::new(),
+                conflicts: Vec::new(),
                 path: dir.join(&name).display().to_string(),
             });
             seen.insert(name);
@@ -1048,13 +1209,22 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
                 editable: true,
                 reloadable: true,
                 shadows,
+                conflicts: Vec::new(),
                 path: project_skills.join(&name).display().to_string(),
             });
             seen.insert(name);
         }
     }
 
-    Ok(entries)
+    Ok(finalize_skill_entries(
+        entries
+            .into_iter()
+            .map(|entry| PendingSkillEntry {
+                provider_rank: skill_entry_provider_rank(&entry.source),
+                entry,
+            })
+            .collect(),
+    ))
 }
 
 #[derive(Debug, Clone)]

@@ -290,6 +290,26 @@ Initial implementation can defer declared helper actions and simply support skil
 - Should extension-provided skills require an explicit manifest field, or is a conventional sidecar path acceptable as a compatibility fallback?
 - Should user-local plaintext skills outrank extension-provided skills, or should extension skills outrank user-local but remain below project overrides? Current decision: user-local outranks extension because operator-owned guidance should override packaged defaults.
 
+## Conflict Resolution for Non-1:1 Skill Overlap
+
+Same-name overlap is shadowing: the higher-precedence provider supplies the active skill and lower-precedence entries are retained as shadow provenance.
+
+Different-name overlap is not shadowing. For example, `recro-rust-dev` from an extension may overlap bundled `rust` because both activate for `project_detected + coding + Cargo.toml`, or because they share trigger phrases. The resolver must treat this as an activation conflict, not as a clean override.
+
+Invariant: one activation slot injects at most one skill directive. A blanket "allow both" resolution is invalid because it reintroduces double-injection.
+
+Preferred operator resolution is merge:
+
+1. choose a base skill, usually the most-specific or higher-precedence participant such as `extension:recro/recro-rust-dev`;
+2. import that base into `.omegon/skills/<name>/SKILL.md` as an editable project-local copy;
+3. compare suppressed/conflicting skills, such as bundled `rust`, and add missing non-duplicative guidance to the local copy;
+4. record provenance that the local skill merged/suppresses the other participants for the activation slot;
+5. reload skills so prompt assembly injects the single merged project-local directive.
+
+Other valid resolutions are: use one participant and suppress the others for this activation slot, disable all participants for this activation slot, or manually narrow activation metadata so the skills no longer claim the same slot. None of these resolutions may inject both conflicting skills for the same slot.
+
+Until a `/skills resolve` workflow exists, non-interactive prompt assembly may use deterministic fallback to keep one participant, but user-facing conflict output should recommend a project-local merge.
+
 ## Metadata Format Decision
 
 Omegon-authored `SKILL.md` files use YAML frontmatter as the canonical format:
