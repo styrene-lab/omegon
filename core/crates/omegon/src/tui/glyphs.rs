@@ -63,6 +63,7 @@ pub enum EngineGlyphRole {
     GradeEmblem,
     Thinking,
     Context,
+    Skill,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,6 +124,7 @@ pub struct EngineGlyphMatrix {
     pub grade_emblem: &'static str,
     pub thinking: &'static str,
     pub context: &'static str,
+    pub skill: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -184,6 +186,7 @@ pub const ASCII_GLYPHS: GlyphSet = GlyphSet {
         grade_emblem: "grade",
         thinking: "think",
         context: "ctx",
+        skill: "skill",
     },
     divider: DividerGlyphMatrix { segment_right: ">" },
 };
@@ -230,6 +233,7 @@ pub const UNICODE_GLYPHS: GlyphSet = GlyphSet {
         grade_emblem: "◆",
         thinking: "ψ",
         context: "ctx",
+        skill: "★",
     },
     divider: DividerGlyphMatrix {
         segment_right: "▶"
@@ -278,6 +282,7 @@ pub const NERD_FONT_GLYPHS: GlyphSet = GlyphSet {
         grade_emblem: "󰿃",
         thinking: "",
         context: "",
+        skill: "󰓎",
     },
     divider: DividerGlyphMatrix {
         segment_right: ""
@@ -343,6 +348,7 @@ impl GlyphSet {
             EngineGlyphRole::GradeEmblem => self.engine.grade_emblem,
             EngineGlyphRole::Thinking => self.engine.thinking,
             EngineGlyphRole::Context => self.engine.context,
+            EngineGlyphRole::Skill => self.engine.skill,
         }
     }
 
