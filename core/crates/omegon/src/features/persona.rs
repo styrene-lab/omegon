@@ -17,17 +17,17 @@ use omegon_traits::{
 };
 
 use crate::plugins::persona_loader;
-use crate::plugins::registry::PluginRegistry;
+use crate::plugins::registry::AugmentRegistry;
 
 /// Feature that exposes persona/tone management as agent tools.
 pub struct PersonaFeature {
-    registry: Mutex<PluginRegistry>,
+    registry: Mutex<AugmentRegistry>,
     /// Flag indicating harness status should be refreshed on next turn boundary
     refresh_status_pending: AtomicBool,
 }
 
 impl PersonaFeature {
-    pub fn new(registry: PluginRegistry) -> Self {
+    pub fn new(registry: AugmentRegistry) -> Self {
         Self {
             registry: Mutex::new(registry),
             refresh_status_pending: AtomicBool::new(false),
@@ -35,7 +35,7 @@ impl PersonaFeature {
     }
 
     /// Get a reference to the inner registry (for HarnessStatus, etc.)
-    pub fn registry(&self) -> std::sync::MutexGuard<'_, PluginRegistry> {
+    pub fn registry(&self) -> std::sync::MutexGuard<'_, AugmentRegistry> {
         self.registry.lock().unwrap()
     }
 }
@@ -367,8 +367,8 @@ fn error_result(text: &str) -> ToolResult {
 mod tests {
     use super::*;
 
-    fn test_registry() -> PluginRegistry {
-        PluginRegistry::new("Test Lex Imperialis.".into())
+    fn test_registry() -> AugmentRegistry {
+        AugmentRegistry::new("Test Lex Imperialis.".into())
     }
 
     #[test]

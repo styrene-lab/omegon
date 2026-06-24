@@ -55,12 +55,12 @@ Footer bar shows: model name + context class badge + thinking level + active per
 Receives HarnessStatus via WebSocket on the existing event bus. Renders: persona/tone in header, MCP servers in tools panel, memory layers in memory panel, inference backends in a new system panel. The dashboard is a read-only consumer — controls go through the TUI or CLI.
 
 **Delivery mechanism:**
-HarnessStatus is assembled by the agent loop from its constituent parts (PluginRegistry, McpFeature, SecretStore, etc.). On any state change (persona switch, MCP connect/disconnect, secret store lock/unlock), a BusEvent::HarnessStatusChanged is emitted. TUI and web dashboard subscribe. Bootstrap reads once at startup before the event loop begins.
+HarnessStatus is assembled by the agent loop from its constituent parts (AugmentRegistry, McpFeature, SecretStore, etc.). On any state change (persona switch, MCP connect/disconnect, secret store lock/unlock), a BusEvent::HarnessStatusChanged is emitted. TUI and web dashboard subscribe. Bootstrap reads once at startup before the event loop begins.
 
 ```
 ┌──────────────────────────────────────────────┐
 │              Agent Loop                       │
-│  PluginRegistry ──┐                          │
+│  AugmentRegistry ──┐                          │
 │  McpFeature    ───┤── assemble() ──▶ HarnessStatus
 │  SecretStore   ───┤                   │      │
 │  InferenceProbe ──┘                   │      │

@@ -1,4 +1,4 @@
-//! Plugin registry — manages active personas, tones, and the memory layer stack.
+//! Augment registry — manages active guidance augments and the memory layer stack.
 //!
 //! This is the runtime counterpart to the armory manifest parser.
 //! It handles persona activation/deactivation, tone switching,
@@ -112,11 +112,11 @@ pub struct DeactivateResult {
     pub facts_removed: usize,
 }
 
-/// The plugin registry — manages active persona, tone, and system prompt assembly.
+/// The augment registry — manages active persona, tone, skills, memory, and system prompt assembly.
 ///
 /// Invariant: `lex_imperialis` is always injected first in the system prompt.
 /// No operation can remove or reorder it.
-pub struct PluginRegistry {
+pub struct AugmentRegistry {
     lex_imperialis: String,
     active_persona: Option<LoadedPersona>,
     active_tone: Option<LoadedTone>,
@@ -157,7 +157,7 @@ fn prompt_skill_conflicts(left: &PromptSkillCandidate, right: &PromptSkillCandid
     trigger_overlap || alias_overlap || activation_overlap
 }
 
-impl PluginRegistry {
+impl AugmentRegistry {
     /// Create a new registry. The Lex Imperialis content is required and immutable.
     pub fn new(lex_imperialis: String) -> Self {
         Self {
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn activate_persona_loads_directive_into_prompt() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
 
         let prompt = reg.build_system_prompt();
@@ -543,7 +543,7 @@ mod tests {
 
     #[test]
     fn activate_persona_loads_mind_facts() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
 
         assert_eq!(reg.memory().persona.len(), 2);
@@ -557,7 +557,7 @@ mod tests {
 
     #[test]
     fn lex_always_first_in_prompt() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
 
         let prompt = reg.build_system_prompt();
@@ -568,7 +568,7 @@ mod tests {
 
     #[test]
     fn first_activation_returns_no_previous() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         let result = reg.activate_persona(tutor_persona());
         assert!(result.previous_id.is_none());
     }
@@ -577,7 +577,7 @@ mod tests {
 
     #[test]
     fn deactivate_removes_directive_from_prompt() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         reg.deactivate_persona();
 
@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn deactivate_clears_persona_memory() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         assert!(!reg.memory().persona.is_empty());
 
@@ -598,7 +598,7 @@ mod tests {
 
     #[test]
     fn deactivate_preserves_project_memory() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         reg.store_project_fact(MindFact {
             section: "Architecture".into(),
@@ -615,7 +615,7 @@ mod tests {
 
     #[test]
     fn deactivate_returns_removed_info() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         let result = reg.deactivate_persona();
 
@@ -625,7 +625,7 @@ mod tests {
 
     #[test]
     fn deactivate_noop_when_none_active() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         let result = reg.deactivate_persona();
         assert!(result.removed_id.is_none());
         assert_eq!(result.facts_removed, 0);
@@ -635,7 +635,7 @@ mod tests {
 
     #[test]
     fn switch_replaces_directive() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         reg.activate_persona(engineer_persona());
 
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn switch_replaces_mind_facts() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         assert!(
             reg.memory()
@@ -672,7 +672,7 @@ mod tests {
 
     #[test]
     fn switch_returns_previous_id() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         let result = reg.activate_persona(engineer_persona());
         assert!(result.previous_id.as_deref().unwrap().contains("tutor"));
@@ -680,7 +680,7 @@ mod tests {
 
     #[test]
     fn switch_preserves_project_memory() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         reg.store_project_fact(MindFact {
             section: "Decisions".into(),
@@ -697,7 +697,7 @@ mod tests {
 
     #[test]
     fn switch_drops_accumulated_persona_facts() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         reg.store_persona_fact(MindFact {
             section: "Domain".into(),
@@ -733,7 +733,7 @@ mod tests {
 
     #[test]
     fn tone_between_lex_and_persona() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         reg.activate_tone(watts_tone());
 
@@ -747,7 +747,7 @@ mod tests {
 
     #[test]
     fn tone_works_without_persona() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_tone(watts_tone());
 
         let prompt = reg.build_system_prompt();
@@ -757,7 +757,7 @@ mod tests {
 
     #[test]
     fn tone_switch_replaces() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_tone(watts_tone());
         reg.activate_tone(concise_tone());
 
@@ -768,7 +768,7 @@ mod tests {
 
     #[test]
     fn tone_deactivate_removes() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_tone(watts_tone());
         reg.deactivate_tone();
         assert!(!reg.build_system_prompt().contains("Alan Watts"));
@@ -778,7 +778,7 @@ mod tests {
 
     #[test]
     fn query_all_merges_in_priority_order() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
         reg.store_project_fact(MindFact {
             section: "Architecture".into(),
@@ -806,7 +806,7 @@ mod tests {
 
     #[test]
     fn persona_facts_dont_leak_to_project() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.activate_persona(tutor_persona());
 
         assert!(!reg.memory().persona.is_empty());
@@ -815,7 +815,7 @@ mod tests {
 
     #[test]
     fn store_persona_fact_fails_without_active_persona() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         let result = reg.store_persona_fact(MindFact {
             section: "Domain".into(),
             content: "orphan fact".into(),
@@ -830,7 +830,7 @@ mod tests {
 
     #[test]
     fn lex_present_with_nothing_active() {
-        let reg = PluginRegistry::new(LEX.into());
+        let reg = AugmentRegistry::new(LEX.into());
         let prompt = reg.build_system_prompt();
         assert!(prompt.contains("Lex Imperialis"));
         assert!(prompt.contains("Anti-Sycophancy"));
@@ -838,7 +838,7 @@ mod tests {
 
     #[test]
     fn lex_survives_all_transitions() {
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
 
         reg.activate_persona(tutor_persona());
         reg.activate_tone(watts_tone());
@@ -857,7 +857,7 @@ mod tests {
 
     #[test]
     fn lex_contains_all_six_directives() {
-        let reg = PluginRegistry::new(LEX.into());
+        let reg = AugmentRegistry::new(LEX.into());
         let prompt = reg.build_system_prompt();
         for directive in [
             "Anti-Sycophancy",
@@ -878,7 +878,7 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill\nDo the thing.").unwrap();
 
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.load_skills_from_explicit(&[tmp.path().join("skills")]);
 
         assert_eq!(reg.skill_count(), 1);
@@ -892,7 +892,7 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "SKILL_MARKER").unwrap();
 
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.load_skills_from_explicit(&[tmp.path().join("skills")]);
         reg.activate_persona(engineer_persona());
 
@@ -942,7 +942,7 @@ RECRO_RUST_MARKER
         )
         .unwrap();
 
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.load_skills_from_explicit(&[tmp.path().join("bundled"), tmp.path().join("extension")]);
 
         let prompt = reg.build_system_prompt();
@@ -985,7 +985,7 @@ SECOND_MARKER
         )
         .unwrap();
 
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.set_skill_conflict_resolution(SkillConflictResolution::Error);
         reg.load_skills_from_explicit(&[tmp.path().join("first"), tmp.path().join("second")]);
 
@@ -1005,7 +1005,7 @@ SECOND_MARKER
         std::fs::create_dir_all(&project_dir).unwrap();
         std::fs::write(project_dir.join("SKILL.md"), "PROJECT_SHARED_MARKER").unwrap();
 
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.load_skills_from_explicit(&[tmp.path().join("user"), tmp.path().join("project")]);
 
         let prompt = reg.build_system_prompt();
@@ -1021,7 +1021,7 @@ SECOND_MARKER
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "   \n   ").unwrap();
 
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.load_skills_from_explicit(&[tmp.path().join("skills")]);
         assert_eq!(reg.skill_count(), 0);
     }
@@ -1036,7 +1036,7 @@ SECOND_MARKER
         std::fs::create_dir_all(&security_dir).unwrap();
         std::fs::write(security_dir.join("SKILL.md"), "# Security\nValidate input.").unwrap();
 
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         reg.load_skills_subset_from_explicit(
             &[tmp.path().join("skills")],
             &["security".to_string()],
@@ -1050,7 +1050,7 @@ SECOND_MARKER
     #[test]
     fn missing_skills_dir_is_silent() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut reg = PluginRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new(LEX.into());
         // Pass a nonexistent dir — should load nothing, not panic
         reg.load_skills_from_explicit(&[tmp.path().join("nonexistent").join("skills")]);
         assert_eq!(reg.skill_count(), 0);

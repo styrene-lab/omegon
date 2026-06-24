@@ -4,7 +4,7 @@
 //! Bundled skills ship embedded in the binary so `omegon skills install` works regardless
 //! of whether a source tree is present.
 //!
-//! Two-tier load order (established by PluginRegistry::load_skills):
+//! Two-tier load order (established by AugmentRegistry::load_skills):
 //!   1. ~/.omegon/skills/*/SKILL.md   — bundled / user-installed
 //!   2. <cwd>/.omegon/skills/*/SKILL.md — project-local (overrides same-named user skills)
 //!

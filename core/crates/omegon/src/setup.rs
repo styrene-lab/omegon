@@ -692,7 +692,7 @@ impl AgentSetup {
         // ─── Native features ────────────────────────────────────────────
         // ─── Persona system ────────────────────────────────────────────
         let mut persona_registry =
-            crate::plugins::registry::PluginRegistry::new(crate::prompt::load_lex_imperialis());
+            crate::plugins::registry::AugmentRegistry::new(crate::prompt::load_lex_imperialis());
         let child_skills = crate::parse_csv_env("OMEGON_CHILD_SKILLS");
         if child_skills.is_empty() {
             persona_registry.load_skills(&cwd);
@@ -1786,7 +1786,7 @@ fn extension_state_disabled(path: &Path) -> bool {
 }
 
 fn activate_startup_persona(
-    registry: &mut crate::plugins::registry::PluginRegistry,
+    registry: &mut crate::plugins::registry::AugmentRegistry,
     persona_name: &str,
 ) {
     let (personas, _) = crate::plugins::persona_loader::scan_available();
@@ -1809,7 +1809,10 @@ fn activate_startup_persona(
     }
 }
 
-fn activate_startup_tone(registry: &mut crate::plugins::registry::PluginRegistry, tone_name: &str) {
+fn activate_startup_tone(
+    registry: &mut crate::plugins::registry::AugmentRegistry,
+    tone_name: &str,
+) {
     let (_, tones) = crate::plugins::persona_loader::scan_available();
     let target = tone_name.to_lowercase();
     if let Some(available) = tones

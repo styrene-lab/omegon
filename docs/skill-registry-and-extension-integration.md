@@ -152,17 +152,17 @@ The skill registry should:
 - resolve precedence and shadowing;
 - expose active and shadowed entries;
 - support explicit reload;
-- provide a prompt-fragment view for `PluginRegistry`;
+- provide a prompt-fragment view for `AugmentRegistry`;
 - provide a management/status view for `/skills` and future TUI modals.
 
-### PluginRegistry Integration
+### AugmentRegistry Integration
 
-`PluginRegistry` should not independently walk skill directories long-term. It should depend on the skill registry projection:
+`AugmentRegistry` should not independently walk skill directories long-term. It should depend on the skill registry projection:
 
 ```text
 SkillRegistry::reload(cwd)
   -> ResolvedSkillInventory
-  -> PluginRegistry receives ordered prompt directives
+  -> AugmentRegistry receives ordered prompt directives
 ```
 
 This prevents duplicate handling between plaintext skill loading and extension-provided skill loading.

@@ -1,5 +1,5 @@
 //! Persona and tone loader — scan installed plugins and build
-//! `LoadedPersona` / `LoadedTone` instances for the PluginRegistry.
+//! `LoadedPersona` / `LoadedTone` instances for the AugmentRegistry.
 
 use std::path::{Path, PathBuf};
 
