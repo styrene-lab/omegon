@@ -2253,6 +2253,84 @@ impl LlmBridge for CodexClient {
     }
 }
 
+fn codex_sse_error_detail(event: &Value) -> String {
+    const MESSAGE_PATHS: &[&str] = &[
+        "/message",
+        "/error/message",
+        "/error/error/message",
+        "/response/error/message",
+        "/response/incomplete_details/reason",
+    ];
+    const CODE_PATHS: &[&str] = &[
+        "/code",
+        "/error/code",
+        "/error/error/code",
+        "/response/error/code",
+    ];
+    const TYPE_PATHS: &[&str] = &["/error/type", "/error/error/type", "/response/error/type"];
+    const STATUS_PATHS: &[&str] = &[
+        "/status",
+        "/status_code",
+        "/error/status",
+        "/error/status_code",
+        "/response/status",
+    ];
+
+    let message = first_string_at(event, MESSAGE_PATHS);
+    let code = first_scalar_at(event, CODE_PATHS);
+    let error_type = first_scalar_at(event, TYPE_PATHS);
+    let status = first_scalar_at(event, STATUS_PATHS);
+
+    let mut context = Vec::new();
+    if let Some(status) = status {
+        context.push(format!("upstream status {status}"));
+    }
+    if let Some(code) = code {
+        context.push(format!("code={code}"));
+    }
+    if let Some(error_type) = error_type {
+        context.push(format!("type={error_type}"));
+    }
+
+    match (message, context.is_empty()) {
+        (Some(message), true) => message,
+        (Some(message), false) => format!("{message} ({})", context.join(", ")),
+        (None, false) => format!("unknown upstream error ({})", context.join(", ")),
+        (None, true) => {
+            let event_type = event
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("<missing>");
+            format!(
+                "unknown upstream error (event type={event_type}; no message/code/status field)"
+            )
+        }
+    }
+}
+
+fn first_string_at(value: &Value, paths: &[&str]) -> Option<String> {
+    paths.iter().find_map(|path| {
+        value
+            .pointer(path)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn first_scalar_at(value: &Value, paths: &[&str]) -> Option<String> {
+    paths.iter().find_map(|path| {
+        let scalar = value.pointer(path)?;
+        match scalar {
+            Value::String(s) => Some(s.trim().to_string()).filter(|s| !s.is_empty()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Bool(b) => Some(b.to_string()),
+            _ => None,
+        }
+    })
+}
+
 /// Parse Codex Responses API SSE stream (different event structure from Chat Completions).
 async fn parse_codex_stream(
     response: reqwest::Response,
@@ -2411,6 +2489,13 @@ async fn parse_codex_stream(
             }
             "error" => {
                 let msg = extract_codex_error_detail(&event);
+                tracing::warn!(
+                    provider = "openai-codex",
+                    event_type = %etype,
+                    error_message = %msg,
+                    raw_event = %event,
+                    "Codex SSE error event"
+                );
                 terminal = Some(TerminalEvent::Error(format!("Codex error: {msg}")));
                 return false;
             }
@@ -3818,6 +3903,67 @@ mod tests {
         );
         assert_eq!(wire[1]["content"][1]["type"], "text");
         assert_eq!(wire[1]["content"][1]["text"], "describe this");
+    }
+
+    #[test]
+    fn codex_sse_error_detail_uses_top_level_message() {
+        let event = json!({"type": "error", "message": "plain upstream failure"});
+        assert_eq!(codex_sse_error_detail(&event), "plain upstream failure");
+    }
+
+    #[test]
+    fn codex_sse_error_detail_uses_nested_error_message_with_code() {
+        let event = json!({
+            "type": "error",
+            "error": {
+                "message": "nested upstream failure",
+                "code": "catch-all-error-code"
+            }
+        });
+        assert_eq!(
+            codex_sse_error_detail(&event),
+            "nested upstream failure (code=catch-all-error-code)"
+        );
+    }
+
+    #[test]
+    fn codex_sse_error_detail_uses_response_error_message_with_status() {
+        let event = json!({
+            "type": "error",
+            "response": {
+                "status": 555,
+                "error": {
+                    "message": "response envelope failed",
+                    "code": 5555555,
+                    "type": "catch-all-error-code"
+                }
+            }
+        });
+        assert_eq!(
+            codex_sse_error_detail(&event),
+            "response envelope failed (upstream status 555, code=5555555, type=catch-all-error-code)"
+        );
+    }
+
+    #[test]
+    fn codex_sse_error_detail_describes_code_only_error() {
+        let event = json!({
+            "type": "error",
+            "error": {"code": 5555555, "type": "catch-all-error-code"}
+        });
+        assert_eq!(
+            codex_sse_error_detail(&event),
+            "unknown upstream error (code=5555555, type=catch-all-error-code)"
+        );
+    }
+
+    #[test]
+    fn codex_sse_error_detail_never_returns_bare_unknown_error() {
+        let event = json!({"type": "error", "upstream": {"opaque": true}});
+        let detail = codex_sse_error_detail(&event);
+        assert!(detail.contains("unknown upstream error"), "{detail}");
+        assert!(detail.contains("event type=error"), "{detail}");
+        assert_ne!(detail, "unknown error");
     }
 
     #[test]
