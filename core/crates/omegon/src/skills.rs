@@ -689,6 +689,105 @@ pub fn cmd_doctor() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn validate_skill_name(name: &str) -> anyhow::Result<String> {
+    let slug: String = name
+        .trim()
+        .to_lowercase()
+        .replace(' ', "-")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect();
+    if slug.is_empty()
+        || slug.contains("..")
+        || slug.contains('/')
+        || slug.contains('\\')
+        || slug.contains('\0')
+    {
+        anyhow::bail!("invalid skill name");
+    }
+    Ok(slug)
+}
+
+fn copy_skill_bundle_dir(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> anyhow::Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        if file_name.to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let src = entry.path();
+        let dst = destination.join(&file_name);
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_skill_bundle_dir(&src, &dst)?;
+        } else if ty.is_file() {
+            std::fs::copy(&src, &dst)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn cmd_import(path: &std::path::Path, project: bool, force: bool) -> anyhow::Result<()> {
+    let source = path.canonicalize()?;
+    let (source_dir, skill_file) = if source.is_dir() {
+        (source.clone(), source.join("SKILL.md"))
+    } else {
+        let parent = source
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("skill file has no parent directory"))?
+            .to_path_buf();
+        (parent, source.clone())
+    };
+    if !skill_file.is_file() {
+        anyhow::bail!("{} does not contain SKILL.md", source.display());
+    }
+    let content = std::fs::read_to_string(&skill_file)?;
+    let (manifest, _body) = parse_skill_file(&content);
+    let fallback_name = source_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "skill".into());
+    let name = if manifest.name.trim().is_empty() {
+        fallback_name
+    } else {
+        manifest.name
+    };
+    let slug = validate_skill_name(&name)?;
+    let base = if project {
+        std::env::current_dir()?.join(".omegon/skills")
+    } else {
+        skills_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
+    };
+    let destination = base.join(&slug);
+    if destination.exists() {
+        if !force {
+            anyhow::bail!(
+                "skill '{}' already exists at {}; pass --force to overwrite",
+                slug,
+                destination.display()
+            );
+        }
+        std::fs::remove_dir_all(&destination)?;
+    }
+    std::fs::create_dir_all(&base)?;
+    copy_skill_bundle_dir(&source_dir, &destination)?;
+    if source.is_file() {
+        std::fs::copy(&skill_file, destination.join("SKILL.md"))?;
+    }
+    println!(
+        "Imported {} skill '{}' from {} to {}",
+        if project { "project-local" } else { "user" },
+        slug,
+        source.display(),
+        destination.display()
+    );
+    Ok(())
+}
+
 /// Install all bundled skills to ~/.omegon/skills/.
 /// Existing files are overwritten. Project-local skills are never touched.
 pub fn cmd_install() -> anyhow::Result<()> {
@@ -1875,6 +1974,51 @@ path = "{skill_path}"
         assert!(report.contains("claude:user"));
         assert!(report.contains("claude:project"));
         assert!(report.contains("sync --all"));
+    }
+
+    #[test]
+    fn import_skill_bundle_preserves_scripts_and_refuses_overwrite() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvRestore::set("OMEGON_HOME", home.path());
+        let source = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(source.path().join("scripts")).unwrap();
+        std::fs::write(
+            source.path().join("SKILL.md"),
+            "---\nname: claude-rust\ndescription: Claude Rust\n---\n\nUse scripts/check.py\n",
+        )
+        .unwrap();
+        std::fs::write(source.path().join("scripts/check.py"), "print('ok')\n").unwrap();
+
+        cmd_import(source.path(), false, false).unwrap();
+        let imported = home.path().join("skills/claude-rust");
+        assert!(imported.join("SKILL.md").is_file());
+        assert!(imported.join("scripts/check.py").is_file());
+        let err = cmd_import(source.path(), false, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("--force"), "{err}");
+    }
+
+    #[test]
+    fn import_skill_file_into_project_uses_manifest_name() {
+        let cwd = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(cwd.path()).unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let skill_file = source.path().join("SKILL.md");
+        std::fs::write(
+            &skill_file,
+            "---\nname: Claude Helper\ndescription: Helper\n---\n\nBody\n",
+        )
+        .unwrap();
+
+        cmd_import(&skill_file, true, false).unwrap();
+        std::env::set_current_dir(original).unwrap();
+        assert!(
+            cwd.path()
+                .join(".omegon/skills/claude-helper/SKILL.md")
+                .is_file()
+        );
     }
 
     #[test]

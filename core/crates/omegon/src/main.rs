@@ -826,6 +826,17 @@ enum SkillsAction {
         #[arg(long)]
         project_local: bool,
     },
+    /// Import a Claude/Omegon skill bundle directory or SKILL.md file.
+    Import {
+        /// Path to a skill directory containing SKILL.md, or a SKILL.md file.
+        path: std::path::PathBuf,
+        /// Import as project-local skill under .omegon/skills/ instead of user-global.
+        #[arg(long)]
+        project: bool,
+        /// Overwrite an existing imported skill bundle.
+        #[arg(long)]
+        force: bool,
+    },
     /// Delete a skill by name.
     Delete {
         /// Skill name to delete.
@@ -1662,6 +1673,11 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Err(e) => Err(e),
             },
+            SkillsAction::Import {
+                path,
+                project,
+                force,
+            } => skills::cmd_import(path, *project, *force),
             SkillsAction::Create {
                 name,
                 content,
