@@ -631,6 +631,21 @@ fn skill_ref(source: &str, name: &str) -> String {
     format!("{source}/{name}")
 }
 
+fn shell_quote_path(path: &std::path::Path) -> String {
+    let value = path.display().to_string();
+    if value.is_empty() {
+        return "''".into();
+    }
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '+'))
+    {
+        value
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
 pub fn doctor_report() -> anyhow::Result<String> {
     let cwd = std::env::current_dir()?;
     let entries = list_structured()?;
@@ -671,16 +686,28 @@ pub fn doctor_report() -> anyhow::Result<String> {
             if metadata.is_empty() {
                 metadata.push("compatible".into());
             }
-            lines.push(format!("    - {} — {}", bundle.name, metadata.join(" · ")));
+            let import_flag = if bundle.source.contains(":project") {
+                " --project"
+            } else {
+                ""
+            };
+            lines.push(format!(
+                "    - {} — {} · import:`omegon skills import {}{}`",
+                bundle.name,
+                metadata.join(" · "),
+                shell_quote_path(&bundle.path),
+                import_flag
+            ));
         }
     }
     lines.push(String::new());
     lines.push(format!("Summary: {total} compatible external skill bundle(s), {conflict_count} conflict marker(s), {missing_scripts} missing script reference(s)."));
     lines.push(String::new());
     lines.push("Recommended next steps:".into());
-    lines.push("  - `omegon skills source add <name> <path-or-url>` to register upstream sources once implemented.".into());
-    lines.push("  - `omegon skills source sync <name>` or `omegon skills source sync --all` to refresh configured sources once implemented.".into());
-    lines.push("  - `omegon skills resolve` to persist conflict choices once implemented; prefer project-local merged skills for non-1:1 conflicts.".into());
+    lines.push("  - Import user-level Claude skills with `omegon skills import <skill-dir>` (creates a copy under ~/.omegon/skills).".into());
+    lines.push("  - Import project-level Claude skills with `omegon skills import <skill-dir> --project` (creates a copy under .omegon/skills).".into());
+    lines.push("  - Re-run import with `--force` to refresh a copied skill after editing its Claude source.".into());
+    lines.push("  - Resolve conflicts by creating a project-local merged skill; Omegon will not inject conflicting skill directives together.".into());
     Ok(lines.join("\n"))
 }
 
@@ -774,8 +801,10 @@ pub fn cmd_import(path: &std::path::Path, project: bool, force: bool) -> anyhow:
         std::fs::remove_dir_all(&destination)?;
     }
     std::fs::create_dir_all(&base)?;
-    copy_skill_bundle_dir(&source_dir, &destination)?;
-    if source.is_file() {
+    if source.is_dir() {
+        copy_skill_bundle_dir(&source_dir, &destination)?;
+    } else {
+        std::fs::create_dir_all(&destination)?;
         std::fs::copy(&skill_file, destination.join("SKILL.md"))?;
     }
     println!(
@@ -1962,18 +1991,64 @@ path = "{skill_path}"
         assert_eq!(refs, vec!["scripts/local.py"]);
     }
 
+    struct CwdRestore {
+        original: std::path::PathBuf,
+    }
+
+    impl CwdRestore {
+        fn enter(path: &std::path::Path) -> Self {
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(path).unwrap();
+            Self { original }
+        }
+    }
+
+    impl Drop for CwdRestore {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
+    }
+
     #[test]
     fn doctor_report_mentions_claude_roots() {
         let dir = tempfile::tempdir().unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd = CwdRestore::enter(dir.path());
         let report = doctor_report().unwrap();
-        std::env::set_current_dir(original).unwrap();
 
         assert!(report.contains("# Skills doctor"));
         assert!(report.contains("claude:user"));
         assert!(report.contains("claude:project"));
-        assert!(report.contains("sync --all"));
+        assert!(report.contains("omegon skills import <skill-dir>"));
+        assert!(report.contains("omegon skills import <skill-dir> --project"));
+        assert!(report.contains("--force"));
+        assert!(!report.contains("sync --all"));
+    }
+
+    #[test]
+    fn doctor_import_commands_quote_paths_with_spaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("Claude Skills/example skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---
+name: example-skill
+description: Example
+---
+
+# Example
+",
+        )
+        .unwrap();
+
+        let bundles = discover_skill_bundles("claude:user", dir.path()).unwrap();
+        assert_eq!(bundles.len(), 1);
+        let command = format!(
+            "omegon skills import {}",
+            shell_quote_path(&bundles[0].path)
+        );
+        assert!(command.contains("'"));
+        assert!(command.contains("Claude Skills/example skill"));
     }
 
     #[test]
@@ -2000,10 +2075,29 @@ path = "{skill_path}"
     }
 
     #[test]
+    fn import_direct_skill_file_does_not_copy_unrelated_sibling_files() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvRestore::set("OMEGON_HOME", home.path());
+        let source = tempfile::tempdir().unwrap();
+        let skill_file = source.path().join("SKILL.md");
+        std::fs::write(
+            &skill_file,
+            "---\nname: solo\ndescription: Solo\n---\n\nBody\n",
+        )
+        .unwrap();
+        std::fs::write(source.path().join("unrelated.txt"), "do not import").unwrap();
+
+        cmd_import(&skill_file, false, false).unwrap();
+
+        let imported = home.path().join("skills/solo");
+        assert!(imported.join("SKILL.md").is_file());
+        assert!(!imported.join("unrelated.txt").exists());
+    }
+
+    #[test]
     fn import_skill_file_into_project_uses_manifest_name() {
         let cwd = tempfile::tempdir().unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(cwd.path()).unwrap();
+        let _cwd = CwdRestore::enter(cwd.path());
         let source = tempfile::tempdir().unwrap();
         let skill_file = source.path().join("SKILL.md");
         std::fs::write(
@@ -2013,7 +2107,6 @@ path = "{skill_path}"
         .unwrap();
 
         cmd_import(&skill_file, true, false).unwrap();
-        std::env::set_current_dir(original).unwrap();
         assert!(
             cwd.path()
                 .join(".omegon/skills/claude-helper/SKILL.md")
