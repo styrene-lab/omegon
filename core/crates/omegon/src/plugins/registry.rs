@@ -94,8 +94,8 @@ pub struct PluginRegistry {
     active_tone: Option<LoadedTone>,
     memory: MemoryLayers,
     /// Skill directives loaded from ~/.omegon/skills/ and .omegon/skills/.
-    /// Project-local (.omegon/skills/) entries follow bundled ones; last writer on
-    /// same name wins, so project-local overrides bundled.
+    /// Project-local (.omegon/skills/) entries override same-named user-installed
+    /// entries so prompt assembly consumes one resolved directive per skill name.
     loaded_skills: Vec<String>,
 }
 
@@ -141,7 +141,7 @@ impl PluginRegistry {
     }
 
     fn load_from_dirs_filtered(dirs: &[std::path::PathBuf], allowed: &[String]) -> Vec<String> {
-        let mut skills = Vec::new();
+        let mut skills = std::collections::BTreeMap::new();
         for dir in dirs {
             if !dir.is_dir() {
                 continue;
@@ -160,11 +160,11 @@ impl PluginRegistry {
                 if let Ok(content) = std::fs::read_to_string(&skill_file)
                     && !content.trim().is_empty()
                 {
-                    skills.push(content);
+                    skills.insert(skill_name, content);
                 }
             }
         }
-        skills
+        skills.into_values().collect()
     }
 
     /// Return the number of loaded skills.
@@ -774,6 +774,25 @@ mod tests {
             .unwrap();
         assert!(lex_pos < skill_pos, "skill should follow lex");
         assert!(skill_pos < persona_pos, "persona should follow skill");
+    }
+
+    #[test]
+    fn later_skill_dirs_override_same_named_skills() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user_dir = tmp.path().join("user").join("shared");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        std::fs::write(user_dir.join("SKILL.md"), "USER_SHARED_MARKER").unwrap();
+        let project_dir = tmp.path().join("project").join("shared");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::write(project_dir.join("SKILL.md"), "PROJECT_SHARED_MARKER").unwrap();
+
+        let mut reg = PluginRegistry::new(LEX.into());
+        reg.load_skills_from_explicit(&[tmp.path().join("user"), tmp.path().join("project")]);
+
+        let prompt = reg.build_system_prompt();
+        assert_eq!(reg.skill_count(), 1);
+        assert!(prompt.contains("PROJECT_SHARED_MARKER"));
+        assert!(!prompt.contains("USER_SHARED_MARKER"));
     }
 
     #[test]

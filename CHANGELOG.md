@@ -23,6 +23,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
 
 ### Fixed
+- Resolved prompt assembly to load one directive per skill name so project-local skills override same-named user skills instead of injecting both.
+- Updated the in-code skill schema documentation to show YAML as canonical while documenting TOML as compatibility.
 - Matched `/skills get` provenance metadata to the resolved skill path so project-local overrides do not accidentally inherit bundled metadata.
 - Kept the Workbench context line reserved above active plan rows so expanded plans render below the Workbench instead of covering it.
 - Fixed direct plan item completion so completing the active item advances/reconciles the visible Workbench pointer even when later items were already marked done.
