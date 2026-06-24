@@ -3853,6 +3853,38 @@ mod tests {
     }
 
     #[test]
+    fn completing_active_item_advances_even_when_later_items_are_done() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec![
+            "A".into(),
+            "B".into(),
+            "C".into(),
+            "D".into(),
+            "E".into(),
+        ]);
+
+        intent.advance_work_plan();
+        intent.advance_work_plan();
+        intent.advance_work_plan();
+        assert_eq!(intent.work_plan[3].status, WorkItemStatus::Active);
+
+        intent.complete_work_item(4);
+        assert_eq!(intent.work_plan[3].status, WorkItemStatus::Active);
+        assert_eq!(intent.work_plan[4].status, WorkItemStatus::Done);
+        assert_eq!(intent.plan_mode, PlanMode::Planning);
+
+        intent.complete_work_item(3);
+        assert!(intent.work_plan_complete());
+        assert_eq!(intent.plan_mode, PlanMode::Complete);
+        assert!(
+            intent
+                .visible_plan
+                .as_ref()
+                .is_some_and(|plan| plan.mode == PlanMode::Complete)
+        );
+    }
+
+    #[test]
     fn work_plan_skip() {
         let mut intent = IntentDocument::default();
         intent.set_work_plan(vec!["A".into(), "B".into()]);
