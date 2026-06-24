@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added read-only `omegon skills doctor` onboarding diagnostics for Claude-compatible skill roots, script references, and registry conflicts.
 - Locked in the ecosystem-superset skill registry design for Claude-compatible skills, upstream Git skill repositories, source lock/provenance, and merge-first conflict resolution.
 - Added extension manifest-declared skill bundles plus conflict-resolution metadata for non-1:1 activation/trigger overlap.
 - Added prompt skill conflict resolution so overlapping activation/trigger skills inject only one provider by default and user-facing output recommends project-local merge resolution.
