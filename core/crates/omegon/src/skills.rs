@@ -330,69 +330,15 @@ fn glob_component_matches(pattern: &str, value: &str) -> bool {
 }
 
 impl SkillManifest {
-    /// Render this manifest as TOML frontmatter for a SKILL.md file.
+    /// Render this manifest as YAML frontmatter for a portable SKILL.md file.
+    ///
+    /// YAML is Omegon's canonical skill frontmatter format because it matches
+    /// the de facto cross-agent SKILL.md ecosystem. TOML frontmatter remains
+    /// accepted by the parser for existing Omegon skills and local preference.
     pub fn to_frontmatter(&self) -> String {
-        let mut lines = vec!["+++".to_string()];
-
-        if let Some(ref id) = self.id {
-            lines.push(format!("id = \"{id}\""));
-        }
-        lines.push(format!("name = \"{}\"", self.name));
-        lines.push(format!("description = \"{}\"", self.description));
-
-        if let Some(ref version) = self.version {
-            lines.push(format!("version = \"{version}\""));
-        }
-        if !self.tags.is_empty() {
-            let tags: Vec<String> = self.tags.iter().map(|t| format!("\"{t}\"")).collect();
-            lines.push(format!("tags = [{}]", tags.join(", ")));
-        }
-        if !self.aliases.is_empty() {
-            let aliases: Vec<String> = self.aliases.iter().map(|a| format!("\"{a}\"")).collect();
-            lines.push(format!("aliases = [{}]", aliases.join(", ")));
-        }
-        if !self.triggers.is_empty() {
-            let triggers: Vec<String> = self.triggers.iter().map(|t| format!("\"{t}\"")).collect();
-            lines.push(format!("triggers = [{}]", triggers.join(", ")));
-        }
-        if let Some(ref activation) = self.activation {
-            lines.push(format!("activation = \"{activation}\""));
-        }
-        if !self.profile.is_empty() {
-            let profiles: Vec<String> = self.profile.iter().map(|p| format!("\"{p}\"")).collect();
-            lines.push(format!("profile = [{}]", profiles.join(", ")));
-        }
-        if !self.project_signals.is_empty() {
-            let signals: Vec<String> = self
-                .project_signals
-                .iter()
-                .map(|s| format!("\"{s}\""))
-                .collect();
-            lines.push(format!("project_signals = [{}]", signals.join(", ")));
-        }
-        if !self.trusted_paths.is_empty() {
-            let paths: Vec<String> = self
-                .trusted_paths
-                .iter()
-                .map(|p| format!("\"{p}\""))
-                .collect();
-            lines.push(format!("trusted_paths = [{}]", paths.join(", ")));
-        }
-        if let Some(ref path) = self.output_path {
-            lines.push(format!("output_path = \"{path}\""));
-        }
-        if let Some(ref fmt) = self.output_format {
-            lines.push(format!("output_format = \"{fmt}\""));
-        }
-        if let Some(turns) = self.max_turns {
-            lines.push(format!("max_turns = {turns}"));
-        }
-        if let Some(ref posture) = self.posture {
-            lines.push(format!("posture = \"{posture}\""));
-        }
-
-        lines.push("+++".to_string());
-        lines.join("\n")
+        let yaml = serde_yaml::to_string(self)
+            .unwrap_or_else(|_| "name: ''\ndescription: ''\n".to_string());
+        format!("---\n{}---", yaml)
     }
 
     /// Generate a complete SKILL.md file from this manifest and a body.
@@ -415,24 +361,24 @@ Guide the operator through these questions conversationally. Be concise — one 
 4. **Where should output go?** If the skill produces files, where should they be saved?
 5. **Any trigger phrases?** What would the operator say to invoke this skill? (e.g., "evaluate this opportunity")
 
-After gathering answers, generate a complete SKILL.md file using this exact TOML frontmatter schema:
+After gathering answers, generate a complete SKILL.md file using YAML frontmatter. YAML is canonical for SKILL.md portability; TOML frontmatter remains accepted for existing Omegon skills.
 
-```toml
-+++
-id = "<generate-a-uuid>"
-name = "<kebab-case-name>"
-description = "<one-line description>"
-version = "1.0.0"
-tags = ["<domain>"]
-aliases = ["<shortname>"]
-triggers = ["<phrase1>", "<phrase2>"]
-activation = "intent_detected"
-profile = ["coding"]
-project_signals = ["<file-or-glob>"]
-trusted_paths = ["<path1>", "<path2>"]
-output_path = "<where results go>"
-output_format = "markdown"
-+++
+```yaml
+---
+id: <generate-a-uuid>
+name: <kebab-case-name>
+description: <one-line description>
+version: 1.0.0
+tags: [<domain>]
+aliases: [<shortname>]
+triggers: [<phrase1>, <phrase2>]
+activation: intent_detected
+profile: [coding]
+project_signals: [<file-or-glob>]
+trusted_paths: [<path1>, <path2>]
+output_path: <where results go>
+output_format: markdown
+---
 ```
 
 - `activation`: one of `always`, `intent_detected`, `project_detected`, `domain_detected`, or `lifecycle_gated`
@@ -930,22 +876,32 @@ fn skill_intent_matches(skill: &ParsedSkill, intent_terms: &[&str]) -> bool {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrontmatterFormat {
+    Yaml,
+    Toml,
+}
+
 /// Parse a SKILL.md into its manifest and body text.
 pub fn parse_skill_file(content: &str) -> (SkillManifest, String) {
-    let (fm_str, body) = split_frontmatter(content);
-    let manifest = if let Some(fm) = fm_str {
-        toml::from_str::<SkillManifest>(&fm).unwrap_or_default()
-    } else {
-        SkillManifest::default()
+    let (frontmatter, body) = split_frontmatter(content);
+    let manifest = match frontmatter {
+        Some((FrontmatterFormat::Yaml, fm)) => serde_yaml::from_str::<SkillManifest>(&fm)
+            .or_else(|_| toml::from_str::<SkillManifest>(&fm))
+            .unwrap_or_default(),
+        Some((FrontmatterFormat::Toml, fm)) => toml::from_str::<SkillManifest>(&fm)
+            .or_else(|_| serde_yaml::from_str::<SkillManifest>(&fm))
+            .unwrap_or_default(),
+        None => SkillManifest::default(),
     };
     (manifest, body.to_string())
 }
 
-fn split_frontmatter(content: &str) -> (Option<String>, &str) {
-    let (rest, delimiter) = if let Some(b) = content.strip_prefix("+++\n") {
-        (b, "\n+++")
+fn split_frontmatter(content: &str) -> (Option<(FrontmatterFormat, String)>, &str) {
+    let (rest, delimiter, format) = if let Some(b) = content.strip_prefix("+++\n") {
+        (b, "\n+++", FrontmatterFormat::Toml)
     } else if let Some(b) = content.strip_prefix("---\n") {
-        (b, "\n---")
+        (b, "\n---", FrontmatterFormat::Yaml)
     } else {
         return (None, content);
     };
@@ -954,7 +910,7 @@ fn split_frontmatter(content: &str) -> (Option<String>, &str) {
             let fm = &rest[..end];
             let body = &rest[end + delimiter.len()..];
             let body = body.strip_prefix('\n').unwrap_or(body);
-            (Some(fm.to_string()), body)
+            (Some((format, fm.to_string())), body)
         }
         None => (None, content),
     }
@@ -1285,10 +1241,10 @@ mod tests {
             ..Default::default()
         };
         let fm = manifest.to_frontmatter();
-        assert!(fm.starts_with("+++"));
-        assert!(fm.ends_with("+++"));
-        assert!(fm.contains("name = \"my-skill\""));
-        assert!(fm.contains("description = \"Does a thing\""));
+        assert!(fm.starts_with("---"));
+        assert!(fm.ends_with("---"));
+        assert!(fm.contains("name: my-skill"));
+        assert!(fm.contains("description: Does a thing"));
     }
 
     #[test]
@@ -1311,17 +1267,22 @@ mod tests {
             posture: Some("architect".into()),
         };
         let fm = manifest.to_frontmatter();
-        assert!(fm.contains("id = \"abc-123\""));
-        assert!(fm.contains("version = \"1.0.0\""));
-        assert!(fm.contains("tags = [\"govcon\"]"));
-        assert!(fm.contains("triggers = [\"evaluate this\"]"));
-        assert!(fm.contains("activation = \"intent_detected\""));
-        assert!(fm.contains("profile = [\"coding\"]"));
-        assert!(fm.contains("project_signals = [\"solicitation/*.md\"]"));
-        assert!(fm.contains("trusted_paths = [\"~/Documents/data/\"]"));
-        assert!(fm.contains("output_path = \"~/output/\""));
-        assert!(fm.contains("max_turns = 100"));
-        assert!(fm.contains("posture = \"architect\""));
+        assert!(fm.contains("id: abc-123"));
+        assert!(fm.contains("version: 1.0.0"));
+        assert!(fm.contains("tags:"));
+        assert!(fm.contains("- govcon"));
+        assert!(fm.contains("triggers:"));
+        assert!(fm.contains("- evaluate this"));
+        assert!(fm.contains("activation: intent_detected"));
+        assert!(fm.contains("profile:"));
+        assert!(fm.contains("- coding"));
+        assert!(fm.contains("project_signals:"));
+        assert!(fm.contains("- solicitation/*.md"));
+        assert!(fm.contains("trusted_paths:"));
+        assert!(fm.contains("- ~/Documents/data/"));
+        assert!(fm.contains("output_path: ~/output/"));
+        assert!(fm.contains("max_turns: 100"));
+        assert!(fm.contains("posture: architect"));
     }
 
     #[test]
@@ -1332,7 +1293,7 @@ mod tests {
             ..Default::default()
         };
         let file = manifest.to_skill_file("# My Skill\n\nDo things.\n");
-        assert!(file.starts_with("+++"));
+        assert!(file.starts_with("---"));
         assert!(file.contains("# My Skill"));
     }
 
@@ -1370,7 +1331,9 @@ mod tests {
         let content = "+++\nname = \"test\"\n+++\n\nBody here.\n";
         let (fm, body) = split_frontmatter(content);
         assert!(fm.is_some());
-        assert!(fm.unwrap().contains("name = \"test\""));
+        let (format, text) = fm.unwrap();
+        assert_eq!(format, FrontmatterFormat::Toml);
+        assert!(text.contains("name = \"test\""));
         assert!(body.contains("Body here."));
     }
 
@@ -1379,7 +1342,9 @@ mod tests {
         let content = "---\nname: test\n---\n\nBody here.\n";
         let (fm, body) = split_frontmatter(content);
         assert!(fm.is_some());
-        assert!(fm.unwrap().contains("name: test"));
+        let (format, text) = fm.unwrap();
+        assert_eq!(format, FrontmatterFormat::Yaml);
+        assert!(text.contains("name: test"));
         assert!(body.contains("Body here."));
     }
 
