@@ -16,6 +16,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+- Fixed Codex Responses replay so assistant history uses request-safe `output_text` content blocks instead of invalid `input_text`, while preserving queued operator prompt visibility in the TUI conversation.
+
 ### Changed
 - Renamed the internal plan surface aggregate to `PlanSurfaceInputs` and removed the local lane projection mirror so active plan lanes use the shared `omegon_traits` projection DTO end-to-end.
 - Promoted internal `PlanUpdated` events to typed plan surface projections while keeping web/IPC/MQTT legacy snapshot adapters for external compatibility.

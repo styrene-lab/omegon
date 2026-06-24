@@ -815,6 +815,14 @@ async fn submitting_while_agent_active_submits_to_runtime_queue_without_interrup
         }
         other => panic!("expected runtime prompt submission, got {other:?}"),
     }
+    assert!(
+        app.conversation.segments().iter().any(|segment| matches!(
+            &segment.content,
+            crate::tui::segments::SegmentContent::UserPrompt { text }
+                if text == "follow up after this turn"
+        )),
+        "queued prompt must be visible as an operator segment"
+    );
 }
 
 #[tokio::test]
