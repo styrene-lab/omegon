@@ -1674,6 +1674,14 @@ pub enum BusEvent {
     },
     MessageEnd,
 
+    // ── Operator-visible agent events ───────────────────────────────
+    /// Mirrors every operator-visible [`AgentEvent`] into the feature bus so
+    /// audit/logging features can capture semantic runtime events instead of
+    /// treating the UI broadcast channel as an unaudited side channel.
+    AgentEventEmitted {
+        event: Box<AgentEvent>,
+    },
+
     // ── Tool lifecycle ──────────────────────────────────────────────
     ToolStart {
         id: String,
@@ -2549,6 +2557,23 @@ pub struct PlanResumeCandidateProjection {
     pub rank: usize,
 }
 
+/// Operator-visible skill activation/resolution event.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SkillActivationEvent {
+    pub active_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation: Option<String>,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matched_signals: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suppressing: Vec<String>,
+    pub resolution: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<String>,
+    pub injected: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     TurnStart {
@@ -2633,6 +2658,10 @@ pub enum AgentEvent {
         serving: Option<String>,
         warning: Option<String>,
         message: String,
+    },
+    /// Skill activation/resolution — displayed in TUI and audited, but not sent to the LLM.
+    SkillActivation {
+        event: SkillActivationEvent,
     },
     /// System notification — displayed in TUI but not sent to the LLM.
     SystemNotification {

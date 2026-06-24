@@ -2267,6 +2267,18 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "warning": warning.as_deref().map(escape_html),
             "message": escape_html(message),
         }),
+        AgentEvent::SkillActivation { event } => json!({
+            "type": "skill_activation",
+            "event_name": "skill.activation",
+            "active_ref": event.active_ref,
+            "activation": event.activation,
+            "reason": event.reason,
+            "matched_signals": event.matched_signals,
+            "suppressing": event.suppressing,
+            "resolution": event.resolution,
+            "recommendation": event.recommendation,
+            "injected": event.injected,
+        }),
         AgentEvent::SystemNotification { message } => json!({
             "type": "system_notification",
             "event_name": "system.notification",
@@ -2942,6 +2954,7 @@ mod tests {
             AgentEvent::FamilyVitalSignsUpdated { .. } => {}
             AgentEvent::PlanUpdated { .. } => {}
             AgentEvent::RouteChanged { .. } => {}
+            AgentEvent::SkillActivation { .. } => {}
             AgentEvent::SystemNotification { .. } => {}
             AgentEvent::ProviderRetry { .. } => {}
             AgentEvent::ProviderFailure { .. } => {}

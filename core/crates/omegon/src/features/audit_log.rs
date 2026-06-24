@@ -25,6 +25,44 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 
+fn agent_event_kind(event: &omegon_traits::AgentEvent) -> &'static str {
+    match event {
+        omegon_traits::AgentEvent::TurnStart { .. } => "turn_start",
+        omegon_traits::AgentEvent::MessageStart { .. } => "message_start",
+        omegon_traits::AgentEvent::MessageChunk { .. } => "message_chunk",
+        omegon_traits::AgentEvent::ThinkingChunk { .. } => "thinking_chunk",
+        omegon_traits::AgentEvent::MessageEnd => "message_end",
+        omegon_traits::AgentEvent::MessageAbort { .. } => "message_abort",
+        omegon_traits::AgentEvent::ToolStart { .. } => "tool_start",
+        omegon_traits::AgentEvent::ToolUpdate { .. } => "tool_update",
+        omegon_traits::AgentEvent::ToolEnd { .. } => "tool_end",
+        omegon_traits::AgentEvent::PermissionRequest { .. } => "permission_request",
+        omegon_traits::AgentEvent::OperatorWaitRequest { .. } => "operator_wait_request",
+        omegon_traits::AgentEvent::TurnEnd(_) => "turn_end",
+        omegon_traits::AgentEvent::AgentEnd => "agent_end",
+        omegon_traits::AgentEvent::PhaseChanged { .. } => "phase_changed",
+        omegon_traits::AgentEvent::DecompositionStarted { .. } => "decomposition_started",
+        omegon_traits::AgentEvent::DecompositionChildCompleted { .. } => {
+            "decomposition_child_completed"
+        }
+        omegon_traits::AgentEvent::DecompositionCompleted { .. } => "decomposition_completed",
+        omegon_traits::AgentEvent::FamilyVitalSignsUpdated { .. } => "family_vital_signs_updated",
+        omegon_traits::AgentEvent::RouteChanged { .. } => "route_changed",
+        omegon_traits::AgentEvent::SkillActivation { .. } => "skill_activation",
+        omegon_traits::AgentEvent::SystemNotification { .. } => "system_notification",
+        omegon_traits::AgentEvent::ProviderRetry { .. } => "provider_retry",
+        omegon_traits::AgentEvent::ProviderFailure { .. } => "provider_failure",
+        omegon_traits::AgentEvent::TurnCancelled { .. } => "turn_cancelled",
+        omegon_traits::AgentEvent::PlanUpdated { .. } => "plan_updated",
+        omegon_traits::AgentEvent::HarnessStatusChanged { .. } => "harness_status_changed",
+        omegon_traits::AgentEvent::WebDashboardStarted { .. } => "web_dashboard_started",
+        omegon_traits::AgentEvent::RuntimeQueueUpdated { .. } => "runtime_queue_updated",
+        omegon_traits::AgentEvent::ContextUpdated { .. } => "context_updated",
+        omegon_traits::AgentEvent::ContextCompaction { .. } => "context_compaction",
+        omegon_traits::AgentEvent::SessionReset => "session_reset",
+    }
+}
+
 /// Maximum audit log size before rotation (5 MB).
 const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -315,6 +353,27 @@ impl Feature for AuditLog {
                 });
             }
 
+            BusEvent::AgentEventEmitted { event } => {
+                let event_kind = agent_event_kind(event);
+                self.append(&AuditEntry {
+                    ts,
+                    session: session.clone(),
+                    kind: "agent_event".into(),
+                    data: serde_json::json!({
+                        "event_kind": event_kind,
+                        "event_debug": format!("{event:?}"),
+                    }),
+                });
+                if let omegon_traits::AgentEvent::SkillActivation { event } = event.as_ref() {
+                    self.append(&AuditEntry {
+                        ts,
+                        session,
+                        kind: "skill_activation".into(),
+                        data: serde_json::json!(event),
+                    });
+                }
+            }
+
             _ => {}
         }
         vec![]
@@ -324,6 +383,67 @@ impl Feature for AuditLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mirrored_agent_event_writes_generic_audit_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut audit = AuditLog::new(tmp.path(), "session-1");
+        audit.path = tmp.path().join("audit-log.jsonl");
+
+        audit.on_event(&omegon_traits::BusEvent::AgentEventEmitted {
+            event: Box::new(omegon_traits::AgentEvent::SystemNotification {
+                message: "hello".into(),
+            }),
+        });
+
+        let content = std::fs::read_to_string(&audit.path).unwrap();
+        let entries: Vec<serde_json::Value> = content
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["kind"], "agent_event");
+        assert_eq!(entries[0]["event_kind"], "system_notification");
+        assert!(
+            entries[0]["event_debug"]
+                .as_str()
+                .unwrap()
+                .contains("hello")
+        );
+    }
+
+    #[test]
+    fn mirrored_skill_activation_writes_structured_audit_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut audit = AuditLog::new(tmp.path(), "session-1");
+        audit.path = tmp.path().join("audit-log.jsonl");
+        let activation = omegon_traits::SkillActivationEvent {
+            active_ref: "extension:recro/recro-rust-dev".into(),
+            activation: Some("project_detected".into()),
+            reason: "startup".into(),
+            matched_signals: vec!["Cargo.toml".into()],
+            suppressing: vec!["bundled/rust".into()],
+            resolution: "merge_recommended".into(),
+            recommendation: Some("Create a project-local merged skill override.".into()),
+            injected: true,
+        };
+
+        audit.on_event(&omegon_traits::BusEvent::AgentEventEmitted {
+            event: Box::new(omegon_traits::AgentEvent::SkillActivation { event: activation }),
+        });
+
+        let content = std::fs::read_to_string(&audit.path).unwrap();
+        let entries: Vec<serde_json::Value> = content
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["kind"], "agent_event");
+        assert_eq!(entries[0]["event_kind"], "skill_activation");
+        assert_eq!(entries[1]["kind"], "skill_activation");
+        assert_eq!(entries[1]["active_ref"], "extension:recro/recro-rust-dev");
+        assert_eq!(entries[1]["suppressing"][0], "bundled/rust");
+    }
 
     #[test]
     fn str_preview_handles_emoji_at_limit() {

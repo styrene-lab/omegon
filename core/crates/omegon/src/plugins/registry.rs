@@ -83,9 +83,20 @@ impl Default for SkillConflictResolution {
 #[derive(Debug, Clone)]
 struct PromptSkillCandidate {
     name: String,
+    source: String,
     content: String,
     order: usize,
     manifest: crate::skills::SkillManifest,
+}
+
+#[derive(Debug, Clone)]
+struct PromptSkillLoadResult {
+    skills: Vec<String>,
+    events: Vec<omegon_traits::SkillActivationEvent>,
+}
+
+fn prompt_skill_ref(candidate: &PromptSkillCandidate) -> String {
+    format!("{}/{}", candidate.source, candidate.name)
 }
 
 /// Layered memory — each layer has distinct lifecycle rules.
@@ -125,7 +136,38 @@ pub struct AugmentRegistry {
     /// Project-local (.omegon/skills/) entries override same-named user-installed
     /// entries so prompt assembly consumes one resolved directive per skill name.
     loaded_skills: Vec<String>,
+    skill_activation_events: Vec<omegon_traits::SkillActivationEvent>,
     skill_conflict_resolution: SkillConflictResolution,
+}
+
+fn prompt_skill_source_for_order(order: usize) -> String {
+    if order == 0 {
+        "user".into()
+    } else {
+        "project".into()
+    }
+}
+
+fn prompt_skill_activation_event(
+    candidate: &PromptSkillCandidate,
+    suppressing: Vec<String>,
+    resolution: &str,
+) -> omegon_traits::SkillActivationEvent {
+    let recommendation = (!suppressing.is_empty()).then(|| "merge_project_override".to_string());
+    omegon_traits::SkillActivationEvent {
+        active_ref: prompt_skill_ref(candidate),
+        activation: candidate.manifest.activation.clone(),
+        reason: if suppressing.is_empty() {
+            "skill_loaded".into()
+        } else {
+            "activation_conflict".into()
+        },
+        matched_signals: candidate.manifest.project_signals.clone(),
+        suppressing,
+        resolution: resolution.into(),
+        recommendation,
+        injected: true,
+    }
 }
 
 fn prompt_skill_conflicts(left: &PromptSkillCandidate, right: &PromptSkillCandidate) -> bool {
@@ -166,6 +208,7 @@ impl AugmentRegistry {
             active_tone: None,
             memory: MemoryLayers::default(),
             loaded_skills: Vec::new(),
+            skill_activation_events: Vec::new(),
             skill_conflict_resolution: SkillConflictResolution::default(),
         }
     }
@@ -189,11 +232,13 @@ impl AugmentRegistry {
             .into_iter()
             .chain(std::iter::once(project))
             .collect();
-        self.loaded_skills = Self::load_from_dirs_filtered_with_policy(
+        let result = Self::load_from_dirs_filtered_with_policy(
             &dirs,
             allowed,
             self.skill_conflict_resolution,
         );
+        self.loaded_skills = result.skills;
+        self.skill_activation_events = result.events;
     }
 
     /// Configure how prompt assembly resolves skill activation conflicts.
@@ -210,13 +255,14 @@ impl AugmentRegistry {
 
     fn load_from_dirs_filtered(dirs: &[std::path::PathBuf], allowed: &[String]) -> Vec<String> {
         Self::load_from_dirs_filtered_with_policy(dirs, allowed, SkillConflictResolution::default())
+            .skills
     }
 
     fn load_from_dirs_filtered_with_policy(
         dirs: &[std::path::PathBuf],
         allowed: &[String],
         policy: SkillConflictResolution,
-    ) -> Vec<String> {
+    ) -> PromptSkillLoadResult {
         let mut skills = std::collections::BTreeMap::<String, PromptSkillCandidate>::new();
         let mut order = 0usize;
         for dir in dirs {
@@ -242,6 +288,7 @@ impl AugmentRegistry {
                         skill_name.clone(),
                         PromptSkillCandidate {
                             name: skill_name,
+                            source: prompt_skill_source_for_order(order),
                             content,
                             order,
                             manifest,
@@ -251,21 +298,35 @@ impl AugmentRegistry {
                 }
             }
         }
-        Self::resolve_prompt_skill_conflicts(skills.into_values().collect(), policy)
-            .into_iter()
-            .map(|candidate| candidate.content)
-            .collect()
+        let (candidates, events) =
+            Self::resolve_prompt_skill_conflicts(skills.into_values().collect(), policy);
+        PromptSkillLoadResult {
+            skills: candidates
+                .into_iter()
+                .map(|candidate| candidate.content)
+                .collect(),
+            events,
+        }
     }
 
     fn resolve_prompt_skill_conflicts(
         mut candidates: Vec<PromptSkillCandidate>,
         policy: SkillConflictResolution,
-    ) -> Vec<PromptSkillCandidate> {
+    ) -> (
+        Vec<PromptSkillCandidate>,
+        Vec<omegon_traits::SkillActivationEvent>,
+    ) {
         if candidates.len() < 2 {
-            return candidates;
+            let events = candidates
+                .iter()
+                .map(|candidate| prompt_skill_activation_event(candidate, Vec::new(), "loaded"))
+                .collect();
+            return (candidates, events);
         }
         candidates.sort_by_key(|candidate| candidate.order);
         let mut suppressed = std::collections::BTreeSet::new();
+        let mut suppressed_by: std::collections::BTreeMap<usize, Vec<String>> =
+            std::collections::BTreeMap::new();
         for left in 0..candidates.len() {
             for right in (left + 1)..candidates.len() {
                 if suppressed.contains(&left) || suppressed.contains(&right) {
@@ -277,6 +338,10 @@ impl AugmentRegistry {
                 match policy {
                     SkillConflictResolution::MostRecent | SkillConflictResolution::Prompt => {
                         suppressed.insert(left);
+                        suppressed_by
+                            .entry(right)
+                            .or_default()
+                            .push(prompt_skill_ref(&candidates[left]));
                     }
                     SkillConflictResolution::Error => {
                         suppressed.insert(left);
@@ -285,11 +350,31 @@ impl AugmentRegistry {
                 }
             }
         }
-        candidates
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, candidate)| (!suppressed.contains(&index)).then_some(candidate))
-            .collect()
+        let mut kept = Vec::new();
+        let mut events = Vec::new();
+        for (index, candidate) in candidates.into_iter().enumerate() {
+            if suppressed.contains(&index) {
+                continue;
+            }
+            let suppressing = suppressed_by.remove(&index).unwrap_or_default();
+            let resolution = if suppressing.is_empty() {
+                "loaded"
+            } else {
+                "selected_by_precedence"
+            };
+            events.push(prompt_skill_activation_event(
+                &candidate,
+                suppressing,
+                resolution,
+            ));
+            kept.push(candidate);
+        }
+        (kept, events)
+    }
+
+    /// Access structured skill activation/resolution events produced during skill loading.
+    pub fn skill_activation_events(&self) -> &[omegon_traits::SkillActivationEvent] {
+        &self.skill_activation_events
     }
 
     /// Return the number of loaded skills.
@@ -306,8 +391,10 @@ impl AugmentRegistry {
     /// bypassing the real ~/.omegon/skills/ path.
     #[cfg(test)]
     fn load_skills_from_explicit(&mut self, dirs: &[std::path::PathBuf]) {
-        self.loaded_skills =
+        let result =
             Self::load_from_dirs_filtered_with_policy(dirs, &[], self.skill_conflict_resolution);
+        self.loaded_skills = result.skills;
+        self.skill_activation_events = result.events;
     }
 
     #[cfg(test)]
@@ -316,11 +403,13 @@ impl AugmentRegistry {
         dirs: &[std::path::PathBuf],
         allowed: &[String],
     ) {
-        self.loaded_skills = Self::load_from_dirs_filtered_with_policy(
+        let result = Self::load_from_dirs_filtered_with_policy(
             dirs,
             allowed,
             self.skill_conflict_resolution,
         );
+        self.loaded_skills = result.skills;
+        self.skill_activation_events = result.events;
     }
 
     /// Activate a persona. Replaces any previously active persona.
