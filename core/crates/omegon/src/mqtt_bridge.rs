@@ -208,6 +208,23 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                 operation: Some(operation.clone()),
             })
         }
+        AgentEvent::SkillActivation { event } => Some(IpcEventPayload::SystemNotification {
+            message: format!(
+                "skill active: {} · {}{}{}",
+                event.active_ref,
+                event.resolution,
+                if event.suppressing.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · suppressing {}", event.suppressing.join(", "))
+                },
+                event
+                    .recommendation
+                    .as_ref()
+                    .map(|r| format!(" · {r}"))
+                    .unwrap_or_default()
+            ),
+        }),
         AgentEvent::SystemNotification { message } => Some(IpcEventPayload::SystemNotification {
             message: message.clone(),
         }),

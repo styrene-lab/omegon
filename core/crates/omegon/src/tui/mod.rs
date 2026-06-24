@@ -8167,6 +8167,32 @@ Scroll transcript:
             AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
                 self.runtime_queue_snapshot = Some(snapshot_json);
             }
+            AgentEvent::SkillActivation { event } => {
+                let mut parts = vec![
+                    format!("skill active: {}", event.active_ref),
+                    event.resolution.clone(),
+                ];
+                if let Some(activation) = event.activation.as_ref()
+                    && !activation.is_empty()
+                {
+                    parts.push(activation.clone());
+                }
+                if !event.matched_signals.is_empty() {
+                    parts.push(format!("matched {}", event.matched_signals.join(", ")));
+                }
+                if !event.suppressing.is_empty() {
+                    parts.push(format!("suppressing {}", event.suppressing.join(", ")));
+                }
+                if let Some(recommendation) = event.recommendation.as_ref()
+                    && !recommendation.is_empty()
+                {
+                    parts.push(recommendation.clone());
+                }
+                let glyph =
+                    crate::tui::glyphs::glyphs().engine(crate::tui::glyphs::EngineGlyphRole::Skill);
+                self.conversation
+                    .push_system(&format!("{glyph} {}", parts.join(" · ")));
+            }
             AgentEvent::SystemNotification { message } => {
                 if let Some(detail) = upstream_retry_hint(&message) {
                     self.slim_turn_state = SlimTurnState::UpstreamRetrying(detail);

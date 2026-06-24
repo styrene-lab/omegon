@@ -43,6 +43,8 @@ pub struct AgentSetup {
     pub session_id: String,
     /// Instance identifier for runtime state isolation (`tui-{pid}`, `acp-{pid}`, etc.).
     pub instance_id: String,
+    /// Skill activation/resolution events produced while loading startup augments.
+    pub startup_skill_activation_events: Vec<omegon_traits::SkillActivationEvent>,
     /// Shared context metrics — updated each turn, read by ContextProvider
     pub context_metrics:
         std::sync::Arc<std::sync::Mutex<crate::features::context::SharedContextMetrics>>,
@@ -1255,6 +1257,7 @@ impl AgentSetup {
             bus,
             session_id,
             instance_id,
+            startup_skill_activation_events: Vec::new(),
             context_metrics,
             command_tx,
             context_manager,

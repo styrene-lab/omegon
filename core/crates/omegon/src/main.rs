@@ -9020,6 +9020,7 @@ mod tests {
             bus: crate::bus::EventBus::new(),
             session_id: "test-session".into(),
             instance_id: "test-instance".into(),
+            startup_skill_activation_events: Vec::new(),
             context_metrics: crate::features::context::SharedContextMetrics::new(),
             command_tx: crate::features::context::new_shared_command_tx(),
             context_manager: crate::context::ContextManager::new("test prompt".into(), vec![]),
