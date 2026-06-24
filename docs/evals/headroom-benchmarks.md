@@ -46,6 +46,15 @@ headroom:
 
 The benchmark harness attaches a low-level `headroom-eval` JSON artifact to each result. That artifact is evidence about the fixture corpus, not proof that the specific agent task succeeded.
 
+Pack-level evaluation now runs both `headroom-eval` and `headroom-understanding-eval`:
+
+```bash
+just headroom-pack-eval evals/headroom/packs/core/omegon
+just headroom-pack-eval-strict evals/headroom/packs/core/omegon
+```
+
+As of the current native-headroom workstream, the strict core pack passes with 96% evaluated savings, zero restored facts, and 103/103 understanding questions passing. This is the default-on readiness gate for the fixture corpus; high-level agent benchmark tasks still need to prove task success under `headroom.mode=on`.
+
 ## Suggested execution
 
 Run one task at a time while this surface is new:
@@ -63,7 +72,8 @@ These benchmarks are evidence-gathering tasks. Native headroom remains default-o
 
 Default-on consideration requires at least:
 
-- low-level corpus eval passes with `--max-restored-facts 0`
+- strict core pack eval passes with `strict_max_restored_facts = 0`
+- strict core pack understanding eval passes with zero failed questions
 - high-level tasks pass with headroom enabled
 - retrieval handles resolve correctly during agent operation
 - token/context telemetry improves or remains neutral
