@@ -4170,6 +4170,7 @@ impl App {
     fn prepare_interrupt_ui(&mut self) {
         self.editor.clear_line();
         self.interrupt_pending = true;
+        self.slim_turn_state = SlimTurnState::Interrupting;
         self.suppress_editor_input_for(Duration::from_millis(1500));
     }
 
@@ -8278,8 +8279,17 @@ Scroll transcript:
                 };
                 self.effects.ping_footer(self.theme.as_ref());
             }
-            AgentEvent::MessageAbort { .. } => {
+            AgentEvent::MessageAbort { reason } => {
                 self.conversation.abort_streaming();
+                match reason.as_deref() {
+                    Some("interrupted · kept") => {
+                        self.slim_turn_state = SlimTurnState::InterruptedKept;
+                    }
+                    Some("aborted · forgotten") => {
+                        self.slim_turn_state = SlimTurnState::AbortedForgotten;
+                    }
+                    _ => {}
+                }
             }
             AgentEvent::ToolUpdate { id, partial } => {
                 // Stash the latest streaming partial onto the matching

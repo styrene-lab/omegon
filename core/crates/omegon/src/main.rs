@@ -6151,7 +6151,10 @@ async fn run_interactive_active_turn(
 ) -> InteractiveAgentState {
     const CANCEL_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
 
-    let loop_config = build_interactive_loop_config(&runtime, &shared_settings, &pending_compact);
+    let cancel_keeps_prompt = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut loop_config =
+        build_interactive_loop_config(&runtime, &shared_settings, &pending_compact);
+    loop_config.cancel_keeps_prompt = Some(cancel_keeps_prompt.clone());
 
     if active.prompt.image_paths.is_empty() {
         runtime_state
@@ -6214,15 +6217,17 @@ async fn run_interactive_active_turn(
                 match tokio::time::timeout(CANCEL_DRAIN_GRACE, &mut run).await {
                     Ok(result) => Some(result),
                     Err(_) => {
+                        let keep_prompt = cancel_keeps_prompt.load(std::sync::atomic::Ordering::Relaxed);
+                        let disposition = if keep_prompt { "interrupted · kept" } else { "aborted · forgotten" };
                         tracing::error!(
                             runtime_turn_id = active.runtime_turn_id,
                             "agent loop did not stop after cancellation grace period; forcing TUI recovery"
                         );
-                        let _ = events_tx.send(AgentEvent::MessageAbort {
-                            reason: Some("Interrupted turn did not stop within 10s; returning the operator surface to idle.".into()),
-                        });
                         let _ = events_tx.send(AgentEvent::SystemNotification {
-                            message: "Interrupted turn did not stop within 10s; recovered the operator surface. The abandoned provider/tool request may finish in the background.".into(),
+                            message: format!("Interrupted turn did not stop within 10s; recovered the operator surface ({disposition}). The abandoned provider/tool request may finish in the background."),
+                        });
+                        let _ = events_tx.send(AgentEvent::MessageAbort {
+                            reason: Some(disposition.to_string()),
                         });
                         let _ = events_tx.send(AgentEvent::AgentEnd);
                         None
@@ -6231,6 +6236,23 @@ async fn run_interactive_active_turn(
             }
         }
     };
+
+    if (matches!(run_result, Some(Ok(_))) || run_result.is_none()) && cancel.is_cancelled() {
+        let keep_prompt = cancel_keeps_prompt.load(std::sync::atomic::Ordering::Relaxed);
+        if !keep_prompt {
+            runtime_state
+                .conversation
+                .rollback_last_user_if_text(&active.prompt.text);
+        }
+        let disposition = if keep_prompt {
+            "interrupted · kept"
+        } else {
+            "aborted · forgotten"
+        };
+        let _ = events_tx.send(AgentEvent::MessageAbort {
+            reason: Some(disposition.to_string()),
+        });
+    }
 
     if let Some(Err(e)) = run_result {
         let recent_telemetry = runtime_state.conversation.last_provider_telemetry(None);

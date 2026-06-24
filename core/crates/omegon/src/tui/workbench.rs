@@ -191,6 +191,9 @@ pub enum SlimTurnState {
     Thinking,
     Responding,
     Tool(String),
+    Interrupting,
+    InterruptedKept,
+    AbortedForgotten,
     Finished(&'static str),
 }
 
@@ -227,6 +230,9 @@ impl SlimTurnState {
             Self::Thinking => "streaming thinking".to_string(),
             Self::Responding => "streaming answer".to_string(),
             Self::Tool(name) => format!("running {name}"),
+            Self::Interrupting => "interrupting".to_string(),
+            Self::InterruptedKept => "interrupted · kept".to_string(),
+            Self::AbortedForgotten => "aborted · forgotten".to_string(),
             Self::Finished(reason) => format!("turn {reason}"),
         }
     }

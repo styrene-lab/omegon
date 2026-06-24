@@ -82,6 +82,9 @@ pub struct LoopConfig {
     pub permission_policy: Option<crate::permissions::LayeredPermissionPolicy>,
     /// Optional Styrene RBAC role gate for this runtime.
     pub permission_role: Option<styrene_rbac::Role>,
+    /// Set once the turn has produced assistant/tool-visible effects that should
+    /// keep the submitted prompt in replay even if the operator interrupts.
+    pub cancel_keeps_prompt: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Default for LoopConfig {
@@ -106,6 +109,7 @@ impl Default for LoopConfig {
             host_context: None,
             permission_policy: None,
             permission_role: None,
+            cancel_keeps_prompt: None,
         }
     }
 }
@@ -923,8 +927,14 @@ pub async fn run(
             conversation.apply_ambient_captures(&captured);
         }
 
-        // Push assistant message to conversation
+        // Push assistant message to conversation. From this point on, an
+        // operator interrupt means "stop this turn" rather than "forget my
+        // submitted prompt" because the model has produced replay-relevant
+        // assistant/tool state.
         conversation.push_assistant(assistant_msg.clone());
+        if let Some(cancel_keeps_prompt) = &config.cancel_keeps_prompt {
+            cancel_keeps_prompt.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
 
         // Extract tool calls
         let tool_calls = assistant_msg.tool_calls();
@@ -2026,10 +2036,13 @@ async fn stream_with_retry(
         // refused, TLS failures) enter the same transient classifier instead
         // of aborting immediately via `?`.
         let err = match bridge.stream(system_prompt, messages, tools, options).await {
-            Ok(mut rx) => match consume_llm_stream(&mut rx, events).await {
-                Ok(msg) => return Ok(msg),
-                Err(e) => e,
-            },
+            Ok(mut rx) => {
+                match consume_llm_stream(&mut rx, events, config.cancel_keeps_prompt.as_ref()).await
+                {
+                    Ok(msg) => return Ok(msg),
+                    Err(e) => e,
+                }
+            }
             Err(e) => e,
         };
 
@@ -2275,6 +2288,7 @@ fn provider_stop_notice(provider: &str, reason: &str) -> Option<String> {
 async fn consume_llm_stream(
     rx: &mut tokio::sync::mpsc::Receiver<LlmEvent>,
     events: &broadcast::Sender<AgentEvent>,
+    cancel_keeps_prompt: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> anyhow::Result<AssistantMessage> {
     let mut text_parts: Vec<String> = Vec::new();
     let mut thinking_parts: Vec<String> = Vec::new();
@@ -2338,6 +2352,20 @@ async fn consume_llm_stream(
                 received_content.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             LlmEvent::TextDelta { delta } => {
+                if !delta.is_empty() {
+                    // Partial assistant output is visible to the operator. If
+                    // they interrupt now, keep the prompt in canonical replay.
+                    // This makes Escape useful for cutting off rambling output
+                    // without pretending the turn never happened.
+                    // Empty deltas are provider heartbeats and do not count.
+                    //
+                    // The flag is intentionally monotonic for the active turn.
+                    // Once any assistant/tool effect is visible, cancellation
+                    // becomes interrupt/keep rather than abort/forget.
+                    if let Some(cancel_keeps_prompt) = cancel_keeps_prompt {
+                        cancel_keeps_prompt.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
                 let _ = events.send(AgentEvent::MessageChunk {
                     text: delta.clone(),
                 });
@@ -2386,6 +2414,11 @@ async fn consume_llm_stream(
                 received_content.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             LlmEvent::ThinkingDelta { delta } => {
+                if !delta.is_empty() {
+                    if let Some(cancel_keeps_prompt) = cancel_keeps_prompt {
+                        cancel_keeps_prompt.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
                 let _ = events.send(AgentEvent::ThinkingChunk {
                     text: delta.clone(),
                 });
@@ -5313,6 +5346,7 @@ mod tests {
             host_context: None,
             permission_policy: None,
             permission_role: None,
+            cancel_keeps_prompt: None,
         };
         // soft_limit_turns=0 → loop should compute 2/3 of max_turns (40)
         assert_eq!(config.soft_limit_turns, 0, "0 = auto-calculate in run()");

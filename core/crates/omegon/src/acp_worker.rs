@@ -466,6 +466,7 @@ async fn worker_loop(
                     host_context: host_ctx_arc.clone(),
                     permission_policy: None,
                     permission_role: None,
+                    cancel_keeps_prompt: None,
                 };
 
                 let result = crate::r#loop::run(
