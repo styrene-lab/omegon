@@ -1993,7 +1993,7 @@ impl CodexClient {
                         if !t.is_empty() {
                             input.push(json!({
                                 "type": "message", "role": "assistant",
-                                "content": [{"type": "input_text", "text": t}],
+                                "content": [{"type": "output_text", "text": t}],
                                 "status": "completed", "id": format!("msg_{msg_index}"),
                             }));
                             msg_index += 1;
@@ -4802,11 +4802,11 @@ mod tests {
         assert_eq!(input.len(), 1);
         assert_eq!(input[0]["type"], "message");
         assert_eq!(input[0]["role"], "assistant");
-        assert_eq!(input[0]["content"][0]["type"], "input_text");
+        assert_eq!(input[0]["content"][0]["type"], "output_text");
         assert_eq!(input[0]["content"][0]["text"], "previous answer");
         assert!(
             input[0]["content"][0].get("annotations").is_none(),
-            "request replay must not use output-only content block shape: {}",
+            "request replay must not include response-only annotations: {}",
             input[0]
         );
     }
@@ -4844,14 +4844,14 @@ mod tests {
         ];
         let input = CodexClient::build_input(&msgs);
         assert_eq!(input[0]["content"][0]["type"], "input_text");
-        assert_eq!(input[1]["content"][0]["type"], "input_text");
+        assert_eq!(input[1]["content"][0]["type"], "output_text");
         assert_eq!(input[2]["type"], "function_call");
         assert_eq!(input[3]["type"], "function_call_output");
         assert_eq!(input[4]["content"][0]["type"], "input_text");
         let rendered = serde_json::to_string(&input).unwrap();
         assert!(
-            !rendered.contains("output_text"),
-            "request input must not replay output-only content blocks: {rendered}"
+            !rendered.contains("annotations"),
+            "request input must not replay response-only annotations: {rendered}"
         );
     }
 
