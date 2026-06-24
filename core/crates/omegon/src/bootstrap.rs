@@ -250,6 +250,7 @@ pub fn build_loop_config(
         host_context: None,
         permission_policy: None,
         permission_role: None,
+        cancel_keeps_prompt: None,
     }
 }
 
