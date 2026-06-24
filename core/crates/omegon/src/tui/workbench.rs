@@ -22,12 +22,17 @@ pub fn workbench_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> 
     (1 + item_count.min(4)).clamp(2, 5)
 }
 
+pub fn active_plan_workspace_context_height(state: &WorkbenchState) -> u16 {
+    u16::from(state.active.is_some() && state.workspace.has_visible_context())
+}
+
 pub fn workbench_preferred_height(state: &WorkbenchState, width: u16) -> u16 {
     if width == 0 {
         return 0;
     }
     if let Some(active) = state.active.as_ref() {
         workbench_snapshot_height(active, width)
+            .saturating_add(active_plan_workspace_context_height(state))
     } else if state.cleave.as_ref().is_some_and(|p| p.active)
         || state
             .delegate
@@ -676,7 +681,14 @@ pub fn render_workbench_panel(
     }
 
     if let Some(snapshot) = state.active.as_ref() {
-        render_active_workbench_panel(area, frame, t, snapshot, state.workstreams.len());
+        render_workspace_context_panel(Rect::new(area.x, area.y, area.width, 1), frame, t, state);
+        let plan_area = Rect::new(
+            area.x,
+            area.y.saturating_add(1),
+            area.width,
+            area.height.saturating_sub(1),
+        );
+        render_active_workbench_panel(plan_area, frame, t, snapshot, state.workstreams.len());
     } else if let Some(cleave) = state.cleave.as_ref().filter(|p| p.active) {
         render_operation_workbench_panel(
             area,
@@ -1195,6 +1207,29 @@ mod tests {
         };
 
         assert_eq!(workbench_preferred_height(&state, 120), 1);
+    }
+
+    #[test]
+    fn workbench_height_stacks_workspace_context_above_active_plan() {
+        let state = WorkbenchState {
+            active: Some(PlanDisplaySnapshot {
+                mode: "executing".into(),
+                completed: 0,
+                total: 1,
+                items: vec![PlanDisplayItem {
+                    status: PlanDisplayStatus::Active,
+                    description: "Patch layout".into(),
+                }],
+            }),
+            workspace: WorkbenchWorkspaceContext {
+                repo: Some("omegon-secundus".to_string()),
+                dir: "omegon-secundus".to_string(),
+                git_branch: Some("feature/ui-improvements-polish".to_string()),
+            },
+            ..WorkbenchState::default()
+        };
+
+        assert_eq!(workbench_preferred_height(&state, 120), 3);
     }
 
     #[test]
