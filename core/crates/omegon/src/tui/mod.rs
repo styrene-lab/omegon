@@ -10741,7 +10741,7 @@ mod slash_command_parsing_tests {
                 },
             ],
         };
-        assert_eq!(snapshot.summary(), "plan 2/4 · executing");
+        assert_eq!(snapshot.summary(), "plan executing · 2/4 · 50%");
         let rows = workbench_rows(&snapshot, 80, 5);
         assert_eq!(
             rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
@@ -10922,7 +10922,7 @@ mod slash_command_parsing_tests {
             "Plan progress\nPlan mode: executing\nProgress: 2/3\n\n1. ● Inspect\n2. ◐ Patch\n3. ⊘ Skip",
         )
         .unwrap();
-        assert_eq!(snapshot.summary(), "plan 2/3 · executing");
+        assert_eq!(snapshot.summary(), "plan executing · 2/3 · 66%");
         assert_eq!(
             snapshot
                 .items
@@ -11008,7 +11008,7 @@ mod slash_command_parsing_tests {
         };
         let active = active_workbench_snapshot(Some(&live), None).unwrap();
 
-        assert_eq!(active.summary(), "plan 1/2 · executing");
+        assert_eq!(active.summary(), "plan executing · 1/2 · 50%");
         assert!(!active.is_complete());
     }
 

@@ -382,7 +382,23 @@ impl PlanDisplaySnapshot {
     }
 
     pub fn summary(&self) -> String {
-        format!("plan {}/{} · {}", self.completed, self.total, self.mode)
+        let percent = self.progress_percent();
+        format!(
+            "plan {} · {}/{} · {percent}%",
+            self.mode, self.completed, self.total
+        )
+    }
+
+    fn progress_percent(&self) -> usize {
+        if self.total == 0 {
+            0
+        } else {
+            (self.completed.saturating_mul(100) / self.total).min(100)
+        }
+    }
+
+    fn progress_percent_label(&self) -> String {
+        format!("{}%", self.progress_percent())
     }
 
     pub fn system_notification_text(&self, heading: &str) -> String {
@@ -759,18 +775,32 @@ fn render_active_workbench_panel(
     frame: &mut Frame,
     t: &dyn theme::Theme,
     snapshot: &PlanDisplaySnapshot,
-    workstream_count: usize,
+    _workstream_count: usize,
 ) {
     let bg = t.surface_bg();
     let mut lines: Vec<Line<'_>> = Vec::new();
-    let mut summary = snapshot.summary();
-    if workstream_count > 0 {
-        summary.push_str(&format!(" · workstreams×{workstream_count}"));
-    }
-    let rule_width = area.width.saturating_sub(summary.len() as u16 + 4) as usize;
+    let heading = snapshot.summary();
+    let rule_width = area.width.saturating_sub(heading.len() as u16 + 4) as usize;
     lines.push(Line::from(vec![
         Span::styled("─ ", Style::default().fg(t.border_dim()).bg(bg)),
-        Span::styled(summary, Style::default().fg(t.muted()).bg(bg)),
+        Span::styled("plan ", Style::default().fg(t.dim()).bg(bg)),
+        Span::styled(
+            snapshot.mode.clone(),
+            Style::default()
+                .fg(t.accent_muted())
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)),
+        Span::styled(
+            format!("{}/{}", snapshot.completed, snapshot.total),
+            Style::default().fg(t.muted()).bg(bg),
+        ),
+        Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)),
+        Span::styled(
+            snapshot.progress_percent_label(),
+            Style::default().fg(t.muted()).bg(bg),
+        ),
         Span::styled(
             format!(" {}", "─".repeat(rule_width)),
             Style::default().fg(t.border_dim()).bg(bg),
