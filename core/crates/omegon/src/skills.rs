@@ -771,18 +771,26 @@ fn skill_entry_provider_rank(source: &str) -> u8 {
     }
 }
 
+fn normalized_skill_token(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn skill_token_overlap(left: &[String], right: &[String]) -> bool {
+    left.iter().any(|left| {
+        let left = normalized_skill_token(left);
+        !left.is_empty()
+            && right
+                .iter()
+                .any(|right| normalized_skill_token(right) == left)
+    })
+}
+
 fn skill_sources_conflict(a: &SkillEntry, b: &SkillEntry) -> bool {
-    if a.name == b.name {
+    if normalized_skill_token(&a.name) == normalized_skill_token(&b.name) {
         return false;
     }
-    let trigger_overlap = a
-        .triggers
-        .iter()
-        .any(|left| b.triggers.iter().any(|right| left == right));
-    let alias_overlap = a
-        .aliases
-        .iter()
-        .any(|left| b.aliases.iter().any(|right| left == right));
+    let trigger_overlap = skill_token_overlap(&a.triggers, &b.triggers);
+    let alias_overlap = skill_token_overlap(&a.aliases, &b.aliases);
     let activation_overlap = a.activation.is_some()
         && a.activation == b.activation
         && (!a.profile.is_empty() && a.profile.iter().any(|profile| b.profile.contains(profile))
@@ -984,13 +992,32 @@ fn split_frontmatter(content: &str) -> (Option<(FrontmatterFormat, String)>, &st
 /// List all skills as structured entries for the ACP settings surface.
 ///
 
+fn skill_path_stays_within_extension_root(
+    extension_dir: &std::path::Path,
+    relative_path: &str,
+) -> Option<std::path::PathBuf> {
+    let relative = std::path::Path::new(relative_path);
+    if relative.is_absolute() {
+        return None;
+    }
+    if relative.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::Prefix(_)
+        )
+    }) {
+        return None;
+    }
+    Some(extension_dir.join(relative))
+}
+
 fn read_extension_skill_entry(
     extension_dir: &std::path::Path,
     extension_name: &str,
     skill: &crate::extensions::manifest::ExtensionSkillConfig,
     existing_entries: &[SkillEntry],
 ) -> Option<SkillEntry> {
-    let skill_path = extension_dir.join(&skill.path);
+    let skill_path = skill_path_stays_within_extension_root(extension_dir, &skill.path)?;
     if !skill_path.exists() {
         return None;
     }
@@ -1572,6 +1599,156 @@ mod tests {
         let (fm, body) = split_frontmatter(content);
         assert!(fm.is_none());
         assert_eq!(body, content);
+    }
+
+    fn write_extension_manifest(
+        dir: &std::path::Path,
+        extension_name: &str,
+        skill_name: &str,
+        skill_path: &str,
+    ) {
+        std::fs::write(
+            dir.join("manifest.toml"),
+            format!(
+                r#"[extension]
+name = "{extension_name}"
+version = "0.1.0"
+description = "test extension"
+
+[runtime]
+type = "native"
+binary = "bin/test"
+
+[[skills]]
+name = "{skill_name}"
+path = "{skill_path}"
+"#
+            ),
+        )
+        .unwrap();
+    }
+
+    struct EnvRestore {
+        key: &'static str,
+        value: Option<std::ffi::OsString>,
+    }
+
+    impl EnvRestore {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let previous = std::env::var_os(key);
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                value: previous,
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            match &self.value {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
+
+    #[test]
+    fn extension_skill_path_cannot_escape_extension_root() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            skill_path_stays_within_extension_root(dir.path(), "skills/rust/SKILL.md").is_some()
+        );
+        assert!(
+            skill_path_stays_within_extension_root(dir.path(), "../outside/SKILL.md").is_none()
+        );
+        assert!(skill_path_stays_within_extension_root(dir.path(), "/tmp/SKILL.md").is_none());
+    }
+
+    #[test]
+    fn extension_skill_conflicts_are_case_insensitive() {
+        let first = SkillEntry {
+            name: "rust".into(),
+            description: String::new(),
+            id: None,
+            version: None,
+            tags: Vec::new(),
+            aliases: vec!["RS".into()],
+            triggers: vec!["Rust".into()],
+            activation: Some("intent_detected".into()),
+            profile: vec!["coding".into()],
+            project_signals: Vec::new(),
+            posture: None,
+            max_turns: None,
+            installed: true,
+            bundled: true,
+            project_local: false,
+            source: "bundled".into(),
+            editable: false,
+            reloadable: false,
+            shadows: Vec::new(),
+            conflicts: Vec::new(),
+            path: String::new(),
+        };
+        let second = SkillEntry {
+            name: "recro-rust-dev".into(),
+            description: String::new(),
+            id: None,
+            version: None,
+            tags: Vec::new(),
+            aliases: vec!["rs".into()],
+            triggers: vec!["rust".into()],
+            activation: Some("intent_detected".into()),
+            profile: vec!["coding".into()],
+            project_signals: Vec::new(),
+            posture: None,
+            max_turns: None,
+            installed: true,
+            bundled: false,
+            project_local: false,
+            source: "extension:recro".into(),
+            editable: false,
+            reloadable: true,
+            shadows: Vec::new(),
+            conflicts: Vec::new(),
+            path: String::new(),
+        };
+        assert!(skill_sources_conflict(&first, &second));
+    }
+
+    #[test]
+    fn list_structured_includes_extension_skill_and_conflict_metadata() {
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvRestore::set("OMEGON_HOME", home.path());
+        let extension_dir = home.path().join("extensions/recro");
+        let skill_dir = extension_dir.join("skills/recro-rust-dev");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        write_extension_manifest(
+            &extension_dir,
+            "recro",
+            "recro-rust-dev",
+            "skills/recro-rust-dev/SKILL.md",
+        );
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: recro-rust-dev\ndescription: Recro Rust\nactivation: project_detected\nprofile: [coding]\nproject_signals: [Cargo.toml]\n---\n\n# Recro Rust\n",
+        )
+        .unwrap();
+
+        let entries = list_structured().unwrap();
+        let recro = entries
+            .iter()
+            .find(|entry| entry.name == "recro-rust-dev")
+            .expect("extension skill should be listed");
+        assert_eq!(recro.source, "extension:recro");
+        assert!(!recro.editable);
+        assert!(recro.reloadable);
+        assert!(
+            recro
+                .conflicts
+                .iter()
+                .any(|conflict| conflict == "rust (bundled)")
+        );
     }
 
     #[test]
