@@ -36,6 +36,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added semantic Workbench projection tests for typed plan lanes so TUI coverage can assert DTO mapping without brittle terminal text matching.
 - Routed lifecycle-aware workbench plan snapshots through the same shared plan surface projection used by `plan list`/`plan show`, removing duplicate registry assembly in main loop surfaces.
 - Routed `plan list` and `plan show` text through shared plan renderers so direct command output and tool-result enrichment cannot drift across harness surfaces.
+- Added typed PlanUpdated edge coverage for IPC and MQTT compatibility payloads so external legacy snapshots are proven to derive from `omegon_traits::PlanSurfaceProjection`.
 - Kept `manage_tools list` synchronized with the EventBus's finalized model-visible tool inventory so it no longer reports `0 total` tools while directly callable tools are available.
 - Render git tool rows with a dedicated git category glyph instead of reusing the file-write/edit document glyph.
 - Render lean editor engine ribbon tail fields as distinct gradient-style badge segments so grade, thinking, and context keep visible backgrounds and Powerline divider bridges instead of falling back to plain metadata text.

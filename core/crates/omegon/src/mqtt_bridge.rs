@@ -333,4 +333,51 @@ mod tests {
             other => panic!("expected decomposition payload with operation, got {other:?}"),
         }
     }
+
+    #[test]
+    fn projects_plan_updated_from_typed_projection_to_legacy_snapshot() {
+        let payload = project_event(&AgentEvent::PlanUpdated {
+            projection: omegon_traits::PlanSurfaceProjection {
+                active: Some(omegon_traits::PlanLaneProjection {
+                    plan_id: "session:current".into(),
+                    mode: "executing".into(),
+                    guidance: "keep going".into(),
+                    status: "active".into(),
+                    scope: "session".into(),
+                    source: "session".into(),
+                    progress: omegon_traits::PlanProgressProjection {
+                        completed: 1,
+                        total: 2,
+                    },
+                    items: vec![omegon_traits::PlanItemProjection {
+                        label: "Patch".into(),
+                        status: "active".into(),
+                        ..Default::default()
+                    }],
+                }),
+                workstreams: vec![omegon_traits::PlanWorkstreamProjection {
+                    id: "openspec:demo".into(),
+                    title: "demo".into(),
+                    status: "paused".into(),
+                    progress: omegon_traits::PlanProgressProjection {
+                        completed: 3,
+                        total: 5,
+                    },
+                }],
+                ..Default::default()
+            },
+        })
+        .expect("projected payload");
+
+        match payload {
+            IpcEventPayload::PlanUpdated { snapshot } => {
+                assert_eq!(snapshot["mode"], "executing");
+                assert_eq!(snapshot["completed"], 1);
+                assert_eq!(snapshot["items"][0]["description"], "Patch");
+                assert_eq!(snapshot["workstreams"][0]["id"], "openspec:demo");
+                assert_eq!(snapshot["workstreams"][0]["completed"], 3);
+            }
+            other => panic!("expected plan payload, got {other:?}"),
+        }
+    }
 }
