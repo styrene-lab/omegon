@@ -1069,9 +1069,12 @@ pub struct SkillDetails {
 /// Read a single skill's resolved manifest, body content, and listing metadata.
 pub fn get_skill_details(name: &str) -> anyhow::Result<SkillDetails> {
     let (manifest, body, path) = get_skill(name)?;
-    let entry = list_structured()
-        .ok()
-        .and_then(|entries| entries.into_iter().find(|entry| entry.name == name));
+    let entry = list_structured().ok().and_then(|entries| {
+        let resolved_path = path.display().to_string();
+        entries
+            .into_iter()
+            .find(|entry| entry.name == name && entry.path == resolved_path)
+    });
     Ok(SkillDetails {
         manifest,
         body,
@@ -1451,6 +1454,35 @@ description: Project git override
         assert!(project_git.editable);
         assert!(project_git.reloadable);
         assert!(project_git.shadows.iter().any(|source| source == "bundled"));
+    }
+
+    #[test]
+    fn get_skill_details_uses_resolved_project_override_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_skill = dir.path().join(".omegon/skills/git");
+        std::fs::create_dir_all(&project_skill).unwrap();
+        std::fs::write(
+            project_skill.join("SKILL.md"),
+            "---
+name: git
+description: Project git override
+---
+
+# Git override
+",
+        )
+        .unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let details = get_skill_details("git").unwrap();
+        std::env::set_current_dir(original).unwrap();
+
+        assert_eq!(details.manifest.description, "Project git override");
+        let entry = details.entry.expect("resolved listing metadata");
+        assert_eq!(entry.source, "project");
+        assert!(entry.project_local);
+        assert!(entry.shadows.iter().any(|source| source == "bundled"));
     }
 
     #[test]
