@@ -1993,7 +1993,7 @@ impl CodexClient {
                         if !t.is_empty() {
                             input.push(json!({
                                 "type": "message", "role": "assistant",
-                                "content": [{"type": "output_text", "text": t, "annotations": []}],
+                                "content": [{"type": "input_text", "text": t}],
                                 "status": "completed", "id": format!("msg_{msg_index}"),
                             }));
                             msg_index += 1;
@@ -4740,6 +4740,71 @@ mod tests {
         assert_eq!(input[0]["role"], "user");
         assert_eq!(input[0]["content"][0]["type"], "input_text");
         assert_eq!(input[0]["content"][0]["text"], "hello");
+    }
+
+    #[test]
+    fn codex_build_input_assistant_text_uses_request_safe_content_type() {
+        let msgs = vec![LlmMessage::Assistant {
+            text: vec!["previous answer".into()],
+            thinking: vec![],
+            tool_calls: vec![],
+            raw: None,
+        }];
+        let input = CodexClient::build_input(&msgs);
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[0]["role"], "assistant");
+        assert_eq!(input[0]["content"][0]["type"], "input_text");
+        assert_eq!(input[0]["content"][0]["text"], "previous answer");
+        assert!(
+            input[0]["content"][0].get("annotations").is_none(),
+            "request replay must not use output-only content block shape: {}",
+            input[0]
+        );
+    }
+
+    #[test]
+    fn codex_build_input_tool_turn_sequence_uses_only_request_safe_content_blocks() {
+        use crate::bridge::WireToolCall;
+        let msgs = vec![
+            LlmMessage::User {
+                content: "run it".into(),
+                images: vec![],
+            },
+            LlmMessage::Assistant {
+                text: vec!["I'll inspect it.".into()],
+                thinking: vec![],
+                tool_calls: vec![WireToolCall {
+                    id: "call_abc|fc_0".into(),
+                    name: "bash".into(),
+                    arguments: json!({"command": "cargo test"}),
+                }],
+                raw: None,
+            },
+            LlmMessage::ToolResult {
+                call_id: "call_abc|fc_0".into(),
+                tool_name: "bash".into(),
+                content: "ok".into(),
+                images: vec![],
+                args_summary: Some("cargo test".into()),
+                is_error: false,
+            },
+            LlmMessage::User {
+                content: "continue".into(),
+                images: vec![],
+            },
+        ];
+        let input = CodexClient::build_input(&msgs);
+        assert_eq!(input[0]["content"][0]["type"], "input_text");
+        assert_eq!(input[1]["content"][0]["type"], "input_text");
+        assert_eq!(input[2]["type"], "function_call");
+        assert_eq!(input[3]["type"], "function_call_output");
+        assert_eq!(input[4]["content"][0]["type"], "input_text");
+        let rendered = serde_json::to_string(&input).unwrap();
+        assert!(
+            !rendered.contains("output_text"),
+            "request input must not replay output-only content blocks: {rendered}"
+        );
     }
 
     #[test]
