@@ -691,7 +691,7 @@ enum Commands {
     #[command(hide = true)]
     Doctor,
 
-    /// Manage bundled skills — list available skills and install them to ~/.omegon/skills/.
+    /// Manage skill bundles — inspect, import, install, and diagnose user/project/extension skills.
     Skills {
         #[command(subcommand)]
         action: SkillsAction,
