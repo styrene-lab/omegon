@@ -1020,6 +1020,16 @@ impl crate::conversation::IntentDocument {
                 .all(|w| matches!(w.status, WorkItemStatus::Done | WorkItemStatus::Skipped))
     }
 
+    /// True when the model should receive the plan in per-turn context.
+    pub fn has_active_work_plan_context(&self) -> bool {
+        let legacy_plan_active = !self.work_plan.is_empty()
+            && !matches!(self.plan_mode, PlanMode::Off | PlanMode::Complete);
+        let visible_plan_active = self.visible_plan.as_ref().is_some_and(|plan| {
+            !plan.items.is_empty() && !matches!(plan.mode, PlanMode::Off | PlanMode::Complete)
+        });
+        legacy_plan_active || visible_plan_active
+    }
+
     /// Render the work plan as a compact one-line summary.
     pub fn work_plan_summary(&self) -> Option<String> {
         if self.work_plan.is_empty() {

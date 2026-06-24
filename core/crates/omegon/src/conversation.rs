@@ -731,24 +731,38 @@ impl ConversationState {
                 intent.constraints_discovered.join("; ")
             ));
         }
-        if !intent.work_plan.is_empty() {
-            let items: Vec<String> = intent
-                .work_plan
+        let plan_items: &[WorkItem] = if !intent.work_plan.is_empty() {
+            &intent.work_plan
+        } else {
+            intent
+                .visible_plan
+                .as_ref()
+                .filter(|plan| !matches!(plan.mode, PlanMode::Off | PlanMode::Complete))
+                .map(|plan| plan.items.as_slice())
+                .unwrap_or(&[])
+        };
+        let plan_mode = intent
+            .visible_plan
+            .as_ref()
+            .filter(|plan| intent.work_plan.is_empty() && !plan.items.is_empty())
+            .map(|plan| plan.mode)
+            .unwrap_or(intent.plan_mode);
+        if !plan_items.is_empty() {
+            let items: Vec<String> = plan_items
                 .iter()
                 .map(|w| format!("{} {}", w.status.icon(), w.description))
                 .collect();
-            let done = intent
-                .work_plan
+            let done = plan_items
                 .iter()
                 .filter(|w| matches!(w.status, WorkItemStatus::Done))
                 .count();
-            lines.push(format!("Plan ({done}/{}):", intent.work_plan.len()));
+            lines.push(format!("Plan ({done}/{}):", plan_items.len()));
             lines.push(format!(
                 "Plan mode: {} — {}",
-                intent.plan_mode.label(),
-                intent.plan_mode.guidance()
+                plan_mode.label(),
+                plan_mode.guidance()
             ));
-            if intent.plan_mode == PlanMode::Executing {
+            if plan_mode == PlanMode::Executing {
                 lines.push(
                     "Plan execution contract: when the active item is completed, call the `plan` tool with action `advance` or `complete` before continuing."
                         .to_string(),
@@ -2533,6 +2547,19 @@ mod tests {
     }
 
     #[test]
+    fn intent_injection_gate_includes_active_work_plan() {
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .set_work_plan(vec!["Read".into(), "Patch".into()]);
+
+        assert_eq!(conversation.intent.stats.tool_calls, 0);
+        assert!(conversation.intent.current_task.is_none());
+        assert_eq!(conversation.intent.stats.compactions, 0);
+        assert!(conversation.intent.has_active_work_plan_context());
+    }
+
+    #[test]
     fn render_intent_for_injection() {
         let mut conv = ConversationState::new();
         conv.intent.current_task = Some("Fix auth flow".into());
@@ -3709,6 +3736,62 @@ mod tests {
         assert_eq!(intent.work_plan.len(), 3);
         assert!(intent.work_plan_complete());
         assert_eq!(intent.plan_mode, PlanMode::Complete);
+    }
+
+    #[test]
+    fn active_work_plan_context_tracks_live_plan_modes() {
+        let mut intent = IntentDocument::default();
+        assert!(!intent.has_active_work_plan_context());
+
+        intent.set_work_plan(vec!["Read".into(), "Patch".into()]);
+        assert!(intent.has_active_work_plan_context());
+
+        intent.approve_work_plan();
+        assert!(intent.has_active_work_plan_context());
+
+        intent.execute_work_plan();
+        assert!(intent.has_active_work_plan_context());
+
+        intent.advance_work_plan();
+        intent.advance_work_plan();
+        assert_eq!(intent.plan_mode, PlanMode::Complete);
+        assert!(!intent.has_active_work_plan_context());
+
+        intent.clear_work_plan();
+        assert!(!intent.has_active_work_plan_context());
+    }
+
+    #[test]
+    fn active_work_plan_context_includes_visible_repo_plan() {
+        let intent = IntentDocument {
+            visible_plan: Some(VisiblePlanState {
+                plan_id: PlanBinding::openspec_plan_id("active-change", None),
+                scope: PlanScope::Repo,
+                source: PlanSource::OpenSpec,
+                binding: PlanBinding {
+                    openspec_change: Some("active-change".into()),
+                    ..PlanBinding::default()
+                },
+                mode: PlanMode::Executing,
+                items: vec![WorkItem {
+                    description: "Implement spec scenario".into(),
+                    status: WorkItemStatus::Active,
+                    intent: Some(TaskIntent::Implementation),
+                    completion_policy: TaskCompletionPolicy::Manual,
+                    evidence: Vec::new(),
+                }],
+            }),
+            ..IntentDocument::default()
+        };
+
+        assert!(intent.has_active_work_plan_context());
+
+        let mut conversation = ConversationState::new();
+        conversation.intent = intent;
+        let rendered = conversation.render_intent_for_injection();
+        assert!(rendered.contains("Plan (0/1):"));
+        assert!(rendered.contains("Plan mode: executing"));
+        assert!(rendered.contains("◐ Implement spec scenario"));
     }
 
     #[test]

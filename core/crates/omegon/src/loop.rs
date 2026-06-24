@@ -627,6 +627,7 @@ pub async fn run(
         if conversation.intent.stats.tool_calls > 0
             || conversation.intent.current_task.is_some()
             || conversation.intent.stats.compactions > 0
+            || conversation.intent.has_active_work_plan_context()
         {
             let intent_block = conversation.render_intent_for_injection();
             context.inject_intent(intent_block);
