@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+- Added extension manifest-declared skill bundles plus conflict-resolution metadata for non-1:1 activation/trigger overlap.
+- Added prompt skill conflict resolution so overlapping activation/trigger skills inject only one provider by default and user-facing output recommends project-local merge resolution.
+
 ### Changed
 - Included skill source/editability/reload/shadow metadata in `/skills get` and CLI `omegon skills get` output.
 - Rendered skill source/editability/reload/shadow metadata in the `/skills` palette so override provenance is visible without opening each skill.

@@ -1985,6 +1985,7 @@ binary = "voice-extension.sh"
             config,
             capabilities: omegon_extension::Capabilities::default(),
             permissions: omegon_extension::ManifestPermissions::default(),
+            skills: Vec::new(),
         }
     }
 }

@@ -1637,6 +1637,12 @@ async fn main() -> anyhow::Result<()> {
                         if !entry.shadows.is_empty() {
                             println!("Shadows: {}", entry.shadows.join(", "));
                         }
+                        if !entry.conflicts.is_empty() {
+                            println!("Conflicts: {}", entry.conflicts.join(", "));
+                            println!(
+                                "Recommended resolution: merge into a project-local skill so one activation slot injects one merged directive."
+                            );
+                        }
                     }
                     if !manifest.tags.is_empty() {
                         println!("Tags: {}", manifest.tags.join(", "));

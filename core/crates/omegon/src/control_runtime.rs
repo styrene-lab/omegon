@@ -3555,6 +3555,10 @@ fn skill_palette_metadata(entry: &crate::skills::SkillEntry) -> Vec<String> {
     if !entry.shadows.is_empty() {
         metadata.push(format!("shadows:{}", entry.shadows.join(",")));
     }
+    if !entry.conflicts.is_empty() {
+        metadata.push(format!("conflicts:{}", entry.conflicts.join(",")));
+        metadata.push("resolve:merge-recommended".into());
+    }
     if metadata.is_empty() {
         vec!["manual".into()]
     } else {
@@ -3673,6 +3677,12 @@ pub async fn skill_get_response(name: &str) -> SlashCommandResponse {
                 out.push_str(&format!("Reloadable: {}\n", entry.reloadable));
                 if !entry.shadows.is_empty() {
                     out.push_str(&format!("Shadows: {}\n", entry.shadows.join(", ")));
+                }
+                if !entry.conflicts.is_empty() {
+                    out.push_str(&format!("Conflicts: {}\n", entry.conflicts.join(", ")));
+                    out.push_str(
+                        "Recommended resolution: merge into a project-local skill so one activation slot injects one merged directive.\n",
+                    );
                 }
             }
             if !manifest.tags.is_empty() {
@@ -4774,6 +4784,7 @@ mod tests {
                 editable: false,
                 reloadable: false,
                 shadows: vec![],
+                conflicts: vec![],
                 path: String::new(),
             },
             crate::skills::SkillEntry {
@@ -4796,6 +4807,7 @@ mod tests {
                 editable: true,
                 reloadable: true,
                 shadows: vec!["bundled".into()],
+                conflicts: vec!["rust (bundled)".into()],
                 path: ".omegon/skills/team".into(),
             },
         ];
@@ -4811,7 +4823,7 @@ mod tests {
             "- `rust` — bundled · available · project_detected · profile:coding · tags:lang · read-only"
         ));
         assert!(rendered.contains(
-            "- `team` — project · local · always · editable · reloadable · shadows:bundled"
+            "- `team` — project · local · always · editable · reloadable · shadows:bundled · conflicts:rust (bundled) · resolve:merge-recommended"
         ));
         assert!(!rendered.contains("+ = installed"));
         assert!(rendered.contains("Details stay behind `/skills get <name>`"));

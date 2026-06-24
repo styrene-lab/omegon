@@ -60,6 +60,34 @@ impl Default for ToneIntensity {
     }
 }
 
+/// Policy for resolving activation conflicts between same-context skills.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillConflictResolution {
+    /// Keep the latest provider by load order. Canonical order is bundled/user before project.
+    /// This is a non-interactive fallback only; interactive surfaces should recommend merging
+    /// conflicting guidance into one project-local skill instead of injecting both.
+    MostRecent,
+    /// Mark the conflict for operator resolution. Until `/skills resolve` exists, this uses
+    /// the same non-interactive fallback as MostRecent to preserve the one-skill-per-slot invariant.
+    Prompt,
+    /// Drop all participants in a detected conflict. Useful for tests/hardening.
+    Error,
+}
+
+impl Default for SkillConflictResolution {
+    fn default() -> Self {
+        Self::MostRecent
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PromptSkillCandidate {
+    name: String,
+    content: String,
+    order: usize,
+    manifest: crate::skills::SkillManifest,
+}
+
 /// Layered memory — each layer has distinct lifecycle rules.
 #[derive(Debug, Default)]
 pub struct MemoryLayers {
@@ -97,6 +125,36 @@ pub struct PluginRegistry {
     /// Project-local (.omegon/skills/) entries override same-named user-installed
     /// entries so prompt assembly consumes one resolved directive per skill name.
     loaded_skills: Vec<String>,
+    skill_conflict_resolution: SkillConflictResolution,
+}
+
+fn prompt_skill_conflicts(left: &PromptSkillCandidate, right: &PromptSkillCandidate) -> bool {
+    if left.name == right.name {
+        return false;
+    }
+    let left_manifest = &left.manifest;
+    let right_manifest = &right.manifest;
+    let trigger_overlap = left_manifest
+        .triggers
+        .iter()
+        .any(|trigger| right_manifest.triggers.contains(trigger));
+    let alias_overlap = left_manifest
+        .aliases
+        .iter()
+        .any(|alias| right_manifest.aliases.contains(alias));
+    let activation_overlap = left_manifest.activation.is_some()
+        && left_manifest.activation == right_manifest.activation
+        && ((!left_manifest.profile.is_empty()
+            && left_manifest
+                .profile
+                .iter()
+                .any(|profile| right_manifest.profile.contains(profile)))
+            || (!left_manifest.project_signals.is_empty()
+                && left_manifest
+                    .project_signals
+                    .iter()
+                    .any(|signal| right_manifest.project_signals.contains(signal))));
+    trigger_overlap || alias_overlap || activation_overlap
 }
 
 impl PluginRegistry {
@@ -108,6 +166,7 @@ impl PluginRegistry {
             active_tone: None,
             memory: MemoryLayers::default(),
             loaded_skills: Vec::new(),
+            skill_conflict_resolution: SkillConflictResolution::default(),
         }
     }
 
@@ -130,7 +189,16 @@ impl PluginRegistry {
             .into_iter()
             .chain(std::iter::once(project))
             .collect();
-        self.loaded_skills = Self::load_from_dirs_filtered(&dirs, allowed);
+        self.loaded_skills = Self::load_from_dirs_filtered_with_policy(
+            &dirs,
+            allowed,
+            self.skill_conflict_resolution,
+        );
+    }
+
+    /// Configure how prompt assembly resolves skill activation conflicts.
+    pub fn set_skill_conflict_resolution(&mut self, policy: SkillConflictResolution) {
+        self.skill_conflict_resolution = policy;
     }
 
     /// Load skill content from an explicit list of directories.
@@ -141,7 +209,16 @@ impl PluginRegistry {
     }
 
     fn load_from_dirs_filtered(dirs: &[std::path::PathBuf], allowed: &[String]) -> Vec<String> {
-        let mut skills = std::collections::BTreeMap::new();
+        Self::load_from_dirs_filtered_with_policy(dirs, allowed, SkillConflictResolution::default())
+    }
+
+    fn load_from_dirs_filtered_with_policy(
+        dirs: &[std::path::PathBuf],
+        allowed: &[String],
+        policy: SkillConflictResolution,
+    ) -> Vec<String> {
+        let mut skills = std::collections::BTreeMap::<String, PromptSkillCandidate>::new();
+        let mut order = 0usize;
         for dir in dirs {
             if !dir.is_dir() {
                 continue;
@@ -160,11 +237,59 @@ impl PluginRegistry {
                 if let Ok(content) = std::fs::read_to_string(&skill_file)
                     && !content.trim().is_empty()
                 {
-                    skills.insert(skill_name, content);
+                    let (manifest, _body) = crate::skills::parse_skill_file(&content);
+                    skills.insert(
+                        skill_name.clone(),
+                        PromptSkillCandidate {
+                            name: skill_name,
+                            content,
+                            order,
+                            manifest,
+                        },
+                    );
+                    order += 1;
                 }
             }
         }
-        skills.into_values().collect()
+        Self::resolve_prompt_skill_conflicts(skills.into_values().collect(), policy)
+            .into_iter()
+            .map(|candidate| candidate.content)
+            .collect()
+    }
+
+    fn resolve_prompt_skill_conflicts(
+        mut candidates: Vec<PromptSkillCandidate>,
+        policy: SkillConflictResolution,
+    ) -> Vec<PromptSkillCandidate> {
+        if candidates.len() < 2 {
+            return candidates;
+        }
+        candidates.sort_by_key(|candidate| candidate.order);
+        let mut suppressed = std::collections::BTreeSet::new();
+        for left in 0..candidates.len() {
+            for right in (left + 1)..candidates.len() {
+                if suppressed.contains(&left) || suppressed.contains(&right) {
+                    continue;
+                }
+                if !prompt_skill_conflicts(&candidates[left], &candidates[right]) {
+                    continue;
+                }
+                match policy {
+                    SkillConflictResolution::MostRecent | SkillConflictResolution::Prompt => {
+                        suppressed.insert(left);
+                    }
+                    SkillConflictResolution::Error => {
+                        suppressed.insert(left);
+                        suppressed.insert(right);
+                    }
+                }
+            }
+        }
+        candidates
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, candidate)| (!suppressed.contains(&index)).then_some(candidate))
+            .collect()
     }
 
     /// Return the number of loaded skills.
@@ -181,7 +306,8 @@ impl PluginRegistry {
     /// bypassing the real ~/.omegon/skills/ path.
     #[cfg(test)]
     fn load_skills_from_explicit(&mut self, dirs: &[std::path::PathBuf]) {
-        self.loaded_skills = Self::load_from_dirs(dirs);
+        self.loaded_skills =
+            Self::load_from_dirs_filtered_with_policy(dirs, &[], self.skill_conflict_resolution);
     }
 
     #[cfg(test)]
@@ -190,7 +316,11 @@ impl PluginRegistry {
         dirs: &[std::path::PathBuf],
         allowed: &[String],
     ) {
-        self.loaded_skills = Self::load_from_dirs_filtered(dirs, allowed);
+        self.loaded_skills = Self::load_from_dirs_filtered_with_policy(
+            dirs,
+            allowed,
+            self.skill_conflict_resolution,
+        );
     }
 
     /// Activate a persona. Replaces any previously active persona.
@@ -774,6 +904,95 @@ mod tests {
             .unwrap();
         assert!(lex_pos < skill_pos, "skill should follow lex");
         assert!(skill_pos < persona_pos, "persona should follow skill");
+    }
+
+    #[test]
+    fn activation_conflicts_keep_most_recent_skill_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundled = tmp.path().join("bundled").join("rust");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::write(
+            bundled.join("SKILL.md"),
+            "---
+name: rust
+description: Bundled Rust
+activation: project_detected
+profile: [coding]
+project_signals: [Cargo.toml]
+---
+
+BUNDLED_RUST_MARKER
+",
+        )
+        .unwrap();
+        let extension = tmp.path().join("extension").join("recro-rust-dev");
+        std::fs::create_dir_all(&extension).unwrap();
+        std::fs::write(
+            extension.join("SKILL.md"),
+            "---
+name: recro-rust-dev
+description: Recro Rust
+activation: project_detected
+profile: [coding]
+project_signals: [Cargo.toml]
+---
+
+RECRO_RUST_MARKER
+",
+        )
+        .unwrap();
+
+        let mut reg = PluginRegistry::new(LEX.into());
+        reg.load_skills_from_explicit(&[tmp.path().join("bundled"), tmp.path().join("extension")]);
+
+        let prompt = reg.build_system_prompt();
+        assert_eq!(reg.skill_count(), 1);
+        assert!(prompt.contains("RECRO_RUST_MARKER"));
+        assert!(!prompt.contains("BUNDLED_RUST_MARKER"));
+    }
+
+    #[test]
+    fn activation_conflict_error_policy_drops_all_participants() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("first").join("rust");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::write(
+            first.join("SKILL.md"),
+            "---
+name: rust
+description: Rust
+activation: intent_detected
+triggers: [rust]
+---
+
+FIRST_MARKER
+",
+        )
+        .unwrap();
+        let second = tmp.path().join("second").join("recro-rust-dev");
+        std::fs::create_dir_all(&second).unwrap();
+        std::fs::write(
+            second.join("SKILL.md"),
+            "---
+name: recro-rust-dev
+description: Recro Rust
+activation: intent_detected
+triggers: [rust]
+---
+
+SECOND_MARKER
+",
+        )
+        .unwrap();
+
+        let mut reg = PluginRegistry::new(LEX.into());
+        reg.set_skill_conflict_resolution(SkillConflictResolution::Error);
+        reg.load_skills_from_explicit(&[tmp.path().join("first"), tmp.path().join("second")]);
+
+        let prompt = reg.build_system_prompt();
+        assert_eq!(reg.skill_count(), 0);
+        assert!(!prompt.contains("FIRST_MARKER"));
+        assert!(!prompt.contains("SECOND_MARKER"));
     }
 
     #[test]
