@@ -3480,7 +3480,7 @@ fn skills_palette_projection(
         .with_group(PaletteGroupProjection::new("Actions").with_rows(action_rows))
         .with_group(
             PaletteGroupProjection::new("Skill rows")
-                .with_description("`name` · scope · state · activation/profile/tags")
+                .with_description("`name` · source · state · activation/profile/tags · edit/reload/shadow metadata")
                 .with_rows(skill_rows),
         )
         .with_footer(
@@ -3488,13 +3488,17 @@ fn skills_palette_projection(
         )
 }
 
-fn skill_scope_label(entry: &crate::skills::SkillEntry) -> &'static str {
-    if entry.project_local {
-        "project"
-    } else if entry.bundled {
-        "bundled"
+fn skill_scope_label(entry: &crate::skills::SkillEntry) -> &str {
+    if entry.source.is_empty() {
+        if entry.project_local {
+            "project"
+        } else if entry.bundled {
+            "bundled"
+        } else {
+            "user"
+        }
     } else {
-        "user"
+        entry.source.as_str()
     }
 }
 
@@ -3536,6 +3540,20 @@ fn skill_palette_metadata(entry: &crate::skills::SkillEntry) -> Vec<String> {
     }
     if !entry.tags.is_empty() {
         metadata.push(format!("tags:{}", entry.tags.join(",")));
+    }
+    metadata.push(
+        if entry.editable {
+            "editable"
+        } else {
+            "read-only"
+        }
+        .into(),
+    );
+    if entry.reloadable {
+        metadata.push("reloadable".into());
+    }
+    if !entry.shadows.is_empty() {
+        metadata.push(format!("shadows:{}", entry.shadows.join(",")));
     }
     if metadata.is_empty() {
         vec!["manual".into()]
@@ -4780,9 +4798,11 @@ mod tests {
         assert!(rendered.contains("`/skills install <name>`"));
         assert!(rendered.contains("### Skill rows"));
         assert!(rendered.contains(
-            "- `rust` — bundled · available · project_detected · profile:coding · tags:lang"
+            "- `rust` — bundled · available · project_detected · profile:coding · tags:lang · read-only"
         ));
-        assert!(rendered.contains("- `team` — project · local · always"));
+        assert!(rendered.contains(
+            "- `team` — project · local · always · editable · reloadable · shadows:bundled"
+        ));
         assert!(!rendered.contains("+ = installed"));
         assert!(rendered.contains("Details stay behind `/skills get <name>`"));
     }
