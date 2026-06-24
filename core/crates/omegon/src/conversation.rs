@@ -929,6 +929,24 @@ impl ConversationState {
         self.invalidate_token_cache();
     }
 
+    /// Remove the most recent user message when it matches the active prompt.
+    ///
+    /// This is used when an upstream provider rejects a turn before producing any
+    /// assistant output. The prompt has already been shown in the local
+    /// transcript, but keeping it in canonical replay can poison every future
+    /// request if the provider rejected the request history shape.
+    pub fn rollback_last_user_if_text(&mut self, expected_text: &str) -> bool {
+        let should_pop = matches!(
+            self.canonical.last(),
+            Some(AgentMessage::User { text, .. }) if text == expected_text
+        );
+        if should_pop {
+            self.canonical.pop();
+            self.invalidate_token_cache();
+        }
+        should_pop
+    }
+
     pub fn turn_count(&self) -> u32 {
         self.intent.stats.turns
     }

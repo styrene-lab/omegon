@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Fixed
+- Fixed upstream LLM error recovery so a provider rejection is surfaced in the transcript without leaving the rejected active prompt in canonical replay and poisoning subsequent sends.
 - Fixed Codex Responses replay so assistant history uses request-safe `output_text` content blocks instead of invalid `input_text`, while preserving queued operator prompt visibility in the TUI conversation.
 
 ### Changed

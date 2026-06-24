@@ -6239,6 +6239,9 @@ async fn run_interactive_active_turn(
             runtime_turn_id = active.runtime_turn_id,
             "Agent loop error: {e}"
         );
+        runtime_state
+            .conversation
+            .rollback_last_user_if_text(&active.prompt.text);
         let _ = events_tx.send(AgentEvent::SystemNotification { message: user_msg });
         let _ = events_tx.send(AgentEvent::AgentEnd);
     }
@@ -8918,6 +8921,7 @@ async fn run_sandboxed(cli: &Cli) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conversation::ConversationState;
     use clap::CommandFactory;
     use tempfile::tempdir;
 
@@ -9354,6 +9358,26 @@ mod tests {
         );
         assert_eq!(active.prompt.submitted_by.kind, RuntimeActorKind::Auspex);
         assert_eq!(supervisor.queue_depth(), 0);
+    }
+
+    #[test]
+    fn conversation_rolls_back_last_user_after_provider_error() {
+        let mut conversation = ConversationState::new();
+        conversation.push_user("bad replay".to_string());
+
+        assert!(conversation.rollback_last_user_if_text("bad replay"));
+
+        assert_eq!(conversation.last_user_prompt(), "");
+    }
+
+    #[test]
+    fn conversation_does_not_roll_back_non_matching_user_after_provider_error() {
+        let mut conversation = ConversationState::new();
+        conversation.push_user("keep me".to_string());
+
+        assert!(!conversation.rollback_last_user_if_text("different prompt"));
+
+        assert_eq!(conversation.last_user_prompt(), "keep me");
     }
 
     #[test]
