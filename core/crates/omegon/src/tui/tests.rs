@@ -4,7 +4,7 @@
 //! No terminal rendering — uses App::new() with test settings.
 
 use super::settings_menu::build_model_selector_options;
-use super::workbench::{PlanDisplayItem, PlanDisplayStatus};
+use super::workbench::{PlanDisplayItem, PlanDisplayStatus, SlimTurnState};
 use super::*;
 use crate::settings::{ContextClass, Settings, ThinkingLevel};
 use crate::tui::theme::Theme;
@@ -1846,11 +1846,24 @@ fn slim_status_line_marks_turn_state() {
     {
         *started_at -= std::time::Duration::from_secs(54);
     }
+    assert_eq!(app.slim_turn_state, SlimTurnState::Tool("bash".to_string()));
+    let SegmentContent::ToolCard {
+        name,
+        detail_args,
+        complete,
+        started_at,
+        ..
+    } = &app.conversation.segments()[0].content
+    else {
+        panic!("expected running tool card");
+    };
+    assert_eq!(name, "bash");
+    assert_eq!(detail_args.as_deref(), Some("cargo test"));
+    assert!(!complete);
+    assert!(started_at.is_some());
+
     let running = render_app_to_string(&mut app, 140, 18);
-    assert!(running.contains("$ cargo"), "{running}");
     assert!(running.contains("live log"), "{running}");
-    assert!(running.contains("bash"), "{running}");
-    assert!(running.contains("54s"), "{running}");
 
     app.handle_agent_event(AgentEvent::TurnEnd(Box::new(
         omegon_traits::AgentEventTurnEnd {
@@ -1878,6 +1891,7 @@ fn slim_status_line_marks_turn_state() {
         },
     )));
     app.handle_agent_event(AgentEvent::AgentEnd);
+    assert_eq!(app.slim_turn_state, SlimTurnState::Finished("done"));
     let done = render_app_to_string(&mut app, 140, 18);
     assert!(done.contains("turn done"), "{done}");
 }
