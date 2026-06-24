@@ -487,6 +487,192 @@ pub fn cmd_list() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct SkillBundleCandidate {
+    source: String,
+    name: String,
+    path: std::path::PathBuf,
+    manifest: SkillManifest,
+    missing_script_refs: Vec<String>,
+}
+
+fn claude_skill_roots(cwd: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    let mut roots = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        roots.push(("claude:user".into(), home.join(".claude").join("skills")));
+        roots.push((
+            "claude:user".into(),
+            home.join(".claude-code").join("skills"),
+        ));
+    }
+    roots.push(("claude:project".into(), cwd.join(".claude").join("skills")));
+    roots.push((
+        "claude:project".into(),
+        cwd.join(".claude-code").join("skills"),
+    ));
+    roots
+}
+
+fn find_script_references(body: &str) -> Vec<String> {
+    let mut refs = Vec::new();
+    for token in body
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, '`' | '\'' | '"' | ')' | '(' | ','))
+    {
+        let token = token.trim_matches(|ch: char| matches!(ch, ':' | ';' | '.'));
+        if (token.starts_with("scripts/") || token.contains("/scripts/"))
+            && !refs.iter().any(|existing| existing == token)
+        {
+            refs.push(token.to_string());
+        }
+    }
+    refs
+}
+
+fn discover_skill_bundles(
+    source: &str,
+    root: &std::path::Path,
+) -> anyhow::Result<Vec<SkillBundleCandidate>> {
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut bundles = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let skill_file = dir.join("SKILL.md");
+        if skill_file.exists() {
+            let content = std::fs::read_to_string(&skill_file).unwrap_or_default();
+            if !content.trim().is_empty() {
+                let (manifest, body) = parse_skill_file(&content);
+                let name = if !manifest.name.is_empty() {
+                    manifest.name.clone()
+                } else {
+                    dir.file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "unknown".into())
+                };
+                let missing_script_refs = find_script_references(&body)
+                    .into_iter()
+                    .filter(|reference| !dir.join(reference).exists())
+                    .collect();
+                bundles.push(SkillBundleCandidate {
+                    source: source.to_string(),
+                    name,
+                    path: dir,
+                    manifest,
+                    missing_script_refs,
+                });
+            }
+            continue;
+        }
+        let Ok(read_dir) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in read_dir.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !is_ignored_signal_dir(&name) {
+                    stack.push(path);
+                }
+            }
+        }
+    }
+    bundles.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(bundles)
+}
+
+fn doctor_candidate_conflicts(
+    candidate: &SkillBundleCandidate,
+    entries: &[SkillEntry],
+) -> Vec<String> {
+    let candidate_entry = SkillEntry {
+        name: candidate.name.clone(),
+        description: candidate.manifest.description.clone(),
+        id: candidate.manifest.id.clone(),
+        version: candidate.manifest.version.clone(),
+        tags: candidate.manifest.tags.clone(),
+        aliases: candidate.manifest.aliases.clone(),
+        triggers: candidate.manifest.triggers.clone(),
+        activation: candidate.manifest.activation.clone(),
+        profile: candidate.manifest.profile.clone(),
+        project_signals: candidate.manifest.project_signals.clone(),
+        posture: candidate.manifest.posture.clone(),
+        max_turns: candidate.manifest.max_turns,
+        installed: true,
+        bundled: false,
+        project_local: false,
+        source: candidate.source.clone(),
+        editable: false,
+        reloadable: true,
+        shadows: Vec::new(),
+        conflicts: Vec::new(),
+        path: candidate.path.display().to_string(),
+    };
+    entries
+        .iter()
+        .filter(|entry| skill_sources_conflict(&candidate_entry, entry))
+        .map(|entry| format!("{} ({})", entry.name, entry.source))
+        .collect()
+}
+
+pub fn doctor_report() -> anyhow::Result<String> {
+    let cwd = std::env::current_dir()?;
+    let entries = list_structured().unwrap_or_default();
+    let mut lines = vec!["# Skills doctor".to_string(), String::new()];
+    lines.push("Detected compatible skill roots:".into());
+    let mut total = 0usize;
+    let mut conflict_count = 0usize;
+    let mut missing_scripts = 0usize;
+    for (source, root) in claude_skill_roots(&cwd) {
+        let bundles = discover_skill_bundles(&source, &root)?;
+        if bundles.is_empty() {
+            lines.push(format!("  ○ {source:<15} {}", root.display()));
+            continue;
+        }
+        total += bundles.len();
+        lines.push(format!(
+            "  ● {source:<15} {} ({} skills)",
+            root.display(),
+            bundles.len()
+        ));
+        for bundle in bundles {
+            let conflicts = doctor_candidate_conflicts(&bundle, &entries);
+            conflict_count += conflicts.len();
+            missing_scripts += bundle.missing_script_refs.len();
+            let mut metadata = Vec::new();
+            if bundle.manifest.description.is_empty() {
+                metadata.push("missing-description".to_string());
+            }
+            if !bundle.missing_script_refs.is_empty() {
+                metadata.push(format!(
+                    "missing-scripts:{}",
+                    bundle.missing_script_refs.join(",")
+                ));
+            }
+            if !conflicts.is_empty() {
+                metadata.push(format!("conflicts:{}", conflicts.join(",")));
+            }
+            if metadata.is_empty() {
+                metadata.push("compatible".into());
+            }
+            lines.push(format!("    - {} — {}", bundle.name, metadata.join(" · ")));
+        }
+    }
+    lines.push(String::new());
+    lines.push(format!("Summary: {total} compatible external skill bundle(s), {conflict_count} conflict marker(s), {missing_scripts} missing script reference(s)."));
+    lines.push(String::new());
+    lines.push("Recommended next steps:".into());
+    lines.push("  - `omegon skills source add <name> <path-or-url>` to register upstream sources once implemented.".into());
+    lines.push("  - `omegon skills source sync <name>` or `omegon skills source sync --all` to refresh configured sources once implemented.".into());
+    lines.push("  - `omegon skills resolve` to persist conflict choices once implemented; prefer project-local merged skills for non-1:1 conflicts.".into());
+    Ok(lines.join("\n"))
+}
+
+pub fn cmd_doctor() -> anyhow::Result<()> {
+    println!("{}", doctor_report()?);
+    Ok(())
+}
+
 /// Install all bundled skills to ~/.omegon/skills/.
 /// Existing files are overwritten. Project-local skills are never touched.
 pub fn cmd_install() -> anyhow::Result<()> {
@@ -1651,6 +1837,20 @@ path = "{skill_path}"
                 None => unsafe { std::env::remove_var(self.key) },
             }
         }
+    }
+
+    #[test]
+    fn doctor_report_mentions_claude_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let report = doctor_report().unwrap();
+        std::env::set_current_dir(original).unwrap();
+
+        assert!(report.contains("# Skills doctor"));
+        assert!(report.contains("claude:user"));
+        assert!(report.contains("claude:project"));
+        assert!(report.contains("sync --all"));
     }
 
     #[test]

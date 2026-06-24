@@ -803,6 +803,8 @@ enum NexAction {
 enum SkillsAction {
     /// List skills — bundled, user-installed, and project-local.
     List,
+    /// Diagnose local/project skill ecosystems and onboarding readiness.
+    Doctor,
     /// Install all bundled skills, or install one skill from the upstream armory.
     Install {
         /// Armory skill name or skills/<name>. Omit to install bundled skills.
@@ -1613,6 +1615,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Doctor) => run_doctor_command(&cli).await,
         Some(Commands::Skills { ref action }) => match action {
             SkillsAction::List => skills::cmd_list(),
+            SkillsAction::Doctor => skills::cmd_doctor(),
             SkillsAction::Install { name } => {
                 if let Some(name) = name.as_deref() {
                     armory::cmd_install(name, armory::ArmoryInstallKind::Skill, &cli.cwd).await
