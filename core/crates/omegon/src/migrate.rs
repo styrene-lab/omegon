@@ -796,6 +796,19 @@ pub fn init_project(cwd: &Path, move_all: bool) -> String {
         actions += 1;
     }
 
+    // ── Bootstrap canonical project memory if explicitly initialized ───
+    let ai_memory = cwd.join("ai/memory");
+    if !ai_memory.exists() {
+        if std::fs::create_dir_all(&ai_memory).is_ok() {
+            lines.push("✓ Created `ai/memory/` for durable project facts".into());
+            actions += 1;
+        } else {
+            lines.push("⚠ Failed to create `ai/memory/` (check permissions)".into());
+        }
+    } else {
+        lines.push("✓ `ai/memory/` already exists".into());
+    }
+
     // ── Bootstrap .omegon/ config dir if needed ──────────────────────
     let config_dir = cwd.join(".omegon");
     if !config_dir.exists() {
@@ -1198,6 +1211,17 @@ mod tests {
             "{report}"
         );
         assert!(dir.path().join(".omegon").is_dir());
+    }
+
+    #[test]
+    fn init_project_creates_memory_scaffold() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = init_project(dir.path(), false);
+        assert!(
+            report.contains("Created `ai/memory/` for durable project facts"),
+            "{report}"
+        );
+        assert!(dir.path().join("ai/memory").is_dir());
     }
 
     #[test]

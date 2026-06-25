@@ -166,6 +166,20 @@ impl LifecycleSnapshot {
     }
 }
 
+pub(crate) fn project_memory_dir_if_initialized(project_root: &Path) -> Option<std::path::PathBuf> {
+    // Canonical: ai/memory/, fallback: .omegon/memory/. Ordinary startup must
+    // not create either path; /init is the explicit project-scaffold boundary.
+    let ai = project_root.join("ai").join("memory");
+    let omegon = project_root.join(".omegon").join("memory");
+    if ai.exists() {
+        Some(ai)
+    } else if omegon.exists() {
+        Some(omegon)
+    } else {
+        None
+    }
+}
+
 impl AgentSetup {
     /// Initialize the event bus, tools, memory, lifecycle context, and conversation.
     pub async fn new(
@@ -403,19 +417,9 @@ impl AgentSetup {
 
         // ─── Memory ─────────────────────────────────────────────────────
         let mind = "default".to_string();
-        let memory_dir = {
-            // Canonical: ai/memory/, fallback: .omegon/memory/
-            let ai = project_root.join("ai").join("memory");
-            let omegon = project_root.join(".omegon").join("memory");
-            if omegon.exists() && !ai.exists() {
-                omegon
-            } else {
-                ai
-            }
-        };
-        let _ = std::fs::create_dir_all(&memory_dir);
-        let db_path = memory_dir.join("facts.db");
-        let jsonl_path = memory_dir.join("facts.jsonl");
+        let memory_dir = project_memory_dir_if_initialized(&project_root);
+        let db_path = memory_dir.as_ref().map(|dir| dir.join("facts.db"));
+        let jsonl_path = memory_dir.as_ref().map(|dir| dir.join("facts.jsonl"));
 
         let mut initial_memory_status = crate::status::MemoryStatus {
             total_facts: 0,
@@ -435,7 +439,9 @@ impl AgentSetup {
         let mut context_embed_service: Option<std::sync::Arc<dyn omegon_memory::EmbeddingService>> =
             None;
 
-        if let Ok(backend) = omegon_memory::SqliteBackend::open(&db_path) {
+        if let Some(db_path) = db_path.as_ref() {
+            match omegon_memory::SqliteBackend::open(db_path) {
+                Ok(backend) => {
             tracing::info!(mind = %mind, db = %db_path.display(), child = is_child, "memory backend loaded");
 
             if let Ok(stats) = backend.stats(&mind).await {
@@ -461,8 +467,9 @@ impl AgentSetup {
             if !is_child {
                 let stats = backend.stats(&mind).await.ok();
                 if stats.as_ref().is_none_or(|s| s.active_facts == 0)
-                    && jsonl_path.exists()
-                    && let Ok(jsonl) = std::fs::read_to_string(&jsonl_path)
+                    && jsonl_path.as_ref().is_some_and(|path| path.exists())
+                    && let Some(jsonl_path) = jsonl_path.as_ref()
+                    && let Ok(jsonl) = std::fs::read_to_string(jsonl_path)
                 {
                     match backend.import_jsonl(&jsonl).await {
                         Ok(import) => {
@@ -542,13 +549,25 @@ impl AgentSetup {
                     .with_extraction_model("anthropic:claude-haiku-4-5-20251001".into());
             }
             bus.register(Box::new(memory_feature));
-        } else {
+                }
+                Err(err) => {
             let warning = format!(
                 "Memory backend unavailable — memory_* tools disabled ({})",
                 db_path.display()
             );
-            tracing::error!(db = %db_path.display(), "memory backend unavailable — memory_* tools disabled");
+            tracing::error!(db = %db_path.display(), error = %err, "memory backend unavailable — memory_* tools disabled");
             memory_warning = Some(warning);
+                }
+            }
+        } else {
+            tracing::info!(
+                root = %project_root.display(),
+                "project memory not initialized — skipping durable project memory backend; run /init to create ai/memory"
+            );
+            memory_warning = Some(
+                "Project memory is not initialized — run `/init` to create `ai/memory/` for durable project facts."
+                    .to_string(),
+            );
         }
 
         // ─── Lifecycle (design-tree + openspec) ──────────────────────────
@@ -2086,5 +2105,35 @@ mod tests {
                 .parent()
                 .map(Path::to_path_buf)
         );
+    }
+}
+
+#[cfg(test)]
+mod init_gating_tests {
+    use super::*;
+
+    #[test]
+    fn project_memory_dir_absent_without_init_scaffold() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(project_memory_dir_if_initialized(dir.path()).is_none());
+        assert!(!dir.path().join("ai").exists());
+        assert!(!dir.path().join(".omegon").exists());
+    }
+
+    #[test]
+    fn project_memory_dir_prefers_existing_ai_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let ai_memory = dir.path().join("ai/memory");
+        std::fs::create_dir_all(&ai_memory).unwrap();
+        std::fs::create_dir_all(dir.path().join(".omegon/memory")).unwrap();
+        assert_eq!(project_memory_dir_if_initialized(dir.path()), Some(ai_memory));
+    }
+
+    #[test]
+    fn project_memory_dir_uses_legacy_omegon_memory_when_ai_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_memory = dir.path().join(".omegon/memory");
+        std::fs::create_dir_all(&legacy_memory).unwrap();
+        assert_eq!(project_memory_dir_if_initialized(dir.path()), Some(legacy_memory));
     }
 }

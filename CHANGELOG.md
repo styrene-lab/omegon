@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 - Added `/ui activity` controls for showing, hiding, and toggling the slim live activity stream independently from dashboard, instruments, and footer surfaces.
+- Made `/init` the explicit boundary for creating project-local `ai/memory/` durable memory scaffolding.
 - Ignored local per-project `.omegon/profile.json` files so live profile changes do not dirty source checkouts.
 - Added `omegon skills import <path> [--project] [--force]` for importing Claude/Omegon skill bundles while preserving scripts and resources.
 - Added read-only `omegon skills doctor` onboarding diagnostics for Claude-compatible skill roots, script references, and registry conflicts.
@@ -37,6 +38,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 - Routed all in-tree bash execution paths, including code-act proxy execution, through workspace-boundary mediation so path permission prompts remain harness-level instead of leaking back as ordinary tool output.
 - Kept completed live tool activity visible briefly before clearing the slim activity stream so successful and failed operations do not disappear abruptly.
+- Stopped ordinary startup from creating project-local `ai/` or `.omegon/` memory directories; uninitialized projects now stay clean until `/init` is run.
 - Retained bounded multi-tool activity rows with display-ready projection metadata so slim activity can show recent running/completed/cancelled tools without TUI-only conversation lookups.
 - Allowed workspace-boundary-safe temp directory paths by default so tools can use `/tmp`-style scratch files without unnecessary permission prompts.
 - Clarified permission prompts with typed request metadata so the TUI distinguishes policy-only approvals from persisted directory grants and shows the actual grant path.
