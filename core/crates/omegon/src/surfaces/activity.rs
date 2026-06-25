@@ -32,12 +32,12 @@ impl ActivitySurfaceProjection {
     }
 
     pub fn from_parts(
-        tool: Option<ActivityToolProjection>,
+        tools: Vec<ActivityToolProjection>,
         cleave: Option<&CleaveProgress>,
         delegate: Option<&DelegateProgress>,
     ) -> Self {
         let mut entries = Vec::new();
-        if let Some(tool) = tool {
+        for tool in tools {
             entries.push(ActivityEntryProjection {
                 kind: ActivityEntryKind::Tool,
                 tool: Some(tool),
@@ -78,6 +78,14 @@ pub enum ActivityEntryKind {
 pub struct ActivityToolProjection {
     pub segment_id: String,
     pub mode: ActivityToolMode,
+    pub status: ActivityToolStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityToolStatus {
+    Running,
+    Complete,
+    Error,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
