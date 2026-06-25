@@ -8043,11 +8043,12 @@ Scroll transcript:
                 };
                 self.tool_inspection_target = Some(ToolInspectionTarget::LiveLatest(id.clone()));
                 self.push_activity_tool_start(&id, &name, args_summary.clone());
-                self.conversation.push_tool_start(
+                self.conversation.push_tool_start_with_expanded(
                     &id,
                     &name,
                     args_summary.as_deref(),
                     detail_args.as_deref(),
+                    id.starts_with("shell-"),
                 );
                 self.conversation.stamp_meta(self.current_meta());
                 self.tool_calls += 1;

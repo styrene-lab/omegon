@@ -485,6 +485,17 @@ impl ConversationView {
         args_summary: Option<&str>,
         detail_args: Option<&str>,
     ) {
+        self.push_tool_start_with_expanded(id, name, args_summary, detail_args, false);
+    }
+
+    pub fn push_tool_start_with_expanded(
+        &mut self,
+        id: &str,
+        name: &str,
+        args_summary: Option<&str>,
+        detail_args: Option<&str>,
+        expanded_by_default: bool,
+    ) {
         if is_suppressed_control_plane_tool(name) {
             self.suppressed_tool_calls.insert(
                 id.to_string(),
@@ -501,11 +512,13 @@ impl ConversationView {
         if let SegmentContent::ToolCard {
             args_summary: ref mut a,
             detail_args: ref mut d,
+            expanded: ref mut e,
             ..
         } = seg.content
         {
             *a = args_summary.map(|s| s.to_string());
             *d = detail_args.map(|s| s.to_string());
+            *e = expanded_by_default;
         }
         self.segments.push(seg);
         self.conv_state.invalidate();
@@ -1831,6 +1844,20 @@ mod tests {
         }
         assert!(found_hello, "should render user prompt");
         assert!(found_bash, "should render tool card");
+    }
+
+    #[test]
+    fn tool_start_can_opt_into_default_expansion() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start_with_expanded("t1", "bash", Some("ls"), Some("ls"), true);
+        cv.push_tool_start("t2", "bash", Some("echo hi"), Some("echo hi"));
+
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[0].content {
+            assert!(expanded, "opt-in card should start expanded");
+        }
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[1].content {
+            assert!(!expanded, "ordinary tool card should still start collapsed");
+        }
     }
 
     #[test]
