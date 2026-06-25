@@ -704,7 +704,8 @@ pub fn doctor_report() -> anyhow::Result<String> {
     lines.push(format!("Summary: {total} compatible external skill bundle(s), {conflict_count} conflict marker(s), {missing_scripts} missing script reference(s)."));
     lines.push(String::new());
     lines.push("Recommended next steps:".into());
-    lines.push("  - Import user-level Claude skills with `omegon skills import <skill-dir>` (creates a copy under ~/.omegon/skills).".into());
+    lines.push("  - Fast path: run `omegon migrate claude-code` to copy detected Claude user/project skills plus Claude settings into Omegon.".into());
+    lines.push("  - Import user-level Claude skills selectively with `omegon skills import <skill-dir>` (creates a copy under ~/.omegon/skills).".into());
     lines.push("  - Import project-level Claude skills with `omegon skills import <skill-dir> --project` (creates a copy under .omegon/skills).".into());
     lines.push("  - Re-run import with `--force` to refresh a copied skill after editing its Claude source.".into());
     lines.push("  - Resolve conflicts by creating a project-local merged skill; Omegon will not inject conflicting skill directives together.".into());
@@ -1320,8 +1321,6 @@ fn split_frontmatter(content: &str) -> (Option<(FrontmatterFormat, String)>, &st
 }
 
 /// List all skills as structured entries for the ACP settings surface.
-///
-
 fn skill_path_stays_within_extension_root(
     extension_dir: &std::path::Path,
     relative_path: &str,
@@ -2007,6 +2006,14 @@ path = "{skill_path}"
         fn drop(&mut self) {
             let _ = std::env::set_current_dir(&self.original);
         }
+    }
+
+    #[test]
+    fn doctor_report_mentions_claude_migration_fast_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd = CwdRestore::enter(dir.path());
+        let report = doctor_report().unwrap();
+        assert!(report.contains("omegon migrate claude-code"));
     }
 
     #[test]

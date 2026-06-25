@@ -61,23 +61,18 @@ impl Default for ToneIntensity {
 }
 
 /// Policy for resolving activation conflicts between same-context skills.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SkillConflictResolution {
     /// Keep the latest provider by load order. Canonical order is bundled/user before project.
     /// This is a non-interactive fallback only; interactive surfaces should recommend merging
     /// conflicting guidance into one project-local skill instead of injecting both.
+    #[default]
     MostRecent,
     /// Mark the conflict for operator resolution. Until `/skills resolve` exists, this uses
     /// the same non-interactive fallback as MostRecent to preserve the one-skill-per-slot invariant.
     Prompt,
     /// Drop all participants in a detected conflict. Useful for tests/hardening.
     Error,
-}
-
-impl Default for SkillConflictResolution {
-    fn default() -> Self {
-        Self::MostRecent
-    }
 }
 
 #[derive(Debug, Clone)]
