@@ -5517,6 +5517,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
                 while let Some(active) = runtime.maybe_start_next_turn() {
                     emit_runtime_queue_snapshot(&runtime, &events_tx);
+                    let _ = events_tx.send(AgentEvent::RuntimePromptStarted {
+                        text: active.prompt.text.clone(),
+                        image_paths: active.prompt.image_paths.clone(),
+                    });
                     stop_voice_session_if_requested(&active.prompt, &runtime_state.bus, &events_tx)
                         .await;
                     mark_interactive_session_busy(&agent.dashboard_handles, true);

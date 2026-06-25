@@ -4050,12 +4050,6 @@ impl App {
 
         if self.agent_active {
             let should_interrupt = matches!(self.queue_mode, PromptQueueMode::InterruptAfterTurn);
-            if attachments.is_empty() {
-                self.conversation.push_user(&final_text);
-            } else {
-                self.conversation
-                    .push_user_with_attachments(&final_text, &attachments);
-            }
             self.history.push(raw_text.clone());
             self.history_idx = None;
             let _ = command_tx
@@ -8211,6 +8205,14 @@ Scroll transcript:
             }
             AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
                 self.runtime_queue_snapshot = Some(snapshot_json);
+            }
+            AgentEvent::RuntimePromptStarted { text, image_paths } => {
+                if image_paths.is_empty() {
+                    self.conversation.push_user(&text);
+                } else {
+                    self.conversation
+                        .push_user_with_attachments(&text, &image_paths);
+                }
             }
             AgentEvent::SkillActivation { event } => {
                 let mut parts = vec![

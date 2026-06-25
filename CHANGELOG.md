@@ -46,6 +46,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Made turn cancellation phase-aware: early interrupted submissions are forgotten from canonical replay, while interrupts after assistant/tool output keep the prompt for the next turn; the session bar now exposes interrupt/keep/forget disposition.
 - Fixed upstream LLM error recovery so a provider rejection is surfaced in the transcript without leaving the rejected active prompt in canonical replay and poisoning subsequent sends.
 - Fixed Codex Responses replay so assistant history uses request-safe `output_text` content blocks instead of invalid `input_text`, while preserving queued operator prompt visibility in the TUI conversation.
+- Display queued prompts as normal operator segments when the runtime actually starts them, instead of inserting them into the transcript at queue time.
 
 ### Changed
 - Renamed the internal plan surface aggregate to `PlanSurfaceInputs` and removed the local lane projection mirror so active plan lanes use the shared `omegon_traits` projection DTO end-to-end.
