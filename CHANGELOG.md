@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added initial Omegon Web discovery endpoints for browser/Auspex capability metadata and launch context.
 - Added a registry-native `/loop` MVP for durable recurring prompt job definitions, binding jobs to prompt path and content hash ahead of daemon scheduler execution.
 - Added `/loop menu` schedule recipes plus agent-facing `loop_list`, `loop_create`, `loop_status`, and `loop_stop` tools for durable loop jobs.
 - Wired daemon loop-job scheduling for enabled interval jobs with run-history records, prompt-hash drift pausing, and max-run stop enforcement.

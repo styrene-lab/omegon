@@ -162,6 +162,27 @@ pub struct EventAccepted {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct WebCapabilityDescriptor {
+    pub interactive: bool,
+    pub chat: bool,
+    pub hosted_web_ui: bool,
+    pub surface_api: bool,
+    pub supports_tool_approval: bool,
+    pub supports_operator_wait: bool,
+    pub supports_session_resume: bool,
+    pub supports_attachments: bool,
+    pub supports_auspex_proxy: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebLaunchContextResponse {
+    pub mode: String,
+    pub proxied_by: Option<String>,
+    pub back_url: Option<String>,
+    pub policy_owner: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct AssistantRunsListResponse {
     pub runs: Vec<crate::capabilities::runs::AssistantRunSummary>,
 }
@@ -291,6 +312,31 @@ pub async fn get_capabilities(
     State(state): State<WebState>,
 ) -> Result<Json<crate::capabilities::inventory::CapabilityInventorySnapshot>, StatusCode> {
     Ok(Json(capability_inventory_snapshot(state)?))
+}
+
+/// GET /api/web/capabilities — web/Auspex capability descriptor.
+pub async fn get_web_capabilities() -> Json<WebCapabilityDescriptor> {
+    Json(WebCapabilityDescriptor {
+        interactive: true,
+        chat: true,
+        hosted_web_ui: true,
+        surface_api: false,
+        supports_tool_approval: true,
+        supports_operator_wait: true,
+        supports_session_resume: false,
+        supports_attachments: false,
+        supports_auspex_proxy: true,
+    })
+}
+
+/// GET /api/web/launch-context — describes how the web UI was launched.
+pub async fn get_web_launch_context() -> Json<WebLaunchContextResponse> {
+    Json(WebLaunchContextResponse {
+        mode: "direct".to_string(),
+        proxied_by: None,
+        back_url: None,
+        policy_owner: "omegon".to_string(),
+    })
 }
 
 /// GET /api/startup — machine-readable dashboard startup/discovery metadata.
@@ -882,6 +928,31 @@ required = ["MISSING_REQUIRED_TOKEN"]
             Some(value) => unsafe { std::env::set_var(key, value) },
             None => unsafe { std::env::remove_var(key) },
         }
+    }
+
+    #[tokio::test]
+    async fn web_capabilities_describe_initial_browser_contract() {
+        let response = get_web_capabilities().await.0;
+
+        assert!(response.interactive);
+        assert!(response.chat);
+        assert!(response.hosted_web_ui);
+        assert!(response.supports_tool_approval);
+        assert!(response.supports_operator_wait);
+        assert!(response.supports_auspex_proxy);
+        assert!(!response.surface_api);
+        assert!(!response.supports_session_resume);
+        assert!(!response.supports_attachments);
+    }
+
+    #[tokio::test]
+    async fn web_launch_context_defaults_to_direct_omegon_owned() {
+        let response = get_web_launch_context().await.0;
+
+        assert_eq!(response.mode, "direct");
+        assert_eq!(response.proxied_by, None);
+        assert_eq!(response.back_url, None);
+        assert_eq!(response.policy_owner, "omegon");
     }
 
     #[tokio::test]
