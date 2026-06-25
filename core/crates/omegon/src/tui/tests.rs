@@ -5787,7 +5787,7 @@ fn selected_tool_segment_detail_pane_renders_full_tool_context() {
             details: serde_json::Value::Null,
         },
     });
-    app.tool_activity_linger_until = None;
+    app.activity_tools.clear();
     app.tool_inspection_target = Some(ToolInspectionTarget::Pinned("tool-1".into()));
 
     let rendered = render_app_to_string(&mut app, 140, 36);
@@ -5815,11 +5815,14 @@ fn completed_live_tool_lingers_before_activity_clears() {
         },
     });
 
-    assert!(matches!(
-        app.tool_inspection_target,
-        Some(ToolInspectionTarget::LiveLatest(ref id)) if id == "tool-1"
-    ));
-    assert!(app.tool_activity_linger_until.is_some());
+    assert!(app.tool_inspection_target.is_none());
+    let tool = app
+        .activity_tools
+        .iter()
+        .find(|tool| tool.segment_id == "tool-1")
+        .expect("completed tool should remain in transient activity");
+    assert_eq!(tool.status, crate::surfaces::activity::ActivityToolStatus::Complete);
+    assert!(tool.expires_at.is_some());
 }
 
 #[test]
@@ -5839,12 +5842,18 @@ fn expired_live_tool_linger_clears_activity_on_render() {
             details: serde_json::Value::Null,
         },
     });
-    app.tool_activity_linger_until = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
+    if let Some(tool) = app
+        .activity_tools
+        .iter_mut()
+        .find(|tool| tool.segment_id == "tool-1")
+    {
+        tool.expires_at = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
+    }
 
     let _ = render_app_to_string(&mut app, 120, 32);
 
     assert!(app.tool_inspection_target.is_none());
-    assert!(app.tool_activity_linger_until.is_none());
+    assert!(app.activity_tools.is_empty());
 }
 
 #[test]

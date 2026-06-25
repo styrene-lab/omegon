@@ -413,6 +413,24 @@ pub(crate) fn voice_prompt_from_notification(
 
 /// Application state for the TUI.
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct ActivityToolState {
+    segment_id: String,
+    mode: crate::surfaces::activity::ActivityToolMode,
+    status: crate::surfaces::activity::ActivityToolStatus,
+    expires_at: Option<std::time::Instant>,
+}
+
+impl ActivityToolState {
+    fn projection(&self) -> crate::surfaces::activity::ActivityToolProjection {
+        crate::surfaces::activity::ActivityToolProjection {
+            segment_id: self.segment_id.clone(),
+            mode: self.mode,
+            status: self.status,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ToolInspectionTarget {
     LiveLatest(String),
     Pinned(String),
@@ -534,7 +552,7 @@ struct App {
     /// Structured session plan snapshot for the active Workbench panel.
     workbench_state: WorkbenchState,
     tool_inspection_target: Option<ToolInspectionTarget>,
-    tool_activity_linger_until: Option<std::time::Instant>,
+    activity_tools: std::collections::VecDeque<ActivityToolState>,
     /// Explicit Slim turn state rendered in the session row.
     slim_turn_state: SlimTurnState,
     /// Visual effects manager (tachyonfx).
@@ -1963,7 +1981,7 @@ impl App {
             workbench_state: WorkbenchState::default(),
             completed_plan_history_available: false,
             tool_inspection_target: None,
-            tool_activity_linger_until: None,
+            activity_tools: std::collections::VecDeque::new(),
             slim_turn_state: SlimTurnState::Ready,
             effects: effects::Effects::new(),
             bus_commands: Vec::new(),
@@ -4494,34 +4512,31 @@ impl App {
             workstreams: self.workbench_state.workstreams.clone(),
             workspace: self.current_workbench_workspace_context(),
         };
-        if self
-            .tool_activity_linger_until
-            .is_some_and(|deadline| std::time::Instant::now() >= deadline)
-        {
-            if self
-                .tool_inspection_target
-                .as_ref()
-                .is_some_and(|target| matches!(target, ToolInspectionTarget::LiveLatest(_)))
-            {
-                self.tool_inspection_target = None;
-            }
-            self.tool_activity_linger_until = None;
-        }
-        let live_activity_tool = self.tool_inspection_target.as_ref().and_then(|target| {
-            self.conversation.tool_segment_by_id(target.id()).map(|_| {
-                let mode = match target {
-                    ToolInspectionTarget::LiveLatest(_) => crate::surfaces::activity::ActivityToolMode::Live,
-                    ToolInspectionTarget::Pinned(_) => crate::surfaces::activity::ActivityToolMode::Detail,
-                };
-                crate::surfaces::activity::ActivityToolProjection {
-                    segment_id: target.id().to_string(),
-                    mode,
-                }
-            })
+        let now = std::time::Instant::now();
+        self.activity_tools.retain(|tool| {
+            tool.expires_at
+                .map(|deadline| now < deadline)
+                .unwrap_or(true)
         });
+        let mut live_activity_tools = self
+            .activity_tools
+            .iter()
+            .filter(|tool| self.conversation.tool_segment_by_id(&tool.segment_id).is_some())
+            .map(ActivityToolState::projection)
+            .collect::<Vec<_>>();
+        if let Some(ToolInspectionTarget::Pinned(id)) = self.tool_inspection_target.as_ref()
+            && self.conversation.tool_segment_by_id(id).is_some()
+            && !live_activity_tools.iter().any(|tool| tool.segment_id == *id)
+        {
+            live_activity_tools.push(crate::surfaces::activity::ActivityToolProjection {
+                segment_id: id.clone(),
+                mode: crate::surfaces::activity::ActivityToolMode::Detail,
+                status: crate::surfaces::activity::ActivityToolStatus::Complete,
+            });
+        }
         let activity_projection = if self.ui_surfaces.activity && self.ui_surfaces.is_compact() {
             crate::surfaces::activity::ActivitySurfaceProjection::from_parts(
-                live_activity_tool,
+                live_activity_tools,
                 live_cleave.as_ref(),
                 live_delegate.as_ref(),
             )
@@ -7921,7 +7936,17 @@ Scroll transcript:
                     _ => Some(serde_json::to_string_pretty(&args).unwrap_or_default()),
                 };
                 self.tool_inspection_target = Some(ToolInspectionTarget::LiveLatest(id.clone()));
-                self.tool_activity_linger_until = None;
+                self.activity_tools
+                    .retain(|tool| tool.segment_id != id);
+                self.activity_tools.push_front(ActivityToolState {
+                    segment_id: id.clone(),
+                    mode: crate::surfaces::activity::ActivityToolMode::Live,
+                    status: crate::surfaces::activity::ActivityToolStatus::Running,
+                    expires_at: None,
+                });
+                while self.activity_tools.len() > 4 {
+                    self.activity_tools.pop_back();
+                }
                 self.conversation.push_tool_start(
                     &id,
                     &name,
@@ -8135,19 +8160,30 @@ Scroll transcript:
                 self.instrument_panel
                     .tool_finished(completed_name, is_error);
                 self.completed_tool_name = self.last_tool_name.take().or(Some(name));
+                let linger_for = if is_error {
+                    Duration::from_secs(8)
+                } else {
+                    Duration::from_millis(2200)
+                };
+                let expires_at = std::time::Instant::now() + linger_for;
+                if let Some(activity_tool) = self
+                    .activity_tools
+                    .iter_mut()
+                    .find(|tool| tool.segment_id == id)
+                {
+                    activity_tool.status = if is_error {
+                        crate::surfaces::activity::ActivityToolStatus::Error
+                    } else {
+                        crate::surfaces::activity::ActivityToolStatus::Complete
+                    };
+                    activity_tool.expires_at = Some(expires_at);
+                }
                 if self
                     .tool_inspection_target
                     .as_ref()
                     .is_some_and(|target| matches!(target, ToolInspectionTarget::LiveLatest(active_id) if active_id == &id))
                 {
-                    self.tool_activity_linger_until = Some(
-                        std::time::Instant::now()
-                            + if is_error {
-                                Duration::from_secs(8)
-                            } else {
-                                Duration::from_millis(2200)
-                            },
-                    );
+                    self.tool_inspection_target = None;
                 }
                 if self.agent_active {
                     self.slim_turn_state = SlimTurnState::RequestingProvider;
@@ -8329,7 +8365,7 @@ Scroll transcript:
                 self.workbench_state.active = None;
                 self.completed_plan_history_available = false;
                 self.tool_inspection_target = None;
-                self.tool_activity_linger_until = None;
+                self.activity_tools.clear();
                 self.turn = 0;
                 self.tool_calls = 0;
                 self.last_tool_name = None;
