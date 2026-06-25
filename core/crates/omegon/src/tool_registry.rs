@@ -160,6 +160,14 @@ pub mod mutation {
     pub const MUTATION_STATS: &str = "mutation_stats";
 }
 
+/// Loop jobs — owned by `features::loop_jobs`
+pub mod loop_jobs {
+    pub const LOOP_LIST: &str = "loop_list";
+    pub const LOOP_CREATE: &str = "loop_create";
+    pub const LOOP_STATUS: &str = "loop_status";
+    pub const LOOP_STOP: &str = "loop_stop";
+}
+
 // ─── Registry query ─────────────────────────────────────────────────────────
 
 /// All statically-declared tool names. Used by `EventBus::finalize()` to
@@ -170,7 +178,7 @@ pub mod mutation {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 68;
+pub const TOOL_COUNT: usize = 72;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -261,6 +269,11 @@ pub fn all_static_names() -> Vec<&'static str> {
         mutation::MUTATION_ACCEPT,
         mutation::MUTATION_REJECT,
         mutation::MUTATION_STATS,
+        // loop_jobs (4)
+        loop_jobs::LOOP_LIST,
+        loop_jobs::LOOP_CREATE,
+        loop_jobs::LOOP_STATUS,
+        loop_jobs::LOOP_STOP,
     ]
     // Total: 66
 }

@@ -8,8 +8,12 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use omegon_traits::{CommandDefinition, CommandResult, CommandSafety, Feature};
+use omegon_traits::{
+    CommandDefinition, CommandResult, CommandSafety, ContentBlock, Feature, ToolDefinition,
+    ToolResult,
+};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,19 +61,31 @@ impl LoopFeature {
     }
 
     fn help() -> String {
-        [
-            "Loop jobs",
-            "",
-            "Usage:",
-            "  /loop list",
-            "  /loop start <prompt> --every <duration> [--max-runs <n>]",
-            "  /loop stop <id>",
-            "  /loop status <id>",
-            "",
-            "First slice: durable loop definitions only. Daemon execution is a follow-up slice.",
-            "Loop jobs bind to the prompt file path and SHA-256 hash at creation time.",
-        ]
-        .join("\n")
+        Self::menu().render_markdown()
+    }
+
+    fn menu() -> crate::surfaces::palette::PaletteProjection {
+        use crate::surfaces::palette::{
+            PaletteGroupProjection, PaletteProjection, PaletteRowProjection,
+        };
+
+        PaletteProjection::new("Loop jobs")
+            .with_summary("Create recurring prompt jobs without remembering cron syntax. Agents can use loop_* tools; operators can use these slash-command recipes.")
+            .with_group(
+                PaletteGroupProjection::new("Common schedules")
+                    .with_description("Pick a human interval first; cron/file/git triggers stay daemon-internal until the scheduler slice is wired.")
+                    .with_row(PaletteRowProjection::action("loop.every.15m", "Every 15 minutes", "Good for polling short-lived work").with_command("/loop start <prompt> --every 15m"))
+                    .with_row(PaletteRowProjection::action("loop.every.hour", "Hourly", "Good for inbox, board, or PR review").with_command("/loop start <prompt> --every 1h"))
+                    .with_row(PaletteRowProjection::action("loop.every.day", "Daily", "Good for morning/evening summaries").with_command("/loop start <prompt> --every 24h"))
+                    .with_row(PaletteRowProjection::action("loop.max.runs", "Bounded run", "Stop automatically after a fixed number of runs").with_command("/loop start <prompt> --every 1h --max-runs 5")),
+            )
+            .with_group(
+                PaletteGroupProjection::new("Manage jobs")
+                    .with_row(PaletteRowProjection::action("loop.list", "List jobs", "Show durable loop definitions").with_command("/loop list"))
+                    .with_row(PaletteRowProjection::action("loop.status", "Inspect job", "Show one job as JSON, including prompt hash").with_command("/loop status <id>"))
+                    .with_row(PaletteRowProjection::action("loop.stop", "Stop job", "Disable a loop job without deleting its record").with_command("/loop stop <id>")),
+            )
+            .with_footer("First slice: definitions only. Jobs bind to prompt path + SHA-256; daemon execution lands next.")
     }
 
     fn load_jobs(&self) -> anyhow::Result<Vec<LoopJob>> {
@@ -140,7 +156,15 @@ impl LoopFeature {
         let max_runs = option_value(&parts, "--max-runs")
             .map(str::parse::<u32>)
             .transpose()?;
+        self.create_job(prompt, every, max_runs)
+    }
 
+    fn create_job(
+        &self,
+        prompt: &str,
+        every: &str,
+        max_runs: Option<u32>,
+    ) -> anyhow::Result<String> {
         let (_manifest, body, path) = crate::prompts::get_prompt(prompt)?;
         let safety = crate::prompts::safety_verdict(&body);
         if safety.is_blocked() {
@@ -188,11 +212,100 @@ impl Feature for LoopFeature {
         "loop"
     }
 
+    fn tools(&self) -> Vec<ToolDefinition> {
+        vec![
+            ToolDefinition {
+                name: crate::tool_registry::loop_jobs::LOOP_LIST.into(),
+                label: "loop_list".into(),
+                description: "List durable loop job definitions.".into(),
+                parameters: json!({"type": "object", "properties": {}}),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
+            },
+            ToolDefinition {
+                name: crate::tool_registry::loop_jobs::LOOP_CREATE.into(),
+                label: "loop_create".into(),
+                description: "Create a durable recurring prompt job using a human interval such as 15m, 1h, or 24h. Jobs are definitions only until daemon scheduler execution is wired.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "description": "Prompt id to run"},
+                        "every": {"type": "string", "description": "Human duration: 15m, 1h, 24h"},
+                        "max_runs": {"type": "integer", "minimum": 1, "description": "Optional automatic stop after N runs"}
+                    },
+                    "required": ["prompt", "every"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name: crate::tool_registry::loop_jobs::LOOP_STATUS.into(),
+                label: "loop_status".into(),
+                description: "Inspect one durable loop job definition by id.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}},
+                    "required": ["id"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
+            },
+            ToolDefinition {
+                name: crate::tool_registry::loop_jobs::LOOP_STOP.into(),
+                label: "loop_stop".into(),
+                description: "Disable a durable loop job definition by id.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}},
+                    "required": ["id"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
+            },
+        ]
+    }
+
+    async fn execute(
+        &self,
+        tool_name: &str,
+        _call_id: &str,
+        args: Value,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> anyhow::Result<ToolResult> {
+        let text = match tool_name {
+            crate::tool_registry::loop_jobs::LOOP_LIST => self.list()?,
+            crate::tool_registry::loop_jobs::LOOP_CREATE => {
+                let prompt = args["prompt"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("loop_create requires prompt"))?;
+                let every = args["every"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("loop_create requires every"))?;
+                let max_runs = args["max_runs"].as_u64().map(|n| n as u32);
+                self.create_job(prompt, every, max_runs)?
+            }
+            crate::tool_registry::loop_jobs::LOOP_STATUS => {
+                let id = args["id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("loop_status requires id"))?;
+                self.status(id)?
+            }
+            crate::tool_registry::loop_jobs::LOOP_STOP => {
+                let id = args["id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("loop_stop requires id"))?;
+                self.stop(id)?
+            }
+            _ => anyhow::bail!("Unknown tool: {tool_name}"),
+        };
+        Ok(ToolResult {
+            content: vec![ContentBlock::Text { text }],
+            details: json!({}),
+        })
+    }
+
     fn commands(&self) -> Vec<CommandDefinition> {
         vec![CommandDefinition {
             name: "loop".into(),
             description: "Register and inspect durable recurring prompt jobs".into(),
             subcommands: vec![
+                "menu".into(),
                 "list".into(),
                 "start".into(),
                 "stop".into(),
@@ -214,6 +327,7 @@ impl Feature for LoopFeature {
             let (subcommand, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
             let rest = rest.trim();
             match subcommand {
+                "menu" => Ok(Self::menu().render_markdown()),
                 "list" => self.list(),
                 "start" => self.start(rest),
                 "stop" if !rest.is_empty() => self.stop(rest),
