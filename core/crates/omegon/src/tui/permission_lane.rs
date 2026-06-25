@@ -1,6 +1,7 @@
 //! Permission prompt lane rendering and key mapping.
 
 use crossterm::event::{KeyCode, KeyModifiers};
+use omegon_traits::{PermissionPersistence, PermissionRequestKind};
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -8,12 +9,23 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 use super::theme;
 
-pub fn permission_persist_scope_label(tool_name: &str) -> &'static str {
-    match tool_name {
-        "bash" | "terminal" => "always for this command",
-        "read" | "view" => "always for this file",
-        "edit" | "write" | "change" => "always for this path",
-        _ => "always for this operation",
+pub fn permission_persist_scope_label(
+    tool_name: &str,
+    kind: PermissionRequestKind,
+    persistence: PermissionPersistence,
+) -> &'static str {
+    match persistence {
+        PermissionPersistence::ProjectDirectory => "always for this directory",
+        PermissionPersistence::SessionDirectory => "always for this directory this session",
+        PermissionPersistence::None => match kind {
+            PermissionRequestKind::Policy => "allow this operation",
+            PermissionRequestKind::PathBoundary => match tool_name {
+                "bash" | "terminal" => "always for this command",
+                "read" | "view" => "always for this file",
+                "edit" | "write" | "change" => "always for this path",
+                _ => "always for this operation",
+            },
+        },
     }
 }
 
@@ -40,13 +52,15 @@ pub fn render_permission_lane(
     t: &dyn theme::Theme,
     tool_name: &str,
     target: &str,
+    kind: PermissionRequestKind,
+    persistence: PermissionPersistence,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
     let bg = t.surface_bg();
     let text_budget = area.width.saturating_sub(2) as usize;
-    let scope = permission_persist_scope_label(tool_name);
+    let scope = permission_persist_scope_label(tool_name, kind, persistence);
     let mut lines = vec![Line::from(vec![
         Span::styled(
             "permission required · ",
@@ -96,14 +110,30 @@ pub fn render_permission_lane(
         .render(area, frame.buffer_mut());
 }
 
-pub fn format_permission_prompt(tool_name: &str, path: &str) -> String {
+pub fn format_permission_prompt(
+    tool_name: &str,
+    path: &str,
+    kind: PermissionRequestKind,
+    persistence: PermissionPersistence,
+    grant_path: Option<&str>,
+) -> String {
+    let scope = permission_persist_scope_label(tool_name, kind, persistence);
+    let grant = grant_path
+        .map(|path| format!("Grant: {path}\n"))
+        .unwrap_or_default();
+    let persist = match persistence {
+        PermissionPersistence::ProjectDirectory => "project profile directory permission",
+        PermissionPersistence::SessionDirectory => "session directory permission",
+        PermissionPersistence::None => "not persisted; approval applies to this operation only",
+    };
     format!(
         "Permission required\n\
          Tool: {tool_name}\n\
          Target: {path}\n\
+         {grant}\
          Reason: grant required for this operation\n\
-         Persist: project profile permissions for always-allow\n\n\
-         [y] once   [Shift+A] always + save   [n/Esc] deny"
+         Persist: {persist}\n\n\
+         [y] once   [Shift+A] {scope}   [n/Esc] deny"
     )
 }
 
@@ -138,20 +168,36 @@ mod tests {
     #[test]
     fn permission_scope_labels_are_tool_specific() {
         assert_eq!(
-            permission_persist_scope_label("bash"),
+            permission_persist_scope_label(
+                "bash",
+                PermissionRequestKind::PathBoundary,
+                PermissionPersistence::None
+            ),
             "always for this command"
         );
         assert_eq!(
-            permission_persist_scope_label("read"),
+            permission_persist_scope_label(
+                "read",
+                PermissionRequestKind::PathBoundary,
+                PermissionPersistence::None
+            ),
             "always for this file"
         );
         assert_eq!(
-            permission_persist_scope_label("edit"),
+            permission_persist_scope_label(
+                "edit",
+                PermissionRequestKind::PathBoundary,
+                PermissionPersistence::None
+            ),
             "always for this path"
         );
         assert_eq!(
-            permission_persist_scope_label("web_search"),
-            "always for this operation"
+            permission_persist_scope_label(
+                "web_search",
+                PermissionRequestKind::Policy,
+                PermissionPersistence::None
+            ),
+            "allow this operation"
         );
     }
 }

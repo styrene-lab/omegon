@@ -1764,7 +1764,9 @@ open_questions:
     #[test]
     fn temp_directory_paths_are_allowed_by_boundary() {
         let tools = CoreTools::new(PathBuf::from("/workspace"));
-        let temp_file = std::env::temp_dir().join("omegon-permission-test").join("out.txt");
+        let temp_file = std::env::temp_dir()
+            .join("omegon-permission-test")
+            .join("out.txt");
         let result = tools.resolve_path(temp_file.to_str().unwrap());
         assert!(result.is_ok(), "temp paths should be allowed: {result:?}");
     }
