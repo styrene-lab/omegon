@@ -398,32 +398,47 @@ fn is_openai_family_model(model_spec: &str) -> bool {
         || model_id.starts_with("o4-")
 }
 
+/// Providers that can serve the same model family through alternate auth or
+/// hosting surfaces. This is intentionally narrow: fallbacks here should be
+/// credential/protocol alternates for the same provider family, not arbitrary
+/// model substitution.
+fn alternate_provider_family(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "openai" => &["openai-codex"],
+        "openai-codex" => &["openai"],
+        "google" => &["google-antigravity"],
+        "google-antigravity" => &["google"],
+        _ => &[],
+    }
+}
+
+fn push_unique<'a>(order: &mut Vec<&'a str>, provider: &'a str) {
+    if !order.contains(&provider) {
+        order.push(provider);
+    }
+}
+
 fn fallback_order_for_model(model_spec: &str) -> Vec<&'static str> {
     let requested = infer_provider_id(model_spec);
+    let Some(requested_provider) = crate::auth::provider_by_id(&requested).map(|provider| provider.id) else {
+        return vec!["anthropic"];
+    };
 
-    match requested.as_str() {
-        "openai" if is_openai_family_model(model_spec) => {
-            vec!["openai", "openai-codex"]
+    let mut order = Vec::new();
+    push_unique(&mut order, requested_provider);
+
+    let allow_family_fallback = match requested_provider {
+        "openai" | "openai-codex" => is_openai_family_model(model_spec),
+        "google" | "google-antigravity" => true,
+        _ => false,
+    };
+    if allow_family_fallback {
+        for alternate in alternate_provider_family(requested_provider) {
+            push_unique(&mut order, alternate);
         }
-        "openai-codex" if is_openai_family_model(model_spec) => {
-            vec!["openai-codex", "openai"]
-        }
-        "openai-codex" => vec!["openai-codex"],
-        "anthropic" => vec!["anthropic"],
-        "openrouter" => vec!["openrouter"],
-        "groq" => vec!["groq"],
-        "xai" => vec!["xai"],
-        "mistral" => vec!["mistral"],
-        "cerebras" => vec!["cerebras"],
-        "google" => vec!["google"],
-        "google-antigravity" => vec!["google-antigravity", "google"],
-        "huggingface" => vec!["huggingface"],
-        "opencode-go" => vec!["opencode-go"],
-        "perplexity" => vec!["perplexity"],
-        "ollama" => vec!["ollama"],
-        "ollama-cloud" => vec!["ollama-cloud"],
-        _ => vec!["anthropic"],
     }
+
+    order
 }
 
 pub async fn resolve_execution_provider(model_spec: &str) -> Option<String> {
@@ -4708,15 +4723,41 @@ mod tests {
     }
 
     #[test]
-    fn openai_family_fallback_prioritizes_codex_for_gpt_models() {
+    fn openai_family_fallback_uses_explicit_provider_priority() {
         let order = fallback_order_for_model("openai:gpt-5.4");
         assert_eq!(order, vec!["openai", "openai-codex"]);
 
         let o_series_order = fallback_order_for_model("openai:o3-mini");
         assert_eq!(o_series_order, vec!["openai", "openai-codex"]);
 
+        let bare_order = fallback_order_for_model("gpt-5.4");
+        assert_eq!(bare_order, vec!["openai", "openai-codex"]);
+
         let codex_order = fallback_order_for_model("openai-codex:gpt-5.4");
         assert_eq!(codex_order, vec!["openai-codex", "openai"]);
+    }
+
+    #[test]
+    fn google_family_fallback_uses_explicit_provider_priority() {
+        assert_eq!(
+            fallback_order_for_model("google:gemini-2.5-pro"),
+            vec!["google", "google-antigravity"]
+        );
+        assert_eq!(
+            fallback_order_for_model("google-antigravity:gemini-2.5-pro"),
+            vec!["google-antigravity", "google"]
+        );
+        assert_eq!(
+            fallback_order_for_model("gemini-2.5-pro"),
+            vec!["google", "google-antigravity"]
+        );
+    }
+
+    #[test]
+    fn fallback_order_keeps_unrelated_providers_single_provider() {
+        assert_eq!(fallback_order_for_model("anthropic:claude-sonnet-4-6"), vec!["anthropic"]);
+        assert_eq!(fallback_order_for_model("openrouter:meta/llama"), vec!["openrouter"]);
+        assert_eq!(fallback_order_for_model("ollama:qwen3:32b"), vec!["ollama"]);
     }
 
     #[test]
