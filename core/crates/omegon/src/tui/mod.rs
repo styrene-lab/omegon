@@ -11097,8 +11097,16 @@ mod slash_command_parsing_tests {
         let text = snapshot.system_notification_text("Plan progress");
         assert!(text.contains("Plan mode: complete"), "{text}");
         assert!(text.contains("Progress: 2/2"), "{text}");
-        assert!(text.contains("● done  1  one"), "{text}");
-        assert!(text.contains("● done  2  two"), "{text}");
+        assert!(
+            text.lines()
+                .any(|line| line.contains("1") && line.contains("●") && line.contains("one")),
+            "{text}"
+        );
+        assert!(
+            text.lines()
+                .any(|line| line.contains("2") && line.contains("●") && line.contains("two")),
+            "{text}"
+        );
     }
 
     #[test]

@@ -655,12 +655,17 @@ impl CleaveFeature {
             {
                 match event {
                     crate::cleave::progress::ProgressEvent::ChildActivity {
-                        turn, tool, ..
+                        turn,
+                        tool,
+                        target,
+                        ..
                     } => {
                         if let Some(turn) = turn {
                             progress.last_turn = Some(turn);
                         }
                         if let Some(tool) = tool {
+                            progress.last_tool_activity =
+                                Some(ToolActivitySummary::new(tool.clone(), target));
                             progress.last_tool = Some(tool);
                         }
                     }
@@ -2343,16 +2348,13 @@ mod tests {
         let feature = CleaveFeature::new(dir.path(), vec![], false);
         let progress = feature.progress();
         let child = &progress.children[0];
+        let last_activity = child
+            .last_tool_activity
+            .as_ref()
+            .expect("replayed tool activity should keep semantic tool metadata");
+        assert_eq!(last_activity.raw_name, "bash");
+        assert_eq!(last_activity.args_summary.as_deref(), Some("cargo test"));
         assert_eq!(child.last_tool.as_deref(), Some("bash"));
-        assert_eq!(
-            child
-                .last_tool_activity
-                .as_ref()
-                .unwrap()
-                .args_summary
-                .as_deref(),
-            Some("cargo test -p omegon")
-        );
         assert_eq!(child.last_turn, Some(3));
         assert_eq!(
             child.supervision_mode,

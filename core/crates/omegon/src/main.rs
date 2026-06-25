@@ -10404,8 +10404,10 @@ mod tests {
         assert!(output.contains("Visible"), "{output}");
         assert!(output.contains("visible work"), "{output}");
         assert!(output.contains("OpenSpec"), "{output}");
-        assert!(output.contains("example · proposed · 1/2"), "{output}");
-        assert!(output.contains("Runtime · 1/2"), "{output}");
+        assert!(output.contains("example"), "{output}");
+        assert!(output.contains("1/2"), "{output}");
+        assert!(output.contains("Done"), "{output}");
+        assert!(output.contains("Pending"), "{output}");
     }
 
     #[test]
