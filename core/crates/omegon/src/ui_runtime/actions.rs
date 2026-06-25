@@ -147,6 +147,7 @@ pub enum UiSurfaceToggle {
     Dashboard,
     Instruments,
     Footer,
+    Activity,
 }
 
 impl UiSurfaceToggle {
@@ -155,6 +156,7 @@ impl UiSurfaceToggle {
             "dashboard" | "dash" => Ok(Self::Dashboard),
             "instruments" | "instrument" | "tools" => Ok(Self::Instruments),
             "footer" => Ok(Self::Footer),
+            "activity" | "activities" | "live" | "log" => Ok(Self::Activity),
             other => Err(format!("Unknown UI surface: {other}")),
         }
     }
@@ -164,6 +166,7 @@ impl UiSurfaceToggle {
             Self::Dashboard => "dashboard",
             Self::Instruments => "instruments",
             Self::Footer => "footer",
+            Self::Activity => "activity",
         }
     }
 }

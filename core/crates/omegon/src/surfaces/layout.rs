@@ -17,6 +17,7 @@ pub struct UiSurfaces {
     pub dashboard: bool,
     pub instruments: bool,
     pub footer: bool,
+    pub activity: bool,
 }
 
 impl UiSurfaces {
@@ -25,6 +26,7 @@ impl UiSurfaces {
             dashboard: false,
             instruments: false,
             footer: false,
+            activity: true,
         }
     }
 
@@ -33,6 +35,7 @@ impl UiSurfaces {
             dashboard: true,
             instruments: true,
             footer: true,
+            activity: true,
         }
     }
 
@@ -42,9 +45,9 @@ impl UiSurfaces {
     }
 
     pub fn preset(&self) -> SurfacePreset {
-        match (self.dashboard, self.instruments, self.footer) {
-            (false, false, false) => SurfacePreset::Lean,
-            (true, true, true) => SurfacePreset::Full,
+        match (self.dashboard, self.instruments, self.footer, self.activity) {
+            (false, false, false, true) => SurfacePreset::Lean,
+            (true, true, true, true) => SurfacePreset::Full,
             _ => SurfacePreset::Custom,
         }
     }
