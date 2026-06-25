@@ -49,6 +49,98 @@ pub enum LoopConcurrencyPolicy {
     SkipIfRunning,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LoopRunRecord {
+    pub job_id: String,
+    pub fired_at: String,
+    pub outcome: String,
+    pub message: String,
+}
+
+pub fn jobs_path(project_root: &Path) -> PathBuf {
+    project_root.join(".omegon").join("loops").join("jobs.json")
+}
+
+pub fn runs_path(project_root: &Path) -> PathBuf {
+    project_root
+        .join(".omegon")
+        .join("loops")
+        .join("runs.jsonl")
+}
+
+pub fn load_jobs_from_project(project_root: &Path) -> anyhow::Result<Vec<LoopJob>> {
+    load_jobs_at(&jobs_path(project_root))
+}
+
+pub fn save_jobs_to_project(project_root: &Path, jobs: &[LoopJob]) -> anyhow::Result<()> {
+    save_jobs_at(&jobs_path(project_root), jobs)
+}
+
+pub fn append_run_record(project_root: &Path, record: &LoopRunRecord) -> anyhow::Result<()> {
+    let path = runs_path(project_root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(file, "{}", serde_json::to_string(record)?)?;
+    Ok(())
+}
+
+pub fn last_run_at(project_root: &Path, job_id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let content = std::fs::read_to_string(runs_path(project_root)).ok()?;
+    content
+        .lines()
+        .filter_map(|line| serde_json::from_str::<LoopRunRecord>(line).ok())
+        .filter(|record| record.job_id == job_id && record.outcome == "dispatched")
+        .filter_map(|record| chrono::DateTime::parse_from_rfc3339(&record.fired_at).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .max()
+}
+
+pub fn run_count(project_root: &Path, job_id: &str) -> usize {
+    let Ok(content) = std::fs::read_to_string(runs_path(project_root)) else {
+        return 0;
+    };
+    content
+        .lines()
+        .filter_map(|line| serde_json::from_str::<LoopRunRecord>(line).ok())
+        .filter(|record| record.job_id == job_id && record.outcome == "dispatched")
+        .count()
+}
+
+pub fn parse_loop_duration(value: &str) -> Option<chrono::Duration> {
+    let value = value.trim();
+    let (num, unit) = value.split_at(value.len().saturating_sub(1));
+    let n = num.parse::<i64>().ok()?;
+    match unit {
+        "s" => Some(chrono::Duration::seconds(n)),
+        "m" => Some(chrono::Duration::minutes(n)),
+        "h" => Some(chrono::Duration::hours(n)),
+        "d" => Some(chrono::Duration::days(n)),
+        _ => None,
+    }
+}
+
+fn load_jobs_at(path: &Path) -> anyhow::Result<Vec<LoopJob>> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(serde_json::from_str(&content)?),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn save_jobs_at(path: &Path, jobs: &[LoopJob]) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(jobs)?)?;
+    Ok(())
+}
+
 pub struct LoopFeature {
     store_path: PathBuf,
 }
@@ -56,7 +148,7 @@ pub struct LoopFeature {
 impl LoopFeature {
     pub fn new(project_root: &Path) -> Self {
         Self {
-            store_path: project_root.join(".omegon").join("loops").join("jobs.json"),
+            store_path: jobs_path(project_root),
         }
     }
 
@@ -89,19 +181,11 @@ impl LoopFeature {
     }
 
     fn load_jobs(&self) -> anyhow::Result<Vec<LoopJob>> {
-        match std::fs::read_to_string(&self.store_path) {
-            Ok(content) => Ok(serde_json::from_str(&content)?),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-            Err(err) => Err(err.into()),
-        }
+        load_jobs_at(&self.store_path)
     }
 
     fn save_jobs(&self, jobs: &[LoopJob]) -> anyhow::Result<()> {
-        if let Some(parent) = self.store_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&self.store_path, serde_json::to_string_pretty(jobs)?)?;
-        Ok(())
+        save_jobs_at(&self.store_path, jobs)
     }
 
     fn list(&self) -> anyhow::Result<String> {

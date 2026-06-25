@@ -483,6 +483,11 @@ pub async fn start_server_with_options(
     });
 
     start_daemon_event_worker(&state);
+    if let Some(project_root) =
+        std::env::var_os("OMEGON_PROJECT_ROOT").map(std::path::PathBuf::from)
+    {
+        start_loop_job_scheduler(&state, project_root);
+    }
 
     Ok((startup, cmd_rx))
 }
@@ -564,6 +569,132 @@ fn start_daemon_event_worker(state: &WebState) {
         #[allow(unreachable_code)]
         Ok(())
     });
+}
+
+fn start_loop_job_scheduler(state: &WebState, project_root: std::path::PathBuf) {
+    let state = state.clone();
+    crate::task_spawn::spawn_best_effort_result("web-loop-job-scheduler", async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            if let Err(err) = process_due_loop_jobs(&state, &project_root).await {
+                tracing::warn!(?err, "loop job scheduler failed");
+            }
+        }
+        #[allow(unreachable_code)]
+        Ok(())
+    });
+}
+
+async fn process_due_loop_jobs(
+    state: &WebState,
+    project_root: &std::path::Path,
+) -> anyhow::Result<()> {
+    let now = chrono::Utc::now();
+    let mut jobs = crate::features::loop_jobs::load_jobs_from_project(project_root)?;
+    let mut changed = false;
+
+    for job in jobs.iter_mut().filter(|job| job.enabled) {
+        let crate::features::loop_jobs::LoopTrigger::Every { duration } = &job.trigger else {
+            continue;
+        };
+        let Some(interval) = crate::features::loop_jobs::parse_loop_duration(duration) else {
+            crate::features::loop_jobs::append_run_record(
+                project_root,
+                &crate::features::loop_jobs::LoopRunRecord {
+                    job_id: job.id.clone(),
+                    fired_at: now.to_rfc3339(),
+                    outcome: "invalid_duration".into(),
+                    message: format!("unsupported interval '{duration}'"),
+                },
+            )?;
+            job.enabled = false;
+            changed = true;
+            continue;
+        };
+        if let Some(last) = crate::features::loop_jobs::last_run_at(project_root, &job.id)
+            && now - last < interval
+        {
+            continue;
+        }
+
+        let prompt_body = match std::fs::read_to_string(&job.prompt_path) {
+            Ok(body) => body,
+            Err(err) => {
+                crate::features::loop_jobs::append_run_record(
+                    project_root,
+                    &crate::features::loop_jobs::LoopRunRecord {
+                        job_id: job.id.clone(),
+                        fired_at: now.to_rfc3339(),
+                        outcome: "prompt_missing".into(),
+                        message: err.to_string(),
+                    },
+                )?;
+                job.enabled = false;
+                changed = true;
+                continue;
+            }
+        };
+        let mut hasher = sha2::Sha256::new();
+        use sha2::Digest as _;
+        hasher.update(prompt_body.as_bytes());
+        let current_hash = format!("{:x}", hasher.finalize());
+        if current_hash != job.prompt_sha256 {
+            crate::features::loop_jobs::append_run_record(
+                project_root,
+                &crate::features::loop_jobs::LoopRunRecord {
+                    job_id: job.id.clone(),
+                    fired_at: now.to_rfc3339(),
+                    outcome: "prompt_hash_changed".into(),
+                    message: "prompt file changed; loop paused pending operator review".into(),
+                },
+            )?;
+            job.enabled = false;
+            changed = true;
+            continue;
+        }
+
+        if let crate::features::loop_jobs::LoopStop::MaxRuns { max_runs } = job.stop
+            && crate::features::loop_jobs::run_count(project_root, &job.id) >= max_runs as usize
+        {
+            crate::features::loop_jobs::append_run_record(
+                project_root,
+                &crate::features::loop_jobs::LoopRunRecord {
+                    job_id: job.id.clone(),
+                    fired_at: now.to_rfc3339(),
+                    outcome: "max_runs_reached".into(),
+                    message: format!("disabled after reaching {max_runs} runs"),
+                },
+            )?;
+            job.enabled = false;
+            changed = true;
+            continue;
+        }
+
+        let prompt = format!(
+            "Recurring loop job `{}` invoking prompt `{}`.\n\n{}",
+            job.id, job.prompt, prompt_body
+        );
+        state
+            .command_tx
+            .send(WebCommand::UserPrompt(prompt))
+            .await?;
+        crate::features::loop_jobs::append_run_record(
+            project_root,
+            &crate::features::loop_jobs::LoopRunRecord {
+                job_id: job.id.clone(),
+                fired_at: now.to_rfc3339(),
+                outcome: "dispatched".into(),
+                message: "queued user prompt from loop scheduler".into(),
+            },
+        )?;
+    }
+
+    if changed {
+        crate::features::loop_jobs::save_jobs_to_project(project_root, &jobs)?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn process_next_daemon_event(state: &WebState) -> anyhow::Result<bool> {
