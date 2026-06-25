@@ -13,12 +13,6 @@ info:
     surfaces.rs, surface_stream.rs) and the UI-runtime outcome envelope in
     `core/crates/omegon/src/ui_runtime/envelope.rs`. This document is the
     source of truth for the wire shape — code implements the contract.
-
-
-    Scope note: several deeply-nested surface objects (editor, command,
-    dashboard, footer, instruments, memory_status, operations, settings) are
-    still evolving and are modeled here as open objects. The conversation
-    surface, which drives the interactive transcript, is modeled in full.
 servers:
   - url: /
     description: Same-origin as the served dashboard (default 127.0.0.1 bind).
@@ -335,10 +329,8 @@ components:
     WebSurfaceBundle:
       type: object
       description: >
-        Renderer-neutral surfaces for one session. `conversation` is modeled in
-        full; the remaining surfaces are still evolving and are exposed here as
-        open objects whose concrete shape is defined by the corresponding Rust
-        struct in `web/surfaces.rs`.
+        Renderer-neutral surfaces for one session. All surfaces are modeled in
+        full from the DTOs in `core/crates/omegon/src/web/surfaces.rs`.
       required:
         - conversation
         - editor
@@ -354,30 +346,137 @@ components:
         conversation:
           $ref: "#/components/schemas/WebConversationSurface"
         editor:
-          $ref: "#/components/schemas/OpenSurface"
+          $ref: "#/components/schemas/WebEditorSurface"
         command:
-          $ref: "#/components/schemas/OpenSurface"
+          $ref: "#/components/schemas/WebCommandSurface"
         command_menu:
-          $ref: "#/components/schemas/OpenSurface"
+          $ref: "#/components/schemas/WebCommandMenuSurface"
         dashboard:
-          $ref: "#/components/schemas/OpenSurface"
+          $ref: "#/components/schemas/WebDashboardSurface"
         footer:
-          $ref: "#/components/schemas/OpenSurface"
+          $ref: "#/components/schemas/WebFooterSurface"
         instruments:
-          $ref: "#/components/schemas/OpenSurface"
+          $ref: "#/components/schemas/WebInstrumentsSurface"
         memory_status:
-          $ref: "#/components/schemas/OpenSurface"
+          $ref: "#/components/schemas/WebMemoryStatusSurface"
         operations:
-          $ref: "#/components/schemas/OpenSurface"
+          $ref: "#/components/schemas/WebOperationsSurface"
         settings:
-          $ref: "#/components/schemas/OpenSurface"
+          $ref: "#/components/schemas/WebSettingsSurface"
 
-    OpenSurface:
+    WebEditorSurface:
       type: object
-      description: >
-        Evolving surface; shape defined by the corresponding Rust struct in
-        web/surfaces.rs. Modeled as an open object until stabilized.
-      additionalProperties: true
+      required: [accepts_prompt, placeholder, queue_mode, supports_attachments]
+      properties:
+        accepts_prompt:
+          type: boolean
+          description: Whether the editor currently accepts a prompt submission.
+        placeholder:
+          type: string
+        queue_mode:
+          type: string
+          description: >
+            How prompts submitted while busy are handled (e.g. `until_ready`).
+        supports_attachments:
+          type: boolean
+
+    WebCommandSurface:
+      type: object
+      properties:
+        pending_prompt:
+          type: [string, "null"]
+          description: A prompt staged but not yet submitted, if any.
+
+    WebCommandMenuSurface:
+      type: object
+      required: [available, open]
+      properties:
+        available:
+          type: boolean
+          description: Whether the slash-command menu can be opened.
+        open:
+          type: boolean
+          description: Whether the menu is currently open.
+
+    WebDashboardSurface:
+      type: object
+      required:
+        - session
+        - lifecycle_available
+        - cleave_available
+        - delegate_available
+        - harness_available
+      properties:
+        session:
+          $ref: "#/components/schemas/WebDashboardSessionSurface"
+        lifecycle_available:
+          type: boolean
+        cleave_available:
+          type: boolean
+        delegate_available:
+          type: boolean
+        harness_available:
+          type: boolean
+
+    WebDashboardSessionSurface:
+      type: object
+      required: [turns, tool_calls, compactions]
+      properties:
+        turns:
+          type: integer
+          format: int32
+          minimum: 0
+        tool_calls:
+          type: integer
+          format: int32
+          minimum: 0
+        compactions:
+          type: integer
+          format: int32
+          minimum: 0
+
+    WebFooterSurface:
+      type: object
+      required: [busy]
+      properties:
+        busy:
+          type: boolean
+          description: Whether the agent is mid-turn.
+
+    WebInstrumentsSurface:
+      type: object
+      properties:
+        active_tool:
+          type: [string, "null"]
+          description: Name of the tool currently executing, if any.
+
+    WebMemoryStatusSurface:
+      type: object
+      required: [active_facts, total_facts]
+      properties:
+        active_facts:
+          type: integer
+          minimum: 0
+        total_facts:
+          type: integer
+          minimum: 0
+
+    WebOperationsSurface:
+      type: object
+      required: [active_child_runtimes]
+      properties:
+        active_child_runtimes:
+          type: integer
+          minimum: 0
+          description: Count of active delegate/child runtimes.
+
+    WebSettingsSurface:
+      type: object
+      properties:
+        auth_mode:
+          type: [string, "null"]
+        auth_source:
+          type: [string, "null"]
 
     WebConversationSurface:
       type: object
