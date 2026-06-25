@@ -122,8 +122,9 @@ use self::settings_menu::SelectorKind;
 use self::workbench::{
     PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, WorkbenchState,
     WorkbenchWorkspaceContext, active_plan_workspace_context_height, active_workbench_snapshot,
-    render_workbench_panel, slim_completed_plan_hint_available, slim_operator_hint,
-    upstream_retry_hint, workbench_preferred_height,
+    activity_preferred_height, render_activity_panel, render_workbench_panel,
+    slim_completed_plan_hint_available, slim_operator_hint, upstream_retry_hint,
+    workbench_preferred_height,
 };
 use crate::surfaces::command::{
     CommandPanel, CommandPrompt, CommandPromptAction, CommandSeverity, CommandToast,
@@ -4614,16 +4615,21 @@ impl App {
             u16::from(runtime_queue_depth(self.runtime_queue_snapshot.as_ref()) > 0);
         let workbench_state = WorkbenchState {
             active: active_workbench_snapshot(self.workbench_state.active.as_ref(), None),
-            cleave: live_cleave,
-            delegate: live_delegate,
             workstreams: self.workbench_state.workstreams.clone(),
             workspace: self.current_workbench_workspace_context(),
         };
-        let raw_tool_inspection_height = if self.ui_surfaces.is_compact() {
-            self.tool_inspection_target
+        let has_live_tool_activity = self.ui_surfaces.is_compact()
+            && self
+                .tool_inspection_target
                 .as_ref()
-                .map(|target| self.conversation.tool_inspection_height_by_id(target.id()))
-                .unwrap_or(0)
+                .is_some_and(|target| self.conversation.tool_segment_by_id(target.id()).is_some());
+        let raw_tool_inspection_height = if self.ui_surfaces.is_compact() {
+            activity_preferred_height(
+                has_live_tool_activity,
+                live_cleave.as_ref(),
+                live_delegate.as_ref(),
+                area.width,
+            )
         } else {
             0
         };
@@ -4748,25 +4754,27 @@ impl App {
         self.editor_area = Some(editor_area);
         self.workbench_area = (workbench_area.height > 0).then_some(workbench_area);
 
-        if let Some(target) = self.tool_inspection_target.as_ref()
-            && tool_inspection_area.height > 0
-            && let Some(segment) = self.conversation.tool_segment_by_id(target.id())
-        {
-            segment_detail::render_tool_card(
+        if tool_inspection_area.height > 0 {
+            let live_tool = self.tool_inspection_target.as_ref().and_then(|target| {
+                self.conversation.tool_segment_by_id(target.id()).map(|segment| {
+                    let mode = match target {
+                        ToolInspectionTarget::LiveLatest(_) => segment_detail::ToolDetailMode::Live,
+                        ToolInspectionTarget::Pinned(_) => segment_detail::ToolDetailMode::Detail,
+                    };
+                    (segment, mode)
+                })
+            });
+            render_activity_panel(
                 tool_inspection_area,
-                frame.buffer_mut(),
+                frame,
                 self.theme.as_ref(),
-                segment,
-                match target {
-                    ToolInspectionTarget::LiveLatest(_) => segment_detail::ToolDetailMode::Live,
-                    ToolInspectionTarget::Pinned(_) => segment_detail::ToolDetailMode::Detail,
-                },
+                live_tool,
+                live_cleave.as_ref(),
+                live_delegate.as_ref(),
             );
         }
 
         if (workbench_state.active.is_some()
-            || workbench_state.cleave.is_some()
-            || workbench_state.delegate.is_some()
             || !workbench_state.workstreams.is_empty()
             || workbench_state.workspace.has_visible_context())
             && workbench_area.height > 0

@@ -47,6 +47,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Fixed upstream LLM error recovery so a provider rejection is surfaced in the transcript without leaving the rejected active prompt in canonical replay and poisoning subsequent sends.
 - Fixed Codex Responses replay so assistant history uses request-safe `output_text` content blocks instead of invalid `input_text`, while preserving queued operator prompt visibility in the TUI conversation.
 - Display queued prompts as normal operator segments when the runtime actually starts them, instead of inserting them into the transcript at queue time.
+- Clarified memory tool segment labels and recall summaries so read/write/pin/compact operations are visually distinct and recall counts render as hits instead of total stored facts.
+- Split stable Workbench plan/context rendering from dynamic activity rendering so live tools plus cleave/delegate progress use tiered activity height instead of resizing the Workbench.
 
 ### Changed
 - Renamed the internal plan surface aggregate to `PlanSurfaceInputs` and removed the local lane projection mirror so active plan lanes use the shared `omegon_traits` projection DTO end-to-end.

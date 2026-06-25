@@ -692,7 +692,7 @@ fn summarize_numbered_memory_facts(lines: &[&str]) -> Option<Vec<String>> {
 
     let fact_count = facts.len();
     let mut cells = vec![format!(
-        "{fact_count} fact{}",
+        "read · {fact_count} hit{}",
         if fact_count == 1 { "" } else { "s" }
     )];
 
@@ -3138,7 +3138,7 @@ mod tests {
 
         assert_eq!(
             summary,
-            "3 facts · Architecture 2 · Decisions 1 · top: First fact"
+            "read · 3 hits · Architecture 2 · Decisions 1 · top: First fact"
         );
     }
 
@@ -3156,7 +3156,7 @@ mod tests {
         );
 
         assert_eq!(cells[0], "line above editor");
-        assert_eq!(cells[1], "3 facts");
+        assert_eq!(cells[1], "read · 3 hits");
         assert_eq!(cells[2], "Architecture 2");
         assert_eq!(cells[3], "Decisions 1");
         assert_eq!(cells[4], "top: First fact");
@@ -4529,7 +4529,7 @@ mod tests {
                 "memory_recall",
                 Some(r#"{"query":"glyph"}"#),
                 crate::tui::glyphs::ToolCategoryGlyphRole::Memory,
-                "memory",
+                "mem read",
             ),
             (
                 "design_tree",

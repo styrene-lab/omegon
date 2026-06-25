@@ -33,13 +33,6 @@ pub fn workbench_preferred_height(state: &WorkbenchState, width: u16) -> u16 {
     if let Some(active) = state.active.as_ref() {
         workbench_snapshot_height(active, width)
             .saturating_add(active_plan_workspace_context_height(state))
-    } else if state.cleave.as_ref().is_some_and(|p| p.active)
-        || state
-            .delegate
-            .as_ref()
-            .is_some_and(|p| p.active || p.running > 0)
-    {
-        5
     } else if !state.workstreams.is_empty() || state.workspace.has_visible_context() {
         1
     } else {
@@ -47,11 +40,28 @@ pub fn workbench_preferred_height(state: &WorkbenchState, width: u16) -> u16 {
     }
 }
 
+pub fn activity_preferred_height(
+    has_live_tool: bool,
+    cleave: Option<&CleaveProgress>,
+    delegate: Option<&DelegateProgress>,
+    width: u16,
+) -> u16 {
+    if width == 0 {
+        return 0;
+    }
+    let has_operation = cleave.as_ref().is_some_and(|p| p.active)
+        || delegate.as_ref().is_some_and(|p| p.active || p.running > 0);
+    match (has_live_tool, has_operation) {
+        (true, true) => 7,
+        (true, false) => 4,
+        (false, true) => 5,
+        (false, false) => 0,
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct WorkbenchState {
     pub active: Option<PlanDisplaySnapshot>,
-    pub cleave: Option<CleaveProgress>,
-    pub delegate: Option<DelegateProgress>,
     pub workstreams: Vec<WorkstreamSummary>,
     pub workspace: WorkbenchWorkspaceContext,
 }
@@ -689,23 +699,74 @@ pub fn render_workbench_panel(
             area.height.saturating_sub(1),
         );
         render_active_workbench_panel(plan_area, frame, t, snapshot, state.workstreams.len());
-    } else if let Some(cleave) = state.cleave.as_ref().filter(|p| p.active) {
+    } else if !state.workstreams.is_empty() {
+        render_workstream_summary(area, frame, t, state.workstreams.as_slice(), t.surface_bg());
+    } else {
+        render_workspace_context_panel(area, frame, t, state);
+    }
+}
+
+pub fn render_activity_panel(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    live_tool: Option<(&crate::tui::segments::Segment, crate::tui::segment_detail::ToolDetailMode)>,
+    cleave: Option<&CleaveProgress>,
+    delegate: Option<&DelegateProgress>,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let has_operation = cleave.as_ref().is_some_and(|p| p.active)
+        || delegate.as_ref().is_some_and(|p| p.active || p.running > 0);
+    match (live_tool, has_operation) {
+        (Some((segment, mode)), true) => {
+            let tool_height = area.height.min(4);
+            let tool_area = Rect::new(area.x, area.y, area.width, tool_height);
+            crate::tui::segment_detail::render_tool_card(
+                tool_area,
+                frame.buffer_mut(),
+                t,
+                segment,
+                mode,
+            );
+            if area.height > tool_height {
+                let op_area = Rect::new(
+                    area.x,
+                    area.y.saturating_add(tool_height),
+                    area.width,
+                    area.height.saturating_sub(tool_height),
+                );
+                render_activity_operation_panel(op_area, frame, t, cleave, delegate);
+            }
+        }
+        (Some((segment, mode)), false) => {
+            crate::tui::segment_detail::render_tool_card(area, frame.buffer_mut(), t, segment, mode);
+        }
+        (None, true) => render_activity_operation_panel(area, frame, t, cleave, delegate),
+        (None, false) => {}
+    }
+}
+
+fn render_activity_operation_panel(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    cleave: Option<&CleaveProgress>,
+    delegate: Option<&DelegateProgress>,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    if let Some(cleave) = cleave.filter(|p| p.active) {
         render_operation_workbench_panel(
             area,
             frame,
             t,
             &OperationWorkbenchProjection::from_cleave(cleave),
         );
-    } else if let Some(delegate) = state
-        .delegate
-        .as_ref()
-        .filter(|p| p.active || p.running > 0)
-    {
+    } else if let Some(delegate) = delegate.filter(|p| p.active || p.running > 0) {
         render_delegate_workbench_panel(area, frame, t, delegate);
-    } else if !state.workstreams.is_empty() {
-        render_workstream_summary(area, frame, t, state.workstreams.as_slice(), t.surface_bg());
-    } else {
-        render_workspace_context_panel(area, frame, t, state);
     }
 }
 
