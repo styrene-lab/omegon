@@ -24,7 +24,7 @@ Omegon is a Rust-native agent loop and lifecycle engine. You are working on the 
 - **Single crate**: `just test-crate omegon-memory`
 - **Filter**: `just test-filter "vault_sync"`
 - **Config schemas**: `pkl/` directory — 10 Pkl schemas validating config surfaces
-- **Skills**: `skills/*/SKILL.md` — TOML frontmatter with `name` and `description` required
+- **Skills**: `skills/*/SKILL.md` — YAML frontmatter is canonical for portable skills; TOML frontmatter remains supported for bundled/existing skills. `name` and `description` are required.
 
 ## Key conventions
 
@@ -78,7 +78,7 @@ Omegon is a Rust-native agent loop and lifecycle engine. You are working on the 
 
 - **Never fabricate URLs, client IDs, or API endpoints.** Research real values from provider documentation or source code. The Antigravity provider had fabricated credentials that wasted significant time.
 - **`Settings::provider()` returns `String`** (not `&str`). It uses `infer_provider_id` — no hardcoded catch-all.
-- **Skill frontmatter is TOML** (`+++` delimiters), not YAML. `extract_description` handles both.
+- **Skill frontmatter** — YAML (`---`) is canonical for portable/user-facing `SKILL.md` files; TOML (`+++`) remains supported for bundled and existing Omegon skills. `extract_description` handles both.
 - **Extension `execute_tool` RPC** — extensions must implement this handler or the call returns a graceful error.
 - **Memory/lifecycle features** have optional `codex_vault_path` — set via `with_codex_vault()` in `setup.rs`.
 - **Plan/Workbench consistency** — never report "nothing pending" while the active Workbench plan still has active/todo items. Either update/complete/clear the plan or state the mismatch explicitly.
