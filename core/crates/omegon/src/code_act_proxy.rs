@@ -32,6 +32,7 @@ struct RpcResponse {
 pub struct ProxyServer {
     socket_path: PathBuf,
     cwd: PathBuf,
+    boundary: Option<crate::tools::WorkspaceBoundary>,
 }
 
 impl ProxyServer {
@@ -45,7 +46,16 @@ impl ProxyServer {
         let socket_dir = cwd.join(".omegon");
         std::fs::create_dir_all(&socket_dir)?;
         let socket_path = socket_dir.join(format!("code-act-proxy-{run_id}.sock"));
-        Ok(Self { socket_path, cwd })
+        Ok(Self {
+            socket_path,
+            cwd,
+            boundary: None,
+        })
+    }
+
+    pub fn with_boundary(mut self, boundary: crate::tools::WorkspaceBoundary) -> Self {
+        self.boundary = Some(boundary);
+        self
     }
 
     pub fn socket_path(&self) -> &Path {
@@ -108,9 +118,10 @@ def web_fetch(url: str) -> str:
                     match accept {
                         Ok((stream, _)) => {
                             let cwd = self.cwd.clone();
+                            let boundary = self.boundary.clone();
                             let cancel = cancel.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = handle_connection(stream, &cwd, cancel).await {
+                                if let Err(e) = handle_connection(stream, &cwd, boundary, cancel).await {
                                     tracing::debug!(error = %e, "proxy connection error");
                                 }
                             });
@@ -135,6 +146,7 @@ def web_fetch(url: str) -> str:
 async fn handle_connection(
     stream: tokio::net::UnixStream,
     cwd: &Path,
+    boundary: Option<crate::tools::WorkspaceBoundary>,
     cancel: CancellationToken,
 ) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
@@ -156,7 +168,7 @@ async fn handle_connection(
             }
         };
 
-        let response = dispatch_rpc(&req.method, &req.params, cwd, &cancel).await;
+        let response = dispatch_rpc(&req.method, &req.params, cwd, boundary.clone(), &cancel).await;
         let resp = match response {
             Ok(text) => RpcResponse {
                 id: req.id,
@@ -181,6 +193,7 @@ async fn dispatch_rpc(
     method: &str,
     params: &serde_json::Value,
     cwd: &Path,
+    boundary: Option<crate::tools::WorkspaceBoundary>,
     cancel: &CancellationToken,
 ) -> Result<String> {
     match method {
@@ -205,7 +218,9 @@ async fn dispatch_rpc(
                 .get("command")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("missing 'command' parameter"))?;
-            let result = bash::execute(command, cwd, Some(30), cancel.clone()).await?;
+            let result =
+                bash::execute_with_boundary(command, cwd, Some(30), cancel.clone(), boundary)
+                    .await?;
             Ok(extract_text(&result))
         }
         other => Err(anyhow::anyhow!("unknown method: {other}")),

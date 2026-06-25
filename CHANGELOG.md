@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
 
 ### Fixed
+- Routed all in-tree bash execution paths, including code-act proxy execution, through workspace-boundary mediation so path permission prompts remain harness-level instead of leaking back as ordinary tool output.
 - Allowed workspace-boundary-safe temp directory paths by default so tools can use `/tmp`-style scratch files without unnecessary permission prompts.
 - Clarified permission prompts with typed request metadata so the TUI distinguishes policy-only approvals from persisted directory grants and shows the actual grant path.
 - Hardened extension-declared skill paths against absolute/path-traversal escapes and made skill conflict matching case-insensitive.

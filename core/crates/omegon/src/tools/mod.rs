@@ -1156,7 +1156,14 @@ impl ToolProvider for CoreTools {
 
                 warn_git_mutation_via_bash(self.repo_model.is_some(), command);
 
-                bash::execute(command, &self.cwd, timeout, cancel).await
+                bash::execute_with_boundary(
+                    command,
+                    &self.cwd,
+                    timeout,
+                    cancel,
+                    Some(self.boundary.clone()),
+                )
+                .await
             }
             reg::READ => {
                 let path_str = args["path"]

@@ -55,6 +55,7 @@ Respond with ONLY a Python code block (```python ... ```). No explanation before
 pub struct CodeActExecutor {
     cwd: PathBuf,
     permitted: bool,
+    boundary: Option<crate::tools::WorkspaceBoundary>,
     proxy_prelude: Option<String>,
     proxy_socket_path: Option<PathBuf>,
 }
@@ -68,6 +69,7 @@ impl CodeActExecutor {
         Self {
             cwd,
             permitted: bypass || code_act,
+            boundary: None,
             proxy_prelude: None,
             proxy_socket_path: None,
         }
@@ -77,9 +79,15 @@ impl CodeActExecutor {
         Self {
             cwd,
             permitted: true,
+            boundary: None,
             proxy_prelude: None,
             proxy_socket_path: None,
         }
+    }
+
+    pub fn with_boundary(mut self, boundary: crate::tools::WorkspaceBoundary) -> Self {
+        self.boundary = Some(boundary);
+        self
     }
 
     pub fn with_proxy(mut self, prelude: String, socket_path: PathBuf) -> Self {
@@ -200,7 +208,14 @@ impl CodeActExecutor {
             }
         } else {
             let command = format!("python3 {}", script_path.display());
-            let result = bash::execute(&command, &self.cwd, timeout_secs, cancel).await?;
+            let result = bash::execute_with_boundary(
+                &command,
+                &self.cwd,
+                timeout_secs,
+                cancel,
+                self.boundary.clone(),
+            )
+            .await?;
             let _ = std::fs::remove_file(&script_path);
 
             let output = result
@@ -299,6 +314,7 @@ mod tests {
         CodeActExecutor {
             cwd,
             permitted: true,
+            boundary: None,
             proxy_prelude: None,
             proxy_socket_path: None,
         }
@@ -310,6 +326,7 @@ mod tests {
         let exec = CodeActExecutor {
             cwd: tmp.path().to_path_buf(),
             permitted: false,
+            boundary: None,
             proxy_prelude: None,
             proxy_socket_path: None,
         };
