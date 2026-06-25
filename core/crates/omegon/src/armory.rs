@@ -903,9 +903,14 @@ mod tests {
         )
         .unwrap();
         let content = ensure_skill_frontmatter("security", &manifest, "# Security\n");
-        assert!(content.starts_with("+++\n"));
-        assert!(content.contains("name = \"security\""));
-        assert!(content.contains("description = \"Security checklist\""));
-        assert!(content.contains("# Security"));
+        let (manifest, body) = crate::skills::parse_skill_file(&content);
+        assert_eq!(manifest.name, "security");
+        assert_eq!(manifest.description, "Security checklist");
+        assert_eq!(
+            manifest.id.as_deref(),
+            Some("dev.styrene.omegon.skill.security")
+        );
+        assert_eq!(manifest.version.as_deref(), Some("1.0.0"));
+        assert!(body.contains("# Security"));
     }
 }

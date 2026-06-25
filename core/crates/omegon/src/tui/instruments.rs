@@ -3025,8 +3025,9 @@ mod tests {
             !rendered.contains("32;7;14m")
                 && !rendered.contains("[0m")
                 && !rendered.contains('\u{1b}')
-                && rendered.contains("→ call"),
-            "cleave activity should strip ANSI/control-sequence debris before rendering: {rendered:?}"
+                && rendered.contains("→")
+                && rendered.contains("tool"),
+            "cleave activity should strip ANSI/control-sequence debris while preserving semantic activity: {rendered:?}"
         );
     }
 

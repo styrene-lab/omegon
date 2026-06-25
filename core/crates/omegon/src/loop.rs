@@ -2414,10 +2414,10 @@ async fn consume_llm_stream(
                 received_content.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             LlmEvent::ThinkingDelta { delta } => {
-                if !delta.is_empty() {
-                    if let Some(cancel_keeps_prompt) = cancel_keeps_prompt {
-                        cancel_keeps_prompt.store(true, std::sync::atomic::Ordering::Relaxed);
-                    }
+                if !delta.is_empty()
+                    && let Some(cancel_keeps_prompt) = cancel_keeps_prompt
+                {
+                    cancel_keeps_prompt.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 let _ = events.send(AgentEvent::ThinkingChunk {
                     text: delta.clone(),

@@ -401,11 +401,11 @@ impl PlanDisplaySnapshot {
     }
 
     fn progress_percent(&self) -> usize {
-        if self.total == 0 {
-            0
-        } else {
-            (self.completed.saturating_mul(100) / self.total).min(100)
-        }
+        self.completed
+            .saturating_mul(100)
+            .checked_div(self.total)
+            .unwrap_or(0)
+            .min(100)
     }
 
     fn progress_percent_label(&self) -> String {

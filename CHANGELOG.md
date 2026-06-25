@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Ignored local per-project `.omegon/profile.json` files so live profile changes do not dirty source checkouts.
 - Added `omegon skills import <path> [--project] [--force]` for importing Claude/Omegon skill bundles while preserving scripts and resources.
 - Added read-only `omegon skills doctor` onboarding diagnostics for Claude-compatible skill roots, script references, and registry conflicts.
 - Locked in the ecosystem-superset skill registry design for Claude-compatible skills, upstream Git skill repositories, source lock/provenance, and merge-first conflict resolution.

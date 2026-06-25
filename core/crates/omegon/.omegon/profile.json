@@ -4,6 +4,5 @@
     "modelId": "claude-sonnet-4-6"
   },
   "thinkingLevel": "medium",
-  "maxTurns": 50,
-  "mouse": false
+  "maxTurns": 50
 }

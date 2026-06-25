@@ -91,3 +91,6 @@ drawings/*.svg
 *.tmp
 *.swp
 *~
+
+# Local per-project Omegon profile state
+**/.omegon/profile.json

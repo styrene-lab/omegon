@@ -29,9 +29,12 @@ source-clean:
 
 # ─── Rust ────────────────────────────────────────────
 
-# Run all Rust tests (CI/full-release gate; use test-changed/test-filter for focused local edits)
+# Run all Rust tests (CI/full-release gate; use test-changed/test-filter for focused local edits).
+# Some tests intentionally exercise process-global state such as cwd/env/profile
+# resolution; keep the full local gate serialized so those integration contracts
+# do not race each other under libtest's default parallel scheduler.
 test-rust:
-    {{cargo}} test --workspace
+    {{cargo}} test --workspace -- --test-threads=1
 
 # Commit-time Rust validation for changed crates. This is the default local gate for
 # focused commits; CI/release hardening still uses test-rust for the full workspace.

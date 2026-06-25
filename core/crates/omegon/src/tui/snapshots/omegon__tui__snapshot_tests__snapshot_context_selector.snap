@@ -1,16 +1,16 @@
 ---
 source: core/crates/omegon/src/tui/snapshot_tests.rs
-assertion_line: 670
+assertion_line: 671
 expression: render_to_string(&terminal)
 ---
 
-       ╭ Context Class ────────╮
-       │● Compact (128k)       │
-       │  Standard sessions    │
-       │  Standard (272k)      │
-       │  Extended analysis    │
-       │  Extended (400k)      │
-       │  Large codebase       │
-       │  Massive (1M+)        │
-       │  Massive context      │
-       ╰───────────────────────╯
+
+  ╭ Context Class ───────────────────╮
+  │● Compact (128k)                  │
+  │  Standard sessions               │
+  │  Standard (272k)                 │
+  │  Extended analysis               │
+  │  Extended (400k)                 │
+  │  Large codebase                  │
+  │  … more options; use ↑/↓ to navig│
+  ╰──────────────────────────────────╯

@@ -663,7 +663,7 @@ fn snapshot_context_selector() {
             },
         ],
     );
-    let backend = TestBackend::new(40, 12);
+    let backend = TestBackend::new(40, 13);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| selector.render(f.area(), f, &Alpharius))
