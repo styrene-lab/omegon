@@ -1810,7 +1810,10 @@ fn plan_update_preserves_workspace_context() {
         },
     });
 
-    assert_eq!(app.workbench_state.workspace.repo.as_deref(), Some("omegon"));
+    assert_eq!(
+        app.workbench_state.workspace.repo.as_deref(),
+        Some("omegon")
+    );
     assert_eq!(
         app.workbench_state.workspace.git_branch.as_deref(),
         Some("feature/ui-improvements-polish")
@@ -1847,7 +1850,10 @@ fn completed_plan_update_clears_active_lane_and_preserves_workspace_context() {
     });
 
     assert!(app.workbench_state.active.is_none());
-    assert_eq!(app.workbench_state.workspace.repo.as_deref(), Some("omegon"));
+    assert_eq!(
+        app.workbench_state.workspace.repo.as_deref(),
+        Some("omegon")
+    );
     assert_eq!(
         app.workbench_state.workspace.git_branch.as_deref(),
         Some("feature/ui-improvements-polish")
@@ -5118,6 +5124,7 @@ fn slash_auspex_status_reports_attach_metadata() {
             worker_running: true,
             transport_warnings: vec!["HTTP and WebSocket control-plane transports use insecure bootstrap tokens on localhost.".into()],
             active_child_runtimes: vec![],
+            ..WebDaemonStatus::default()
         },
         instance_descriptor: None,
     });
@@ -5186,6 +5193,7 @@ fn slash_dash_status_uses_compatibility_wording() {
             worker_running: true,
             transport_warnings: vec!["HTTP and WebSocket control-plane transports use insecure bootstrap tokens on localhost.".into()],
             active_child_runtimes: vec![],
+            ..WebDaemonStatus::default()
         },
         instance_descriptor: None,
     });
@@ -5241,6 +5249,7 @@ fn slash_dash_status_preserves_tls_startup_urls() {
             worker_running: true,
             transport_warnings: vec![],
             active_child_runtimes: vec![],
+            ..WebDaemonStatus::default()
         },
         instance_descriptor: None,
     });
@@ -5297,6 +5306,7 @@ fn web_dashboard_started_event_updates_cached_addr() {
             worker_running: true,
             transport_warnings: vec!["HTTP and WebSocket control-plane transports use insecure bootstrap tokens on localhost.".into()],
             active_child_runtimes: vec![],
+            ..WebDaemonStatus::default()
         },
         instance_descriptor: None,
     };
@@ -5345,6 +5355,7 @@ fn auspex_attach_payload_carries_startup_and_instance_metadata() {
             worker_running: false,
             transport_warnings: vec!["HTTP and WebSocket control-plane transports use insecure bootstrap tokens on localhost.".into()],
             active_child_runtimes: vec![],
+            ..WebDaemonStatus::default()
         },
         instance_descriptor: Some(omegon_traits::OmegonInstanceDescriptor {
             schema_version: 1,
@@ -6181,7 +6192,10 @@ fn completed_live_tool_lingers_before_activity_clears() {
         .iter()
         .find(|tool| tool.segment_id == "tool-1")
         .expect("completed tool should remain in transient activity");
-    assert_eq!(tool.status, crate::surfaces::activity::ActivityToolStatus::Complete);
+    assert_eq!(
+        tool.status,
+        crate::surfaces::activity::ActivityToolStatus::Complete
+    );
     assert!(tool.expires_at.is_some());
 }
 
@@ -6215,7 +6229,6 @@ fn expired_live_tool_linger_clears_activity_on_render() {
     assert!(app.tool_inspection_target.is_none());
     assert!(app.activity_tools.is_empty());
 }
-
 
 #[test]
 fn activity_tool_start_refreshes_without_duplicate_entries() {
@@ -6275,12 +6288,21 @@ fn activity_tool_cap_preserves_running_entries_over_completed_entries() {
     let running = app
         .activity_tools
         .iter()
-        .filter(|tool| matches!(tool.status, crate::surfaces::activity::ActivityToolStatus::Running))
+        .filter(|tool| {
+            matches!(
+                tool.status,
+                crate::surfaces::activity::ActivityToolStatus::Running
+            )
+        })
         .count();
     let completed = app.activity_tools.len().saturating_sub(running);
 
     assert_eq!(running, 5);
-    assert!(completed <= 4, "completed={completed}, tools={:?}", app.activity_tools);
+    assert!(
+        completed <= 4,
+        "completed={completed}, tools={:?}",
+        app.activity_tools
+    );
     assert!(app.activity_tools.len() <= 8);
 }
 
@@ -6306,14 +6328,26 @@ fn activity_prune_removes_expired_completed_but_keeps_running_entries() {
         name: "bash".into(),
         args: serde_json::json!({"command": "sleep 10"}),
     });
-    if let Some(tool) = app.activity_tools.iter_mut().find(|tool| tool.segment_id == "done") {
+    if let Some(tool) = app
+        .activity_tools
+        .iter_mut()
+        .find(|tool| tool.segment_id == "done")
+    {
         tool.expires_at = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
     }
 
     let _ = render_app_to_string(&mut app, 140, 36);
 
-    assert!(app.activity_tools.iter().all(|tool| tool.segment_id != "done"));
-    assert!(app.activity_tools.iter().any(|tool| tool.segment_id == "running"));
+    assert!(
+        app.activity_tools
+            .iter()
+            .all(|tool| tool.segment_id != "done")
+    );
+    assert!(
+        app.activity_tools
+            .iter()
+            .any(|tool| tool.segment_id == "running")
+    );
 }
 
 #[test]
@@ -6344,7 +6378,9 @@ fn activity_panel_renders_multiple_completed_tool_rows() {
         name: "read".into(),
         is_error: false,
         result: omegon_traits::ToolResult {
-            content: vec![omegon_traits::ContentBlock::Text { text: "workspace manifest".into() }],
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "workspace manifest".into(),
+            }],
             details: serde_json::Value::Null,
         },
     });
@@ -6358,7 +6394,9 @@ fn activity_panel_renders_multiple_completed_tool_rows() {
         name: "bash".into(),
         is_error: false,
         result: omegon_traits::ToolResult {
-            content: vec![omegon_traits::ContentBlock::Text { text: "Finished dev profile".into() }],
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "Finished dev profile".into(),
+            }],
             details: serde_json::Value::Null,
         },
     });

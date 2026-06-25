@@ -56,12 +56,22 @@ pub struct DaemonChildRuntimeStatus {
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct WebLoopSchedulerStatus {
+    pub configured_jobs: usize,
+    pub enabled_jobs: usize,
+    pub disabled_jobs: usize,
+    pub last_outcome: Option<String>,
+    pub next_due_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct WebDaemonStatus {
     pub queued_events: usize,
     pub processed_events: usize,
     pub worker_running: bool,
     pub transport_warnings: Vec<String>,
     pub active_child_runtimes: Vec<DaemonChildRuntimeStatus>,
+    pub loop_scheduler: WebLoopSchedulerStatus,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -544,10 +554,46 @@ fn refresh_startup_daemon_status(state: &WebState) {
                 .collect()
         })
         .unwrap_or_default();
+    daemon_status.loop_scheduler = loop_scheduler_status();
     if let Ok(mut startup) = state.startup_info.lock()
         && let Some(startup) = startup.as_mut()
     {
         startup.daemon_status = daemon_status;
+    }
+}
+
+fn loop_scheduler_status() -> WebLoopSchedulerStatus {
+    let Some(project_root) = std::env::var_os("OMEGON_PROJECT_ROOT").map(std::path::PathBuf::from)
+    else {
+        return WebLoopSchedulerStatus::default();
+    };
+    let jobs =
+        crate::features::loop_jobs::load_jobs_from_project(&project_root).unwrap_or_default();
+    let configured_jobs = jobs.len();
+    let enabled_jobs = jobs.iter().filter(|job| job.enabled).count();
+    let disabled_jobs = configured_jobs.saturating_sub(enabled_jobs);
+    let next_due_at = jobs
+        .iter()
+        .filter(|job| job.enabled)
+        .filter_map(|job| crate::features::loop_jobs::next_due_at(&project_root, job))
+        .min()
+        .map(|due| due.to_rfc3339());
+    let last_outcome = jobs
+        .iter()
+        .filter_map(|job| crate::features::loop_jobs::last_run_record(&project_root, &job.id))
+        .filter_map(|record| {
+            let ts = chrono::DateTime::parse_from_rfc3339(&record.fired_at).ok()?;
+            Some((ts, format!("{}:{}", record.job_id, record.outcome)))
+        })
+        .max_by_key(|(ts, _)| *ts)
+        .map(|(_, outcome)| outcome);
+
+    WebLoopSchedulerStatus {
+        configured_jobs,
+        enabled_jobs,
+        disabled_jobs,
+        last_outcome,
+        next_due_at,
     }
 }
 
@@ -1360,5 +1406,149 @@ mod tests {
             }
             other => panic!("wrong event: {other:?}"),
         }
+    }
+    #[tokio::test]
+    async fn loop_scheduler_dispatches_due_job_and_records_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.md");
+        std::fs::write(&prompt_path, "loop body").unwrap();
+        let mut hasher = sha2::Sha256::new();
+        use sha2::Digest as _;
+        hasher.update("loop body".as_bytes());
+        let hash = format!("{:x}", hasher.finalize());
+        crate::features::loop_jobs::save_jobs_to_project(
+            dir.path(),
+            &[crate::features::loop_jobs::LoopJob {
+                id: "loop-test".into(),
+                prompt: "test-prompt".into(),
+                trigger: crate::features::loop_jobs::LoopTrigger::Every {
+                    duration: "1s".into(),
+                },
+                stop: crate::features::loop_jobs::LoopStop::OperatorStop,
+                concurrency: crate::features::loop_jobs::LoopConcurrencyPolicy::SkipIfRunning,
+                enabled: true,
+                prompt_path: prompt_path.display().to_string(),
+                prompt_sha256: hash,
+                created_at: chrono::Utc::now().to_rfc3339(),
+            }],
+        )
+        .unwrap();
+
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
+        let state = WebState {
+            command_tx,
+            ..WebState::new(
+                DashboardHandles::default(),
+                tokio::sync::broadcast::channel(16).0,
+            )
+        };
+
+        process_due_loop_jobs(&state, dir.path()).await.unwrap();
+        let command = command_rx.recv().await.unwrap();
+        match command {
+            WebCommand::UserPrompt(text) => {
+                assert!(text.contains("Recurring loop job `loop-test`"));
+                assert!(text.contains("loop body"));
+            }
+            other => panic!("wrong command: {other:?}"),
+        }
+        assert_eq!(
+            crate::features::loop_jobs::run_count(dir.path(), "loop-test"),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn loop_scheduler_pauses_job_when_prompt_hash_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.md");
+        std::fs::write(&prompt_path, "changed body").unwrap();
+        crate::features::loop_jobs::save_jobs_to_project(
+            dir.path(),
+            &[crate::features::loop_jobs::LoopJob {
+                id: "loop-drift".into(),
+                prompt: "test-prompt".into(),
+                trigger: crate::features::loop_jobs::LoopTrigger::Every {
+                    duration: "1s".into(),
+                },
+                stop: crate::features::loop_jobs::LoopStop::OperatorStop,
+                concurrency: crate::features::loop_jobs::LoopConcurrencyPolicy::SkipIfRunning,
+                enabled: true,
+                prompt_path: prompt_path.display().to_string(),
+                prompt_sha256: "stale".into(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            }],
+        )
+        .unwrap();
+
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
+        let state = WebState {
+            command_tx,
+            ..WebState::new(
+                DashboardHandles::default(),
+                tokio::sync::broadcast::channel(16).0,
+            )
+        };
+
+        process_due_loop_jobs(&state, dir.path()).await.unwrap();
+        assert!(command_rx.try_recv().is_err());
+        let jobs = crate::features::loop_jobs::load_jobs_from_project(dir.path()).unwrap();
+        assert!(!jobs[0].enabled);
+        let last = crate::features::loop_jobs::last_run_record(dir.path(), "loop-drift").unwrap();
+        assert_eq!(last.outcome, "prompt_hash_changed");
+    }
+
+    #[tokio::test]
+    async fn loop_scheduler_disables_after_max_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.md");
+        std::fs::write(&prompt_path, "loop body").unwrap();
+        let mut hasher = sha2::Sha256::new();
+        use sha2::Digest as _;
+        hasher.update("loop body".as_bytes());
+        let hash = format!("{:x}", hasher.finalize());
+        crate::features::loop_jobs::append_run_record(
+            dir.path(),
+            &crate::features::loop_jobs::LoopRunRecord {
+                job_id: "loop-max".into(),
+                fired_at: (chrono::Utc::now() - chrono::Duration::seconds(5)).to_rfc3339(),
+                outcome: "dispatched".into(),
+                message: "previous".into(),
+            },
+        )
+        .unwrap();
+        crate::features::loop_jobs::save_jobs_to_project(
+            dir.path(),
+            &[crate::features::loop_jobs::LoopJob {
+                id: "loop-max".into(),
+                prompt: "test-prompt".into(),
+                trigger: crate::features::loop_jobs::LoopTrigger::Every {
+                    duration: "1s".into(),
+                },
+                stop: crate::features::loop_jobs::LoopStop::MaxRuns { max_runs: 1 },
+                concurrency: crate::features::loop_jobs::LoopConcurrencyPolicy::SkipIfRunning,
+                enabled: true,
+                prompt_path: prompt_path.display().to_string(),
+                prompt_sha256: hash,
+                created_at: chrono::Utc::now().to_rfc3339(),
+            }],
+        )
+        .unwrap();
+
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
+        let state = WebState {
+            command_tx,
+            ..WebState::new(
+                DashboardHandles::default(),
+                tokio::sync::broadcast::channel(16).0,
+            )
+        };
+
+        process_due_loop_jobs(&state, dir.path()).await.unwrap();
+        assert!(command_rx.try_recv().is_err());
+        let jobs = crate::features::loop_jobs::load_jobs_from_project(dir.path()).unwrap();
+        assert!(!jobs[0].enabled);
+        let last = crate::features::loop_jobs::last_run_record(dir.path(), "loop-max").unwrap();
+        assert_eq!(last.outcome, "max_runs_reached");
     }
 }
