@@ -178,20 +178,28 @@ fn lint_spec(path: &Path, errors: &mut Vec<String>) {
             // responses present and non-empty
             match op.get("responses").and_then(Value::as_object) {
                 Some(r) if !r.is_empty() => {}
-                _ => err(format!("{} {route}: operation has no responses", method.to_uppercase())),
+                _ => err(format!(
+                    "{} {route}: operation has no responses",
+                    method.to_uppercase()
+                )),
             }
 
             // operationId unique
             match op.get("operationId").and_then(Value::as_str) {
                 Some(id) => {
-                    if let Some(prev) = seen_op_ids.insert(id.to_string(), format!("{} {route}", method.to_uppercase())) {
+                    if let Some(prev) = seen_op_ids
+                        .insert(id.to_string(), format!("{} {route}", method.to_uppercase()))
+                    {
                         err(format!(
                             "duplicate operationId {id:?} ({} {route} and {prev})",
                             method.to_uppercase()
                         ));
                     }
                 }
-                None => err(format!("{} {route}: missing operationId", method.to_uppercase())),
+                None => err(format!(
+                    "{} {route}: missing operationId",
+                    method.to_uppercase()
+                )),
             }
 
             // path-template params must be declared as required path params
