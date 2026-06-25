@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
 
 ### Fixed
+- Allowed workspace-boundary-safe temp directory paths by default so tools can use `/tmp`-style scratch files without unnecessary permission prompts.
 - Hardened extension-declared skill paths against absolute/path-traversal escapes and made skill conflict matching case-insensitive.
 - Resolved prompt assembly to load one directive per skill name so project-local skills override same-named user skills instead of injecting both.
 - Updated the in-code skill schema documentation to show YAML as canonical while documenting TOML as compatibility.

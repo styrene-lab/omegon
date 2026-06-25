@@ -547,17 +547,21 @@ impl WorkspaceBoundary {
 }
 
 fn is_allowed_special_path(path: &Path) -> bool {
-    let Some(path) = path.to_str() else {
+    let Some(path_str) = path.to_str() else {
         return false;
     };
 
     #[cfg(windows)]
-    if path.eq_ignore_ascii_case("NUL") {
+    if path_str.eq_ignore_ascii_case("NUL") {
+        return true;
+    }
+
+    if is_allowed_temp_path(path) {
         return true;
     }
 
     matches!(
-        path,
+        path_str,
         "/dev/null"
             | "/dev/stdin"
             | "/dev/stdout"
@@ -569,6 +573,14 @@ fn is_allowed_special_path(path: &Path) -> bool {
             | "/proc/self/fd/1"
             | "/proc/self/fd/2"
     )
+}
+
+fn is_allowed_temp_path(path: &Path) -> bool {
+    let temp_dir = std::env::temp_dir();
+    let normalized_path = lexical_normalize(path);
+    let normalized_temp_dir = lexical_normalize(&temp_dir);
+
+    normalized_path == normalized_temp_dir || normalized_path.starts_with(&normalized_temp_dir)
 }
 
 /// Expand `~` to the home directory in a path string.
@@ -1747,6 +1759,14 @@ open_questions:
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("PERMISSION REQUIRED"), "error: {err}");
+    }
+
+    #[test]
+    fn temp_directory_paths_are_allowed_by_boundary() {
+        let tools = CoreTools::new(PathBuf::from("/workspace"));
+        let temp_file = std::env::temp_dir().join("omegon-permission-test").join("out.txt");
+        let result = tools.resolve_path(temp_file.to_str().unwrap());
+        assert!(result.is_ok(), "temp paths should be allowed: {result:?}");
     }
 
     #[test]
