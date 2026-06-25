@@ -99,6 +99,14 @@ impl MemoryFeature {
         &self.backend
     }
 
+    fn parse_section_arg(section_str: &str) -> anyhow::Result<Section> {
+        serde_json::from_value(Value::String(section_str.into())).map_err(|_| {
+            anyhow::anyhow!(
+                "invalid memory section '{section_str}'; expected one of Architecture, Decisions, Constraints, Known Issues, Patterns & Conventions, Specs"
+            )
+        })
+    }
+
     /// Get the current mind identifier.
     pub fn mind(&self) -> &str {
         &self.mind
@@ -452,8 +460,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             crate::tool_registry::memory::MEMORY_STORE => {
                 let content = args["content"].as_str().unwrap_or("").to_string();
                 let section_str = args["section"].as_str().unwrap_or("Architecture");
-                let section: Section = serde_json::from_value(Value::String(section_str.into()))
-                    .unwrap_or(Section::Architecture);
+                let section = Self::parse_section_arg(section_str)?;
 
                 let result = self
                     .backend
@@ -492,7 +499,15 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 })
             }
             crate::tool_registry::memory::MEMORY_RECALL => {
-                let query = args["query"].as_str().unwrap_or("").to_string();
+                let query = args["query"].as_str().unwrap_or("").trim().to_string();
+                if query.is_empty() {
+                    return Ok(ToolResult {
+                        content: vec![ContentBlock::Text {
+                            text: "memory_recall requires a non-empty query.".into(),
+                        }],
+                        details: serde_json::json!({ "is_error": true }),
+                    });
+                }
                 let k = args["k"].as_u64().unwrap_or(10) as usize;
                 let fetch_k = k * 2; // over-fetch for RRF merge headroom
 
@@ -666,8 +681,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 let fact_id = args["fact_id"].as_str().unwrap_or("").to_string();
                 let content = args["content"].as_str().unwrap_or("").to_string();
                 let section_str = args["section"].as_str().unwrap_or("Architecture");
-                let section: Section = serde_json::from_value(Value::String(section_str.into()))
-                    .unwrap_or(Section::Architecture);
+                let section = Self::parse_section_arg(section_str)?;
 
                 let new_fact = self
                     .backend
@@ -1190,6 +1204,76 @@ mod tests {
             text.contains("OAuth2"),
             "recall should find auth fact: {text}"
         );
+    }
+
+    #[tokio::test]
+    async fn recall_requires_non_empty_query() {
+        let backend: Arc<dyn MemoryBackend> = Arc::new(InMemoryBackend::new());
+        let feature = MemoryFeature::new(backend, "test".into());
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        let result = feature
+            .execute(
+                "memory_recall",
+                "c1",
+                serde_json::json!({"query": "   "}),
+                cancel,
+            )
+            .await
+            .unwrap();
+
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("requires a non-empty query"));
+        assert_eq!(result.details["is_error"], true);
+    }
+
+    #[tokio::test]
+    async fn memory_store_rejects_invalid_section() {
+        let backend: Arc<dyn MemoryBackend> = Arc::new(InMemoryBackend::new());
+        let feature = MemoryFeature::new(backend, "test".into());
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        let err = feature
+            .execute(
+                "memory_store",
+                "c1",
+                serde_json::json!({"section": "Notes", "content": "System uses microservices"}),
+                cancel,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("invalid memory section 'Notes'"));
+    }
+
+    #[tokio::test]
+    async fn memory_supersede_rejects_invalid_section() {
+        let backend: Arc<dyn MemoryBackend> = Arc::new(InMemoryBackend::new());
+        let feature = MemoryFeature::new(backend, "test".into());
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        let stored = feature
+            .execute(
+                "memory_store",
+                "c1",
+                serde_json::json!({"section": "Architecture", "content": "System uses microservices"}),
+                cancel.clone(),
+            )
+            .await
+            .unwrap();
+        let fact_id = stored.details["id"].as_str().unwrap();
+
+        let err = feature
+            .execute(
+                "memory_supersede",
+                "c2",
+                serde_json::json!({"fact_id": fact_id, "section": "Notes", "content": "System uses services"}),
+                cancel,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("invalid memory section 'Notes'"));
     }
 
     #[tokio::test]
