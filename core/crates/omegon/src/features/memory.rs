@@ -609,7 +609,8 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     });
                 }
 
-                // Group by section, show counts + sample facts (capped to avoid overwhelming the model)
+                // Group by section. Large stores are inventory-only to avoid turning memory_query
+                // into a noisy context dump; use memory_recall for targeted retrieval.
                 let mut sections: std::collections::BTreeMap<String, Vec<&omegon_memory::Fact>> =
                     std::collections::BTreeMap::new();
                 for fact in &facts {
@@ -625,32 +626,43 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     sections.len()
                 ));
 
-                let max_per_section = 8;
-                for (section, section_facts) in &sections {
-                    lines.push(format!("## {} ({} facts)", section, section_facts.len()));
-                    for fact in section_facts.iter().take(max_per_section) {
-                        // Truncate long facts to keep output manageable
-                        let content = if fact.content.len() > 120 {
-                            crate::util::truncate(&fact.content, 117)
-                        } else {
-                            fact.content.clone()
-                        };
-                        lines.push(format!("  [{}] {}", fact.id, content));
-                    }
-                    if section_facts.len() > max_per_section {
-                        lines.push(format!(
-                            "  … +{} more (use memory_recall for targeted search)",
-                            section_facts.len() - max_per_section
-                        ));
-                    }
+                let large_store_threshold = 200;
+                if facts.len() > large_store_threshold {
+                    lines.push(format!(
+                        "Large memory store detected (>{large_store_threshold} facts). Showing section counts only; use memory_recall for targeted retrieval."
+                    ));
                     lines.push(String::new());
+                    for (section, section_facts) in &sections {
+                        lines.push(format!("## {} ({} facts)", section, section_facts.len()));
+                    }
+                } else {
+                    let max_per_section = 8;
+                    for (section, section_facts) in &sections {
+                        lines.push(format!("## {} ({} facts)", section, section_facts.len()));
+                        for fact in section_facts.iter().take(max_per_section) {
+                            // Truncate long facts to keep output manageable
+                            let content = if fact.content.len() > 120 {
+                                crate::util::truncate(&fact.content, 117)
+                            } else {
+                                fact.content.clone()
+                            };
+                            lines.push(format!("  [{}] {}", fact.id, content));
+                        }
+                        if section_facts.len() > max_per_section {
+                            lines.push(format!(
+                                "  … +{} more (use memory_recall for targeted search)",
+                                section_facts.len() - max_per_section
+                            ));
+                        }
+                        lines.push(String::new());
+                    }
                 }
 
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: lines.join("\n"),
                     }],
-                    details: serde_json::json!({ "count": facts.len(), "sections": sections.len() }),
+                    details: serde_json::json!({ "count": facts.len(), "sections": sections.len(), "inventory_only": facts.len() > large_store_threshold }),
                 })
             }
             crate::tool_registry::memory::MEMORY_ARCHIVE => {
@@ -1274,6 +1286,39 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("invalid memory section 'Notes'"));
+    }
+
+    #[tokio::test]
+    async fn memory_query_large_store_reports_inventory_only() {
+        let backend: Arc<dyn MemoryBackend> = Arc::new(InMemoryBackend::new());
+        let feature = MemoryFeature::new(backend, "test".into());
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        for i in 0..201 {
+            feature
+                .execute(
+                    "memory_store",
+                    &format!("store-{i}"),
+                    serde_json::json!({
+                        "section": "Architecture",
+                        "content": format!("Large store fact {i}")
+                    }),
+                    cancel.clone(),
+                )
+                .await
+                .unwrap();
+        }
+
+        let result = feature
+            .execute("memory_query", "query", serde_json::json!({}), cancel)
+            .await
+            .unwrap();
+
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("Large memory store detected"));
+        assert!(text.contains("## Architecture (201 facts)"));
+        assert!(!text.contains("Large store fact 0"));
+        assert_eq!(result.details["inventory_only"], true);
     }
 
     #[tokio::test]
