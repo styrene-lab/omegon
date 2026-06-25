@@ -314,6 +314,9 @@ impl Feature for AuditLog {
                 tool_name,
                 path,
                 decision,
+                kind,
+                persistence,
+                grant_path,
             } => {
                 self.append(&AuditEntry {
                     ts,
@@ -323,6 +326,9 @@ impl Feature for AuditLog {
                         "tool": tool_name,
                         "path": path,
                         "decision": decision,
+                        "kind": format!("{kind:?}"),
+                        "persistence": format!("{persistence:?}"),
+                        "grant_path": grant_path,
                     }),
                 });
             }

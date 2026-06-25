@@ -1697,12 +1697,15 @@ pub enum BusEvent {
     },
 
     // ── Permission ──────────────────────────────────────────────────
-    /// The agent wants to access a path outside the workspace.
+    /// The agent needs operator permission before executing a tool operation.
     /// The operator surface should display a blocking prompt and send a
     /// `PermissionResponse` via the sender inside the Arc<Mutex<Option<...>>>.
     PermissionRequest {
         tool_name: String,
         path: String,
+        kind: PermissionRequestKind,
+        persistence: PermissionPersistence,
+        grant_path: Option<String>,
         /// Response channel. The UI takes the sender via `.lock().unwrap().take()`
         /// and sends allow-once, always-allow, or deny. Wrapped in Arc<Mutex>
         /// because AgentEvent must be Clone for broadcast channels.
@@ -1716,6 +1719,9 @@ pub enum BusEvent {
         tool_name: String,
         path: String,
         decision: String, // "allow", "always_allow", "deny"
+        kind: PermissionRequestKind,
+        persistence: PermissionPersistence,
+        grant_path: Option<String>,
     },
 
     // ── Behavioral nudge ────────────────────────────────────────────
