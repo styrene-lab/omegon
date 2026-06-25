@@ -1,9 +1,8 @@
 //! Registry-native loop job command surface.
 //!
 //! This is the first daemon-prerequisite slice for recurring prompt work: a
-//! durable job definition store and `/loop` command metadata. It deliberately
-//! does not execute jobs yet; daemon execution can consume this stable on-disk
-//! model in the next slice.
+//! durable job definition store, `/loop` command metadata, agent tool surfaces,
+//! and shared helpers consumed by the daemon loop scheduler.
 
 use std::path::{Path, PathBuf};
 
@@ -101,6 +100,28 @@ pub fn last_run_at(project_root: &Path, job_id: &str) -> Option<chrono::DateTime
         .max()
 }
 
+pub fn last_run_record(project_root: &Path, job_id: &str) -> Option<LoopRunRecord> {
+    let content = std::fs::read_to_string(runs_path(project_root)).ok()?;
+    content
+        .lines()
+        .filter_map(|line| serde_json::from_str::<LoopRunRecord>(line).ok())
+        .filter(|record| record.job_id == job_id)
+        .filter_map(|record| {
+            let ts = chrono::DateTime::parse_from_rfc3339(&record.fired_at).ok()?;
+            Some((ts, record))
+        })
+        .max_by_key(|(ts, _)| *ts)
+        .map(|(_, record)| record)
+}
+
+pub fn next_due_at(project_root: &Path, job: &LoopJob) -> Option<chrono::DateTime<chrono::Utc>> {
+    let LoopTrigger::Every { duration } = &job.trigger else {
+        return None;
+    };
+    let interval = parse_loop_duration(duration)?;
+    Some(last_run_at(project_root, &job.id).map_or_else(chrono::Utc::now, |last| last + interval))
+}
+
 pub fn run_count(project_root: &Path, job_id: &str) -> usize {
     let Ok(content) = std::fs::read_to_string(runs_path(project_root)) else {
         return 0;
@@ -142,12 +163,14 @@ fn save_jobs_at(path: &Path, jobs: &[LoopJob]) -> anyhow::Result<()> {
 }
 
 pub struct LoopFeature {
+    project_root: PathBuf,
     store_path: PathBuf,
 }
 
 impl LoopFeature {
     pub fn new(project_root: &Path) -> Self {
         Self {
+            project_root: project_root.to_path_buf(),
             store_path: jobs_path(project_root),
         }
     }
@@ -195,17 +218,31 @@ impl LoopFeature {
         }
         let mut out = String::from("## Loop jobs\n");
         for job in jobs {
-            let trigger = match job.trigger {
+            let trigger = match &job.trigger {
                 LoopTrigger::Now => "now".to_string(),
                 LoopTrigger::Every { duration } => format!("every {duration}"),
             };
             let state = if job.enabled { "enabled" } else { "stopped" };
+            let runs = run_count(&self.project_root, &job.id);
+            let last = last_run_record(&self.project_root, &job.id)
+                .map(|record| format!("last:{}@{}", record.outcome, record.fired_at))
+                .unwrap_or_else(|| "last:never".into());
+            let next = if job.enabled {
+                next_due_at(&self.project_root, &job)
+                    .map(|due| format!("next:{}", due.to_rfc3339()))
+                    .unwrap_or_else(|| "next:unknown".into())
+            } else {
+                "next:disabled".into()
+            };
             out.push_str(&format!(
-                "- `{}` — {} · prompt `{}` · {} · hash {}\n",
+                "- `{}` — {} · prompt `{}` · {} · runs {} · {} · {} · hash {}\n",
                 job.id,
                 state,
                 job.prompt,
                 trigger,
+                runs,
+                last,
+                next,
                 &job.prompt_sha256[..12.min(job.prompt_sha256.len())]
             ));
         }
@@ -450,5 +487,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let feature = LoopFeature::new(dir.path());
         assert_eq!(feature.list().unwrap(), "No loop jobs registered.");
+    }
+
+    #[test]
+    fn loop_duration_parses_human_intervals() {
+        assert_eq!(
+            parse_loop_duration("15m"),
+            Some(chrono::Duration::minutes(15))
+        );
+        assert_eq!(parse_loop_duration("1h"), Some(chrono::Duration::hours(1)));
+        assert_eq!(
+            parse_loop_duration("24h"),
+            Some(chrono::Duration::hours(24))
+        );
+        assert_eq!(parse_loop_duration("daily"), None);
     }
 }

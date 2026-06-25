@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a registry-native `/loop` MVP for durable recurring prompt job definitions, binding jobs to prompt path and content hash ahead of daemon scheduler execution.
 - Added `/loop menu` schedule recipes plus agent-facing `loop_list`, `loop_create`, `loop_status`, and `loop_stop` tools for durable loop jobs.
 - Wired daemon loop-job scheduling for enabled interval jobs with run-history records, prompt-hash drift pausing, and max-run stop enforcement.
+- Improved `/loop list` observability with run counts, last outcome, next due time, and disabled-job next-state markers.
 - Added `/ui activity` controls for showing, hiding, and toggling the slim live activity stream independently from dashboard, instruments, and footer surfaces.
 - Made `/init` the explicit boundary for creating project-local `ai/memory/` durable memory scaffolding.
 - Ignored local per-project `.omegon/profile.json` files so live profile changes do not dirty source checkouts.
