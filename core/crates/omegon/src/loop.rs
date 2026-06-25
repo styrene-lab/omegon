@@ -1400,6 +1400,9 @@ pub async fn run(
                 tool_name: perm.tool_name,
                 path: perm.path,
                 decision: perm.decision,
+                kind: perm.kind,
+                persistence: perm.persistence,
+                grant_path: perm.grant_path,
             });
         }
 
@@ -2520,6 +2523,9 @@ struct PermissionRecord {
     tool_name: String,
     path: String,
     decision: String,
+    kind: omegon_traits::PermissionRequestKind,
+    persistence: omegon_traits::PermissionPersistence,
+    grant_path: Option<String>,
 }
 
 struct DispatchResult {
@@ -3050,6 +3056,9 @@ async fn execute_tool_invocation(
                             tool_name: visible_tool_name.to_string(),
                             path: requested.clone(),
                             decision: "allow".into(),
+                            kind: omegon_traits::PermissionRequestKind::Policy,
+                            persistence: omegon_traits::PermissionPersistence::None,
+                            grant_path: None,
                         });
                     }
                     omegon_traits::PermissionResponse::Deny => {
@@ -3057,6 +3066,9 @@ async fn execute_tool_invocation(
                             tool_name: visible_tool_name.to_string(),
                             path: requested.clone(),
                             decision: "deny".into(),
+                            kind: omegon_traits::PermissionRequestKind::Policy,
+                            persistence: omegon_traits::PermissionPersistence::None,
+                            grant_path: None,
                         });
                         let text = format!(
                             "BLOCKED: `{}` denied by operator after permission-policy prompt.",
@@ -3371,6 +3383,9 @@ async fn execute_tool_invocation(
                         tool_name: visible_tool_name.to_string(),
                         path: perm_err.requested_path.clone(),
                         decision: "allow".into(),
+                        kind: omegon_traits::PermissionRequestKind::PathBoundary,
+                        persistence: omegon_traits::PermissionPersistence::SessionDirectory,
+                        grant_path: Some(perm_err.directory.clone()),
                     });
                     let trust_args = serde_json::json!({
                         "path": perm_err.directory,
@@ -3406,6 +3421,9 @@ async fn execute_tool_invocation(
                         tool_name: visible_tool_name.to_string(),
                         path: perm_err.requested_path.clone(),
                         decision: "always_allow".into(),
+                        kind: omegon_traits::PermissionRequestKind::PathBoundary,
+                        persistence: omegon_traits::PermissionPersistence::ProjectDirectory,
+                        grant_path: Some(perm_err.directory.clone()),
                     });
                     let trust_args = serde_json::json!({
                         "path": perm_err.directory,
@@ -3441,6 +3459,9 @@ async fn execute_tool_invocation(
                         tool_name: visible_tool_name.to_string(),
                         path: perm_err.requested_path.clone(),
                         decision: "deny".into(),
+                        kind: omegon_traits::PermissionRequestKind::PathBoundary,
+                        persistence: omegon_traits::PermissionPersistence::None,
+                        grant_path: Some(perm_err.directory.clone()),
                     });
                     (
                         omegon_traits::ToolResult {
@@ -5095,6 +5116,144 @@ mod tests {
         assert_eq!(dispatch.results.len(), 1);
         assert!(dispatch.results[0].is_error);
         assert!(!dir.path().join("should-not-exist").exists());
+    }
+
+    #[tokio::test]
+    async fn path_always_allow_grants_directory_without_second_prompt() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!(
+                "permission-always-allow-test-{}",
+                std::process::id()
+            ));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).unwrap();
+        let outside_file = outside.join("allowed.txt");
+        std::fs::write(&outside_file, "outside content").unwrap();
+
+        let settings = crate::settings::shared("test-model");
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::features::adapter::ToolAdapter::new(
+            "core-tools",
+            Box::new(
+                crate::tools::CoreTools::new(workspace.path().to_path_buf())
+                    .with_settings(settings.clone()),
+            ),
+        )));
+        bus.register_internal_tool(crate::tool_registry::core::TRUST_DIRECTORY, "core-tools");
+        bus.finalize();
+        let (events_tx, mut events_rx) = broadcast::channel(16);
+        let cancel = CancellationToken::new();
+        let path = outside_file.display().to_string();
+        let calls = vec![ToolCall {
+            id: "outside-read".into(),
+            name: crate::tool_registry::core::READ.into(),
+            arguments: serde_json::json!({"path": path}),
+        }];
+
+        let dispatch_fut = dispatch_tools(
+            &bus,
+            &calls,
+            &events_tx,
+            cancel.clone(),
+            workspace.path(),
+            None,
+            None,
+            None,
+            None,
+        );
+        tokio::pin!(dispatch_fut);
+
+        loop {
+            tokio::select! {
+                event = events_rx.recv() => {
+                    if let Ok(AgentEvent::PermissionRequest { tool_name, path, kind, persistence, grant_path, respond }) = event {
+                        assert_eq!(tool_name, crate::tool_registry::core::READ);
+                        assert_eq!(path, outside_file.display().to_string());
+                        assert_eq!(kind, omegon_traits::PermissionRequestKind::PathBoundary);
+                        assert_eq!(persistence, omegon_traits::PermissionPersistence::ProjectDirectory);
+                        assert_eq!(grant_path.as_deref(), Some(outside.to_str().unwrap()));
+                        let tx = respond.lock().unwrap().take().expect("permission response sender");
+                        tx.send(omegon_traits::PermissionResponse::AlwaysAllow).expect("send always allow");
+                        break;
+                    }
+                }
+                dispatch = &mut dispatch_fut => {
+                    panic!("dispatch completed before permission prompt: {:?}", dispatch.results.first().map(|r| &r.content));
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                    panic!("timed out waiting for permission prompt");
+                }
+            }
+        }
+
+        let first_dispatch = dispatch_fut.await;
+        assert_eq!(first_dispatch.results.len(), 1);
+        assert!(
+            !first_dispatch.results[0].is_error,
+            "first dispatch failed: {:?}",
+            first_dispatch.results[0].content
+        );
+        assert!(
+            first_dispatch.results[0].content[0]
+                .as_text()
+                .unwrap()
+                .contains("outside content"),
+            "dispatch result: {:?}",
+            first_dispatch.results[0].content
+        );
+        assert_eq!(first_dispatch.permission_decisions.len(), 1);
+        assert_eq!(
+            first_dispatch.permission_decisions[0].decision,
+            "always_allow"
+        );
+        assert_eq!(
+            first_dispatch.permission_decisions[0].kind,
+            omegon_traits::PermissionRequestKind::PathBoundary
+        );
+        assert_eq!(
+            first_dispatch.permission_decisions[0].persistence,
+            omegon_traits::PermissionPersistence::ProjectDirectory
+        );
+        assert_eq!(
+            first_dispatch.permission_decisions[0].grant_path.as_deref(),
+            Some(outside.to_str().unwrap())
+        );
+
+        let second_calls = vec![ToolCall {
+            id: "outside-read-again".into(),
+            name: crate::tool_registry::core::READ.into(),
+            arguments: serde_json::json!({"path": outside_file.display().to_string()}),
+        }];
+        let second_dispatch = dispatch_tools(
+            &bus,
+            &second_calls,
+            &events_tx,
+            cancel,
+            workspace.path(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(second_dispatch.results.len(), 1);
+        assert!(!second_dispatch.results[0].is_error);
+        assert!(second_dispatch.permission_decisions.is_empty());
+
+        loop {
+            match events_rx.try_recv() {
+                Err(broadcast::error::TryRecvError::Empty) => break,
+                Ok(AgentEvent::PermissionRequest { .. }) => {
+                    panic!("second read emitted an unexpected permission request")
+                }
+                Ok(_) => {}
+                Err(err) => panic!("unexpected event channel error: {err:?}"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[tokio::test]
