@@ -137,6 +137,9 @@ pub fn parse_loop_duration(value: &str) -> Option<chrono::Duration> {
     let value = value.trim();
     let (num, unit) = value.split_at(value.len().saturating_sub(1));
     let n = num.parse::<i64>().ok()?;
+    if n <= 0 {
+        return None;
+    }
     match unit {
         "s" => Some(chrono::Duration::seconds(n)),
         "m" => Some(chrono::Duration::minutes(n)),
