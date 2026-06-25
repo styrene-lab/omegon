@@ -380,6 +380,7 @@ async fn ui_action_set_ui_preset_updates_surfaces() {
     assert!(app.ui_surfaces.dashboard);
     assert!(app.ui_surfaces.instruments);
     assert!(app.ui_surfaces.footer);
+    assert!(app.ui_surfaces.activity);
 }
 
 #[tokio::test]
@@ -404,6 +405,30 @@ async fn ui_action_set_surface_visible_updates_one_surface() {
     assert!(app.ui_surfaces.dashboard);
     assert!(!app.ui_surfaces.instruments);
     assert!(!app.ui_surfaces.footer);
+    assert!(app.ui_surfaces.activity);
+}
+
+#[tokio::test]
+async fn ui_action_can_hide_activity_surface() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::SetSurfaceVisible(SetSurfaceVisibleAction {
+                surface: UiSurfaceToggle::Activity,
+                visible: false,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("UI surface disabled: activity")
+    );
+    assert!(!app.ui_surfaces.activity);
+    assert!(app.ui_status_text().contains("activity: off"));
 }
 
 #[tokio::test]
@@ -2617,6 +2642,7 @@ fn ctrl_g_preset_toggle_skips_removed_standard_mode() {
         dashboard: false,
         instruments: false,
         footer: true,
+        activity: true,
     };
     assert_eq!(custom.preset_name(), "custom");
     assert_eq!(custom.toggle_preset().preset_name(), "lean");
@@ -5988,6 +6014,7 @@ fn selected_tool_segment_detail_pane_renders_full_tool_context() {
             details: serde_json::Value::Null,
         },
     });
+    app.tool_activity_linger_until = None;
     app.tool_inspection_target = Some(ToolInspectionTarget::Pinned("tool-1".into()));
 
     let rendered = render_app_to_string(&mut app, 140, 36);
@@ -5995,6 +6022,56 @@ fn selected_tool_segment_detail_pane_renders_full_tool_context() {
     assert!(rendered.contains("detail log"), "{rendered}");
     assert!(rendered.contains("bash"), "{rendered}");
     assert!(rendered.contains("test result details"), "{rendered}");
+}
+
+#[test]
+fn completed_live_tool_lingers_before_activity_clears() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        args: serde_json::json!({"command": "pwd"}),
+    });
+    app.handle_agent_event(AgentEvent::ToolEnd {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        is_error: false,
+        result: omegon_traits::ToolResult {
+            content: vec![omegon_traits::ContentBlock::Text { text: "ok".into() }],
+            details: serde_json::Value::Null,
+        },
+    });
+
+    assert!(matches!(
+        app.tool_inspection_target,
+        Some(ToolInspectionTarget::LiveLatest(ref id)) if id == "tool-1"
+    ));
+    assert!(app.tool_activity_linger_until.is_some());
+}
+
+#[test]
+fn expired_live_tool_linger_clears_activity_on_render() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        args: serde_json::json!({"command": "pwd"}),
+    });
+    app.handle_agent_event(AgentEvent::ToolEnd {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        is_error: false,
+        result: omegon_traits::ToolResult {
+            content: vec![omegon_traits::ContentBlock::Text { text: "ok".into() }],
+            details: serde_json::Value::Null,
+        },
+    });
+    app.tool_activity_linger_until = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
+
+    let _ = render_app_to_string(&mut app, 120, 32);
+
+    assert!(app.tool_inspection_target.is_none());
+    assert!(app.tool_activity_linger_until.is_none());
 }
 
 #[test]

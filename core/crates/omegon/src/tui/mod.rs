@@ -539,6 +539,7 @@ struct App {
     /// Structured session plan snapshot for the active Workbench panel.
     workbench_state: WorkbenchState,
     tool_inspection_target: Option<ToolInspectionTarget>,
+    tool_activity_linger_until: Option<std::time::Instant>,
     /// Explicit Slim turn state rendered in the session row.
     slim_turn_state: SlimTurnState,
     /// Visual effects manager (tachyonfx).
@@ -1968,6 +1969,7 @@ impl App {
             workbench_state: WorkbenchState::default(),
             completed_plan_history_available: false,
             tool_inspection_target: None,
+            tool_activity_linger_until: None,
             slim_turn_state: SlimTurnState::Ready,
             effects: effects::Effects::new(),
             bus_commands: Vec::new(),
@@ -2035,6 +2037,7 @@ impl App {
             UiSurfaceToggle::Dashboard => self.ui_surfaces.dashboard = enabled,
             UiSurfaceToggle::Instruments => self.ui_surfaces.instruments = enabled,
             UiSurfaceToggle::Footer => self.ui_surfaces.footer = enabled,
+            UiSurfaceToggle::Activity => self.ui_surfaces.activity = enabled,
         }
     }
 
@@ -2089,7 +2092,7 @@ impl App {
     fn ui_status_text(&self) -> String {
         let mode = self.ui_surfaces.preset_name();
         format!(
-            "UI preset: {mode}\n  dashboard: {}\n  instruments: {}\n  footer: {}\n\nPresets\n  /ui lean    (conversation-only)\n  /ui full    (+ dashboard + instruments)\n\nSurfaces\n  /ui show|hide|toggle dashboard|instruments|footer",
+            "UI preset: {mode}\n  dashboard: {}\n  instruments: {}\n  footer: {}\n  activity: {}\n\nPresets\n  /ui lean    (conversation + activity)\n  /ui full    (+ dashboard + instruments)\n\nSurfaces\n  /ui show|hide|toggle dashboard|instruments|footer|activity",
             if self.ui_surfaces.dashboard {
                 "on"
             } else {
@@ -2101,6 +2104,11 @@ impl App {
                 "off"
             },
             if self.ui_surfaces.footer { "on" } else { "off" },
+            if self.ui_surfaces.activity {
+                "on"
+            } else {
+                "off"
+            },
         )
     }
 
@@ -4618,12 +4626,27 @@ impl App {
             workstreams: self.workbench_state.workstreams.clone(),
             workspace: self.current_workbench_workspace_context(),
         };
-        let has_live_tool_activity = self.ui_surfaces.is_compact()
+        if self
+            .tool_activity_linger_until
+            .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+        {
+            if self
+                .tool_inspection_target
+                .as_ref()
+                .is_some_and(|target| matches!(target, ToolInspectionTarget::LiveLatest(_)))
+            {
+                self.tool_inspection_target = None;
+            }
+            self.tool_activity_linger_until = None;
+        }
+        let has_live_tool_activity = self.ui_surfaces.activity
+            && self.ui_surfaces.is_compact()
             && self
                 .tool_inspection_target
                 .as_ref()
                 .is_some_and(|target| self.conversation.tool_segment_by_id(target.id()).is_some());
-        let raw_tool_inspection_height = if self.ui_surfaces.is_compact() {
+        let raw_tool_inspection_height = if self.ui_surfaces.activity && self.ui_surfaces.is_compact()
+        {
             activity_preferred_height(
                 has_live_tool_activity,
                 live_cleave.as_ref(),
@@ -7134,6 +7157,7 @@ Scroll transcript:
                         UiSurfaceToggle::Dashboard => !self.ui_surfaces.dashboard,
                         UiSurfaceToggle::Instruments => !self.ui_surfaces.instruments,
                         UiSurfaceToggle::Footer => !self.ui_surfaces.footer,
+                        UiSurfaceToggle::Activity => !self.ui_surfaces.activity,
                     };
                     let outcome = self.handle_surface_visible_action(SetSurfaceVisibleAction {
                         surface,
@@ -8043,6 +8067,7 @@ Scroll transcript:
                     _ => Some(serde_json::to_string_pretty(&args).unwrap_or_default()),
                 };
                 self.tool_inspection_target = Some(ToolInspectionTarget::LiveLatest(id.clone()));
+                self.tool_activity_linger_until = None;
                 self.conversation.push_tool_start(
                     &id,
                     &name,
@@ -8261,7 +8286,14 @@ Scroll transcript:
                     .as_ref()
                     .is_some_and(|target| matches!(target, ToolInspectionTarget::LiveLatest(active_id) if active_id == &id))
                 {
-                    self.tool_inspection_target = None;
+                    self.tool_activity_linger_until = Some(
+                        std::time::Instant::now()
+                            + if is_error {
+                                Duration::from_secs(8)
+                            } else {
+                                Duration::from_millis(2200)
+                            },
+                    );
                 }
                 if self.agent_active {
                     self.slim_turn_state = SlimTurnState::RequestingProvider;
@@ -8443,6 +8475,7 @@ Scroll transcript:
                 self.workbench_state.active = None;
                 self.completed_plan_history_available = false;
                 self.tool_inspection_target = None;
+                self.tool_activity_linger_until = None;
                 self.turn = 0;
                 self.tool_calls = 0;
                 self.last_tool_name = None;

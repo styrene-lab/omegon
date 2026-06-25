@@ -223,6 +223,7 @@ mod tests {
                 dashboard: false,
                 instruments: false,
                 footer: true,
+                activity: true,
             },
             dashboard_has_content: false,
             editor_height: 3,
