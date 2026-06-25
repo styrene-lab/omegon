@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 - Added `docs/web-api.openapi.yaml` — an OpenAPI 3.1 contract for the omegon-web `/api/web/*` surface (capabilities, launch-context, surface snapshot, surface stream WebSocket, action ingress, sessions, attachments), derived from the axum handlers and DTOs in `core/crates/omegon/src/web/`.
+- Added a Rust-native OpenAPI contract linter (`cargo test -p omegon --test openapi_contract_lint`, also `just lint-openapi`) that structurally validates every `docs/**/*.openapi.{yaml,yml}` spec — version, info, non-empty paths, per-operation responses, unique operationIds, path-template/parameter agreement, and local `$ref` resolution — so contracts are gated by CI without a Node/Python toolchain.
 - Added initial Omegon Web discovery endpoints for browser/Auspex capability metadata, launch context, native surface snapshots, browser action ingress, browser-native surface event streaming, session discovery, and staged browser attachments.
 - Added a registry-native `/loop` MVP for durable recurring prompt job definitions, binding jobs to prompt path and content hash ahead of daemon scheduler execution.
 - Added `/loop menu` schedule recipes plus agent-facing `loop_list`, `loop_create`, `loop_status`, and `loop_stop` tools for durable loop jobs.
