@@ -14,6 +14,8 @@
 pub mod acp_ws;
 pub mod api;
 pub mod auth;
+pub mod surface_stream;
+pub mod surfaces;
 pub mod ws;
 
 use std::net::SocketAddr;
@@ -406,6 +408,34 @@ pub async fn start_server_with_options(
             axum::routing::get(api::get_capabilities),
         )
         .route("/api/state", axum::routing::get(api::get_state))
+        .route(
+            "/api/web/attachments/{id}",
+            axum::routing::get(api::get_web_attachment),
+        )
+        .route(
+            "/api/web/attachments",
+            axum::routing::post(api::post_web_attachment),
+        )
+        .route(
+            "/api/web/sessions/{session_id}",
+            axum::routing::get(api::get_web_session),
+        )
+        .route(
+            "/api/web/sessions",
+            axum::routing::get(api::get_web_sessions),
+        )
+        .route(
+            "/api/web/surfaces/stream",
+            axum::routing::get(surface_stream::web_surface_stream_handler),
+        )
+        .route(
+            "/api/web/actions",
+            axum::routing::post(api::post_web_action),
+        )
+        .route(
+            "/api/web/surfaces",
+            axum::routing::get(api::get_web_surfaces),
+        )
         .route(
             "/api/web/capabilities",
             axum::routing::get(api::get_web_capabilities),
