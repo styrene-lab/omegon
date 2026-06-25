@@ -37,6 +37,14 @@ impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
     pub fn backend(&self) -> &B {
         &self.backend
     }
+
+    fn parse_section_arg(section_str: &str) -> anyhow::Result<Section> {
+        serde_json::from_value(Value::String(section_str.into())).map_err(|_| {
+            anyhow::anyhow!(
+                "invalid memory section '{section_str}'; expected one of Architecture, Decisions, Constraints, Known Issues, Patterns & Conventions, Specs"
+            )
+        })
+    }
 }
 
 // ─── Tool definitions ───────────────────────────────────────────────────────
@@ -267,8 +275,7 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
             "memory_store" => {
                 let content = args["content"].as_str().unwrap_or("").to_string();
                 let section_str = args["section"].as_str().unwrap_or("Architecture");
-                let section: Section = serde_json::from_value(Value::String(section_str.into()))
-                    .unwrap_or(Section::Architecture);
+                let section = Self::parse_section_arg(section_str)?;
 
                 let result = self
                     .backend
@@ -424,8 +431,7 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                 let fact_id = args["fact_id"].as_str().unwrap_or("").to_string();
                 let content = args["content"].as_str().unwrap_or("").to_string();
                 let section_str = args["section"].as_str().unwrap_or("Architecture");
-                let section: Section = serde_json::from_value(Value::String(section_str.into()))
-                    .unwrap_or(Section::Architecture);
+                let section = Self::parse_section_arg(section_str)?;
 
                 let new_fact = self
                     .backend
