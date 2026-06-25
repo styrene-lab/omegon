@@ -79,6 +79,9 @@ pub struct ActivityToolProjection {
     pub segment_id: String,
     pub mode: ActivityToolMode,
     pub status: ActivityToolStatus,
+    pub name: String,
+    pub args_summary: Option<String>,
+    pub result_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +89,7 @@ pub enum ActivityToolStatus {
     Running,
     Complete,
     Error,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

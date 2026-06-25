@@ -768,7 +768,7 @@ pub fn render_activity_panel(
                 area.height
             };
             let tool_area = Rect::new(area.x, area.y, area.width, tool_rows);
-            render_activity_tool_rows(tool_area, frame, t, conversation, tools);
+            render_activity_tool_rows(tool_area, frame, t, tools);
             if let Some(operation) = operation
                 && area.height > tool_rows
             {
@@ -788,7 +788,6 @@ fn render_activity_tool_rows(
     area: Rect,
     frame: &mut Frame,
     t: &dyn theme::Theme,
-    conversation: &crate::tui::conversation::ConversationView,
     tools: &[&crate::surfaces::activity::ActivityToolProjection],
 ) {
     if area.width == 0 || area.height == 0 {
@@ -799,12 +798,11 @@ fn render_activity_tool_rows(
     let lines = tools
         .iter()
         .take(max_rows)
-        .filter_map(|tool| {
-            let segment = conversation.tool_segment_by_id(&tool.segment_id)?;
-            Some(Line::from(Span::styled(
-                activity_tool_row_text(tool, segment, area.width),
+        .map(|tool| {
+            Line::from(Span::styled(
+                activity_tool_row_text(tool, area.width),
                 activity_tool_status_style(tool.status, t, bg),
-            )))
+            ))
         })
         .collect::<Vec<_>>();
     Paragraph::new(lines)
@@ -815,26 +813,16 @@ fn render_activity_tool_rows(
 
 fn activity_tool_row_text(
     tool: &crate::surfaces::activity::ActivityToolProjection,
-    segment: &crate::tui::segments::Segment,
     width: u16,
 ) -> String {
-    let (name, args, result) = match &segment.content {
-        crate::tui::segments::SegmentContent::ToolCard {
-            name,
-            args_summary,
-            result_summary,
-            ..
-        } => (
-            name.as_str(),
-            args_summary.as_deref().unwrap_or(""),
-            result_summary.as_deref().unwrap_or(""),
-        ),
-        _ => ("tool", "", ""),
-    };
+    let name = tool.name.as_str();
+    let args = tool.args_summary.as_deref().unwrap_or("");
+    let result = tool.result_summary.as_deref().unwrap_or("");
     let state = match tool.status {
         crate::surfaces::activity::ActivityToolStatus::Running => "run",
         crate::surfaces::activity::ActivityToolStatus::Complete => "done",
         crate::surfaces::activity::ActivityToolStatus::Error => "fail",
+        crate::surfaces::activity::ActivityToolStatus::Cancelled => "stop",
     };
     let detail = [args, result]
         .into_iter()
@@ -858,6 +846,7 @@ fn activity_tool_status_style(
         crate::surfaces::activity::ActivityToolStatus::Running => t.accent_muted(),
         crate::surfaces::activity::ActivityToolStatus::Complete => t.muted(),
         crate::surfaces::activity::ActivityToolStatus::Error => t.error(),
+        crate::surfaces::activity::ActivityToolStatus::Cancelled => t.dim(),
     };
     Style::default().fg(fg).bg(bg)
 }
