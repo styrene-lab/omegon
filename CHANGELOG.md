@@ -42,6 +42,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
 
 ### Fixed
+- Auto-expanded TUI tool cards for direct bang shell commands like `!ls` so operator-requested command output is visible by default.
 - Made `memory_query` inventory-only for large stores so mature projects show section counts instead of noisy sample facts.
 - Rejected invalid native memory sections, including lifecycle ingestion paths, instead of silently defaulting them to Architecture, and made empty `memory_recall` queries return an explicit error result.
 - Clarified extension tool descriptions as extension-owned rather than Omegon core semantics, reducing confusion between Flynt document-memory tools and native `memory_*` runtime memory.
