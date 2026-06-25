@@ -759,6 +759,92 @@ fn copy_skill_bundle_dir(
     Ok(())
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SkillBundleSummary {
+    scripts: Vec<String>,
+    resources: Vec<String>,
+    conflicts: Vec<String>,
+}
+
+fn relative_file_list(root: &std::path::Path, subdir: &str) -> Vec<String> {
+    let base = root.join(subdir);
+    if !base.is_dir() {
+        return Vec::new();
+    }
+    let mut stack = vec![base];
+    let mut files = Vec::new();
+    while let Some(dir) = stack.pop() {
+        let Ok(read_dir) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in read_dir.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                stack.push(path);
+            } else if file_type.is_file()
+                && let Ok(relative) = path.strip_prefix(root)
+            {
+                files.push(relative.to_string_lossy().to_string());
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+fn summarize_imported_skill(root: &std::path::Path, entry_name: &str) -> SkillBundleSummary {
+    let candidate = std::fs::read_to_string(root.join("SKILL.md"))
+        .ok()
+        .map(|content| {
+            let (manifest, _body) = parse_skill_file(&content);
+            SkillBundleCandidate {
+                source: "import".into(),
+                name: entry_name.into(),
+                path: root.to_path_buf(),
+                manifest,
+                missing_script_refs: Vec::new(),
+            }
+        });
+    let entries = list_structured().unwrap_or_default();
+    SkillBundleSummary {
+        scripts: relative_file_list(root, "scripts"),
+        resources: relative_file_list(root, "resources"),
+        conflicts: candidate
+            .as_ref()
+            .map(|candidate| doctor_candidate_conflicts(candidate, &entries))
+            .unwrap_or_default(),
+    }
+}
+
+fn print_import_summary(summary: &SkillBundleSummary) {
+    println!("Summary:");
+    println!("  scripts: {}", summary.scripts.len());
+    for script in summary.scripts.iter().take(5) {
+        println!("    - {script}");
+    }
+    if summary.scripts.len() > 5 {
+        println!("    - … {} more", summary.scripts.len() - 5);
+    }
+    println!("  resources: {}", summary.resources.len());
+    for resource in summary.resources.iter().take(5) {
+        println!("    - {resource}");
+    }
+    if summary.resources.len() > 5 {
+        println!("    - … {} more", summary.resources.len() - 5);
+    }
+    if summary.conflicts.is_empty() {
+        println!("  conflicts: none");
+    } else {
+        println!("  conflicts: {}", summary.conflicts.join(", "));
+        println!(
+            "  resolution: create a project-local merged skill; Omegon will not inject conflicting directives together"
+        );
+    }
+}
+
 pub fn cmd_import(path: &std::path::Path, project: bool, force: bool) -> anyhow::Result<()> {
     let source = path.canonicalize()?;
     let (source_dir, skill_file) = if source.is_dir() {
@@ -808,6 +894,7 @@ pub fn cmd_import(path: &std::path::Path, project: bool, force: bool) -> anyhow:
         std::fs::create_dir_all(&destination)?;
         std::fs::copy(&skill_file, destination.join("SKILL.md"))?;
     }
+    let summary = summarize_imported_skill(&destination, &slug);
     println!(
         "Imported {} skill '{}' from {} to {}",
         if project { "project-local" } else { "user" },
@@ -815,6 +902,7 @@ pub fn cmd_import(path: &std::path::Path, project: bool, force: bool) -> anyhow:
         source.display(),
         destination.display()
     );
+    print_import_summary(&summary);
     Ok(())
 }
 
@@ -2056,6 +2144,46 @@ description: Example
         );
         assert!(command.contains("'"));
         assert!(command.contains("Claude Skills/example skill"));
+    }
+
+    #[test]
+    fn imported_skill_summary_lists_scripts_resources_and_conflicts() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("rust-helper");
+        std::fs::create_dir_all(skill_dir.join("scripts/nested")).unwrap();
+        std::fs::create_dir_all(skill_dir.join("resources/templates")).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: rust-helper\ndescription: Rust helper\nactivation: project_detected\nprofile: [coding]\nproject_signals: [Cargo.toml]\n---\n\nBody\n",
+        )
+        .unwrap();
+        std::fs::write(skill_dir.join("scripts/run.sh"), "echo run\n").unwrap();
+        std::fs::write(skill_dir.join("scripts/nested/check.py"), "print('ok')\n").unwrap();
+        std::fs::write(
+            skill_dir.join("resources/templates/readme.md"),
+            "template\n",
+        )
+        .unwrap();
+
+        let summary = summarize_imported_skill(&skill_dir, "rust-helper");
+
+        assert_eq!(
+            summary.scripts,
+            vec![
+                "scripts/nested/check.py".to_string(),
+                "scripts/run.sh".to_string()
+            ]
+        );
+        assert_eq!(
+            summary.resources,
+            vec!["resources/templates/readme.md".to_string()]
+        );
+        assert!(
+            summary
+                .conflicts
+                .iter()
+                .any(|conflict| conflict == "bundled/rust")
+        );
     }
 
     #[test]
