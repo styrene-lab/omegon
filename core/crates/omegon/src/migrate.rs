@@ -160,6 +160,82 @@ fn migrate_auto(cwd: &Path) -> MigrationReport {
     report
 }
 
+fn claude_skill_roots(cwd: &Path) -> Vec<(PathBuf, bool)> {
+    let h = home();
+    vec![
+        (h.join(".claude/skills"), false),
+        (h.join(".claude-code/skills"), false),
+        (cwd.join(".claude/skills"), true),
+        (cwd.join(".claude-code/skills"), true),
+    ]
+}
+
+fn import_claude_skill(path: &Path, project: bool, cwd: &Path) -> anyhow::Result<()> {
+    if project {
+        let original = std::env::current_dir()?;
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+        std::env::set_current_dir(cwd)?;
+        let _restore = Restore(original);
+        crate::skills::cmd_import(path, true, false)
+    } else {
+        crate::skills::cmd_import(path, false, false)
+    }
+}
+
+fn migrate_claude_skills(cwd: &Path, r: &mut MigrationReport) {
+    for (root, project) in claude_skill_roots(cwd) {
+        if !root.is_dir() {
+            continue;
+        }
+        let Ok(read_dir) = std::fs::read_dir(&root) else {
+            r.warn(format!(
+                "Failed to read Claude skills at {}",
+                root.display()
+            ));
+            continue;
+        };
+        let mut bundles: Vec<_> = read_dir
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().join("SKILL.md").is_file())
+            .collect();
+        bundles.sort_by_key(|entry| entry.file_name());
+        for bundle in bundles {
+            let path = bundle.path();
+            let display = path.display().to_string();
+            match import_claude_skill(&path, project, cwd) {
+                Ok(()) => r.add(
+                    "skill",
+                    format!(
+                        "imported {} skill from {display}",
+                        if project { "project" } else { "user" }
+                    ),
+                ),
+                Err(err) => r.warn(format!(
+                    "Skipped Claude skill at {display}: {err}. Re-run `omegon skills import {}{} --force` to refresh.",
+                    shell_quote_path(&path),
+                    if project { " --project" } else { "" }
+                )),
+            }
+        }
+    }
+}
+
+fn shell_quote_path(path: &Path) -> String {
+    let s = path.display().to_string();
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | ':'))
+    {
+        s
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
 // ─── Claude Code ────────────────────────────────────────────────────────────
 
 fn migrate_claude_code(cwd: &Path) -> MigrationReport {
@@ -207,6 +283,8 @@ fn migrate_claude_code(cwd: &Path) -> MigrationReport {
 
     // Project: CLAUDE.md → .omegon/AGENTS.md
     import_project_instructions(cwd, &cwd.join(".claude/CLAUDE.md"), &mut r);
+
+    migrate_claude_skills(cwd, &mut r);
 
     r
 }
@@ -894,6 +972,31 @@ fn scan_conventions(cwd: &Path) -> Vec<DetectedConvention> {
 mod tests {
     use super::*;
 
+    struct EnvRestore {
+        key: &'static str,
+        value: Option<std::ffi::OsString>,
+    }
+
+    impl EnvRestore {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let previous = std::env::var_os(key);
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                value: previous,
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            match &self.value {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
+
     #[test]
     fn detect_sources_returns_list() {
         let sources = detect_sources();
@@ -921,6 +1024,62 @@ mod tests {
             !report.warnings.is_empty() || report.items.is_empty(),
             "unknown source should warn or have no items"
         );
+    }
+
+    #[test]
+    fn migrate_claude_code_imports_project_skill_bundle() {
+        let home = tempfile::tempdir().unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let _home = EnvRestore::set("OMEGON_HOME", home.path());
+        let skill_dir = cwd.path().join(".claude/skills/project-helper");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: project-helper\ndescription: Project helper\n---\n\nBody\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(skill_dir.join("scripts")).unwrap();
+        std::fs::write(skill_dir.join("scripts/run.sh"), "echo ok\n").unwrap();
+
+        let report = migrate_claude_code(cwd.path());
+
+        assert!(report.items.iter().any(|item| item.kind == "skill"));
+        assert!(
+            cwd.path()
+                .join(".omegon/skills/project-helper/SKILL.md")
+                .is_file()
+        );
+        assert!(
+            cwd.path()
+                .join(".omegon/skills/project-helper/scripts/run.sh")
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn migrate_claude_code_skips_existing_skill_with_force_hint() {
+        let home = tempfile::tempdir().unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let _home = EnvRestore::set("OMEGON_HOME", home.path());
+        let skill_dir = cwd.path().join(".claude/skills/existing-helper");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: existing-helper\ndescription: Existing helper\n---\n\nBody\n",
+        )
+        .unwrap();
+        let destination = cwd.path().join(".omegon/skills/existing-helper");
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(destination.join("SKILL.md"), "already here\n").unwrap();
+
+        let report = migrate_claude_code(cwd.path());
+
+        assert!(report.warnings.iter().any(|warning| {
+            warning.contains("existing-helper")
+                && warning.contains("omegon skills import")
+                && warning.contains("--project")
+                && warning.contains("--force")
+        }));
     }
 
     #[test]
