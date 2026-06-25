@@ -4201,12 +4201,6 @@ impl App {
             return;
         }
 
-        if attachments.is_empty() {
-            self.conversation.push_user(&final_text);
-        } else {
-            self.conversation
-                .push_user_with_attachments(&final_text, &attachments);
-        }
         self.history.push(raw_text.clone());
         self.exit_history_recall();
         self.agent_active = true;
@@ -8567,10 +8561,11 @@ Scroll transcript:
                     self.workbench_state = WorkbenchState {
                         active: None,
                         workstreams: dock_state.workstreams,
-                        ..WorkbenchState::default()
+                        workspace: self.workbench_state.workspace.clone(),
                     };
                 } else {
-                    self.workbench_state = dock_state;
+                    self.workbench_state.active = dock_state.active;
+                    self.workbench_state.workstreams = dock_state.workstreams;
                 }
             }
             AgentEvent::SessionReset => {

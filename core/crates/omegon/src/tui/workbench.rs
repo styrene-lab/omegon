@@ -143,7 +143,7 @@ impl WorkbenchState {
                 .iter()
                 .filter_map(WorkstreamSummary::from_projection)
                 .collect(),
-            ..Self::default()
+            workspace: WorkbenchWorkspaceContext::default(),
         }
     }
 
