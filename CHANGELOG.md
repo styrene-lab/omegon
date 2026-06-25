@@ -43,7 +43,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 - Made `memory_query` inventory-only for large stores so mature projects show section counts instead of noisy sample facts.
-- Rejected invalid native memory sections instead of silently defaulting them to Architecture, and made empty `memory_recall` queries return an explicit error result.
+- Rejected invalid native memory sections, including lifecycle ingestion paths, instead of silently defaulting them to Architecture, and made empty `memory_recall` queries return an explicit error result.
 - Clarified extension tool descriptions as extension-owned rather than Omegon core semantics, reducing confusion between Flynt document-memory tools and native `memory_*` runtime memory.
 - Tightened native memory tool guidance to discourage over-storing, prefer targeted recall, and reserve broad `memory_query` for inventory/debugging.
 - Routed all in-tree bash execution paths, including code-act proxy execution, through workspace-boundary mediation so path permission prompts remain harness-level instead of leaking back as ordinary tool output.
