@@ -1147,6 +1147,14 @@ fn normalize_extension_tool_definition(value: &Value) -> Result<ToolDefinition> 
         .map_err(|err| anyhow!("tool '{name}' has invalid capabilities: {err}"))?
         .unwrap_or_default();
 
+    let description = if description.is_empty() {
+        "Extension tool. Semantics are owned by the extension, not Omegon core.".to_string()
+    } else {
+        format!(
+            "Extension tool (not Omegon core; semantics are owned by the extension): {description}"
+        )
+    };
+
     Ok(ToolDefinition {
         name,
         label,
@@ -1621,6 +1629,9 @@ binary = "flaky-extension.sh"
         assert_eq!(tools[0].name, "reader_doctor");
         assert_eq!(tools[0].label, "reader_doctor");
         assert_eq!(tools[0].parameters["type"], "object");
+        assert!(tools[0]
+            .description
+            .starts_with("Extension tool (not Omegon core; semantics are owned by the extension):"));
         assert_eq!(tools[1].name, "reader_open");
         assert_eq!(tools[1].parameters["required"][0], "path");
     }
@@ -1639,6 +1650,9 @@ binary = "flaky-extension.sh"
 
         assert_eq!(tools[0].name, "hello_extension");
         assert_eq!(tools[0].label, "Hello Extension");
+        assert!(tools[0]
+            .description
+            .contains("semantics are owned by the extension"));
         assert_eq!(tools[0].parameters["properties"]["name"]["type"], "string");
     }
 

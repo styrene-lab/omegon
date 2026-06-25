@@ -232,11 +232,11 @@ impl Feature for MemoryFeature {
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_STORE.into(),
                 label: "memory_store".into(),
-                description: "Store a fact in project memory. Facts persist across sessions. \
-Use this PROACTIVELY — without being asked — whenever you learn something worth remembering: \
-an architectural decision, a constraint, a bug pattern, a project convention, a tradeoff that was made, \
-or any fact that would help you (or a future session) avoid re-discovering the same thing. \
-If in doubt, store it. Over-storing is better than forgetting.".into(),
+                description: "Store a durable fact in Omegon runtime memory. Facts persist across sessions. \
+Use this for stable architectural decisions, constraints, bug patterns, project conventions, and durable tradeoffs. \
+Before storing, prefer memory_recall to check whether an active fact already covers the point; use memory_supersede for stale facts \
+and rely on reinforcement for exact duplicates instead of storing paraphrases. Do not store transient observations, generic task chatter, \
+or facts better represented as Flynt/project documents.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["section", "content"],
@@ -286,7 +286,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_QUERY.into(),
                 label: "memory_query".into(),
-                description: "Read all active facts from project memory.".into(),
+                description: "Read a capped inventory of active facts from Omegon runtime memory. This is broad and can be noisy in mature projects; prefer memory_recall for targeted retrieval and use memory_query only for inventory, hygiene, or debugging.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {}
