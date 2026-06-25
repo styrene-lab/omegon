@@ -545,8 +545,7 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                 // Lifecycle fact ingestion — stores with source metadata
                 let content = args["content"].as_str().unwrap_or("").to_string();
                 let section_str = args["section"].as_str().unwrap_or("Architecture");
-                let section: Section = serde_json::from_value(Value::String(section_str.into()))
-                    .unwrap_or(Section::Architecture);
+                let section = Self::parse_section_arg(section_str)?;
                 let authority = args["authority"].as_str().unwrap_or("inferred");
                 let source_kind = args["source_kind"].as_str().unwrap_or("unknown");
 

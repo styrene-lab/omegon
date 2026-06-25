@@ -850,8 +850,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 // Lifecycle fact ingestion — stores with source metadata
                 let content = args["content"].as_str().unwrap_or("").to_string();
                 let section_str = args["section"].as_str().unwrap_or("Architecture");
-                let section: Section = serde_json::from_value(Value::String(section_str.into()))
-                    .unwrap_or(Section::Architecture);
+                let section = Self::parse_section_arg(section_str)?;
                 let authority = args["authority"].as_str().unwrap_or("inferred");
                 let source_kind = args["source_kind"].as_str().unwrap_or("unknown");
 
@@ -1280,6 +1279,30 @@ mod tests {
                 "memory_supersede",
                 "c2",
                 serde_json::json!({"fact_id": fact_id, "section": "Notes", "content": "System uses services"}),
+                cancel,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("invalid memory section 'Notes'"));
+    }
+
+    #[tokio::test]
+    async fn memory_ingest_lifecycle_rejects_invalid_section() {
+        let backend: Arc<dyn MemoryBackend> = Arc::new(InMemoryBackend::new());
+        let feature = MemoryFeature::new(backend, "test".into());
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        let err = feature
+            .execute(
+                "memory_ingest_lifecycle",
+                "c1",
+                serde_json::json!({
+                    "source_kind": "design-tree",
+                    "authority": "inferred",
+                    "section": "Notes",
+                    "content": "Lifecycle fact"
+                }),
                 cancel,
             )
             .await
