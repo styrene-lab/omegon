@@ -38,6 +38,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 - Routed all in-tree bash execution paths, including code-act proxy execution, through workspace-boundary mediation so path permission prompts remain harness-level instead of leaking back as ordinary tool output.
 - Kept completed live tool activity visible briefly before clearing the slim activity stream so successful and failed operations do not disappear abruptly.
+- Routed TUI prompt visibility through the runtime-start event so submitted and queued operator prompts do not render before the runtime actually starts sending them.
+- Cleared stale Workbench active-plan state when typed plan projections report no active lane, while preserving workspace context across plan updates.
 - Stopped ordinary startup from creating project-local `ai/` or `.omegon/` memory directories; uninitialized projects now stay clean until `/init` is run.
 - Retained bounded multi-tool activity rows with display-ready projection metadata so slim activity can show recent running/completed/cancelled tools without TUI-only conversation lookups.
 - Allowed workspace-boundary-safe temp directory paths by default so tools can use `/tmp`-style scratch files without unnecessary permission prompts.

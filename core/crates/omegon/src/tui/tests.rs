@@ -856,6 +856,44 @@ async fn submitting_while_agent_active_submits_to_runtime_queue_without_interrup
     );
 }
 
+#[tokio::test]
+async fn idle_submission_waits_for_runtime_prompt_started_segment() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+    app.editor.set_text("start actual work");
+
+    app.submit_editor_buffer(&tx).await;
+
+    match rx.recv().await.expect("prompt submission") {
+        TuiCommand::SubmitPrompt(PromptSubmission { text, .. }) => {
+            assert_eq!(text, "start actual work");
+        }
+        other => panic!("expected prompt submission, got {other:?}"),
+    }
+    assert!(
+        app.conversation.segments().iter().all(|segment| !matches!(
+            &segment.content,
+            crate::tui::segments::SegmentContent::UserPrompt { text }
+                if text == "start actual work"
+        )),
+        "idle prompt must not be visible until the runtime starts it"
+    );
+
+    app.handle_agent_event(AgentEvent::RuntimePromptStarted {
+        text: "start actual work".to_string(),
+        image_paths: Vec::new(),
+    });
+
+    assert!(
+        app.conversation.segments().iter().any(|segment| matches!(
+            &segment.content,
+            crate::tui::segments::SegmentContent::UserPrompt { text }
+                if text == "start actual work"
+        )),
+        "runtime-started prompt must become visible"
+    );
+}
+
 #[test]
 fn runtime_prompt_started_event_displays_operator_segment() {
     let mut app = test_app();
@@ -1527,6 +1565,101 @@ fn slim_status_line_marks_detached_conversation_viewport() {
 
     let text = render_app_to_string(&mut app, 120, 18);
     assert!(text.contains("view detached ↑12 · End tail"), "{text}");
+}
+
+#[test]
+fn plan_update_without_active_lane_clears_stale_workbench_plan() {
+    let mut app = test_app();
+    app.workbench_state.active = Some(PlanDisplaySnapshot {
+        mode: "planning".into(),
+        completed: 0,
+        total: 1,
+        items: vec![PlanDisplayItem {
+            status: PlanDisplayStatus::Active,
+            description: "stale work".into(),
+        }],
+    });
+
+    app.handle_agent_event(AgentEvent::PlanUpdated {
+        projection: omegon_traits::PlanSurfaceProjection::default(),
+    });
+
+    assert!(
+        app.workbench_state.active.is_none(),
+        "active workbench plan must clear when the authoritative projection has no active lane"
+    );
+}
+
+#[test]
+fn plan_update_preserves_workspace_context() {
+    let mut app = test_app();
+    app.workbench_state.workspace = WorkbenchWorkspaceContext {
+        repo: Some("omegon".into()),
+        dir: "omegon-secundus".into(),
+        git_branch: Some("feature/ui-improvements-polish".into()),
+    };
+
+    app.handle_agent_event(AgentEvent::PlanUpdated {
+        projection: omegon_traits::PlanSurfaceProjection {
+            active: Some(omegon_traits::PlanLaneProjection {
+                mode: "planning".into(),
+                progress: omegon_traits::PlanProgressProjection {
+                    completed: 0,
+                    total: 1,
+                },
+                items: vec![omegon_traits::PlanItemProjection {
+                    status: "active".into(),
+                    label: "do work".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    });
+
+    assert_eq!(app.workbench_state.workspace.repo.as_deref(), Some("omegon"));
+    assert_eq!(
+        app.workbench_state.workspace.git_branch.as_deref(),
+        Some("feature/ui-improvements-polish")
+    );
+    assert!(app.workbench_state.active.is_some());
+}
+
+#[test]
+fn completed_plan_update_clears_active_lane_and_preserves_workspace_context() {
+    let mut app = test_app();
+    app.workbench_state.workspace = WorkbenchWorkspaceContext {
+        repo: Some("omegon".into()),
+        dir: "omegon-secundus".into(),
+        git_branch: Some("feature/ui-improvements-polish".into()),
+    };
+
+    app.handle_agent_event(AgentEvent::PlanUpdated {
+        projection: omegon_traits::PlanSurfaceProjection {
+            active: Some(omegon_traits::PlanLaneProjection {
+                mode: "complete".into(),
+                progress: omegon_traits::PlanProgressProjection {
+                    completed: 1,
+                    total: 1,
+                },
+                items: vec![omegon_traits::PlanItemProjection {
+                    status: "done".into(),
+                    label: "done work".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    });
+
+    assert!(app.workbench_state.active.is_none());
+    assert_eq!(app.workbench_state.workspace.repo.as_deref(), Some("omegon"));
+    assert_eq!(
+        app.workbench_state.workspace.git_branch.as_deref(),
+        Some("feature/ui-improvements-polish")
+    );
 }
 
 #[test]
