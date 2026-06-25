@@ -46,7 +46,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "memory_store".into(),
             label: "memory_store".into(),
-            description: "Store a fact in project memory. Facts persist across sessions.".into(),
+            description: "Store a durable fact in Omegon runtime memory. Facts persist across sessions. Check existing facts first; supersede stale facts instead of storing paraphrases.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "required": ["section", "content"],
@@ -91,7 +91,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "memory_query".into(),
             label: "memory_query".into(),
-            description: "Read all active facts from project memory.".into(),
+            description: "Read a capped inventory of active facts from Omegon runtime memory. Broad/noisy in mature projects; prefer memory_recall for targeted retrieval.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {}

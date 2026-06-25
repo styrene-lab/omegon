@@ -42,6 +42,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
 
 ### Fixed
+- Clarified extension tool descriptions as extension-owned rather than Omegon core semantics, reducing confusion between Flynt document-memory tools and native `memory_*` runtime memory.
+- Tightened native memory tool guidance to discourage over-storing, prefer targeted recall, and reserve broad `memory_query` for inventory/debugging.
 - Routed all in-tree bash execution paths, including code-act proxy execution, through workspace-boundary mediation so path permission prompts remain harness-level instead of leaking back as ordinary tool output.
 - Kept completed live tool activity visible briefly before clearing the slim activity stream so successful and failed operations do not disappear abruptly.
 - Routed TUI prompt visibility through the runtime-start event so submitted and queued operator prompts do not render before the runtime actually starts sending them.
