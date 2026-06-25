@@ -4644,12 +4644,7 @@ impl App {
             workstreams: self.workbench_state.workstreams.clone(),
             workspace: self.current_workbench_workspace_context(),
         };
-        let now = std::time::Instant::now();
-        self.activity_tools.retain(|tool| {
-            tool.expires_at
-                .map(|deadline| now < deadline)
-                .unwrap_or(true)
-        });
+        self.prune_activity_tools(std::time::Instant::now());
         let mut live_activity_tools = self
             .activity_tools
             .iter()
@@ -7875,6 +7870,72 @@ Scroll transcript:
         }
     }
 
+    fn prune_activity_tools(&mut self, now: std::time::Instant) {
+        self.activity_tools.retain(|tool| {
+            tool.expires_at
+                .map(|deadline| now < deadline)
+                .unwrap_or(true)
+        });
+    }
+
+    fn cap_activity_tools(&mut self) {
+        const MAX_COMPLETED_ACTIVITY_TOOLS: usize = 4;
+        const MAX_ACTIVITY_TOOLS: usize = 8;
+
+        let mut completed_seen = 0usize;
+        self.activity_tools.retain(|tool| {
+            if matches!(tool.status, crate::surfaces::activity::ActivityToolStatus::Running) {
+                return true;
+            }
+            completed_seen += 1;
+            completed_seen <= MAX_COMPLETED_ACTIVITY_TOOLS
+        });
+
+        while self.activity_tools.len() > MAX_ACTIVITY_TOOLS {
+            if let Some(idx) = self.activity_tools.iter().rposition(|tool| {
+                !matches!(tool.status, crate::surfaces::activity::ActivityToolStatus::Running)
+            }) {
+                self.activity_tools.remove(idx);
+            } else {
+                self.activity_tools.pop_back();
+            }
+        }
+    }
+
+    fn push_activity_tool_start(&mut self, id: &str) {
+        self.prune_activity_tools(std::time::Instant::now());
+        self.activity_tools.retain(|tool| tool.segment_id != id);
+        self.activity_tools.push_front(ActivityToolState {
+            segment_id: id.to_string(),
+            mode: crate::surfaces::activity::ActivityToolMode::Live,
+            status: crate::surfaces::activity::ActivityToolStatus::Running,
+            expires_at: None,
+        });
+        self.cap_activity_tools();
+    }
+
+    fn mark_activity_tool_end(&mut self, id: &str, is_error: bool) {
+        let linger_for = if is_error {
+            Duration::from_secs(8)
+        } else {
+            Duration::from_millis(2200)
+        };
+        let expires_at = std::time::Instant::now() + linger_for;
+        if let Some(activity_tool) = self
+            .activity_tools
+            .iter_mut()
+            .find(|tool| tool.segment_id == id)
+        {
+            activity_tool.status = if is_error {
+                crate::surfaces::activity::ActivityToolStatus::Error
+            } else {
+                crate::surfaces::activity::ActivityToolStatus::Complete
+            };
+            activity_tool.expires_at = Some(expires_at);
+        }
+        self.cap_activity_tools();
+    }
+
     fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
             AgentEvent::TurnStart { turn } => {
@@ -8077,17 +8138,7 @@ Scroll transcript:
                     _ => Some(serde_json::to_string_pretty(&args).unwrap_or_default()),
                 };
                 self.tool_inspection_target = Some(ToolInspectionTarget::LiveLatest(id.clone()));
-                self.activity_tools
-                    .retain(|tool| tool.segment_id != id);
-                self.activity_tools.push_front(ActivityToolState {
-                    segment_id: id.clone(),
-                    mode: crate::surfaces::activity::ActivityToolMode::Live,
-                    status: crate::surfaces::activity::ActivityToolStatus::Running,
-                    expires_at: None,
-                });
-                while self.activity_tools.len() > 4 {
-                    self.activity_tools.pop_back();
-                }
+                self.push_activity_tool_start(&id);
                 self.conversation.push_tool_start(
                     &id,
                     &name,
@@ -8301,24 +8352,7 @@ Scroll transcript:
                 self.instrument_panel
                     .tool_finished(completed_name, is_error);
                 self.completed_tool_name = self.last_tool_name.take().or(Some(name));
-                let linger_for = if is_error {
-                    Duration::from_secs(8)
-                } else {
-                    Duration::from_millis(2200)
-                };
-                let expires_at = std::time::Instant::now() + linger_for;
-                if let Some(activity_tool) = self
-                    .activity_tools
-                    .iter_mut()
-                    .find(|tool| tool.segment_id == id)
-                {
-                    activity_tool.status = if is_error {
-                        crate::surfaces::activity::ActivityToolStatus::Error
-                    } else {
-                        crate::surfaces::activity::ActivityToolStatus::Complete
-                    };
-                    activity_tool.expires_at = Some(expires_at);
-                }
+                self.mark_activity_tool_end(&id, is_error);
                 if self
                     .tool_inspection_target
                     .as_ref()

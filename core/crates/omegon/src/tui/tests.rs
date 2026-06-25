@@ -6083,6 +6083,161 @@ fn expired_live_tool_linger_clears_activity_on_render() {
     assert!(app.activity_tools.is_empty());
 }
 
+
+#[test]
+fn activity_tool_start_refreshes_without_duplicate_entries() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        args: serde_json::json!({"command": "cargo check"}),
+    });
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        args: serde_json::json!({"command": "cargo test"}),
+    });
+
+    assert_eq!(
+        app.activity_tools
+            .iter()
+            .filter(|tool| tool.segment_id == "tool-1")
+            .count(),
+        1
+    );
+    assert_eq!(
+        app.activity_tools.front().map(|tool| tool.status),
+        Some(crate::surfaces::activity::ActivityToolStatus::Running)
+    );
+}
+
+#[test]
+fn activity_tool_cap_preserves_running_entries_over_completed_entries() {
+    let mut app = test_app();
+    for idx in 0..6 {
+        let id = format!("done-{idx}");
+        app.handle_agent_event(AgentEvent::ToolStart {
+            id: id.clone(),
+            name: "read".into(),
+            args: serde_json::json!({"path": format!("file-{idx}.rs")}),
+        });
+        app.handle_agent_event(AgentEvent::ToolEnd {
+            id,
+            name: "read".into(),
+            is_error: false,
+            result: omegon_traits::ToolResult {
+                content: vec![omegon_traits::ContentBlock::Text { text: "ok".into() }],
+                details: serde_json::Value::Null,
+            },
+        });
+    }
+    for idx in 0..5 {
+        app.handle_agent_event(AgentEvent::ToolStart {
+            id: format!("run-{idx}"),
+            name: "bash".into(),
+            args: serde_json::json!({"command": format!("cmd-{idx}")}),
+        });
+    }
+
+    let running = app
+        .activity_tools
+        .iter()
+        .filter(|tool| matches!(tool.status, crate::surfaces::activity::ActivityToolStatus::Running))
+        .count();
+    let completed = app.activity_tools.len().saturating_sub(running);
+
+    assert_eq!(running, 5);
+    assert!(completed <= 4, "completed={completed}, tools={:?}", app.activity_tools);
+    assert!(app.activity_tools.len() <= 8);
+}
+
+#[test]
+fn activity_prune_removes_expired_completed_but_keeps_running_entries() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "done".into(),
+        name: "read".into(),
+        args: serde_json::json!({"path": "Cargo.toml"}),
+    });
+    app.handle_agent_event(AgentEvent::ToolEnd {
+        id: "done".into(),
+        name: "read".into(),
+        is_error: false,
+        result: omegon_traits::ToolResult {
+            content: vec![omegon_traits::ContentBlock::Text { text: "ok".into() }],
+            details: serde_json::Value::Null,
+        },
+    });
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "running".into(),
+        name: "bash".into(),
+        args: serde_json::json!({"command": "sleep 10"}),
+    });
+    if let Some(tool) = app.activity_tools.iter_mut().find(|tool| tool.segment_id == "done") {
+        tool.expires_at = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
+    }
+
+    let _ = render_app_to_string(&mut app, 140, 36);
+
+    assert!(app.activity_tools.iter().all(|tool| tool.segment_id != "done"));
+    assert!(app.activity_tools.iter().any(|tool| tool.segment_id == "running"));
+}
+
+#[test]
+fn single_running_activity_tool_uses_full_live_card() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        args: serde_json::json!({"command": "cargo check"}),
+    });
+
+    let rendered = render_app_to_string(&mut app, 140, 36);
+
+    assert!(rendered.contains("live log"), "{rendered}");
+    assert!(rendered.contains("cargo check"), "{rendered}");
+}
+
+#[test]
+fn activity_panel_renders_multiple_completed_tool_rows() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-1".into(),
+        name: "read".into(),
+        args: serde_json::json!({"path": "Cargo.toml"}),
+    });
+    app.handle_agent_event(AgentEvent::ToolEnd {
+        id: "tool-1".into(),
+        name: "read".into(),
+        is_error: false,
+        result: omegon_traits::ToolResult {
+            content: vec![omegon_traits::ContentBlock::Text { text: "workspace manifest".into() }],
+            details: serde_json::Value::Null,
+        },
+    });
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-2".into(),
+        name: "bash".into(),
+        args: serde_json::json!({"command": "cargo check"}),
+    });
+    app.handle_agent_event(AgentEvent::ToolEnd {
+        id: "tool-2".into(),
+        name: "bash".into(),
+        is_error: false,
+        result: omegon_traits::ToolResult {
+            content: vec![omegon_traits::ContentBlock::Text { text: "Finished dev profile".into() }],
+            details: serde_json::Value::Null,
+        },
+    });
+
+    let rendered = render_app_to_string(&mut app, 140, 36);
+
+    assert!(rendered.contains("done bash"), "{rendered}");
+    assert!(rendered.contains("cargo check"), "{rendered}");
+    assert!(rendered.contains("done read"), "{rendered}");
+    assert!(rendered.contains("Cargo.toml"), "{rendered}");
+}
+
 #[test]
 fn tool_end_aggregates_all_text_blocks() {
     let mut app = test_app();
