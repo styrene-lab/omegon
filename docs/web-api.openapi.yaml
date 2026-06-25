@@ -1,0 +1,608 @@
+openapi: 3.1.0
+info:
+  title: Omegon Web API
+  version: 0.27.0
+  description: >
+    Browser-native control surface for the Omegon web dashboard ("omegon-web").
+    Covers the `/api/web/*` family: capability discovery, launch context, the
+    semantic surface snapshot and its live stream, the semantic action ingress,
+    saved-session listing, and staged browser attachments.
+
+
+    Derived from the axum handlers in `core/crates/omegon/src/web/` (api.rs,
+    surfaces.rs, surface_stream.rs) and the UI-runtime outcome envelope in
+    `core/crates/omegon/src/ui_runtime/envelope.rs`. This document is the
+    source of truth for the wire shape — code implements the contract.
+
+
+    Scope note: several deeply-nested surface objects (editor, command,
+    dashboard, footer, instruments, memory_status, operations, settings) are
+    still evolving and are modeled here as open objects. The conversation
+    surface, which drives the interactive transcript, is modeled in full.
+servers:
+  - url: /
+    description: Same-origin as the served dashboard (default 127.0.0.1 bind).
+
+tags:
+  - name: discovery
+    description: Capability and launch-context discovery.
+  - name: surfaces
+    description: Semantic surface snapshot and live stream.
+  - name: actions
+    description: Browser-native semantic action ingress.
+  - name: sessions
+    description: Saved/live session listing.
+  - name: attachments
+    description: Staged browser attachments.
+
+paths:
+  /api/web/capabilities:
+    get:
+      tags: [discovery]
+      operationId: getWebCapabilities
+      summary: Web/Auspex capability descriptor.
+      description: Static descriptor of what the hosted web UI supports.
+      responses:
+        "200":
+          description: Capability descriptor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebCapabilityDescriptor"
+
+  /api/web/launch-context:
+    get:
+      tags: [discovery]
+      operationId: getWebLaunchContext
+      summary: Describe how the web UI was launched.
+      description: >
+        Reports whether the UI is being served directly or proxied (e.g. by
+        Auspex). Derived from request headers.
+      parameters:
+        - name: x-omegon-proxied-by
+          in: header
+          required: false
+          description: >
+            Set by a proxy (e.g. Auspex). Presence flips `mode` to `proxied`
+            and `policy_owner` to `auspex`.
+          schema:
+            type: string
+        - name: x-omegon-back-url
+          in: header
+          required: false
+          description: >
+            Return URL for the proxying surface. Only honored when it begins
+            with `http://` or `https://`.
+          schema:
+            type: string
+            format: uri
+      responses:
+        "200":
+          description: Launch context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebLaunchContextResponse"
+
+  /api/web/surfaces:
+    get:
+      tags: [surfaces]
+      operationId: getWebSurfaces
+      summary: Browser-native semantic surface snapshot.
+      description: >
+        Full point-in-time projection of every renderer-neutral surface for the
+        live session.
+      responses:
+        "200":
+          description: Surface snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebSurfacesSnapshot"
+
+  /api/web/surfaces/stream:
+    get:
+      tags: [surfaces]
+      operationId: streamWebSurfaces
+      summary: Live surface stream (WebSocket upgrade).
+      description: >
+        Upgrades the GET request to a WebSocket. On connect the server sends a
+        `snapshot` message carrying the full `WebSurfacesSnapshot` as `payload`,
+        then one message per agent event with a monotonically increasing
+        `revision`. On consumer lag the server emits an `error` message advising
+        a refetch of `/api/web/surfaces`. Messages are JSON text frames.
+      parameters:
+        - name: token
+          in: query
+          required: false
+          description: >
+            Web-auth query token. Required when the server has web auth enabled;
+            an invalid or missing token yields `401` before the upgrade.
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Switching Protocols — WebSocket established.
+        "401":
+          description: Missing or invalid web-auth token.
+      x-websocket-message:
+        $ref: "#/components/schemas/SurfaceStreamMessage"
+
+  /api/web/actions:
+    post:
+      tags: [actions]
+      operationId: postWebAction
+      summary: Browser-native semantic action ingress.
+      description: >
+        Submit a renderer-neutral action against the live session. The response
+        is always a `UiActionOutcomeEnvelope`; the HTTP status reflects the
+        disposition. Only `schema_version: 1` and `session_id: "default"` are
+        currently accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebActionRequest"
+      responses:
+        "202":
+          description: Action accepted and queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UiActionOutcomeEnvelope"
+        "400":
+          description: >
+            Rejected — unsupported schema_version, empty prompt text, non-slash
+            slash command, or attachment-prompt conversion (not yet implemented).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UiActionOutcomeEnvelope"
+        "404":
+          description: Unknown session_id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UiActionOutcomeEnvelope"
+        "501":
+          description: >
+            Action recognized but not yet wired (respond_permission,
+            respond_operator_wait, copy_latest_response, select_segment,
+            copy_segment).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UiActionOutcomeEnvelope"
+        "503":
+          description: Command queue unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UiActionOutcomeEnvelope"
+
+  /api/web/sessions:
+    get:
+      tags: [sessions]
+      operationId: getWebSessions
+      summary: Browser-native saved session list.
+      description: >
+        Lists saved sessions for the current working directory, with the live
+        `default` session pinned first.
+      responses:
+        "200":
+          description: Session list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebSessionListResponse"
+
+  /api/web/sessions/{session_id}:
+    get:
+      tags: [sessions]
+      operationId: getWebSession
+      summary: Session metadata plus current surface snapshot.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          description: Session id, or `default` for the live session.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session metadata and a current surface snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebSessionShowResponse"
+        "404":
+          description: Unknown session_id.
+
+  /api/web/attachments:
+    post:
+      tags: [attachments]
+      operationId: postWebAttachment
+      summary: Stage a browser-provided attachment.
+      description: >
+        Stores a base64-encoded payload under a generated id. Decoded payloads
+        larger than 16 MiB are rejected. Staged attachments expire 24h after
+        creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebAttachmentCreateRequest"
+      responses:
+        "201":
+          description: Attachment staged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebAttachmentResponse"
+        "400":
+          description: Invalid filename or non-base64 payload.
+        "413":
+          description: Decoded payload exceeds 16 MiB.
+
+  /api/web/attachments/{id}:
+    get:
+      tags: [attachments]
+      operationId: getWebAttachment
+      summary: Retrieve a staged browser attachment.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Attachment id. Must not contain path separators or null bytes.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Attachment metadata plus base64-encoded bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebAttachmentGetResponse"
+        "400":
+          description: Malformed id.
+        "404":
+          description: Attachment not found or expired.
+
+components:
+  schemas:
+    WebCapabilityDescriptor:
+      type: object
+      required:
+        - interactive
+        - chat
+        - hosted_web_ui
+        - surface_api
+        - supports_tool_approval
+        - supports_operator_wait
+        - supports_session_resume
+        - supports_attachments
+        - supports_auspex_proxy
+      properties:
+        interactive: { type: boolean }
+        chat: { type: boolean }
+        hosted_web_ui: { type: boolean }
+        surface_api: { type: boolean }
+        supports_tool_approval: { type: boolean }
+        supports_operator_wait: { type: boolean }
+        supports_session_resume: { type: boolean }
+        supports_attachments: { type: boolean }
+        supports_auspex_proxy: { type: boolean }
+
+    WebLaunchContextResponse:
+      type: object
+      required: [mode, policy_owner]
+      properties:
+        mode:
+          type: string
+          enum: [direct, proxied]
+        proxied_by:
+          type: [string, "null"]
+          description: Identifier of the proxying surface, when proxied.
+        back_url:
+          type: [string, "null"]
+          format: uri
+          description: Return URL for the proxying surface, when provided.
+        policy_owner:
+          type: string
+          enum: [omegon, auspex]
+
+    WebSurfacesSnapshot:
+      type: object
+      required: [schema_version, session_id, revision, generated_at, surfaces]
+      properties:
+        schema_version:
+          type: integer
+          format: int32
+          const: 1
+        session_id: { type: string }
+        revision:
+          type: integer
+          format: int64
+          minimum: 0
+        generated_at:
+          type: string
+          description: RFC 3339 timestamp.
+        surfaces:
+          $ref: "#/components/schemas/WebSurfaceBundle"
+
+    WebSurfaceBundle:
+      type: object
+      description: >
+        Renderer-neutral surfaces for one session. `conversation` is modeled in
+        full; the remaining surfaces are still evolving and are exposed here as
+        open objects whose concrete shape is defined by the corresponding Rust
+        struct in `web/surfaces.rs`.
+      required:
+        - conversation
+        - editor
+        - command
+        - command_menu
+        - dashboard
+        - footer
+        - instruments
+        - memory_status
+        - operations
+        - settings
+      properties:
+        conversation:
+          $ref: "#/components/schemas/WebConversationSurface"
+        editor:
+          $ref: "#/components/schemas/OpenSurface"
+        command:
+          $ref: "#/components/schemas/OpenSurface"
+        command_menu:
+          $ref: "#/components/schemas/OpenSurface"
+        dashboard:
+          $ref: "#/components/schemas/OpenSurface"
+        footer:
+          $ref: "#/components/schemas/OpenSurface"
+        instruments:
+          $ref: "#/components/schemas/OpenSurface"
+        memory_status:
+          $ref: "#/components/schemas/OpenSurface"
+        operations:
+          $ref: "#/components/schemas/OpenSurface"
+        settings:
+          $ref: "#/components/schemas/OpenSurface"
+
+    OpenSurface:
+      type: object
+      description: >
+        Evolving surface; shape defined by the corresponding Rust struct in
+        web/surfaces.rs. Modeled as an open object until stabilized.
+      additionalProperties: true
+
+    WebConversationSurface:
+      type: object
+      required: [segments]
+      properties:
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebConversationSegment"
+
+    WebConversationSegment:
+      type: object
+      required: [index, role, complete, copyable, selectable]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        role: { type: string }
+        title:
+          type: [string, "null"]
+        summary:
+          type: [string, "null"]
+        body:
+          type: [string, "null"]
+        complete: { type: boolean }
+        copyable: { type: boolean }
+        selectable: { type: boolean }
+
+    SurfaceStreamMessage:
+      type: object
+      description: One JSON text frame on the /api/web/surfaces/stream WebSocket.
+      required: [schema_version, session_id, revision, type, payload]
+      properties:
+        schema_version:
+          type: integer
+          format: int32
+          const: 1
+        session_id: { type: string }
+        revision:
+          type: integer
+          format: int64
+        type:
+          type: string
+          description: >
+            `snapshot` for the initial full projection, `error` on consumer lag,
+            otherwise an agent-event-derived message type.
+        surface:
+          type: [string, "null"]
+          description: Surface key the message pertains to, when scoped.
+        payload:
+          description: >
+            For `snapshot`, a WebSurfacesSnapshot. For `error`, `{ "message": ... }`.
+            Otherwise an agent-event-shaped object.
+          oneOf:
+            - $ref: "#/components/schemas/WebSurfacesSnapshot"
+            - type: object
+              additionalProperties: true
+
+    WebActionRequest:
+      type: object
+      required: [schema_version, action_id, client_id, action]
+      properties:
+        schema_version:
+          type: integer
+          format: int32
+          const: 1
+        action_id:
+          type: string
+          description: Client-generated id echoed back in the outcome envelope.
+        client_id: { type: string }
+        session_id:
+          type: string
+          default: default
+          description: Target session. Only `default` is currently accepted.
+        action:
+          $ref: "#/components/schemas/WebActionPayload"
+
+    WebActionPayload:
+      type: object
+      description: >
+        Discriminated by `type` (snake_case). Variant-specific fields are
+        siblings of `type`.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum:
+            - submit_prompt
+            - cancel_active_turn
+            - run_slash_command
+            - respond_permission
+            - respond_operator_wait
+            - copy_latest_response
+            - select_segment
+            - copy_segment
+        text:
+          type: string
+          description: "submit_prompt: prompt text (must be non-empty)."
+        attachments:
+          type: array
+          description: "submit_prompt: attachment ids (conversion not yet implemented)."
+          items: { type: string }
+        raw:
+          type: string
+          description: "run_slash_command: raw command, must start with `/`."
+        request_id:
+          type: string
+          description: "respond_permission / respond_operator_wait: target request id."
+        allow:
+          type: boolean
+          description: "respond_permission: approve or deny."
+        completed:
+          type: boolean
+          description: "respond_operator_wait: whether the operator step completed."
+        index:
+          type: integer
+          minimum: 0
+          description: "select_segment / copy_segment: segment index."
+      discriminator:
+        propertyName: type
+
+    UiActionOutcomeEnvelope:
+      type: object
+      required: [protocol_version, session_id, action_id, status]
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          const: 1
+        session_id: { type: string }
+        action_id: { type: string }
+        status:
+          type: string
+          enum: [accepted, rejected, noop, deferred]
+        revision_after:
+          type: [integer, "null"]
+          format: int64
+        message:
+          type: [string, "null"]
+        error:
+          type: [string, "null"]
+
+    WebSessionListResponse:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebSessionSummary"
+
+    WebSessionSummary:
+      type: object
+      required:
+        - session_id
+        - cwd
+        - created_at
+        - turns
+        - tool_calls
+        - last_prompt_snippet
+        - current
+      properties:
+        session_id: { type: string }
+        cwd: { type: string }
+        created_at:
+          type: string
+          description: RFC 3339 timestamp.
+        turns:
+          type: integer
+          format: int32
+          minimum: 0
+        tool_calls:
+          type: integer
+          format: int32
+          minimum: 0
+        last_prompt_snippet: { type: string }
+        current:
+          type: boolean
+          description: True for the live session.
+
+    WebSessionShowResponse:
+      type: object
+      required: [session, snapshot]
+      properties:
+        session:
+          $ref: "#/components/schemas/WebSessionSummary"
+        snapshot:
+          $ref: "#/components/schemas/WebSurfacesSnapshot"
+
+    WebAttachmentCreateRequest:
+      type: object
+      required: [filename, data_base64]
+      properties:
+        filename:
+          type: string
+          description: >
+            Basename only; rejected if it contains path separators, null bytes,
+            or `..`.
+        content_type:
+          type: [string, "null"]
+        data_base64:
+          type: string
+          description: Standard base64-encoded payload (decoded max 16 MiB).
+
+    WebAttachmentResponse:
+      type: object
+      required: [id, filename, size_bytes, expires_at]
+      properties:
+        id: { type: string }
+        filename: { type: string }
+        content_type:
+          type: [string, "null"]
+        size_bytes:
+          type: integer
+          minimum: 0
+        expires_at:
+          type: string
+          description: RFC 3339 timestamp, 24h after creation.
+
+    WebAttachmentGetResponse:
+      type: object
+      required: [attachment, data_base64]
+      properties:
+        attachment:
+          $ref: "#/components/schemas/WebAttachmentResponse"
+        data_base64:
+          type: string
+          description: Standard base64-encoded payload bytes.
