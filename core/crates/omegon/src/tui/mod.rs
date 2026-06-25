@@ -415,6 +415,9 @@ pub(crate) fn voice_prompt_from_notification(
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ActivityToolState {
     segment_id: String,
+    name: String,
+    args_summary: Option<String>,
+    result_summary: Option<String>,
     mode: crate::surfaces::activity::ActivityToolMode,
     status: crate::surfaces::activity::ActivityToolStatus,
     expires_at: Option<std::time::Instant>,
@@ -426,6 +429,9 @@ impl ActivityToolState {
             segment_id: self.segment_id.clone(),
             mode: self.mode,
             status: self.status,
+            name: self.name.clone(),
+            args_summary: self.args_summary.clone(),
+            result_summary: self.result_summary.clone(),
         }
     }
 }
@@ -4520,13 +4526,25 @@ impl App {
             .map(ActivityToolState::projection)
             .collect::<Vec<_>>();
         if let Some(ToolInspectionTarget::Pinned(id)) = self.tool_inspection_target.as_ref()
-            && self.conversation.tool_segment_by_id(id).is_some()
+            && let Some(segment) = self.conversation.tool_segment_by_id(id)
             && !live_activity_tools.iter().any(|tool| tool.segment_id == *id)
         {
+            let (name, args_summary, result_summary) = match &segment.content {
+                SegmentContent::ToolCard {
+                    name,
+                    args_summary,
+                    result_summary,
+                    ..
+                } => (name.clone(), args_summary.clone(), result_summary.clone()),
+                _ => ("tool".to_string(), None, None),
+            };
             live_activity_tools.push(crate::surfaces::activity::ActivityToolProjection {
                 segment_id: id.clone(),
                 mode: crate::surfaces::activity::ActivityToolMode::Detail,
                 status: crate::surfaces::activity::ActivityToolStatus::Complete,
+                name,
+                args_summary,
+                result_summary,
             });
         }
         let activity_projection = if self.ui_surfaces.activity && self.ui_surfaces.is_compact() {
@@ -7761,11 +7779,14 @@ Scroll transcript:
         }
     }
 
-    fn push_activity_tool_start(&mut self, id: &str) {
+    fn push_activity_tool_start(&mut self, id: &str, name: &str, args_summary: Option<String>) {
         self.prune_activity_tools(std::time::Instant::now());
         self.activity_tools.retain(|tool| tool.segment_id != id);
         self.activity_tools.push_front(ActivityToolState {
             segment_id: id.to_string(),
+            name: name.to_string(),
+            args_summary,
+            result_summary: None,
             mode: crate::surfaces::activity::ActivityToolMode::Live,
             status: crate::surfaces::activity::ActivityToolStatus::Running,
             expires_at: None,
@@ -7773,7 +7794,7 @@ Scroll transcript:
         self.cap_activity_tools();
     }
 
-    fn mark_activity_tool_end(&mut self, id: &str, is_error: bool) {
+    fn mark_activity_tool_end(&mut self, id: &str, is_error: bool, result_summary: Option<String>) {
         let linger_for = if is_error {
             Duration::from_secs(8)
         } else {
@@ -7790,7 +7811,19 @@ Scroll transcript:
             } else {
                 crate::surfaces::activity::ActivityToolStatus::Complete
             };
+            activity_tool.result_summary = result_summary;
             activity_tool.expires_at = Some(expires_at);
+        }
+        self.cap_activity_tools();
+    }
+
+    fn expire_running_activity_tools(&mut self, ttl: Duration) {
+        let expires_at = std::time::Instant::now() + ttl;
+        for tool in &mut self.activity_tools {
+            if matches!(tool.status, crate::surfaces::activity::ActivityToolStatus::Running) {
+                tool.status = crate::surfaces::activity::ActivityToolStatus::Cancelled;
+                tool.expires_at = Some(expires_at);
+            }
         }
         self.cap_activity_tools();
     }
@@ -7997,7 +8030,7 @@ Scroll transcript:
                     _ => Some(serde_json::to_string_pretty(&args).unwrap_or_default()),
                 };
                 self.tool_inspection_target = Some(ToolInspectionTarget::LiveLatest(id.clone()));
-                self.push_activity_tool_start(&id);
+                self.push_activity_tool_start(&id, &name, args_summary.clone());
                 self.conversation.push_tool_start(
                     &id,
                     &name,
@@ -8118,6 +8151,11 @@ Scroll transcript:
                 // Use enriched message if available, otherwise the full text payload.
                 let display = enriched.as_deref().or(full_text.as_deref());
                 self.conversation.push_tool_end(&id, is_error, display);
+                self.mark_activity_tool_end(
+                    &id,
+                    is_error,
+                    display.map(|text| crate::util::truncate(text, 96)),
+                );
 
                 // Visual feedback: error flash or completion pulse
                 if is_error {
@@ -8211,7 +8249,6 @@ Scroll transcript:
                 self.instrument_panel
                     .tool_finished(completed_name, is_error);
                 self.completed_tool_name = self.last_tool_name.take().or(Some(name));
-                self.mark_activity_tool_end(&id, is_error);
                 if self
                     .tool_inspection_target
                     .as_ref()
@@ -8224,6 +8261,7 @@ Scroll transcript:
                 }
             }
             AgentEvent::AgentEnd => {
+                self.expire_running_activity_tools(Duration::from_millis(2200));
                 self.agent_active = false;
                 if !matches!(self.slim_turn_state, SlimTurnState::Finished(_)) {
                     self.slim_turn_state = SlimTurnState::Ready;
@@ -8465,6 +8503,7 @@ Scroll transcript:
                 self.effects.ping_footer(self.theme.as_ref());
             }
             AgentEvent::MessageAbort { reason } => {
+                self.expire_running_activity_tools(Duration::from_secs(4));
                 self.conversation.abort_streaming();
                 match reason.as_deref() {
                     Some("interrupted · kept") => {
