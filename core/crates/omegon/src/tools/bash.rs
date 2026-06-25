@@ -31,13 +31,23 @@ pub async fn execute(
     timeout_secs: Option<u64>,
     cancel: CancellationToken,
 ) -> Result<ToolResult> {
+    execute_with_boundary(command, cwd, timeout_secs, cancel, None).await
+}
+
+pub async fn execute_with_boundary(
+    command: &str,
+    cwd: &Path,
+    timeout_secs: Option<u64>,
+    cancel: CancellationToken,
+    boundary: Option<super::WorkspaceBoundary>,
+) -> Result<ToolResult> {
     execute_streaming(
         command,
         cwd,
         timeout_secs,
         cancel,
         ToolProgressSink::noop(),
-        None,
+        boundary,
     )
     .await
 }

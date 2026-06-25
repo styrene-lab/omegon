@@ -746,7 +746,9 @@ async fn run_code_act_task(
 ) -> anyhow::Result<TaskResult> {
     let start = Instant::now();
 
-    let proxy = crate::code_act_proxy::ProxyServer::new(cwd.to_path_buf())?;
+    let boundary = crate::tools::WorkspaceBoundary::new(cwd.to_path_buf());
+    let proxy =
+        crate::code_act_proxy::ProxyServer::new(cwd.to_path_buf())?.with_boundary(boundary.clone());
     let proxy_prelude = proxy.python_prelude();
     let proxy_socket_path = proxy.socket_path().to_path_buf();
     let proxy_cancel = CancellationToken::new();
@@ -789,6 +791,7 @@ async fn run_code_act_inner(
         crate::code_act::CodeActExecutor::permitted(cwd.to_path_buf())
     } else {
         crate::code_act::CodeActExecutor::new(cwd.to_path_buf())
+            .with_boundary(crate::tools::WorkspaceBoundary::new(cwd.to_path_buf()))
     }
     .with_proxy(proxy_prelude, proxy_socket_path);
     let mut total_tokens = 0u64;
