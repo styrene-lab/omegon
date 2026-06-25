@@ -897,24 +897,90 @@ impl ToolCallAccum {
 /// otherwise look like a silent provider hang for five minutes before the
 /// operator sees any actionable failure. The env override preserves an escape
 /// hatch for unusually slow reasoning streams.
-fn sse_idle_timeout() -> std::time::Duration {
-    std::env::var("OMEGON_SSE_IDLE_TIMEOUT_SECS")
+/// Stream phase for the idle-timeout watchdog.
+///
+/// A flat idle timeout cannot tell a *thinking* stream (model reasoning
+/// silently between events) from a *dead* one. Reasoning models — OpenAI
+/// gpt-5.x / o-series especially — routinely go silent on the wire for
+/// minutes during reasoning (OpenAI's own SDK default request timeout is
+/// 15 minutes), while a stream that has stalled mid-content should be
+/// caught quickly. We therefore key the idle budget on the current phase.
+const SSE_PHASE_ACTIVE: u8 = 0;
+const SSE_PHASE_REASONING: u8 = 1;
+
+/// Phase gate shared between `process_sse` (reader) and the per-provider
+/// event closure (writer). Backed by an atomic so the enclosing future stays
+/// `Send` across `.await` points. Defaults to `Reasoning` so the generous
+/// budget also covers the pre-first-token wait, which reasoning models can
+/// stretch well past the active-phase budget.
+pub(crate) struct SsePhaseGate(std::sync::atomic::AtomicU8);
+
+impl SsePhaseGate {
+    fn new() -> Self {
+        Self(std::sync::atomic::AtomicU8::new(SSE_PHASE_REASONING))
+    }
+
+    /// Mark the stream as actively emitting content/tool tokens (tight budget).
+    pub(crate) fn active(&self) {
+        self.0
+            .store(SSE_PHASE_ACTIVE, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Mark the stream as reasoning / between items (generous budget).
+    pub(crate) fn reasoning(&self) {
+        self.0
+            .store(SSE_PHASE_REASONING, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn phase(&self) -> u8 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Two-tier idle budget: a tight ceiling while content is actively streaming,
+/// a generous ceiling while the model is reasoning or before the first token.
+struct SseIdleBudget {
+    active: std::time::Duration,
+    reasoning: std::time::Duration,
+}
+
+fn env_secs(key: &str, default: u64, min: u64) -> std::time::Duration {
+    let secs = std::env::var(key)
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
-        .filter(|seconds| *seconds >= 30)
-        .map(std::time::Duration::from_secs)
-        .unwrap_or_else(|| std::time::Duration::from_secs(90))
+        .filter(|seconds| *seconds >= min)
+        .unwrap_or(default);
+    std::time::Duration::from_secs(secs)
+}
+
+fn sse_idle_budget() -> SseIdleBudget {
+    SseIdleBudget {
+        // Active phase: once tokens flow, gaps should be small. Anthropic's
+        // periodic `ping` keep-alives keep this warm. Backward-compatible
+        // override retains the original env var and 90s default.
+        active: env_secs("OMEGON_SSE_IDLE_TIMEOUT_SECS", 90, 30),
+        // Reasoning / pre-first-token phase: reasoning models stream nothing
+        // on the wire for minutes. 300s tolerates that while still catching a
+        // genuinely dead stream within ~2 retries of the loop exhaustion budget.
+        reasoning: env_secs("OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS", 300, 60),
+    }
 }
 
 async fn process_sse<F>(response: reqwest::Response, mut on_data: F) -> anyhow::Result<()>
 where
-    F: FnMut(&str) -> bool, // returns false to stop
+    F: FnMut(&str, &SsePhaseGate) -> bool, // returns false to stop
 {
-    let idle_timeout = sse_idle_timeout();
+    let budget = sse_idle_budget();
+    let gate = SsePhaseGate::new();
     let mut buffer = String::new();
     let mut stream = response.bytes_stream();
 
     loop {
+        let idle_timeout = if gate.phase() == SSE_PHASE_REASONING {
+            budget.reasoning
+        } else {
+            budget.active
+        };
         match tokio::time::timeout(idle_timeout, stream.next()).await {
             Ok(Some(chunk)) => {
                 let chunk = chunk?;
@@ -925,7 +991,7 @@ where
                     buffer = buffer[newline + 1..].to_string();
 
                     if let Some(data) = line.strip_prefix("data: ")
-                        && (data == "[DONE]" || !on_data(data))
+                        && (data == "[DONE]" || !on_data(data, &gate))
                     {
                         return Ok(());
                     }
@@ -933,12 +999,18 @@ where
             }
             Ok(None) => break, // stream ended
             Err(_) => {
+                let phase = if gate.phase() == SSE_PHASE_REASONING {
+                    "reasoning"
+                } else {
+                    "active"
+                };
                 tracing::warn!(
-                    "SSE stream idle for {}s — treating as stalled",
+                    phase,
+                    "SSE stream idle for {}s ({phase} phase) — treating as stalled",
                     idle_timeout.as_secs()
                 );
                 anyhow::bail!(
-                    "SSE stream idle timeout ({}s with no data)",
+                    "SSE stream idle timeout ({}s with no data, {phase} phase)",
                     idle_timeout.as_secs()
                 );
             }
@@ -1377,7 +1449,7 @@ async fn parse_anthropic_stream(
     let provider_telemetry_done = provider_telemetry.clone();
     let mut event_count = 0u32;
 
-    process_sse(response, |data| {
+    process_sse(response, |data, gate| {
         let Ok(event) = serde_json::from_str::<Value>(data) else {
             tracing::warn!(data, "failed to parse SSE event as JSON");
             return true;
@@ -1406,15 +1478,18 @@ async fn parse_anthropic_stream(
                 block_type = Some(bt.to_string());
                 match bt {
                     "text" => {
+                        gate.active();
                         current_block_text.clear();
                         let _ = tx.try_send(LlmEvent::TextStart);
                     }
                     "thinking" => {
+                        gate.reasoning();
                         current_thinking_text.clear();
                         current_thinking_signature = None;
                         let _ = tx.try_send(LlmEvent::ThinkingStart);
                     }
                     "tool_use" => {
+                        gate.active();
                         let id = event["content_block"]["id"].as_str().unwrap_or("").to_string();
                         let raw_name = event["content_block"]["name"].as_str().unwrap_or("");
                         let name = from_claude_code_name(raw_name);
@@ -1436,6 +1511,7 @@ async fn parse_anthropic_stream(
                         let _ = tx.try_send(LlmEvent::TextDelta { delta: t.to_string() });
                     }
                     "thinking_delta" => {
+                        gate.reasoning();
                         let t = event["delta"]["thinking"].as_str().unwrap_or("");
                         current_thinking_text.push_str(t);
                         let _ = tx.try_send(LlmEvent::ThinkingDelta { delta: t.to_string() });
@@ -1458,6 +1534,9 @@ async fn parse_anthropic_stream(
             }
 
             "content_block_stop" => {
+                // Block finished. Anthropic may pause (interleaved thinking,
+                // pre-tool reasoning) before the next block — generous budget.
+                gate.reasoning();
                 match block_type.as_deref() {
                     Some("text") => {
                         content_blocks.push(json!({"type": "text", "text": current_block_text.clone()}));
@@ -1753,7 +1832,7 @@ async fn parse_openai_stream(
     let _ = tx.try_send(LlmEvent::Start);
     let _ = tx.try_send(LlmEvent::TextStart);
 
-    process_sse(response, |data| {
+    process_sse(response, |data, gate| {
         let Ok(event) = serde_json::from_str::<Value>(data) else {
             return true;
         };
@@ -1783,6 +1862,7 @@ async fn parse_openai_stream(
 
         // Text
         if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+            gate.active();
             full_text.push_str(content);
             let _ = tx.try_send(LlmEvent::TextDelta {
                 delta: content.to_string(),
@@ -2381,7 +2461,7 @@ async fn parse_codex_stream(
     }
     let mut terminal: Option<TerminalEvent> = None;
 
-    process_sse(response, |data| {
+    process_sse(response, |data, gate| {
         let Ok(event) = serde_json::from_str::<Value>(data) else {
             return true;
         };
@@ -2392,16 +2472,22 @@ async fn parse_codex_stream(
                 let item = &event["item"];
                 match item["type"].as_str().unwrap_or("") {
                     "reasoning" => {
+                        // Reasoning item open: the wire may go silent for
+                        // minutes while the model thinks. Use the generous budget.
+                        gate.reasoning();
                         _current_item_type = Some("reasoning".into());
                         _current_thinking.clear();
                         let _ = tx.try_send(LlmEvent::ThinkingStart);
                     }
                     "message" => {
+                        // Content is about to stream — tighten the budget.
+                        gate.active();
                         _current_item_type = Some("message".into());
                         _current_text.clear();
                         let _ = tx.try_send(LlmEvent::TextStart);
                     }
                     "function_call" => {
+                        gate.active();
                         _current_item_type = Some("function_call".into());
                         tool_calls.push(ToolAcc {
                             call_id: item["call_id"].as_str().unwrap_or("").into(),
@@ -2415,6 +2501,7 @@ async fn parse_codex_stream(
                 }
             }
             "response.output_text.delta" => {
+                gate.active();
                 let delta = event["delta"].as_str().unwrap_or("");
                 full_text.push_str(delta);
                 _current_text.push_str(delta);
@@ -2423,6 +2510,9 @@ async fn parse_codex_stream(
                 });
             }
             "response.reasoning_summary_text.delta" => {
+                // Still reasoning — keep the generous budget for the gaps
+                // between summary parts (deltas reset the timer on arrival).
+                gate.reasoning();
                 let delta = event["delta"].as_str().unwrap_or("");
                 _current_thinking.push_str(delta);
                 let _ = tx.try_send(LlmEvent::ThinkingDelta {
@@ -2436,6 +2526,7 @@ async fn parse_codex_stream(
                 });
             }
             "response.function_call_arguments.delta" => {
+                gate.active();
                 if let Some(tc) = tool_calls.last_mut() {
                     tc.args_json.push_str(event["delta"].as_str().unwrap_or(""));
                 }
@@ -2477,6 +2568,9 @@ async fn parse_codex_stream(
                     _ => {}
                 }
                 _current_item_type = None;
+                // Item complete. The model may reason again before the next
+                // item streams — restore the generous budget for that gap.
+                gate.reasoning();
             }
             // "response.done" is an alias used by some Codex endpoint variants;
             // handle it alongside the documented "response.completed".
@@ -3557,6 +3651,63 @@ impl LlmBridge for AntigravityClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sse_phase_gate_defaults_to_reasoning() {
+        // Pre-first-token and reasoning phases must use the generous budget,
+        // so the gate must start in the reasoning phase.
+        let gate = SsePhaseGate::new();
+        assert_eq!(gate.phase(), SSE_PHASE_REASONING);
+    }
+
+    #[test]
+    fn sse_phase_gate_transitions() {
+        let gate = SsePhaseGate::new();
+        gate.active();
+        assert_eq!(gate.phase(), SSE_PHASE_ACTIVE);
+        gate.reasoning();
+        assert_eq!(gate.phase(), SSE_PHASE_REASONING);
+    }
+
+    #[test]
+    fn sse_idle_budget_reasoning_exceeds_active() {
+        // The whole point of the phase-aware watchdog: a thinking stream gets
+        // a strictly longer leash than an actively-streaming one. This must
+        // hold regardless of any env overrides present in the environment.
+        let budget = sse_idle_budget();
+        assert!(
+            budget.reasoning > budget.active,
+            "reasoning budget {:?} must exceed active budget {:?}",
+            budget.reasoning,
+            budget.active
+        );
+    }
+
+    #[test]
+    fn sse_idle_budget_defaults_are_research_backed() {
+        // Defaults derived from provider streaming behavior research:
+        //   active   = 90s  (Anthropic ping keep-alive cadence keeps it warm)
+        //   reasoning = 300s (reasoning models stream nothing for minutes;
+        //                     OpenAI's own SDK request timeout is 15 min)
+        // Only assert defaults when the operator has not overridden via env.
+        if std::env::var("OMEGON_SSE_IDLE_TIMEOUT_SECS").is_err() {
+            assert_eq!(sse_idle_budget().active, std::time::Duration::from_secs(90));
+        }
+        if std::env::var("OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS").is_err() {
+            assert_eq!(
+                sse_idle_budget().reasoning,
+                std::time::Duration::from_secs(300)
+            );
+        }
+    }
+
+    #[test]
+    fn env_secs_floor_and_parse() {
+        // Below-floor and unparseable values fall back to the default.
+        let key = "OMEGON_TEST_ENV_SECS_NONEXISTENT_XYZ";
+        // Unset key → default.
+        assert_eq!(env_secs(key, 120, 60), std::time::Duration::from_secs(120));
+    }
 
     #[test]
     fn anthropic_adaptive_thinking_uses_registry_metadata_and_family_fallback() {

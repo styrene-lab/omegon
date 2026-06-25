@@ -17,7 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
-- Added initial Omegon Web discovery endpoints for browser/Auspex capability metadata and launch context.
+- Added initial Omegon Web discovery endpoints for browser/Auspex capability metadata, launch context, native surface snapshots, browser action ingress, browser-native surface event streaming, session discovery, and staged browser attachments.
 - Added a registry-native `/loop` MVP for durable recurring prompt job definitions, binding jobs to prompt path and content hash ahead of daemon scheduler execution.
 - Added `/loop menu` schedule recipes plus agent-facing `loop_list`, `loop_create`, `loop_status`, and `loop_stop` tools for durable loop jobs.
 - Wired daemon loop-job scheduling for enabled interval jobs with run-history records, prompt-hash drift pausing, and max-run stop enforcement.
@@ -43,6 +43,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
 
 ### Fixed
+- Made the SSE stream watchdog phase-aware so extended reasoning is no longer misclassified as a stall: idle budget is now 90s while content/tool tokens actively stream and 300s while the model is reasoning or before the first token. Fixes repeated `stream stall exhaustion` failures on reasoning models (OpenAI gpt-5.x / o-series, Anthropic interleaved thinking) where the flat 90s idle timeout tripped during legitimate silent reasoning. Reasoning budget is overridable via `OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS` (default 300, min 60); active budget retains `OMEGON_SSE_IDLE_TIMEOUT_SECS` (default 90, min 30).
 - Auto-expanded TUI tool cards for direct bang shell commands like `!ls` so operator-requested command output is visible by default.
 - Made `memory_query` inventory-only for large stores so mature projects show section counts instead of noisy sample facts.
 - Rejected invalid native memory sections, including lifecycle ingestion paths, instead of silently defaulting them to Architecture, and made empty `memory_recall` queries return an explicit error result.
