@@ -7,8 +7,9 @@ use crate::status::HarnessStatus;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use base64::Engine;
 use omegon_traits::{DaemonEventEnvelope, OmegonInstanceDescriptor};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{ControlPlaneState, WebState};
 use crate::lifecycle::types::*;
@@ -162,6 +163,96 @@ pub struct EventAccepted {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct WebSessionListResponse {
+    pub sessions: Vec<WebSessionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebSessionShowResponse {
+    pub session: WebSessionSummary,
+    pub snapshot: super::surfaces::WebSurfacesSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebSessionSummary {
+    pub session_id: String,
+    pub cwd: String,
+    pub created_at: String,
+    pub turns: u32,
+    pub tool_calls: u32,
+    pub last_prompt_snippet: String,
+    pub current: bool,
+}
+
+fn web_session_summary(entry: crate::session::SessionEntry) -> WebSessionSummary {
+    WebSessionSummary {
+        session_id: entry.meta.session_id,
+        cwd: entry.meta.cwd,
+        created_at: entry.meta.created_at,
+        turns: entry.meta.turns,
+        tool_calls: entry.meta.tool_calls,
+        last_prompt_snippet: entry.meta.last_prompt_snippet,
+        current: false,
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebActionRequest {
+    pub schema_version: u32,
+    pub action_id: String,
+    pub client_id: String,
+    #[serde(default = "default_web_session_id")]
+    pub session_id: String,
+    pub action: WebActionPayload,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WebActionPayload {
+    SubmitPrompt {
+        text: String,
+        #[serde(default)]
+        attachments: Vec<String>,
+    },
+    CancelActiveTurn,
+    RunSlashCommand {
+        raw: String,
+    },
+    RespondPermission {
+        request_id: String,
+        allow: bool,
+    },
+    RespondOperatorWait {
+        request_id: String,
+        completed: bool,
+    },
+    CopyLatestResponse,
+    SelectSegment {
+        index: usize,
+    },
+    CopySegment {
+        index: usize,
+    },
+}
+
+fn default_web_session_id() -> String {
+    "default".to_string()
+}
+
+fn web_outcome_accepted(
+    session_id: String,
+    action_id: String,
+    message: Option<String>,
+) -> crate::ui_runtime::envelope::UiActionOutcomeEnvelope {
+    crate::ui_runtime::envelope::UiActionOutcomeEnvelope::accepted(
+        session_id,
+        action_id,
+        Some(0),
+        message,
+    )
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct WebCapabilityDescriptor {
     pub interactive: bool,
     pub chat: bool,
@@ -172,6 +263,43 @@ pub struct WebCapabilityDescriptor {
     pub supports_session_resume: bool,
     pub supports_attachments: bool,
     pub supports_auspex_proxy: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebAttachmentCreateRequest {
+    pub filename: String,
+    pub content_type: Option<String>,
+    pub data_base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebAttachmentResponse {
+    pub id: String,
+    pub filename: String,
+    pub content_type: Option<String>,
+    pub size_bytes: usize,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebAttachmentGetResponse {
+    pub attachment: WebAttachmentResponse,
+    pub data_base64: String,
+}
+
+fn sanitize_web_attachment_filename(filename: &str) -> Option<String> {
+    if filename.contains(['/', '\\', '\0']) || filename.contains("..") {
+        return None;
+    }
+    let name = std::path::Path::new(filename).file_name()?.to_str()?.trim();
+    if name.is_empty() || name == "." || name == ".." {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+fn web_attachment_root() -> std::path::PathBuf {
+    std::env::temp_dir().join("omegon-web-attachments")
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -314,28 +442,308 @@ pub async fn get_capabilities(
     Ok(Json(capability_inventory_snapshot(state)?))
 }
 
+/// GET /api/web/sessions — browser-native saved session list.
+pub async fn get_web_sessions() -> Result<Json<WebSessionListResponse>, StatusCode> {
+    let cwd = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut sessions: Vec<WebSessionSummary> = crate::session::list_sessions(&cwd)
+        .into_iter()
+        .map(web_session_summary)
+        .collect();
+    sessions.insert(
+        0,
+        WebSessionSummary {
+            session_id: "default".to_string(),
+            cwd: cwd.to_string_lossy().to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            turns: 0,
+            tool_calls: 0,
+            last_prompt_snippet: "Current live session".to_string(),
+            current: true,
+        },
+    );
+    Ok(Json(WebSessionListResponse { sessions }))
+}
+
+/// GET /api/web/sessions/{session_id} — session metadata plus current web surface snapshot.
+pub async fn get_web_session(
+    State(state): State<WebState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Json<WebSessionShowResponse>, StatusCode> {
+    let cwd = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let session = if session_id == "default" {
+        WebSessionSummary {
+            session_id: "default".to_string(),
+            cwd: cwd.to_string_lossy().to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            turns: state
+                .handles
+                .session
+                .lock()
+                .ok()
+                .map(|s| s.turns)
+                .unwrap_or(0),
+            tool_calls: state
+                .handles
+                .session
+                .lock()
+                .ok()
+                .map(|s| s.tool_calls)
+                .unwrap_or(0),
+            last_prompt_snippet: "Current live session".to_string(),
+            current: true,
+        }
+    } else {
+        crate::session::list_sessions(&cwd)
+            .into_iter()
+            .find(|entry| entry.meta.session_id == session_id)
+            .map(web_session_summary)
+            .ok_or(StatusCode::NOT_FOUND)?
+    };
+
+    Ok(Json(WebSessionShowResponse {
+        session,
+        snapshot: super::surfaces::project_web_surfaces(&state),
+    }))
+}
+
+/// GET /api/web/attachments/{id} — retrieve a staged browser attachment.
+pub async fn get_web_attachment(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<WebAttachmentGetResponse>, StatusCode> {
+    if id.contains(['/', '\\', '\0']) || id.trim().is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let dir = web_attachment_root().join(&id);
+    let meta_path = dir.join("meta.json");
+    let data_path = dir.join("data.bin");
+    if !meta_path.exists() || !data_path.exists() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let meta = std::fs::read_to_string(meta_path).map_err(|_| StatusCode::NOT_FOUND)?;
+    let attachment: WebAttachmentResponse =
+        serde_json::from_str(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let bytes = std::fs::read(data_path).map_err(|_| StatusCode::NOT_FOUND)?;
+    Ok(Json(WebAttachmentGetResponse {
+        attachment,
+        data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+    }))
+}
+
+/// POST /api/web/attachments — stage a browser-provided attachment by id.
+pub async fn post_web_attachment(
+    Json(request): Json<WebAttachmentCreateRequest>,
+) -> Result<(StatusCode, Json<WebAttachmentResponse>), StatusCode> {
+    const MAX_ATTACHMENT_BYTES: usize = 16 * 1024 * 1024;
+    let filename =
+        sanitize_web_attachment_filename(&request.filename).ok_or(StatusCode::BAD_REQUEST)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(request.data_base64.as_bytes())
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    if bytes.len() > MAX_ATTACHMENT_BYTES {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    let id = format!(
+        "att-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let root = web_attachment_root();
+    let dir = root.join(&id);
+    std::fs::create_dir_all(&dir).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let data_path = dir.join("data.bin");
+    std::fs::write(&data_path, &bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let expires_at = (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
+    let response = WebAttachmentResponse {
+        id,
+        filename,
+        content_type: request.content_type,
+        size_bytes: bytes.len(),
+        expires_at,
+    };
+    let meta = serde_json::to_string(&response).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    std::fs::write(dir.join("meta.json"), meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// POST /api/web/actions — browser-native semantic action ingress.
+pub async fn post_web_action(
+    State(state): State<WebState>,
+    Json(request): Json<WebActionRequest>,
+) -> (
+    StatusCode,
+    Json<crate::ui_runtime::envelope::UiActionOutcomeEnvelope>,
+) {
+    if request.schema_version != 1 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                    request.session_id,
+                    request.action_id,
+                    "unsupported schema_version",
+                ),
+            ),
+        );
+    }
+    if request.session_id != "default" {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(
+                crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                    request.session_id,
+                    request.action_id,
+                    "unknown session_id",
+                ),
+            ),
+        );
+    }
+
+    let send_result = match request.action {
+        WebActionPayload::SubmitPrompt { text, attachments } => {
+            if !attachments.is_empty() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                            request.session_id,
+                            request.action_id,
+                            "attachment prompt conversion is not implemented yet",
+                        ),
+                    ),
+                );
+            }
+            if text.trim().is_empty() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                            request.session_id,
+                            request.action_id,
+                            "prompt text cannot be empty",
+                        ),
+                    ),
+                );
+            }
+            state
+                .command_tx
+                .try_send(super::WebCommand::UserPrompt(text))
+        }
+        WebActionPayload::CancelActiveTurn => state.command_tx.try_send(super::WebCommand::Cancel),
+        WebActionPayload::RunSlashCommand { raw } => {
+            let trimmed = raw.trim();
+            if !trimmed.starts_with('/') {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                            request.session_id,
+                            request.action_id,
+                            "not a slash command",
+                        ),
+                    ),
+                );
+            }
+            let command = trimmed.trim_start_matches('/');
+            let (name, args) = command.split_once(' ').unwrap_or((command, ""));
+            state.command_tx.try_send(super::WebCommand::SlashCommand {
+                name: name.to_string(),
+                args: args.to_string(),
+                respond_to: None,
+            })
+        }
+        WebActionPayload::RespondPermission { .. }
+        | WebActionPayload::RespondOperatorWait { .. }
+        | WebActionPayload::CopyLatestResponse
+        | WebActionPayload::SelectSegment { .. }
+        | WebActionPayload::CopySegment { .. } => {
+            return (
+                StatusCode::NOT_IMPLEMENTED,
+                Json(
+                    crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                        request.session_id,
+                        request.action_id,
+                        "action requires renderer-neutral runtime state wiring",
+                    ),
+                ),
+            );
+        }
+    };
+
+    match send_result {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(web_outcome_accepted(
+                request.session_id,
+                request.action_id,
+                Some("action queued".to_string()),
+            )),
+        ),
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(
+                crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                    request.session_id,
+                    request.action_id,
+                    "command queue unavailable",
+                ),
+            ),
+        ),
+    }
+}
+
+/// GET /api/web/surfaces — browser-native semantic surface snapshot.
+pub async fn get_web_surfaces(
+    State(state): State<WebState>,
+) -> Json<super::surfaces::WebSurfacesSnapshot> {
+    Json(super::surfaces::project_web_surfaces(&state))
+}
+
 /// GET /api/web/capabilities — web/Auspex capability descriptor.
 pub async fn get_web_capabilities() -> Json<WebCapabilityDescriptor> {
     Json(WebCapabilityDescriptor {
         interactive: true,
         chat: true,
         hosted_web_ui: true,
-        surface_api: false,
+        surface_api: true,
         supports_tool_approval: true,
         supports_operator_wait: true,
-        supports_session_resume: false,
-        supports_attachments: false,
+        supports_session_resume: true,
+        supports_attachments: true,
         supports_auspex_proxy: true,
     })
 }
 
 /// GET /api/web/launch-context — describes how the web UI was launched.
-pub async fn get_web_launch_context() -> Json<WebLaunchContextResponse> {
+pub async fn get_web_launch_context(headers: HeaderMap) -> Json<WebLaunchContextResponse> {
+    let proxied_by = headers
+        .get("x-omegon-proxied-by")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| !v.trim().is_empty())
+        .map(|v| v.to_string());
+    let back_url = headers
+        .get("x-omegon-back-url")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| v.starts_with("http://") || v.starts_with("https://"))
+        .map(|v| v.to_string());
+    let policy_owner = if proxied_by.is_some() {
+        "auspex"
+    } else {
+        "omegon"
+    };
+
     Json(WebLaunchContextResponse {
-        mode: "direct".to_string(),
-        proxied_by: None,
-        back_url: None,
-        policy_owner: "omegon".to_string(),
+        mode: if proxied_by.is_some() {
+            "proxied"
+        } else {
+            "direct"
+        }
+        .to_string(),
+        proxied_by,
+        back_url,
+        policy_owner: policy_owner.to_string(),
     })
 }
 
@@ -940,19 +1348,223 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert!(response.supports_tool_approval);
         assert!(response.supports_operator_wait);
         assert!(response.supports_auspex_proxy);
-        assert!(!response.surface_api);
-        assert!(!response.supports_session_resume);
-        assert!(!response.supports_attachments);
+        assert!(response.surface_api);
+        assert!(response.supports_session_resume);
+        assert!(response.supports_attachments);
     }
 
     #[tokio::test]
     async fn web_launch_context_defaults_to_direct_omegon_owned() {
-        let response = get_web_launch_context().await.0;
+        let response = get_web_launch_context(HeaderMap::new()).await.0;
 
         assert_eq!(response.mode, "direct");
         assert_eq!(response.proxied_by, None);
         assert_eq!(response.back_url, None);
         assert_eq!(response.policy_owner, "omegon");
+    }
+
+    #[tokio::test]
+    async fn web_surfaces_snapshot_exposes_expected_surface_keys() {
+        let response = get_web_surfaces(axum::extract::State(test_state())).await.0;
+
+        assert_eq!(
+            response.schema_version,
+            super::super::surfaces::WEB_SURFACES_SCHEMA_VERSION
+        );
+        assert_eq!(response.session_id, "default");
+        assert_eq!(response.revision, 0);
+        assert!(response.generated_at.contains('T'));
+        assert!(response.surfaces.editor.accepts_prompt);
+        assert_eq!(
+            response.surfaces.editor.placeholder,
+            "Ask anything, or type / for commands"
+        );
+        assert!(response.surfaces.editor.supports_attachments);
+        assert!(response.surfaces.command.pending_prompt.is_none());
+        assert!(response.surfaces.command_menu.available);
+        assert_eq!(response.surfaces.conversation.segments.len(), 0);
+        assert_eq!(response.surfaces.dashboard.session.turns, 0);
+        assert!(!response.surfaces.footer.busy);
+        assert_eq!(response.surfaces.memory_status.active_facts, 0);
+        assert_eq!(response.surfaces.operations.active_child_runtimes, 0);
+        assert_eq!(
+            response.surfaces.settings.auth_mode.as_deref(),
+            Some("ephemeral-bearer")
+        );
+    }
+
+    #[tokio::test]
+    async fn web_attachments_stage_and_read_browser_payload() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let cwd = std::env::current_dir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(home.path()).unwrap();
+
+        let (status, created) = post_web_attachment(Json(WebAttachmentCreateRequest {
+            filename: "note.txt".to_string(),
+            content_type: Some("text/plain".to_string()),
+            data_base64: base64::engine::general_purpose::STANDARD.encode(b"hello"),
+        }))
+        .await
+        .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(created.filename, "note.txt");
+        assert_eq!(created.size_bytes, 5);
+
+        let fetched = get_web_attachment(axum::extract::Path(created.id.clone()))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(fetched.attachment.id, created.id);
+        assert_eq!(
+            fetched.data_base64,
+            base64::engine::general_purpose::STANDARD.encode(b"hello")
+        );
+
+        std::env::set_current_dir(cwd).unwrap();
+    }
+
+    #[tokio::test]
+    async fn web_attachments_reject_path_traversal_names() {
+        let response = post_web_attachment(Json(WebAttachmentCreateRequest {
+            filename: "../secret.txt".to_string(),
+            content_type: None,
+            data_base64: base64::engine::general_purpose::STANDARD.encode(b"bad"),
+        }))
+        .await;
+
+        assert!(matches!(response, Err(StatusCode::BAD_REQUEST)));
+    }
+
+    #[tokio::test]
+    async fn web_sessions_endpoint_lists_default_session() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let cwd = std::env::current_dir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(home.path()).unwrap();
+
+        let response = get_web_sessions().await.unwrap().0;
+
+        std::env::set_current_dir(cwd).unwrap();
+        assert_eq!(response.sessions.len(), 1);
+        assert_eq!(response.sessions[0].session_id, "default");
+        assert!(response.sessions[0].current);
+    }
+
+    #[tokio::test]
+    async fn web_session_endpoint_returns_default_snapshot() {
+        let response = get_web_session(
+            axum::extract::State(test_state()),
+            axum::extract::Path("default".to_string()),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(response.session.session_id, "default");
+        assert!(response.session.current);
+        assert_eq!(response.snapshot.session_id, "default");
+    }
+
+    #[tokio::test]
+    async fn web_session_endpoint_404s_missing_session() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let cwd = std::env::current_dir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(home.path()).unwrap();
+
+        let response = get_web_session(
+            axum::extract::State(test_state()),
+            axum::extract::Path("missing".to_string()),
+        )
+        .await;
+
+        std::env::set_current_dir(cwd).unwrap();
+        assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
+    }
+
+    #[tokio::test]
+    async fn web_action_submit_prompt_queues_web_command() {
+        let mut state = test_state();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        state.command_tx = tx;
+
+        let (status, response) = post_web_action(
+            axum::extract::State(state),
+            Json(WebActionRequest {
+                schema_version: 1,
+                action_id: "a1".to_string(),
+                client_id: "browser-tab".to_string(),
+                session_id: "default".to_string(),
+                action: WebActionPayload::SubmitPrompt {
+                    text: "hello web".to_string(),
+                    attachments: Vec::new(),
+                },
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(
+            response.status,
+            crate::ui_runtime::envelope::UiActionOutcomeStatus::Accepted
+        );
+        match rx.recv().await.unwrap() {
+            super::super::WebCommand::UserPrompt(text) => assert_eq!(text, "hello web"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn web_action_run_slash_command_queues_web_command() {
+        let mut state = test_state();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        state.command_tx = tx;
+
+        let (status, _) = post_web_action(
+            axum::extract::State(state),
+            Json(WebActionRequest {
+                schema_version: 1,
+                action_id: "a2".to_string(),
+                client_id: "browser-tab".to_string(),
+                session_id: "default".to_string(),
+                action: WebActionPayload::RunSlashCommand {
+                    raw: "/model list".to_string(),
+                },
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::ACCEPTED);
+        match rx.recv().await.unwrap() {
+            super::super::WebCommand::SlashCommand { name, args, .. } => {
+                assert_eq!(name, "model");
+                assert_eq!(args, "list");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn web_action_rejects_unknown_session() {
+        let (status, response) = post_web_action(
+            axum::extract::State(test_state()),
+            Json(WebActionRequest {
+                schema_version: 1,
+                action_id: "a3".to_string(),
+                client_id: "browser-tab".to_string(),
+                session_id: "missing".to_string(),
+                action: WebActionPayload::CancelActiveTurn,
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.status,
+            crate::ui_runtime::envelope::UiActionOutcomeStatus::Rejected
+        );
+        assert_eq!(response.error.as_deref(), Some("unknown session_id"));
     }
 
     #[tokio::test]
