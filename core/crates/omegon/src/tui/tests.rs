@@ -1014,12 +1014,31 @@ async fn submitting_while_agent_active_submits_to_runtime_queue_without_interrup
         other => panic!("expected runtime prompt submission, got {other:?}"),
     }
     assert!(
+        app.conversation.segments().iter().all(|segment| !matches!(
+            &segment.content,
+            crate::tui::segments::SegmentContent::UserPrompt { text }
+                if text == "follow up after this turn"
+        )),
+        "queued prompt must not be visible as an operator segment until the runtime starts it"
+    );
+}
+
+#[test]
+fn runtime_prompt_started_event_displays_operator_segment() {
+    let mut app = test_app();
+
+    app.handle_agent_event(AgentEvent::RuntimePromptStarted {
+        text: "follow up after this turn".to_string(),
+        image_paths: Vec::new(),
+    });
+
+    assert!(
         app.conversation.segments().iter().any(|segment| matches!(
             &segment.content,
             crate::tui::segments::SegmentContent::UserPrompt { text }
                 if text == "follow up after this turn"
         )),
-        "queued prompt must be visible as an operator segment"
+        "started queued prompt must be visible as an operator segment"
     );
 }
 

@@ -2337,6 +2337,12 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "event_name": "runtime.queue_updated",
             "snapshot": snapshot_json,
         }),
+        AgentEvent::RuntimePromptStarted { text, image_paths } => json!({
+            "type": "runtime_prompt_started",
+            "event_name": "runtime.prompt_started",
+            "text": text,
+            "image_paths": image_paths,
+        }),
         AgentEvent::WebDashboardStarted { .. } => unreachable!("filtered by serialize_ws_messages"),
         AgentEvent::ContextUpdated {
             tokens,
@@ -2961,6 +2967,7 @@ mod tests {
             AgentEvent::TurnCancelled { .. } => {}
             AgentEvent::HarnessStatusChanged { .. } => {}
             AgentEvent::RuntimeQueueUpdated { .. } => {}
+            AgentEvent::RuntimePromptStarted { .. } => {}
             AgentEvent::WebDashboardStarted { .. } => {}
             AgentEvent::ContextUpdated { .. } => {}
             AgentEvent::ContextCompaction(_) => {}
@@ -3113,6 +3120,10 @@ mod tests {
             },
             AgentEvent::RuntimeQueueUpdated {
                 snapshot_json: serde_json::json!({"depth": 1, "items": []}),
+            },
+            AgentEvent::RuntimePromptStarted {
+                text: "queued prompt".into(),
+                image_paths: Vec::new(),
             },
             AgentEvent::WebDashboardStarted {
                 startup_json: serde_json::json!({"port": 0}),

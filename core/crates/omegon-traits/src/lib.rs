@@ -2734,6 +2734,13 @@ pub enum AgentEvent {
     RuntimeQueueUpdated {
         snapshot_json: Value,
     },
+    /// A queued prompt has been promoted to the active runtime turn and is now
+    /// being sent to the model. Operator surfaces should render this as the
+    /// visible operator segment for that turn.
+    RuntimePromptStarted {
+        text: String,
+        image_paths: Vec<PathBuf>,
+    },
     /// Context updated — authoritative snapshot after compaction, clear, or turn completion.
     /// TUI + web consumers should use this as the canonical context status source.
     ContextUpdated {
