@@ -712,14 +712,18 @@ pub fn render_activity_panel(
         return;
     }
 
-    let tool = projection.entries.iter().find_map(|entry| entry.tool.as_ref());
+    let tools = projection
+        .entries
+        .iter()
+        .filter_map(|entry| entry.tool.as_ref())
+        .collect::<Vec<_>>();
     let operation = projection
         .entries
         .iter()
         .find_map(|entry| entry.operation.as_ref());
 
-    match (tool, operation) {
-        (Some(tool), Some(operation)) => {
+    match (tools.as_slice(), operation) {
+        ([tool], Some(operation)) => {
             let tool_height = area.height.min(4);
             let tool_area = Rect::new(area.x, area.y, area.width, tool_height);
             if let Some(segment) = conversation.tool_segment_by_id(&tool.segment_id) {
@@ -741,7 +745,10 @@ pub fn render_activity_panel(
                 render_operation_workbench_panel(op_area, frame, t, operation);
             }
         }
-        (Some(tool), None) => {
+        ([tool], None)
+            if tool.mode == crate::surfaces::activity::ActivityToolMode::Detail
+                || tool.status == crate::surfaces::activity::ActivityToolStatus::Running =>
+        {
             if let Some(segment) = conversation.tool_segment_by_id(&tool.segment_id) {
                 crate::tui::segment_detail::render_tool_card(
                     area,
@@ -752,9 +759,107 @@ pub fn render_activity_panel(
                 );
             }
         }
-        (None, Some(operation)) => render_operation_workbench_panel(area, frame, t, operation),
-        (None, None) => {}
+        ([], Some(operation)) => render_operation_workbench_panel(area, frame, t, operation),
+        ([], None) => {}
+        (tools, operation) => {
+            let tool_rows = if operation.is_some() {
+                area.height.saturating_sub(3).max(1)
+            } else {
+                area.height
+            };
+            let tool_area = Rect::new(area.x, area.y, area.width, tool_rows);
+            render_activity_tool_rows(tool_area, frame, t, conversation, tools);
+            if let Some(operation) = operation
+                && area.height > tool_rows
+            {
+                let op_area = Rect::new(
+                    area.x,
+                    area.y.saturating_add(tool_rows),
+                    area.width,
+                    area.height.saturating_sub(tool_rows),
+                );
+                render_operation_workbench_panel(op_area, frame, t, operation);
+            }
+        }
     }
+}
+
+fn render_activity_tool_rows(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    conversation: &crate::tui::conversation::ConversationView,
+    tools: &[&crate::surfaces::activity::ActivityToolProjection],
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let bg = t.surface_bg();
+    let max_rows = area.height as usize;
+    let lines = tools
+        .iter()
+        .take(max_rows)
+        .filter_map(|tool| {
+            let segment = conversation.tool_segment_by_id(&tool.segment_id)?;
+            Some(Line::from(Span::styled(
+                activity_tool_row_text(tool, segment, area.width),
+                activity_tool_status_style(tool.status, t, bg),
+            )))
+        })
+        .collect::<Vec<_>>();
+    Paragraph::new(lines)
+        .style(Style::default().bg(bg))
+        .wrap(Wrap { trim: false })
+        .render(area, frame.buffer_mut());
+}
+
+fn activity_tool_row_text(
+    tool: &crate::surfaces::activity::ActivityToolProjection,
+    segment: &crate::tui::segments::Segment,
+    width: u16,
+) -> String {
+    let (name, args, result) = match &segment.content {
+        crate::tui::segments::SegmentContent::ToolCard {
+            name,
+            args_summary,
+            result_summary,
+            ..
+        } => (
+            name.as_str(),
+            args_summary.as_deref().unwrap_or(""),
+            result_summary.as_deref().unwrap_or(""),
+        ),
+        _ => ("tool", "", ""),
+    };
+    let state = match tool.status {
+        crate::surfaces::activity::ActivityToolStatus::Running => "run",
+        crate::surfaces::activity::ActivityToolStatus::Complete => "done",
+        crate::surfaces::activity::ActivityToolStatus::Error => "fail",
+    };
+    let detail = [args, result]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let text = if detail.is_empty() {
+        format!("{state:<4} {name}")
+    } else {
+        format!("{state:<4} {name} · {detail}")
+    };
+    crate::util::truncate(&text, width.saturating_sub(1) as usize)
+}
+
+fn activity_tool_status_style(
+    status: crate::surfaces::activity::ActivityToolStatus,
+    t: &dyn theme::Theme,
+    bg: Color,
+) -> Style {
+    let fg = match status {
+        crate::surfaces::activity::ActivityToolStatus::Running => t.accent_muted(),
+        crate::surfaces::activity::ActivityToolStatus::Complete => t.muted(),
+        crate::surfaces::activity::ActivityToolStatus::Error => t.error(),
+    };
+    Style::default().fg(fg).bg(bg)
 }
 
 fn activity_tool_mode(
