@@ -5,7 +5,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 use super::{dashboard, theme};
-use crate::features::cleave::CleaveProgress;
 use crate::features::delegate::DelegateProgress;
 use crate::surfaces::operations::{
     OperationChildRow, OperationChildStatus, OperationWorkbenchProjection,
@@ -41,17 +40,13 @@ pub fn workbench_preferred_height(state: &WorkbenchState, width: u16) -> u16 {
 }
 
 pub fn activity_preferred_height(
-    has_live_tool: bool,
-    cleave: Option<&CleaveProgress>,
-    delegate: Option<&DelegateProgress>,
+    projection: &crate::surfaces::activity::ActivitySurfaceProjection,
     width: u16,
 ) -> u16 {
-    if width == 0 {
+    if width == 0 || projection.is_empty() {
         return 0;
     }
-    let has_operation = cleave.as_ref().is_some_and(|p| p.active)
-        || delegate.as_ref().is_some_and(|p| p.active || p.running > 0);
-    match (has_live_tool, has_operation) {
+    match (projection.has_tool(), projection.has_operation()) {
         (true, true) => 7,
         (true, false) => 4,
         (false, true) => 5,
@@ -710,26 +705,32 @@ pub fn render_activity_panel(
     area: Rect,
     frame: &mut Frame,
     t: &dyn theme::Theme,
-    live_tool: Option<(&crate::tui::segments::Segment, crate::tui::segment_detail::ToolDetailMode)>,
-    cleave: Option<&CleaveProgress>,
-    delegate: Option<&DelegateProgress>,
+    conversation: &crate::tui::conversation::ConversationView,
+    projection: &crate::surfaces::activity::ActivitySurfaceProjection,
 ) {
-    if area.width == 0 || area.height == 0 {
+    if area.width == 0 || area.height == 0 || projection.is_empty() {
         return;
     }
-    let has_operation = cleave.as_ref().is_some_and(|p| p.active)
-        || delegate.as_ref().is_some_and(|p| p.active || p.running > 0);
-    match (live_tool, has_operation) {
-        (Some((segment, mode)), true) => {
+
+    let tool = projection.entries.iter().find_map(|entry| entry.tool.as_ref());
+    let operation = projection
+        .entries
+        .iter()
+        .find_map(|entry| entry.operation.as_ref());
+
+    match (tool, operation) {
+        (Some(tool), Some(operation)) => {
             let tool_height = area.height.min(4);
             let tool_area = Rect::new(area.x, area.y, area.width, tool_height);
-            crate::tui::segment_detail::render_tool_card(
-                tool_area,
-                frame.buffer_mut(),
-                t,
-                segment,
-                mode,
-            );
+            if let Some(segment) = conversation.tool_segment_by_id(&tool.segment_id) {
+                crate::tui::segment_detail::render_tool_card(
+                    tool_area,
+                    frame.buffer_mut(),
+                    t,
+                    segment,
+                    activity_tool_mode(tool.mode),
+                );
+            }
             if area.height > tool_height {
                 let op_area = Rect::new(
                     area.x,
@@ -737,36 +738,35 @@ pub fn render_activity_panel(
                     area.width,
                     area.height.saturating_sub(tool_height),
                 );
-                render_activity_operation_panel(op_area, frame, t, cleave, delegate);
+                render_operation_workbench_panel(op_area, frame, t, operation);
             }
         }
-        (Some((segment, mode)), false) => {
-            crate::tui::segment_detail::render_tool_card(area, frame.buffer_mut(), t, segment, mode);
+        (Some(tool), None) => {
+            if let Some(segment) = conversation.tool_segment_by_id(&tool.segment_id) {
+                crate::tui::segment_detail::render_tool_card(
+                    area,
+                    frame.buffer_mut(),
+                    t,
+                    segment,
+                    activity_tool_mode(tool.mode),
+                );
+            }
         }
-        (None, true) => render_activity_operation_panel(area, frame, t, cleave, delegate),
-        (None, false) => {}
+        (None, Some(operation)) => render_operation_workbench_panel(area, frame, t, operation),
+        (None, None) => {}
     }
 }
 
-fn render_activity_operation_panel(
-    area: Rect,
-    frame: &mut Frame,
-    t: &dyn theme::Theme,
-    cleave: Option<&CleaveProgress>,
-    delegate: Option<&DelegateProgress>,
-) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-    if let Some(cleave) = cleave.filter(|p| p.active) {
-        render_operation_workbench_panel(
-            area,
-            frame,
-            t,
-            &OperationWorkbenchProjection::from_cleave(cleave),
-        );
-    } else if let Some(delegate) = delegate.filter(|p| p.active || p.running > 0) {
-        render_delegate_workbench_panel(area, frame, t, delegate);
+fn activity_tool_mode(
+    mode: crate::surfaces::activity::ActivityToolMode,
+) -> crate::tui::segment_detail::ToolDetailMode {
+    match mode {
+        crate::surfaces::activity::ActivityToolMode::Live => {
+            crate::tui::segment_detail::ToolDetailMode::Live
+        }
+        crate::surfaces::activity::ActivityToolMode::Detail => {
+            crate::tui::segment_detail::ToolDetailMode::Detail
+        }
     }
 }
 
