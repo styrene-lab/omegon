@@ -125,6 +125,11 @@ lint:
     {{cargo}} check --workspace
     {{cargo}} clippy --workspace --all-targets -- -D warnings
 
+# Structurally lint every docs/**/*.openapi.{yaml,yml} contract. Rust-native
+# (no Node/Python toolchain); also runs in CI via the rust-integration job.
+lint-openapi:
+    {{cargo}} test -p omegon --test openapi_contract_lint -- --nocapture
+
 # ─── Benchmarks ─────────────────────────────────────────────
 
 # Run a quick token-efficiency benchmark. Writes per-turn snapshots to .tmp/bench/.
