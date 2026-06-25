@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added a registry-native `/loop` MVP for durable recurring prompt job definitions, binding jobs to prompt path and content hash ahead of daemon scheduler execution.
 - Added `/ui activity` controls for showing, hiding, and toggling the slim live activity stream independently from dashboard, instruments, and footer surfaces.
 - Made `/init` the explicit boundary for creating project-local `ai/memory/` durable memory scaffolding.
 - Ignored local per-project `.omegon/profile.json` files so live profile changes do not dirty source checkouts.

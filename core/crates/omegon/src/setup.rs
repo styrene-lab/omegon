@@ -442,74 +442,77 @@ impl AgentSetup {
         if let Some(db_path) = db_path.as_ref() {
             match omegon_memory::SqliteBackend::open(db_path) {
                 Ok(backend) => {
-            tracing::info!(mind = %mind, db = %db_path.display(), child = is_child, "memory backend loaded");
+                    tracing::info!(mind = %mind, db = %db_path.display(), child = is_child, "memory backend loaded");
 
-            if let Ok(stats) = backend.stats(&mind).await {
-                initial_memory_status = crate::status::MemoryStatus {
-                    total_facts: stats.total_facts,
-                    active_facts: stats.active_facts,
-                    project_facts: stats.active_facts,
-                    persona_facts: 0,
-                    working_facts: 0,
-                    episodes: stats.episodes,
-                    edges: stats.edges,
-                    active_persona_mind: None,
-                };
-                tracing::info!(
-                    facts = initial_memory_status.active_facts,
-                    episodes = initial_memory_status.episodes,
-                    edges = initial_memory_status.edges,
-                    "memory snapshot for TUI"
-                );
-            }
-
-            // Import JSONL if database is empty (but not in child processes)
-            if !is_child {
-                let stats = backend.stats(&mind).await.ok();
-                if stats.as_ref().is_none_or(|s| s.active_facts == 0)
-                    && jsonl_path.as_ref().is_some_and(|path| path.exists())
-                    && let Some(jsonl_path) = jsonl_path.as_ref()
-                    && let Ok(jsonl) = std::fs::read_to_string(jsonl_path)
-                {
-                    match backend.import_jsonl(&jsonl).await {
-                        Ok(import) => {
-                            tracing::info!(imported = import.imported, "imported facts.jsonl")
-                        }
-                        Err(e) => tracing::warn!("JSONL import failed: {e}"),
-                    }
-                }
-            }
-
-            // Register MemoryFeature with Arc<dyn MemoryBackend>
-            let memory_backend: std::sync::Arc<dyn omegon_memory::MemoryBackend> =
-                std::sync::Arc::new(backend);
-            context_memory_backend = Some(memory_backend.clone());
-            context_memory_mind = Some(mind.clone());
-
-            // ── Embedding service (optional, for hybrid search) ──
-            // Skip the probe in child processes — the async HTTP request blocks
-            // single-threaded runtimes (ACP, delegate children).
-            let embed_service: Option<std::sync::Arc<dyn omegon_memory::EmbeddingService>> =
-                if is_child {
-                    None
-                } else {
-                    let profile = crate::settings::Profile::load(&cwd);
-                    let svc = crate::embedding::OllamaEmbeddingService::from_config(
-                        profile.embed_url.as_deref(),
-                        profile.embed_model.as_deref(),
-                    );
-                    if svc.probe().await {
+                    if let Ok(stats) = backend.stats(&mind).await {
+                        initial_memory_status = crate::status::MemoryStatus {
+                            total_facts: stats.total_facts,
+                            active_facts: stats.active_facts,
+                            project_facts: stats.active_facts,
+                            persona_facts: 0,
+                            working_facts: 0,
+                            episodes: stats.episodes,
+                            edges: stats.edges,
+                            active_persona_mind: None,
+                        };
                         tracing::info!(
-                            url = svc.base_url(),
-                            model = svc.model_name(),
-                            "embedding service available — hybrid search enabled"
+                            facts = initial_memory_status.active_facts,
+                            episodes = initial_memory_status.episodes,
+                            edges = initial_memory_status.edges,
+                            "memory snapshot for TUI"
                         );
-                        Some(std::sync::Arc::new(svc)
-                            as std::sync::Arc<dyn omegon_memory::EmbeddingService>)
-                    } else {
-                        #[cfg(feature = "local-embeddings")]
+                    }
+
+                    // Import JSONL if database is empty (but not in child processes)
+                    if !is_child {
+                        let stats = backend.stats(&mind).await.ok();
+                        if stats.as_ref().is_none_or(|s| s.active_facts == 0)
+                            && jsonl_path.as_ref().is_some_and(|path| path.exists())
+                            && let Some(jsonl_path) = jsonl_path.as_ref()
+                            && let Ok(jsonl) = std::fs::read_to_string(jsonl_path)
                         {
-                            match crate::local_embedding::LocalEmbeddingService::from_default_dir()
+                            match backend.import_jsonl(&jsonl).await {
+                                Ok(import) => {
+                                    tracing::info!(
+                                        imported = import.imported,
+                                        "imported facts.jsonl"
+                                    )
+                                }
+                                Err(e) => tracing::warn!("JSONL import failed: {e}"),
+                            }
+                        }
+                    }
+
+                    // Register MemoryFeature with Arc<dyn MemoryBackend>
+                    let memory_backend: std::sync::Arc<dyn omegon_memory::MemoryBackend> =
+                        std::sync::Arc::new(backend);
+                    context_memory_backend = Some(memory_backend.clone());
+                    context_memory_mind = Some(mind.clone());
+
+                    // ── Embedding service (optional, for hybrid search) ──
+                    // Skip the probe in child processes — the async HTTP request blocks
+                    // single-threaded runtimes (ACP, delegate children).
+                    let embed_service: Option<std::sync::Arc<dyn omegon_memory::EmbeddingService>> =
+                        if is_child {
+                            None
+                        } else {
+                            let profile = crate::settings::Profile::load(&cwd);
+                            let svc = crate::embedding::OllamaEmbeddingService::from_config(
+                                profile.embed_url.as_deref(),
+                                profile.embed_model.as_deref(),
+                            );
+                            if svc.probe().await {
+                                tracing::info!(
+                                    url = svc.base_url(),
+                                    model = svc.model_name(),
+                                    "embedding service available — hybrid search enabled"
+                                );
+                                Some(std::sync::Arc::new(svc)
+                                    as std::sync::Arc<dyn omegon_memory::EmbeddingService>)
+                            } else {
+                                #[cfg(feature = "local-embeddings")]
+                                {
+                                    match crate::local_embedding::LocalEmbeddingService::from_default_dir()
                             {
                                 Ok(local_svc) => {
                                     tracing::info!(
@@ -526,37 +529,40 @@ impl AgentSetup {
                                     None
                                 }
                             }
-                        }
-                        #[cfg(not(feature = "local-embeddings"))]
-                        {
-                            tracing::info!("embedding service not reachable — FTS-only recall");
-                            None
-                        }
-                    }
-                }; // end if is_child else probe
+                                }
+                                #[cfg(not(feature = "local-embeddings"))]
+                                {
+                                    tracing::info!(
+                                        "embedding service not reachable — FTS-only recall"
+                                    );
+                                    None
+                                }
+                            }
+                        }; // end if is_child else probe
 
-            let mut memory_feature = features::memory::MemoryFeature::new(memory_backend, mind);
-            if let Some(ref svc) = embed_service {
-                memory_feature = memory_feature.with_embed_service(svc.clone());
-                context_embed_service = Some(svc.clone());
-            }
-            if let Some(ref vp) = codex_vault_path {
-                memory_feature = memory_feature.with_codex_vault(vp.clone());
-                tracing::info!(vault = %vp.display(), "Codex vault sync enabled for memory");
-            }
-            if embed_service.is_some() {
-                memory_feature = memory_feature
-                    .with_extraction_model("anthropic:claude-haiku-4-5-20251001".into());
-            }
-            bus.register(Box::new(memory_feature));
+                    let mut memory_feature =
+                        features::memory::MemoryFeature::new(memory_backend, mind);
+                    if let Some(ref svc) = embed_service {
+                        memory_feature = memory_feature.with_embed_service(svc.clone());
+                        context_embed_service = Some(svc.clone());
+                    }
+                    if let Some(ref vp) = codex_vault_path {
+                        memory_feature = memory_feature.with_codex_vault(vp.clone());
+                        tracing::info!(vault = %vp.display(), "Codex vault sync enabled for memory");
+                    }
+                    if embed_service.is_some() {
+                        memory_feature = memory_feature
+                            .with_extraction_model("anthropic:claude-haiku-4-5-20251001".into());
+                    }
+                    bus.register(Box::new(memory_feature));
                 }
                 Err(err) => {
-            let warning = format!(
-                "Memory backend unavailable — memory_* tools disabled ({})",
-                db_path.display()
-            );
-            tracing::error!(db = %db_path.display(), error = %err, "memory backend unavailable — memory_* tools disabled");
-            memory_warning = Some(warning);
+                    let warning = format!(
+                        "Memory backend unavailable — memory_* tools disabled ({})",
+                        db_path.display()
+                    );
+                    tracing::error!(db = %db_path.display(), error = %err, "memory backend unavailable — memory_* tools disabled");
+                    memory_warning = Some(warning);
                 }
             }
         } else {
@@ -673,6 +679,9 @@ impl AgentSetup {
 
         // ─── Prompt library (/prompt registry-native command surface) ───
         bus.register(Box::new(features::prompt::PromptFeature::new()));
+        bus.register(Box::new(features::loop_jobs::LoopFeature::new(
+            &project_root,
+        )));
 
         // ─── User command aliases (explicit prompt-targeted slash surfaces) ───
         bus.register(Box::new(features::user_commands::UserCommandFeature::load()));
@@ -2126,7 +2135,10 @@ mod init_gating_tests {
         let ai_memory = dir.path().join("ai/memory");
         std::fs::create_dir_all(&ai_memory).unwrap();
         std::fs::create_dir_all(dir.path().join(".omegon/memory")).unwrap();
-        assert_eq!(project_memory_dir_if_initialized(dir.path()), Some(ai_memory));
+        assert_eq!(
+            project_memory_dir_if_initialized(dir.path()),
+            Some(ai_memory)
+        );
     }
 
     #[test]
@@ -2134,6 +2146,9 @@ mod init_gating_tests {
         let dir = tempfile::tempdir().unwrap();
         let legacy_memory = dir.path().join(".omegon/memory");
         std::fs::create_dir_all(&legacy_memory).unwrap();
-        assert_eq!(project_memory_dir_if_initialized(dir.path()), Some(legacy_memory));
+        assert_eq!(
+            project_memory_dir_if_initialized(dir.path()),
+            Some(legacy_memory)
+        );
     }
 }

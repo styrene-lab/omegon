@@ -29,6 +29,7 @@ pub mod context;
 pub mod delegate;
 pub mod harness_settings;
 pub mod lifecycle;
+pub mod loop_jobs;
 pub mod manage_tools;
 pub mod memory;
 pub mod model_budget;
