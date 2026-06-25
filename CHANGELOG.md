@@ -35,6 +35,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 - Allowed workspace-boundary-safe temp directory paths by default so tools can use `/tmp`-style scratch files without unnecessary permission prompts.
+- Clarified permission prompts with typed request metadata so the TUI distinguishes policy-only approvals from persisted directory grants and shows the actual grant path.
 - Hardened extension-declared skill paths against absolute/path-traversal escapes and made skill conflict matching case-insensitive.
 - Resolved prompt assembly to load one directive per skill name so project-local skills override same-named user skills instead of injecting both.
 - Updated the in-code skill schema documentation to show YAML as canonical while documenting TOML as compatibility.

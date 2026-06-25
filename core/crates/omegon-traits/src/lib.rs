@@ -2574,6 +2574,19 @@ pub struct SkillActivationEvent {
     pub injected: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionRequestKind {
+    PathBoundary,
+    Policy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionPersistence {
+    None,
+    SessionDirectory,
+    ProjectDirectory,
+}
+
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     TurnStart {
@@ -2607,12 +2620,15 @@ pub enum AgentEvent {
         result: ToolResult,
         is_error: bool,
     },
-    /// The agent wants to access a path outside the workspace.
+    /// The agent needs operator permission before executing a tool operation.
     /// The operator surface renders a blocking permission prompt and sends
     /// the response via the channel inside the Arc<Mutex<Option<...>>>.
     PermissionRequest {
         tool_name: String,
         path: String,
+        kind: PermissionRequestKind,
+        persistence: PermissionPersistence,
+        grant_path: Option<String>,
         respond:
             std::sync::Arc<std::sync::Mutex<Option<std::sync::mpsc::Sender<PermissionResponse>>>>,
     },

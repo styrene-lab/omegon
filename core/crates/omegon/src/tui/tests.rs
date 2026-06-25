@@ -635,7 +635,13 @@ async fn ui_action_permission_response_unblocks_pending_permission() {
     app.pending_permission = Some(std::sync::Arc::new(std::sync::Mutex::new(Some(
         permission_tx,
     ))));
-    app.pending_permission_context = Some(("write".into(), "src/lib.rs".into()));
+    app.pending_permission_context = Some(PendingPermissionContext {
+        tool_name: "write".into(),
+        target: "src/lib.rs".into(),
+        kind: omegon_traits::PermissionRequestKind::PathBoundary,
+        persistence: omegon_traits::PermissionPersistence::ProjectDirectory,
+        grant_path: Some("src".into()),
+    });
     app.command_prompt = Some(crate::surfaces::command::CommandPrompt::new(
         "Permission required",
         "Allow write?",

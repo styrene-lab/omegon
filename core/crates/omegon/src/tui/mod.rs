@@ -104,7 +104,7 @@ use crossterm::event::{
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use omegon_traits::AgentEvent;
+use omegon_traits::{AgentEvent, PermissionPersistence, PermissionRequestKind};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use tokio::sync::{broadcast, mpsc};
@@ -136,6 +136,14 @@ use crate::ui_runtime::actions::{
     SegmentCopyMode, SelectConversationSegmentAction, SetSurfaceVisibleAction, SetUiPresetAction,
     SlashCommandAction, SubmitPromptAction, UiAction, UiActionOutcome, UiSurfaceToggle,
 };
+
+struct PendingPermissionContext {
+    tool_name: String,
+    target: String,
+    kind: PermissionRequestKind,
+    persistence: PermissionPersistence,
+    grant_path: Option<String>,
+}
 
 /// Get current process RSS in megabytes (platform-specific).
 /// Uses getrusage(2) on macOS and /proc on Linux — no subprocess spawn.
@@ -565,7 +573,7 @@ struct App {
         >,
     >,
     /// Human-readable context for the pending permission prompt.
-    pending_permission_context: Option<(String, String)>,
+    pending_permission_context: Option<PendingPermissionContext>,
     /// Pending manual-action wait prompt — waiting for operator confirmation.
     pending_operator_wait: Option<
         std::sync::Arc<
@@ -3860,12 +3868,34 @@ impl App {
         let label = match action.response {
             omegon_traits::PermissionResponse::Allow => "allowed (this session)",
             omegon_traits::PermissionResponse::AlwaysAllow => {
-                "always allowed - persisted to project permissions"
+                match context.as_ref().map(|ctx| ctx.persistence) {
+                    Some(omegon_traits::PermissionPersistence::ProjectDirectory) => {
+                        "always allowed - project directory grant requested"
+                    }
+                    Some(omegon_traits::PermissionPersistence::SessionDirectory) => {
+                        "always allowed - session directory grant requested"
+                    }
+                    _ => "allowed for this operation",
+                }
             }
             omegon_traits::PermissionResponse::Deny => "denied",
         };
-        let message = if let Some((tool, path)) = context {
-            format!("→ {label}: {tool} {path}")
+        let message = if let Some(context) = context {
+            if matches!(
+                action.response,
+                omegon_traits::PermissionResponse::AlwaysAllow
+            ) {
+                if let Some(grant_path) = context.grant_path {
+                    format!(
+                        "→ {label}: {} {} (grant: {})",
+                        context.tool_name, context.target, grant_path
+                    )
+                } else {
+                    format!("→ {label}: {} {}", context.tool_name, context.target)
+                }
+            } else {
+                format!("→ {label}: {} {}", context.tool_name, context.target)
+            }
         } else {
             format!("→ {label}")
         };
@@ -7883,11 +7913,20 @@ Scroll transcript:
             AgentEvent::PermissionRequest {
                 tool_name,
                 path,
+                kind,
+                persistence,
+                grant_path,
                 respond,
             } => {
                 self.slim_turn_state = SlimTurnState::Finished("blocked");
                 // Show a blocking permission prompt in the TUI.
-                let prompt_text = format_permission_prompt(&tool_name, &path);
+                let prompt_text = format_permission_prompt(
+                    &tool_name,
+                    &path,
+                    kind,
+                    persistence,
+                    grant_path.as_deref(),
+                );
                 self.command_prompt = Some(
                     CommandPrompt::new("Permission required", prompt_text.clone()).with_actions(
                         vec![
@@ -7901,7 +7940,13 @@ Scroll transcript:
                 // Store the responder — the next key event (y/a/n) will
                 // resolve it. See handle_permission_key below.
                 self.pending_permission = Some(respond.clone());
-                self.pending_permission_context = Some((tool_name, path));
+                self.pending_permission_context = Some(PendingPermissionContext {
+                    tool_name,
+                    target: path,
+                    kind,
+                    persistence,
+                    grant_path,
+                });
             }
             AgentEvent::OperatorWaitRequest {
                 prompt,
@@ -10641,13 +10686,20 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn permission_prompt_contract_is_neutral_and_complete() {
-        let prompt = format_permission_prompt("read", "/tmp/outside");
+        let prompt = format_permission_prompt(
+            "read",
+            "/tmp/outside",
+            omegon_traits::PermissionRequestKind::PathBoundary,
+            omegon_traits::PermissionPersistence::ProjectDirectory,
+            Some("/tmp"),
+        );
         assert!(prompt.contains("Tool: read"));
         assert!(prompt.contains("Target: /tmp/outside"));
         assert!(prompt.contains("Reason: grant required for this operation"));
-        assert!(prompt.contains("Persist: project profile permissions"));
+        assert!(prompt.contains("Persist: project profile directory permission"));
+        assert!(prompt.contains("Grant: /tmp"));
         assert!(prompt.contains("[y] once"));
-        assert!(prompt.contains("[Shift+A] always + save"));
+        assert!(prompt.contains("[Shift+A] always for this directory"));
         assert!(!prompt.contains("[a] always + save"));
         assert!(!prompt.contains("outside trusted workspace"));
     }
@@ -10655,15 +10707,27 @@ mod slash_command_parsing_tests {
     #[test]
     fn permission_scope_labels_are_specific() {
         assert_eq!(
-            permission_persist_scope_label("read"),
+            permission_persist_scope_label(
+                "read",
+                omegon_traits::PermissionRequestKind::PathBoundary,
+                omegon_traits::PermissionPersistence::None
+            ),
             "always for this file"
         );
         assert_eq!(
-            permission_persist_scope_label("edit"),
+            permission_persist_scope_label(
+                "edit",
+                omegon_traits::PermissionRequestKind::PathBoundary,
+                omegon_traits::PermissionPersistence::None
+            ),
             "always for this path"
         );
         assert_eq!(
-            permission_persist_scope_label("bash"),
+            permission_persist_scope_label(
+                "bash",
+                omegon_traits::PermissionRequestKind::PathBoundary,
+                omegon_traits::PermissionPersistence::None
+            ),
             "always for this command"
         );
     }

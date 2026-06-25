@@ -3035,6 +3035,9 @@ async fn execute_tool_invocation(
                     let _ = events.send(AgentEvent::PermissionRequest {
                         tool_name: visible_tool_name.to_string(),
                         path: requested.clone(),
+                        kind: omegon_traits::PermissionRequestKind::Policy,
+                        persistence: omegon_traits::PermissionPersistence::None,
+                        grant_path: None,
                         respond,
                     });
                     wait_for_permission_response(rx, cancel.clone()).await
@@ -3352,6 +3355,9 @@ async fn execute_tool_invocation(
                 let _ = events.send(AgentEvent::PermissionRequest {
                     tool_name: visible_tool_name.to_string(),
                     path: perm_err.requested_path.clone(),
+                    kind: omegon_traits::PermissionRequestKind::PathBoundary,
+                    persistence: omegon_traits::PermissionPersistence::ProjectDirectory,
+                    grant_path: Some(perm_err.directory.clone()),
                     respond,
                 });
 
@@ -5131,9 +5137,12 @@ mod tests {
         loop {
             tokio::select! {
                 event = events_rx.recv() => {
-                    if let Ok(AgentEvent::PermissionRequest { tool_name, path, respond }) = event {
+                    if let Ok(AgentEvent::PermissionRequest { tool_name, path, kind, persistence, grant_path, respond }) = event {
                         assert_eq!(tool_name, crate::tool_registry::core::BASH);
                         assert!(path.contains("printf prompt-created"), "prompt subject should include command: {path}");
+                        assert_eq!(kind, omegon_traits::PermissionRequestKind::Policy);
+                        assert_eq!(persistence, omegon_traits::PermissionPersistence::None);
+                        assert!(grant_path.is_none());
                         let tx = respond.lock().unwrap().take().expect("permission response sender");
                         tx.send(omegon_traits::PermissionResponse::Allow).expect("send allow");
                         break;
