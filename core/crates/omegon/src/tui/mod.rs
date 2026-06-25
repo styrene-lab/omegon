@@ -4639,23 +4639,28 @@ impl App {
             }
             self.tool_activity_linger_until = None;
         }
-        let has_live_tool_activity = self.ui_surfaces.activity
-            && self.ui_surfaces.is_compact()
-            && self
-                .tool_inspection_target
-                .as_ref()
-                .is_some_and(|target| self.conversation.tool_segment_by_id(target.id()).is_some());
-        let raw_tool_inspection_height = if self.ui_surfaces.activity && self.ui_surfaces.is_compact()
-        {
-            activity_preferred_height(
-                has_live_tool_activity,
+        let live_activity_tool = self.tool_inspection_target.as_ref().and_then(|target| {
+            self.conversation.tool_segment_by_id(target.id()).map(|_| {
+                let mode = match target {
+                    ToolInspectionTarget::LiveLatest(_) => crate::surfaces::activity::ActivityToolMode::Live,
+                    ToolInspectionTarget::Pinned(_) => crate::surfaces::activity::ActivityToolMode::Detail,
+                };
+                crate::surfaces::activity::ActivityToolProjection {
+                    segment_id: target.id().to_string(),
+                    mode,
+                }
+            })
+        });
+        let activity_projection = if self.ui_surfaces.activity && self.ui_surfaces.is_compact() {
+            crate::surfaces::activity::ActivitySurfaceProjection::from_parts(
+                live_activity_tool,
                 live_cleave.as_ref(),
                 live_delegate.as_ref(),
-                area.width,
             )
         } else {
-            0
+            crate::surfaces::activity::ActivitySurfaceProjection { entries: Vec::new() }
         };
+        let raw_tool_inspection_height = activity_preferred_height(&activity_projection, area.width);
         let raw_workbench_height = workbench_preferred_height(&workbench_state, area.width);
         self.session_row.sync_from_footer(&self.footer_data);
         let session_height = self.session_row.preferred_height_for(area.width);
@@ -4778,22 +4783,12 @@ impl App {
         self.workbench_area = (workbench_area.height > 0).then_some(workbench_area);
 
         if tool_inspection_area.height > 0 {
-            let live_tool = self.tool_inspection_target.as_ref().and_then(|target| {
-                self.conversation.tool_segment_by_id(target.id()).map(|segment| {
-                    let mode = match target {
-                        ToolInspectionTarget::LiveLatest(_) => segment_detail::ToolDetailMode::Live,
-                        ToolInspectionTarget::Pinned(_) => segment_detail::ToolDetailMode::Detail,
-                    };
-                    (segment, mode)
-                })
-            });
             render_activity_panel(
                 tool_inspection_area,
                 frame,
                 self.theme.as_ref(),
-                live_tool,
-                live_cleave.as_ref(),
-                live_delegate.as_ref(),
+                &self.conversation,
+                &activity_projection,
             );
         }
 

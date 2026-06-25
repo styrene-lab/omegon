@@ -1,0 +1,87 @@
+//! Renderer-neutral live activity surface projection.
+//!
+//! The activity surface is a transient, bounded view into work that is
+//! happening right now: the current tool card plus active delegate/cleave
+//! operation progress. It is intentionally not a durable audit log; transcript
+//! segments remain the durable history.
+
+use crate::features::cleave::CleaveProgress;
+use crate::features::delegate::DelegateProgress;
+use crate::surfaces::operations::OperationWorkbenchProjection;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivitySurfaceProjection {
+    pub entries: Vec<ActivityEntryProjection>,
+}
+
+impl ActivitySurfaceProjection {
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn has_tool(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| matches!(entry.kind, ActivityEntryKind::Tool))
+    }
+
+    pub fn has_operation(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| matches!(entry.kind, ActivityEntryKind::Operation))
+    }
+
+    pub fn from_parts(
+        tool: Option<ActivityToolProjection>,
+        cleave: Option<&CleaveProgress>,
+        delegate: Option<&DelegateProgress>,
+    ) -> Self {
+        let mut entries = Vec::new();
+        if let Some(tool) = tool {
+            entries.push(ActivityEntryProjection {
+                kind: ActivityEntryKind::Tool,
+                tool: Some(tool),
+                operation: None,
+            });
+        }
+        if let Some(cleave) = cleave.filter(|progress| progress.active) {
+            entries.push(ActivityEntryProjection {
+                kind: ActivityEntryKind::Operation,
+                tool: None,
+                operation: Some(OperationWorkbenchProjection::from_cleave(cleave)),
+            });
+        } else if let Some(delegate) = delegate.filter(|progress| progress.active || progress.running > 0) {
+            entries.push(ActivityEntryProjection {
+                kind: ActivityEntryKind::Operation,
+                tool: None,
+                operation: Some(OperationWorkbenchProjection::from_delegate(delegate)),
+            });
+        }
+        Self { entries }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityEntryProjection {
+    pub kind: ActivityEntryKind,
+    pub tool: Option<ActivityToolProjection>,
+    pub operation: Option<OperationWorkbenchProjection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityEntryKind {
+    Tool,
+    Operation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityToolProjection {
+    pub segment_id: String,
+    pub mode: ActivityToolMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityToolMode {
+    Live,
+    Detail,
+}
