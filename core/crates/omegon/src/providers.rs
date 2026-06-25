@@ -420,7 +420,9 @@ fn push_unique<'a>(order: &mut Vec<&'a str>, provider: &'a str) {
 
 fn fallback_order_for_model(model_spec: &str) -> Vec<&'static str> {
     let requested = infer_provider_id(model_spec);
-    let Some(requested_provider) = crate::auth::provider_by_id(&requested).map(|provider| provider.id) else {
+    let Some(requested_provider) =
+        crate::auth::provider_by_id(&requested).map(|provider| provider.id)
+    else {
         return vec!["anthropic"];
     };
 
@@ -4755,8 +4757,14 @@ mod tests {
 
     #[test]
     fn fallback_order_keeps_unrelated_providers_single_provider() {
-        assert_eq!(fallback_order_for_model("anthropic:claude-sonnet-4-6"), vec!["anthropic"]);
-        assert_eq!(fallback_order_for_model("openrouter:meta/llama"), vec!["openrouter"]);
+        assert_eq!(
+            fallback_order_for_model("anthropic:claude-sonnet-4-6"),
+            vec!["anthropic"]
+        );
+        assert_eq!(
+            fallback_order_for_model("openrouter:meta/llama"),
+            vec!["openrouter"]
+        );
         assert_eq!(fallback_order_for_model("ollama:qwen3:32b"), vec!["ollama"]);
     }
 

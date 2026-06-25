@@ -835,9 +835,11 @@ pub fn tool_visual_identity(name: &str, detail_args: Option<&str>) -> ToolVisual
             (ToolRealm::Harness, ToolFamily::ModelRuntime, "model")
         }
         "whoami" => (ToolRealm::Harness, ToolFamily::Identity, "identity"),
-        name if name.starts_with("memory_") || name.contains("memory") => {
-            (ToolRealm::Knowledge, ToolFamily::Memory, memory_tool_label(name))
-        }
+        name if name.starts_with("memory_") || name.contains("memory") => (
+            ToolRealm::Knowledge,
+            ToolFamily::Memory,
+            memory_tool_label(name),
+        ),
         name if name.starts_with("drawing_") => (ToolRealm::Design, ToolFamily::Drawing, "drawing"),
         name if name.starts_with("design_board_") => {
             (ToolRealm::Design, ToolFamily::DesignBoard, "board")
@@ -873,7 +875,10 @@ fn memory_tool_label(name: &str) -> &'static str {
         "memory_recall" | "memory_query" | "memory_episodes" | "memory_search_archive" => {
             "mem read"
         }
-        "memory_store" | "memory_archive" | "memory_supersede" | "memory_connect"
+        "memory_store"
+        | "memory_archive"
+        | "memory_supersede"
+        | "memory_connect"
         | "memory_ingest_lifecycle" => "mem write",
         "memory_focus" => "mem pin",
         "memory_release" => "mem unpin",

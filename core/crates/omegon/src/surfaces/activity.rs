@@ -50,7 +50,9 @@ impl ActivitySurfaceProjection {
                 tool: None,
                 operation: Some(OperationWorkbenchProjection::from_cleave(cleave)),
             });
-        } else if let Some(delegate) = delegate.filter(|progress| progress.active || progress.running > 0) {
+        } else if let Some(delegate) =
+            delegate.filter(|progress| progress.active || progress.running > 0)
+        {
             entries.push(ActivityEntryProjection {
                 kind: ActivityEntryKind::Operation,
                 tool: None,

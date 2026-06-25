@@ -4516,12 +4516,18 @@ impl App {
         let mut live_activity_tools = self
             .activity_tools
             .iter()
-            .filter(|tool| self.conversation.tool_segment_by_id(&tool.segment_id).is_some())
+            .filter(|tool| {
+                self.conversation
+                    .tool_segment_by_id(&tool.segment_id)
+                    .is_some()
+            })
             .map(ActivityToolState::projection)
             .collect::<Vec<_>>();
         if let Some(ToolInspectionTarget::Pinned(id)) = self.tool_inspection_target.as_ref()
             && let Some(segment) = self.conversation.tool_segment_by_id(id)
-            && !live_activity_tools.iter().any(|tool| tool.segment_id == *id)
+            && !live_activity_tools
+                .iter()
+                .any(|tool| tool.segment_id == *id)
         {
             let (name, args_summary, result_summary) = match &segment.content {
                 SegmentContent::ToolCard {
@@ -4548,9 +4554,12 @@ impl App {
                 live_delegate.as_ref(),
             )
         } else {
-            crate::surfaces::activity::ActivitySurfaceProjection { entries: Vec::new() }
+            crate::surfaces::activity::ActivitySurfaceProjection {
+                entries: Vec::new(),
+            }
         };
-        let raw_tool_inspection_height = activity_preferred_height(&activity_projection, area.width);
+        let raw_tool_inspection_height =
+            activity_preferred_height(&activity_projection, area.width);
         let raw_workbench_height = workbench_preferred_height(&workbench_state, area.width);
         self.session_row.sync_from_footer(&self.footer_data);
         let session_height = self.session_row.preferred_height_for(area.width);
@@ -7755,7 +7764,10 @@ Scroll transcript:
 
         let mut completed_seen = 0usize;
         self.activity_tools.retain(|tool| {
-            if matches!(tool.status, crate::surfaces::activity::ActivityToolStatus::Running) {
+            if matches!(
+                tool.status,
+                crate::surfaces::activity::ActivityToolStatus::Running
+            ) {
                 return true;
             }
             completed_seen += 1;
@@ -7764,7 +7776,10 @@ Scroll transcript:
 
         while self.activity_tools.len() > MAX_ACTIVITY_TOOLS {
             if let Some(idx) = self.activity_tools.iter().rposition(|tool| {
-                !matches!(tool.status, crate::surfaces::activity::ActivityToolStatus::Running)
+                !matches!(
+                    tool.status,
+                    crate::surfaces::activity::ActivityToolStatus::Running
+                )
             }) {
                 self.activity_tools.remove(idx);
             } else {
@@ -7814,7 +7829,10 @@ Scroll transcript:
     fn expire_running_activity_tools(&mut self, ttl: Duration) {
         let expires_at = std::time::Instant::now() + ttl;
         for tool in &mut self.activity_tools {
-            if matches!(tool.status, crate::surfaces::activity::ActivityToolStatus::Running) {
+            if matches!(
+                tool.status,
+                crate::surfaces::activity::ActivityToolStatus::Running
+            ) {
                 tool.status = crate::surfaces::activity::ActivityToolStatus::Cancelled;
                 tool.expires_at = Some(expires_at);
             }
