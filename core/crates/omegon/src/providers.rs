@@ -4723,7 +4723,7 @@ mod tests {
     }
 
     #[test]
-    fn openai_family_fallback_uses_explicit_provider_priority() {
+    fn fallback_order_openai_family_uses_explicit_provider_priority() {
         let order = fallback_order_for_model("openai:gpt-5.4");
         assert_eq!(order, vec!["openai", "openai-codex"]);
 
@@ -4738,7 +4738,7 @@ mod tests {
     }
 
     #[test]
-    fn google_family_fallback_uses_explicit_provider_priority() {
+    fn fallback_order_google_family_uses_explicit_provider_priority() {
         assert_eq!(
             fallback_order_for_model("google:gemini-2.5-pro"),
             vec!["google", "google-antigravity"]
