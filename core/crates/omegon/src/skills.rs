@@ -427,7 +427,7 @@ pub const BUNDLED: &[(&str, &str)] = &[
         "typescript",
         include_str!("../../../../skills/typescript/SKILL.md"),
     ),
-    ("vault", include_str!("../../../../skills/vault/SKILL.md")),
+    ("flynt", include_str!("../../../../skills/flynt/SKILL.md")),
 ];
 
 fn skills_dir() -> Option<std::path::PathBuf> {
@@ -1792,7 +1792,7 @@ mod tests {
 
     #[test]
     fn bundled_count_matches_skills_directory() {
-        // 10 skills: code-act, git, oci, openspec, python, rust, security, style, typescript, vault
+        // 10 skills: code-act, git, oci, openspec, python, rust, security, style, typescript, flynt
         assert_eq!(BUNDLED.len(), 10);
     }
 
@@ -2546,7 +2546,7 @@ description: Project git override
         std::fs::write(root.join("README.md"), "# docs\n").unwrap();
         std::fs::create_dir_all(root.join("openspec/changes/demo")).unwrap();
         let skills = vec![
-            bundled_parsed_skill("vault"),
+            bundled_parsed_skill("flynt"),
             bundled_parsed_skill("openspec"),
         ];
 
@@ -2568,7 +2568,7 @@ description: Project git override
                 intent_terms: &[],
             },
         );
-        assert!(docs.iter().any(|suggestion| suggestion.name == "vault"));
+        assert!(docs.iter().any(|suggestion| suggestion.name == "flynt"));
         assert!(!docs.iter().any(|suggestion| suggestion.name == "openspec"));
 
         let lifecycle = suggest_skills_for_context(
