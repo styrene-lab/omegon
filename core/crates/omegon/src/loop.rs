@@ -2297,23 +2297,41 @@ fn provider_stop_notice(provider: &str, reason: &str) -> Option<String> {
 }
 
 /// Consume LlmEvents from the bridge, build an AssistantMessage.
-/// Select the stream idle budget for the current phase. Reasoning (thinking
-/// begun, no content/tool yet) gets the most generous leash because reasoning
-/// models can stream nothing for minutes; once content arrives the tighter
-/// content budget applies; before anything arrives, the initial budget.
+/// Stream idle phase is a liveness concept, not just visible thinking text.
+/// Providers can legally go silent while deciding the next item after text,
+/// thinking, or tool-call blocks complete; those inter-item gaps need the same
+/// generous leash as active reasoning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamIdlePhase {
+    Initial = 0,
+    ActiveContent = 1,
+    ActiveToolCall = 2,
+    ActiveThinking = 3,
+    InterItemGap = 4,
+}
+
+impl StreamIdlePhase {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::ActiveContent,
+            2 => Self::ActiveToolCall,
+            3 => Self::ActiveThinking,
+            4 => Self::InterItemGap,
+            _ => Self::Initial,
+        }
+    }
+}
+
 fn select_stream_idle_budget(
-    reasoning: bool,
-    received_content: bool,
+    phase: StreamIdlePhase,
     initial: std::time::Duration,
-    content: std::time::Duration,
+    active: std::time::Duration,
     reasoning_budget: std::time::Duration,
 ) -> std::time::Duration {
-    if reasoning && !received_content {
-        reasoning_budget
-    } else if received_content {
-        content
-    } else {
-        initial
+    match phase {
+        StreamIdlePhase::Initial => initial,
+        StreamIdlePhase::ActiveContent | StreamIdlePhase::ActiveToolCall => active,
+        StreamIdlePhase::ActiveThinking | StreamIdlePhase::InterItemGap => reasoning_budget,
     }
 }
 
@@ -2365,13 +2383,14 @@ async fn consume_llm_stream(
         .filter(|seconds| *seconds >= 60)
         .map(std::time::Duration::from_secs)
         .unwrap_or_else(|| std::time::Duration::from_secs(300));
-    let received_content = std::sync::atomic::AtomicBool::new(false);
-    // Set while the model is reasoning (ThinkingStart..first content/tool).
-    let reasoning = std::sync::atomic::AtomicBool::new(false);
+    // Active output phases use a tight watchdog; explicit thinking and
+    // provider decision gaps between output items use the generous reasoning
+    // budget. This mirrors provider-side SSE gates for Anthropic/Codex and
+    // local thinking-capable providers such as Ollama.
+    let stream_idle_phase = std::sync::atomic::AtomicU8::new(StreamIdlePhase::Initial as u8);
     let idle_timeout = || {
         select_stream_idle_budget(
-            reasoning.load(std::sync::atomic::Ordering::Relaxed),
-            received_content.load(std::sync::atomic::Ordering::Relaxed),
+            StreamIdlePhase::from_u8(stream_idle_phase.load(std::sync::atomic::Ordering::Relaxed)),
             initial_idle_timeout,
             content_idle_timeout,
             reasoning_idle_timeout,
@@ -2396,8 +2415,10 @@ async fn consume_llm_stream(
                 // Does NOT count as "content" for timeout phase transition.
             }
             LlmEvent::TextStart => {
-                received_content.store(true, std::sync::atomic::Ordering::Relaxed);
-                reasoning.store(false, std::sync::atomic::Ordering::Relaxed);
+                stream_idle_phase.store(
+                    StreamIdlePhase::ActiveContent as u8,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
             }
             LlmEvent::TextDelta { delta } => {
                 if !delta.is_empty() {
@@ -2456,17 +2477,25 @@ async fn consume_llm_stream(
                 }
             }
             LlmEvent::TextEnd => {
+                stream_idle_phase.store(
+                    StreamIdlePhase::InterItemGap as u8,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 text_parts.push(String::new());
             }
             LlmEvent::ThinkingStart => {
-                // Reasoning has begun. Do NOT mark received_content — that would
-                // drop the idle budget to the 90s content window and trip on a
-                // legitimately silent reasoning gap. Enter the reasoning phase
-                // instead, which carries the generous budget.
-                reasoning.store(true, std::sync::atomic::Ordering::Relaxed);
+                // Active reasoning has begun. This is a liveness phase, not a
+                // promise that every provider exposes raw chain-of-thought.
+                stream_idle_phase.store(
+                    StreamIdlePhase::ActiveThinking as u8,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
             }
             LlmEvent::ThinkingDelta { delta } => {
-                reasoning.store(true, std::sync::atomic::Ordering::Relaxed);
+                stream_idle_phase.store(
+                    StreamIdlePhase::ActiveThinking as u8,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 if !delta.is_empty()
                     && let Some(cancel_keeps_prompt) = cancel_keeps_prompt
                 {
@@ -2482,16 +2511,30 @@ async fn consume_llm_stream(
                 }
             }
             LlmEvent::ThinkingEnd => {
+                stream_idle_phase.store(
+                    StreamIdlePhase::InterItemGap as u8,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 thinking_parts.push(String::new());
             }
             LlmEvent::ToolCallStart => {
-                received_content.store(true, std::sync::atomic::Ordering::Relaxed);
-                reasoning.store(false, std::sync::atomic::Ordering::Relaxed);
+                stream_idle_phase.store(
+                    StreamIdlePhase::ActiveToolCall as u8,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
             }
             LlmEvent::ToolCallDelta { .. } => {
+                stream_idle_phase.store(
+                    StreamIdlePhase::ActiveToolCall as u8,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 // Deltas accumulated by the bridge — complete tool call in ToolCallEnd
             }
             LlmEvent::ToolCallEnd { tool_call } => {
+                stream_idle_phase.store(
+                    StreamIdlePhase::InterItemGap as u8,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 tool_calls.push(ToolCall {
                     id: tool_call.id,
                     name: tool_call.name,
@@ -4432,25 +4475,31 @@ mod tests {
         let content = Duration::from_secs(90);
         let reasoning = Duration::from_secs(300);
 
-        // Reasoning before any content → the generous reasoning budget. This is
-        // the regression: ThinkingStart must not collapse to the 90s window.
+        // Explicit reasoning uses the generous reasoning budget.
         assert_eq!(
-            select_stream_idle_budget(true, false, initial, content, reasoning),
+            select_stream_idle_budget(StreamIdlePhase::ActiveThinking, initial, content, reasoning),
             reasoning
         );
-        // Once content/tool output begins, reasoning is cleared → content budget.
+        // Active content uses the tighter active budget.
         assert_eq!(
-            select_stream_idle_budget(false, true, initial, content, reasoning),
+            select_stream_idle_budget(StreamIdlePhase::ActiveContent, initial, content, reasoning),
             content
         );
-        // Content takes precedence even if a stale reasoning flag lingered.
+        // Active tool-call streaming is also active output, not a reasoning gap.
         assert_eq!(
-            select_stream_idle_budget(true, true, initial, content, reasoning),
+            select_stream_idle_budget(StreamIdlePhase::ActiveToolCall, initial, content, reasoning),
             content
+        );
+        // Inter-item gaps after text/thinking/tool blocks get the generous
+        // budget because providers may legally go silent while deciding the
+        // next block/item.
+        assert_eq!(
+            select_stream_idle_budget(StreamIdlePhase::InterItemGap, initial, content, reasoning),
+            reasoning
         );
         // Nothing yet → the initial budget.
         assert_eq!(
-            select_stream_idle_budget(false, false, initial, content, reasoning),
+            select_stream_idle_budget(StreamIdlePhase::Initial, initial, content, reasoning),
             initial
         );
         // The reasoning leash must strictly exceed the content leash.
