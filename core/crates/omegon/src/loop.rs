@@ -1040,7 +1040,16 @@ pub async fn run(
             if should_nudge_plan_reconciliation(&conversation.intent, &assistant_msg.text)
                 && turn < config.max_turns
             {
-                conversation.intent.plan_reconciliation_nudged = true;
+                let fingerprint = plan_open_fingerprint(&conversation.intent);
+                if conversation.intent.plan_reconciliation_fingerprint == Some(fingerprint) {
+                    conversation.intent.plan_reconciliation_nudges = conversation
+                        .intent
+                        .plan_reconciliation_nudges
+                        .saturating_add(1);
+                } else {
+                    conversation.intent.plan_reconciliation_fingerprint = Some(fingerprint);
+                    conversation.intent.plan_reconciliation_nudges = 1;
+                }
                 tracing::info!(
                     "Agent finishing with incomplete visible plan — nudging reconciliation"
                 );
@@ -3968,11 +3977,42 @@ fn looks_like_completion(text: &str) -> bool {
     completion_phrases.iter().any(|p| lower.contains(p))
 }
 
+/// Maximum reconciliation nudges for a single unchanged stale-plan state.
+/// Bounds livelock with a model that refuses to reconcile, while no longer
+/// disarming reconciliation after one nudge (the former one-shot-latch bug).
+const MAX_PLAN_RECONCILIATION_NUDGES: u8 = 3;
+
+/// Fingerprint of the open (Pending/Active) work-plan items. Changes whenever
+/// the agent makes genuine progress, replaces the plan, or orphans a new one —
+/// which re-arms the reconciliation nudge budget.
+fn plan_open_fingerprint(intent: &IntentDocument) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for item in &intent.work_plan {
+        if matches!(
+            item.status,
+            crate::conversation::WorkItemStatus::Pending
+                | crate::conversation::WorkItemStatus::Active
+        ) {
+            item.description.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
 fn should_nudge_plan_reconciliation(intent: &IntentDocument, assistant_text: &str) -> bool {
-    !intent.plan_reconciliation_nudged
-        && !intent.work_plan.is_empty()
-        && !intent.work_plan_complete()
-        && looks_like_completion(assistant_text)
+    if intent.work_plan.is_empty()
+        || intent.work_plan_complete()
+        || !looks_like_completion(assistant_text)
+    {
+        return false;
+    }
+    // A new or changed stale-plan state always re-arms the nudge.
+    if intent.plan_reconciliation_fingerprint != Some(plan_open_fingerprint(intent)) {
+        return true;
+    }
+    // Identical stale state: nudge a bounded number of times.
+    intent.plan_reconciliation_nudges < MAX_PLAN_RECONCILIATION_NUDGES
 }
 
 /// Returns true if a write target path looks like a session-administrative
@@ -4904,15 +4944,41 @@ mod tests {
     }
 
     #[test]
-    fn plan_reconciliation_nudge_is_one_shot() {
+    fn plan_reconciliation_nudge_is_bounded_then_rearms_on_progress() {
         let mut intent = IntentDocument::default();
-        intent.set_work_plan(vec!["Inspect".into()]);
-        intent.plan_reconciliation_nudged = true;
+        intent.set_work_plan(vec!["Inspect".into(), "Patch".into()]);
+        let done = "Done! The patch is validated.";
 
-        assert!(!should_nudge_plan_reconciliation(
-            &intent,
-            "Done! The patch is validated."
-        ));
+        // Simulate the loop's caller bookkeeping for an unchanged stale state:
+        // it nudges up to MAX_PLAN_RECONCILIATION_NUDGES times, then stops —
+        // bounding livelock without the old one-shot disarm.
+        for _ in 0..MAX_PLAN_RECONCILIATION_NUDGES {
+            assert!(
+                should_nudge_plan_reconciliation(&intent, done),
+                "should nudge while under the per-state budget"
+            );
+            let fp = plan_open_fingerprint(&intent);
+            if intent.plan_reconciliation_fingerprint == Some(fp) {
+                intent.plan_reconciliation_nudges += 1;
+            } else {
+                intent.plan_reconciliation_fingerprint = Some(fp);
+                intent.plan_reconciliation_nudges = 1;
+            }
+        }
+        // Budget for this exact stale state is now spent.
+        assert!(
+            !should_nudge_plan_reconciliation(&intent, done),
+            "unchanged stale state must stop nudging after the budget"
+        );
+
+        // Genuine progress changes the open-plan fingerprint and re-arms — the
+        // regression this fixes: a single early nudge no longer disarms
+        // reconciliation for the rest of the session.
+        intent.advance_work_plan();
+        assert!(
+            should_nudge_plan_reconciliation(&intent, done),
+            "progress (changed fingerprint) must re-arm the nudge"
+        );
     }
 
     #[test]
