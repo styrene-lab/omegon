@@ -287,6 +287,7 @@ pub struct WebSessionListResponse {
 pub struct WebSessionShowResponse {
     pub schema_version: u8,
     pub session: WebSessionSummary,
+    pub allocation_mode: String,
     pub links: WebSessionLinks,
     pub snapshot: super::surfaces::WebSurfacesSnapshot,
 }
@@ -310,6 +311,7 @@ pub struct NativeSessionCreateRequest {
 pub struct NativeSessionCreateResponse {
     pub schema_version: u8,
     pub session: WebSessionSummary,
+    pub allocation_mode: String,
     pub assistant_profile_id: Option<String>,
     pub assistant: Option<crate::capabilities::profiles::AssistantListItem>,
     pub links: WebSessionLinks,
@@ -345,6 +347,9 @@ fn native_default_session_links() -> WebSessionLinks {
         stream: Some("/api/sessions/default/surfaces/stream".to_string()),
     }
 }
+
+const NATIVE_SESSION_ALLOCATION_MODE: &str = "singleton-live";
+const HISTORICAL_SESSION_ALLOCATION_MODE: &str = "historical-read-only";
 
 fn historical_web_session_links(session_id: &str) -> WebSessionLinks {
     WebSessionLinks {
@@ -699,6 +704,7 @@ pub async fn post_native_session(
         StatusCode::CREATED,
         Json(NativeSessionCreateResponse {
             schema_version: 1,
+            allocation_mode: NATIVE_SESSION_ALLOCATION_MODE.to_string(),
             assistant_profile_id,
             assistant,
             links: native_default_session_links(),
@@ -716,6 +722,7 @@ pub async fn get_native_session(
     Ok(Json(WebSessionShowResponse {
         schema_version: 1,
         session: default_live_session_summary(&state)?,
+        allocation_mode: NATIVE_SESSION_ALLOCATION_MODE.to_string(),
         links: native_default_session_links(),
         snapshot: super::surfaces::project_web_surfaces(&state),
     }))
@@ -819,9 +826,16 @@ pub async fn get_web_session(
         historical_web_session_links(&session.session_id)
     };
 
+    let allocation_mode = if session.current {
+        NATIVE_SESSION_ALLOCATION_MODE
+    } else {
+        HISTORICAL_SESSION_ALLOCATION_MODE
+    };
+
     Ok(Json(WebSessionShowResponse {
         schema_version: 1,
         session,
+        allocation_mode: allocation_mode.to_string(),
         links,
         snapshot: super::surfaces::project_web_surfaces(&state),
     }))
@@ -2396,6 +2410,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         assert_eq!(response.0, StatusCode::CREATED);
         assert_eq!(response.1.schema_version, 1);
+        assert_eq!(response.1.allocation_mode, "singleton-live");
         assert_eq!(response.1.session.session_id, "default");
         assert!(response.1.assistant_profile_id.is_none());
         assert!(response.1.assistant.is_none());
