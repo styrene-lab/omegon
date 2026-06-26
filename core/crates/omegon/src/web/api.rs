@@ -302,6 +302,7 @@ pub struct NativeSessionCreateResponse {
     pub schema_version: u8,
     pub session: WebSessionSummary,
     pub assistant_profile_id: Option<String>,
+    pub assistant: Option<crate::capabilities::profiles::AssistantListItem>,
     pub surfaces_href: String,
     pub actions_href: String,
     pub stream_href: String,
@@ -626,12 +627,26 @@ pub async fn post_native_session(
             return Err(StatusCode::BAD_REQUEST);
         }
     }
+    let assistant = if let Some(profile_id) = request.assistant_profile_id.as_deref() {
+        let snapshot = capability_inventory_snapshot(state.clone())?;
+        Some(
+            snapshot
+                .assistant_list
+                .into_iter()
+                .find(|assistant| assistant.id == profile_id)
+                .ok_or(StatusCode::NOT_FOUND)?,
+        )
+    } else {
+        None
+    };
+    let assistant_profile_id = assistant.as_ref().map(|assistant| assistant.id.clone());
     let session = default_live_session_summary(&state)?;
     Ok((
         StatusCode::CREATED,
         Json(NativeSessionCreateResponse {
             schema_version: 1,
-            assistant_profile_id: request.assistant_profile_id,
+            assistant_profile_id,
+            assistant,
             surfaces_href: "/api/sessions/default/surfaces".to_string(),
             actions_href: "/api/sessions/default/actions".to_string(),
             stream_href: "/api/sessions/default/surfaces/stream".to_string(),
@@ -2310,7 +2325,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
         let response = post_native_session(
             axum::extract::State(test_state()),
             Json(NativeSessionCreateRequest {
-                assistant_profile_id: Some("default-profile".to_string()),
+                assistant_profile_id: None,
                 cwd: None,
             }),
         )
@@ -2320,16 +2335,69 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert_eq!(response.0, StatusCode::CREATED);
         assert_eq!(response.1.schema_version, 1);
         assert_eq!(response.1.session.session_id, "default");
-        assert_eq!(
-            response.1.assistant_profile_id.as_deref(),
-            Some("default-profile")
-        );
+        assert!(response.1.assistant_profile_id.is_none());
+        assert!(response.1.assistant.is_none());
         assert_eq!(response.1.surfaces_href, "/api/sessions/default/surfaces");
         assert_eq!(response.1.actions_href, "/api/sessions/default/actions");
         assert_eq!(
             response.1.stream_href,
             "/api/sessions/default/surfaces/stream"
         );
+    }
+
+    #[tokio::test]
+    async fn native_session_create_validates_assistant_profile_readiness() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        write_blocked_agent(home.path());
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = post_native_session(
+            axum::extract::State(test_state()),
+            Json(NativeSessionCreateRequest {
+                assistant_profile_id: Some("blocked-agent".to_string()),
+                cwd: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        restore_env("OMEGON_HOME", previous_home);
+
+        assert_eq!(response.0, StatusCode::CREATED);
+        assert_eq!(
+            response.1.assistant_profile_id.as_deref(),
+            Some("blocked-agent")
+        );
+        let assistant = response.1.assistant.as_ref().expect("assistant readiness");
+        assert_eq!(assistant.id, "blocked-agent");
+        assert_eq!(
+            assistant.launch_readiness.status,
+            crate::capabilities::profiles::AssistantLaunchStatus::Blocked
+        );
+        assert_eq!(assistant.blocker_count, 1);
+    }
+
+    #[tokio::test]
+    async fn native_session_create_404s_unknown_assistant_profile() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = post_native_session(
+            axum::extract::State(test_state()),
+            Json(NativeSessionCreateRequest {
+                assistant_profile_id: Some("missing".to_string()),
+                cwd: None,
+            }),
+        )
+        .await;
+
+        restore_env("OMEGON_HOME", previous_home);
+
+        assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
     }
 
     #[tokio::test]
