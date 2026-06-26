@@ -539,7 +539,10 @@ mod tests {
         assert!(active.items[0].writable);
         assert_eq!(projected.workstreams.len(), 1);
         assert_eq!(projected.workstreams[0].completed, 3);
-        assert_eq!(projected.promotion_nudges, vec!["record the web surface contract"]);
+        assert_eq!(
+            projected.promotion_nudges,
+            vec!["record the web surface contract"]
+        );
     }
 
     #[test]
