@@ -31,6 +31,7 @@ pub struct WebSurfaceBundle {
     pub instruments: WebInstrumentsSurface,
     pub memory_status: WebMemoryStatusSurface,
     pub operations: WebOperationsSurface,
+    pub runtime: WebRuntimeSurface,
     pub settings: WebSettingsSurface,
 }
 
@@ -105,6 +106,38 @@ pub struct WebMemoryStatusSurface {
 #[derive(Debug, Clone, Serialize)]
 pub struct WebOperationsSurface {
     pub active_child_runtimes: usize,
+    /// Aggregated delegate + cleave child runtimes, projected for the
+    /// browser's Operations instrument. Empty when nothing is running.
+    pub kind: Option<String>,
+    pub running: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub children: Vec<WebOperationChild>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebOperationChild {
+    pub label: String,
+    pub status: String,
+    pub activity: Option<String>,
+    pub tasks_done: usize,
+    pub tasks_total: usize,
+    pub result_summary: Option<String>,
+}
+
+/// Runtime telemetry for the top HUD strip: context routing, autonomy posture,
+/// capability grade, and repo state. Projected from `HarnessStatus`.
+#[derive(Debug, Clone, Serialize)]
+pub struct WebRuntimeSurface {
+    pub context_class: Option<String>,
+    pub thinking_level: Option<String>,
+    pub capability_grade: Option<String>,
+    pub posture: Option<String>,
+    pub operating_profile: Option<String>,
+    pub autonomy_mode: Option<String>,
+    pub session_kind: Option<String>,
+    pub git_branch: Option<String>,
+    pub active_persona: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -163,16 +196,103 @@ pub fn project_web_surfaces(state: &WebState) -> WebSurfacesSnapshot {
                 active_facts: harness.as_ref().map(|h| h.memory.active_facts).unwrap_or(0),
                 total_facts: harness.as_ref().map(|h| h.memory.total_facts).unwrap_or(0),
             },
-            operations: WebOperationsSurface {
-                active_child_runtimes: harness
-                    .as_ref()
-                    .map(|h| h.active_delegates.len())
-                    .unwrap_or(0),
-            },
+            operations: project_operations(state),
+            runtime: project_runtime(harness.as_deref()),
             settings: WebSettingsSurface {
                 auth_mode: startup.as_ref().map(|s| s.auth_mode.clone()),
                 auth_source: startup.as_ref().map(|s| s.auth_source.clone()),
             },
         },
+    }
+}
+
+/// Project delegate + cleave child runtimes into the browser Operations
+/// surface. Delegate takes precedence as the `kind` when both are active;
+/// counts and children are merged so the instrument shows all live work.
+fn project_operations(state: &WebState) -> WebOperationsSurface {
+    let mut kind: Option<String> = None;
+    let (mut running, mut completed, mut failed) = (0usize, 0usize, 0usize);
+    let mut children: Vec<WebOperationChild> = Vec::new();
+
+    if let Some(delegate) = state.handles.delegate.as_ref().and_then(|d| d.lock().ok()) {
+        if delegate.active || !delegate.children.is_empty() {
+            kind = Some("delegate".to_string());
+            running += delegate.running;
+            completed += delegate.completed;
+            failed += delegate.failed;
+            for child in &delegate.children {
+                children.push(WebOperationChild {
+                    label: child.label.clone(),
+                    status: child.status.clone(),
+                    activity: child.last_tool.clone(),
+                    tasks_done: child.tasks_done,
+                    tasks_total: child.tasks.len(),
+                    result_summary: child.result_summary.clone(),
+                });
+            }
+        }
+    }
+
+    if let Some(cleave) = state.handles.cleave.as_ref().and_then(|c| c.lock().ok()) {
+        if cleave.active || !cleave.children.is_empty() {
+            if kind.is_none() {
+                kind = Some("cleave".to_string());
+            }
+            running += cleave
+                .children
+                .iter()
+                .filter(|c| c.status == "running")
+                .count();
+            completed += cleave.completed;
+            failed += cleave.failed;
+            for child in &cleave.children {
+                children.push(WebOperationChild {
+                    label: child.label.clone(),
+                    status: child.status.clone(),
+                    activity: child.last_tool.clone(),
+                    tasks_done: child.tasks_done,
+                    tasks_total: child.tasks.len(),
+                    result_summary: None,
+                });
+            }
+        }
+    }
+
+    let active_child_runtimes = running;
+    WebOperationsSurface {
+        active_child_runtimes,
+        kind,
+        running,
+        completed,
+        failed,
+        children,
+    }
+}
+
+/// Project runtime telemetry for the top HUD strip from `HarnessStatus`.
+fn project_runtime(harness: Option<&crate::status::HarnessStatus>) -> WebRuntimeSurface {
+    let Some(h) = harness else {
+        return WebRuntimeSurface {
+            context_class: None,
+            thinking_level: None,
+            capability_grade: None,
+            posture: None,
+            operating_profile: None,
+            autonomy_mode: None,
+            session_kind: None,
+            git_branch: None,
+            active_persona: None,
+        };
+    };
+    WebRuntimeSurface {
+        context_class: Some(h.context_class.clone()),
+        thinking_level: Some(h.thinking_level.clone()),
+        capability_grade: Some(h.capability_grade.clone()),
+        posture: Some(h.posture.clone()),
+        operating_profile: Some(h.operating_profile.clone()),
+        autonomy_mode: Some(format!("{:?}", h.autonomy_mode)),
+        session_kind: Some(h.session_kind.clone()),
+        git_branch: h.git_branch.clone(),
+        active_persona: h.active_persona.as_ref().map(|p| p.name.clone()),
     }
 }

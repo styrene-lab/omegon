@@ -711,6 +711,14 @@ pub async fn start_server_with_options(
             "/api/web/launch-context",
             axum::routing::get(api::get_web_launch_context),
         )
+        .route(
+            "/api/runtime/capabilities",
+            axum::routing::get(api::get_runtime_capabilities),
+        )
+        .route(
+            "/api/runtime/status",
+            axum::routing::get(api::get_runtime_status),
+        )
         .route("/api/startup", axum::routing::get(api::get_startup))
         .route("/api/healthz", axum::routing::get(api::get_health))
         .route("/api/readyz", axum::routing::get(api::get_ready))
