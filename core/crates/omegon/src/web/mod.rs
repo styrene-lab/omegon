@@ -278,6 +278,18 @@ pub struct WebState {
     pub daemon_events: Arc<Mutex<Vec<DaemonEventEnvelope>>>,
     /// Shared queue/worker status for daemon event ingress.
     pub daemon_status: Arc<Mutex<WebDaemonStatus>>,
+    /// Permission responders captured from broadcast `PermissionRequest`
+    /// events, keyed by a stable `Arc`-identity id, so the web client can
+    /// answer tool-approval prompts via `POST /api/web/actions`. Populated by
+    /// the surface stream as it forwards the event to the browser.
+    pub pending_permissions: Arc<
+        Mutex<
+            std::collections::HashMap<
+                String,
+                std::sync::mpsc::Sender<omegon_traits::PermissionResponse>,
+            >,
+        >,
+    >,
 }
 
 impl WebState {
@@ -324,7 +336,57 @@ impl WebState {
                 transport_warnings: default_transport_warnings(),
                 ..WebDaemonStatus::default()
             })),
+            pending_permissions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
+    }
+}
+
+/// Derive a stable, coordination-free id for a permission responder from its
+/// `Arc` identity. Every clone of the same broadcast `PermissionRequest` event
+/// shares the `Arc`, so the surface stream (which emits this id to the browser)
+/// and the later action lookup agree without a shared counter.
+pub(crate) fn permission_request_id(
+    respond: &Arc<Mutex<Option<std::sync::mpsc::Sender<omegon_traits::PermissionResponse>>>>,
+) -> String {
+    format!("perm-{:x}", Arc::as_ptr(respond) as usize)
+}
+
+impl WebState {
+    /// Capture a permission responder so the web client can answer it later,
+    /// returning its stable id. Takes the sender out of the shared event slot
+    /// (first consumer wins — in a daemon-hosted web deployment there is no TUI
+    /// contending for it). Idempotent: if the sender was already taken, the id
+    /// is still returned so the browser can reference the in-flight request.
+    pub(crate) fn register_permission(
+        &self,
+        respond: &Arc<Mutex<Option<std::sync::mpsc::Sender<omegon_traits::PermissionResponse>>>>,
+    ) -> String {
+        let id = permission_request_id(respond);
+        if let Some(sender) = respond.lock().ok().and_then(|mut slot| slot.take())
+            && let Ok(mut map) = self.pending_permissions.lock()
+        {
+            map.insert(id.clone(), sender);
+        }
+        id
+    }
+
+    /// Resolve a captured permission responder by id, sending the decision.
+    /// Returns `Err` with a reason if the id is unknown/already answered or the
+    /// agent is no longer waiting.
+    pub(crate) fn answer_permission(
+        &self,
+        request_id: &str,
+        decision: omegon_traits::PermissionResponse,
+    ) -> Result<(), &'static str> {
+        let sender = self
+            .pending_permissions
+            .lock()
+            .ok()
+            .and_then(|mut map| map.remove(request_id))
+            .ok_or("unknown or already-answered permission request")?;
+        sender
+            .send(decision)
+            .map_err(|_| "permission request is no longer awaiting a response")
     }
 }
 

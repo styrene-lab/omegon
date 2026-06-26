@@ -654,8 +654,41 @@ pub async fn post_web_action(
                 respond_to: None,
             })
         }
-        WebActionPayload::RespondPermission { .. }
-        | WebActionPayload::RespondOperatorWait { .. }
+        WebActionPayload::RespondPermission { request_id, allow } => {
+            let decision = if allow {
+                omegon_traits::PermissionResponse::Allow
+            } else {
+                omegon_traits::PermissionResponse::Deny
+            };
+            return match state.answer_permission(&request_id, decision) {
+                Ok(()) => (
+                    StatusCode::ACCEPTED,
+                    Json(web_outcome_accepted(
+                        request.session_id,
+                        request.action_id,
+                        Some(
+                            if allow {
+                                "permission allowed"
+                            } else {
+                                "permission denied"
+                            }
+                            .to_string(),
+                        ),
+                    )),
+                ),
+                Err(reason) => (
+                    StatusCode::NOT_FOUND,
+                    Json(
+                        crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                            request.session_id,
+                            request.action_id,
+                            reason,
+                        ),
+                    ),
+                ),
+            };
+        }
+        WebActionPayload::RespondOperatorWait { .. }
         | WebActionPayload::CopyLatestResponse
         | WebActionPayload::SelectSegment { .. }
         | WebActionPayload::CopySegment { .. } => {
@@ -1309,6 +1342,9 @@ mod tests {
             ),
             daemon_events: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             daemon_status: std::sync::Arc::new(std::sync::Mutex::new(WebDaemonStatus::default())),
+            pending_permissions: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 
