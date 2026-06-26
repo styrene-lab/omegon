@@ -296,3 +296,164 @@ fn project_runtime(harness: Option<&crate::status::HarnessStatus>) -> WebRuntime
         active_persona: h.active_persona.as_ref().map(|p| p.name.clone()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::cleave::{ChildProgress, CleaveProgress};
+    use crate::features::delegate::{DelegateProgress, DelegateProgressChild};
+    use crate::status::HarnessStatus;
+    use std::sync::{Arc, Mutex};
+
+    fn test_state() -> WebState {
+        WebState::new(
+            super::super::DashboardHandles::default(),
+            tokio::sync::broadcast::channel(16).0,
+        )
+    }
+
+    fn cleave_child(label: &str, status: &str) -> ChildProgress {
+        ChildProgress {
+            label: label.into(),
+            status: status.into(),
+            failure_kind: None,
+            duration_secs: None,
+            supervision_mode: None,
+            pid: None,
+            last_tool: Some("bash".into()),
+            last_tool_activity: None,
+            last_turn: Some(3),
+            tasks: Vec::new(),
+            tasks_done: 1,
+            started_at: None,
+            last_activity_at: None,
+            tokens_in: 0,
+            tokens_out: 0,
+            runtime: None,
+        }
+    }
+
+    fn delegate_child(label: &str, status: &str) -> DelegateProgressChild {
+        DelegateProgressChild {
+            task_id: "task-1".into(),
+            label: label.into(),
+            status: status.into(),
+            last_tool: Some("write".into()),
+            last_tool_activity: None,
+            last_turn: Some(2),
+            started_at: None,
+            completed_at: None,
+            result_summary: Some("scouted module".into()),
+            failure_kind: None,
+            tasks: Vec::new(),
+            tasks_done: 2,
+        }
+    }
+
+    #[test]
+    fn runtime_surface_is_empty_without_harness() {
+        let rt = project_runtime(None);
+        assert!(rt.autonomy_mode.is_none());
+        assert!(rt.context_class.is_none());
+        assert!(rt.active_persona.is_none());
+    }
+
+    #[test]
+    fn runtime_surface_projects_harness_fields() {
+        let h = HarnessStatus {
+            context_class: "Standard".into(),
+            thinking_level: "high".into(),
+            capability_grade: "B".into(),
+            posture: "Architect".into(),
+            session_kind: "interactive".into(),
+            ..Default::default()
+        };
+        let rt = project_runtime(Some(&h));
+        assert_eq!(rt.context_class.as_deref(), Some("Standard"));
+        assert_eq!(rt.capability_grade.as_deref(), Some("B"));
+        assert_eq!(rt.posture.as_deref(), Some("Architect"));
+        // autonomy_mode is always populated (Debug-formatted) when harness present
+        assert!(rt.autonomy_mode.is_some());
+    }
+
+    #[test]
+    fn operations_surface_is_empty_when_idle() {
+        let ops = project_operations(&test_state());
+        assert!(ops.kind.is_none());
+        assert_eq!(ops.running, 0);
+        assert_eq!(ops.completed, 0);
+        assert_eq!(ops.failed, 0);
+        assert!(ops.children.is_empty());
+    }
+
+    #[test]
+    fn operations_surface_projects_delegate_children() {
+        let mut state = test_state();
+        state.handles.delegate = Some(Arc::new(Mutex::new(DelegateProgress {
+            active: true,
+            running: 1,
+            completed: 1,
+            failed: 0,
+            children: vec![
+                delegate_child("scout-mod", "running"),
+                delegate_child("scout-tests", "completed"),
+            ],
+        })));
+
+        let ops = project_operations(&state);
+        assert_eq!(ops.kind.as_deref(), Some("delegate"));
+        assert_eq!(ops.running, 1);
+        assert_eq!(ops.completed, 1);
+        assert_eq!(ops.children.len(), 2);
+        let first = &ops.children[0];
+        assert_eq!(first.label, "scout-mod");
+        assert_eq!(first.activity.as_deref(), Some("write"));
+        assert_eq!(first.tasks_done, 2);
+        assert_eq!(first.result_summary.as_deref(), Some("scouted module"));
+    }
+
+    #[test]
+    fn operations_surface_merges_delegate_and_cleave() {
+        let mut state = test_state();
+        state.handles.delegate = Some(Arc::new(Mutex::new(DelegateProgress {
+            active: true,
+            running: 1,
+            completed: 0,
+            failed: 0,
+            children: vec![delegate_child("deleg-a", "running")],
+        })));
+        state.handles.cleave = Some(Arc::new(Mutex::new(CleaveProgress {
+            active: true,
+            run_id: "run-9".into(),
+            total_children: 2,
+            completed: 1,
+            failed: 0,
+            children: vec![
+                cleave_child("cleave-a", "running"),
+                cleave_child("cleave-b", "completed"),
+            ],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        })));
+
+        let ops = project_operations(&state);
+        // delegate wins the kind label when both are active
+        assert_eq!(ops.kind.as_deref(), Some("delegate"));
+        // running = delegate.running (1) + cleave children with status running (1)
+        assert_eq!(ops.running, 2);
+        // completed = delegate.completed (0) + cleave.completed (1)
+        assert_eq!(ops.completed, 1);
+        // all children merged: 1 delegate + 2 cleave
+        assert_eq!(ops.children.len(), 3);
+    }
+
+    #[test]
+    fn snapshot_bundle_reports_capability_flags() {
+        let mut state = test_state();
+        state.handles.delegate = Some(Arc::new(Mutex::new(DelegateProgress::default())));
+        let snap = project_web_surfaces(&state);
+        assert_eq!(snap.schema_version, WEB_SURFACES_SCHEMA_VERSION);
+        assert!(snap.surfaces.dashboard.delegate_available);
+        assert!(!snap.surfaces.dashboard.cleave_available);
+    }
+}
