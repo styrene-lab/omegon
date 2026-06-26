@@ -163,18 +163,25 @@ fn surface_stream_event(
             Some("conversation"),
             json!({ "text": text }),
         ),
-        AgentEvent::ToolStart { id, name, args } => WebSurfaceStreamEnvelope::default_session(
-            revision,
-            "tool_started",
-            Some("instruments"),
-            json!({ "id": id, "name": name, "args": args }),
-        ),
-        AgentEvent::ToolUpdate { id, partial } => WebSurfaceStreamEnvelope::default_session(
-            revision,
-            "tool_updated",
-            Some("instruments"),
-            json!({ "id": id, "partial": partial }),
-        ),
+        AgentEvent::ToolStart { id, name, args } => {
+            let args = state.redact_web_value(&args);
+            WebSurfaceStreamEnvelope::default_session(
+                revision,
+                "tool_started",
+                Some("instruments"),
+                json!({ "id": id, "name": name, "args": args }),
+            )
+        }
+        AgentEvent::ToolUpdate { id, partial } => {
+            let mut partial = partial;
+            partial.tail = state.redact_web_text(&partial.tail);
+            WebSurfaceStreamEnvelope::default_session(
+                revision,
+                "tool_updated",
+                Some("instruments"),
+                json!({ "id": id, "partial": partial }),
+            )
+        }
         AgentEvent::ToolEnd {
             id, name, is_error, ..
         } => WebSurfaceStreamEnvelope::default_session(
@@ -246,6 +253,18 @@ mod tests {
         )
     }
 
+    fn secret_test_state() -> WebState {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = std::sync::Arc::new(omegon_secrets::SecretsManager::new(dir.path()).unwrap());
+        secrets.register_redaction_secret("TEST_WEB_TOKEN", "super-secret-token");
+        WebState::with_auth_state_and_secrets(
+            super::super::DashboardHandles::default(),
+            tokio::sync::broadcast::channel(16).0,
+            crate::web::auth::WebAuthState::ephemeral_generated("test-token".to_string()),
+            Some(secrets),
+        )
+    }
+
     #[test]
     fn surface_stream_maps_tool_start() {
         let value = serde_json::to_value(surface_stream_event(
@@ -263,6 +282,37 @@ mod tests {
         assert_eq!(value["type"], "tool_started");
         assert_eq!(value["surface"], "instruments");
         assert_eq!(value["payload"]["id"], "t1");
+    }
+
+    #[test]
+    fn surface_stream_redacts_tool_args_and_update_tail() {
+        let state = secret_test_state();
+        let started = serde_json::to_value(surface_stream_event(
+            &state,
+            1,
+            AgentEvent::ToolStart {
+                id: "t-secret".into(),
+                name: "bash".into(),
+                args: serde_json::json!({"command":"echo super-secret-token"}),
+            },
+        ))
+        .expect("serialize envelope");
+        let updated = serde_json::to_value(surface_stream_event(
+            &state,
+            2,
+            AgentEvent::ToolUpdate {
+                id: "t-secret".into(),
+                partial: omegon_traits::PartialToolResult {
+                    tail: "tail super-secret-token".into(),
+                    progress: omegon_traits::ToolProgress::default(),
+                    details: serde_json::Value::Null,
+                },
+            },
+        ))
+        .expect("serialize envelope");
+        let serialized = serde_json::to_string(&(started, updated)).unwrap();
+        assert!(!serialized.contains("super-secret-token"));
+        assert!(serialized.contains("[REDACTED"));
     }
 
     #[test]
