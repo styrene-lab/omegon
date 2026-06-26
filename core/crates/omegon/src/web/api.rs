@@ -285,8 +285,17 @@ pub struct WebSessionListResponse {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WebSessionShowResponse {
+    pub schema_version: u8,
     pub session: WebSessionSummary,
+    pub links: WebSessionLinks,
     pub snapshot: super::surfaces::WebSurfacesSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebSessionLinks {
+    pub surfaces: Option<String>,
+    pub actions: Option<String>,
+    pub stream: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -303,9 +312,7 @@ pub struct NativeSessionCreateResponse {
     pub session: WebSessionSummary,
     pub assistant_profile_id: Option<String>,
     pub assistant: Option<crate::capabilities::profiles::AssistantListItem>,
-    pub surfaces_href: String,
-    pub actions_href: String,
-    pub stream_href: String,
+    pub links: WebSessionLinks,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -328,6 +335,22 @@ fn web_session_summary(entry: crate::session::SessionEntry) -> WebSessionSummary
         tool_calls: entry.meta.tool_calls,
         last_prompt_snippet: entry.meta.last_prompt_snippet,
         current: false,
+    }
+}
+
+fn native_default_session_links() -> WebSessionLinks {
+    WebSessionLinks {
+        surfaces: Some("/api/sessions/default/surfaces".to_string()),
+        actions: Some("/api/sessions/default/actions".to_string()),
+        stream: Some("/api/sessions/default/surfaces/stream".to_string()),
+    }
+}
+
+fn historical_web_session_links(session_id: &str) -> WebSessionLinks {
+    WebSessionLinks {
+        surfaces: Some(format!("/api/web/sessions/{session_id}/surfaces")),
+        actions: None,
+        stream: None,
     }
 }
 
@@ -527,6 +550,14 @@ pub struct AssistantReadinessResponse {
     pub assistant: crate::capabilities::profiles::AssistantListItem,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AssistantProfileDetailResponse {
+    pub schema_version: u8,
+    pub profile: crate::capabilities::profiles::AssistantProfileSummary,
+    pub assistant: crate::capabilities::profiles::AssistantListItem,
+    pub readiness_href: String,
+}
+
 pub async fn get_capability_assistant_readiness(
     State(state): State<WebState>,
     axum::extract::Path(id): axum::extract::Path<String>,
@@ -538,6 +569,29 @@ pub async fn get_capability_assistant_readiness(
         .find(|assistant| assistant.id == id)
         .ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(AssistantReadinessResponse { assistant }))
+}
+
+pub async fn get_assistant_profile(
+    State(state): State<WebState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<AssistantProfileDetailResponse>, StatusCode> {
+    let snapshot = capability_inventory_snapshot(state)?;
+    let profile = snapshot
+        .assistant_profiles
+        .into_iter()
+        .find(|profile| profile.id == id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let assistant = snapshot
+        .assistant_list
+        .into_iter()
+        .find(|assistant| assistant.id == id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(AssistantProfileDetailResponse {
+        schema_version: 1,
+        readiness_href: format!("/api/capabilities/assistants/{id}/readiness"),
+        profile,
+        assistant,
+    }))
 }
 
 pub async fn get_capability_assistants(
@@ -647,9 +701,7 @@ pub async fn post_native_session(
             schema_version: 1,
             assistant_profile_id,
             assistant,
-            surfaces_href: "/api/sessions/default/surfaces".to_string(),
-            actions_href: "/api/sessions/default/actions".to_string(),
-            stream_href: "/api/sessions/default/surfaces/stream".to_string(),
+            links: native_default_session_links(),
             session,
         }),
     ))
@@ -662,7 +714,9 @@ pub async fn get_native_session(
 ) -> Result<Json<WebSessionShowResponse>, StatusCode> {
     validate_native_session_id(&session_id)?;
     Ok(Json(WebSessionShowResponse {
+        schema_version: 1,
         session: default_live_session_summary(&state)?,
+        links: native_default_session_links(),
         snapshot: super::surfaces::project_web_surfaces(&state),
     }))
 }
@@ -759,8 +813,16 @@ pub async fn get_web_session(
             .ok_or(StatusCode::NOT_FOUND)?
     };
 
+    let links = if session.session_id == "default" {
+        native_default_session_links()
+    } else {
+        historical_web_session_links(&session.session_id)
+    };
+
     Ok(Json(WebSessionShowResponse {
+        schema_version: 1,
         session,
+        links,
         snapshot: super::surfaces::project_web_surfaces(&state),
     }))
 }
@@ -2337,11 +2399,17 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert_eq!(response.1.session.session_id, "default");
         assert!(response.1.assistant_profile_id.is_none());
         assert!(response.1.assistant.is_none());
-        assert_eq!(response.1.surfaces_href, "/api/sessions/default/surfaces");
-        assert_eq!(response.1.actions_href, "/api/sessions/default/actions");
         assert_eq!(
-            response.1.stream_href,
-            "/api/sessions/default/surfaces/stream"
+            response.1.links.surfaces.as_deref(),
+            Some("/api/sessions/default/surfaces")
+        );
+        assert_eq!(
+            response.1.links.actions.as_deref(),
+            Some("/api/sessions/default/actions")
+        );
+        assert_eq!(
+            response.1.links.stream.as_deref(),
+            Some("/api/sessions/default/surfaces/stream")
         );
     }
 
@@ -2469,6 +2537,19 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         assert_eq!(response.session.session_id, "default");
         assert!(response.session.current);
+        assert_eq!(response.schema_version, 1);
+        assert_eq!(
+            response.links.surfaces.as_deref(),
+            Some("/api/sessions/default/surfaces")
+        );
+        assert_eq!(
+            response.links.actions.as_deref(),
+            Some("/api/sessions/default/actions")
+        );
+        assert_eq!(
+            response.links.stream.as_deref(),
+            Some("/api/sessions/default/surfaces/stream")
+        );
         assert_eq!(response.snapshot.session_id, "default");
     }
 
@@ -2713,6 +2794,59 @@ required = ["MISSING_REQUIRED_TOKEN"]
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
 
         let response = get_capability_assistant_readiness(
+            axum::extract::State(test_state()),
+            axum::extract::Path("missing".to_string()),
+        )
+        .await;
+
+        restore_env("OMEGON_HOME", previous_home);
+
+        assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
+    }
+
+    #[tokio::test]
+    async fn assistant_profile_detail_endpoint_returns_full_profile_and_readiness() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        write_blocked_agent(home.path());
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = get_assistant_profile(
+            axum::extract::State(test_state()),
+            axum::extract::Path("blocked-agent".to_string()),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        restore_env("OMEGON_HOME", previous_home);
+
+        assert_eq!(response.schema_version, 1);
+        assert_eq!(response.profile.id, "blocked-agent");
+        assert_eq!(
+            response.profile.required_secrets,
+            vec!["MISSING_REQUIRED_TOKEN"]
+        );
+        assert_eq!(response.assistant.id, "blocked-agent");
+        assert_eq!(
+            response.assistant.launch_readiness.status,
+            crate::capabilities::profiles::AssistantLaunchStatus::Blocked
+        );
+        assert_eq!(
+            response.readiness_href,
+            "/api/capabilities/assistants/blocked-agent/readiness"
+        );
+    }
+
+    #[tokio::test]
+    async fn assistant_profile_detail_endpoint_404s_missing_profile() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let response = get_assistant_profile(
             axum::extract::State(test_state()),
             axum::extract::Path("missing".to_string()),
         )
