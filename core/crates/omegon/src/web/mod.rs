@@ -290,6 +290,19 @@ pub struct WebState {
             >,
         >,
     >,
+    /// Operator-wait responders captured from broadcast `OperatorWaitRequest`
+    /// events, keyed by a stable `Arc`-identity id. The surface stream sends
+    /// `acknowledge` immediately on capture (the producer abandons the wait if
+    /// no surface acknowledges within ~2s), then the browser delivers the
+    /// Completed/Cancelled decision via `POST /api/web/actions`.
+    pub pending_operator_waits: Arc<
+        Mutex<
+            std::collections::HashMap<
+                String,
+                std::sync::mpsc::Sender<omegon_traits::OperatorWaitResponse>,
+            >,
+        >,
+    >,
 }
 
 impl WebState {
@@ -337,6 +350,7 @@ impl WebState {
                 ..WebDaemonStatus::default()
             })),
             pending_permissions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            pending_operator_waits: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 }
@@ -387,6 +401,53 @@ impl WebState {
         sender
             .send(decision)
             .map_err(|_| "permission request is no longer awaiting a response")
+    }
+
+    /// Capture an operator-wait responder so the web client can answer it, and
+    /// send `acknowledge` immediately. The producer abandons the wait if no
+    /// surface acknowledges within ~2s of emitting the event, so acknowledgement
+    /// must happen synchronously on capture — well before the browser round-trip
+    /// that delivers the eventual Completed/Cancelled decision. Returns the id.
+    pub(crate) fn register_operator_wait(
+        &self,
+        acknowledge: &Arc<Mutex<Option<std::sync::mpsc::Sender<()>>>>,
+        respond: &Arc<Mutex<Option<std::sync::mpsc::Sender<omegon_traits::OperatorWaitResponse>>>>,
+    ) -> String {
+        let id = format!("wait-{:x}", Arc::as_ptr(respond) as usize);
+        // Acknowledge first: a present web surface is handling this wait.
+        if let Some(ack) = acknowledge.lock().ok().and_then(|mut slot| slot.take()) {
+            let _ = ack.send(());
+        }
+        if let Some(sender) = respond.lock().ok().and_then(|mut slot| slot.take())
+            && let Ok(mut map) = self.pending_operator_waits.lock()
+        {
+            map.insert(id.clone(), sender);
+        }
+        id
+    }
+
+    /// Resolve a captured operator-wait responder by id with the operator's
+    /// decision. Returns `Err` if the id is unknown/already answered or the
+    /// agent is no longer waiting.
+    pub(crate) fn answer_operator_wait(
+        &self,
+        request_id: &str,
+        completed: bool,
+    ) -> Result<(), &'static str> {
+        let decision = if completed {
+            omegon_traits::OperatorWaitResponse::Completed
+        } else {
+            omegon_traits::OperatorWaitResponse::Cancelled
+        };
+        let sender = self
+            .pending_operator_waits
+            .lock()
+            .ok()
+            .and_then(|mut map| map.remove(request_id))
+            .ok_or("unknown or already-answered operator-wait request")?;
+        sender
+            .send(decision)
+            .map_err(|_| "operator-wait request is no longer awaiting a response")
     }
 }
 

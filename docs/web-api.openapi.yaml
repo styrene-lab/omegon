@@ -155,16 +155,16 @@ paths:
                 $ref: "#/components/schemas/UiActionOutcomeEnvelope"
         "404":
           description: >
-            Unknown session_id, or (for respond_permission) an unknown or
-            already-answered permission request_id.
+            Unknown session_id, or (for respond_permission /
+            respond_operator_wait) an unknown or already-answered request_id.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/UiActionOutcomeEnvelope"
         "501":
           description: >
-            Action recognized but not yet wired (respond_operator_wait,
-            copy_latest_response, select_segment, copy_segment).
+            Action recognized but not yet wired (copy_latest_response,
+            select_segment, copy_segment).
           content:
             application/json:
               schema:
