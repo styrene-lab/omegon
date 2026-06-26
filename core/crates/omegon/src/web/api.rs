@@ -289,6 +289,24 @@ pub struct WebSessionShowResponse {
     pub snapshot: super::surfaces::WebSurfacesSnapshot,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct NativeSessionCreateRequest {
+    #[serde(default)]
+    pub assistant_profile_id: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NativeSessionCreateResponse {
+    pub schema_version: u8,
+    pub session: WebSessionSummary,
+    pub assistant_profile_id: Option<String>,
+    pub surfaces_href: String,
+    pub actions_href: String,
+    pub stream_href: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WebSessionSummary {
     pub session_id: String,
@@ -309,6 +327,32 @@ fn web_session_summary(entry: crate::session::SessionEntry) -> WebSessionSummary
         tool_calls: entry.meta.tool_calls,
         last_prompt_snippet: entry.meta.last_prompt_snippet,
         current: false,
+    }
+}
+
+fn default_live_session_summary(state: &WebState) -> Result<WebSessionSummary, StatusCode> {
+    let cwd = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let session = state
+        .handles
+        .session
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(WebSessionSummary {
+        session_id: "default".to_string(),
+        cwd: cwd.to_string_lossy().to_string(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        turns: session.turns,
+        tool_calls: session.tool_calls,
+        last_prompt_snippet: "Current live session".to_string(),
+        current: true,
+    })
+}
+
+fn validate_native_session_id(session_id: &str) -> Result<(), StatusCode> {
+    if session_id == "default" {
+        Ok(())
+    } else {
+        Err(StatusCode::NOT_FOUND)
     }
 }
 
@@ -565,6 +609,81 @@ pub async fn get_capabilities(
     State(state): State<WebState>,
 ) -> Result<Json<crate::capabilities::inventory::CapabilityInventorySnapshot>, StatusCode> {
     Ok(Json(capability_inventory_snapshot(state)?))
+}
+
+/// POST /api/sessions — create/attach the native first-party live session.
+///
+/// Phase 1 exposes the singleton in-process agent session through the native
+/// session resource shape. Additional durable/multi-session allocation can
+/// extend this without changing the client-facing links.
+pub async fn post_native_session(
+    State(state): State<WebState>,
+    Json(request): Json<NativeSessionCreateRequest>,
+) -> Result<(StatusCode, Json<NativeSessionCreateResponse>), StatusCode> {
+    if let Some(cwd) = request.cwd.as_deref() {
+        let current = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if cwd != current.to_string_lossy() {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+    let session = default_live_session_summary(&state)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(NativeSessionCreateResponse {
+            schema_version: 1,
+            assistant_profile_id: request.assistant_profile_id,
+            surfaces_href: "/api/sessions/default/surfaces".to_string(),
+            actions_href: "/api/sessions/default/actions".to_string(),
+            stream_href: "/api/sessions/default/surfaces/stream".to_string(),
+            session,
+        }),
+    ))
+}
+
+/// GET /api/sessions/{session_id} — native first-party session metadata.
+pub async fn get_native_session(
+    State(state): State<WebState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Json<WebSessionShowResponse>, StatusCode> {
+    validate_native_session_id(&session_id)?;
+    Ok(Json(WebSessionShowResponse {
+        session: default_live_session_summary(&state)?,
+        snapshot: super::surfaces::project_web_surfaces(&state),
+    }))
+}
+
+/// GET /api/sessions/{session_id}/surfaces — native session-scoped surface snapshot.
+pub async fn get_native_session_surfaces(
+    State(state): State<WebState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Json<super::surfaces::WebSurfacesSnapshot>, StatusCode> {
+    validate_native_session_id(&session_id)?;
+    Ok(Json(super::surfaces::project_web_surfaces(&state)))
+}
+
+/// POST /api/sessions/{session_id}/actions — native session-scoped action ingress.
+pub async fn post_native_session_action(
+    State(state): State<WebState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+    Json(mut request): Json<WebActionRequest>,
+) -> (
+    StatusCode,
+    Json<crate::ui_runtime::envelope::UiActionOutcomeEnvelope>,
+) {
+    if validate_native_session_id(&session_id).is_err() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(
+                crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                    session_id,
+                    request.action_id,
+                    "unknown session_id",
+                ),
+            ),
+        );
+    }
+    request.session_id = session_id;
+    post_web_action(State(state), Json(request)).await
 }
 
 /// GET /api/web/sessions — browser-native saved session list.
@@ -2184,6 +2303,75 @@ required = ["MISSING_REQUIRED_TOKEN"]
         .await;
 
         assert!(matches!(response, Err(StatusCode::BAD_REQUEST)));
+    }
+
+    #[tokio::test]
+    async fn native_session_create_returns_first_party_links() {
+        let response = post_native_session(
+            axum::extract::State(test_state()),
+            Json(NativeSessionCreateRequest {
+                assistant_profile_id: Some("default-profile".to_string()),
+                cwd: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.0, StatusCode::CREATED);
+        assert_eq!(response.1.schema_version, 1);
+        assert_eq!(response.1.session.session_id, "default");
+        assert_eq!(
+            response.1.assistant_profile_id.as_deref(),
+            Some("default-profile")
+        );
+        assert_eq!(response.1.surfaces_href, "/api/sessions/default/surfaces");
+        assert_eq!(response.1.actions_href, "/api/sessions/default/actions");
+        assert_eq!(
+            response.1.stream_href,
+            "/api/sessions/default/surfaces/stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_session_surfaces_reject_unknown_session() {
+        let response = get_native_session_surfaces(
+            axum::extract::State(test_state()),
+            axum::extract::Path("missing".to_string()),
+        )
+        .await;
+        assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
+    }
+
+    #[tokio::test]
+    async fn native_session_action_reuses_web_action_ingress() {
+        let mut state = test_state();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        state.command_tx = tx;
+
+        let (status, response) = post_native_session_action(
+            axum::extract::State(state),
+            axum::extract::Path("default".to_string()),
+            Json(WebActionRequest {
+                schema_version: 1,
+                action_id: "native-a1".to_string(),
+                client_id: "auspex".to_string(),
+                session_id: "ignored-client-value".to_string(),
+                action: WebActionPayload::SubmitPrompt {
+                    text: "hello native session".to_string(),
+                    attachments: Vec::new(),
+                },
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(response.session_id, "default");
+        match rx.recv().await.unwrap() {
+            super::super::WebCommand::UserPrompt { text, .. } => {
+                assert_eq!(text, "hello native session");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[tokio::test]
