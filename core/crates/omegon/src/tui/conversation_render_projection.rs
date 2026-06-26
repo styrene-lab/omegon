@@ -303,7 +303,7 @@ mod tests {
     fn tool_display_name_shortens_common_compound_tools() {
         assert_eq!(tool_display_name("codebase_search", None), "codebase");
         assert_eq!(tool_display_name("search_documents", None), "docs");
-        assert_eq!(tool_display_name("memory_recall", None), "memory");
+        assert_eq!(tool_display_name("memory_recall", None), "mem read");
         assert_eq!(tool_display_name("request_context", None), "context");
         assert_eq!(tool_display_name("wait_for_operator", None), "tool");
         assert_eq!(tool_display_name("browser_search", None), "browser");

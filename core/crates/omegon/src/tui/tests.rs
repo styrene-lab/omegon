@@ -6036,14 +6036,14 @@ fn editor_top_line_dividers_bridge_gradient_segment_backgrounds() {
             ),
             (
                 crate::tui::theme::Alpharius.accent(),
-                crate::tui::theme::Alpharius.surface_bg()
-            ),
-            (
-                crate::tui::theme::Alpharius.surface_bg(),
                 crate::tui::theme::Alpharius.card_bg()
             ),
             (
                 crate::tui::theme::Alpharius.card_bg(),
+                crate::tui::theme::Alpharius.surface_bg()
+            ),
+            (
+                crate::tui::theme::Alpharius.surface_bg(),
                 crate::tui::theme::Alpharius.surface_bg()
             ),
         ],
@@ -6089,6 +6089,30 @@ fn editor_top_line_grades_actual_model_not_route_intent() {
     assert!(
         rendered.contains("openai-codex/gpt-5.5  󰿃 S   low   ctx:"),
         "{rendered}"
+    );
+}
+
+#[test]
+fn active_turn_keeps_engine_ribbon_and_moves_spinner_to_status_row() {
+    let mut settings = Settings::new("openai-codex:gpt-5.5");
+    settings.thinking = ThinkingLevel::High;
+    let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
+    app.apply_ui_preset(UiSurfaces::lean());
+    app.footer_data.harness.capability_grade = "S".into();
+    app.footer_data.context_window = 1_048_576;
+    app.footer_data.context_percent = 5.0;
+    app.agent_active = true;
+    app.working_verb = "thinking";
+
+    let rendered = render_app_to_string(&mut app, 160, 20);
+
+    assert!(
+        rendered.contains("openai-codex/gpt-5.5  󰿃 S   high   ctx:"),
+        "active turn must keep engine route/grade/thinking/context visible: {rendered}"
+    );
+    assert!(
+        rendered.contains("⟳") && rendered.contains("· active turn"),
+        "spinner verb should move to shaded status row: {rendered}"
     );
 }
 
