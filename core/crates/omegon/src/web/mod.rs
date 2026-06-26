@@ -567,6 +567,22 @@ impl WebState {
         }
     }
 
+    pub(crate) fn redact_web_value(&self, value: &serde_json::Value) -> serde_json::Value {
+        let Some(secrets) = &self.secrets else {
+            return value.clone();
+        };
+        let serialized = value.to_string();
+        let redacted = secrets.redact(&serialized);
+        serde_json::from_str(&redacted).unwrap_or(serde_json::Value::String(redacted))
+    }
+
+    pub(crate) fn redact_web_text(&self, text: &str) -> String {
+        self.secrets
+            .as_ref()
+            .map(|secrets| secrets.redact(text))
+            .unwrap_or_else(|| text.to_string())
+    }
+
     fn fold_tool_event(&self, event: &omegon_traits::AgentEvent) {
         use omegon_traits::{AgentEvent, ContentBlock};
         let Ok(mut tools) = self.tool_runs.lock() else {
@@ -574,10 +590,11 @@ impl WebState {
         };
         match event {
             AgentEvent::ToolStart { id, name, args } => {
+                let redacted_args = self.redact_web_value(args);
                 if let Some(existing) = tools.iter_mut().find(|tool| tool.id == *id) {
                     existing.name = name.clone();
                     existing.status = "running".to_string();
-                    existing.args = args.clone();
+                    existing.args = redacted_args;
                     existing.output_tail = None;
                     existing.result_summary = None;
                     existing.is_error = false;
@@ -588,7 +605,7 @@ impl WebState {
                         id: id.clone(),
                         name: name.clone(),
                         status: "running".to_string(),
-                        args: args.clone(),
+                        args: redacted_args,
                         output_tail: None,
                         result_summary: None,
                         is_error: false,
@@ -600,7 +617,7 @@ impl WebState {
             AgentEvent::ToolUpdate { id, partial } => {
                 if let Some(tool) = tools.iter_mut().rev().find(|tool| tool.id == *id) {
                     if !partial.tail.is_empty() {
-                        tool.output_tail = Some(partial.tail.clone());
+                        tool.output_tail = Some(self.redact_web_text(&partial.tail));
                     }
                     tool.elapsed_ms = Some(partial.progress.elapsed_ms);
                     tool.phase = partial.progress.phase.clone();
@@ -617,7 +634,7 @@ impl WebState {
                     .iter()
                     .filter_map(ContentBlock::as_text)
                     .find(|text| !text.trim().is_empty())
-                    .map(|text| text.chars().take(240).collect::<String>());
+                    .map(|text| self.redact_web_text(&text.chars().take(240).collect::<String>()));
                 if let Some(tool) = tools.iter_mut().rev().find(|tool| tool.id == *id) {
                     tool.name = name.clone();
                     tool.status = if *is_error { "failed" } else { "completed" }.to_string();
@@ -2150,6 +2167,49 @@ mod tests {
         assert_eq!(tool.result_summary.as_deref(), Some("done"));
         assert_eq!(tool.elapsed_ms, Some(42));
         assert_eq!(tool.phase.as_deref(), Some("reading cwd"));
+    }
+
+    #[test]
+    fn web_state_redacts_tool_run_snapshot_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = std::sync::Arc::new(omegon_secrets::SecretsManager::new(dir.path()).unwrap());
+        secrets.register_redaction_secret("TEST_WEB_TOKEN", "super-secret-token");
+        let state = WebState::with_auth_state_and_secrets(
+            DashboardHandles::default(),
+            tokio::sync::broadcast::channel(16).0,
+            WebAuthState::ephemeral_generated("test-token".to_string()),
+            Some(secrets),
+        );
+        state.fold_conversation_event(&omegon_traits::AgentEvent::ToolStart {
+            id: "tool-secret".into(),
+            name: "bash".into(),
+            args: serde_json::json!({"command":"curl -H 'Authorization: Bearer super-secret-token'"}),
+        });
+        state.fold_conversation_event(&omegon_traits::AgentEvent::ToolUpdate {
+            id: "tool-secret".into(),
+            partial: omegon_traits::PartialToolResult {
+                tail: "using super-secret-token".into(),
+                progress: omegon_traits::ToolProgress::default(),
+                details: serde_json::Value::Null,
+            },
+        });
+        state.fold_conversation_event(&omegon_traits::AgentEvent::ToolEnd {
+            id: "tool-secret".into(),
+            name: "bash".into(),
+            result: omegon_traits::ToolResult {
+                content: vec![omegon_traits::ContentBlock::Text {
+                    text: "result contained super-secret-token".into(),
+                }],
+                details: serde_json::Value::Null,
+            },
+            is_error: false,
+        });
+
+        let tools = state.tool_runs.lock().unwrap();
+        let tool = tools.front().unwrap();
+        let serialized = serde_json::to_string(tool).unwrap();
+        assert!(!serialized.contains("super-secret-token"));
+        assert!(serialized.contains("[REDACTED"));
     }
 
     #[test]
