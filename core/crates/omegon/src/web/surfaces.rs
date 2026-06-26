@@ -6,6 +6,7 @@
 
 use chrono::Utc;
 use serde::Serialize;
+use serde_json::Value;
 
 use super::WebState;
 
@@ -96,6 +97,20 @@ pub struct WebFooterSurface {
 #[derive(Debug, Clone, Serialize)]
 pub struct WebInstrumentsSurface {
     pub active_tool: Option<String>,
+    pub tools: Vec<WebToolRunSurface>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebToolRunSurface {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    pub args: Value,
+    pub output_tail: Option<String>,
+    pub result_summary: Option<String>,
+    pub is_error: bool,
+    pub elapsed_ms: Option<u64>,
+    pub phase: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -232,7 +247,7 @@ pub fn project_web_surfaces(state: &WebState) -> WebSurfacesSnapshot {
             footer: WebFooterSurface {
                 busy: session.as_ref().is_some_and(|s| s.busy),
             },
-            instruments: WebInstrumentsSurface { active_tool: None },
+            instruments: project_instruments(state),
             memory_status: WebMemoryStatusSurface {
                 active_facts: harness.as_ref().map(|h| h.memory.active_facts).unwrap_or(0),
                 total_facts: harness.as_ref().map(|h| h.memory.total_facts).unwrap_or(0),
@@ -246,6 +261,20 @@ pub fn project_web_surfaces(state: &WebState) -> WebSurfacesSnapshot {
             },
         },
     }
+}
+
+fn project_instruments(state: &WebState) -> WebInstrumentsSurface {
+    let tools = state
+        .tool_runs
+        .lock()
+        .map(|tools| tools.iter().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let active_tool = tools
+        .iter()
+        .rev()
+        .find(|tool| tool.status == "running")
+        .map(|tool| tool.name.clone());
+    WebInstrumentsSurface { active_tool, tools }
 }
 
 /// Project the latest typed plan surface received from `AgentEvent::PlanUpdated`

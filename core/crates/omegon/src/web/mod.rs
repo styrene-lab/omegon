@@ -313,11 +313,15 @@ pub struct WebState {
     /// bus. Served by `GET /api/web/surfaces` so the browser's Plan rail can
     /// survive reloads instead of relying only on live `plan_updated` pushes.
     pub plan_surface: Arc<Mutex<omegon_traits::PlanSurfaceProjection>>,
+    /// Recent tool runs accumulated from AgentEvent::ToolStart/Update/End so
+    /// the browser Instruments rail can recover active/recent tool state after reload.
+    pub tool_runs: Arc<Mutex<std::collections::VecDeque<surfaces::WebToolRunSurface>>>,
 }
 
 /// Maximum conversation segments retained for reload replay. Older segments are
 /// evicted; the live stream remains the source of truth for the active turn.
 pub(crate) const CONVERSATION_LOG_CAP: usize = 400;
+pub(crate) const TOOL_RUN_LOG_CAP: usize = 100;
 
 impl WebState {
     /// Create a new WebState. Generates a random auth token.
@@ -367,6 +371,7 @@ impl WebState {
             pending_operator_waits: Arc::new(Mutex::new(std::collections::HashMap::new())),
             conversation_log: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             plan_surface: Arc::new(Mutex::new(omegon_traits::PlanSurfaceProjection::default())),
+            tool_runs: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         }
     }
 }
@@ -501,6 +506,7 @@ impl WebState {
         {
             *plan = projection.clone();
         }
+        self.fold_tool_event(event);
         let Ok(mut log) = self.conversation_log.lock() else {
             return;
         };
@@ -558,6 +564,83 @@ impl WebState {
         }
         while log.len() > CONVERSATION_LOG_CAP {
             log.pop_front();
+        }
+    }
+
+    fn fold_tool_event(&self, event: &omegon_traits::AgentEvent) {
+        use omegon_traits::{AgentEvent, ContentBlock};
+        let Ok(mut tools) = self.tool_runs.lock() else {
+            return;
+        };
+        match event {
+            AgentEvent::ToolStart { id, name, args } => {
+                if let Some(existing) = tools.iter_mut().find(|tool| tool.id == *id) {
+                    existing.name = name.clone();
+                    existing.status = "running".to_string();
+                    existing.args = args.clone();
+                    existing.output_tail = None;
+                    existing.result_summary = None;
+                    existing.is_error = false;
+                    existing.elapsed_ms = None;
+                    existing.phase = None;
+                } else {
+                    tools.push_back(surfaces::WebToolRunSurface {
+                        id: id.clone(),
+                        name: name.clone(),
+                        status: "running".to_string(),
+                        args: args.clone(),
+                        output_tail: None,
+                        result_summary: None,
+                        is_error: false,
+                        elapsed_ms: None,
+                        phase: None,
+                    });
+                }
+            }
+            AgentEvent::ToolUpdate { id, partial } => {
+                if let Some(tool) = tools.iter_mut().rev().find(|tool| tool.id == *id) {
+                    if !partial.tail.is_empty() {
+                        tool.output_tail = Some(partial.tail.clone());
+                    }
+                    tool.elapsed_ms = Some(partial.progress.elapsed_ms);
+                    tool.phase = partial.progress.phase.clone();
+                }
+            }
+            AgentEvent::ToolEnd {
+                id,
+                name,
+                result,
+                is_error,
+            } => {
+                let summary = result
+                    .content
+                    .iter()
+                    .filter_map(ContentBlock::as_text)
+                    .find(|text| !text.trim().is_empty())
+                    .map(|text| text.chars().take(240).collect::<String>());
+                if let Some(tool) = tools.iter_mut().rev().find(|tool| tool.id == *id) {
+                    tool.name = name.clone();
+                    tool.status = if *is_error { "failed" } else { "completed" }.to_string();
+                    tool.result_summary = summary;
+                    tool.is_error = *is_error;
+                } else {
+                    tools.push_back(surfaces::WebToolRunSurface {
+                        id: id.clone(),
+                        name: name.clone(),
+                        status: if *is_error { "failed" } else { "completed" }.to_string(),
+                        args: serde_json::Value::Null,
+                        output_tail: None,
+                        result_summary: summary,
+                        is_error: *is_error,
+                        elapsed_ms: None,
+                        phase: None,
+                    });
+                }
+            }
+            _ => {}
+        }
+        while tools.len() > TOOL_RUN_LOG_CAP {
+            tools.pop_front();
         }
     }
 
@@ -2020,5 +2103,70 @@ mod tests {
         assert!(!jobs[0].enabled);
         let last = crate::features::loop_jobs::last_run_record(dir.path(), "loop-max").unwrap();
         assert_eq!(last.outcome, "max_runs_reached");
+    }
+
+    #[test]
+    fn web_state_accumulates_tool_runs_for_instrument_snapshot() {
+        let state = WebState::new(
+            DashboardHandles::default(),
+            tokio::sync::broadcast::channel(16).0,
+        );
+        state.fold_conversation_event(&omegon_traits::AgentEvent::ToolStart {
+            id: "tool-1".into(),
+            name: "bash".into(),
+            args: serde_json::json!({"command":"pwd"}),
+        });
+        state.fold_conversation_event(&omegon_traits::AgentEvent::ToolUpdate {
+            id: "tool-1".into(),
+            partial: omegon_traits::PartialToolResult {
+                tail: "workspace".into(),
+                progress: omegon_traits::ToolProgress {
+                    elapsed_ms: 42,
+                    phase: Some("reading cwd".into()),
+                    ..omegon_traits::ToolProgress::default()
+                },
+                details: serde_json::Value::Null,
+            },
+        });
+        state.fold_conversation_event(&omegon_traits::AgentEvent::ToolEnd {
+            id: "tool-1".into(),
+            name: "bash".into(),
+            result: omegon_traits::ToolResult {
+                content: vec![omegon_traits::ContentBlock::Text {
+                    text: "done".into(),
+                }],
+                details: serde_json::Value::Null,
+            },
+            is_error: false,
+        });
+
+        let tools = state.tool_runs.lock().unwrap();
+        assert_eq!(tools.len(), 1);
+        let tool = &tools[0];
+        assert_eq!(tool.id, "tool-1");
+        assert_eq!(tool.name, "bash");
+        assert_eq!(tool.status, "completed");
+        assert_eq!(tool.output_tail.as_deref(), Some("workspace"));
+        assert_eq!(tool.result_summary.as_deref(), Some("done"));
+        assert_eq!(tool.elapsed_ms, Some(42));
+        assert_eq!(tool.phase.as_deref(), Some("reading cwd"));
+    }
+
+    #[test]
+    fn web_state_bounds_tool_run_history() {
+        let state = WebState::new(
+            DashboardHandles::default(),
+            tokio::sync::broadcast::channel(16).0,
+        );
+        for idx in 0..(TOOL_RUN_LOG_CAP + 3) {
+            state.fold_conversation_event(&omegon_traits::AgentEvent::ToolStart {
+                id: format!("tool-{idx}"),
+                name: "bash".into(),
+                args: serde_json::json!({}),
+            });
+        }
+        let tools = state.tool_runs.lock().unwrap();
+        assert_eq!(tools.len(), TOOL_RUN_LOG_CAP);
+        assert_eq!(tools.front().unwrap().id, "tool-3");
     }
 }

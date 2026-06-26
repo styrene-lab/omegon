@@ -39,6 +39,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Locked in the ecosystem-superset skill registry design for Claude-compatible skills, upstream Git skill repositories, source lock/provenance, and merge-first conflict resolution.
 - Added extension manifest-declared skill bundles plus conflict-resolution metadata for non-1:1 activation/trigger overlap.
 - Added `/api/acp` as the documented external-client ACP WebSocket path while preserving the legacy `/acp` alias, and clarified that Auspex should use native HTTP/SSE/WebSocket APIs as its first-party control plane.
+- Added Web surface instrument recovery for recent tool runs so the browser can restore active/recent tool state after reload.
 - Added read-only lifecycle query endpoints for ready, blocked, and frontier design nodes.
 - Added read-only lifecycle endpoints for web/console clients: `GET /api/lifecycle/snapshot`, `GET /api/lifecycle/design`, and `GET /api/lifecycle/design/{id}`.
 - Added `GET /api/workspaces/leases` to expose active checkout workspace leases for the web/console backend.
