@@ -1824,6 +1824,41 @@ impl App {
         format!("ctx:{class}@{capacity} {bar} {percent}%")
     }
 
+    fn render_engine_status_row(&self, area: Rect, frame: &mut Frame, t: &dyn theme::Theme) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+        let bg = t.card_bg();
+        let verb = if self.agent_active {
+            spinner::maybe_glitch(self.working_verb)
+                .unwrap_or_else(|| self.working_verb.to_string())
+        } else {
+            "ready".to_string()
+        };
+        let mut spans = vec![
+            Span::styled(" ", Style::default().bg(bg)),
+            Span::styled("⟳ ", Style::default().fg(t.accent_bright()).bg(bg)),
+            Span::styled(
+                verb,
+                Style::default()
+                    .fg(t.accent_muted())
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ];
+        if self.agent_active {
+            spans.push(Span::styled(
+                " · active turn",
+                Style::default().fg(t.dim()).bg(bg),
+            ));
+        } else {
+            spans.push(Span::styled(" · idle", Style::default().fg(t.dim()).bg(bg)));
+        }
+        Paragraph::new(Line::from(spans))
+            .style(Style::default().bg(bg))
+            .render(area, frame.buffer_mut());
+    }
+
     fn current_persona_state(&self) -> crate::settings::PersonaState {
         let persona_id = self
             .augment_registry
@@ -4558,8 +4593,11 @@ impl App {
                 entries: Vec::new(),
             }
         };
+        let engine_status_height =
+            u16::from(self.ui_surfaces.activity && self.ui_surfaces.is_compact());
         let raw_tool_inspection_height =
-            activity_preferred_height(&activity_projection, area.width);
+            activity_preferred_height(&activity_projection, area.width)
+                .saturating_add(engine_status_height);
         let raw_workbench_height = workbench_preferred_height(&workbench_state, area.width);
         self.session_row.sync_from_footer(&self.footer_data);
         let session_height = self.session_row.preferred_height_for(area.width);
@@ -4682,8 +4720,29 @@ impl App {
         self.workbench_area = (workbench_area.height > 0).then_some(workbench_area);
 
         if tool_inspection_area.height > 0 {
+            let (status_area, activity_area) = if engine_status_height > 0 {
+                (
+                    Rect::new(
+                        tool_inspection_area.x,
+                        tool_inspection_area.y,
+                        tool_inspection_area.width,
+                        1,
+                    ),
+                    Rect::new(
+                        tool_inspection_area.x,
+                        tool_inspection_area.y.saturating_add(1),
+                        tool_inspection_area.width,
+                        tool_inspection_area.height.saturating_sub(1),
+                    ),
+                )
+            } else {
+                (Rect::ZERO, tool_inspection_area)
+            };
+            if status_area.height > 0 {
+                self.render_engine_status_row(status_area, frame, self.theme.as_ref());
+            }
             render_activity_panel(
-                tool_inspection_area,
+                activity_area,
                 frame,
                 self.theme.as_ref(),
                 &self.conversation,
@@ -4977,22 +5036,7 @@ impl App {
                 provider_label
             };
             let route_label = format!("{provider_label}/{model_short}");
-            let editor_title = if self.agent_active {
-                let verb_display = spinner::maybe_glitch(self.working_verb)
-                    .unwrap_or_else(|| self.working_verb.to_string());
-                Line::from(vec![
-                    Span::styled(
-                        " ⟳ ",
-                        Style::default()
-                            .fg(t.accent_bright())
-                            .add_modifier(ratatui::style::Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!("{verb_display} "),
-                        Style::default().fg(t.accent_muted()),
-                    ),
-                ])
-            } else {
+            let editor_title = {
                 use crate::tui::glyphs::EngineGlyphRole;
                 let glyphs = crate::tui::glyphs::glyphs();
                 let is_local_provider = matches!(provider_label, "ollama" | "llama.cpp" | "local");
@@ -5026,8 +5070,8 @@ impl App {
                 );
                 let route_bg = t.accent_muted();
                 let grade_bg = t.accent();
-                let thinking_bg = t.surface_bg();
-                let context_bg = t.card_bg();
+                let thinking_bg = t.card_bg();
+                let context_bg = t.surface_bg();
                 let mut title_spans = vec![Span::styled(
                     " ",
                     Style::default().fg(t.border_dim()).bg(t.surface_bg()),
