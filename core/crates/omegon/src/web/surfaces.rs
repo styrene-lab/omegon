@@ -31,6 +31,7 @@ pub struct WebSurfaceBundle {
     pub instruments: WebInstrumentsSurface,
     pub memory_status: WebMemoryStatusSurface,
     pub operations: WebOperationsSurface,
+    pub plan: WebPlanSurface,
     pub runtime: WebRuntimeSurface,
     pub settings: WebSettingsSurface,
 }
@@ -101,6 +102,46 @@ pub struct WebInstrumentsSurface {
 pub struct WebMemoryStatusSurface {
     pub active_facts: usize,
     pub total_facts: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct WebPlanSurface {
+    pub active: Option<WebPlanLane>,
+    pub workstreams: Vec<WebPlanWorkstream>,
+    pub reconciliation_issues: usize,
+    pub promotion_nudges: Vec<String>,
+    pub resume_candidates: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebPlanLane {
+    pub plan_id: String,
+    pub mode: String,
+    pub guidance: String,
+    pub status: String,
+    pub scope: String,
+    pub source: String,
+    pub completed: usize,
+    pub total: usize,
+    pub items: Vec<WebPlanItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebPlanItem {
+    pub id: Option<String>,
+    pub label: String,
+    pub status: String,
+    pub intent: Option<String>,
+    pub writable: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebPlanWorkstream {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub completed: usize,
+    pub total: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -197,12 +238,63 @@ pub fn project_web_surfaces(state: &WebState) -> WebSurfacesSnapshot {
                 total_facts: harness.as_ref().map(|h| h.memory.total_facts).unwrap_or(0),
             },
             operations: project_operations(state),
+            plan: project_plan(state),
             runtime: project_runtime(harness.as_deref()),
             settings: WebSettingsSurface {
                 auth_mode: startup.as_ref().map(|s| s.auth_mode.clone()),
                 auth_source: startup.as_ref().map(|s| s.auth_source.clone()),
             },
         },
+    }
+}
+
+/// Project the latest typed plan surface received from `AgentEvent::PlanUpdated`
+/// into the browser's right-rail Plan instrument. The web DTO keeps the same
+/// semantic field names as `omegon_traits::PlanSurfaceProjection` while flattening
+/// progress into `completed` / `total` for simple renderer binding.
+fn project_plan(state: &WebState) -> WebPlanSurface {
+    let projection = state
+        .plan_surface
+        .lock()
+        .ok()
+        .map(|guard| guard.clone())
+        .unwrap_or_default();
+    WebPlanSurface {
+        active: projection.active.map(|lane| WebPlanLane {
+            plan_id: lane.plan_id,
+            mode: lane.mode,
+            guidance: lane.guidance,
+            status: lane.status,
+            scope: lane.scope,
+            source: lane.source,
+            completed: lane.progress.completed,
+            total: lane.progress.total,
+            items: lane
+                .items
+                .into_iter()
+                .map(|item| WebPlanItem {
+                    id: item.id,
+                    label: item.label,
+                    status: item.status,
+                    intent: item.intent,
+                    writable: item.writable,
+                })
+                .collect(),
+        }),
+        workstreams: projection
+            .workstreams
+            .into_iter()
+            .map(|workstream| WebPlanWorkstream {
+                id: workstream.id,
+                title: workstream.title,
+                status: workstream.status,
+                completed: workstream.progress.completed,
+                total: workstream.progress.total,
+            })
+            .collect(),
+        reconciliation_issues: projection.reconciliation_issues.len(),
+        promotion_nudges: projection.promotion_nudges,
+        resume_candidates: projection.resume_candidates.len(),
     }
 }
 

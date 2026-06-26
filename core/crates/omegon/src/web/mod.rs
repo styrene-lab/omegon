@@ -309,6 +309,10 @@ pub struct WebState {
     /// replays prior turns instead of starting blank. Bounded to the most
     /// recent [`CONVERSATION_LOG_CAP`] segments.
     pub conversation_log: Arc<Mutex<std::collections::VecDeque<surfaces::WebConversationSegment>>>,
+    /// Latest renderer-neutral plan projection observed from the agent event
+    /// bus. Served by `GET /api/web/surfaces` so the browser's Plan rail can
+    /// survive reloads instead of relying only on live `plan_updated` pushes.
+    pub plan_surface: Arc<Mutex<omegon_traits::PlanSurfaceProjection>>,
 }
 
 /// Maximum conversation segments retained for reload replay. Older segments are
@@ -362,6 +366,7 @@ impl WebState {
             pending_permissions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             pending_operator_waits: Arc::new(Mutex::new(std::collections::HashMap::new())),
             conversation_log: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            plan_surface: Arc::new(Mutex::new(omegon_traits::PlanSurfaceProjection::default())),
         }
     }
 }
@@ -491,6 +496,11 @@ impl WebState {
     /// events are ignored.
     pub(crate) fn fold_conversation_event(&self, event: &omegon_traits::AgentEvent) {
         use omegon_traits::AgentEvent;
+        if let AgentEvent::PlanUpdated { projection } = event
+            && let Ok(mut plan) = self.plan_surface.lock()
+        {
+            *plan = projection.clone();
+        }
         let Ok(mut log) = self.conversation_log.lock() else {
             return;
         };
@@ -759,7 +769,10 @@ pub async fn start_server_with_options(
         .route("/api/healthz", axum::routing::get(api::get_health))
         .route("/api/readyz", axum::routing::get(api::get_ready))
         .route("/api/graph", axum::routing::get(api::get_graph))
-        .route("/api/events", axum::routing::post(api::post_event))
+        .route(
+            "/api/events",
+            axum::routing::get(api::get_events).post(api::post_event),
+        )
         .route("/api/evals", axum::routing::get(api::get_evals))
         .route(
             "/api/evals/compare",

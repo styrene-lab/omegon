@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use super::design;
 use super::types::{DesignNode, NodeStatus};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FrontierNode {
     pub id: String,
     pub title: String,
@@ -30,14 +30,14 @@ pub struct DependencyNode {
     pub status: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ReadyNode {
     pub id: String,
     pub title: String,
     pub priority: Option<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockedNode {
     pub id: String,
     pub title: String,
