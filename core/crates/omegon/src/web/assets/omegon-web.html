@@ -295,12 +295,25 @@ function applySnapshot(snap) {
   if (s.instruments && s.instruments.active_tool) {
     $("activity").textContent = "running " + s.instruments.active_tool;
   }
-  // Conversation segments (snapshot transcript). v1 backend ships these empty;
-  // the live stream drives the running transcript.
+  // Conversation segments (snapshot transcript). Rebuild idempotently so a
+  // reload or stream reconnect replays prior turns without duplicating them.
   if (s.conversation && Array.isArray(s.conversation.segments)) {
-    for (const seg of s.conversation.segments) {
-      const role = seg.role === "user" ? "user" : "assistant";
-      addMessage(role, seg.body || seg.summary || seg.title || "");
+    const segs = s.conversation.segments;
+    if (segs.length) {
+      transcript.innerHTML = "";
+      currentAssistant = null;
+      let lastBubble = null;
+      let lastSeg = null;
+      for (const seg of segs) {
+        const role = seg.role === "user" ? "user" : "assistant";
+        lastBubble = addMessage(role, seg.body || seg.summary || seg.title || "");
+        lastSeg = seg;
+      }
+      // If the final segment is an assistant turn still in flight, keep
+      // streaming live deltas into it instead of opening a duplicate bubble.
+      if (lastSeg && lastSeg.role === "assistant" && lastSeg.complete === false) {
+        currentAssistant = lastBubble;
+      }
     }
   }
 }
