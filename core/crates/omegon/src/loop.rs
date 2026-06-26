@@ -2335,6 +2335,19 @@ fn select_stream_idle_budget(
     }
 }
 
+fn stream_idle_phase_after_event(current: StreamIdlePhase, event: &LlmEvent) -> StreamIdlePhase {
+    match event {
+        LlmEvent::Start => current,
+        LlmEvent::TextStart | LlmEvent::TextDelta { .. } => StreamIdlePhase::ActiveContent,
+        LlmEvent::TextEnd => StreamIdlePhase::InterItemGap,
+        LlmEvent::ThinkingStart | LlmEvent::ThinkingDelta { .. } => StreamIdlePhase::ActiveThinking,
+        LlmEvent::ThinkingEnd => StreamIdlePhase::InterItemGap,
+        LlmEvent::ToolCallStart | LlmEvent::ToolCallDelta { .. } => StreamIdlePhase::ActiveToolCall,
+        LlmEvent::ToolCallEnd { .. } => StreamIdlePhase::InterItemGap,
+        LlmEvent::Done { .. } | LlmEvent::Error { .. } => current,
+    }
+}
+
 async fn consume_llm_stream(
     rx: &mut tokio::sync::mpsc::Receiver<LlmEvent>,
     events: &broadcast::Sender<AgentEvent>,
@@ -2359,12 +2372,16 @@ async fn consume_llm_stream(
     const REPETITION_WINDOW_SIZE: usize = 40;
     const REPETITION_ABORT_THRESHOLD: usize = 30; // 30 of last 40 chunks identical → abort
 
-    // Two-phase idle timeout:
-    // - Before first content: 90s by default. Stale provider sessions can
-    //   otherwise look like silent hangs for too long; override with
-    //   OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS for unusually slow reasoning.
-    // - After first content: 90s (Claude Code's CLAUDE_STREAM_IDLE_TIMEOUT_MS
-    //   default is 90s; nobody in the industry uses less than 60s)
+    // Phase-aware idle timeout:
+    // - Initial: 90s by default. Stale provider sessions can otherwise look
+    //   like silent hangs for too long; override with
+    //   OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS for unusually slow starts.
+    // - Active content/tool-call streaming: 90s. Claude Code's
+    //   CLAUDE_STREAM_IDLE_TIMEOUT_MS default is 90s; nobody in the industry
+    //   uses less than 60s.
+    // - Active thinking and inter-item decision gaps: generous reasoning
+    //   budget. Reasoning-capable providers may legally go silent between
+    //   text/thinking/tool-call blocks while deciding the next item.
     let initial_idle_timeout = std::env::var("OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -2409,17 +2426,17 @@ async fn consume_llm_stream(
             anyhow::bail!("{reason}");
         }
     } {
+        let next_phase = stream_idle_phase_after_event(
+            StreamIdlePhase::from_u8(stream_idle_phase.load(std::sync::atomic::Ordering::Relaxed)),
+            &event,
+        );
+        stream_idle_phase.store(next_phase as u8, std::sync::atomic::Ordering::Relaxed);
         match event {
             LlmEvent::Start => {
                 // Heartbeat — any server activity proves connection is alive.
                 // Does NOT count as "content" for timeout phase transition.
             }
-            LlmEvent::TextStart => {
-                stream_idle_phase.store(
-                    StreamIdlePhase::ActiveContent as u8,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-            }
+            LlmEvent::TextStart => {}
             LlmEvent::TextDelta { delta } => {
                 if !delta.is_empty() {
                     // Partial assistant output is visible to the operator. If
@@ -2477,25 +2494,13 @@ async fn consume_llm_stream(
                 }
             }
             LlmEvent::TextEnd => {
-                stream_idle_phase.store(
-                    StreamIdlePhase::InterItemGap as u8,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
                 text_parts.push(String::new());
             }
             LlmEvent::ThinkingStart => {
                 // Active reasoning has begun. This is a liveness phase, not a
                 // promise that every provider exposes raw chain-of-thought.
-                stream_idle_phase.store(
-                    StreamIdlePhase::ActiveThinking as u8,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
             }
             LlmEvent::ThinkingDelta { delta } => {
-                stream_idle_phase.store(
-                    StreamIdlePhase::ActiveThinking as u8,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
                 if !delta.is_empty()
                     && let Some(cancel_keeps_prompt) = cancel_keeps_prompt
                 {
@@ -2511,30 +2516,13 @@ async fn consume_llm_stream(
                 }
             }
             LlmEvent::ThinkingEnd => {
-                stream_idle_phase.store(
-                    StreamIdlePhase::InterItemGap as u8,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
                 thinking_parts.push(String::new());
             }
-            LlmEvent::ToolCallStart => {
-                stream_idle_phase.store(
-                    StreamIdlePhase::ActiveToolCall as u8,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-            }
+            LlmEvent::ToolCallStart => {}
             LlmEvent::ToolCallDelta { .. } => {
-                stream_idle_phase.store(
-                    StreamIdlePhase::ActiveToolCall as u8,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
                 // Deltas accumulated by the bridge — complete tool call in ToolCallEnd
             }
             LlmEvent::ToolCallEnd { tool_call } => {
-                stream_idle_phase.store(
-                    StreamIdlePhase::InterItemGap as u8,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
                 tool_calls.push(ToolCall {
                     id: tool_call.id,
                     name: tool_call.name,
@@ -4504,6 +4492,72 @@ mod tests {
         );
         // The reasoning leash must strictly exceed the content leash.
         assert!(reasoning > content);
+    }
+
+    #[test]
+    fn stream_idle_phase_tracks_event_sequences() {
+        fn apply(mut phase: StreamIdlePhase, events: &[LlmEvent]) -> StreamIdlePhase {
+            for event in events {
+                phase = stream_idle_phase_after_event(phase, event);
+            }
+            phase
+        }
+
+        assert_eq!(
+            apply(
+                StreamIdlePhase::Initial,
+                &[
+                    LlmEvent::TextStart,
+                    LlmEvent::TextDelta { delta: "hi".into() },
+                ],
+            ),
+            StreamIdlePhase::ActiveContent
+        );
+        assert_eq!(
+            apply(StreamIdlePhase::ActiveContent, &[LlmEvent::TextEnd]),
+            StreamIdlePhase::InterItemGap
+        );
+        assert_eq!(
+            apply(
+                StreamIdlePhase::InterItemGap,
+                &[
+                    LlmEvent::ThinkingStart,
+                    LlmEvent::ThinkingDelta { delta: "".into() },
+                ],
+            ),
+            StreamIdlePhase::ActiveThinking
+        );
+        assert_eq!(
+            apply(StreamIdlePhase::ActiveThinking, &[LlmEvent::ThinkingEnd]),
+            StreamIdlePhase::InterItemGap
+        );
+        assert_eq!(
+            apply(
+                StreamIdlePhase::InterItemGap,
+                &[
+                    LlmEvent::ToolCallStart,
+                    LlmEvent::ToolCallDelta { delta: "{}".into() },
+                ],
+            ),
+            StreamIdlePhase::ActiveToolCall
+        );
+        assert_eq!(
+            apply(
+                StreamIdlePhase::ActiveToolCall,
+                &[LlmEvent::ToolCallEnd {
+                    tool_call: crate::bridge::WireToolCall {
+                        id: "call-1".into(),
+                        name: "bash".into(),
+                        arguments: serde_json::json!({}),
+                    },
+                }],
+            ),
+            StreamIdlePhase::InterItemGap
+        );
+        assert_eq!(
+            stream_idle_phase_after_event(StreamIdlePhase::Initial, &LlmEvent::Start),
+            StreamIdlePhase::Initial
+        );
     }
 
     #[tokio::test]
