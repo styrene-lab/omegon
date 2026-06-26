@@ -457,6 +457,7 @@ pub async fn start_server_with_options(
         .route("/api/evals/{*id}", axum::routing::get(api::get_eval))
         .route("/ws", axum::routing::get(ws::ws_handler))
         .route("/evals", axum::routing::get(serve_eval_dashboard))
+        .route("/web", axum::routing::get(serve_omegon_web))
         .route("/", axum::routing::get(serve_dashboard))
         .merge(
             Router::new()
@@ -521,7 +522,9 @@ pub async fn start_server_with_options(
         port = bound.port(),
         auth_mode = startup.auth_mode,
         auth_source = startup.auth_source,
-        "web dashboard at {}/?token={}",
+        "web dashboard at {}/?token={} · interactive SPA at {}/web?token={}",
+        startup.http_base,
+        startup.token,
         startup.http_base,
         startup.token
     );
@@ -912,6 +915,15 @@ async fn serve_dashboard() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("assets/dashboard.html"))
 }
 
+/// Serve the embedded Omegon Web single-agent SPA.
+///
+/// Consumes the `/api/web/*` surface contract: an initial `GET /api/web/surfaces`
+/// snapshot, the `/api/web/surfaces/stream` WebSocket for live deltas, and
+/// `POST /api/web/actions` for prompt/cancel/slash submission.
+async fn serve_omegon_web() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("assets/omegon-web.html"))
+}
+
 async fn serve_eval_dashboard() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("assets/eval-dashboard.html"))
 }
@@ -980,6 +992,24 @@ mod tests {
         let token = generate_token();
         assert!(!token.is_empty());
         assert!(token.len() >= 8);
+    }
+
+    #[tokio::test]
+    async fn serves_omegon_web_spa_referencing_the_contract() {
+        // The embedded SPA must be present and wired to the /api/web/* contract
+        // it consumes; a silent rename of an endpoint would break the UI without
+        // a compile error, so assert the references here.
+        let html = serve_omegon_web().await.0;
+        assert!(html.contains("Omegon Web"));
+        assert!(html.contains("/api/web/surfaces"));
+        assert!(html.contains("/api/web/surfaces/stream"));
+        assert!(html.contains("/api/web/actions"));
+        // Action discriminators the backend accepts.
+        assert!(html.contains("submit_prompt"));
+        assert!(html.contains("cancel_active_turn"));
+        assert!(html.contains("run_slash_command"));
+        // Token is taken from the query string (WS auth).
+        assert!(html.contains("token"));
     }
 
     #[test]

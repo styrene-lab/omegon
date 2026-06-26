@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added the Omegon Web single-agent SPA at `GET /web` — a self-contained, no-CDN HTML/JS client that consumes the `/api/web/*` contract: loads the `/api/web/surfaces` snapshot, streams live deltas over the `/api/web/surfaces/stream` WebSocket (assistant output, tool lifecycle, permission/operator-wait banners), and submits prompts/cancel/slash commands via `POST /api/web/actions` with optimistic transcript rendering and auto-reconnect. Startup logging now advertises the SPA URL alongside the dashboard.
 - Added `docs/web-api.openapi.yaml` — an OpenAPI 3.1 contract for the omegon-web `/api/web/*` surface (capabilities, launch-context, surface snapshot, surface stream WebSocket, action ingress, sessions, attachments), derived from the axum handlers and DTOs in `core/crates/omegon/src/web/`.
 - Added a Rust-native OpenAPI contract linter (`cargo test -p omegon --test openapi_contract_lint`, also `just lint-openapi`) that structurally validates every `docs/**/*.openapi.{yaml,yml}` spec — version, info, non-empty paths, per-operation responses, unique operationIds, path-template/parameter agreement, and local `$ref` resolution — so contracts are gated by CI without a Node/Python toolchain.
 - Added initial Omegon Web discovery endpoints for browser/Auspex capability metadata, launch context, native surface snapshots, browser action ingress, browser-native surface event streaming, session discovery, and staged browser attachments.
