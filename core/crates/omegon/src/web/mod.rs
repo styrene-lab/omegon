@@ -303,7 +303,17 @@ pub struct WebState {
             >,
         >,
     >,
+    /// Rolling conversation transcript accumulated by a single-writer task
+    /// subscribed to the agent event bus, plus user prompts recorded at
+    /// submission. Served by `GET /api/web/surfaces` so a browser reload
+    /// replays prior turns instead of starting blank. Bounded to the most
+    /// recent [`CONVERSATION_LOG_CAP`] segments.
+    pub conversation_log: Arc<Mutex<std::collections::VecDeque<surfaces::WebConversationSegment>>>,
 }
+
+/// Maximum conversation segments retained for reload replay. Older segments are
+/// evicted; the live stream remains the source of truth for the active turn.
+pub(crate) const CONVERSATION_LOG_CAP: usize = 400;
 
 impl WebState {
     /// Create a new WebState. Generates a random auth token.
@@ -351,6 +361,7 @@ impl WebState {
             })),
             pending_permissions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             pending_operator_waits: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            conversation_log: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         }
     }
 }
@@ -449,6 +460,134 @@ impl WebState {
             .send(decision)
             .map_err(|_| "operator-wait request is no longer awaiting a response")
     }
+
+    /// Append a completed user-prompt segment to the transcript. Called at
+    /// submission time (user prompts are not re-broadcast on the agent bus),
+    /// preserving correct ordering: the user turn lands before the agent's
+    /// `TurnStart` opens the assistant reply.
+    pub(crate) fn record_user_segment(&self, text: &str) {
+        if let Ok(mut log) = self.conversation_log.lock() {
+            let index = log.len();
+            log.push_back(surfaces::WebConversationSegment {
+                index,
+                role: "user".to_string(),
+                title: None,
+                summary: None,
+                body: Some(text.to_string()),
+                complete: true,
+                copyable: true,
+                selectable: true,
+            });
+            while log.len() > CONVERSATION_LOG_CAP {
+                log.pop_front();
+            }
+        }
+    }
+
+    /// Fold one agent event into the rolling transcript. Single-writer: only the
+    /// accumulator task started by [`start_conversation_accumulator`] calls this.
+    /// `TurnStart` opens an assistant segment, `MessageChunk` appends to it
+    /// (opening one if needed), `TurnEnd` marks it complete. Non-conversation
+    /// events are ignored.
+    pub(crate) fn fold_conversation_event(&self, event: &omegon_traits::AgentEvent) {
+        use omegon_traits::AgentEvent;
+        let Ok(mut log) = self.conversation_log.lock() else {
+            return;
+        };
+        let open_assistant = |log: &std::collections::VecDeque<
+            surfaces::WebConversationSegment,
+        >| {
+            matches!(log.back(), Some(seg) if seg.role == "assistant" && !seg.complete)
+        };
+        match event {
+            AgentEvent::TurnStart { .. } => {
+                let index = log.len();
+                log.push_back(surfaces::WebConversationSegment {
+                    index,
+                    role: "assistant".to_string(),
+                    title: None,
+                    summary: None,
+                    body: Some(String::new()),
+                    complete: false,
+                    copyable: true,
+                    selectable: true,
+                });
+            }
+            AgentEvent::MessageChunk { text } => {
+                if !open_assistant(&log) {
+                    let index = log.len();
+                    log.push_back(surfaces::WebConversationSegment {
+                        index,
+                        role: "assistant".to_string(),
+                        title: None,
+                        summary: None,
+                        body: Some(String::new()),
+                        complete: false,
+                        copyable: true,
+                        selectable: true,
+                    });
+                }
+                if let Some(seg) = log.back_mut() {
+                    seg.body.get_or_insert_with(String::new).push_str(text);
+                }
+            }
+            AgentEvent::TurnEnd { .. } => {
+                if let Some(seg) = log.back_mut()
+                    && seg.role == "assistant"
+                    && !seg.complete
+                {
+                    seg.complete = true;
+                    // Drop an assistant turn that produced no visible text
+                    // (e.g. a tool-only turn) so reload replay stays clean.
+                    if seg.body.as_deref().unwrap_or("").is_empty() {
+                        log.pop_back();
+                    }
+                }
+            }
+            _ => {}
+        }
+        while log.len() > CONVERSATION_LOG_CAP {
+            log.pop_front();
+        }
+    }
+
+    /// Snapshot the current transcript for `GET /api/web/surfaces`, re-indexing
+    /// from zero so the browser sees a contiguous list after any eviction.
+    pub(crate) fn conversation_segments(&self) -> Vec<surfaces::WebConversationSegment> {
+        self.conversation_log
+            .lock()
+            .map(|log| {
+                log.iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(index, mut seg)| {
+                        seg.index = index;
+                        seg
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// Spawn the single-writer conversation accumulator: subscribes to the agent
+/// event bus and folds turn/message events into `state.conversation_log` so a
+/// browser reload can replay the transcript. A broadcast lag (slow consumer)
+/// can drop events and leave a gap; the live stream remains authoritative for
+/// the active turn, and the next `TurnStart` reopens a clean segment.
+fn start_conversation_accumulator(state: &WebState) {
+    let mut rx = state.events_tx.subscribe();
+    let state = state.clone();
+    crate::task_spawn::spawn_best_effort_result("web-conversation-accumulator", async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => state.fold_conversation_event(&event),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+        Ok(())
+    });
 }
 
 /// Commands received from WebSocket clients, forwarded to the main loop.
@@ -657,6 +796,7 @@ pub async fn start_server_with_options(
     });
 
     start_daemon_event_worker(&state);
+    start_conversation_accumulator(&state);
     if let Some(project_root) =
         std::env::var_os("OMEGON_PROJECT_ROOT").map(std::path::PathBuf::from)
     {
@@ -1322,6 +1462,72 @@ mod tests {
             .daemon_status
             .clone();
         assert_eq!(startup_status.processed_events, 1);
+    }
+
+    fn test_turn_end() -> omegon_traits::AgentEvent {
+        omegon_traits::AgentEvent::TurnEnd(Box::new(omegon_traits::AgentEventTurnEnd {
+            turn: 1,
+            turn_end_reason: omegon_traits::TurnEndReason::AssistantCompleted,
+            model: None,
+            provider: None,
+            estimated_tokens: 0,
+            context_window: 0,
+            context_composition: omegon_traits::ContextComposition::default(),
+            actual_input_tokens: 0,
+            actual_output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            provider_telemetry: None,
+            dominant_phase: None,
+            drift_kind: None,
+            progress_nudge_reason: None,
+            intent_task: None,
+            intent_phase: None,
+            files_read_count: 0,
+            files_modified_count: 0,
+            stats_tool_calls: 0,
+            streaks: omegon_traits::ControllerStreaks::default(),
+        }))
+    }
+
+    #[test]
+    fn conversation_fold_records_user_and_assistant_turns() {
+        use omegon_traits::AgentEvent;
+        let (events_tx, _rx) = tokio::sync::broadcast::channel(8);
+        let state = WebState::new(DashboardHandles::default(), events_tx);
+
+        // User prompt is recorded at submission; agent turn folds from the bus.
+        state.record_user_segment("hello");
+        state.fold_conversation_event(&AgentEvent::TurnStart { turn: 1 });
+        state.fold_conversation_event(&AgentEvent::MessageChunk { text: "hi ".into() });
+        state.fold_conversation_event(&AgentEvent::MessageChunk {
+            text: "there".into(),
+        });
+        state.fold_conversation_event(&test_turn_end());
+
+        let segs = state.conversation_segments();
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].role, "user");
+        assert_eq!(segs[0].body.as_deref(), Some("hello"));
+        assert!(segs[0].complete);
+        assert_eq!(segs[1].role, "assistant");
+        assert_eq!(segs[1].body.as_deref(), Some("hi there"));
+        assert!(segs[1].complete);
+        // Contiguous indices after re-indexing.
+        assert_eq!(segs[0].index, 0);
+        assert_eq!(segs[1].index, 1);
+    }
+
+    #[test]
+    fn conversation_fold_drops_text_free_assistant_turn() {
+        use omegon_traits::AgentEvent;
+        let (events_tx, _rx) = tokio::sync::broadcast::channel(8);
+        let state = WebState::new(DashboardHandles::default(), events_tx);
+        // A tool-only turn produces no MessageChunk; it must not leave an empty
+        // assistant bubble in the reload transcript.
+        state.fold_conversation_event(&AgentEvent::TurnStart { turn: 1 });
+        state.fold_conversation_event(&test_turn_end());
+        assert!(state.conversation_segments().is_empty());
     }
 
     #[tokio::test]

@@ -129,7 +129,7 @@ pub fn project_web_surfaces(state: &WebState) -> WebSurfacesSnapshot {
         generated_at: Utc::now().to_rfc3339(),
         surfaces: WebSurfaceBundle {
             conversation: WebConversationSurface {
-                segments: Vec::new(),
+                segments: state.conversation_segments(),
             },
             editor: WebEditorSurface {
                 accepts_prompt: true,

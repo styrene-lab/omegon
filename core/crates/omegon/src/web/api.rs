@@ -627,6 +627,7 @@ pub async fn post_web_action(
                     ),
                 );
             }
+            state.record_user_segment(&text);
             state
                 .command_tx
                 .try_send(super::WebCommand::UserPrompt(text))
@@ -1378,6 +1379,9 @@ mod tests {
             )),
             pending_operator_waits: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
+            )),
+            conversation_log: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::new(),
             )),
         }
     }
