@@ -156,6 +156,41 @@ pub struct ProbeResponse {
     pub state: ControlPlaneState,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeStatusResponse {
+    pub schema_version: u8,
+    pub state: ControlPlaneState,
+    pub ready: bool,
+    pub startup: Option<RuntimeStartupSummary>,
+    pub daemon: super::WebDaemonStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeStartupSummary {
+    pub http_base: String,
+    pub ws_url: String,
+    pub acp_url: Option<String>,
+    pub auth_mode: String,
+    pub auth_source: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeCapabilitiesResponse {
+    pub schema_version: u8,
+    pub probes: RuntimeProbeCapabilities,
+    pub browser_web: WebCapabilityDescriptor,
+    pub acp_websocket: bool,
+    pub daemon_event_ingress: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeProbeCapabilities {
+    pub healthz: bool,
+    pub readyz: bool,
+    pub startup: bool,
+    pub state_snapshot: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct EventAccepted {
     pub accepted: bool,
@@ -825,8 +860,8 @@ pub async fn get_web_surfaces(
 }
 
 /// GET /api/web/capabilities — web/Auspex capability descriptor.
-pub async fn get_web_capabilities() -> Json<WebCapabilityDescriptor> {
-    Json(WebCapabilityDescriptor {
+fn web_capabilities_descriptor() -> WebCapabilityDescriptor {
+    WebCapabilityDescriptor {
         interactive: true,
         chat: true,
         hosted_web_ui: true,
@@ -839,7 +874,11 @@ pub async fn get_web_capabilities() -> Json<WebCapabilityDescriptor> {
         supports_session_resume: true,
         supports_attachments: true,
         supports_auspex_proxy: true,
-    })
+    }
+}
+
+pub async fn get_web_capabilities() -> Json<WebCapabilityDescriptor> {
+    Json(web_capabilities_descriptor())
 }
 
 /// GET /api/web/launch-context — describes how the web UI was launched.
@@ -870,6 +909,55 @@ pub async fn get_web_launch_context(headers: HeaderMap) -> Json<WebLaunchContext
         proxied_by,
         back_url,
         policy_owner: policy_owner.to_string(),
+    })
+}
+
+/// GET /api/runtime/status — runtime/control-plane readiness snapshot.
+pub async fn get_runtime_status(
+    State(state): State<WebState>,
+) -> Result<Json<RuntimeStatusResponse>, StatusCode> {
+    let control_state = *state
+        .control_plane_state
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let startup = state
+        .startup_info
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .clone();
+    let daemon = state
+        .daemon_status
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .clone();
+    Ok(Json(RuntimeStatusResponse {
+        schema_version: 1,
+        state: control_state,
+        ready: matches!(control_state, ControlPlaneState::Ready),
+        startup: startup.map(|info| RuntimeStartupSummary {
+            http_base: info.http_base,
+            ws_url: info.ws_url,
+            acp_url: info.acp_url,
+            auth_mode: info.auth_mode,
+            auth_source: info.auth_source,
+        }),
+        daemon,
+    }))
+}
+
+/// GET /api/runtime/capabilities — stable runtime API capability descriptor.
+pub async fn get_runtime_capabilities() -> Json<RuntimeCapabilitiesResponse> {
+    Json(RuntimeCapabilitiesResponse {
+        schema_version: 1,
+        probes: RuntimeProbeCapabilities {
+            healthz: true,
+            readyz: true,
+            startup: true,
+            state_snapshot: true,
+        },
+        browser_web: web_capabilities_descriptor(),
+        acp_websocket: true,
+        daemon_event_ingress: true,
     })
 }
 
@@ -1489,6 +1577,40 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert!(response.legacy_ws);
         assert!(response.supports_session_resume);
         assert!(response.supports_attachments);
+    }
+
+    #[tokio::test]
+    async fn runtime_capabilities_describe_registered_runtime_contract() {
+        let response = get_runtime_capabilities().await.0;
+
+        assert_eq!(response.schema_version, 1);
+        assert!(response.probes.healthz);
+        assert!(response.probes.readyz);
+        assert!(response.probes.startup);
+        assert!(response.probes.state_snapshot);
+        assert!(response.browser_web.surface_api);
+        assert!(response.browser_web.surface_stream);
+        assert!(response.browser_web.actions_api);
+        assert!(response.acp_websocket);
+        assert!(response.daemon_event_ingress);
+    }
+
+    #[tokio::test]
+    async fn runtime_status_reports_control_plane_and_daemon_state() {
+        let state = test_state();
+        let response = get_runtime_status(axum::extract::State(state))
+            .await
+            .unwrap()
+            .0;
+
+        assert_eq!(response.schema_version, 1);
+        assert_eq!(response.state, ControlPlaneState::Ready);
+        assert!(response.ready);
+        assert_eq!(response.daemon.queued_events, 0);
+        assert_eq!(
+            response.startup.as_ref().unwrap().auth_mode,
+            "ephemeral-bearer"
+        );
     }
 
     #[tokio::test]
