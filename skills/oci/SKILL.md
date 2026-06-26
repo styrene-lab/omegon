@@ -304,7 +304,7 @@ ghcr.io/ORG/base/RUNTIME              # Shared base images
     platforms: linux/amd64,linux/arm64
     tags: |
       ghcr.io/${{ github.repository }}:${{ github.sha }}
-      ghcr.io/${{ github.repository }}:latest
+      ghcr.io/${{ github.repository }}:${{ github.ref_name }}
     cache-from: type=gha
     cache-to: type=gha,mode=max
 ```

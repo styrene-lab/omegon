@@ -15,7 +15,7 @@ Canonical design system for all visual output. Every diagram, theme, and generat
 
 ## Design Philosophy
 
-**Alpharius** — dark, cold, precise. Deep void backgrounds with iridescent ceramite teal, silver-chrome highlights, and muted brass-gold signal warmth. The aesthetic of the XX Legion: disciplined, mercurial, beautiful in its deception. Every surface gleams like polished power armour under starlight.
+**Alpharius** — dark, cold, precise. Deep void backgrounds with iridescent ceramite teal, silver-chrome highlights, and muted brass-gold signal warmth. The aesthetic is disciplined, mercurial, and high-contrast: every surface should feel like polished metal under starlight.
 
 Principles:
 1. **Semantic color, not decorative** — every color communicates purpose
@@ -50,8 +50,8 @@ Derived from `themes/alpharius.json`. These are the ground-truth tokens.
 
 | Signal | Hex | Usage |
 |--------|-----|-------|
-| `green` | `#1ab878` | Success, completion, positive — hydra emerald |
-| `red` | `#c83030` | Error, destructive, critical — blood of the false emperor |
+| `green` | `#1ab878` | Success, completion, positive — emerald signal |
+| `red` | `#c83030` | Error, destructive, critical — saturated red |
 | `orange` | `#c86418` | Warning, attention needed — hot metal |
 | `yellow` | `#b89020` | Caution, numbers, highlights — tarnished brass |
 

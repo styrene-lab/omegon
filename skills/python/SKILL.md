@@ -18,7 +18,7 @@ Conventions, tooling, and patterns for Python development.
 - **Python 3.11+** minimum
 - **src/ layout** (PEP 517) for all packages
 - **pyproject.toml** is the single config file — no `.cfg`, `.ini`, or separate `.toml`
-- **venv + pip** for environment management — no poetry, no conda
+- **venv + pip** is the default for new/simple projects; respect existing Poetry, Conda, uv, or PDM setups when present
 - **Makefile** (or justfile) wraps all dev commands
 - **Editable install**: `pip install -e ".[dev]"` for development
 
