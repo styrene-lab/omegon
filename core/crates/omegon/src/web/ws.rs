@@ -166,7 +166,10 @@ async fn handle_client_command(
         "user_prompt" => {
             if let Some(text) = cmd["text"].as_str() {
                 let _ = command_tx
-                    .send(WebCommand::UserPrompt(text.to_string()))
+                    .send(WebCommand::UserPrompt {
+                        text: text.to_string(),
+                        image_paths: Vec::new(),
+                    })
                     .await;
             }
         }

@@ -2633,7 +2633,13 @@ async fn run_embedded_command(
             }
             cmd = cmd_rx.recv() => {
                 match cmd {
-                    Some(web::WebCommand::UserPrompt(text)) => {
+                    Some(web::WebCommand::UserPrompt { text, image_paths }) => {
+                        if !image_paths.is_empty() {
+                            tracing::warn!(
+                                count = image_paths.len(),
+                                "daemon: prompt attachments are not yet supported in headless serve mode; ignoring"
+                            );
+                        }
                         tracing::info!(prompt_len = text.len(), "daemon: received user prompt");
 
                         // Clone handles for the spawned task.
@@ -5041,10 +5047,13 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             let mut rx = web_cmd_rx;
                             while let Some(web_cmd) = rx.recv().await {
                                 let tui_cmd = match web_cmd {
-                                    web::WebCommand::UserPrompt(text) => {
+                                    web::WebCommand::UserPrompt { text, image_paths } => {
                                         tui::TuiCommand::SubmitPrompt(crate::tui::PromptSubmission {
                                             text,
-                                            image_paths: Vec::new(),
+                                            image_paths: image_paths
+                                                .into_iter()
+                                                .map(std::path::PathBuf::from)
+                                                .collect(),
                                             submitted_by: "web-dashboard".to_string(),
                                             via: "websocket",
                                             queue_mode: crate::tui::PromptQueueMode::InterruptAfterTurn,
