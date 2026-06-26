@@ -184,6 +184,18 @@ pub struct RuntimeCapabilitiesResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ProviderStatusResponse {
+    pub schema_version: u8,
+    pub providers: Vec<crate::status::ProviderStatus>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExtensionsStatusResponse {
+    pub schema_version: u8,
+    pub extensions: Vec<crate::capabilities::extensions::ExtensionCapabilitySummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct RuntimeProbeCapabilities {
     pub healthz: bool,
     pub readyz: bool,
@@ -912,6 +924,34 @@ pub async fn get_web_launch_context(headers: HeaderMap) -> Json<WebLaunchContext
     })
 }
 
+/// GET /api/providers/status — provider auth/runtime readiness from harness status.
+pub async fn get_providers_status(
+    State(state): State<WebState>,
+) -> Result<Json<ProviderStatusResponse>, StatusCode> {
+    let providers = state
+        .handles
+        .harness
+        .as_ref()
+        .and_then(|harness| harness.lock().ok())
+        .map(|harness| harness.providers.clone())
+        .unwrap_or_default();
+    Ok(Json(ProviderStatusResponse {
+        schema_version: 1,
+        providers,
+    }))
+}
+
+/// GET /api/extensions — installed extension capability/status inventory.
+pub async fn get_extensions_status(
+    State(state): State<WebState>,
+) -> Result<Json<ExtensionsStatusResponse>, StatusCode> {
+    let snapshot = capability_inventory_snapshot(state)?;
+    Ok(Json(ExtensionsStatusResponse {
+        schema_version: 1,
+        extensions: snapshot.installed_extensions,
+    }))
+}
+
 /// GET /api/runtime/status — runtime/control-plane readiness snapshot.
 pub async fn get_runtime_status(
     State(state): State<WebState>,
@@ -1611,6 +1651,55 @@ required = ["MISSING_REQUIRED_TOKEN"]
             response.startup.as_ref().unwrap().auth_mode,
             "ephemeral-bearer"
         );
+    }
+
+    #[tokio::test]
+    async fn providers_status_reports_harness_provider_inventory() {
+        let mut state = test_state();
+        let mut harness = crate::status::HarnessStatus::default();
+        harness.providers.push(crate::status::ProviderStatus {
+            name: "OpenAI".into(),
+            authenticated: true,
+            auth_method: Some("api-key".into()),
+            auth_state: None,
+            model: Some("gpt-5".into()),
+            runtime_status: None,
+            recent_failure_count: None,
+            last_failure_kind: None,
+            last_failure_at: None,
+        });
+        state.handles.harness = Some(Arc::new(Mutex::new(harness)));
+
+        let response = get_providers_status(axum::extract::State(state))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(response.schema_version, 1);
+        assert_eq!(response.providers.len(), 1);
+        assert_eq!(response.providers[0].name, "OpenAI");
+        assert!(response.providers[0].authenticated);
+    }
+
+    #[tokio::test]
+    async fn extensions_status_reports_extension_inventory_schema() {
+        let response = get_extensions_status(axum::extract::State(test_state()))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(response.schema_version, 1);
+        // Inventory is host-dependent; the endpoint contract is that it returns
+        // a sorted metadata vector without requiring the UI to scrape files.
+        let names: Vec<_> = response
+            .extensions
+            .iter()
+            .map(|extension| extension.name.clone())
+            .collect();
+        let sorted = {
+            let mut sorted = names.clone();
+            sorted.sort();
+            sorted
+        };
+        assert_eq!(names, sorted);
     }
 
     #[tokio::test]
