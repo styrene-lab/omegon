@@ -215,6 +215,17 @@ fn surface_stream_event(
                 json!({ "request_id": request_id, "prompt": prompt, "timeout_secs": timeout_secs }),
             )
         }
+        AgentEvent::PlanUpdated { projection } => {
+            if let Ok(mut plan) = state.plan_surface.lock() {
+                *plan = projection.clone();
+            }
+            WebSurfaceStreamEnvelope::default_session(
+                revision,
+                "plan_updated",
+                Some("plan"),
+                serde_json::to_value(&projection).unwrap_or_else(|_| json!({})),
+            )
+        }
         other => WebSurfaceStreamEnvelope::default_session(
             revision,
             "surface_updated",

@@ -260,6 +260,14 @@ pub struct EventAccepted {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct DaemonEventsResponse {
+    pub schema_version: u8,
+    pub queued_events: usize,
+    pub processed_events: usize,
+    pub events: Vec<DaemonEventEnvelope>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct WebSessionListResponse {
     pub sessions: Vec<WebSessionSummary>,
 }
@@ -1214,6 +1222,28 @@ pub async fn get_ready(State(state): State<WebState>) -> (StatusCode, Json<Probe
     }
 }
 
+/// GET /api/events — read-only daemon event queue snapshot for web/console clients.
+pub async fn get_events(
+    State(state): State<WebState>,
+) -> Result<Json<DaemonEventsResponse>, StatusCode> {
+    let events = state
+        .daemon_events
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .clone();
+    let status = state
+        .daemon_status
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .clone();
+    Ok(Json(DaemonEventsResponse {
+        schema_version: 1,
+        queued_events: events.len(),
+        processed_events: status.processed_events,
+        events,
+    }))
+}
+
 /// POST /api/events — authenticated local event ingress for daemon/runtime triggers.
 pub async fn post_event(
     State(state): State<WebState>,
@@ -1729,6 +1759,9 @@ mod tests {
             conversation_log: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::VecDeque::new(),
             )),
+            plan_surface: std::sync::Arc::new(std::sync::Mutex::new(
+                omegon_traits::PlanSurfaceProjection::default(),
+            )),
         }
     }
 
@@ -1861,6 +1894,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn workspace_leases_status_reports_active_instance_leases() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let dir = tempfile::tempdir().unwrap();
         let previous_cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir.path()).unwrap();
@@ -2526,6 +2560,32 @@ required = ["BRAVE_API_KEY"]
             post_event(axum::extract::State(test_state()), headers, Json(event)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert!(!payload.accepted);
+    }
+
+    #[tokio::test]
+    async fn get_events_reports_queued_daemon_event_snapshot() {
+        let state = test_state();
+        state
+            .daemon_events
+            .lock()
+            .unwrap()
+            .push(DaemonEventEnvelope {
+                event_id: "evt-queued".into(),
+                source: "manual/test".into(),
+                trigger_kind: "new_session".into(),
+                payload: serde_json::json!({"reason":"test"}),
+                caller_role: Some("write".into()),
+                source_user: None,
+                source_channel: None,
+                source_thread: None,
+            });
+        state.daemon_status.lock().unwrap().processed_events = 2;
+
+        let response = get_events(axum::extract::State(state)).await.unwrap().0;
+        assert_eq!(response.schema_version, 1);
+        assert_eq!(response.queued_events, 1);
+        assert_eq!(response.processed_events, 2);
+        assert_eq!(response.events[0].event_id, "evt-queued");
     }
 
     #[tokio::test]
