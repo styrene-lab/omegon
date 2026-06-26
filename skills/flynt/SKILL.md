@@ -1,7 +1,7 @@
 +++
 id = "8d7961f6-4742-416f-89eb-bef9f6cc12f6"
-name = "vault"
-description = "Interlinked markdown conventions for wikis and knowledge bases"
+name = "flynt"
+description = "Interlinked markdown conventions for Flynt workspaces and knowledge bases"
 tags = []
 aliases = []
 activation = "domain_detected"
@@ -9,9 +9,9 @@ profile = ["docs"]
 project_signals = ["*.md", "docs/**/*.md"]
 +++
 
-# Vault Skill — Interlinked Markdown Conventions
+# Flynt Skill — Interlinked Markdown Conventions
 
-Write markdown that renders beautifully in mdserve, Obsidian, and GitHub.
+Write markdown that renders beautifully in Flynt, mdserve, Obsidian, and GitHub.
 
 ## Wikilink Syntax
 

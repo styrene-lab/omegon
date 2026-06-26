@@ -20,7 +20,7 @@ Future design exploration for deciding which skills should ship inside the Omego
 
 ### Pre-0.27.0 bundled skill inventory assessment
 
-Current bundled skills inventory: code-act, git, oci, openspec, python, rust, security, style, typescript, vault. Potential future posture split: core harness skills vs standard-library domain/language skills vs project/brand-local skills. Pre-0.27.0 assessment found likely low-risk polish candidates: rust contains a Zellij-specific sentence in the generic skill; oci CI example pushes latest despite warning to avoid latest; python states no poetry/no conda too absolutely for a bundled generic skill; style contains brand-specific/flavor language; typescript mentions legacy pi-* package names in an illustrative SDK warning.
+Current bundled skills inventory: code-act, git, oci, openspec, python, rust, security, style, typescript, flynt. Potential future posture split: core harness skills vs standard-library domain/language skills vs project/brand-local skills. Pre-0.27.0 assessment found likely low-risk polish candidates: rust contains a Zellij-specific sentence in the generic skill; oci CI example pushes latest despite warning to avoid latest; python states no poetry/no conda too absolutely for a bundled generic skill; style contains brand-specific/flavor language; typescript mentions legacy pi-* package names in an illustrative SDK warning. The former vault markdown skill was renamed to flynt to avoid overloading Vault/security terminology.
 
 ## Open Questions
 

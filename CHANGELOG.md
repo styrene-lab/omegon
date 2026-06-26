@@ -41,6 +41,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added prompt skill conflict resolution so overlapping activation/trigger skills inject only one provider by default and user-facing output recommends project-local merge resolution.
 
 ### Changed
+- Renamed the bundled interlinked-markdown skill from `vault` to `flynt` so markdown workspace guidance no longer overloads HashiCorp Vault/security terminology.
 - Polished bundled skill guidance ahead of 0.27.0 by removing overly project-specific language, softening generic Python environment-manager defaults, and aligning the OCI CI example with immutable-tag guidance.
 - Surfaced startup skill activation events in the runtime event stream and mirrored them into audit logs so operators can see and review skill activation/provenance.
 - Added `omegon skills import <path> [--project] [--force]` for copying Claude/Omegon skill bundles or direct `SKILL.md` files into user or project skill roots, and updated `skills doctor` to recommend those import commands.
