@@ -790,6 +790,7 @@ pub async fn start_server_with_options(
         .merge(
             Router::new()
                 .route("/acp", axum::routing::get(acp_ws::acp_ws_handler))
+                .route("/api/acp", axum::routing::get(acp_ws::acp_ws_handler))
                 .with_state(acp_state.clone()),
         )
         .layer(
@@ -827,7 +828,7 @@ pub async fn start_server_with_options(
         health_url: format!("{http_scheme}://{bound}/api/healthz"),
         ready_url: format!("{http_scheme}://{bound}/api/readyz"),
         ws_url: format!("{ws_scheme}://{bound}/ws?token={token}"),
-        acp_url: Some(format!("{ws_scheme}://{bound}/acp?token={token}")),
+        acp_url: Some(format!("{ws_scheme}://{bound}/api/acp?token={token}")),
         token,
         auth_mode: auth_mode.to_string(),
         auth_source,
