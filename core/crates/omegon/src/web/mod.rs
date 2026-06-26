@@ -712,6 +712,22 @@ pub async fn start_server_with_options(
             axum::routing::get(api::get_web_launch_context),
         )
         .route(
+            "/api/lifecycle/design/{id}",
+            axum::routing::get(api::get_lifecycle_design_node),
+        )
+        .route(
+            "/api/lifecycle/design",
+            axum::routing::get(api::get_lifecycle_design),
+        )
+        .route(
+            "/api/lifecycle/snapshot",
+            axum::routing::get(api::get_lifecycle_snapshot),
+        )
+        .route(
+            "/api/workspaces/leases",
+            axum::routing::get(api::get_workspace_leases_status),
+        )
+        .route(
             "/api/providers/status",
             axum::routing::get(api::get_providers_status),
         )

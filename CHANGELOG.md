@@ -38,6 +38,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added read-only `omegon skills doctor` onboarding diagnostics for Claude-compatible skill roots, script references, and registry conflicts.
 - Locked in the ecosystem-superset skill registry design for Claude-compatible skills, upstream Git skill repositories, source lock/provenance, and merge-first conflict resolution.
 - Added extension manifest-declared skill bundles plus conflict-resolution metadata for non-1:1 activation/trigger overlap.
+- Added read-only lifecycle endpoints for web/console clients: `GET /api/lifecycle/snapshot`, `GET /api/lifecycle/design`, and `GET /api/lifecycle/design/{id}`.
+- Added `GET /api/workspaces/leases` to expose active checkout workspace leases for the web/console backend.
 - Added `GET /api/providers/status` and `GET /api/extensions` read-only web backend endpoints for provider readiness and installed extension status inventory.
 - Added `GET /api/runtime/status` and `GET /api/runtime/capabilities` as stable read-only runtime foundation endpoints for the Omegon web/console backend.
 - Added prompt skill conflict resolution so overlapping activation/trigger skills inject only one provider by default and user-facing output recommends project-local merge resolution.

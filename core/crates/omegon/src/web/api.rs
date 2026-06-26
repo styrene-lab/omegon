@@ -196,6 +196,38 @@ pub struct ExtensionsStatusResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceLeasesResponse {
+    pub schema_version: u8,
+    pub cwd: String,
+    pub leases: Vec<WorkspaceLeaseStatus>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceLeaseStatus {
+    pub instance_id: String,
+    pub lease: crate::workspace::types::WorkspaceLease,
+}
+
+#[derive(Serialize)]
+pub struct LifecycleSnapshotResponse {
+    pub schema_version: u8,
+    pub design: DesignSnapshot,
+    pub openspec: OpenSpecSnapshot,
+}
+
+#[derive(Serialize)]
+pub struct LifecycleDesignResponse {
+    pub schema_version: u8,
+    pub design: DesignSnapshot,
+}
+
+#[derive(Serialize)]
+pub struct LifecycleDesignNodeResponse {
+    pub schema_version: u8,
+    pub node: NodeBrief,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct RuntimeProbeCapabilities {
     pub healthz: bool,
     pub readyz: bool,
@@ -952,6 +984,63 @@ pub async fn get_extensions_status(
     }))
 }
 
+/// GET /api/workspaces/leases — active workspace lease inventory for this checkout.
+pub async fn get_workspace_leases_status() -> Result<Json<WorkspaceLeasesResponse>, StatusCode> {
+    let cwd = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut leases: Vec<_> = crate::workspace::runtime::read_all_active_leases(&cwd)
+        .into_iter()
+        .map(|(instance_id, lease)| WorkspaceLeaseStatus { instance_id, lease })
+        .collect();
+    leases.sort_by(|a, b| a.instance_id.cmp(&b.instance_id));
+    Ok(Json(WorkspaceLeasesResponse {
+        schema_version: 1,
+        cwd: cwd.display().to_string(),
+        leases,
+    }))
+}
+
+/// GET /api/lifecycle/snapshot — lifecycle read model for web/console clients.
+pub async fn get_lifecycle_snapshot(
+    State(state): State<WebState>,
+) -> Json<LifecycleSnapshotResponse> {
+    let snapshot = build_snapshot(&state);
+    Json(LifecycleSnapshotResponse {
+        schema_version: 1,
+        design: snapshot.design,
+        openspec: snapshot.openspec,
+    })
+}
+
+/// GET /api/lifecycle/design — design tree read model.
+pub async fn get_lifecycle_design(State(state): State<WebState>) -> Json<LifecycleDesignResponse> {
+    let snapshot = build_snapshot(&state);
+    Json(LifecycleDesignResponse {
+        schema_version: 1,
+        design: snapshot.design,
+    })
+}
+
+/// GET /api/lifecycle/design/{id} — compact design node read model.
+pub async fn get_lifecycle_design_node(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    State(state): State<WebState>,
+) -> Result<Json<LifecycleDesignNodeResponse>, StatusCode> {
+    let Some(lifecycle) = state.handles.lifecycle.as_ref() else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+    let provider = lifecycle.provider();
+    let guard = provider
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some(node) = guard.get_node(&id) else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+    Ok(Json(LifecycleDesignNodeResponse {
+        schema_version: 1,
+        node: node_brief(node),
+    }))
+}
+
 /// GET /api/runtime/status — runtime/control-plane readiness snapshot.
 pub async fn get_runtime_status(
     State(state): State<WebState>,
@@ -1174,6 +1263,20 @@ pub fn build_graph_data(handles: &crate::tui::dashboard::DashboardHandles) -> Gr
     GraphData { nodes, links }
 }
 
+fn node_brief(node: &crate::lifecycle::types::DesignNode) -> NodeBrief {
+    NodeBrief {
+        id: node.id.clone(),
+        title: node.title.clone(),
+        status: node.status.as_str().to_string(),
+        parent: node.parent.clone(),
+        open_questions: node.open_questions.len(),
+        openspec_change: node.openspec_change.clone(),
+        dependencies: node.dependencies.clone(),
+        branches: node.branches.clone(),
+        tags: node.tags.clone(),
+    }
+}
+
 /// GET /api/state — build a full snapshot from the shared handles.
 pub async fn get_state(State(state): State<WebState>) -> Json<StateSnapshot> {
     let snapshot = build_snapshot(&state);
@@ -1228,17 +1331,7 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
             }
             design.counts.open_questions += node.open_questions.len();
 
-            let brief = NodeBrief {
-                id: node.id.clone(),
-                title: node.title.clone(),
-                status: node.status.as_str().to_string(),
-                parent: node.parent.clone(),
-                open_questions: node.open_questions.len(),
-                openspec_change: node.openspec_change.clone(),
-                dependencies: node.dependencies.clone(),
-                branches: node.branches.clone(),
-                tags: node.tags.clone(),
-            };
+            let brief = node_brief(node);
 
             if matches!(node.status, NodeStatus::Implementing) {
                 design.implementing.push(brief.clone());
@@ -1700,6 +1793,47 @@ required = ["MISSING_REQUIRED_TOKEN"]
             sorted
         };
         assert_eq!(names, sorted);
+    }
+
+    #[tokio::test]
+    async fn workspace_leases_status_reports_active_instance_leases() {
+        let dir = tempfile::tempdir().unwrap();
+        let previous_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let lease = crate::workspace::types::WorkspaceLease {
+            project_id: "project".into(),
+            workspace_id: crate::workspace::runtime::workspace_id_from_path(dir.path()),
+            label: "main".into(),
+            path: dir.path().display().to_string(),
+            backend_kind: crate::workspace::types::WorkspaceBackendKind::LocalDir,
+            vcs_ref: None,
+            bindings: crate::workspace::types::WorkspaceBindings::default(),
+            branch: "main".into(),
+            role: crate::workspace::types::WorkspaceRole::Primary,
+            workspace_kind: crate::workspace::types::WorkspaceKind::Code,
+            mutability: crate::workspace::types::Mutability::Mutable,
+            owner_session_id: Some("session-1".into()),
+            owner_agent_id: Some("omegon-test".into()),
+            created_at: crate::workspace::runtime::current_timestamp(),
+            last_heartbeat: crate::workspace::runtime::current_timestamp(),
+            archived: false,
+            archived_at: None,
+            archive_reason: None,
+            parent_workspace_id: None,
+            source: "test".into(),
+        };
+        crate::workspace::runtime::write_workspace_lease(dir.path(), "test-1", &lease).unwrap();
+
+        let response = get_workspace_leases_status().await.unwrap().0;
+        std::env::set_current_dir(previous_cwd).unwrap();
+
+        assert_eq!(response.schema_version, 1);
+        assert_eq!(response.leases.len(), 1);
+        assert_eq!(response.leases[0].instance_id, "test-1");
+        assert_eq!(
+            response.leases[0].lease.owner_session_id.as_deref(),
+            Some("session-1")
+        );
     }
 
     #[tokio::test]
