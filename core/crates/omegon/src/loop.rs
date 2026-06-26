@@ -3982,29 +3982,63 @@ fn looks_like_completion(text: &str) -> bool {
 /// disarming reconciliation after one nudge (the former one-shot-latch bug).
 const MAX_PLAN_RECONCILIATION_NUDGES: u8 = 3;
 
-/// Fingerprint of the open (Pending/Active) work-plan items. Changes whenever
-/// the agent makes genuine progress, replaces the plan, or orphans a new one —
-/// which re-arms the reconciliation nudge budget.
+fn plan_open_items(
+    intent: &IntentDocument,
+) -> Vec<(usize, crate::conversation::WorkItemStatus, &str)> {
+    let items = intent
+        .visible_plan
+        .as_ref()
+        .map(|plan| plan.items.as_slice())
+        .unwrap_or(intent.work_plan.as_slice());
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, item)| {
+            matches!(
+                item.status,
+                crate::conversation::WorkItemStatus::Pending
+                    | crate::conversation::WorkItemStatus::Active
+            )
+            .then_some((idx, item.status, item.description.as_str()))
+        })
+        .collect()
+}
+
+/// Fingerprint of the operator-visible open (Pending/Active) plan items.
+/// Changes whenever the visible plan changes, the agent makes genuine progress,
+/// replaces the plan, or orphans a new one — which re-arms the reconciliation
+/// nudge budget.
 fn plan_open_fingerprint(intent: &IntentDocument) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for item in &intent.work_plan {
-        if matches!(
-            item.status,
-            crate::conversation::WorkItemStatus::Pending
-                | crate::conversation::WorkItemStatus::Active
-        ) {
-            item.description.hash(&mut hasher);
+    // Stable FNV-1a; do not use DefaultHasher here because this value is stored
+    // in session state and may be compared after reload/resume.
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    fn feed(hash: &mut u64, bytes: &[u8]) {
+        for byte in bytes {
+            *hash ^= u64::from(*byte);
+            *hash = hash.wrapping_mul(FNV_PRIME);
         }
+        *hash ^= 0xff;
+        *hash = hash.wrapping_mul(FNV_PRIME);
     }
-    hasher.finish()
+
+    let mut hash = FNV_OFFSET;
+    if let Some(plan) = intent.visible_plan.as_ref() {
+        feed(&mut hash, plan.plan_id.as_bytes());
+        feed(&mut hash, plan.scope.label().as_bytes());
+    } else {
+        feed(&mut hash, b"legacy-work-plan");
+    }
+    for (idx, status, description) in plan_open_items(intent) {
+        feed(&mut hash, idx.to_string().as_bytes());
+        feed(&mut hash, format!("{status:?}").as_bytes());
+        feed(&mut hash, description.as_bytes());
+    }
+    hash
 }
 
 fn should_nudge_plan_reconciliation(intent: &IntentDocument, assistant_text: &str) -> bool {
-    if intent.work_plan.is_empty()
-        || intent.work_plan_complete()
-        || !looks_like_completion(assistant_text)
-    {
+    if plan_open_items(intent).is_empty() || !looks_like_completion(assistant_text) {
         return false;
     }
     // A new or changed stale-plan state always re-arms the nudge.
@@ -4386,6 +4420,9 @@ fn hash_value(v: &Value) -> u64 {
 mod tests {
     use super::*;
     use crate::behavior::{EvidenceAssessment, EvidenceSufficiency, ProgressSignal};
+    use crate::conversation::{
+        PlanBinding, PlanMode, PlanScope, PlanSource, VisiblePlanState, WorkItem, WorkItemStatus,
+    };
     use omegon_traits::{OodaPhase, ToolCapability, ToolDefinition, ToolProvider};
 
     #[test]
@@ -4941,6 +4978,81 @@ mod tests {
             &intent,
             "Done! The patch is validated."
         ));
+    }
+
+    fn visible_plan_state_with_items(items: Vec<(&str, WorkItemStatus)>) -> VisiblePlanState {
+        VisiblePlanState {
+            plan_id: "repo:example".into(),
+            scope: PlanScope::Repo,
+            source: PlanSource::OpenSpec,
+            binding: PlanBinding::default(),
+            mode: PlanMode::Executing,
+            items: items
+                .into_iter()
+                .map(|(description, status)| WorkItem {
+                    description: description.into(),
+                    status,
+                    intent: None,
+                    completion_policy: Default::default(),
+                    evidence: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn plan_reconciliation_uses_visible_plan_as_source_of_truth() {
+        let mut intent = IntentDocument {
+            visible_plan: Some(visible_plan_state_with_items(vec![
+                ("Repo task A", WorkItemStatus::Active),
+                ("Repo task B", WorkItemStatus::Pending),
+            ])),
+            ..IntentDocument::default()
+        };
+        // Legacy plan is empty, but Workbench's visible plan has open rows.
+        // This is the adversarial case: the stale surface must still nudge.
+
+        assert!(should_nudge_plan_reconciliation(
+            &intent,
+            "Done! The patch is validated."
+        ));
+
+        // Completed/skipped visible rows do not nudge.
+        intent.visible_plan = Some(visible_plan_state_with_items(vec![
+            ("Repo task A", WorkItemStatus::Done),
+            ("Repo task B", WorkItemStatus::Skipped),
+        ]));
+        assert!(!should_nudge_plan_reconciliation(
+            &intent,
+            "Done! The patch is validated."
+        ));
+    }
+
+    #[test]
+    fn plan_open_fingerprint_is_stable_and_sensitive_to_visible_state() {
+        let mut a = IntentDocument {
+            visible_plan: Some(visible_plan_state_with_items(vec![
+                ("Task A", WorkItemStatus::Active),
+                ("Task B", WorkItemStatus::Pending),
+            ])),
+            ..IntentDocument::default()
+        };
+        let b = a.clone();
+        assert_eq!(plan_open_fingerprint(&a), plan_open_fingerprint(&b));
+
+        // Status and item order/index both matter: completing A and activating B
+        // is progress and must re-arm the nudge.
+        if let Some(plan) = a.visible_plan.as_mut() {
+            plan.items[0].status = WorkItemStatus::Done;
+            plan.items[1].status = WorkItemStatus::Active;
+        }
+        assert_ne!(plan_open_fingerprint(&a), plan_open_fingerprint(&b));
+
+        // Plan identity matters too; switching to another visible plan with the
+        // same labels is still a new operator-visible stale state.
+        let mut c = b.clone();
+        c.visible_plan.as_mut().unwrap().plan_id = "repo:other".into();
+        assert_ne!(plan_open_fingerprint(&c), plan_open_fingerprint(&b));
     }
 
     #[test]
