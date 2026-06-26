@@ -182,6 +182,7 @@ pub struct RuntimeCapabilitiesResponse {
     pub probes: RuntimeProbeCapabilities,
     pub browser_web: WebCapabilityDescriptor,
     pub acp_websocket: bool,
+    pub acp_websocket_path: &'static str,
     pub daemon_event_ingress: bool,
 }
 
@@ -380,6 +381,8 @@ pub struct WebCapabilityDescriptor {
     pub actions_api: bool,
     /// Legacy dashboard/control websocket remains available for compatibility.
     pub legacy_ws: bool,
+    /// Browser-compatible ACP transport for agent session protocol frames.
+    pub acp_websocket_path: &'static str,
     pub supports_tool_approval: bool,
     pub supports_operator_wait: bool,
     pub supports_session_resume: bool,
@@ -949,6 +952,7 @@ fn web_capabilities_descriptor() -> WebCapabilityDescriptor {
         surface_stream: true,
         actions_api: true,
         legacy_ws: true,
+        acp_websocket_path: "/api/acp",
         supports_tool_approval: true,
         supports_operator_wait: true,
         supports_session_resume: true,
@@ -1168,6 +1172,7 @@ pub async fn get_runtime_capabilities() -> Json<RuntimeCapabilitiesResponse> {
         },
         browser_web: web_capabilities_descriptor(),
         acp_websocket: true,
+        acp_websocket_path: "/api/acp",
         daemon_event_ingress: true,
     })
 }
@@ -1932,6 +1937,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert!(response.surface_stream);
         assert!(response.actions_api);
         assert!(response.legacy_ws);
+        assert_eq!(response.acp_websocket_path, "/api/acp");
         assert!(response.supports_session_resume);
         assert!(response.supports_attachments);
     }
@@ -1949,6 +1955,8 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert!(response.browser_web.surface_stream);
         assert!(response.browser_web.actions_api);
         assert!(response.acp_websocket);
+        assert_eq!(response.acp_websocket_path, "/api/acp");
+        assert_eq!(response.browser_web.acp_websocket_path, "/api/acp");
         assert!(response.daemon_event_ingress);
     }
 
