@@ -479,6 +479,70 @@ mod tests {
     }
 
     #[test]
+    fn plan_surface_is_empty_without_plan_update() {
+        let plan = project_plan(&test_state());
+        assert!(plan.active.is_none());
+        assert!(plan.workstreams.is_empty());
+        assert_eq!(plan.reconciliation_issues, 0);
+        assert!(plan.promotion_nudges.is_empty());
+        assert_eq!(plan.resume_candidates, 0);
+    }
+
+    #[test]
+    fn plan_surface_projects_active_lane_and_workstreams() {
+        let state = test_state();
+        {
+            let mut plan = state.plan_surface.lock().expect("plan surface lock");
+            *plan = omegon_traits::PlanSurfaceProjection {
+                active: Some(omegon_traits::PlanLaneProjection {
+                    plan_id: "session:current".into(),
+                    mode: "executing".into(),
+                    guidance: "advance the current implementation slice".into(),
+                    status: "active".into(),
+                    scope: "session".into(),
+                    source: "operator".into(),
+                    progress: omegon_traits::PlanProgressProjection {
+                        completed: 2,
+                        total: 4,
+                    },
+                    items: vec![omegon_traits::PlanItemProjection {
+                        id: Some("task-1".into()),
+                        label: "Wire plan surface into the web rail".into(),
+                        status: "active".into(),
+                        intent: Some("implementation".into()),
+                        writable: true,
+                    }],
+                }),
+                workstreams: vec![omegon_traits::PlanWorkstreamProjection {
+                    id: "ws-ui".into(),
+                    title: "Web UI".into(),
+                    status: "active".into(),
+                    progress: omegon_traits::PlanProgressProjection {
+                        completed: 3,
+                        total: 5,
+                    },
+                }],
+                promotion_nudges: vec!["record the web surface contract".into()],
+                ..Default::default()
+            };
+        }
+
+        let projected = project_plan(&state);
+        let active = projected.active.expect("active plan lane");
+        assert_eq!(active.plan_id, "session:current");
+        assert_eq!(active.mode, "executing");
+        assert_eq!(active.completed, 2);
+        assert_eq!(active.total, 4);
+        assert_eq!(active.items.len(), 1);
+        assert_eq!(active.items[0].label, "Wire plan surface into the web rail");
+        assert_eq!(active.items[0].intent.as_deref(), Some("implementation"));
+        assert!(active.items[0].writable);
+        assert_eq!(projected.workstreams.len(), 1);
+        assert_eq!(projected.workstreams[0].completed, 3);
+        assert_eq!(projected.promotion_nudges, vec!["record the web surface contract"]);
+    }
+
+    #[test]
     fn operations_surface_projects_delegate_children() {
         let mut state = test_state();
         state.handles.delegate = Some(Arc::new(Mutex::new(DelegateProgress {
