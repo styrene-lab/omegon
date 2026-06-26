@@ -555,6 +555,13 @@ pub async fn post_web_attachment(
     std::fs::create_dir_all(&dir).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let data_path = dir.join("data.bin");
     std::fs::write(&data_path, &bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Also materialize under the original (sanitized) filename so downstream
+    // image detection — which keys off the extension — works when this
+    // attachment is later resolved into a prompt's attachment paths.
+    let named_path = dir.join(&filename);
+    if named_path != data_path {
+        std::fs::write(&named_path, &bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
     let expires_at = (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
     let response = WebAttachmentResponse {
         id,
@@ -566,6 +573,35 @@ pub async fn post_web_attachment(
     let meta = serde_json::to_string(&response).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     std::fs::write(dir.join("meta.json"), meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// Resolve staged attachment ids to on-disk file paths (with original
+/// extensions) for inclusion in a prompt. Returns `Err(reason)` naming the
+/// first id that is malformed, unknown, or missing its staged file.
+fn resolve_web_attachment_paths(ids: &[String]) -> Result<Vec<String>, String> {
+    let mut paths = Vec::with_capacity(ids.len());
+    for id in ids {
+        if id.contains(['/', '\\', '\0']) || id.trim().is_empty() {
+            return Err(format!("invalid attachment id '{id}'"));
+        }
+        let dir = web_attachment_root().join(id);
+        let meta_path = dir.join("meta.json");
+        let meta = std::fs::read_to_string(&meta_path)
+            .map_err(|_| format!("unknown or expired attachment '{id}'"))?;
+        let attachment: WebAttachmentResponse = serde_json::from_str(&meta)
+            .map_err(|_| format!("corrupt attachment metadata for '{id}'"))?;
+        let named = dir.join(&attachment.filename);
+        let path = if named.exists() {
+            named
+        } else {
+            dir.join("data.bin")
+        };
+        if !path.exists() {
+            return Err(format!("attachment data missing for '{id}'"));
+        }
+        paths.push(path.to_string_lossy().into_owned());
+    }
+    Ok(paths)
 }
 
 /// POST /api/web/actions — browser-native semantic action ingress.
@@ -603,19 +639,27 @@ pub async fn post_web_action(
 
     let send_result = match request.action {
         WebActionPayload::SubmitPrompt { text, attachments } => {
-            if !attachments.is_empty() {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(
-                        crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
-                            request.session_id,
-                            request.action_id,
-                            "attachment prompt conversion is not implemented yet",
-                        ),
-                    ),
-                );
-            }
-            if text.trim().is_empty() {
+            let image_paths = if attachments.is_empty() {
+                Vec::new()
+            } else {
+                match resolve_web_attachment_paths(&attachments) {
+                    Ok(paths) => paths,
+                    Err(reason) => {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(
+                                crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                                    request.session_id,
+                                    request.action_id,
+                                    &reason,
+                                ),
+                            ),
+                        );
+                    }
+                }
+            };
+            // An image-only prompt (text empty, attachments present) is valid.
+            if text.trim().is_empty() && image_paths.is_empty() {
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(
@@ -627,10 +671,17 @@ pub async fn post_web_action(
                     ),
                 );
             }
-            state.record_user_segment(&text);
+            let segment_text = if text.trim().is_empty() {
+                format!("[{} attachment(s)]", image_paths.len())
+            } else if image_paths.is_empty() {
+                text.clone()
+            } else {
+                format!("{text}  [{} attachment(s)]", image_paths.len())
+            };
+            state.record_user_segment(&segment_text);
             state
                 .command_tx
-                .try_send(super::WebCommand::UserPrompt(text))
+                .try_send(super::WebCommand::UserPrompt { text, image_paths })
         }
         WebActionPayload::CancelActiveTurn => state.command_tx.try_send(super::WebCommand::Cancel),
         WebActionPayload::RunSlashCommand { raw } => {
@@ -1499,6 +1550,37 @@ required = ["MISSING_REQUIRED_TOKEN"]
     }
 
     #[tokio::test]
+    async fn resolve_attachment_paths_returns_named_file_for_images() {
+        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
+        let (status, created) = post_web_attachment(Json(WebAttachmentCreateRequest {
+            filename: "shot.png".to_string(),
+            content_type: Some("image/png".to_string()),
+            data_base64: base64::engine::general_purpose::STANDARD.encode(b"\x89PNGfake"),
+        }))
+        .await
+        .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+
+        let paths =
+            resolve_web_attachment_paths(std::slice::from_ref(&created.id)).expect("resolves");
+        assert_eq!(paths.len(), 1);
+        // Resolves to the original-extension file so downstream image detection
+        // (which keys off the extension) recognizes it — not the .bin blob.
+        assert!(paths[0].ends_with("shot.png"), "path was {}", paths[0]);
+        assert!(std::path::Path::new(&paths[0]).exists());
+    }
+
+    #[tokio::test]
+    async fn resolve_attachment_paths_rejects_unknown_and_traversal_ids() {
+        // Unknown id → descriptive error, not a panic.
+        let err = resolve_web_attachment_paths(&["att-does-not-exist".to_string()]).unwrap_err();
+        assert!(err.contains("unknown or expired"), "got {err}");
+        // Traversal-shaped id is refused before any filesystem touch.
+        let err = resolve_web_attachment_paths(&["../../etc/passwd".to_string()]).unwrap_err();
+        assert!(err.contains("invalid attachment id"), "got {err}");
+    }
+
+    #[tokio::test]
     async fn web_attachments_reject_path_traversal_names() {
         let response = post_web_attachment(Json(WebAttachmentCreateRequest {
             filename: "../secret.txt".to_string(),
@@ -1584,7 +1666,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
             crate::ui_runtime::envelope::UiActionOutcomeStatus::Accepted
         );
         match rx.recv().await.unwrap() {
-            super::super::WebCommand::UserPrompt(text) => assert_eq!(text, "hello web"),
+            super::super::WebCommand::UserPrompt { text, .. } => assert_eq!(text, "hello web"),
             other => panic!("unexpected command: {other:?}"),
         }
     }

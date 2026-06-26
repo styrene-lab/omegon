@@ -147,8 +147,9 @@ paths:
                 $ref: "#/components/schemas/UiActionOutcomeEnvelope"
         "400":
           description: >
-            Rejected — unsupported schema_version, empty prompt text, non-slash
-            slash command, or attachment-prompt conversion (not yet implemented).
+            Rejected — unsupported schema_version, a prompt with neither text
+            nor attachments, a non-slash "slash" command, or an unknown,
+            expired, or malformed attachment id.
           content:
             application/json:
               schema:

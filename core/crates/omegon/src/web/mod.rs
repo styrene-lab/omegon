@@ -593,7 +593,12 @@ fn start_conversation_accumulator(state: &WebState) {
 /// Commands received from WebSocket clients, forwarded to the main loop.
 #[derive(Debug)]
 pub enum WebCommand {
-    UserPrompt(String),
+    UserPrompt {
+        text: String,
+        /// Resolved on-disk attachment paths (images render inline; other types
+        /// are summarized downstream). Empty for a plain text prompt.
+        image_paths: Vec<String>,
+    },
     SlashCommand {
         name: String,
         args: String,
@@ -1028,7 +1033,10 @@ async fn process_due_loop_jobs(
         );
         state
             .command_tx
-            .send(WebCommand::UserPrompt(prompt))
+            .send(WebCommand::UserPrompt {
+                text: prompt,
+                image_paths: Vec::new(),
+            })
             .await?;
         crate::features::loop_jobs::append_run_record(
             project_root,
@@ -1069,7 +1077,10 @@ pub(crate) async fn process_next_daemon_event(state: &WebState) -> anyhow::Resul
             .payload
             .get("text")
             .and_then(|value| value.as_str())
-            .map(|text| WebCommand::UserPrompt(text.to_string())),
+            .map(|text| WebCommand::UserPrompt {
+                text: text.to_string(),
+                image_paths: Vec::new(),
+            }),
         "slash-command" => event
             .payload
             .get("name")
@@ -1447,7 +1458,7 @@ mod tests {
         assert!(processed);
         let command = command_rx.recv().await.unwrap();
         match command {
-            WebCommand::UserPrompt(text) => assert_eq!(text, "hello from queue"),
+            WebCommand::UserPrompt { text, .. } => assert_eq!(text, "hello from queue"),
             other => panic!("wrong command: {other:?}"),
         }
         let status = state.daemon_status.lock().unwrap().clone();
@@ -1736,7 +1747,7 @@ mod tests {
         assert!(processed);
         let command = command_rx.recv().await.unwrap();
         match command {
-            WebCommand::UserPrompt(text) => assert_eq!(text, "runtime check"),
+            WebCommand::UserPrompt { text, .. } => assert_eq!(text, "runtime check"),
             other => panic!("wrong command: {other:?}"),
         }
 
@@ -1843,7 +1854,7 @@ mod tests {
         process_due_loop_jobs(&state, dir.path()).await.unwrap();
         let command = command_rx.recv().await.unwrap();
         match command {
-            WebCommand::UserPrompt(text) => {
+            WebCommand::UserPrompt { text, .. } => {
                 assert!(text.contains("Recurring loop job `loop-test`"));
                 assert!(text.contains("loop body"));
             }
