@@ -1,7 +1,7 @@
 //! Browser-native surface stream WebSocket.
 
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,38 @@ pub async fn web_surface_stream_handler(
     Query(query): Query<WebSurfaceStreamQuery>,
     State(state): State<WebState>,
 ) -> impl IntoResponse {
+    authorize_surface_stream(ws, query, state, None)
+}
+
+pub async fn native_session_surface_stream_handler(
+    ws: WebSocketUpgrade,
+    Path(session_id): Path<String>,
+    Query(query): Query<WebSurfaceStreamQuery>,
+    State(state): State<WebState>,
+) -> impl IntoResponse {
+    authorize_surface_stream(ws, query, state, Some(session_id))
+}
+
+fn validate_surface_stream_session_id(
+    session_id: Option<&str>,
+) -> Result<(), axum::http::StatusCode> {
+    if let Some(session_id) = session_id
+        && session_id != "default"
+    {
+        return Err(axum::http::StatusCode::NOT_FOUND);
+    }
+    Ok(())
+}
+
+fn authorize_surface_stream(
+    ws: WebSocketUpgrade,
+    query: WebSurfaceStreamQuery,
+    state: WebState,
+    session_id: Option<String>,
+) -> axum::response::Response {
+    if let Err(status) = validate_surface_stream_session_id(session_id.as_deref()) {
+        return status.into_response();
+    }
     if !state.web_auth.verify_query_token(query.token.as_deref()) {
         return axum::http::StatusCode::UNAUTHORIZED.into_response();
     }
@@ -263,6 +295,16 @@ mod tests {
             crate::web::auth::WebAuthState::ephemeral_generated("test-token".to_string()),
             Some(secrets),
         )
+    }
+
+    #[test]
+    fn native_session_surface_stream_rejects_unknown_session_id() {
+        assert_eq!(
+            validate_surface_stream_session_id(Some("missing")),
+            Err(axum::http::StatusCode::NOT_FOUND)
+        );
+        assert!(validate_surface_stream_session_id(Some("default")).is_ok());
+        assert!(validate_surface_stream_session_id(None).is_ok());
     }
 
     #[test]

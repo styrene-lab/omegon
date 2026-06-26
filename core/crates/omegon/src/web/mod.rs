@@ -766,7 +766,7 @@ pub async fn start_server_with_options(
     let app = Router::new()
         .route(
             "/api/sessions/{session_id}/surfaces/stream",
-            axum::routing::get(surface_stream::web_surface_stream_handler),
+            axum::routing::get(surface_stream::native_session_surface_stream_handler),
         )
         .route(
             "/api/sessions/{session_id}/surfaces",
@@ -783,6 +783,10 @@ pub async fn start_server_with_options(
         .route(
             "/api/sessions",
             axum::routing::post(api::post_native_session),
+        )
+        .route(
+            "/api/assistant-profiles/{id}",
+            axum::routing::get(api::get_assistant_profile),
         )
         .route(
             "/api/assistant-runs/{run_id}",
