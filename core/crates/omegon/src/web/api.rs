@@ -227,6 +227,24 @@ pub struct LifecycleDesignNodeResponse {
     pub node: NodeBrief,
 }
 
+#[derive(Serialize)]
+pub struct LifecycleDesignReadyResponse {
+    pub schema_version: u8,
+    pub nodes: Vec<crate::lifecycle::query::ReadyNode>,
+}
+
+#[derive(Serialize)]
+pub struct LifecycleDesignBlockedResponse {
+    pub schema_version: u8,
+    pub nodes: Vec<crate::lifecycle::query::BlockedNode>,
+}
+
+#[derive(Serialize)]
+pub struct LifecycleDesignFrontierResponse {
+    pub schema_version: u8,
+    pub nodes: Vec<crate::lifecycle::query::FrontierNode>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeProbeCapabilities {
     pub healthz: bool,
@@ -1038,6 +1056,52 @@ pub async fn get_lifecycle_design_node(
     Ok(Json(LifecycleDesignNodeResponse {
         schema_version: 1,
         node: node_brief(node),
+    }))
+}
+
+fn lifecycle_nodes(
+    state: &WebState,
+) -> Result<std::collections::HashMap<String, crate::lifecycle::types::DesignNode>, StatusCode> {
+    let Some(lifecycle) = state.handles.lifecycle.as_ref() else {
+        return Ok(std::collections::HashMap::new());
+    };
+    let provider = lifecycle.provider();
+    let guard = provider
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(guard.all_nodes().clone())
+}
+
+/// GET /api/lifecycle/design/ready — decided nodes whose dependencies are implemented.
+pub async fn get_lifecycle_design_ready(
+    State(state): State<WebState>,
+) -> Result<Json<LifecycleDesignReadyResponse>, StatusCode> {
+    let nodes = lifecycle_nodes(&state)?;
+    Ok(Json(LifecycleDesignReadyResponse {
+        schema_version: 1,
+        nodes: crate::lifecycle::query::ready(&nodes),
+    }))
+}
+
+/// GET /api/lifecycle/design/blocked — blocked nodes and nodes blocked by dependencies.
+pub async fn get_lifecycle_design_blocked(
+    State(state): State<WebState>,
+) -> Result<Json<LifecycleDesignBlockedResponse>, StatusCode> {
+    let nodes = lifecycle_nodes(&state)?;
+    Ok(Json(LifecycleDesignBlockedResponse {
+        schema_version: 1,
+        nodes: crate::lifecycle::query::blocked(&nodes),
+    }))
+}
+
+/// GET /api/lifecycle/design/frontier — nodes with unresolved open questions.
+pub async fn get_lifecycle_design_frontier(
+    State(state): State<WebState>,
+) -> Result<Json<LifecycleDesignFrontierResponse>, StatusCode> {
+    let nodes = lifecycle_nodes(&state)?;
+    Ok(Json(LifecycleDesignFrontierResponse {
+        schema_version: 1,
+        nodes: crate::lifecycle::query::frontier(&nodes),
     }))
 }
 
