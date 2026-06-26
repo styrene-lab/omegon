@@ -151,15 +151,21 @@ fn surface_stream_event(state: &WebState, revision: u64, event: AgentEvent) -> s
         AgentEvent::OperatorWaitRequest {
             prompt,
             timeout_secs,
-            ..
-        } => json!({
-            "schema_version": 1,
-            "session_id": "default",
-            "revision": revision,
-            "type": "operator_wait_requested",
-            "surface": "command",
-            "payload": { "prompt": prompt, "timeout_secs": timeout_secs },
-        }),
+            acknowledge,
+            respond,
+        } => {
+            // Acknowledge immediately (2s producer deadline) and capture the
+            // responder so POST /api/web/actions can deliver the decision.
+            let request_id = state.register_operator_wait(&acknowledge, &respond);
+            json!({
+                "schema_version": 1,
+                "session_id": "default",
+                "revision": revision,
+                "type": "operator_wait_requested",
+                "surface": "command",
+                "payload": { "request_id": request_id, "prompt": prompt, "timeout_secs": timeout_secs },
+            })
+        }
         other => json!({
             "schema_version": 1,
             "session_id": "default",
@@ -234,5 +240,41 @@ mod tests {
                 .answer_permission(&id, omegon_traits::PermissionResponse::Deny)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn operator_wait_acknowledges_immediately_and_captures_responder() {
+        let state = test_state();
+        let (ack_tx, ack_rx) = std::sync::mpsc::channel();
+        let (resp_tx, resp_rx) = std::sync::mpsc::channel();
+        let acknowledge = std::sync::Arc::new(std::sync::Mutex::new(Some(ack_tx)));
+        let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(resp_tx)));
+        let value = surface_stream_event(
+            &state,
+            5,
+            AgentEvent::OperatorWaitRequest {
+                prompt: "swap the cable".into(),
+                timeout_secs: 120,
+                acknowledge: acknowledge.clone(),
+                respond: respond.clone(),
+            },
+        );
+        assert_eq!(value["type"], "operator_wait_requested");
+        // Acknowledged synchronously (beats the producer's ~2s deadline).
+        assert!(ack_rx.try_recv().is_ok());
+        let id = value["payload"]["request_id"]
+            .as_str()
+            .expect("request_id present")
+            .to_string();
+        assert!(id.starts_with("wait-"));
+        // The browser's later decision reaches the agent channel.
+        state
+            .answer_operator_wait(&id, true)
+            .expect("answer succeeds");
+        assert_eq!(
+            resp_rx.recv().unwrap(),
+            omegon_traits::OperatorWaitResponse::Completed
+        );
+        assert!(state.answer_operator_wait(&id, false).is_err());
     }
 }

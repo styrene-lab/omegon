@@ -222,6 +222,50 @@ function renderPermissionPrompt(requestId, toolName, path) {
   scrollToBottom();
 }
 
+// Interactive operator-wait prompt with Complete/Cancel → respond_operator_wait.
+function renderOperatorWaitPrompt(requestId, prompt, timeoutSecs) {
+  clearEmpty();
+  if (!requestId) {
+    banner("Waiting on operator: " + (prompt || ""));
+    return;
+  }
+  const box = document.createElement("div");
+  box.className = "banner";
+  const label = document.createElement("div");
+  label.textContent =
+    "Operator action needed: " + (prompt || "") +
+    (timeoutSecs ? " (times out in " + timeoutSecs + "s)" : "");
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex;gap:8px;margin-top:8px;";
+  const done = document.createElement("button");
+  done.textContent = "Mark complete";
+  const cancel = document.createElement("button");
+  cancel.className = "ghost";
+  cancel.textContent = "Cancel";
+  const settle = async (completed) => {
+    done.disabled = true;
+    cancel.disabled = true;
+    const outcome = await postAction({
+      type: "respond_operator_wait",
+      request_id: requestId,
+      completed,
+    });
+    box.className = "tool-line" + (completed ? "" : " error");
+    box.textContent = "Operator action " + (completed ? "completed" : "cancelled");
+    if (outcome && outcome.status === "rejected") {
+      box.textContent += " (" + (outcome.error || "no longer awaiting") + ")";
+    }
+  };
+  done.addEventListener("click", () => settle(true));
+  cancel.addEventListener("click", () => settle(false));
+  row.appendChild(done);
+  row.appendChild(cancel);
+  box.appendChild(label);
+  box.appendChild(row);
+  transcript.appendChild(box);
+  scrollToBottom();
+}
+
 function scrollToBottom() {
   transcript.scrollTop = transcript.scrollHeight;
 }
@@ -340,7 +384,7 @@ function handleEvent(msg) {
     }
     case "operator_wait_requested": {
       const p = msg.payload || {};
-      banner("Waiting on operator: " + (p.prompt || ""));
+      renderOperatorWaitPrompt(p.request_id, p.prompt, p.timeout_secs);
       break;
     }
     case "error":

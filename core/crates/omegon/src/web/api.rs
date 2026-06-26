@@ -688,8 +688,39 @@ pub async fn post_web_action(
                 ),
             };
         }
-        WebActionPayload::RespondOperatorWait { .. }
-        | WebActionPayload::CopyLatestResponse
+        WebActionPayload::RespondOperatorWait {
+            request_id,
+            completed,
+        } => {
+            return match state.answer_operator_wait(&request_id, completed) {
+                Ok(()) => (
+                    StatusCode::ACCEPTED,
+                    Json(web_outcome_accepted(
+                        request.session_id,
+                        request.action_id,
+                        Some(
+                            if completed {
+                                "operator action completed"
+                            } else {
+                                "operator action cancelled"
+                            }
+                            .to_string(),
+                        ),
+                    )),
+                ),
+                Err(reason) => (
+                    StatusCode::NOT_FOUND,
+                    Json(
+                        crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                            request.session_id,
+                            request.action_id,
+                            reason,
+                        ),
+                    ),
+                ),
+            };
+        }
+        WebActionPayload::CopyLatestResponse
         | WebActionPayload::SelectSegment { .. }
         | WebActionPayload::CopySegment { .. } => {
             return (
@@ -1343,6 +1374,9 @@ mod tests {
             daemon_events: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             daemon_status: std::sync::Arc::new(std::sync::Mutex::new(WebDaemonStatus::default())),
             pending_permissions: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            pending_operator_waits: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
         }
