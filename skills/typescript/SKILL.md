@@ -223,6 +223,6 @@ interface ToolResult {
 import type { AgentToolResult } from "@styrene-lab/omegon-coding-agent";
 ```
 
-The package name above is illustrative. Use the project-local SDK dependency that owns the type; do not cargo-cult legacy `pi-*` package names into new code.
+The package name above is illustrative. Use the project-local SDK dependency that owns the type; do not cargo-cult legacy package names from older projects into new code.
 
 **Directive:** Always import SDK types. Never redefine them locally. If an SDK type is not exported, file an issue or use module augmentation — don't copy the shape.

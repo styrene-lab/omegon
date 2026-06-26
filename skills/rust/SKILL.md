@@ -11,7 +11,7 @@ project_signals = ["Cargo.toml", "*.rs"]
 
 # Rust Development Skill
 
-Conventions for Rust development, with a dedicated section for Zellij WASM plugin development.
+Conventions for Rust development and Cargo workflows.
 
 ## Core Conventions
 

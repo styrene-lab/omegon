@@ -1217,6 +1217,21 @@
       "bound_change": null,
       "created_at": "2026-06-17T15:37:49Z",
       "updated_at": "2026-06-17T15:37:49Z"
+    },
+    {
+      "id": "bundled-armory-local-skill-posture",
+      "title": "Bundled vs Armory vs Local Skill Posture",
+      "state": "seed",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-26T13:19:46Z",
+      "updated_at": "2026-06-26T13:19:46Z"
     }
   ],
   "changes": [
@@ -3163,6 +3178,15 @@
       "to_state": "exploring",
       "reason": "initial status on create",
       "forced": true
+    },
+    {
+      "timestamp": "2026-06-26T13:19:46Z",
+      "entity_type": "node",
+      "entity_id": "bundled-armory-local-skill-posture",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
     }
   ]
 }
