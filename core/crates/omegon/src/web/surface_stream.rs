@@ -52,7 +52,7 @@ async fn handle_surface_stream(socket: WebSocket, state: WebState) {
         match events_rx.recv().await {
             Ok(event) => {
                 revision += 1;
-                let message = surface_stream_event(revision, event);
+                let message = surface_stream_event(&state, revision, event);
                 if ws_tx
                     .send(Message::Text(message.to_string().into()))
                     .await
@@ -78,7 +78,7 @@ async fn handle_surface_stream(socket: WebSocket, state: WebState) {
     }
 }
 
-fn surface_stream_event(revision: u64, event: AgentEvent) -> serde_json::Value {
+fn surface_stream_event(state: &WebState, revision: u64, event: AgentEvent) -> serde_json::Value {
     match event {
         AgentEvent::TurnStart { turn } => json!({
             "schema_version": 1,
@@ -131,15 +131,23 @@ fn surface_stream_event(revision: u64, event: AgentEvent) -> serde_json::Value {
             "payload": { "id": id, "name": name, "is_error": is_error },
         }),
         AgentEvent::PermissionRequest {
-            tool_name, path, ..
-        } => json!({
-            "schema_version": 1,
-            "session_id": "default",
-            "revision": revision,
-            "type": "permission_requested",
-            "surface": "command",
-            "payload": { "tool_name": tool_name, "path": path },
-        }),
+            tool_name,
+            path,
+            respond,
+            ..
+        } => {
+            // Capture the responder so POST /api/web/actions can answer it, and
+            // hand the browser the stable id to echo back.
+            let request_id = state.register_permission(&respond);
+            json!({
+                "schema_version": 1,
+                "session_id": "default",
+                "revision": revision,
+                "type": "permission_requested",
+                "surface": "command",
+                "payload": { "request_id": request_id, "tool_name": tool_name, "path": path },
+            })
+        }
         AgentEvent::OperatorWaitRequest {
             prompt,
             timeout_secs,
@@ -167,9 +175,17 @@ fn surface_stream_event(revision: u64, event: AgentEvent) -> serde_json::Value {
 mod tests {
     use super::*;
 
+    fn test_state() -> WebState {
+        WebState::new(
+            super::super::DashboardHandles::default(),
+            tokio::sync::broadcast::channel(16).0,
+        )
+    }
+
     #[test]
     fn surface_stream_maps_tool_start() {
         let value = surface_stream_event(
+            &test_state(),
             7,
             AgentEvent::ToolStart {
                 id: "t1".into(),
@@ -182,5 +198,41 @@ mod tests {
         assert_eq!(value["type"], "tool_started");
         assert_eq!(value["surface"], "instruments");
         assert_eq!(value["payload"]["id"], "t1");
+    }
+
+    #[test]
+    fn permission_request_registers_responder_and_emits_id() {
+        let state = test_state();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+        let value = surface_stream_event(
+            &state,
+            3,
+            AgentEvent::PermissionRequest {
+                tool_name: "bash".into(),
+                path: "/tmp".into(),
+                kind: omegon_traits::PermissionRequestKind::PathBoundary,
+                persistence: omegon_traits::PermissionPersistence::None,
+                grant_path: None,
+                respond: respond.clone(),
+            },
+        );
+        assert_eq!(value["type"], "permission_requested");
+        let id = value["payload"]["request_id"]
+            .as_str()
+            .expect("request_id present")
+            .to_string();
+        assert!(id.starts_with("perm-"));
+        // The responder was captured; answering it drives the agent's channel.
+        state
+            .answer_permission(&id, omegon_traits::PermissionResponse::Allow)
+            .expect("answer succeeds");
+        assert_eq!(rx.recv().unwrap(), omegon_traits::PermissionResponse::Allow);
+        // Second answer to the same id is rejected (already removed).
+        assert!(
+            state
+                .answer_permission(&id, omegon_traits::PermissionResponse::Deny)
+                .is_err()
+        );
     }
 }

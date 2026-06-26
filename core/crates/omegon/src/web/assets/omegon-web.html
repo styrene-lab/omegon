@@ -183,6 +183,45 @@ function banner(text) {
   scrollToBottom();
 }
 
+// Interactive permission prompt with Approve/Deny → POST respond_permission.
+function renderPermissionPrompt(requestId, toolName, path) {
+  clearEmpty();
+  if (!requestId) {
+    banner("Permission requested: " + (toolName || "tool") + (path ? " · " + path : ""));
+    return;
+  }
+  const box = document.createElement("div");
+  box.className = "banner";
+  const label = document.createElement("div");
+  label.textContent = "Permission requested: " + (toolName || "tool") + (path ? " · " + path : "");
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex;gap:8px;margin-top:8px;";
+  const approve = document.createElement("button");
+  approve.textContent = "Approve";
+  const deny = document.createElement("button");
+  deny.className = "ghost";
+  deny.textContent = "Deny";
+  const settle = async (allow) => {
+    approve.disabled = true;
+    deny.disabled = true;
+    const outcome = await postAction({ type: "respond_permission", request_id: requestId, allow });
+    box.className = "tool-line" + (allow ? "" : " error");
+    box.textContent =
+      "Permission " + (allow ? "approved" : "denied") + ": " + (toolName || "tool");
+    if (outcome && outcome.status === "rejected") {
+      box.textContent += " (" + (outcome.error || "no longer awaiting") + ")";
+    }
+  };
+  approve.addEventListener("click", () => settle(true));
+  deny.addEventListener("click", () => settle(false));
+  row.appendChild(approve);
+  row.appendChild(deny);
+  box.appendChild(label);
+  box.appendChild(row);
+  transcript.appendChild(box);
+  scrollToBottom();
+}
+
 function scrollToBottom() {
   transcript.scrollTop = transcript.scrollHeight;
 }
@@ -296,7 +335,7 @@ function handleEvent(msg) {
     }
     case "permission_requested": {
       const p = msg.payload || {};
-      banner("Permission requested: " + (p.tool_name || "tool") + (p.path ? " · " + p.path : ""));
+      renderPermissionPrompt(p.request_id, p.tool_name, p.path);
       break;
     }
     case "operator_wait_requested": {
