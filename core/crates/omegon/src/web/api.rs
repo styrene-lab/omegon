@@ -7,7 +7,9 @@ use crate::status::HarnessStatus;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use base64::Engine;
+use futures_util::stream;
 use omegon_traits::{DaemonEventEnvelope, OmegonInstanceDescriptor};
 use serde::{Deserialize, Serialize};
 
@@ -265,6 +267,14 @@ pub struct DaemonEventsResponse {
     pub queued_events: usize,
     pub processed_events: usize,
     pub events: Vec<DaemonEventEnvelope>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DaemonEventStreamEnvelope {
+    pub schema_version: u8,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub payload: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1220,6 +1230,123 @@ pub async fn get_ready(State(state): State<WebState>) -> (StatusCode, Json<Probe
             }),
         ),
     }
+}
+
+pub fn daemon_event_stream_envelope(
+    event: &omegon_traits::AgentEvent,
+) -> Option<DaemonEventStreamEnvelope> {
+    use omegon_traits::AgentEvent;
+    let (event_type, payload) = match event {
+        AgentEvent::TurnStart { turn } => {
+            ("session.turn_started", serde_json::json!({ "turn": turn }))
+        }
+        AgentEvent::TurnEnd(summary) => (
+            "session.turn_ended",
+            serde_json::json!({
+                "turn": summary.turn,
+                "tool_calls": summary.stats_tool_calls,
+                "model": summary.model,
+                "provider": summary.provider,
+                "estimated_tokens": summary.estimated_tokens,
+            }),
+        ),
+        AgentEvent::AgentEnd => ("session.ended", serde_json::json!({})),
+        AgentEvent::RouteChanged {
+            state,
+            selected,
+            serving,
+            warning,
+            message,
+        } => (
+            "provider.status_changed",
+            serde_json::json!({
+                "state": state,
+                "selected": selected,
+                "serving": serving,
+                "warning": warning,
+                "message": message,
+            }),
+        ),
+        AgentEvent::SkillActivation { event } => (
+            "extension.status_changed",
+            serde_json::to_value(event).unwrap_or_else(|_| serde_json::json!({})),
+        ),
+        AgentEvent::HarnessStatusChanged { status_json } => {
+            ("runtime.status_changed", status_json.clone())
+        }
+        AgentEvent::PlanUpdated { projection } => (
+            "lifecycle.snapshot_changed",
+            serde_json::to_value(projection).unwrap_or_else(|_| serde_json::json!({})),
+        ),
+        AgentEvent::WebDashboardStarted { startup_json } => {
+            ("runtime.web_started", startup_json.clone())
+        }
+        AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
+            ("runtime.queue_changed", snapshot_json.clone())
+        }
+        AgentEvent::ContextUpdated {
+            tokens,
+            context_window,
+            context_class,
+            thinking_level,
+        } => (
+            "runtime.context_changed",
+            serde_json::json!({
+                "tokens": tokens,
+                "context_window": context_window,
+                "context_class": context_class,
+                "thinking_level": thinking_level,
+            }),
+        ),
+        _ => return None,
+    };
+    Some(DaemonEventStreamEnvelope {
+        schema_version: 1,
+        event_type: event_type.to_string(),
+        payload,
+    })
+}
+
+/// GET /api/events/stream — Server-Sent Events stream for daemon/app dashboards.
+pub async fn get_events_stream(
+    State(state): State<WebState>,
+) -> Sse<impl futures_util::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let rx = state.events_tx.subscribe();
+    let stream = stream::unfold(rx, move |mut rx| async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    if let Some(envelope) = daemon_event_stream_envelope(&event) {
+                        let data =
+                            serde_json::to_string(&envelope).unwrap_or_else(|_| "{}".to_string());
+                        let event = Event::default()
+                            .event(envelope.event_type.clone())
+                            .data(data);
+                        return Some((Ok(event), rx));
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    let envelope = DaemonEventStreamEnvelope {
+                        schema_version: 1,
+                        event_type: "stream.lagged".to_string(),
+                        payload: serde_json::json!({
+                            "skipped_events": skipped,
+                            "recovery": {
+                                "action": "refetch_snapshot",
+                                "href": "/api/events"
+                            }
+                        }),
+                    };
+                    let data =
+                        serde_json::to_string(&envelope).unwrap_or_else(|_| "{}".to_string());
+                    let event = Event::default().event("stream.lagged").data(data);
+                    return Some((Ok(event), rx));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 /// GET /api/events — read-only daemon event queue snapshot for web/console clients.
@@ -2586,6 +2713,40 @@ required = ["BRAVE_API_KEY"]
         assert_eq!(response.queued_events, 1);
         assert_eq!(response.processed_events, 2);
         assert_eq!(response.events[0].event_id, "evt-queued");
+    }
+
+    #[test]
+    fn daemon_event_stream_maps_runtime_and_provider_events() {
+        let runtime = daemon_event_stream_envelope(&omegon_traits::AgentEvent::ContextUpdated {
+            tokens: 512,
+            context_window: 4096,
+            context_class: "standard".into(),
+            thinking_level: "medium".into(),
+        })
+        .expect("context event maps");
+        assert_eq!(runtime.event_type, "runtime.context_changed");
+        assert_eq!(runtime.payload["tokens"], 512);
+
+        let provider = daemon_event_stream_envelope(&omegon_traits::AgentEvent::RouteChanged {
+            state: "ready".into(),
+            selected: Some("anthropic/claude".into()),
+            serving: Some("anthropic".into()),
+            warning: None,
+            message: "provider ready".into(),
+        })
+        .expect("provider event maps");
+        assert_eq!(provider.event_type, "provider.status_changed");
+        assert_eq!(provider.payload["selected"], "anthropic/claude");
+    }
+
+    #[test]
+    fn daemon_event_stream_ignores_conversation_chunks() {
+        assert!(
+            daemon_event_stream_envelope(&omegon_traits::AgentEvent::MessageChunk {
+                text: "not daemon state".into(),
+            })
+            .is_none()
+        );
     }
 
     #[tokio::test]

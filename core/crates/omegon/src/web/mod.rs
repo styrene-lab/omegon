@@ -770,6 +770,10 @@ pub async fn start_server_with_options(
         .route("/api/readyz", axum::routing::get(api::get_ready))
         .route("/api/graph", axum::routing::get(api::get_graph))
         .route(
+            "/api/events/stream",
+            axum::routing::get(api::get_events_stream),
+        )
+        .route(
             "/api/events",
             axum::routing::get(api::get_events).post(api::post_event),
         )
