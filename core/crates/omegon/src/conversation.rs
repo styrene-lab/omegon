@@ -130,10 +130,17 @@ pub struct IntentDocument {
     #[serde(default)]
     pub skill_completion_nudged: bool,
 
-    /// Set to true after the agent has been nudged to reconcile an incomplete
-    /// visible Workbench plan before ending the turn.
+    /// Fingerprint of the open (Pending/Active) work-plan state at the last
+    /// reconciliation nudge, plus how many times that exact state has been
+    /// nudged. A changed fingerprint (genuine progress or a new orphaned plan)
+    /// re-arms the nudge; an unchanged one is bounded by
+    /// `MAX_PLAN_RECONCILIATION_NUDGES`. Replaces the former one-shot
+    /// `plan_reconciliation_nudged` latch, which disarmed reconciliation for
+    /// the rest of the session after a single early nudge.
     #[serde(default)]
-    pub plan_reconciliation_nudged: bool,
+    pub plan_reconciliation_fingerprint: Option<u64>,
+    #[serde(default)]
+    pub plan_reconciliation_nudges: u8,
 
     /// Set when the user's prompt contains MCQ options (A/B/C/D pattern).
     /// The loop injects a format hint so the agent states the letter answer.
