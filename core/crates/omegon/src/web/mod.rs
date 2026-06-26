@@ -712,6 +712,18 @@ pub async fn start_server_with_options(
             axum::routing::get(api::get_web_launch_context),
         )
         .route(
+            "/api/lifecycle/design/frontier",
+            axum::routing::get(api::get_lifecycle_design_frontier),
+        )
+        .route(
+            "/api/lifecycle/design/blocked",
+            axum::routing::get(api::get_lifecycle_design_blocked),
+        )
+        .route(
+            "/api/lifecycle/design/ready",
+            axum::routing::get(api::get_lifecycle_design_ready),
+        )
+        .route(
             "/api/lifecycle/design/{id}",
             axum::routing::get(api::get_lifecycle_design_node),
         )
