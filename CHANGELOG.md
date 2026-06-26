@@ -41,6 +41,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added prompt skill conflict resolution so overlapping activation/trigger skills inject only one provider by default and user-facing output recommends project-local merge resolution.
 
 ### Changed
+- Expanded the omegon-web browser API capability descriptor with explicit surface stream, actions API, and legacy WebSocket flags, and typed the surface-stream WebSocket envelope for a stable UI contract.
 - Added `omegon skills install` cleanup and `skills doctor` detection for stale installed copies of the old bundled `vault` markdown skill after its rename to `flynt`.
 - Renamed the bundled interlinked-markdown skill from `vault` to `flynt` so markdown workspace guidance no longer overloads HashiCorp Vault/security terminology.
 - Polished bundled skill guidance ahead of 0.27.0 by removing overly project-specific language, softening generic Python environment-manager defaults, and aligning the OCI CI example with immutable-tag guidance.

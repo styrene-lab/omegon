@@ -257,7 +257,14 @@ pub struct WebCapabilityDescriptor {
     pub interactive: bool,
     pub chat: bool,
     pub hosted_web_ui: bool,
+    /// HTTP snapshot/query surface, anchored by GET /api/web/surfaces.
     pub surface_api: bool,
+    /// WebSocket live event surface, anchored by GET /api/web/surfaces/stream.
+    pub surface_stream: bool,
+    /// HTTP action submission surface, anchored by POST /api/web/actions.
+    pub actions_api: bool,
+    /// Legacy dashboard/control websocket remains available for compatibility.
+    pub legacy_ws: bool,
     pub supports_tool_approval: bool,
     pub supports_operator_wait: bool,
     pub supports_session_resume: bool,
@@ -824,6 +831,9 @@ pub async fn get_web_capabilities() -> Json<WebCapabilityDescriptor> {
         chat: true,
         hosted_web_ui: true,
         surface_api: true,
+        surface_stream: true,
+        actions_api: true,
+        legacy_ws: true,
         supports_tool_approval: true,
         supports_operator_wait: true,
         supports_session_resume: true,
@@ -1474,6 +1484,9 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert!(response.supports_operator_wait);
         assert!(response.supports_auspex_proxy);
         assert!(response.surface_api);
+        assert!(response.surface_stream);
+        assert!(response.actions_api);
+        assert!(response.legacy_ws);
         assert!(response.supports_session_resume);
         assert!(response.supports_attachments);
     }
