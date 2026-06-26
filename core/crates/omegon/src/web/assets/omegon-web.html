@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ω Omegon Web</title>
+<style>
+  :root {
+    --bg: #020308;
+    --card-bg: #080e18;
+    --surface-bg: #060a12;
+    --border: #30708c;
+    --border-dim: #204860;
+    --fg: #c4d8e4;
+    --muted: #607888;
+    --dim: #405870;
+    --accent: #2ab4c8;
+    --accent-muted: #1a8898;
+    --user: #2ab4c8;
+    --assistant: #1ab878;
+    --tool: #8b5cf6;
+    --error: #ef4444;
+    --warning: #f59e0b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; border-bottom: 1px solid var(--border-dim);
+    flex: 0 0 auto;
+  }
+  header h1 { font-size: 15px; color: var(--accent); font-weight: 600; letter-spacing: 0.02em; }
+  .header-right { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 12px; }
+  .stat b { color: var(--fg); font-weight: 600; }
+  .status { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); transition: background 0.3s; }
+  .dot.connected { background: var(--assistant); box-shadow: 0 0 6px var(--assistant); }
+  .dot.connecting { background: var(--warning); }
+  .dot.disconnected { background: var(--error); }
+
+  main {
+    flex: 1 1 auto; overflow-y: auto; padding: 16px;
+    max-width: 1000px; width: 100%; margin: 0 auto;
+  }
+  .msg { margin-bottom: 14px; display: flex; flex-direction: column; gap: 4px; }
+  .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .msg.user .who { color: var(--user); }
+  .msg.assistant .who { color: var(--assistant); }
+  .msg .bubble {
+    background: var(--card-bg); border: 1px solid var(--border-dim);
+    border-radius: 6px; padding: 10px 12px; white-space: pre-wrap; word-break: break-word;
+  }
+  .msg.user .bubble { border-color: var(--accent-muted); }
+  .tool-line {
+    font-size: 12px; color: var(--tool); padding: 4px 12px;
+    border-left: 2px solid var(--tool); margin-bottom: 8px; background: rgba(139,92,246,0.06);
+  }
+  .tool-line.error { color: var(--error); border-color: var(--error); background: rgba(239,68,68,0.06); }
+  .banner {
+    padding: 8px 12px; margin-bottom: 12px; border-radius: 6px;
+    border: 1px solid var(--warning); color: var(--warning); background: rgba(245,158,11,0.08);
+  }
+  .empty { color: var(--dim); text-align: center; margin-top: 40px; font-style: italic; }
+
+  footer {
+    flex: 0 0 auto; border-top: 1px solid var(--border-dim); padding: 10px 16px;
+    max-width: 1000px; width: 100%; margin: 0 auto;
+  }
+  .activity { font-size: 11px; color: var(--tool); height: 16px; margin-bottom: 6px; }
+  .composer { display: flex; gap: 8px; align-items: flex-end; }
+  textarea {
+    flex: 1; resize: none; background: var(--surface-bg); color: var(--fg);
+    border: 1px solid var(--border-dim); border-radius: 6px; padding: 9px 11px;
+    font-family: inherit; font-size: 13px; line-height: 1.5; min-height: 40px; max-height: 160px;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--accent-muted); color: #021014; border: none; border-radius: 6px;
+    padding: 0 16px; height: 40px; font-family: inherit; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: background 0.2s;
+  }
+  button:hover { background: var(--accent); }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border-dim); }
+  button.ghost:hover { color: var(--fg); border-color: var(--border); background: transparent; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Ω Omegon Web</h1>
+    <div class="header-right">
+      <span class="stat">turns <b id="stat-turns">0</b></span>
+      <span class="stat">tools <b id="stat-tools">0</b></span>
+      <span class="stat">facts <b id="stat-facts">0</b></span>
+      <span class="status"><span class="dot" id="dot"></span><span id="conn-label">connecting</span></span>
+    </div>
+  </header>
+
+  <main id="transcript">
+    <div class="empty" id="empty">No messages yet. Send a prompt to begin.</div>
+  </main>
+
+  <footer>
+    <div class="activity" id="activity"></div>
+    <div class="composer">
+      <textarea id="input" placeholder="Ask anything, or type / for commands" rows="1"></textarea>
+      <button id="send">Send</button>
+      <button id="cancel" class="ghost">Cancel</button>
+    </div>
+  </footer>
+
+<script>
+"use strict";
+
+// ── Bootstrap ────────────────────────────────────────────────────
+const params = new URLSearchParams(location.search);
+const TOKEN = params.get("token") || "";
+const SESSION_ID = "default";
+const CLIENT_ID = "web-" + Math.random().toString(36).slice(2, 10);
+
+const $ = (id) => document.getElementById(id);
+const transcript = $("transcript");
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function uuid() {
+  return "act-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+}
+
+// ── Transcript rendering ─────────────────────────────────────────
+let currentAssistant = null; // live assistant bubble element being streamed into
+
+function clearEmpty() {
+  const e = $("empty");
+  if (e) e.remove();
+}
+
+function addMessage(role, text) {
+  clearEmpty();
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + role;
+  const who = document.createElement("div");
+  who.className = "who";
+  who.textContent = role;
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.textContent = text || "";
+  wrap.appendChild(who);
+  wrap.appendChild(bubble);
+  transcript.appendChild(wrap);
+  scrollToBottom();
+  return bubble;
+}
+
+function appendToolLine(text, isError) {
+  clearEmpty();
+  const line = document.createElement("div");
+  line.className = "tool-line" + (isError ? " error" : "");
+  line.textContent = text;
+  transcript.appendChild(line);
+  scrollToBottom();
+}
+
+function banner(text) {
+  clearEmpty();
+  const b = document.createElement("div");
+  b.className = "banner";
+  b.textContent = text;
+  transcript.appendChild(b);
+  scrollToBottom();
+}
+
+function scrollToBottom() {
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+// ── Snapshot (REST) ──────────────────────────────────────────────
+async function loadSnapshot() {
+  try {
+    const res = await fetch("/api/web/surfaces", { headers: { "Accept": "application/json" } });
+    if (!res.ok) return;
+    const snap = await res.json();
+    applySnapshot(snap);
+  } catch (e) {
+    // stream will still drive the UI; snapshot is best-effort
+  }
+}
+
+function applySnapshot(snap) {
+  const s = snap && snap.surfaces;
+  if (!s) return;
+  if (s.dashboard && s.dashboard.session) {
+    $("stat-turns").textContent = s.dashboard.session.turns ?? 0;
+    $("stat-tools").textContent = s.dashboard.session.tool_calls ?? 0;
+  }
+  if (s.memory_status) {
+    $("stat-facts").textContent = s.memory_status.active_facts ?? 0;
+  }
+  if (s.instruments && s.instruments.active_tool) {
+    $("activity").textContent = "running " + s.instruments.active_tool;
+  }
+  // Conversation segments (snapshot transcript). v1 backend ships these empty;
+  // the live stream drives the running transcript.
+  if (s.conversation && Array.isArray(s.conversation.segments)) {
+    for (const seg of s.conversation.segments) {
+      const role = seg.role === "user" ? "user" : "assistant";
+      addMessage(role, seg.body || seg.summary || seg.title || "");
+    }
+  }
+}
+
+// ── Live stream (WebSocket) ──────────────────────────────────────
+let ws = null;
+let reconnectDelay = 500;
+
+function setConn(state) {
+  const dot = $("dot");
+  dot.className = "dot " + state;
+  $("conn-label").textContent = state;
+}
+
+function connectStream() {
+  setConn("connecting");
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${scheme}://${location.host}/api/web/surfaces/stream?token=${encodeURIComponent(TOKEN)}`;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    setConn("connected");
+    reconnectDelay = 500;
+  };
+  ws.onclose = () => {
+    setConn("disconnected");
+    scheduleReconnect();
+  };
+  ws.onerror = () => { try { ws.close(); } catch (e) {} };
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    handleEvent(msg);
+  };
+}
+
+function scheduleReconnect() {
+  setTimeout(() => {
+    // On reconnect, refetch the snapshot so stale revisions are reconciled.
+    loadSnapshot();
+    connectStream();
+  }, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, 8000);
+}
+
+function handleEvent(msg) {
+  switch (msg.type) {
+    case "snapshot":
+      applySnapshot(msg.payload);
+      break;
+    case "turn_started":
+      // Open a fresh assistant bubble to stream into.
+      currentAssistant = addMessage("assistant", "");
+      break;
+    case "conversation_segment_updated":
+      if (!currentAssistant) currentAssistant = addMessage("assistant", "");
+      currentAssistant.textContent += (msg.payload && msg.payload.text) || "";
+      scrollToBottom();
+      break;
+    case "turn_completed":
+      currentAssistant = null;
+      $("activity").textContent = "";
+      bumpTurns();
+      break;
+    case "tool_started": {
+      const p = msg.payload || {};
+      appendToolLine("⚙ " + (p.name || "tool"), false);
+      $("activity").textContent = "running " + (p.name || "tool");
+      break;
+    }
+    case "tool_completed": {
+      const p = msg.payload || {};
+      if (p.is_error) appendToolLine("✗ " + (p.name || "tool") + " failed", true);
+      $("activity").textContent = "";
+      break;
+    }
+    case "permission_requested": {
+      const p = msg.payload || {};
+      banner("Permission requested: " + (p.tool_name || "tool") + (p.path ? " · " + p.path : ""));
+      break;
+    }
+    case "operator_wait_requested": {
+      const p = msg.payload || {};
+      banner("Waiting on operator: " + (p.prompt || ""));
+      break;
+    }
+    case "error":
+      banner("Stream error: " + ((msg.payload && msg.payload.message) || "unknown"));
+      break;
+    default:
+      // surface_updated / unmodeled events — ignore in v1.
+      break;
+  }
+}
+
+function bumpTurns() {
+  const el = $("stat-turns");
+  el.textContent = (parseInt(el.textContent, 10) || 0) + 1;
+}
+
+// ── Actions (REST) ───────────────────────────────────────────────
+async function postAction(action) {
+  const body = {
+    schema_version: 1,
+    action_id: uuid(),
+    client_id: CLIENT_ID,
+    session_id: SESSION_ID,
+    action,
+  };
+  const res = await fetch("/api/web/actions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let outcome = null;
+  try { outcome = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    const reason = (outcome && (outcome.error || outcome.message)) || res.status;
+    banner("Action rejected: " + reason);
+  }
+  return outcome;
+}
+
+async function submitPrompt() {
+  const input = $("input");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  autosize();
+  if (text.startsWith("/")) {
+    addMessage("user", text);
+    await postAction({ type: "run_slash_command", raw: text });
+  } else {
+    addMessage("user", text);
+    await postAction({ type: "submit_prompt", text, attachments: [] });
+  }
+}
+
+async function cancelTurn() {
+  await postAction({ type: "cancel_active_turn" });
+  $("activity").textContent = "";
+}
+
+// ── Composer wiring ──────────────────────────────────────────────
+function autosize() {
+  const input = $("input");
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 160) + "px";
+}
+
+$("input").addEventListener("input", autosize);
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    submitPrompt();
+  }
+});
+$("send").addEventListener("click", submitPrompt);
+$("cancel").addEventListener("click", cancelTurn);
+
+// ── Go ───────────────────────────────────────────────────────────
+loadSnapshot();
+connectStream();
+</script>
+</body>
+</html>
