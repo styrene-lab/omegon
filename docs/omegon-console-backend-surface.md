@@ -23,35 +23,34 @@ Omegon should not become a Flynt clone, an Auspex clone, or a second orchestrati
 
 ## Position
 
-Use a two-channel integration model:
+Use a native-first integration model for Auspex, with ACP as an external-client adapter:
 
 ```text
 Auspex UI / Control Plane
-  ├─ ACP-over-WebSocket for interactive Omegon agent sessions
-  └─ Omegon-native HTTP/WebSocket API for runtime, lifecycle, settings, memory, capabilities, and project state
+  ├─ Omegon-native HTTP API for runtime, lifecycle, settings, memory, capabilities, and project state
+  ├─ Omegon-native SSE/WebSocket streams for operational events and web surfaces
+  └─ optional ACP endpoint discovery/status for compatibility and external attach flows
+
+External host apps / editors
+  └─ ACP-over-WebSocket for portable assistant integration
 
 omegon serve
-  ├─ ACP session bridge
   ├─ native API router
+  ├─ native session/action/surface services
+  ├─ optional ACP adapter bridge
   ├─ lifecycle read/mutation services
   ├─ runtime/provider/extension/secrets surfaces
   ├─ memory/codebase projections
   └─ workspace/session orchestration
 ```
 
-ACP is the agent conversation/session protocol. The native API is Omegon's runtime/control-plane API for Auspex.
+ACP is the portable agent conversation/session protocol for external host applications such as Zed, Flynt, editors, and other clients where Omegon is a secondary helper inside the host's primary workflow. The native API is Omegon's runtime/control-plane API for Auspex and other first-party operator surfaces.
 
-## Why not ACP-only
+## Why native-first for Auspex
 
-ACP is ideal for:
+Auspex is a first-party control-plane UI, not a generic ACP client. It should use normal HTTP/SSE/WebSocket APIs for Omegon application state and workflows.
 
-- session creation
-- prompt submission
-- assistant/tool/plan streaming
-- model/mode/thinking session config
-- editor/client-mediated tool operations
-
-ACP is not the best primary shape for:
+Native APIs are the right primary shape for:
 
 - browser app auth/session management
 - runtime health and daemon readiness
@@ -61,8 +60,17 @@ ACP is not the best primary shape for:
 - memory/codebase browsing
 - durable history and analytics
 - REST/SSE/WebSocket-friendly dashboard refresh
+- structured surface projections, action endpoints, and operational drawers
 
-ACP ext_methods remain useful for Zed/Flynt/editor compatibility. Auspex should use normal Omegon APIs for app/control-plane state and embed ACP only where agent-session semantics are needed.
+ACP remains valuable for:
+
+- external editor/client integration
+- portable assistant conversation/session semantics
+- prompt submission from non-Omegon host applications
+- assistant/tool/plan streaming where the host wants a standard agent protocol
+- editor/client-mediated tool operations
+
+ACP ext_methods remain useful for Zed/Flynt/editor compatibility. Auspex should not route ordinary app/control-plane state through ACP, and should not treat ACP as the spine of its own session architecture. If native Omegon sessions later expose an ACP attach route, ACP is an adapter onto that session, not the owner of the session resource.
 
 ## Repo strategy
 
@@ -84,7 +92,7 @@ core/crates/omegon-backend-surfaces/
 Do not split into a separate repository yet. The API shape is still evolving and needs atomic backend/frontend iteration. Split only after:
 
 1. `omegon serve` exposes a stable versioned API.
-2. ACP-over-WebSocket behavior is stable.
+2. Native session/action/surface behavior is stable.
 3. DTOs are generated or published as a stable package/crate.
 4. The UI can tolerate daemon version skew.
 5. Release cadence/distribution needs diverge from core Omegon.
@@ -141,22 +149,26 @@ _lifecycle/design/blocked
 _lifecycle/design/frontier
 ```
 
-### Phase 3: ACP-over-WebSocket sessions
+### Phase 3: native agent sessions, with optional ACP attach
 
-Expose browser-compatible ACP transport:
-
-```text
-WS /api/acp
-```
-
-or, if session preallocation is cleaner:
+Expose native session resources for Auspex first. ACP remains available as a compatibility adapter for external host applications and can attach to a native session when needed:
 
 ```text
 POST /api/sessions
+GET  /api/sessions/:id
+POST /api/sessions/:id/actions
+GET  /api/sessions/:id/surfaces
+WS   /api/sessions/:id/surfaces/stream
+```
+
+Optional ACP compatibility attach:
+
+```text
+WS /api/acp
 WS /api/sessions/:id/acp
 ```
 
-Auspex acts as an ACP client for conversation sessions. This should reuse existing ACP semantics rather than inventing a separate chat stream.
+Auspex should use native session/action/surface APIs for first-party UI workflows. External clients such as Zed and Flynt should use ACP when they need a portable assistant protocol and Omegon is a secondary helper inside the host application.
 
 ### Phase 4: daemon event stream
 
@@ -272,7 +284,7 @@ Conceptual review of Hermes/OpenClaw-style systems shows the relevant product pa
 
 Omegon's advantage is that its Rust-native harness already has stronger primitives than these systems usually expose: lifecycle authority (design tree, OpenSpec, drift findings, mutation services), ACP session semantics, native daemon APIs, memory facts/episodes/codebase search, cleave/delegation, provider/tool/extension surfaces, and emerging autonomous tasking/sentry concepts. The console should therefore compete on operational depth rather than adapter breadth.
 
-Architectural direction: use ACP-over-WebSocket strictly for interactive agent sessions and conversation semantics; use native HTTP/WebSocket daemon APIs for runtime, lifecycle, memory, settings, tasking, run history, and dashboard state. Durable autonomy should be modeled as persistent executable objectives: task becomes actionable via trigger, sentry claims it, agent executes with bounded spec/checkpoints/budget, results update lifecycle/memory/evidence, and Auspex shows truth.
+Architectural direction: use native HTTP/SSE/WebSocket daemon APIs for Auspex runtime, lifecycle, memory, settings, tasking, run history, dashboard state, and first-party agent sessions. ACP-over-WebSocket remains an external-host adapter for portable assistant integration in clients such as Zed and Flynt. Durable autonomy should be modeled as persistent executable objectives: task becomes actionable via trigger, sentry claims it, agent executes with bounded spec/checkpoints/budget, results update lifecycle/memory/evidence, and Auspex shows truth.
 
 Implications for this design node: first backend substrate work should stabilize read DTOs and control-plane APIs before Auspex UI integration. The near-term foundation remains ACP lifecycle read expansion plus native HTTP mirrors. The strategic follow-on is durable task/sentry APIs, not messaging-gateway breadth. Messaging, remote/container backends, and multimodal adapters are later ingress/egress plugins over the core substrate, not the core product.
 
@@ -350,10 +362,10 @@ Required organization for the backend substrate:
 **Status:** decided
 **Rationale:** Auspex UI screens should consume stable Omegon daemon APIs. Building UI against file formats or internal tool handlers would recreate product-boundary duplication.
 
-### Decision: Use ACP plus native API
+### Decision: Use native APIs for Auspex and ACP for external host adapters
 
 **Status:** decided
-**Rationale:** ACP is the right session protocol; native API is the right application control plane for Auspex and other rich clients.
+**Rationale:** Native HTTP/SSE/WebSocket APIs are the right application and session control plane for first-party Auspex workflows. ACP is the right portable assistant protocol for external host applications where Omegon is a secondary helper, such as Zed, Flynt, and editor integrations.
 
 ### Decision: Keep the app in-repo initially
 
@@ -382,7 +394,7 @@ Required correction: add a capability-profile substrate before or alongside dura
 
 The document describes sessions, lifecycle, runtime, settings, memory, and future tasking, but it does not define the persisted assistant/profile unit that a session or task runs as. That risks rebuilding the same weak pattern seen in broad assistant systems: prompt + tool bag + cron trigger. Omegon's advantage is policy-aware composition, so the execution unit must include capability selection, trust posture, budgets, memory/mind attachments, and evidence requirements.
 
-Required correction: introduce an assistant profile schema and make ACP session creation and sentry task execution reference a profile id.
+Required correction: introduce an assistant profile schema and make native session creation plus sentry task execution reference a profile id. ACP may attach to those sessions as an adapter, but should not own the profile/session resource.
 
 ### Gap: Durable tasking is mentioned strategically but not connected to lifecycle authority
 
@@ -402,11 +414,11 @@ The document correctly says mutating endpoints need permission/capability policy
 
 Required correction: capability inventory and assistant profiles must carry permission/trust summaries from the beginning. The UI should make authority legible: local-only vs networked, read vs mutate, host-action capable, secret-bound, voice/microphone capable, browser-action capable, and trusted-provider vs standard-extension.
 
-### Gap: ACP/native API boundary is correct but incomplete for profile-scoped sessions
+### Gap: Native session/profile boundary is not yet specified
 
-The document correctly keeps ACP for conversation/session semantics and native APIs for app control-plane state. Missing detail: ACP session creation needs a way to select an assistant profile and receive the profile/capability envelope that shaped the session. Otherwise Auspex cannot explain why a session had particular tools, skills, memory, or restrictions.
+The document now keeps ACP as an external-host adapter and native APIs as the Auspex control plane. Missing detail: native session creation needs a way to select an assistant profile and receive the profile/capability envelope that shaped the session. Otherwise Auspex cannot explain why a session had particular tools, skills, memory, or restrictions.
 
-Required correction: either session creation (`POST /api/sessions`) or ACP initialize metadata should include `assistant_profile_id`, resolved capability set, and policy summary.
+Required correction: native session creation (`POST /api/sessions`) should include `assistant_profile_id` and return the resolved capability set and policy summary. ACP initialize metadata may mirror this when an external client attaches, but ACP should not be the authoritative owner of profile-scoped session creation.
 
 ### Gap: Evidence is present in the ecosystem but absent from console success criteria
 
