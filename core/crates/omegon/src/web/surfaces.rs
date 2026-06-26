@@ -508,6 +508,64 @@ mod tests {
     }
 
     #[test]
+    fn instruments_surface_is_empty_without_tool_events() {
+        let instruments = project_instruments(&test_state());
+        assert!(instruments.active_tool.is_none());
+        assert!(instruments.tools.is_empty());
+    }
+
+    #[test]
+    fn instruments_surface_reports_latest_running_tool() {
+        let state = test_state();
+        {
+            let mut tools = state.tool_runs.lock().expect("tool runs lock");
+            tools.push_back(WebToolRunSurface {
+                id: "tool-1".into(),
+                name: "read".into(),
+                status: "completed".into(),
+                args: serde_json::json!({"path": "src/lib.rs"}),
+                output_tail: None,
+                result_summary: Some("read source".into()),
+                is_error: false,
+                elapsed_ms: Some(12),
+                phase: None,
+            });
+            tools.push_back(WebToolRunSurface {
+                id: "tool-2".into(),
+                name: "bash".into(),
+                status: "running".into(),
+                args: serde_json::json!({"command": "cargo test"}),
+                output_tail: Some("running 8 tests".into()),
+                result_summary: None,
+                is_error: false,
+                elapsed_ms: Some(1840),
+                phase: Some("executing".into()),
+            });
+            tools.push_back(WebToolRunSurface {
+                id: "tool-3".into(),
+                name: "write".into(),
+                status: "running".into(),
+                args: serde_json::json!({"path": "src/web.rs"}),
+                output_tail: None,
+                result_summary: None,
+                is_error: false,
+                elapsed_ms: Some(400),
+                phase: Some("applying".into()),
+            });
+        }
+
+        let instruments = project_instruments(&state);
+        assert_eq!(instruments.active_tool.as_deref(), Some("write"));
+        assert_eq!(instruments.tools.len(), 3);
+        assert_eq!(instruments.tools[0].name, "read");
+        assert_eq!(
+            instruments.tools[1].output_tail.as_deref(),
+            Some("running 8 tests")
+        );
+        assert_eq!(instruments.tools[2].phase.as_deref(), Some("applying"));
+    }
+
+    #[test]
     fn plan_surface_is_empty_without_plan_update() {
         let plan = project_plan(&test_state());
         assert!(plan.active.is_none());
