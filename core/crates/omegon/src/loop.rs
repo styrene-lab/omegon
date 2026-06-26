@@ -2288,6 +2288,26 @@ fn provider_stop_notice(provider: &str, reason: &str) -> Option<String> {
 }
 
 /// Consume LlmEvents from the bridge, build an AssistantMessage.
+/// Select the stream idle budget for the current phase. Reasoning (thinking
+/// begun, no content/tool yet) gets the most generous leash because reasoning
+/// models can stream nothing for minutes; once content arrives the tighter
+/// content budget applies; before anything arrives, the initial budget.
+fn select_stream_idle_budget(
+    reasoning: bool,
+    received_content: bool,
+    initial: std::time::Duration,
+    content: std::time::Duration,
+    reasoning_budget: std::time::Duration,
+) -> std::time::Duration {
+    if reasoning && !received_content {
+        reasoning_budget
+    } else if received_content {
+        content
+    } else {
+        initial
+    }
+}
+
 async fn consume_llm_stream(
     rx: &mut tokio::sync::mpsc::Receiver<LlmEvent>,
     events: &broadcast::Sender<AgentEvent>,
@@ -2325,13 +2345,28 @@ async fn consume_llm_stream(
         .map(std::time::Duration::from_secs)
         .unwrap_or_else(|| std::time::Duration::from_secs(90));
     let content_idle_timeout = std::time::Duration::from_secs(90);
+    // Reasoning phase: the model has begun thinking but emitted no content or
+    // tool call yet. Reasoning models (OpenAI gpt-5.x/o-series, Anthropic
+    // interleaved thinking) can stream nothing — not even reasoning-summary
+    // deltas — for minutes. Give this phase a strictly longer leash than the
+    // active-content phase, mirroring the provider-side SSE watchdog.
+    let reasoning_idle_timeout = std::env::var("OMEGON_LLM_REASONING_IDLE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| *seconds >= 60)
+        .map(std::time::Duration::from_secs)
+        .unwrap_or_else(|| std::time::Duration::from_secs(300));
     let received_content = std::sync::atomic::AtomicBool::new(false);
+    // Set while the model is reasoning (ThinkingStart..first content/tool).
+    let reasoning = std::sync::atomic::AtomicBool::new(false);
     let idle_timeout = || {
-        if received_content.load(std::sync::atomic::Ordering::Relaxed) {
-            content_idle_timeout
-        } else {
-            initial_idle_timeout
-        }
+        select_stream_idle_budget(
+            reasoning.load(std::sync::atomic::Ordering::Relaxed),
+            received_content.load(std::sync::atomic::Ordering::Relaxed),
+            initial_idle_timeout,
+            content_idle_timeout,
+            reasoning_idle_timeout,
+        )
     };
     while let Some(event) = match tokio::time::timeout(idle_timeout(), rx.recv()).await {
         Ok(event) => event,
@@ -2353,6 +2388,7 @@ async fn consume_llm_stream(
             }
             LlmEvent::TextStart => {
                 received_content.store(true, std::sync::atomic::Ordering::Relaxed);
+                reasoning.store(false, std::sync::atomic::Ordering::Relaxed);
             }
             LlmEvent::TextDelta { delta } => {
                 if !delta.is_empty() {
@@ -2414,9 +2450,14 @@ async fn consume_llm_stream(
                 text_parts.push(String::new());
             }
             LlmEvent::ThinkingStart => {
-                received_content.store(true, std::sync::atomic::Ordering::Relaxed);
+                // Reasoning has begun. Do NOT mark received_content — that would
+                // drop the idle budget to the 90s content window and trip on a
+                // legitimately silent reasoning gap. Enter the reasoning phase
+                // instead, which carries the generous budget.
+                reasoning.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             LlmEvent::ThinkingDelta { delta } => {
+                reasoning.store(true, std::sync::atomic::Ordering::Relaxed);
                 if !delta.is_empty()
                     && let Some(cancel_keeps_prompt) = cancel_keeps_prompt
                 {
@@ -2436,6 +2477,7 @@ async fn consume_llm_stream(
             }
             LlmEvent::ToolCallStart => {
                 received_content.store(true, std::sync::atomic::Ordering::Relaxed);
+                reasoning.store(false, std::sync::atomic::Ordering::Relaxed);
             }
             LlmEvent::ToolCallDelta { .. } => {
                 // Deltas accumulated by the bridge — complete tool call in ToolCallEnd
@@ -4305,6 +4347,38 @@ mod tests {
     use super::*;
     use crate::behavior::{EvidenceAssessment, EvidenceSufficiency, ProgressSignal};
     use omegon_traits::{OodaPhase, ToolCapability, ToolDefinition, ToolProvider};
+
+    #[test]
+    fn stream_idle_budget_is_phase_aware() {
+        use std::time::Duration;
+        let initial = Duration::from_secs(90);
+        let content = Duration::from_secs(90);
+        let reasoning = Duration::from_secs(300);
+
+        // Reasoning before any content → the generous reasoning budget. This is
+        // the regression: ThinkingStart must not collapse to the 90s window.
+        assert_eq!(
+            select_stream_idle_budget(true, false, initial, content, reasoning),
+            reasoning
+        );
+        // Once content/tool output begins, reasoning is cleared → content budget.
+        assert_eq!(
+            select_stream_idle_budget(false, true, initial, content, reasoning),
+            content
+        );
+        // Content takes precedence even if a stale reasoning flag lingered.
+        assert_eq!(
+            select_stream_idle_budget(true, true, initial, content, reasoning),
+            content
+        );
+        // Nothing yet → the initial budget.
+        assert_eq!(
+            select_stream_idle_budget(false, false, initial, content, reasoning),
+            initial
+        );
+        // The reasoning leash must strictly exceed the content leash.
+        assert!(reasoning > content);
+    }
 
     #[tokio::test]
     async fn permission_wait_remains_pending_without_operator_response() {
