@@ -1894,6 +1894,9 @@ mod tests {
             plan_surface: std::sync::Arc::new(std::sync::Mutex::new(
                 omegon_traits::PlanSurfaceProjection::default(),
             )),
+            tool_runs: std::sync::Arc::new(
+                std::sync::Mutex::new(std::collections::VecDeque::new()),
+            ),
         }
     }
 
