@@ -701,6 +701,19 @@ pub fn doctor_report() -> anyhow::Result<String> {
         }
     }
     lines.push(String::new());
+    if let Some(skills_dir) = skills_dir() {
+        let legacy_file = skills_dir.join("vault/SKILL.md");
+        if let Ok(content) = std::fs::read_to_string(&legacy_file)
+            && is_legacy_bundled_vault_skill(&content)
+        {
+            lines.push("Bundled skill rename notice:".into());
+            lines.push(format!(
+                "  - {} is the old bundled markdown skill; it was renamed to `flynt`. Run `omegon skills install` to remove the stale copy and install `flynt`.",
+                legacy_file.display()
+            ));
+            lines.push(String::new());
+        }
+    }
     lines.push(format!("Summary: {total} compatible external skill bundle(s), {conflict_count} conflict marker(s), {missing_scripts} missing script reference(s)."));
     lines.push(String::new());
     lines.push("Recommended next steps:".into());
@@ -906,6 +919,26 @@ pub fn cmd_import(path: &std::path::Path, project: bool, force: bool) -> anyhow:
     Ok(())
 }
 
+const LEGACY_VAULT_SKILL_ID: &str = "8d7961f6-4742-416f-89eb-bef9f6cc12f6";
+
+fn is_legacy_bundled_vault_skill(content: &str) -> bool {
+    let (manifest, _body) = parse_skill_file(content);
+    manifest.name == "vault" && manifest.id.as_deref() == Some(LEGACY_VAULT_SKILL_ID)
+}
+
+fn remove_legacy_bundled_vault_skill(skills_dir: &std::path::Path) -> anyhow::Result<bool> {
+    let legacy_dir = skills_dir.join("vault");
+    let legacy_file = legacy_dir.join("SKILL.md");
+    let Ok(content) = std::fs::read_to_string(&legacy_file) else {
+        return Ok(false);
+    };
+    if !is_legacy_bundled_vault_skill(&content) {
+        return Ok(false);
+    }
+    std::fs::remove_dir_all(&legacy_dir)?;
+    Ok(true)
+}
+
 /// Install all bundled skills to ~/.omegon/skills/.
 /// Existing files are overwritten. Project-local skills are never touched.
 pub fn cmd_install() -> anyhow::Result<()> {
@@ -916,6 +949,10 @@ pub fn cmd_install() -> anyhow::Result<()> {
 
     let mut installed = 0;
     let mut updated = 0;
+
+    if remove_legacy_bundled_vault_skill(&skills_dir)? {
+        println!("  - vault  (removed; renamed to flynt)");
+    }
 
     for (name, content) in BUNDLED {
         let skill_dir = skills_dir.join(name);
