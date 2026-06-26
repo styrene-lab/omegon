@@ -4,11 +4,66 @@ use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use super::WebState;
 use omegon_traits::AgentEvent;
+
+#[derive(Debug, Clone, Serialize)]
+struct WebSurfaceStreamEnvelope {
+    schema_version: u8,
+    session_id: String,
+    revision: u64,
+    #[serde(rename = "type")]
+    event_type: String,
+    surface: Option<String>,
+    payload: Value,
+}
+
+impl WebSurfaceStreamEnvelope {
+    fn new(
+        session_id: impl Into<String>,
+        revision: u64,
+        event_type: impl Into<String>,
+        surface: Option<&str>,
+        payload: Value,
+    ) -> Self {
+        Self {
+            schema_version: 1,
+            session_id: session_id.into(),
+            revision,
+            event_type: event_type.into(),
+            surface: surface.map(str::to_string),
+            payload,
+        }
+    }
+
+    fn default_session(
+        revision: u64,
+        event_type: &str,
+        surface: Option<&str>,
+        payload: Value,
+    ) -> Self {
+        Self::new("default", revision, event_type, surface, payload)
+    }
+
+    fn lagged(revision: u64, skipped: u64) -> Self {
+        Self::default_session(
+            revision,
+            "stream_lagged",
+            None,
+            json!({
+                "skipped_events": skipped,
+                "message": format!("skipped {skipped} events; refetch /api/web/surfaces"),
+                "recovery": {
+                    "action": "refetch_snapshot",
+                    "href": "/api/web/surfaces"
+                }
+            }),
+        )
+    }
+}
 
 #[derive(Deserialize)]
 pub struct WebSurfaceStreamQuery {
@@ -31,16 +86,19 @@ async fn handle_surface_stream(socket: WebSocket, state: WebState) {
     let (mut ws_tx, _ws_rx) = socket.split();
     let mut revision = 0_u64;
     let snapshot = super::surfaces::project_web_surfaces(&state);
-    let initial = json!({
-        "schema_version": 1,
-        "session_id": snapshot.session_id,
-        "revision": revision,
-        "type": "snapshot",
-        "surface": null,
-        "payload": snapshot,
-    });
+    let initial = WebSurfaceStreamEnvelope::new(
+        snapshot.session_id.clone(),
+        revision,
+        "snapshot",
+        None,
+        serde_json::to_value(snapshot).unwrap_or_else(|_| json!({})),
+    );
     if ws_tx
-        .send(Message::Text(initial.to_string().into()))
+        .send(Message::Text(
+            serde_json::to_string(&initial)
+                .unwrap_or_else(|_| "{}".to_string())
+                .into(),
+        ))
         .await
         .is_err()
     {
@@ -54,7 +112,11 @@ async fn handle_surface_stream(socket: WebSocket, state: WebState) {
                 revision += 1;
                 let message = surface_stream_event(&state, revision, event);
                 if ws_tx
-                    .send(Message::Text(message.to_string().into()))
+                    .send(Message::Text(
+                        serde_json::to_string(&message)
+                            .unwrap_or_else(|_| "{}".to_string())
+                            .into(),
+                    ))
                     .await
                     .is_err()
                 {
@@ -63,73 +125,64 @@ async fn handle_surface_stream(socket: WebSocket, state: WebState) {
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                 revision += 1;
-                let message = json!({
-                    "schema_version": 1,
-                    "session_id": "default",
-                    "revision": revision,
-                    "type": "error",
-                    "surface": null,
-                    "payload": { "message": format!("skipped {n} events; refetch /api/web/surfaces") },
-                });
-                let _ = ws_tx.send(Message::Text(message.to_string().into())).await;
+                let message = WebSurfaceStreamEnvelope::lagged(revision, n);
+                let _ = ws_tx
+                    .send(Message::Text(
+                        serde_json::to_string(&message)
+                            .unwrap_or_else(|_| "{}".to_string())
+                            .into(),
+                    ))
+                    .await;
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }
     }
 }
 
-fn surface_stream_event(state: &WebState, revision: u64, event: AgentEvent) -> serde_json::Value {
+fn surface_stream_event(
+    state: &WebState,
+    revision: u64,
+    event: AgentEvent,
+) -> WebSurfaceStreamEnvelope {
     match event {
-        AgentEvent::TurnStart { turn } => json!({
-            "schema_version": 1,
-            "session_id": "default",
-            "revision": revision,
-            "type": "turn_started",
-            "surface": "conversation",
-            "payload": { "turn": turn },
-        }),
-        AgentEvent::TurnEnd { .. } => json!({
-            "schema_version": 1,
-            "session_id": "default",
-            "revision": revision,
-            "type": "turn_completed",
-            "surface": "conversation",
-            "payload": {},
-        }),
-        AgentEvent::MessageChunk { text } => json!({
-            "schema_version": 1,
-            "session_id": "default",
-            "revision": revision,
-            "type": "conversation_segment_updated",
-            "surface": "conversation",
-            "payload": { "text": text },
-        }),
-        AgentEvent::ToolStart { id, name, args } => json!({
-            "schema_version": 1,
-            "session_id": "default",
-            "revision": revision,
-            "type": "tool_started",
-            "surface": "instruments",
-            "payload": { "id": id, "name": name, "args": args },
-        }),
-        AgentEvent::ToolUpdate { id, partial } => json!({
-            "schema_version": 1,
-            "session_id": "default",
-            "revision": revision,
-            "type": "tool_updated",
-            "surface": "instruments",
-            "payload": { "id": id, "partial": partial },
-        }),
+        AgentEvent::TurnStart { turn } => WebSurfaceStreamEnvelope::default_session(
+            revision,
+            "turn_started",
+            Some("conversation"),
+            json!({ "turn": turn }),
+        ),
+        AgentEvent::TurnEnd { .. } => WebSurfaceStreamEnvelope::default_session(
+            revision,
+            "turn_completed",
+            Some("conversation"),
+            json!({}),
+        ),
+        AgentEvent::MessageChunk { text } => WebSurfaceStreamEnvelope::default_session(
+            revision,
+            "conversation_segment_updated",
+            Some("conversation"),
+            json!({ "text": text }),
+        ),
+        AgentEvent::ToolStart { id, name, args } => WebSurfaceStreamEnvelope::default_session(
+            revision,
+            "tool_started",
+            Some("instruments"),
+            json!({ "id": id, "name": name, "args": args }),
+        ),
+        AgentEvent::ToolUpdate { id, partial } => WebSurfaceStreamEnvelope::default_session(
+            revision,
+            "tool_updated",
+            Some("instruments"),
+            json!({ "id": id, "partial": partial }),
+        ),
         AgentEvent::ToolEnd {
             id, name, is_error, ..
-        } => json!({
-            "schema_version": 1,
-            "session_id": "default",
-            "revision": revision,
-            "type": "tool_completed",
-            "surface": "instruments",
-            "payload": { "id": id, "name": name, "is_error": is_error },
-        }),
+        } => WebSurfaceStreamEnvelope::default_session(
+            revision,
+            "tool_completed",
+            Some("instruments"),
+            json!({ "id": id, "name": name, "is_error": is_error }),
+        ),
         AgentEvent::PermissionRequest {
             tool_name,
             path,
@@ -139,14 +192,12 @@ fn surface_stream_event(state: &WebState, revision: u64, event: AgentEvent) -> s
             // Capture the responder so POST /api/web/actions can answer it, and
             // hand the browser the stable id to echo back.
             let request_id = state.register_permission(&respond);
-            json!({
-                "schema_version": 1,
-                "session_id": "default",
-                "revision": revision,
-                "type": "permission_requested",
-                "surface": "command",
-                "payload": { "request_id": request_id, "tool_name": tool_name, "path": path },
-            })
+            WebSurfaceStreamEnvelope::default_session(
+                revision,
+                "permission_requested",
+                Some("command"),
+                json!({ "request_id": request_id, "tool_name": tool_name, "path": path }),
+            )
         }
         AgentEvent::OperatorWaitRequest {
             prompt,
@@ -157,23 +208,19 @@ fn surface_stream_event(state: &WebState, revision: u64, event: AgentEvent) -> s
             // Acknowledge immediately (2s producer deadline) and capture the
             // responder so POST /api/web/actions can deliver the decision.
             let request_id = state.register_operator_wait(&acknowledge, &respond);
-            json!({
-                "schema_version": 1,
-                "session_id": "default",
-                "revision": revision,
-                "type": "operator_wait_requested",
-                "surface": "command",
-                "payload": { "request_id": request_id, "prompt": prompt, "timeout_secs": timeout_secs },
-            })
+            WebSurfaceStreamEnvelope::default_session(
+                revision,
+                "operator_wait_requested",
+                Some("command"),
+                json!({ "request_id": request_id, "prompt": prompt, "timeout_secs": timeout_secs }),
+            )
         }
-        other => json!({
-            "schema_version": 1,
-            "session_id": "default",
-            "revision": revision,
-            "type": "surface_updated",
-            "surface": null,
-            "payload": { "event": format!("{other:?}") },
-        }),
+        other => WebSurfaceStreamEnvelope::default_session(
+            revision,
+            "surface_updated",
+            None,
+            json!({ "event": format!("{other:?}") }),
+        ),
     }
 }
 
@@ -190,7 +237,7 @@ mod tests {
 
     #[test]
     fn surface_stream_maps_tool_start() {
-        let value = surface_stream_event(
+        let value = serde_json::to_value(surface_stream_event(
             &test_state(),
             7,
             AgentEvent::ToolStart {
@@ -198,7 +245,8 @@ mod tests {
                 name: "bash".into(),
                 args: serde_json::json!({"command":"pwd"}),
             },
-        );
+        ))
+        .expect("serialize envelope");
         assert_eq!(value["schema_version"], 1);
         assert_eq!(value["revision"], 7);
         assert_eq!(value["type"], "tool_started");
@@ -211,7 +259,7 @@ mod tests {
         let state = test_state();
         let (tx, rx) = std::sync::mpsc::channel();
         let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
-        let value = surface_stream_event(
+        let value = serde_json::to_value(surface_stream_event(
             &state,
             3,
             AgentEvent::PermissionRequest {
@@ -222,7 +270,8 @@ mod tests {
                 grant_path: None,
                 respond: respond.clone(),
             },
-        );
+        ))
+        .expect("serialize envelope");
         assert_eq!(value["type"], "permission_requested");
         let id = value["payload"]["request_id"]
             .as_str()
@@ -249,7 +298,7 @@ mod tests {
         let (resp_tx, resp_rx) = std::sync::mpsc::channel();
         let acknowledge = std::sync::Arc::new(std::sync::Mutex::new(Some(ack_tx)));
         let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(resp_tx)));
-        let value = surface_stream_event(
+        let value = serde_json::to_value(surface_stream_event(
             &state,
             5,
             AgentEvent::OperatorWaitRequest {
@@ -258,7 +307,8 @@ mod tests {
                 acknowledge: acknowledge.clone(),
                 respond: respond.clone(),
             },
-        );
+        ))
+        .expect("serialize envelope");
         assert_eq!(value["type"], "operator_wait_requested");
         // Acknowledged synchronously (beats the producer's ~2s deadline).
         assert!(ack_rx.try_recv().is_ok());
