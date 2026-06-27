@@ -2379,7 +2379,13 @@ async fn run_embedded_command(
 
     let (events_tx, _) = bootstrap::wire_event_channel(&agent, 256);
 
-    let state = web::WebState::new(agent.dashboard_handles.clone(), events_tx.clone());
+    let web_role = shared_settings
+        .lock()
+        .ok()
+        .and_then(|settings| crate::permissions::styrene_role_from_settings(&settings))
+        .unwrap_or(styrene_rbac::Role::Admin);
+    let state = web::WebState::new(agent.dashboard_handles.clone(), events_tx.clone())
+        .with_web_role(web_role);
     let vox_daemon_events = state.daemon_events.clone();
     let global_cancel = CancellationToken::new();
 
