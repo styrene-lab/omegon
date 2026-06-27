@@ -4993,6 +4993,7 @@ dependencies = [
  "omegon-git",
  "omegon-memory",
  "omegon-opsx",
+ "omegon-rbac",
  "omegon-secrets",
  "omegon-traits",
  "omegon-web",
@@ -5131,6 +5132,13 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "omegon-rbac"
+version = "0.1.0"
+dependencies = [
+ "styrene-rbac",
 ]
 
 [[package]]
