@@ -71,10 +71,14 @@ impl RbacError {
                 role: None,
                 mode: "styrene-mapped",
             },
-            Self::InvalidRole { .. } => RbacErrorResponse {
+        RbacError::InvalidRole { role } => RbacErrorResponse {
                 schema_version: 1,
                 error: "invalid_role",
-                reason: "unknown_role",
+                reason: if role == "missing" {
+                    "missing_role"
+                } else {
+                    "unknown_role"
+                },
                 operation: None,
                 capability: None,
                 required_base: None,

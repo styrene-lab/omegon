@@ -696,6 +696,19 @@ pub async fn post_native_session(
     State(state): State<WebState>,
     Json(request): Json<NativeSessionCreateRequest>,
 ) -> Result<(StatusCode, Json<NativeSessionCreateResponse>), StatusCode> {
+    let role = super::rbac::current_web_role(&state);
+    if let Err(error) = super::rbac::require_operation(
+        role,
+        omegon_rbac::OmegonOperation::NativeSessionCreate,
+        &super::rbac::RbacContext {
+            route: "/api/sessions",
+            assistant_profile_id: request.assistant_profile_id.as_deref(),
+            ..super::rbac::RbacContext::default()
+        },
+    ) {
+        return Err(error.status());
+    }
+
     if let Some(cwd) = request.cwd.as_deref() {
         let current = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         if cwd != current.to_string_lossy() {
@@ -735,6 +748,19 @@ pub async fn get_native_session(
     axum::extract::Path(session_id): axum::extract::Path<String>,
 ) -> Result<Json<WebSessionShowResponse>, StatusCode> {
     validate_native_session_id(&session_id)?;
+    let role = super::rbac::current_web_role(&state);
+    if let Err(error) = super::rbac::require_operation(
+        role,
+        omegon_rbac::OmegonOperation::NativeSessionRead,
+        &super::rbac::RbacContext {
+            route: "/api/sessions/{session_id}",
+            session_id: Some(&session_id),
+            ..super::rbac::RbacContext::default()
+        },
+    ) {
+        return Err(error.status());
+    }
+
     Ok(Json(WebSessionShowResponse {
         schema_version: 1,
         session: default_live_session_summary(&state)?,
@@ -750,6 +776,19 @@ pub async fn get_native_session_surfaces(
     axum::extract::Path(session_id): axum::extract::Path<String>,
 ) -> Result<Json<super::surfaces::WebSurfacesSnapshot>, StatusCode> {
     validate_native_session_id(&session_id)?;
+    let role = super::rbac::current_web_role(&state);
+    if let Err(error) = super::rbac::require_operation(
+        role,
+        omegon_rbac::OmegonOperation::SurfaceRead,
+        &super::rbac::RbacContext {
+            route: "/api/sessions/{session_id}/surfaces",
+            session_id: Some(&session_id),
+            ..super::rbac::RbacContext::default()
+        },
+    ) {
+        return Err(error.status());
+    }
+
     Ok(Json(super::surfaces::project_web_surfaces(&state)))
 }
 
@@ -1214,8 +1253,20 @@ pub async fn post_web_action(
 /// GET /api/web/surfaces — browser-native semantic surface snapshot.
 pub async fn get_web_surfaces(
     State(state): State<WebState>,
-) -> Json<super::surfaces::WebSurfacesSnapshot> {
-    Json(super::surfaces::project_web_surfaces(&state))
+) -> Result<Json<super::surfaces::WebSurfacesSnapshot>, StatusCode> {
+    let role = super::rbac::current_web_role(&state);
+    if let Err(error) = super::rbac::require_operation(
+        role,
+        omegon_rbac::OmegonOperation::SurfaceRead,
+        &super::rbac::RbacContext {
+            route: "/api/web/surfaces",
+            ..super::rbac::RbacContext::default()
+        },
+    ) {
+        return Err(error.status());
+    }
+
+    Ok(Json(super::surfaces::project_web_surfaces(&state)))
 }
 
 /// GET /api/web/capabilities — web/Auspex capability descriptor.
@@ -1673,10 +1724,20 @@ pub async fn post_event(
         );
     }
 
-    let role = match super::rbac::parse_control_role(event.caller_role.as_deref().or(Some("admin")))
-    {
-        Ok(role) => role,
-        Err(error) => return EventIngressOutcome::Rbac(error.status(), error.response()),
+    let role = match event.caller_role.as_deref() {
+        Some(label) => match super::rbac::parse_control_role(Some(label)) {
+            Ok(role) => role,
+            Err(error) => return EventIngressOutcome::Rbac(error.status(), error.response()),
+        },
+        None => {
+            return EventIngressOutcome::Rbac(
+                StatusCode::BAD_REQUEST,
+                super::rbac::RbacError::InvalidRole {
+                    role: "missing".to_string(),
+                }
+                .response(),
+            );
+        }
     };
     if let Err(error) = super::rbac::require_operation(
         role,
@@ -2417,7 +2478,10 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn web_surfaces_snapshot_exposes_expected_surface_keys() {
-        let response = get_web_surfaces(axum::extract::State(test_state())).await.0;
+        let response = get_web_surfaces(axum::extract::State(test_state()))
+            .await
+            .unwrap()
+            .0;
 
         assert_eq!(
             response.schema_version,
@@ -2520,6 +2584,42 @@ required = ["MISSING_REQUIRED_TOKEN"]
     }
 
     #[tokio::test]
+    async fn native_session_create_denies_monitor_role() {
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Monitor;
+
+        let response = post_native_session(
+            axum::extract::State(state),
+            Json(NativeSessionCreateRequest {
+                assistant_profile_id: None,
+                cwd: None,
+            }),
+        )
+        .await;
+
+        assert!(matches!(response, Err(StatusCode::FORBIDDEN)));
+    }
+
+    #[tokio::test]
+    async fn native_session_create_allows_operator_role() {
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Operator;
+
+        let response = post_native_session(
+            axum::extract::State(state),
+            Json(NativeSessionCreateRequest {
+                assistant_profile_id: None,
+                cwd: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.0, StatusCode::CREATED);
+        assert_eq!(response.1.session.session_id, "default");
+    }
+
+    #[tokio::test]
     async fn native_session_create_returns_first_party_links() {
         let response = post_native_session(
             axum::extract::State(test_state()),
@@ -2604,6 +2704,44 @@ required = ["MISSING_REQUIRED_TOKEN"]
         restore_env("OMEGON_HOME", previous_home);
 
         assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
+    }
+
+    #[tokio::test]
+    async fn native_session_read_denies_blocked_role() {
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Blocked;
+
+        let response = get_native_session(
+            axum::extract::State(state),
+            axum::extract::Path("default".to_string()),
+        )
+        .await;
+
+        assert!(matches!(response, Err(StatusCode::FORBIDDEN)));
+    }
+
+    #[tokio::test]
+    async fn native_session_surfaces_deny_blocked_role() {
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Blocked;
+
+        let response = get_native_session_surfaces(
+            axum::extract::State(state),
+            axum::extract::Path("default".to_string()),
+        )
+        .await;
+
+        assert!(matches!(response, Err(StatusCode::FORBIDDEN)));
+    }
+
+    #[tokio::test]
+    async fn web_surfaces_deny_blocked_role() {
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Blocked;
+
+        let response = get_web_surfaces(axum::extract::State(state)).await;
+
+        assert!(matches!(response, Err(StatusCode::FORBIDDEN)));
     }
 
     #[tokio::test]
@@ -3315,6 +3453,35 @@ required = ["BRAVE_API_KEY"]
         );
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert!(!payload.accepted);
+    }
+
+    #[tokio::test]
+    async fn post_event_rejects_missing_caller_role() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer test"),
+        );
+        let state = test_state();
+        let event = DaemonEventEnvelope {
+            event_id: "evt-missing-role".into(),
+            source: "manual/test".into(),
+            trigger_kind: "manual".into(),
+            payload: serde_json::json!({"ok": true}),
+            caller_role: None,
+            source_user: None,
+            source_channel: None,
+            source_thread: None,
+        };
+
+        let (status, payload) = event_rbac_response(
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await,
+        );
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload.error, "invalid_role");
+        assert_eq!(payload.reason, "missing_role");
+        assert!(state.daemon_events.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

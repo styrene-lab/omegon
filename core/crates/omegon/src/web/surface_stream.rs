@@ -98,6 +98,27 @@ fn validate_surface_stream_session_id(
     Ok(())
 }
 
+fn require_surface_stream_operation(
+    state: &WebState,
+    session_id: Option<&str>,
+) -> Result<(), axum::http::StatusCode> {
+    let role = super::rbac::current_web_role(state);
+    super::rbac::require_operation(
+        role,
+        omegon_rbac::OmegonOperation::SurfaceStream,
+        &super::rbac::RbacContext {
+            route: if session_id.is_some() {
+                "/api/sessions/{session_id}/surfaces/stream"
+            } else {
+                "/api/web/surfaces/stream"
+            },
+            session_id,
+            ..super::rbac::RbacContext::default()
+        },
+    )
+    .map_err(|error| error.status())
+}
+
 fn authorize_surface_stream(
     ws: WebSocketUpgrade,
     query: WebSurfaceStreamQuery,
@@ -109,6 +130,9 @@ fn authorize_surface_stream(
     }
     if !state.web_auth.verify_query_token(query.token.as_deref()) {
         return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    }
+    if let Err(status) = require_surface_stream_operation(&state, session_id.as_deref()) {
+        return status.into_response();
     }
     ws.on_upgrade(|socket| handle_surface_stream(socket, state))
         .into_response()
@@ -305,6 +329,30 @@ mod tests {
         );
         assert!(validate_surface_stream_session_id(Some("default")).is_ok());
         assert!(validate_surface_stream_session_id(None).is_ok());
+    }
+
+    #[test]
+    fn surface_stream_operation_denies_blocked_role() {
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Blocked;
+
+        assert_eq!(
+            require_surface_stream_operation(&state, Some("default")),
+            Err(axum::http::StatusCode::FORBIDDEN)
+        );
+        assert_eq!(
+            require_surface_stream_operation(&state, None),
+            Err(axum::http::StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn surface_stream_operation_allows_monitor_role() {
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Monitor;
+
+        assert!(require_surface_stream_operation(&state, Some("default")).is_ok());
+        assert!(require_surface_stream_operation(&state, None).is_ok());
     }
 
     #[test]
