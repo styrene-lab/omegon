@@ -119,11 +119,19 @@ impl RbacError {
     }
 }
 
-pub fn parse_control_role(label: Option<&str>) -> Result<styrene_rbac::Role, RbacError> {
-    let label = label.unwrap_or("admin");
+pub fn parse_control_role(label: &str) -> Result<styrene_rbac::Role, RbacError> {
     omegon_rbac::role_from_control_label(label).ok_or_else(|| RbacError::InvalidRole {
         role: label.to_string(),
     })
+}
+
+pub fn role_to_control_role(role: styrene_rbac::Role) -> crate::control_actions::ControlRole {
+    match role {
+        styrene_rbac::Role::Monitor => crate::control_actions::ControlRole::Read,
+        styrene_rbac::Role::Operator => crate::control_actions::ControlRole::Edit,
+        styrene_rbac::Role::Admin => crate::control_actions::ControlRole::Admin,
+        _ => crate::control_actions::ControlRole::Read,
+    }
 }
 
 /// Current local web role. Until signed identities/session claims land, local

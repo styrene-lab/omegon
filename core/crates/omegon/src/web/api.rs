@@ -1724,21 +1724,31 @@ pub async fn post_event(
         );
     }
 
-    let role = match event.caller_role.as_deref() {
-        Some(label) => match super::rbac::parse_control_role(Some(label)) {
+    let role = super::rbac::current_web_role(&state);
+    if let Some(label) = event.caller_role.as_deref() {
+        let asserted_role = match super::rbac::parse_control_role(label) {
             Ok(role) => role,
             Err(error) => return EventIngressOutcome::Rbac(error.status(), error.response()),
-        },
-        None => {
+        };
+        if asserted_role != role {
             return EventIngressOutcome::Rbac(
-                StatusCode::BAD_REQUEST,
-                super::rbac::RbacError::InvalidRole {
-                    role: "missing".to_string(),
+                StatusCode::FORBIDDEN,
+                super::rbac::RbacError::Forbidden {
+                    role,
+                    operation: omegon_rbac::OmegonOperation::EventIngress,
                 }
                 .response(),
             );
         }
-    };
+    } else {
+        return EventIngressOutcome::Rbac(
+            StatusCode::BAD_REQUEST,
+            super::rbac::RbacError::InvalidRole {
+                role: "missing".to_string(),
+            }
+            .response(),
+        );
+    }
     if let Err(error) = super::rbac::require_operation(
         role,
         omegon_rbac::OmegonOperation::EventIngress,
@@ -1752,12 +1762,7 @@ pub async fn post_event(
         return EventIngressOutcome::Rbac(error.status(), error.response());
     }
 
-    let caller_role = match role {
-        styrene_rbac::Role::Monitor => crate::control_actions::ControlRole::Read,
-        styrene_rbac::Role::Operator => crate::control_actions::ControlRole::Edit,
-        styrene_rbac::Role::Admin => crate::control_actions::ControlRole::Admin,
-        _ => crate::control_actions::ControlRole::Read,
-    };
+    let caller_role = super::rbac::role_to_control_role(role);
     let required = crate::control_actions::classify_daemon_trigger(&event.trigger_kind).role;
     if !crate::control_actions::is_role_sufficient(caller_role, required) {
         return EventIngressOutcome::Rbac(
@@ -3481,6 +3486,38 @@ required = ["BRAVE_API_KEY"]
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(payload.error, "invalid_role");
         assert_eq!(payload.reason, "missing_role");
+        assert!(state.daemon_events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn post_event_rejects_self_asserted_admin_role() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer test"),
+        );
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Monitor;
+        let event = DaemonEventEnvelope {
+            event_id: "evt-self-assert-admin".into(),
+            source: "manual/test".into(),
+            trigger_kind: "manual".into(),
+            payload: serde_json::json!({}),
+            caller_role: Some("admin".into()),
+            source_user: None,
+            source_channel: None,
+            source_thread: None,
+        };
+
+        let (status, payload) = event_rbac_response(
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await,
+        );
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(payload.error, "forbidden");
+        assert_eq!(payload.reason, "capability_not_granted");
+        assert_eq!(payload.operation.as_deref(), Some("event.ingress"));
+        assert_eq!(payload.role.as_deref(), Some("monitor"));
         assert!(state.daemon_events.lock().unwrap().is_empty());
     }
 
