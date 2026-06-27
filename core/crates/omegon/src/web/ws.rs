@@ -148,6 +148,24 @@ async fn handle_socket(socket: WebSocket, state: WebState) {
     tracing::info!("WebSocket client disconnected");
 }
 
+fn websocket_caller_role(cmd: &Value, state: &WebState) -> crate::control_actions::ControlRole {
+    if let Some(label) = cmd["caller_role"].as_str() {
+        match label {
+            "read" => crate::control_actions::ControlRole::Read,
+            "edit" => crate::control_actions::ControlRole::Edit,
+            "admin" => crate::control_actions::ControlRole::Admin,
+            _ => crate::control_actions::ControlRole::Read,
+        }
+    } else {
+        match super::rbac::current_web_role(state) {
+            styrene_rbac::Role::Monitor => crate::control_actions::ControlRole::Read,
+            styrene_rbac::Role::Operator => crate::control_actions::ControlRole::Edit,
+            styrene_rbac::Role::Admin => crate::control_actions::ControlRole::Admin,
+            _ => crate::control_actions::ControlRole::Read,
+        }
+    }
+}
+
 /// Process a command from a WebSocket client.
 async fn handle_client_command(
     cmd: &Value,
@@ -156,14 +174,21 @@ async fn handle_client_command(
     snapshot_tx: &tokio::sync::mpsc::Sender<Value>,
 ) {
     let cmd_type = cmd["type"].as_str().unwrap_or("");
-    let caller_role = match cmd["caller_role"].as_str().unwrap_or("admin") {
-        "read" => crate::control_actions::ControlRole::Read,
-        "edit" => crate::control_actions::ControlRole::Edit,
-        _ => crate::control_actions::ControlRole::Admin,
-    };
+    let caller_role = websocket_caller_role(cmd, state);
 
     match cmd_type {
         "user_prompt" => {
+            let classified = crate::control_actions::classify_web_method("user_prompt");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for user_prompt",
+                    }))
+                    .await;
+                return;
+            }
             if let Some(text) = cmd["text"].as_str() {
                 let _ = command_tx
                     .send(WebCommand::UserPrompt {
@@ -1817,11 +1842,7 @@ async fn handle_client_command(
         "slash_command" => {
             let name = cmd["name"].as_str().unwrap_or("").to_string();
             let args = cmd["args"].as_str().unwrap_or("").to_string();
-            let caller_role = match cmd["caller_role"].as_str().unwrap_or("admin") {
-                "read" => crate::control_actions::ControlRole::Read,
-                "edit" => crate::control_actions::ControlRole::Edit,
-                _ => crate::control_actions::ControlRole::Admin,
-            };
+            let caller_role = websocket_caller_role(cmd, state);
             let classified = crate::control_actions::classify_remote_slash_command(&name, &args);
             if !classified.remote_safe {
                 let _ = snapshot_tx
@@ -1927,6 +1948,17 @@ async fn handle_client_command(
             let _ = snapshot_tx.send(message).await;
         }
         "cancel" => {
+            let classified = crate::control_actions::classify_web_method("cancel");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for cancel",
+                    }))
+                    .await;
+                return;
+            }
             let _ = command_tx.send(WebCommand::Cancel).await;
         }
         "cancel_cleave_child" => {
@@ -2380,6 +2412,53 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn handle_client_command_rejects_user_prompt_for_monitor_default_role() {
+        let (events_tx, _) = tokio::sync::broadcast::channel(4);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
+        let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
+        let mut state = WebState::new(
+            crate::tui::dashboard::DashboardHandles::default(),
+            events_tx,
+        );
+        state.web_role = styrene_rbac::Role::Monitor;
+
+        let cmd = serde_json::json!({
+            "type": "user_prompt",
+            "text": "should not queue"
+        });
+
+        handle_client_command(&cmd, &command_tx, &state, &snapshot_tx).await;
+
+        assert!(command_rx.try_recv().is_err(), "should not enqueue prompt");
+        let msg = snapshot_rx.recv().await.expect("snapshot message");
+        assert_eq!(msg["type"], "system_message");
+        assert_eq!(msg["message"], "caller role is insufficient for user_prompt");
+    }
+
+    #[tokio::test]
+    async fn handle_client_command_rejects_cancel_for_monitor_default_role() {
+        let (events_tx, _) = tokio::sync::broadcast::channel(4);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
+        let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
+        let mut state = WebState::new(
+            crate::tui::dashboard::DashboardHandles::default(),
+            events_tx,
+        );
+        state.web_role = styrene_rbac::Role::Monitor;
+
+        let cmd = serde_json::json!({
+            "type": "cancel"
+        });
+
+        handle_client_command(&cmd, &command_tx, &state, &snapshot_tx).await;
+
+        assert!(command_rx.try_recv().is_err(), "should not enqueue cancel");
+        let msg = snapshot_rx.recv().await.expect("snapshot message");
+        assert_eq!(msg["type"], "system_message");
+        assert_eq!(msg["message"], "caller role is insufficient for cancel");
+    }
 
     #[tokio::test]
     async fn handle_client_command_enqueues_switch_dispatcher_and_reports_result() {
