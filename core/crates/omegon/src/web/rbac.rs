@@ -4,7 +4,7 @@
 //! current implementation maps precise `omegon.*` capabilities onto the coarse
 //! `styrene-rbac` base lattice.
 
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -36,19 +36,35 @@ pub enum RbacError {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebPrincipalIssuer {
+    LocalToken,
+    TrustedProxy,
+    SessionCookie,
+    InternalDaemon,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebPrincipal {
-    pub subject: &'static str,
-    pub auth_source: &'static str,
+    pub subject: String,
+    pub display_name: Option<String>,
+    pub issuer: WebPrincipalIssuer,
+    pub auth_source: String,
     pub role: styrene_rbac::Role,
+    pub session_id: Option<String>,
+    pub client_id: Option<String>,
 }
 
 impl WebPrincipal {
     pub fn from_state(state: &super::WebState) -> Self {
         Self {
-            subject: "local-web",
-            auth_source: state.web_auth.source_name(),
+            subject: "local-web".to_string(),
+            display_name: None,
+            issuer: WebPrincipalIssuer::LocalToken,
+            auth_source: state.web_auth.source_name().to_string(),
             role: state.web_role,
+            session_id: None,
+            client_id: None,
         }
     }
 }
@@ -142,6 +158,65 @@ pub fn parse_control_role(label: &str) -> Result<styrene_rbac::Role, RbacError> 
     })
 }
 
+fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name).and_then(|value| value.to_str().ok())
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    header_str(headers, axum::http::header::AUTHORIZATION.as_str())
+        .and_then(|value| value.strip_prefix("Bearer "))
+}
+
+fn trusted_proxy_name(headers: &HeaderMap) -> Option<&str> {
+    header_str(headers, "x-omegon-proxied-by")
+}
+
+fn is_trusted_proxy(name: &str) -> bool {
+    name == "auspex"
+}
+
+pub fn principal_from_headers(
+    state: &super::WebState,
+    headers: &HeaderMap,
+) -> Result<WebPrincipal, RbacError> {
+    let token = bearer_token(headers);
+    if !state.web_auth.verify_query_token(token) {
+        return Err(RbacError::Unauthorized);
+    }
+
+    let Some(proxy_name) = trusted_proxy_name(headers) else {
+        return Ok(WebPrincipal::from_state(state));
+    };
+
+    if !is_trusted_proxy(proxy_name) {
+        return Err(RbacError::PolicyUnavailable {
+            reason: "untrusted_proxy",
+        });
+    }
+
+    let subject = header_str(headers, "x-omegon-subject")
+        .filter(|subject| !subject.trim().is_empty())
+        .ok_or(RbacError::PolicyUnavailable {
+            reason: "missing_proxy_subject",
+        })?;
+    let role_label = header_str(headers, "x-omegon-role")
+        .filter(|role| !role.trim().is_empty())
+        .ok_or_else(|| RbacError::InvalidRole {
+            role: "missing".to_string(),
+        })?;
+    let role = parse_control_role(role_label)?;
+
+    Ok(WebPrincipal {
+        subject: subject.to_string(),
+        display_name: header_str(headers, "x-omegon-display-name").map(str::to_string),
+        issuer: WebPrincipalIssuer::TrustedProxy,
+        auth_source: format!("trusted-proxy:{proxy_name}"),
+        role,
+        session_id: header_str(headers, "x-omegon-session-id").map(str::to_string),
+        client_id: header_str(headers, "x-omegon-client-id").map(str::to_string),
+    })
+}
+
 pub fn role_to_control_role(role: styrene_rbac::Role) -> crate::control_actions::ControlRole {
     match role {
         styrene_rbac::Role::Monitor => crate::control_actions::ControlRole::Read,
@@ -163,7 +238,7 @@ pub fn current_web_role(state: &super::WebState) -> styrene_rbac::Role {
 }
 
 pub fn require_principal_operation(
-    principal: WebPrincipal,
+    principal: &WebPrincipal,
     operation: omegon_rbac::OmegonOperation,
     ctx: &RbacContext<'_>,
 ) -> Result<(), RbacError> {
@@ -278,17 +353,113 @@ pub fn policy_descriptor(role: styrene_rbac::Role) -> RbacPolicyDescriptor {
 mod tests {
     use super::*;
 
-    #[test]
-    fn web_principal_uses_configured_local_role_and_auth_source() {
-        let state = super::super::WebState::new(
+    fn test_state() -> super::super::WebState {
+        super::super::WebState::with_auth_state(
             super::super::DashboardHandles::default(),
             tokio::sync::broadcast::channel(1).0,
+            super::super::auth::WebAuthState::ephemeral_generated("test".to_string()),
+        )
+    }
+
+    fn bearer_headers(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
         );
+        headers
+    }
+
+    #[test]
+    fn web_principal_uses_configured_local_role_and_auth_source() {
+        let state = test_state();
         let principal = WebPrincipal::from_state(&state);
 
         assert_eq!(principal.subject, "local-web");
+        assert_eq!(principal.issuer, WebPrincipalIssuer::LocalToken);
         assert_eq!(principal.auth_source, "generated");
         assert_eq!(principal.role, styrene_rbac::Role::Admin);
+    }
+
+    #[test]
+    fn principal_from_headers_accepts_local_bearer_token() {
+        let state = test_state();
+        let principal = principal_from_headers(&state, &bearer_headers("test"))
+            .expect("local bearer principal");
+
+        assert_eq!(principal.subject, "local-web");
+        assert_eq!(principal.issuer, WebPrincipalIssuer::LocalToken);
+        assert_eq!(principal.role, styrene_rbac::Role::Admin);
+    }
+
+    #[test]
+    fn principal_from_headers_rejects_invalid_bearer_token() {
+        let state = test_state();
+
+        assert!(matches!(
+            principal_from_headers(&state, &bearer_headers("wrong")),
+            Err(RbacError::Unauthorized)
+        ));
+    }
+
+    #[test]
+    fn principal_from_headers_ignores_stray_role_without_proxy_marker() {
+        let state = test_state();
+        let mut headers = bearer_headers("test");
+        headers.insert("x-omegon-role", axum::http::HeaderValue::from_static("admin"));
+
+        let principal = principal_from_headers(&state, &headers).expect("local bearer principal");
+
+        assert_eq!(principal.issuer, WebPrincipalIssuer::LocalToken);
+        assert_eq!(principal.subject, "local-web");
+    }
+
+    #[test]
+    fn principal_from_headers_accepts_trusted_proxy_identity() {
+        let state = test_state();
+        let mut headers = bearer_headers("test");
+        headers.insert("x-omegon-proxied-by", axum::http::HeaderValue::from_static("auspex"));
+        headers.insert("x-omegon-subject", axum::http::HeaderValue::from_static("user:alice"));
+        headers.insert("x-omegon-role", axum::http::HeaderValue::from_static("operator"));
+        headers.insert("x-omegon-display-name", axum::http::HeaderValue::from_static("Alice"));
+        headers.insert("x-omegon-session-id", axum::http::HeaderValue::from_static("s-1"));
+
+        let principal = principal_from_headers(&state, &headers).expect("proxy principal");
+
+        assert_eq!(principal.issuer, WebPrincipalIssuer::TrustedProxy);
+        assert_eq!(principal.subject, "user:alice");
+        assert_eq!(principal.display_name.as_deref(), Some("Alice"));
+        assert_eq!(principal.auth_source, "trusted-proxy:auspex");
+        assert_eq!(principal.role, styrene_rbac::Role::Operator);
+        assert_eq!(principal.session_id.as_deref(), Some("s-1"));
+    }
+
+    #[test]
+    fn principal_from_headers_rejects_invalid_proxy_identity() {
+        let state = test_state();
+        let mut untrusted = bearer_headers("test");
+        untrusted.insert("x-omegon-proxied-by", axum::http::HeaderValue::from_static("evil"));
+        assert!(matches!(
+            principal_from_headers(&state, &untrusted),
+            Err(RbacError::PolicyUnavailable { reason: "untrusted_proxy" })
+        ));
+
+        let mut missing_subject = bearer_headers("test");
+        missing_subject.insert("x-omegon-proxied-by", axum::http::HeaderValue::from_static("auspex"));
+        missing_subject.insert("x-omegon-role", axum::http::HeaderValue::from_static("operator"));
+        assert!(matches!(
+            principal_from_headers(&state, &missing_subject),
+            Err(RbacError::PolicyUnavailable { reason: "missing_proxy_subject" })
+        ));
+
+        let mut invalid_role = bearer_headers("test");
+        invalid_role.insert("x-omegon-proxied-by", axum::http::HeaderValue::from_static("auspex"));
+        invalid_role.insert("x-omegon-subject", axum::http::HeaderValue::from_static("user:alice"));
+        invalid_role.insert("x-omegon-role", axum::http::HeaderValue::from_static("root"));
+        assert!(matches!(
+            principal_from_headers(&state, &invalid_role),
+            Err(RbacError::InvalidRole { role }) if role == "root"
+        ));
     }
 
     #[test]
