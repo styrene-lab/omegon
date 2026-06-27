@@ -4,9 +4,10 @@ info:
   version: 0.27.0
   description: >
     Browser-native control surface for the Omegon web dashboard ("omegon-web").
-    Covers the `/api/web/*` family: capability discovery, launch context, the
-    semantic surface snapshot and its live stream, the semantic action ingress,
-    saved-session listing, and staged browser attachments.
+    Covers the browser-native Web UI API: `/api/web/*` compatibility routes,
+    native first-party `/api/sessions*` session resources, daemon event ingress,
+    capability discovery, launch context, semantic surface snapshots/streams,
+    semantic action ingress, saved-session listing, and staged browser attachments.
 
 
     Derived from the axum handlers in `core/crates/omegon/src/web/` (api.rs,
@@ -26,10 +27,136 @@ tags:
     description: Browser-native semantic action ingress.
   - name: sessions
     description: Saved/live session listing.
+  - name: events
+    description: Authenticated daemon/runtime event ingress.
   - name: attachments
     description: Staged browser attachments.
 
 paths:
+  /api/sessions:
+    post:
+      tags: [sessions]
+      operationId: postNativeSession
+      summary: Create or attach the native first-party live session.
+      description: >
+        Phase 1 exposes the singleton in-process agent session through the
+        native session resource shape. Requires the `native_session.create`
+        RBAC operation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NativeSessionCreateRequest"
+      responses:
+        "201":
+          description: Native live session created or attached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NativeSessionCreateResponse"
+        "400":
+          description: Requested cwd does not match the server working directory.
+        "403":
+          description: Caller role lacks `native_session.create`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RbacErrorResponse"
+        "404":
+          description: Requested assistant_profile_id is unknown.
+
+  /api/sessions/{session_id}:
+    get:
+      tags: [sessions]
+      operationId: getNativeSession
+      summary: Native session metadata plus current surface snapshot.
+      description: Requires the `native_session.read` RBAC operation.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          description: Session id. Only `default` is currently accepted.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session metadata and a current surface snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebSessionShowResponse"
+        "403":
+          description: Caller role lacks `native_session.read`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RbacErrorResponse"
+        "404":
+          description: Unknown session_id.
+
+  /api/sessions/{session_id}/surfaces:
+    get:
+      tags: [surfaces]
+      operationId: getNativeSessionSurfaces
+      summary: Native session semantic surface snapshot.
+      description: Requires the `surface.read` RBAC operation.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          description: Session id. Only `default` is currently accepted.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Surface snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebSurfacesSnapshot"
+        "403":
+          description: Caller role lacks `surface.read`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RbacErrorResponse"
+        "404":
+          description: Unknown session_id.
+
+  /api/sessions/{session_id}/surfaces/stream:
+    get:
+      tags: [surfaces]
+      operationId: streamNativeSessionSurfaces
+      summary: Native session live surface stream (WebSocket upgrade).
+      description: >
+        Requires a valid web-auth query token and the `surface.stream` RBAC
+        operation before the WebSocket upgrade is accepted.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          description: Session id. Only `default` is currently accepted.
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: false
+          description: Web-auth query token.
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Switching Protocols — WebSocket established.
+        "401":
+          description: Missing or invalid web-auth token.
+        "403":
+          description: Caller role lacks `surface.stream`.
+        "404":
+          description: Unknown session_id.
+      x-websocket-message:
+        $ref: "#/components/schemas/SurfaceStreamMessage"
+
   /api/web/capabilities:
     get:
       tags: [discovery]
@@ -87,12 +214,12 @@ paths:
         Full point-in-time projection of every renderer-neutral surface for the
         live session.
       responses:
-        "200":
-          description: Surface snapshot.
+        "403":
+          description: Caller role lacks `surface.read`.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WebSurfacesSnapshot"
+                $ref: "#/components/schemas/RbacErrorResponse"
 
   /api/web/surfaces/stream:
     get:
@@ -119,6 +246,8 @@ paths:
           description: Switching Protocols — WebSocket established.
         "401":
           description: Missing or invalid web-auth token.
+        "403":
+          description: Caller role lacks `surface.stream`.
       x-websocket-message:
         $ref: "#/components/schemas/SurfaceStreamMessage"
 
@@ -158,6 +287,12 @@ paths:
           description: >
             Unknown session_id, or (for respond_permission /
             respond_operator_wait) an unknown or already-answered request_id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UiActionOutcomeEnvelope"
+        "403":
+          description: Caller role lacks `native_session.action`.
           content:
             application/json:
               schema:
@@ -266,8 +401,175 @@ paths:
         "404":
           description: Attachment not found or expired.
 
+  /api/events:
+    get:
+      tags: [events]
+      operationId: getDaemonEvents
+      summary: List queued daemon/runtime events.
+      responses:
+        "200":
+          description: Queued daemon event snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DaemonEventsResponse"
+    post:
+      tags: [events]
+      operationId: postDaemonEvent
+      summary: Authenticated local event ingress for daemon/runtime triggers.
+      description: >
+        Requires a bearer web-auth token and an explicit `caller_role`. The
+        caller role must satisfy the `event.ingress` RBAC operation and the
+        trigger-specific control role classification.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DaemonEventEnvelope"
+      responses:
+        "202":
+          description: Event accepted and queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventAccepted"
+        "400":
+          description: Missing or unknown caller_role.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RbacErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RbacErrorResponse"
+        "403":
+          description: Caller role lacks `event.ingress` or trigger-specific authority.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RbacErrorResponse"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
   schemas:
+    NativeSessionCreateRequest:
+      type: object
+      properties:
+        assistant_profile_id:
+          type: [string, "null"]
+        cwd:
+          type: [string, "null"]
+
+    NativeSessionCreateResponse:
+      type: object
+      required: [schema_version, session, allocation_mode, assistant_profile_id, assistant, links]
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        session:
+          $ref: "#/components/schemas/WebSessionSummary"
+        allocation_mode:
+          type: string
+          enum: [singleton_live]
+        assistant_profile_id:
+          type: [string, "null"]
+        assistant:
+          type: [object, "null"]
+          additionalProperties: true
+        links:
+          $ref: "#/components/schemas/WebSessionLinks"
+
+    WebSessionLinks:
+      type: object
+      required: [surfaces, actions, stream]
+      properties:
+        surfaces:
+          type: [string, "null"]
+        actions:
+          type: [string, "null"]
+        stream:
+          type: [string, "null"]
+
+    RbacErrorResponse:
+      type: object
+      required: [schema_version, error, reason, operation, capability, required_base, role, mode]
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        error:
+          type: string
+          enum: [unauthorized, invalid_role, forbidden, misconfigured, policy_unavailable]
+        reason:
+          type: string
+        operation:
+          type: [string, "null"]
+        capability:
+          type: [string, "null"]
+        required_base:
+          type: [string, "null"]
+        role:
+          type: [string, "null"]
+        mode:
+          type: string
+
+    EventAccepted:
+      type: object
+      required: [accepted, queued_events]
+      properties:
+        accepted:
+          type: boolean
+        queued_events:
+          type: integer
+          minimum: 0
+
+    DaemonEventsResponse:
+      type: object
+      required: [schema_version, queued_events, processed_events, events]
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        queued_events:
+          type: integer
+          minimum: 0
+        processed_events:
+          type: integer
+          minimum: 0
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/DaemonEventEnvelope"
+
+    DaemonEventEnvelope:
+      type: object
+      required: [event_id, source, trigger_kind, payload, caller_role]
+      properties:
+        event_id: { type: string }
+        source: { type: string }
+        trigger_kind: { type: string }
+        payload: true
+        caller_role:
+          type: string
+          enum: [read, edit, admin, monitor, operator]
+        source_user:
+          type: [string, "null"]
+        source_channel:
+          type: [string, "null"]
+        source_thread:
+          type: [string, "null"]
+
     WebCapabilityDescriptor:
       type: object
       required:
