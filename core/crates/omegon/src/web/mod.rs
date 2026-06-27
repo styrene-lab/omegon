@@ -348,6 +348,11 @@ impl WebState {
         Self::with_auth_state_and_secrets(handles, events_tx, auth_state, None)
     }
 
+    pub fn with_web_role(mut self, web_role: styrene_rbac::Role) -> Self {
+        self.web_role = web_role;
+        self
+    }
+
     pub fn with_auth_state_and_secrets(
         handles: DashboardHandles,
         events_tx: broadcast::Sender<omegon_traits::AgentEvent>,
