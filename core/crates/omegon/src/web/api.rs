@@ -795,6 +795,7 @@ pub async fn get_native_session_surfaces(
 /// POST /api/sessions/{session_id}/actions — native session-scoped action ingress.
 pub async fn post_native_session_action(
     State(state): State<WebState>,
+    headers: HeaderMap,
     axum::extract::Path(session_id): axum::extract::Path<String>,
     Json(mut request): Json<WebActionRequest>,
 ) -> (
@@ -815,7 +816,19 @@ pub async fn post_native_session_action(
         );
     }
 
-    let principal = super::rbac::current_web_principal(&state);
+    let principal = match super::rbac::principal_from_headers(&state, &headers) {
+        Ok(principal) => principal,
+        Err(error) => {
+            return (
+                error.status(),
+                Json(crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                    session_id,
+                    action_id,
+                    error.response().reason,
+                )),
+            );
+        }
+    };
     if let Err(error) = super::rbac::require_principal_operation(
         &principal,
         omegon_rbac::OmegonOperation::NativeSessionAction,
@@ -840,7 +853,7 @@ pub async fn post_native_session_action(
     }
 
     request.session_id = session_id;
-    post_web_action(State(state), Json(request)).await
+    post_web_action(State(state), headers, Json(request)).await
 }
 
 /// GET /api/web/sessions — browser-native saved session list.
@@ -1023,6 +1036,7 @@ fn resolve_web_attachment_paths(ids: &[String]) -> Result<Vec<String>, String> {
 /// POST /api/web/actions — browser-native semantic action ingress.
 pub async fn post_web_action(
     State(state): State<WebState>,
+    headers: HeaderMap,
     Json(request): Json<WebActionRequest>,
 ) -> (
     StatusCode,
@@ -1053,7 +1067,19 @@ pub async fn post_web_action(
         );
     }
 
-    let principal = super::rbac::current_web_principal(&state);
+    let principal = match super::rbac::principal_from_headers(&state, &headers) {
+        Ok(principal) => principal,
+        Err(error) => {
+            return (
+                error.status(),
+                Json(crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                    request.session_id,
+                    request.action_id,
+                    error.response().reason,
+                )),
+            );
+        }
+    };
     if let Err(error) = super::rbac::require_principal_operation(
         &principal,
         omegon_rbac::OmegonOperation::NativeSessionAction,
@@ -2202,6 +2228,15 @@ mod tests {
     use crate::web::{ControlPlaneState, WebAuthState, WebDaemonStatus, WebStartupInfo};
     use std::sync::{Arc, Mutex};
 
+    fn auth_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer test"),
+        );
+        headers
+    }
+
     fn test_state() -> WebState {
         WebState {
             handles: DashboardHandles::default(),
@@ -2760,6 +2795,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let (status, response) = post_native_session_action(
             axum::extract::State(state),
+            auth_headers(),
             axum::extract::Path("default".to_string()),
             Json(WebActionRequest {
                 schema_version: 1,
@@ -2820,6 +2856,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let (status, response) = post_native_session_action(
             axum::extract::State(state),
+            auth_headers(),
             axum::extract::Path("default".to_string()),
             Json(WebActionRequest {
                 schema_version: 1,
@@ -2913,6 +2950,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let (status, response) = post_web_action(
             axum::extract::State(state),
+            auth_headers(),
             Json(WebActionRequest {
                 schema_version: 1,
                 action_id: "web-denied".to_string(),
@@ -2939,6 +2977,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let (status, response) = post_web_action(
             axum::extract::State(state),
+            auth_headers(),
             Json(WebActionRequest {
                 schema_version: 1,
                 action_id: "a1".to_string(),
@@ -2971,6 +3010,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let (status, _) = post_web_action(
             axum::extract::State(state),
+            auth_headers(),
             Json(WebActionRequest {
                 schema_version: 1,
                 action_id: "a2".to_string(),
@@ -2997,6 +3037,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
     async fn web_action_rejects_unknown_session() {
         let (status, response) = post_web_action(
             axum::extract::State(test_state()),
+            auth_headers(),
             Json(WebActionRequest {
                 schema_version: 1,
                 action_id: "a3".to_string(),
