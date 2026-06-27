@@ -1295,12 +1295,12 @@ pub async fn get_web_capabilities() -> Json<WebCapabilityDescriptor> {
 /// GET /api/web/launch-context — describes how the web UI was launched.
 pub async fn get_web_launch_context(headers: HeaderMap) -> Json<WebLaunchContextResponse> {
     let proxied_by = headers
-        .get("x-omegon-proxied-by")
+        .get("omegon-principal-issuer")
         .and_then(|v| v.to_str().ok())
         .filter(|v| !v.trim().is_empty())
         .map(|v| v.to_string());
     let back_url = headers
-        .get("x-omegon-back-url")
+        .get("omegon-back-url")
         .and_then(|v| v.to_str().ok())
         .filter(|v| v.starts_with("http://") || v.starts_with("https://"))
         .map(|v| v.to_string());
@@ -3521,15 +3521,15 @@ required = ["BRAVE_API_KEY"]
             axum::http::HeaderValue::from_static("Bearer test"),
         );
         headers.insert(
-            "x-omegon-proxied-by",
+            "omegon-principal-issuer",
             axum::http::HeaderValue::from_static("auspex"),
         );
         headers.insert(
-            "x-omegon-subject",
+            "omegon-principal-subject",
             axum::http::HeaderValue::from_static("user:alice"),
         );
         headers.insert(
-            "x-omegon-role",
+            "omegon-principal-role",
             axum::http::HeaderValue::from_static("admin"),
         );
         let state = test_state();
