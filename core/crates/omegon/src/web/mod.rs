@@ -14,6 +14,7 @@
 pub mod acp_ws;
 pub mod api;
 pub mod auth;
+pub mod rbac;
 pub mod surface_stream;
 pub mod surfaces;
 pub mod ws;
@@ -316,6 +317,9 @@ pub struct WebState {
     /// Recent tool runs accumulated from AgentEvent::ToolStart/Update/End so
     /// the browser Instruments rail can recover active/recent tool state after reload.
     pub tool_runs: Arc<Mutex<std::collections::VecDeque<surfaces::WebToolRunSurface>>>,
+    /// Effective Styrene role for browser/native web requests. Defaults to Admin
+    /// for local ephemeral bearer mode until profile settings thread a stricter role.
+    pub web_role: styrene_rbac::Role,
 }
 
 /// Maximum conversation segments retained for reload replay. Older segments are
@@ -372,6 +376,7 @@ impl WebState {
             conversation_log: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             plan_surface: Arc::new(Mutex::new(omegon_traits::PlanSurfaceProjection::default())),
             tool_runs: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            web_role: styrene_rbac::Role::Admin,
         }
     }
 }

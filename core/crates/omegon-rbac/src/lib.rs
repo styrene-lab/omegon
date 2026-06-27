@@ -139,6 +139,113 @@ pub fn role_allows_tool(role: styrene_rbac::Role, tool: &str) -> bool {
         .unwrap_or(true)
 }
 
+/// Backend/API operations that can be authorized or described to Auspex.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OmegonOperation {
+    NativeSessionCreate,
+    NativeSessionRead,
+    NativeSessionAction,
+    NativeSessionStream,
+    SurfaceRead,
+    SurfaceStream,
+    AssistantProfileRead,
+    AssistantLaunch,
+    RuntimeStatusRead,
+    ProviderStatusRead,
+    ExtensionStatusRead,
+    EventRead,
+    EventIngress,
+    LifecycleRead,
+    LifecycleMutate,
+    MemoryRead,
+    MemoryMutate,
+}
+
+impl OmegonOperation {
+    pub const ALL: &'static [Self] = &[
+        Self::NativeSessionCreate,
+        Self::NativeSessionRead,
+        Self::NativeSessionAction,
+        Self::NativeSessionStream,
+        Self::SurfaceRead,
+        Self::SurfaceStream,
+        Self::AssistantProfileRead,
+        Self::AssistantLaunch,
+        Self::RuntimeStatusRead,
+        Self::ProviderStatusRead,
+        Self::ExtensionStatusRead,
+        Self::EventRead,
+        Self::EventIngress,
+        Self::LifecycleRead,
+        Self::LifecycleMutate,
+        Self::MemoryRead,
+        Self::MemoryMutate,
+    ];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::NativeSessionCreate => "native_session.create",
+            Self::NativeSessionRead => "native_session.read",
+            Self::NativeSessionAction => "native_session.action",
+            Self::NativeSessionStream => "native_session.stream",
+            Self::SurfaceRead => "surface.read",
+            Self::SurfaceStream => "surface.stream",
+            Self::AssistantProfileRead => "assistant_profile.read",
+            Self::AssistantLaunch => "assistant.launch",
+            Self::RuntimeStatusRead => "runtime.status.read",
+            Self::ProviderStatusRead => "provider.status.read",
+            Self::ExtensionStatusRead => "extension.status.read",
+            Self::EventRead => "event.read",
+            Self::EventIngress => "event.ingress",
+            Self::LifecycleRead => "lifecycle.read",
+            Self::LifecycleMutate => "lifecycle.mutate",
+            Self::MemoryRead => "memory.read",
+            Self::MemoryMutate => "memory.mutate",
+        }
+    }
+
+    pub fn capability(self) -> &'static str {
+        match self {
+            Self::NativeSessionCreate => OmegonCapability::SESSION_CREATE,
+            Self::NativeSessionRead => OmegonCapability::SESSION_READ,
+            Self::NativeSessionAction => OmegonCapability::SESSION_ACTION,
+            Self::NativeSessionStream => OmegonCapability::SESSION_STREAM,
+            Self::SurfaceRead => OmegonCapability::SURFACE_READ,
+            Self::SurfaceStream => OmegonCapability::SURFACE_STREAM,
+            Self::AssistantProfileRead => OmegonCapability::ASSISTANT_PROFILE_READ,
+            Self::AssistantLaunch => OmegonCapability::ASSISTANT_LAUNCH,
+            Self::RuntimeStatusRead => OmegonCapability::RUNTIME_STATUS_READ,
+            Self::ProviderStatusRead => OmegonCapability::PROVIDER_STATUS_READ,
+            Self::ExtensionStatusRead => OmegonCapability::EXTENSION_STATUS_READ,
+            Self::EventRead => OmegonCapability::EVENT_READ,
+            Self::EventIngress => OmegonCapability::EVENT_INGRESS,
+            Self::LifecycleRead => OmegonCapability::LIFECYCLE_READ,
+            Self::LifecycleMutate => OmegonCapability::LIFECYCLE_MUTATE,
+            Self::MemoryRead => OmegonCapability::MEMORY_READ,
+            Self::MemoryMutate => OmegonCapability::MEMORY_MUTATE,
+        }
+    }
+
+    pub fn styrene_base(self) -> Option<&'static str> {
+        styrene_base_for_omegon(self.capability())
+    }
+}
+
+pub fn role_allows_operation(role: styrene_rbac::Role, operation: OmegonOperation) -> bool {
+    role_allows_omegon_capability(role, operation.capability())
+}
+
+pub fn role_from_control_label(label: &str) -> Option<styrene_rbac::Role> {
+    match label {
+        "read" | "monitor" => Some(styrene_rbac::Role::Monitor),
+        "edit" | "write" | "operator" => Some(styrene_rbac::Role::Operator),
+        "admin" => Some(styrene_rbac::Role::Admin),
+        "none" => Some(styrene_rbac::Role::None),
+        "blocked" => Some(styrene_rbac::Role::Blocked),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +303,30 @@ mod tests {
         assert!(!role_allows_tool(styrene_rbac::Role::Monitor, "bash"));
         assert!(role_allows_tool(styrene_rbac::Role::Operator, "bash"));
         assert!(role_allows_tool(styrene_rbac::Role::Monitor, "read"));
+    }
+
+    #[test]
+    fn operations_have_capabilities_and_base_mappings() {
+        for operation in OmegonOperation::ALL {
+            assert!(!operation.id().is_empty());
+            assert!(is_omegon_capability(operation.capability()));
+            assert!(operation.styrene_base().is_some(), "{:?}", operation);
+        }
+    }
+
+    #[test]
+    fn operation_role_checks_use_expected_tiers() {
+        assert!(role_allows_operation(
+            styrene_rbac::Role::Monitor,
+            OmegonOperation::SurfaceRead
+        ));
+        assert!(!role_allows_operation(
+            styrene_rbac::Role::Monitor,
+            OmegonOperation::EventIngress
+        ));
+        assert!(role_allows_operation(
+            styrene_rbac::Role::Operator,
+            OmegonOperation::EventIngress
+        ));
     }
 }

@@ -181,6 +181,7 @@ pub struct RuntimeCapabilitiesResponse {
     pub schema_version: u8,
     pub probes: RuntimeProbeCapabilities,
     pub browser_web: WebCapabilityDescriptor,
+    pub rbac: super::rbac::RbacPolicyDescriptor,
     pub acp_websocket: bool,
     pub acp_websocket_path: &'static str,
     pub daemon_event_ingress: bool,
@@ -746,18 +747,44 @@ pub async fn post_native_session_action(
     StatusCode,
     Json<crate::ui_runtime::envelope::UiActionOutcomeEnvelope>,
 ) {
+    let action_id = request.action_id.clone();
     if validate_native_session_id(&session_id).is_err() {
         return (
             StatusCode::NOT_FOUND,
             Json(
                 crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
                     session_id,
-                    request.action_id,
+                    action_id,
                     "unknown session_id",
                 ),
             ),
         );
     }
+
+    let role = super::rbac::current_web_role(&state);
+    if let Err(error) = super::rbac::require_operation(
+        role,
+        omegon_rbac::OmegonOperation::NativeSessionAction,
+        &super::rbac::RbacContext {
+            route: "/api/sessions/{session_id}/actions",
+            session_id: Some(&session_id),
+            action_id: Some(&action_id),
+            client_id: Some(&request.client_id),
+            ..super::rbac::RbacContext::default()
+        },
+    ) {
+        return (
+            error.status(),
+            Json(
+                crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                    session_id,
+                    action_id,
+                    error.response().reason,
+                ),
+            ),
+        );
+    }
+
     request.session_id = session_id;
     post_web_action(State(state), Json(request)).await
 }
@@ -1371,7 +1398,10 @@ pub async fn get_runtime_status(
 }
 
 /// GET /api/runtime/capabilities — stable runtime API capability descriptor.
-pub async fn get_runtime_capabilities() -> Json<RuntimeCapabilitiesResponse> {
+pub async fn get_runtime_capabilities(
+    State(state): State<WebState>,
+) -> Json<RuntimeCapabilitiesResponse> {
+    let role = super::rbac::current_web_role(&state);
     Json(RuntimeCapabilitiesResponse {
         schema_version: 1,
         probes: RuntimeProbeCapabilities {
@@ -1381,6 +1411,7 @@ pub async fn get_runtime_capabilities() -> Json<RuntimeCapabilitiesResponse> {
             state_snapshot: true,
         },
         browser_web: web_capabilities_descriptor(),
+        rbac: super::rbac::policy_descriptor(role),
         acp_websocket: true,
         acp_websocket_path: "/api/acp",
         daemon_event_ingress: true,
@@ -2107,6 +2138,7 @@ mod tests {
             tool_runs: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::VecDeque::new()),
             ),
+            web_role: styrene_rbac::Role::Admin,
         }
     }
 
@@ -2157,7 +2189,9 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn runtime_capabilities_describe_registered_runtime_contract() {
-        let response = get_runtime_capabilities().await.0;
+        let response = get_runtime_capabilities(axum::extract::State(test_state()))
+            .await
+            .0;
 
         assert_eq!(response.schema_version, 1);
         assert!(response.probes.healthz);
@@ -2171,6 +2205,15 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert_eq!(response.acp_websocket_path, "/api/acp");
         assert_eq!(response.browser_web.acp_websocket_path, "/api/acp");
         assert!(response.daemon_event_ingress);
+        assert_eq!(response.rbac.mode, "styrene-mapped");
+        assert_eq!(response.rbac.role, "admin");
+        assert!(
+            response
+                .rbac
+                .operations
+                .iter()
+                .any(|operation| operation.id == "native_session.action" && operation.allowed)
+        );
     }
 
     #[tokio::test]
@@ -2491,6 +2534,67 @@ required = ["MISSING_REQUIRED_TOKEN"]
         )
         .await;
         assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
+    }
+
+    #[tokio::test]
+    async fn native_session_action_denies_monitor_role_at_endpoint() {
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Monitor;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        state.command_tx = tx;
+
+        let (status, response) = post_native_session_action(
+            axum::extract::State(state),
+            axum::extract::Path("default".to_string()),
+            Json(WebActionRequest {
+                schema_version: 1,
+                action_id: "rbac-denied".to_string(),
+                client_id: "auspex".to_string(),
+                session_id: "default".to_string(),
+                action: WebActionPayload::SubmitPrompt {
+                    text: "must not run".to_string(),
+                    attachments: Vec::new(),
+                },
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            response.0.status,
+            crate::ui_runtime::envelope::UiActionOutcomeStatus::Rejected
+        );
+        assert_eq!(response.0.error.as_deref(), Some("capability_not_granted"));
+        assert!(
+            rx.try_recv().is_err(),
+            "denied action must not reach command queue"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_session_action_rbac_denial_has_stable_failure_contract() {
+        let error = super::super::rbac::require_operation(
+            styrene_rbac::Role::Monitor,
+            omegon_rbac::OmegonOperation::NativeSessionAction,
+            &super::super::rbac::RbacContext {
+                route: "/api/sessions/{session_id}/actions",
+                session_id: Some("default"),
+                action_id: Some("a-denied"),
+                client_id: Some("auspex"),
+                ..super::super::rbac::RbacContext::default()
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.status(), StatusCode::FORBIDDEN);
+        let response = error.response();
+        assert_eq!(response.error, "forbidden");
+        assert_eq!(response.reason, "capability_not_granted");
+        assert_eq!(response.operation, Some("native_session.action"));
+        assert_eq!(
+            response.capability,
+            Some(omegon_rbac::OmegonCapability::SESSION_ACTION)
+        );
     }
 
     #[tokio::test]
