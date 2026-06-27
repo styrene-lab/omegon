@@ -41,7 +41,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added `/api/acp` as the documented external-client ACP WebSocket path while preserving the legacy `/acp` alias, and clarified that Auspex should use native HTTP/SSE/WebSocket APIs as its first-party control plane.
 - Added native first-party session resource endpoints under `/api/sessions` for Auspex session create/metadata/surfaces/actions access, including assistant profile readiness validation during session creation, explicit singleton-live allocation metadata, consistent session response links, and session-scoped stream id validation.
 - Added `GET /api/assistant-profiles/{id}` to return the detailed assistant profile substrate plus compact readiness metadata for Auspex profile selectors.
-- Added a local `omegon-rbac` crate for Omegon/Auspex capability vocabulary layered on `styrene-rbac`, plus upstream issue notes for generic Styrene RBAC extension points.
+- Added a local `omegon-rbac` crate for Omegon/Auspex capability vocabulary layered on `styrene-rbac`, runtime RBAC policy descriptors, and endpoint-level native-session action enforcement, plus upstream issue notes for generic Styrene RBAC extension points.
 - Redacted tool arguments, output tails, and summaries before storing or streaming Web UI instrument state so browser-visible tool telemetry does not retain known secret values.
 - Added read-only lifecycle query endpoints for ready, blocked, and frontier design nodes.
 - Added read-only lifecycle endpoints for web/console clients: `GET /api/lifecycle/snapshot`, `GET /api/lifecycle/design`, and `GET /api/lifecycle/design/{id}`.
