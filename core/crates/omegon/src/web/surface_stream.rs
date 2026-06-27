@@ -2,6 +2,7 @@
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
+use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -72,19 +73,21 @@ pub struct WebSurfaceStreamQuery {
 
 pub async fn web_surface_stream_handler(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
     Query(query): Query<WebSurfaceStreamQuery>,
     State(state): State<WebState>,
 ) -> impl IntoResponse {
-    authorize_surface_stream(ws, query, state, None)
+    authorize_surface_stream(ws, headers, query, state, None)
 }
 
 pub async fn native_session_surface_stream_handler(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
     Path(session_id): Path<String>,
     Query(query): Query<WebSurfaceStreamQuery>,
     State(state): State<WebState>,
 ) -> impl IntoResponse {
-    authorize_surface_stream(ws, query, state, Some(session_id))
+    authorize_surface_stream(ws, headers, query, state, Some(session_id))
 }
 
 fn validate_surface_stream_session_id(
@@ -99,12 +102,11 @@ fn validate_surface_stream_session_id(
 }
 
 fn require_surface_stream_operation(
-    state: &WebState,
+    principal: &super::rbac::WebPrincipal,
     session_id: Option<&str>,
 ) -> Result<(), axum::http::StatusCode> {
-    let role = super::rbac::current_web_role(state);
-    super::rbac::require_operation(
-        role,
+    super::rbac::require_principal_operation(
+        principal,
         omegon_rbac::OmegonOperation::SurfaceStream,
         &super::rbac::RbacContext {
             route: if session_id.is_some() {
@@ -121,6 +123,7 @@ fn require_surface_stream_operation(
 
 fn authorize_surface_stream(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
     query: WebSurfaceStreamQuery,
     state: WebState,
     session_id: Option<String>,
@@ -128,10 +131,18 @@ fn authorize_surface_stream(
     if let Err(status) = validate_surface_stream_session_id(session_id.as_deref()) {
         return status.into_response();
     }
-    if !state.web_auth.verify_query_token(query.token.as_deref()) {
-        return axum::http::StatusCode::UNAUTHORIZED.into_response();
-    }
-    if let Err(status) = require_surface_stream_operation(&state, session_id.as_deref()) {
+    let principal = if query.token.is_some() {
+        if !state.web_auth.verify_query_token(query.token.as_deref()) {
+            return axum::http::StatusCode::UNAUTHORIZED.into_response();
+        }
+        super::rbac::current_web_principal(&state)
+    } else {
+        match super::rbac::principal_from_headers(&state, &headers) {
+            Ok(principal) => principal,
+            Err(error) => return error.status().into_response(),
+        }
+    };
+    if let Err(status) = require_surface_stream_operation(&principal, session_id.as_deref()) {
         return status.into_response();
     }
     ws.on_upgrade(|socket| handle_surface_stream(socket, state))
@@ -303,9 +314,10 @@ mod tests {
     use super::*;
 
     fn test_state() -> WebState {
-        WebState::new(
+        WebState::with_auth_state(
             super::super::DashboardHandles::default(),
             tokio::sync::broadcast::channel(16).0,
+            super::super::auth::WebAuthState::ephemeral_generated("test".to_string()),
         )
     }
 
@@ -319,6 +331,32 @@ mod tests {
             crate::web::auth::WebAuthState::ephemeral_generated("test-token".to_string()),
             Some(secrets),
         )
+    }
+
+    fn auth_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer test"),
+        );
+        headers
+    }
+
+    fn trusted_proxy_headers(role: &str) -> HeaderMap {
+        let mut headers = auth_headers();
+        headers.insert(
+            "Omegon-Principal-Issuer",
+            axum::http::HeaderValue::from_static("auspex"),
+        );
+        headers.insert(
+            "Omegon-Principal-Subject",
+            axum::http::HeaderValue::from_static("user:alice"),
+        );
+        headers.insert(
+            "Omegon-Principal-Role",
+            axum::http::HeaderValue::from_str(role).unwrap(),
+        );
+        headers
     }
 
     #[test]
@@ -337,11 +375,17 @@ mod tests {
         state.web_role = styrene_rbac::Role::Blocked;
 
         assert_eq!(
-            require_surface_stream_operation(&state, Some("default")),
+            require_surface_stream_operation(
+                &super::super::rbac::WebPrincipal::from_state(&state),
+                Some("default")
+            ),
             Err(axum::http::StatusCode::FORBIDDEN)
         );
         assert_eq!(
-            require_surface_stream_operation(&state, None),
+            require_surface_stream_operation(
+                &super::super::rbac::WebPrincipal::from_state(&state),
+                None
+            ),
             Err(axum::http::StatusCode::FORBIDDEN)
         );
     }
@@ -351,8 +395,57 @@ mod tests {
         let mut state = test_state();
         state.web_role = styrene_rbac::Role::Monitor;
 
-        assert!(require_surface_stream_operation(&state, Some("default")).is_ok());
-        assert!(require_surface_stream_operation(&state, None).is_ok());
+        assert!(require_surface_stream_operation(
+            &super::super::rbac::WebPrincipal::from_state(&state),
+            Some("default")
+        )
+        .is_ok());
+        assert!(require_surface_stream_operation(
+            &super::super::rbac::WebPrincipal::from_state(&state),
+            None
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn surface_stream_principal_headers_accept_trusted_proxy() {
+        let state = test_state();
+        let principal = super::super::rbac::principal_from_headers(
+            &state,
+            &trusted_proxy_headers("monitor"),
+        )
+        .expect("trusted proxy principal");
+
+        assert_eq!(principal.issuer, super::super::rbac::WebPrincipalIssuer::TrustedProxy);
+        assert_eq!(principal.role, styrene_rbac::Role::Monitor);
+        assert!(require_surface_stream_operation(&principal, Some("default")).is_ok());
+    }
+
+    #[test]
+    fn surface_stream_principal_headers_reject_invalid_bearer() {
+        let state = test_state();
+        let mut headers = trusted_proxy_headers("monitor");
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer wrong"),
+        );
+
+        assert!(matches!(
+            super::super::rbac::principal_from_headers(&state, &headers),
+            Err(super::super::rbac::RbacError::Unauthorized)
+        ));
+    }
+
+    #[test]
+    fn surface_stream_query_token_path_uses_local_role() {
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Blocked;
+        let principal = super::super::rbac::current_web_principal(&state);
+
+        assert_eq!(
+            require_surface_stream_operation(&principal, None),
+            Err(axum::http::StatusCode::FORBIDDEN)
+        );
     }
 
     #[test]

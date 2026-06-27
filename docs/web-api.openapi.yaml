@@ -37,6 +37,8 @@ paths:
     post:
       tags: [sessions]
       operationId: postNativeSession
+      security:
+        - bearerAuth: []
       summary: Create or attach the native first-party live session.
       description: >
         Phase 1 exposes the singleton in-process agent session through the
@@ -70,6 +72,8 @@ paths:
     get:
       tags: [sessions]
       operationId: getNativeSession
+      security:
+        - bearerAuth: []
       summary: Native session metadata plus current surface snapshot.
       description: Requires the `native_session.read` RBAC operation.
       parameters:
@@ -99,6 +103,8 @@ paths:
     get:
       tags: [surfaces]
       operationId: getNativeSessionSurfaces
+      security:
+        - bearerAuth: []
       summary: Native session semantic surface snapshot.
       description: Requires the `surface.read` RBAC operation.
       parameters:
@@ -130,8 +136,7 @@ paths:
       operationId: streamNativeSessionSurfaces
       summary: Native session live surface stream (WebSocket upgrade).
       description: >
-        Requires a valid web-auth query token and the `surface.stream` RBAC
-        operation before the WebSocket upgrade is accepted.
+        Requires either a valid web-auth query token, or bearer auth plus optional trusted principal headers, and the `surface.stream` RBAC operation before the WebSocket upgrade is accepted.
       parameters:
         - name: session_id
           in: path
@@ -213,7 +218,15 @@ paths:
       description: >
         Full point-in-time projection of every renderer-neutral surface for the
         live session.
+      security:
+        - bearerAuth: []
       responses:
+        "200":
+          description: Surface snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebSurfacesSnapshot"
         "403":
           description: Caller role lacks `surface.read`.
           content:
@@ -227,7 +240,7 @@ paths:
       operationId: streamWebSurfaces
       summary: Live surface stream (WebSocket upgrade).
       description: >
-        Upgrades the GET request to a WebSocket. On connect the server sends a
+        Upgrades the GET request to a WebSocket. Requires either a web-auth query token, or bearer auth plus optional trusted principal headers. On connect the server sends a
         `snapshot` message carrying the full `WebSurfacesSnapshot` as `payload`,
         then one message per agent event with a monotonically increasing
         `revision`. On consumer lag the server emits an `error` message advising
@@ -255,6 +268,8 @@ paths:
     post:
       tags: [actions]
       operationId: postWebAction
+      security:
+        - bearerAuth: []
       summary: Browser-native semantic action ingress.
       description: >
         Submit a renderer-neutral action against the live session. The response
@@ -460,6 +475,44 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+
+  parameters:
+    PrincipalIssuer:
+      name: Omegon-Principal-Issuer
+      in: header
+      required: false
+      description: Trusted proxy issuer. Currently `auspex` is accepted when bearer auth succeeds.
+      schema: { type: string }
+    PrincipalSubject:
+      name: Omegon-Principal-Subject
+      in: header
+      required: false
+      description: Stable subject asserted by a trusted proxy. Required when Principal-Issuer is present.
+      schema: { type: string }
+    PrincipalRole:
+      name: Omegon-Principal-Role
+      in: header
+      required: false
+      description: Role asserted by a trusted proxy; accepted values map to monitor/operator/admin. Required when Principal-Issuer is present.
+      schema: { type: string, enum: [read, edit, admin, monitor, operator] }
+    PrincipalDisplayName:
+      name: Omegon-Principal-Display-Name
+      in: header
+      required: false
+      description: Human-readable display name asserted by a trusted proxy.
+      schema: { type: string }
+    PrincipalSessionId:
+      name: Omegon-Principal-Session-Id
+      in: header
+      required: false
+      description: Proxy/user session id for audit correlation.
+      schema: { type: string }
+    PrincipalClientId:
+      name: Omegon-Principal-Client-Id
+      in: header
+      required: false
+      description: Client id for audit correlation.
+      schema: { type: string }
 
   schemas:
     NativeSessionCreateRequest:
