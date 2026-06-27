@@ -1014,6 +1014,30 @@ pub async fn post_web_action(
         );
     }
 
+    let role = super::rbac::current_web_role(&state);
+    if let Err(error) = super::rbac::require_operation(
+        role,
+        omegon_rbac::OmegonOperation::NativeSessionAction,
+        &super::rbac::RbacContext {
+            route: "/api/web/actions",
+            session_id: Some(&request.session_id),
+            action_id: Some(&request.action_id),
+            client_id: Some(&request.client_id),
+            ..super::rbac::RbacContext::default()
+        },
+    ) {
+        return (
+            error.status(),
+            Json(
+                crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                    request.session_id,
+                    request.action_id,
+                    error.response().reason,
+                ),
+            ),
+        );
+    }
+
     let send_result = match request.action {
         WebActionPayload::SubmitPrompt { text, attachments } => {
             let image_paths = if attachments.is_empty() {
@@ -2743,6 +2767,33 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         std::env::set_current_dir(cwd).unwrap();
         assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
+    }
+
+    #[tokio::test]
+    async fn web_action_denies_monitor_role_before_queueing_command() {
+        let mut state = test_state();
+        state.web_role = styrene_rbac::Role::Monitor;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        state.command_tx = tx;
+
+        let (status, response) = post_web_action(
+            axum::extract::State(state),
+            Json(WebActionRequest {
+                schema_version: 1,
+                action_id: "web-denied".to_string(),
+                client_id: "auspex".to_string(),
+                session_id: "default".to_string(),
+                action: WebActionPayload::SubmitPrompt {
+                    text: "should not queue".to_string(),
+                    attachments: Vec::new(),
+                },
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(response.0.error.as_deref(), Some("capability_not_granted"));
+        assert!(rx.try_recv().is_err());
     }
 
     #[tokio::test]
