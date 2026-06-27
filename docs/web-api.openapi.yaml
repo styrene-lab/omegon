@@ -180,7 +180,7 @@ paths:
         Reports whether the UI is being served directly or proxied (e.g. by
         Auspex). Derived from request headers.
       parameters:
-        - name: x-omegon-proxied-by
+        - name: Omegon-Principal-Issuer
           in: header
           required: false
           description: >
@@ -188,7 +188,7 @@ paths:
             and `policy_owner` to `auspex`.
           schema:
             type: string
-        - name: x-omegon-back-url
+        - name: Omegon-Back-Url
           in: header
           required: false
           description: >
