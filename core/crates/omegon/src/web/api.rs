@@ -698,7 +698,7 @@ pub async fn post_native_session(
 ) -> Result<(StatusCode, Json<NativeSessionCreateResponse>), StatusCode> {
     let principal = super::rbac::current_web_principal(&state);
     if let Err(error) = super::rbac::require_principal_operation(
-        principal,
+        &principal,
         omegon_rbac::OmegonOperation::NativeSessionCreate,
         &super::rbac::RbacContext {
             route: "/api/sessions",
@@ -750,7 +750,7 @@ pub async fn get_native_session(
     validate_native_session_id(&session_id)?;
     let principal = super::rbac::current_web_principal(&state);
     if let Err(error) = super::rbac::require_principal_operation(
-        principal,
+        &principal,
         omegon_rbac::OmegonOperation::NativeSessionRead,
         &super::rbac::RbacContext {
             route: "/api/sessions/{session_id}",
@@ -778,7 +778,7 @@ pub async fn get_native_session_surfaces(
     validate_native_session_id(&session_id)?;
     let principal = super::rbac::current_web_principal(&state);
     if let Err(error) = super::rbac::require_principal_operation(
-        principal,
+        &principal,
         omegon_rbac::OmegonOperation::SurfaceRead,
         &super::rbac::RbacContext {
             route: "/api/sessions/{session_id}/surfaces",
@@ -817,7 +817,7 @@ pub async fn post_native_session_action(
 
     let principal = super::rbac::current_web_principal(&state);
     if let Err(error) = super::rbac::require_principal_operation(
-        principal,
+        &principal,
         omegon_rbac::OmegonOperation::NativeSessionAction,
         &super::rbac::RbacContext {
             route: "/api/sessions/{session_id}/actions",
@@ -1055,7 +1055,7 @@ pub async fn post_web_action(
 
     let principal = super::rbac::current_web_principal(&state);
     if let Err(error) = super::rbac::require_principal_operation(
-        principal,
+        &principal,
         omegon_rbac::OmegonOperation::NativeSessionAction,
         &super::rbac::RbacContext {
             route: "/api/web/actions",
@@ -1256,7 +1256,7 @@ pub async fn get_web_surfaces(
 ) -> Result<Json<super::surfaces::WebSurfacesSnapshot>, StatusCode> {
     let principal = super::rbac::current_web_principal(&state);
     if let Err(error) = super::rbac::require_principal_operation(
-        principal,
+        &principal,
         omegon_rbac::OmegonOperation::SurfaceRead,
         &super::rbac::RbacContext {
             route: "/api/web/surfaces",
@@ -1713,18 +1713,10 @@ pub async fn post_event(
     headers: HeaderMap,
     Json(event): Json<DaemonEventEnvelope>,
 ) -> EventIngressOutcome {
-    let bearer = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "));
-    if !state.web_auth.verify_query_token(bearer) {
-        return EventIngressOutcome::Rbac(
-            StatusCode::UNAUTHORIZED,
-            super::rbac::RbacError::Unauthorized.response(),
-        );
-    }
-
-    let principal = super::rbac::current_web_principal(&state);
+    let principal = match super::rbac::principal_from_headers(&state, &headers) {
+        Ok(principal) => principal,
+        Err(error) => return EventIngressOutcome::Rbac(error.status(), error.response()),
+    };
     if let Some(label) = event.caller_role.as_deref() {
         let asserted_role = match super::rbac::parse_control_role(label) {
             Ok(role) => role,
@@ -1750,7 +1742,7 @@ pub async fn post_event(
         );
     }
     if let Err(error) = super::rbac::require_principal_operation(
-        principal,
+        &principal,
         omegon_rbac::OmegonOperation::EventIngress,
         &super::rbac::RbacContext {
             route: "/api/events",
@@ -3519,6 +3511,46 @@ required = ["BRAVE_API_KEY"]
         assert_eq!(payload.operation.as_deref(), Some("event.ingress"));
         assert_eq!(payload.role.as_deref(), Some("monitor"));
         assert!(state.daemon_events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn post_event_accepts_trusted_proxy_principal() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer test"),
+        );
+        headers.insert(
+            "x-omegon-proxied-by",
+            axum::http::HeaderValue::from_static("auspex"),
+        );
+        headers.insert(
+            "x-omegon-subject",
+            axum::http::HeaderValue::from_static("user:alice"),
+        );
+        headers.insert(
+            "x-omegon-role",
+            axum::http::HeaderValue::from_static("admin"),
+        );
+        let state = test_state();
+        let event = DaemonEventEnvelope {
+            event_id: "evt-proxy".into(),
+            source: "auspex/test".into(),
+            trigger_kind: "manual".into(),
+            payload: serde_json::json!({"ok": true}),
+            caller_role: Some("admin".into()),
+            source_user: Some("user:alice".into()),
+            source_channel: None,
+            source_thread: None,
+        };
+
+        let (status, payload) = event_accepted_response(
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await,
+        );
+
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert!(payload.accepted);
+        assert_eq!(state.daemon_events.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
