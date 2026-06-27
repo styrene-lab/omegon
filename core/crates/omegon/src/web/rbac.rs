@@ -36,6 +36,23 @@ pub enum RbacError {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct WebPrincipal {
+    pub subject: &'static str,
+    pub auth_source: &'static str,
+    pub role: styrene_rbac::Role,
+}
+
+impl WebPrincipal {
+    pub fn from_state(state: &super::WebState) -> Self {
+        Self {
+            subject: "local-web",
+            auth_source: state.web_auth.source_name(),
+            role: state.web_role,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RbacErrorResponse {
     pub schema_version: u8,
@@ -134,11 +151,23 @@ pub fn role_to_control_role(role: styrene_rbac::Role) -> crate::control_actions:
     }
 }
 
+pub fn current_web_principal(state: &super::WebState) -> WebPrincipal {
+    WebPrincipal::from_state(state)
+}
+
 /// Current local web role. Until signed identities/session claims land, local
-/// browser-native requests run as Admin but still pass through the same operation
-/// gate so handler wiring and descriptors are stable.
+/// browser-native requests run as the configured web role but still pass through
+/// the same operation gate so handler wiring and descriptors are stable.
 pub fn current_web_role(state: &super::WebState) -> styrene_rbac::Role {
-    state.web_role
+    current_web_principal(state).role
+}
+
+pub fn require_principal_operation(
+    principal: WebPrincipal,
+    operation: omegon_rbac::OmegonOperation,
+    ctx: &RbacContext<'_>,
+) -> Result<(), RbacError> {
+    require_operation(principal.role, operation, ctx)
 }
 
 pub fn require_operation(
@@ -248,6 +277,19 @@ pub fn policy_descriptor(role: styrene_rbac::Role) -> RbacPolicyDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_principal_uses_configured_local_role_and_auth_source() {
+        let state = super::super::WebState::new(
+            super::super::DashboardHandles::default(),
+            tokio::sync::broadcast::channel(1).0,
+        );
+        let principal = WebPrincipal::from_state(&state);
+
+        assert_eq!(principal.subject, "local-web");
+        assert_eq!(principal.auth_source, "generated");
+        assert_eq!(principal.role, styrene_rbac::Role::Admin);
+    }
 
     #[test]
     fn monitor_can_read_but_not_mutate() {
