@@ -7,6 +7,7 @@ members = [
     "core/crates/omegon-secrets",
     "core/crates/omegon-traits",
     "core/crates/omegon-opsx",
+    "core/crates/omegon-rbac",
     "core/crates/omegon-web",
 ]
 

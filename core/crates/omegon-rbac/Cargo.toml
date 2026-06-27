@@ -1,0 +1,9 @@
+[package]
+name = "omegon-rbac"
+version = "0.1.0"
+edition = "2024"
+description = "Omegon/Auspex capability vocabulary layered on styrene-rbac"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+styrene-rbac = "0.1.0"

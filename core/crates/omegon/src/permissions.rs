@@ -340,36 +340,15 @@ impl LayeredPermissionPolicy {
 
 /// Styrene RBAC capability associated with an Omegon tool surface.
 ///
-/// This deliberately reuses `styrene-rbac` capability constants so Omegon's
-/// local permission model can converge with StyreneIdentity/StyreneRBAC
-/// rosters without inventing a second access vocabulary.
+/// Delegates through `omegon-rbac`, which owns Omegon/Auspex-specific
+/// capability vocabulary while mapping to the current Styrene base lattice for
+/// enforcement compatibility.
 pub fn styrene_capability_for_tool(tool: &str) -> Option<&'static str> {
-    match tool {
-        crate::tool_registry::core::BASH | crate::tool_registry::core::TERMINAL => {
-            Some(styrene_rbac::Capability::TERMINAL_RESTRICTED)
-        }
-        crate::tool_registry::core::READ | crate::tool_registry::web_search::WEB_FETCH => {
-            Some(styrene_rbac::Capability::WEB_READ)
-        }
-        crate::tool_registry::core::WRITE
-        | crate::tool_registry::core::EDIT
-        | crate::tool_registry::core::CHANGE => Some(styrene_rbac::Capability::WEB_WRITE),
-        crate::tool_registry::core::VALIDATE => Some(styrene_rbac::Capability::RPC_STATUS),
-        crate::tool_registry::secrets::SECRET_SET
-        | crate::tool_registry::secrets::SECRET_DELETE => {
-            Some(styrene_rbac::Capability::RPC_CONFIG_UPDATE)
-        }
-        _ => None,
-    }
+    omegon_rbac::styrene_capability_for_tool(tool)
 }
 
 pub fn styrene_role_allows_tool(role: styrene_rbac::Role, tool: &str) -> bool {
-    styrene_capability_for_tool(tool)
-        .map(|cap| {
-            styrene_rbac::RosterEntry::new("00000000000000000000000000000000", role)
-                .has_capability(cap)
-        })
-        .unwrap_or(true)
+    omegon_rbac::role_allows_tool(role, tool)
 }
 
 /// Build the runtime permission policy snapshot from settings.
