@@ -239,8 +239,8 @@ pub fn classify_web_method(method: &str) -> ClassifiedAction {
         "context_compact" => (CanonicalAction::ContextCompact, ControlRole::Edit, true),
         "context_clear" => (CanonicalAction::ContextClear, ControlRole::Edit, true),
         "auth_status" => (CanonicalAction::AuthStatus, ControlRole::Read, true),
-        "auth_login" => (CanonicalAction::AuthLogin, ControlRole::Admin, false),
-        "auth_logout" => (CanonicalAction::AuthLogout, ControlRole::Admin, false),
+        "auth_login" => (CanonicalAction::AuthLogin, ControlRole::Admin, true),
+        "auth_logout" => (CanonicalAction::AuthLogout, ControlRole::Admin, true),
         "model_view" => (CanonicalAction::ModelView, ControlRole::Read, true),
         "model_list" => (CanonicalAction::ModelList, ControlRole::Read, true),
         "set_context_class" => (CanonicalAction::ContextSetClass, ControlRole::Edit, true),
@@ -278,15 +278,15 @@ pub fn classify_web_method(method: &str) -> ClassifiedAction {
         "plugin_install" => (CanonicalAction::PluginInstall, ControlRole::Edit, false),
         "plugin_remove" => (CanonicalAction::PluginRemove, ControlRole::Edit, false),
         "plugin_update" => (CanonicalAction::PluginUpdate, ControlRole::Edit, false),
-        "secrets_view" => (CanonicalAction::SecretsView, ControlRole::Edit, false),
-        "secrets_set" => (CanonicalAction::SecretsSet, ControlRole::Edit, false),
-        "secrets_get" => (CanonicalAction::SecretsGet, ControlRole::Edit, false),
-        "secrets_delete" => (CanonicalAction::SecretsDelete, ControlRole::Edit, false),
-        "vault_status" => (CanonicalAction::StatusView, ControlRole::Read, false),
-        "vault_unseal" => (CanonicalAction::Unknown, ControlRole::Admin, false),
-        "vault_login" => (CanonicalAction::Unknown, ControlRole::Admin, false),
-        "vault_configure" => (CanonicalAction::Unknown, ControlRole::Admin, false),
-        "vault_init_policy" => (CanonicalAction::Unknown, ControlRole::Admin, false),
+        "secrets_view" => (CanonicalAction::SecretsView, ControlRole::Edit, true),
+        "secrets_set" => (CanonicalAction::SecretsSet, ControlRole::Edit, true),
+        "secrets_get" => (CanonicalAction::SecretsGet, ControlRole::Edit, true),
+        "secrets_delete" => (CanonicalAction::SecretsDelete, ControlRole::Edit, true),
+        "vault_status" => (CanonicalAction::StatusView, ControlRole::Read, true),
+        "vault_unseal" => (CanonicalAction::Unknown, ControlRole::Admin, true),
+        "vault_login" => (CanonicalAction::Unknown, ControlRole::Admin, true),
+        "vault_configure" => (CanonicalAction::Unknown, ControlRole::Admin, true),
+        "vault_init_policy" => (CanonicalAction::Unknown, ControlRole::Admin, true),
         "cleave_status" => (CanonicalAction::CleaveView, ControlRole::Read, true),
         "cleave_cancel_child" => (CanonicalAction::CleaveCancelChild, ControlRole::Edit, true),
         "delegate_status" => (CanonicalAction::DelegateStatus, ControlRole::Read, true),
@@ -730,19 +730,42 @@ mod tests {
     }
 
     #[test]
-    fn classifies_web_secrets_set_as_edit_local_only() {
+    fn classifies_web_secrets_set_as_edit_remote_safe() {
         let action = classify_web_method("secrets_set");
         assert_eq!(action.action, CanonicalAction::SecretsSet);
         assert_eq!(action.role, ControlRole::Edit);
-        assert!(!action.remote_safe);
+        assert!(action.remote_safe);
     }
 
     #[test]
-    fn classifies_web_vault_login_as_admin_local_only() {
+    fn classifies_web_vault_login_as_admin_remote_safe() {
         let action = classify_web_method("vault_login");
         assert_eq!(action.action, CanonicalAction::Unknown);
         assert_eq!(action.role, ControlRole::Admin);
-        assert!(!action.remote_safe);
+        assert!(action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_web_exposed_sensitive_methods_as_remote_safe_with_roles() {
+        let cases = [
+            ("auth_login", ControlRole::Admin),
+            ("auth_logout", ControlRole::Admin),
+            ("secrets_view", ControlRole::Edit),
+            ("secrets_set", ControlRole::Edit),
+            ("secrets_get", ControlRole::Edit),
+            ("secrets_delete", ControlRole::Edit),
+            ("vault_status", ControlRole::Read),
+            ("vault_unseal", ControlRole::Admin),
+            ("vault_login", ControlRole::Admin),
+            ("vault_configure", ControlRole::Admin),
+            ("vault_init_policy", ControlRole::Admin),
+        ];
+
+        for (method, role) in cases {
+            let action = classify_web_method(method);
+            assert_eq!(action.role, role, "{method} role drifted");
+            assert!(action.remote_safe, "{method} is exposed by /ws and must be classified remote-safe");
+        }
     }
 
     #[test]
