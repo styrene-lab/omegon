@@ -694,9 +694,11 @@ pub async fn get_capabilities(
 /// extend this without changing the client-facing links.
 pub async fn post_native_session(
     State(state): State<WebState>,
+    headers: HeaderMap,
     Json(request): Json<NativeSessionCreateRequest>,
 ) -> Result<(StatusCode, Json<NativeSessionCreateResponse>), StatusCode> {
-    let principal = super::rbac::current_web_principal(&state);
+    let principal = super::rbac::principal_from_headers(&state, &headers)
+        .map_err(|error| error.status())?;
     if let Err(error) = super::rbac::require_principal_operation(
         &principal,
         omegon_rbac::OmegonOperation::NativeSessionCreate,
@@ -745,10 +747,12 @@ pub async fn post_native_session(
 /// GET /api/sessions/{session_id} — native first-party session metadata.
 pub async fn get_native_session(
     State(state): State<WebState>,
+    headers: HeaderMap,
     axum::extract::Path(session_id): axum::extract::Path<String>,
 ) -> Result<Json<WebSessionShowResponse>, StatusCode> {
     validate_native_session_id(&session_id)?;
-    let principal = super::rbac::current_web_principal(&state);
+    let principal = super::rbac::principal_from_headers(&state, &headers)
+        .map_err(|error| error.status())?;
     if let Err(error) = super::rbac::require_principal_operation(
         &principal,
         omegon_rbac::OmegonOperation::NativeSessionRead,
@@ -773,10 +777,12 @@ pub async fn get_native_session(
 /// GET /api/sessions/{session_id}/surfaces — native session-scoped surface snapshot.
 pub async fn get_native_session_surfaces(
     State(state): State<WebState>,
+    headers: HeaderMap,
     axum::extract::Path(session_id): axum::extract::Path<String>,
 ) -> Result<Json<super::surfaces::WebSurfacesSnapshot>, StatusCode> {
     validate_native_session_id(&session_id)?;
-    let principal = super::rbac::current_web_principal(&state);
+    let principal = super::rbac::principal_from_headers(&state, &headers)
+        .map_err(|error| error.status())?;
     if let Err(error) = super::rbac::require_principal_operation(
         &principal,
         omegon_rbac::OmegonOperation::SurfaceRead,
@@ -2622,6 +2628,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let response = post_native_session(
             axum::extract::State(state),
+            auth_headers(),
             Json(NativeSessionCreateRequest {
                 assistant_profile_id: None,
                 cwd: None,
@@ -2639,6 +2646,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let response = post_native_session(
             axum::extract::State(state),
+            auth_headers(),
             Json(NativeSessionCreateRequest {
                 assistant_profile_id: None,
                 cwd: None,
@@ -2655,6 +2663,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
     async fn native_session_create_returns_first_party_links() {
         let response = post_native_session(
             axum::extract::State(test_state()),
+            auth_headers(),
             Json(NativeSessionCreateRequest {
                 assistant_profile_id: None,
                 cwd: None,
@@ -2693,6 +2702,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let response = post_native_session(
             axum::extract::State(test_state()),
+            auth_headers(),
             Json(NativeSessionCreateRequest {
                 assistant_profile_id: Some("blocked-agent".to_string()),
                 cwd: None,
@@ -2726,6 +2736,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let response = post_native_session(
             axum::extract::State(test_state()),
+            auth_headers(),
             Json(NativeSessionCreateRequest {
                 assistant_profile_id: Some("missing".to_string()),
                 cwd: None,
@@ -2745,6 +2756,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let response = get_native_session(
             axum::extract::State(state),
+            auth_headers(),
             axum::extract::Path("default".to_string()),
         )
         .await;
@@ -2759,6 +2771,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         let response = get_native_session_surfaces(
             axum::extract::State(state),
+            auth_headers(),
             axum::extract::Path("default".to_string()),
         )
         .await;
@@ -2780,6 +2793,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
     async fn native_session_surfaces_reject_unknown_session() {
         let response = get_native_session_surfaces(
             axum::extract::State(test_state()),
+            auth_headers(),
             axum::extract::Path("missing".to_string()),
         )
         .await;
