@@ -696,9 +696,9 @@ pub async fn post_native_session(
     State(state): State<WebState>,
     Json(request): Json<NativeSessionCreateRequest>,
 ) -> Result<(StatusCode, Json<NativeSessionCreateResponse>), StatusCode> {
-    let role = super::rbac::current_web_role(&state);
-    if let Err(error) = super::rbac::require_operation(
-        role,
+    let principal = super::rbac::current_web_principal(&state);
+    if let Err(error) = super::rbac::require_principal_operation(
+        principal,
         omegon_rbac::OmegonOperation::NativeSessionCreate,
         &super::rbac::RbacContext {
             route: "/api/sessions",
@@ -1724,17 +1724,17 @@ pub async fn post_event(
         );
     }
 
-    let role = super::rbac::current_web_role(&state);
+    let principal = super::rbac::current_web_principal(&state);
     if let Some(label) = event.caller_role.as_deref() {
         let asserted_role = match super::rbac::parse_control_role(label) {
             Ok(role) => role,
             Err(error) => return EventIngressOutcome::Rbac(error.status(), error.response()),
         };
-        if asserted_role != role {
+        if asserted_role != principal.role {
             return EventIngressOutcome::Rbac(
                 StatusCode::FORBIDDEN,
                 super::rbac::RbacError::Forbidden {
-                    role,
+                    role: principal.role,
                     operation: omegon_rbac::OmegonOperation::EventIngress,
                 }
                 .response(),
@@ -1749,8 +1749,8 @@ pub async fn post_event(
             .response(),
         );
     }
-    if let Err(error) = super::rbac::require_operation(
-        role,
+    if let Err(error) = super::rbac::require_principal_operation(
+        principal,
         omegon_rbac::OmegonOperation::EventIngress,
         &super::rbac::RbacContext {
             route: "/api/events",
@@ -1762,13 +1762,13 @@ pub async fn post_event(
         return EventIngressOutcome::Rbac(error.status(), error.response());
     }
 
-    let caller_role = super::rbac::role_to_control_role(role);
+    let caller_role = super::rbac::role_to_control_role(principal.role);
     let required = crate::control_actions::classify_daemon_trigger(&event.trigger_kind).role;
     if !crate::control_actions::is_role_sufficient(caller_role, required) {
         return EventIngressOutcome::Rbac(
             StatusCode::FORBIDDEN,
             super::rbac::RbacError::Forbidden {
-                role,
+                role: principal.role,
                 operation: omegon_rbac::OmegonOperation::EventIngress,
             }
             .response(),
