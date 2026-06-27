@@ -8,6 +8,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use base64::Engine;
 use futures_util::stream;
 use omegon_traits::{DaemonEventEnvelope, OmegonInstanceDescriptor};
@@ -261,6 +262,20 @@ pub struct RuntimeProbeCapabilities {
 pub struct EventAccepted {
     pub accepted: bool,
     pub queued_events: usize,
+}
+
+pub enum EventIngressOutcome {
+    Accepted(StatusCode, EventAccepted),
+    Rbac(StatusCode, super::rbac::RbacErrorResponse),
+}
+
+impl IntoResponse for EventIngressOutcome {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Accepted(status, payload) => (status, Json(payload)).into_response(),
+            Self::Rbac(status, payload) => (status, Json(payload)).into_response(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1622,34 +1637,51 @@ pub async fn post_event(
     State(state): State<WebState>,
     headers: HeaderMap,
     Json(event): Json<DaemonEventEnvelope>,
-) -> (StatusCode, Json<EventAccepted>) {
+) -> EventIngressOutcome {
     let bearer = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "));
     if !state.web_auth.verify_query_token(bearer) {
-        return (
+        return EventIngressOutcome::Rbac(
             StatusCode::UNAUTHORIZED,
-            Json(EventAccepted {
-                accepted: false,
-                queued_events: 0,
-            }),
+            super::rbac::RbacError::Unauthorized.response(),
         );
     }
 
-    let caller_role = match event.caller_role.as_deref().unwrap_or("admin") {
-        "read" => crate::control_actions::ControlRole::Read,
-        "edit" => crate::control_actions::ControlRole::Edit,
-        _ => crate::control_actions::ControlRole::Admin,
+    let role = match super::rbac::parse_control_role(event.caller_role.as_deref().or(Some("admin")))
+    {
+        Ok(role) => role,
+        Err(error) => return EventIngressOutcome::Rbac(error.status(), error.response()),
+    };
+    if let Err(error) = super::rbac::require_operation(
+        role,
+        omegon_rbac::OmegonOperation::EventIngress,
+        &super::rbac::RbacContext {
+            route: "/api/events",
+            daemon_event_id: Some(&event.event_id),
+            trigger_kind: Some(&event.trigger_kind),
+            ..super::rbac::RbacContext::default()
+        },
+    ) {
+        return EventIngressOutcome::Rbac(error.status(), error.response());
+    }
+
+    let caller_role = match role {
+        styrene_rbac::Role::Monitor => crate::control_actions::ControlRole::Read,
+        styrene_rbac::Role::Operator => crate::control_actions::ControlRole::Edit,
+        styrene_rbac::Role::Admin => crate::control_actions::ControlRole::Admin,
+        _ => crate::control_actions::ControlRole::Read,
     };
     let required = crate::control_actions::classify_daemon_trigger(&event.trigger_kind).role;
     if !crate::control_actions::is_role_sufficient(caller_role, required) {
-        return (
+        return EventIngressOutcome::Rbac(
             StatusCode::FORBIDDEN,
-            Json(EventAccepted {
-                accepted: false,
-                queued_events: 0,
-            }),
+            super::rbac::RbacError::Forbidden {
+                role,
+                operation: omegon_rbac::OmegonOperation::EventIngress,
+            }
+            .response(),
         );
     }
 
@@ -1660,20 +1692,20 @@ pub async fn post_event(
             if let Ok(mut status) = state.daemon_status.lock() {
                 status.queued_events = queued_events;
             }
-            (
+            EventIngressOutcome::Accepted(
                 StatusCode::ACCEPTED,
-                Json(EventAccepted {
+                EventAccepted {
                     accepted: true,
                     queued_events,
-                }),
+                },
             )
         }
-        Err(_) => (
+        Err(_) => EventIngressOutcome::Accepted(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(EventAccepted {
+            EventAccepted {
                 accepted: false,
                 queued_events: 0,
-            }),
+            },
         ),
     }
 }
@@ -2165,6 +2197,30 @@ required = ["MISSING_REQUIRED_TOKEN"]
         match value {
             Some(value) => unsafe { std::env::set_var(key, value) },
             None => unsafe { std::env::remove_var(key) },
+        }
+    }
+
+    fn event_accepted_response(outcome: EventIngressOutcome) -> (StatusCode, EventAccepted) {
+        match outcome {
+            EventIngressOutcome::Accepted(status, payload) => (status, payload),
+            EventIngressOutcome::Rbac(status, _error) => (
+                status,
+                EventAccepted {
+                    accepted: false,
+                    queued_events: 0,
+                },
+            ),
+        }
+    }
+
+    fn event_rbac_response(
+        outcome: EventIngressOutcome,
+    ) -> (StatusCode, super::super::rbac::RbacErrorResponse) {
+        match outcome {
+            EventIngressOutcome::Rbac(status, payload) => (status, payload),
+            EventIngressOutcome::Accepted(status, _) => {
+                panic!("expected RBAC response, got {status}")
+            }
         }
     }
 
@@ -3203,10 +3259,72 @@ required = ["BRAVE_API_KEY"]
             source_channel: None,
             source_thread: None,
         };
-        let (status, Json(payload)) =
-            post_event(axum::extract::State(test_state()), headers, Json(event)).await;
+        let (status, payload) = event_accepted_response(
+            post_event(axum::extract::State(test_state()), headers, Json(event)).await,
+        );
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert!(!payload.accepted);
+    }
+
+    #[tokio::test]
+    async fn post_event_rejects_monitor_role_for_event_ingress() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer test"),
+        );
+        let state = test_state();
+        let event = DaemonEventEnvelope {
+            event_id: "evt-monitor-denied".into(),
+            source: "manual/test".into(),
+            trigger_kind: "new_session".into(),
+            payload: serde_json::json!({}),
+            caller_role: Some("read".into()),
+            source_user: None,
+            source_channel: None,
+            source_thread: None,
+        };
+
+        let (status, payload) = event_rbac_response(
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await,
+        );
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(payload.error, "forbidden");
+        assert_eq!(payload.reason, "capability_not_granted");
+        assert_eq!(payload.operation.as_deref(), Some("event.ingress"));
+        assert_eq!(
+            payload.capability.as_deref(),
+            Some(omegon_rbac::OmegonCapability::EVENT_INGRESS)
+        );
+        assert!(state.daemon_events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn post_event_rejects_invalid_caller_role() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer test"),
+        );
+        let event = DaemonEventEnvelope {
+            event_id: "evt-invalid-role".into(),
+            source: "manual/test".into(),
+            trigger_kind: "new_session".into(),
+            payload: serde_json::json!({}),
+            caller_role: Some("superuser".into()),
+            source_user: None,
+            source_channel: None,
+            source_thread: None,
+        };
+
+        let (status, payload) = event_rbac_response(
+            post_event(axum::extract::State(test_state()), headers, Json(event)).await,
+        );
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload.error, "invalid_role");
+        assert_eq!(payload.reason, "unknown_role");
     }
 
     #[tokio::test]
@@ -3287,8 +3405,9 @@ required = ["BRAVE_API_KEY"]
             source_channel: None,
             source_thread: None,
         };
-        let (status, Json(payload)) =
-            post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
+        let (status, payload) = event_accepted_response(
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await,
+        );
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert!(!payload.accepted);
         assert_eq!(payload.queued_events, 0);
@@ -3313,8 +3432,9 @@ required = ["BRAVE_API_KEY"]
             source_channel: None,
             source_thread: None,
         };
-        let (status, Json(payload)) =
-            post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
+        let (status, payload) = event_accepted_response(
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await,
+        );
         assert_eq!(status, StatusCode::ACCEPTED);
         assert!(payload.accepted);
         assert_eq!(payload.queued_events, 1);
@@ -3340,8 +3460,9 @@ required = ["BRAVE_API_KEY"]
             source_channel: None,
             source_thread: None,
         };
-        let (status, Json(payload)) =
-            post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
+        let (status, payload) = event_accepted_response(
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await,
+        );
         assert_eq!(status, StatusCode::ACCEPTED);
         assert!(payload.accepted);
         assert_eq!(payload.queued_events, 1);
@@ -3367,8 +3488,9 @@ required = ["BRAVE_API_KEY"]
             source_channel: None,
             source_thread: None,
         };
-        let (status, Json(payload)) =
-            post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
+        let (status, payload) = event_accepted_response(
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await,
+        );
         assert_eq!(status, StatusCode::ACCEPTED);
         assert!(payload.accepted);
         assert_eq!(payload.queued_events, 1);
