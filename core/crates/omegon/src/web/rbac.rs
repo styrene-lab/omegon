@@ -242,7 +242,73 @@ pub fn require_principal_operation(
     operation: omegon_rbac::OmegonOperation,
     ctx: &RbacContext<'_>,
 ) -> Result<(), RbacError> {
-    require_operation(principal.role, operation, ctx)
+    let Some(required_base) = operation.styrene_base() else {
+        tracing::error!(
+            rbac.mode = "styrene-mapped",
+            rbac.decision = "error",
+            rbac.operation = operation.id(),
+            principal.subject = principal.subject.as_str(),
+            principal.issuer = ?principal.issuer,
+            principal.auth_source = principal.auth_source.as_str(),
+            http.route = ctx.route,
+            "rbac operation missing Styrene base mapping"
+        );
+        return Err(RbacError::Misconfigured {
+            operation: operation.id(),
+        });
+    };
+
+    if omegon_rbac::role_allows_operation(principal.role, operation) {
+        tracing::debug!(
+            rbac.mode = "styrene-mapped",
+            rbac.decision = "allow",
+            rbac.operation = operation.id(),
+            rbac.capability = operation.capability(),
+            rbac.required_base = required_base,
+            rbac.role = principal.role.as_str(),
+            principal.subject = principal.subject.as_str(),
+            principal.issuer = ?principal.issuer,
+            principal.auth_source = principal.auth_source.as_str(),
+            principal.session_id = principal.session_id.as_deref().unwrap_or(""),
+            principal.client_id = principal.client_id.as_deref().unwrap_or(""),
+            http.route = ctx.route,
+            session.id = ctx.session_id.unwrap_or(""),
+            action.id = ctx.action_id.unwrap_or(""),
+            assistant_profile.id = ctx.assistant_profile_id.unwrap_or(""),
+            client.id = ctx.client_id.unwrap_or(""),
+            daemon_event.id = ctx.daemon_event_id.unwrap_or(""),
+            daemon_event.trigger_kind = ctx.trigger_kind.unwrap_or(""),
+            "rbac allowed operation for principal"
+        );
+        Ok(())
+    } else {
+        tracing::warn!(
+            rbac.mode = "styrene-mapped",
+            rbac.decision = "deny",
+            rbac.operation = operation.id(),
+            rbac.capability = operation.capability(),
+            rbac.required_base = required_base,
+            rbac.role = principal.role.as_str(),
+            principal.subject = principal.subject.as_str(),
+            principal.issuer = ?principal.issuer,
+            principal.auth_source = principal.auth_source.as_str(),
+            principal.session_id = principal.session_id.as_deref().unwrap_or(""),
+            principal.client_id = principal.client_id.as_deref().unwrap_or(""),
+            http.route = ctx.route,
+            session.id = ctx.session_id.unwrap_or(""),
+            action.id = ctx.action_id.unwrap_or(""),
+            assistant_profile.id = ctx.assistant_profile_id.unwrap_or(""),
+            client.id = ctx.client_id.unwrap_or(""),
+            daemon_event.id = ctx.daemon_event_id.unwrap_or(""),
+            daemon_event.trigger_kind = ctx.trigger_kind.unwrap_or(""),
+            reason = "capability_not_granted",
+            "rbac denied operation for principal"
+        );
+        Err(RbacError::Forbidden {
+            role: principal.role,
+            operation,
+        })
+    }
 }
 
 pub fn require_operation(
