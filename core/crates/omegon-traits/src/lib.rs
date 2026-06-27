@@ -658,8 +658,9 @@ pub struct DaemonEventEnvelope {
     pub source: String,
     pub trigger_kind: String,
     pub payload: Value,
-    /// Optional caller role for transport-side authorization. Defaults to admin
-    /// when omitted for backward compatibility with existing clients.
+    /// Optional caller role for transport-side authorization. HTTP daemon event
+    /// ingress requires this field; legacy transports may apply their own
+    /// compatibility defaults.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller_role: Option<String>,
     /// Identity of the user who triggered this event (e.g. Slack user ID).
