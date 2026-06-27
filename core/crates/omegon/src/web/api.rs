@@ -748,9 +748,9 @@ pub async fn get_native_session(
     axum::extract::Path(session_id): axum::extract::Path<String>,
 ) -> Result<Json<WebSessionShowResponse>, StatusCode> {
     validate_native_session_id(&session_id)?;
-    let role = super::rbac::current_web_role(&state);
-    if let Err(error) = super::rbac::require_operation(
-        role,
+    let principal = super::rbac::current_web_principal(&state);
+    if let Err(error) = super::rbac::require_principal_operation(
+        principal,
         omegon_rbac::OmegonOperation::NativeSessionRead,
         &super::rbac::RbacContext {
             route: "/api/sessions/{session_id}",
@@ -776,9 +776,9 @@ pub async fn get_native_session_surfaces(
     axum::extract::Path(session_id): axum::extract::Path<String>,
 ) -> Result<Json<super::surfaces::WebSurfacesSnapshot>, StatusCode> {
     validate_native_session_id(&session_id)?;
-    let role = super::rbac::current_web_role(&state);
-    if let Err(error) = super::rbac::require_operation(
-        role,
+    let principal = super::rbac::current_web_principal(&state);
+    if let Err(error) = super::rbac::require_principal_operation(
+        principal,
         omegon_rbac::OmegonOperation::SurfaceRead,
         &super::rbac::RbacContext {
             route: "/api/sessions/{session_id}/surfaces",
@@ -815,9 +815,9 @@ pub async fn post_native_session_action(
         );
     }
 
-    let role = super::rbac::current_web_role(&state);
-    if let Err(error) = super::rbac::require_operation(
-        role,
+    let principal = super::rbac::current_web_principal(&state);
+    if let Err(error) = super::rbac::require_principal_operation(
+        principal,
         omegon_rbac::OmegonOperation::NativeSessionAction,
         &super::rbac::RbacContext {
             route: "/api/sessions/{session_id}/actions",
@@ -1053,9 +1053,9 @@ pub async fn post_web_action(
         );
     }
 
-    let role = super::rbac::current_web_role(&state);
-    if let Err(error) = super::rbac::require_operation(
-        role,
+    let principal = super::rbac::current_web_principal(&state);
+    if let Err(error) = super::rbac::require_principal_operation(
+        principal,
         omegon_rbac::OmegonOperation::NativeSessionAction,
         &super::rbac::RbacContext {
             route: "/api/web/actions",
@@ -1254,9 +1254,9 @@ pub async fn post_web_action(
 pub async fn get_web_surfaces(
     State(state): State<WebState>,
 ) -> Result<Json<super::surfaces::WebSurfacesSnapshot>, StatusCode> {
-    let role = super::rbac::current_web_role(&state);
-    if let Err(error) = super::rbac::require_operation(
-        role,
+    let principal = super::rbac::current_web_principal(&state);
+    if let Err(error) = super::rbac::require_principal_operation(
+        principal,
         omegon_rbac::OmegonOperation::SurfaceRead,
         &super::rbac::RbacContext {
             route: "/api/web/surfaces",
