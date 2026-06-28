@@ -1047,7 +1047,7 @@ pub fn doctor_candidate_conflicts(
         .collect()
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct SkillBundleSummary {
     pub scripts: Vec<String>,
     pub resources: Vec<String>,

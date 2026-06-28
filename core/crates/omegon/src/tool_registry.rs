@@ -139,6 +139,17 @@ pub mod persona {
     pub const LIST_PERSONAS: &str = "list_personas";
 }
 
+/// Skills surface — owned by `features::persona` until skills have their own augment registry handle.
+pub mod skills {
+    pub const SKILLS_LIST: &str = "skills_list";
+    pub const SKILLS_GET: &str = "skills_get";
+    pub const SKILLS_CREATE: &str = "skills_create";
+    pub const SKILLS_IMPORT: &str = "skills_import";
+    pub const SKILLS_INSTALL: &str = "skills_install";
+    pub const SKILLS_DELETE: &str = "skills_delete";
+    pub const SKILLS_RELOAD: &str = "skills_reload";
+}
+
 /// Code and knowledge scanning — owned by `tools::codebase_search`
 pub mod codescan {
     pub const CODEBASE_SEARCH: &str = "codebase_search";
@@ -178,7 +189,7 @@ pub mod loop_jobs {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 72;
+pub const TOOL_COUNT: usize = 79;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -257,6 +268,14 @@ pub fn all_static_names() -> Vec<&'static str> {
         persona::SWITCH_PERSONA,
         persona::SWITCH_TONE,
         persona::LIST_PERSONAS,
+        // skills (7)
+        skills::SKILLS_LIST,
+        skills::SKILLS_GET,
+        skills::SKILLS_CREATE,
+        skills::SKILLS_IMPORT,
+        skills::SKILLS_INSTALL,
+        skills::SKILLS_DELETE,
+        skills::SKILLS_RELOAD,
         // codescan (2)
         codescan::CODEBASE_SEARCH,
         codescan::CODEBASE_INDEX,
@@ -275,7 +294,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         loop_jobs::LOOP_STATUS,
         loop_jobs::LOOP_STOP,
     ]
-    // Total: 66
+    // Total: 79
 }
 
 #[cfg(test)]

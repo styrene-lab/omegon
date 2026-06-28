@@ -891,8 +891,13 @@ impl AgentSetup {
             activate_startup_tone(&mut persona_registry, &tone_name);
         }
 
+        let shared_augment_registry =
+            features::persona::SharedAugmentRegistry::new(persona_registry);
         bus.register(Box::new(features::persona::PersonaFeature::new(
-            persona_registry,
+            shared_augment_registry.clone(),
+        )));
+        bus.register(Box::new(features::skills::SkillsFeature::new(
+            shared_augment_registry,
         )));
 
         if let Some(ref settings) = settings {
