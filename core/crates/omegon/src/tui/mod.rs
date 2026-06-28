@@ -6440,7 +6440,7 @@ Scroll transcript:
                 {
                     if self.agent_active {
                         SlashResult::Display(
-                            "Runtime hot restart unavailable while a model turn is active. Wait for completion or cancel the turn first.".into(),
+                            "Runtime substrate refresh unavailable while a model turn is active. Wait for completion or cancel the turn first.".into(),
                         )
                     } else {
                         let active_skills = self
@@ -6456,7 +6456,7 @@ Scroll transcript:
                                     dry_run.invalid_manifests.join("; ")
                                 };
                                 SlashResult::Display(format!(
-                                    "## Runtime hot restart preview\n\nStatus: guarded dry-run only; substrate swap is not implemented yet.\nRuntime generation: {}\n\nWould preserve: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nWould rebuild: EventBus, tools, commands, extensions, widgets, skills, context providers, harness inventory.\nCurrent active skill directives: {active_skills}\nBus commands registered: {}\n\nLive substrate inventory:\n- Extension widgets mounted: {}\n- Extension metadata entries: {}\n- Extension RPC handles: {}\n- Widget receivers: {}\n- Voice notification receivers: {}\n- Voice polling handles: {}\n- Vox polling handles: {}\n- Startup skill activation events: {}\n\nDry-run rebuild inventory:\n- Extension candidates: {}\n- Skipped by policy: {}\n- Disabled extensions: {}\n- Invalid manifests: {invalid}\n- Candidate widgets: {}\n- Candidate metadata entries: {}\n- Candidate RPC handles: {}\n- Candidate widget receivers: {}\n- Candidate vox polling handles: {}\n- Reloadable skill entries: {}\n\nNext implementation step: build the replacement EventBus and side-channel handles transactionally, then swap only after build succeeds.",
+                                    "## Runtime substrate refresh preview\n\nStatus: guarded candidate inventory only; generation promotion is not implemented yet.\nRuntime generation: {}\n\nWould preserve: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nWould refresh: discovered extensions, widgets, RPC handles, skill augments, commands/tools, context-provider registrations, harness inventory.\nCurrent active skill directives: {active_skills}\nCommand definitions registered: {}\n\nLive substrate inventory:\n- Extension widgets mounted: {}\n- Extension metadata entries: {}\n- Extension RPC handles: {}\n- Widget receivers: {}\n- Voice notification receivers: {}\n- Voice polling handles: {}\n- Vox polling handles: {}\n- Startup skill activation events: {}\n\nCandidate refresh inventory:\n- Extension candidates: {}\n- Skipped by policy: {}\n- Disabled extensions: {}\n- Invalid manifests: {invalid}\n- Candidate widgets: {}\n- Candidate metadata entries: {}\n- Candidate RPC handles: {}\n- Candidate widget receivers: {}\n- Candidate vox polling handles: {}\n- Reloadable skill entries: {}\n\nNext implementation step: build the complete candidate generation transactionally, then promote only after validation succeeds.",
                                     self.runtime_generation,
                                     self.bus_commands.len(),
                                     self.runtime_inventory.extension_widgets,
@@ -6479,7 +6479,7 @@ Scroll transcript:
                                 ))
                             }
                             Err(err) => SlashResult::Display(format!(
-                                "Runtime hot restart dry-run failed before touching live runtime: {err}"
+                                "Runtime substrate refresh candidate failed before touching live runtime: {err}"
                             )),
                         }
                     }

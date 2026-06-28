@@ -101,13 +101,13 @@ pub struct AgentSetup {
 }
 
 
-/// Restart-substrate inventory captured at startup or before a future hot restart.
+/// Runtime-substrate inventory captured at startup or before a future substrate refresh.
 ///
 /// This is intentionally small and copyable: it lets operator-facing surfaces
-/// describe what the runtime substrate contains without taking ownership of
-/// process handles, receivers, or the event bus. Future hot restart code should
-/// build and validate a replacement substrate first, then publish a new
-/// inventory only after a successful swap.
+/// describe what the runtime-discovered substrate contains without taking
+/// ownership of process handles, receivers, or internal routing state. Future
+/// refresh code should build and validate a candidate generation first, then
+/// promote that candidate only after it succeeds.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeSubstrateInventory {
     pub skill_activation_events: usize,
@@ -145,12 +145,12 @@ pub struct RuntimeRestartDryRun {
     pub invalid_manifests: Vec<String>,
 }
 
-/// Build the restart substrate inventory without mutating live runtime state.
+/// Build a runtime substrate refresh candidate inventory without mutating live runtime state.
 ///
-/// This intentionally does not spawn extension subprocesses or register bus
+/// This intentionally does not spawn extension subprocesses or register live
 /// features. It verifies the filesystem/profile side of extension discovery so
-/// `/runtime restart` can report whether a transactional rebuild is plausible
-/// before the later swap implementation exists.
+/// `/runtime restart` can report whether a candidate refresh is plausible
+/// before the later promotion implementation exists.
 pub fn runtime_restart_dry_run(cwd: &Path) -> anyhow::Result<RuntimeRestartDryRun> {
     let cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let mut dry_run = RuntimeRestartDryRun::default();
