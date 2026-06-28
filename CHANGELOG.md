@@ -72,6 +72,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
 
 ### Fixed
+- Made `omegon skills --cwd <path>` honor the requested project directory for project-local skill create/get/list/import/delete operations, so iterative skill work can target another checkout without changing the shell cwd.
 - Serialized skills and Claude migration tests that mutate process-global `OMEGON_HOME` or the current working directory, making plain parallel `cargo test -p omegon` pass without relying on `--test-threads=1`.
 - Made the loop stream idle watchdog phase-aware for post-text, post-thinking, and post-tool-call inter-item gaps so normal provider decision silence does not trip the tighter active-output stall timeout.
 - Improved the slim TUI engine/footer band: active turns no longer replace provider/model, tier, thinking, and context details with the spinner verb; thinking mode now renders as its own shaded engine-ribbon segment, and the spinner/status verb moves to a subtle always-on activity row above the engine line. Updated the stale memory-tool label assertion to match the shared `mem read` conversation-surface identity.

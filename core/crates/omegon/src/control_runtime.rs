@@ -3586,7 +3586,7 @@ pub async fn skills_install_response(name: Option<&str>) -> SlashCommandResponse
         {
             Ok(result) => SlashCommandResponse {
                 accepted: true,
-                output: Some(format!("{}\n\nRun `/extension refresh` to inspect the current-session refresh candidate.", armory_install_output(result))),
+                output: Some(armory_install_output(result)),
             },
             Err(err) => SlashCommandResponse {
                 accepted: false,
@@ -3854,7 +3854,7 @@ pub async fn extension_install_response(uri: &str) -> SlashCommandResponse {
     match crate::armory::install_extension(uri.trim(), None).await {
         Ok(result) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("{}\n\nRun `/extension refresh` to inspect the current-session refresh candidate.", armory_install_output(result))),
+            output: Some(armory_install_output(result)),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
@@ -3989,7 +3989,7 @@ pub async fn armory_install_response(target: &str) -> SlashCommandResponse {
     match crate::armory::install(target, crate::armory::ArmoryInstallKind::Auto, &cwd).await {
         Ok(result) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("{}\n\nRun `/extension refresh` to inspect the current-session refresh candidate.", armory_install_output(result))),
+            output: Some(armory_install_output(result)),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
@@ -4001,13 +4001,13 @@ pub async fn armory_install_response(target: &str) -> SlashCommandResponse {
 fn armory_install_output(result: crate::armory::ArmoryInstallResult) -> String {
     let followup = match result.kind {
         crate::armory::ArmoryItemKind::Extension => {
-            "New sessions will discover the extension. Use /extension list to verify it is installed."
+            "New sessions will discover the extension. Use /extension list to verify it is installed, or /extension refresh to inspect the current-session refresh candidate."
         }
         crate::armory::ArmoryItemKind::Plugin => {
             "New sessions will discover the plugin. Use /plugin list, /persona list, or /armory search to verify the installed surface."
         }
         crate::armory::ArmoryItemKind::Skill => {
-            "New sessions will load the skill. Use /skills list to verify it is installed."
+            "Run /skills reload to activate user/project skill changes in this session, or start a new session. Use /skills list to verify it is installed."
         }
         crate::armory::ArmoryItemKind::Agent => {
             "Use /catalog list to verify installed agent catalog entries."
