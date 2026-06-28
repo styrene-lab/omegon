@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added structured stream-idle telemetry (`AgentEvent::StreamIdle`, Web `stream.idle`, ACP `_stream/idle`) so provider idle/stall diagnostics can flow to UIs without being rendered as assistant-authored content.
 - Added dedicated agent-callable skills tools (`skills_list`, `skills_get`, `skills_create`, `skills_import`, `skills_install`, `skills_delete`, `skills_reload`) backed by a first-class skills feature and shared augment registry reload path.
 - Added `/extension refresh`, `/extension reload`, and `/extension restart` as safe aliases for a partial live runtime substrate refresh: skill augments reload immediately, extension/process/widget changes remain candidate inventory until explicit promotion support lands.
 - Added a guarded `/runtime restart` substrate-refresh candidate surface with runtime generation, live startup substrate inventory, and non-mutating extension/skill candidate inventory so the extension/runtime reload design has an operator-visible command seam before generation promotion lands.

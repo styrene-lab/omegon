@@ -1055,6 +1055,21 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
         AgentEvent::SystemNotification { message } => Some(IpcEventPayload::SystemNotification {
             message: message.clone(),
         }),
+        AgentEvent::StreamIdle {
+            provider,
+            model,
+            phase,
+            idle_secs,
+            ambiguous,
+            message,
+        } => Some(IpcEventPayload::StreamIdle {
+            provider: provider.clone(),
+            model: model.clone(),
+            phase: phase.clone(),
+            idle_secs: *idle_secs,
+            ambiguous: *ambiguous,
+            message: message.clone(),
+        }),
         AgentEvent::ProviderRetry {
             provider,
             model,
@@ -1158,6 +1173,7 @@ fn event_name(ev: &IpcEventPayload) -> &'static str {
         IpcEventPayload::DecompositionCompleted { .. } => "decomposition.completed",
         IpcEventPayload::FamilyVitalSignsUpdated { .. } => "family.vital_signs",
         IpcEventPayload::PlanUpdated { .. } => "plan.updated",
+        IpcEventPayload::StreamIdle { .. } => "stream.idle",
         IpcEventPayload::ProviderRouteChanged { .. } => "provider.route_changed",
         IpcEventPayload::RuntimeQueueUpdated { .. } => "runtime.queue_updated",
         IpcEventPayload::HarnessChanged => "harness.changed",
@@ -1264,6 +1280,39 @@ mod tests {
                 assert_eq!(snapshot["workstreams"][0]["completed"], 3);
             }
             other => panic!("expected plan payload, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn projects_stream_idle_to_structured_ipc_payload() {
+        let payload = project_event(&AgentEvent::StreamIdle {
+            provider: "openai-codex".into(),
+            model: "gpt-5.5".into(),
+            phase: "ambiguous silent reasoning".into(),
+            idle_secs: 600,
+            ambiguous: true,
+            message: "idle".into(),
+        })
+        .expect("projected payload");
+
+        assert_eq!(event_name(&payload), "stream.idle");
+        match payload {
+            IpcEventPayload::StreamIdle {
+                provider,
+                model,
+                phase,
+                idle_secs,
+                ambiguous,
+                message,
+            } => {
+                assert_eq!(provider, "openai-codex");
+                assert_eq!(model, "gpt-5.5");
+                assert_eq!(phase, "ambiguous silent reasoning");
+                assert_eq!(idle_secs, 600);
+                assert!(ambiguous);
+                assert_eq!(message, "idle");
+            }
+            other => panic!("expected stream idle payload, got {other:?}"),
         }
     }
 }

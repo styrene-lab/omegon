@@ -2044,12 +2044,30 @@ async fn stream_with_retry(
     loop {
         attempt += 1;
 
+        let provider = config
+            .model
+            .split(':')
+            .next()
+            .unwrap_or("upstream")
+            .to_string();
+        let model = options
+            .model
+            .clone()
+            .unwrap_or_else(|| config.model.clone());
+
         // Wrap bridge.stream() so pre-stream network errors (DNS, connection
         // refused, TLS failures) enter the same transient classifier instead
         // of aborting immediately via `?`.
         let err = match bridge.stream(system_prompt, messages, tools, options).await {
             Ok(mut rx) => {
-                match consume_llm_stream(&mut rx, events, config.cancel_keeps_prompt.as_ref()).await
+                match consume_llm_stream(
+                    &mut rx,
+                    events,
+                    &provider,
+                    &model,
+                    config.cancel_keeps_prompt.as_ref(),
+                )
+                .await
                 {
                     Ok(msg) => return Ok(msg),
                     Err(e) => e,
@@ -2059,20 +2077,9 @@ async fn stream_with_retry(
         };
 
         let err_msg = err.to_string();
-        let provider = config
-            .model
-            .split(':')
-            .next()
-            .unwrap_or("upstream")
-            .to_string();
         let upstream_class = classify_upstream_error_for_provider(&provider, &err_msg);
         let transient_kind = upstream_class.transient_kind();
         let is_transient = transient_kind.is_some();
-        let model = options
-            .model
-            .as_deref()
-            .unwrap_or(&config.model)
-            .to_string();
 
         if !is_transient {
             if attempt > 1 {
@@ -2388,6 +2395,8 @@ fn stream_idle_phase_after_event(current: StreamIdlePhase, event: &LlmEvent) -> 
 async fn consume_llm_stream(
     rx: &mut tokio::sync::mpsc::Receiver<LlmEvent>,
     events: &broadcast::Sender<AgentEvent>,
+    provider: &str,
+    model: &str,
     cancel_keeps_prompt: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> anyhow::Result<AssistantMessage> {
     let mut text_parts: Vec<String> = Vec::new();
@@ -2470,6 +2479,14 @@ async fn consume_llm_stream(
                     phase.label()
                 )
             };
+            let _ = events.send(AgentEvent::StreamIdle {
+                provider: provider.to_string(),
+                model: model.to_string(),
+                phase: phase.label().to_string(),
+                idle_secs: idle_timeout().as_secs(),
+                ambiguous: phase.is_ambiguous_reasoning(),
+                message: reason.clone(),
+            });
             let _ = events.send(AgentEvent::MessageAbort {
                 reason: Some(reason.clone()),
             });

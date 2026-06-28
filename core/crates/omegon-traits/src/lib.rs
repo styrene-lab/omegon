@@ -1248,7 +1248,20 @@ pub enum IpcEventPayload {
     #[serde(rename = "plan.updated")]
     PlanUpdated { snapshot: Value },
 
-    // ── Provider routing ───────────────────────────────────────────────────
+    // ── Provider / stream telemetry ────────────────────────────────────────
+    /// Provider stream had no observable activity for the active watchdog
+    /// window. Consumers should treat this as telemetry, not assistant-authored
+    /// conversation content.
+    #[serde(rename = "stream.idle")]
+    StreamIdle {
+        provider: String,
+        model: String,
+        phase: String,
+        idle_secs: u64,
+        ambiguous: bool,
+        message: String,
+    },
+
     /// Runtime provider/model route changed. Consumers should treat this as
     /// readiness telemetry, not assistant-authored conversation content.
     #[serde(rename = "provider.route_changed")]
@@ -2688,6 +2701,15 @@ pub enum AgentEvent {
     },
     /// System notification — displayed in TUI but not sent to the LLM.
     SystemNotification {
+        message: String,
+    },
+    /// Structured stream-idle telemetry — renderers must not treat this as assistant-authored content.
+    StreamIdle {
+        provider: String,
+        model: String,
+        phase: String,
+        idle_secs: u64,
+        ambiguous: bool,
         message: String,
     },
     /// Structured provider retry telemetry — renderers must not treat this as assistant-authored content.

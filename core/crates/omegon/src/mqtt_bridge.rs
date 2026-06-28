@@ -228,6 +228,21 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
         AgentEvent::SystemNotification { message } => Some(IpcEventPayload::SystemNotification {
             message: message.clone(),
         }),
+        AgentEvent::StreamIdle {
+            provider,
+            model,
+            phase,
+            idle_secs,
+            ambiguous,
+            message,
+        } => Some(IpcEventPayload::StreamIdle {
+            provider: provider.clone(),
+            model: model.clone(),
+            phase: phase.clone(),
+            idle_secs: *idle_secs,
+            ambiguous: *ambiguous,
+            message: message.clone(),
+        }),
         AgentEvent::ProviderRetry {
             provider,
             model,
@@ -317,6 +332,7 @@ fn event_name(ev: &IpcEventPayload) -> &'static str {
         IpcEventPayload::DecompositionCompleted { .. } => "decomposition.completed",
         IpcEventPayload::FamilyVitalSignsUpdated { .. } => "family.vital_signs",
         IpcEventPayload::PlanUpdated { .. } => "plan.updated",
+        IpcEventPayload::StreamIdle { .. } => "stream.idle",
         IpcEventPayload::ProviderRouteChanged { .. } => "provider.route_changed",
         IpcEventPayload::RuntimeQueueUpdated { .. } => "runtime.queue_updated",
         IpcEventPayload::HarnessChanged => "harness.changed",
