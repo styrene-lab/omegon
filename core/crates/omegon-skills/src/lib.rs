@@ -2,7 +2,9 @@
 
 /// Parsed skill manifest — the structured metadata from SKILL.md frontmatter.
 ///
-/// All fields except `name` and `description` are optional. This struct is used
+/// `name` and `description` are required for a useful skill, but parse-time
+/// recovery intentionally defaults missing fields so diagnostics can report
+/// malformed skills without failing the whole registry load. This struct is used
 /// by the skill builder, the TUI `/skills` command, and setup-time skill loading.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SkillManifest {
@@ -92,6 +94,10 @@ pub fn parse_skill_file(content: &str) -> (SkillManifest, String) {
     (manifest, body.to_string())
 }
 
+/// Split a SKILL.md file into raw frontmatter and body.
+///
+/// Most callers should use [`parse_skill_file`]. This lower-level helper is
+/// public for diagnostics/tests that need to preserve the raw delimiter format.
 pub fn split_frontmatter(content: &str) -> (Option<(FrontmatterFormat, String)>, &str) {
     let (rest, delimiter, format) = if let Some(b) = content.strip_prefix("+++\n") {
         (b, "\n+++", FrontmatterFormat::Toml)
@@ -303,6 +309,10 @@ pub struct SkillSignalMatch {
 
 const IGNORED_SIGNAL_DIRS: &[&str] = &[".git", "target", "node_modules", ".venv", "dist", "build"];
 
+/// Validate and classify a project signal from skill frontmatter.
+///
+/// Signals are intentionally constrained to workspace-relative literals, root
+/// globs like `*.rs`, or one-recursive-segment globs like `docs/**/*.md`.
 pub fn validate_project_signal(signal: &str) -> anyhow::Result<SkillSignalKind> {
     if signal.is_empty()
         || signal.starts_with('/')
@@ -330,6 +340,10 @@ pub fn validate_project_signal(signal: &str) -> anyhow::Result<SkillSignalKind> 
     }
 }
 
+/// Match a validated project signal against a workspace root.
+///
+/// Ignored dependency/build directories are skipped for glob searches to avoid
+/// activating skills from vendor or build artifacts.
 pub fn match_project_signal(
     root: &std::path::Path,
     signal: &str,
@@ -407,6 +421,7 @@ fn find_recursive_signal_match(
     Ok(None)
 }
 
+/// Return whether a directory name should be ignored during project-signal glob matching.
 pub fn is_ignored_signal_dir(name: &str) -> bool {
     IGNORED_SIGNAL_DIRS.contains(&name)
 }
