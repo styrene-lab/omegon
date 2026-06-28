@@ -5174,7 +5174,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-skills"
-version = "0.1.0"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "serde",
