@@ -4403,10 +4403,10 @@ fn slash_runtime_restart_displays_guarded_preview() {
     let result = app.handle_slash_command("/runtime restart", &tx);
     match result {
         SlashResult::Display(message) => {
-            assert!(message.contains("Runtime hot restart preview"), "{message}");
-            assert!(message.contains("guarded dry-run only"), "{message}");
+            assert!(message.contains("Runtime substrate refresh preview"), "{message}");
+            assert!(message.contains("guarded candidate inventory only"), "{message}");
             assert!(message.contains("Would preserve"), "{message}");
-            assert!(message.contains("Would rebuild"), "{message}");
+            assert!(message.contains("Would refresh"), "{message}");
             assert!(message.contains("Extension metadata entries"), "{message}");
             assert!(message.contains("Startup skill activation events"), "{message}");
         }
