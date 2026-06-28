@@ -2111,7 +2111,8 @@ async fn stream_with_retry(
             && elapsed.as_secs() >= 120;
         let stall_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(TransientFailureKind::StalledStream))
-            && elapsed.as_secs() >= 600;
+            && elapsed.as_secs()
+                >= stall_exhaustion_secs(&provider, &model, options.reasoning.as_deref());
         let attempt_exhausted = config.max_retries > 0 && attempt >= config.max_retries;
 
         if attempt_exhausted || rate_limit_exhausted || stall_exhausted {
@@ -2208,6 +2209,21 @@ async fn stream_with_retry(
     }
 }
 
+fn stall_exhaustion_secs(provider: &str, model: &str, reasoning: Option<&str>) -> u64 {
+    let is_openai_reasoning = provider == "openai-codex"
+        || ((provider == "openai" || provider == "openai-compatible")
+            && (model.contains("gpt-5") || model.contains("o3") || model.contains("o4")));
+    if is_openai_reasoning {
+        return match reasoning {
+            Some("high") => 2_400,
+            Some("medium") => 1_800,
+            Some("low" | "minimal") => 1_200,
+            _ => 1_200,
+        };
+    }
+    600
+}
+
 fn exhaustion_advice(
     provider: &str,
     transient_kind: Option<TransientFailureKind>,
@@ -2220,6 +2236,9 @@ fn exhaustion_advice(
                 == crate::providers::AnthropicCredentialMode::OAuthOnly
         {
             return "Anthropic OAuth streams are repeatedly stalling. Retry /auth login anthropic to refresh the Claude session, or switch provider with /model.";
+        }
+        if provider == "openai-codex" || provider == "openai" || provider == "openai-compatible" {
+            return "The OpenAI stream exceeded Omegon's local silent-reasoning budget. This may be a long-running reasoning window or a wedged stream; lower thinking, retry later, or switch provider with /model.";
         }
         return "The provider's stream is unresponsive. Retry later or switch provider with /model.";
     }
@@ -2302,23 +2321,39 @@ fn provider_stop_notice(provider: &str, reason: &str) -> Option<String> {
 /// thinking, or tool-call blocks complete; those inter-item gaps need the same
 /// generous leash as active reasoning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StreamIdlePhase {
-    Initial = 0,
-    ActiveContent = 1,
-    ActiveToolCall = 2,
-    ActiveThinking = 3,
-    InterItemGap = 4,
+enum StreamIdleState {
+    AwaitingFirstEvent = 0,
+    OutputStreaming = 1,
+    ToolStreaming = 2,
+    ReasoningStreaming = 3,
+    AmbiguousSilent = 4,
 }
 
-impl StreamIdlePhase {
+type StreamIdlePhase = StreamIdleState;
+
+impl StreamIdleState {
     fn from_u8(value: u8) -> Self {
         match value {
-            1 => Self::ActiveContent,
-            2 => Self::ActiveToolCall,
-            3 => Self::ActiveThinking,
-            4 => Self::InterItemGap,
-            _ => Self::Initial,
+            1 => Self::OutputStreaming,
+            2 => Self::ToolStreaming,
+            3 => Self::ReasoningStreaming,
+            4 => Self::AmbiguousSilent,
+            _ => Self::AwaitingFirstEvent,
         }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::AwaitingFirstEvent => "awaiting first stream event",
+            Self::OutputStreaming => "output streaming",
+            Self::ToolStreaming => "tool-call streaming",
+            Self::ReasoningStreaming => "reasoning streaming",
+            Self::AmbiguousSilent => "ambiguous silent reasoning",
+        }
+    }
+
+    fn is_ambiguous_reasoning(self) -> bool {
+        matches!(self, Self::ReasoningStreaming | Self::AmbiguousSilent)
     }
 }
 
@@ -2329,21 +2364,23 @@ fn select_stream_idle_budget(
     reasoning_budget: std::time::Duration,
 ) -> std::time::Duration {
     match phase {
-        StreamIdlePhase::Initial => initial,
-        StreamIdlePhase::ActiveContent | StreamIdlePhase::ActiveToolCall => active,
-        StreamIdlePhase::ActiveThinking | StreamIdlePhase::InterItemGap => reasoning_budget,
+        StreamIdlePhase::AwaitingFirstEvent => initial,
+        StreamIdlePhase::OutputStreaming | StreamIdlePhase::ToolStreaming => active,
+        StreamIdlePhase::ReasoningStreaming | StreamIdlePhase::AmbiguousSilent => reasoning_budget,
     }
 }
 
 fn stream_idle_phase_after_event(current: StreamIdlePhase, event: &LlmEvent) -> StreamIdlePhase {
     match event {
         LlmEvent::Start => current,
-        LlmEvent::TextStart | LlmEvent::TextDelta { .. } => StreamIdlePhase::ActiveContent,
-        LlmEvent::TextEnd => StreamIdlePhase::InterItemGap,
-        LlmEvent::ThinkingStart | LlmEvent::ThinkingDelta { .. } => StreamIdlePhase::ActiveThinking,
-        LlmEvent::ThinkingEnd => StreamIdlePhase::InterItemGap,
-        LlmEvent::ToolCallStart | LlmEvent::ToolCallDelta { .. } => StreamIdlePhase::ActiveToolCall,
-        LlmEvent::ToolCallEnd { .. } => StreamIdlePhase::InterItemGap,
+        LlmEvent::TextStart | LlmEvent::TextDelta { .. } => StreamIdlePhase::OutputStreaming,
+        LlmEvent::TextEnd => StreamIdlePhase::AmbiguousSilent,
+        LlmEvent::ThinkingStart | LlmEvent::ThinkingDelta { .. } => {
+            StreamIdlePhase::ReasoningStreaming
+        }
+        LlmEvent::ThinkingEnd => StreamIdlePhase::AmbiguousSilent,
+        LlmEvent::ToolCallStart | LlmEvent::ToolCallDelta { .. } => StreamIdlePhase::ToolStreaming,
+        LlmEvent::ToolCallEnd { .. } => StreamIdlePhase::AmbiguousSilent,
         LlmEvent::Done { .. } | LlmEvent::Error { .. } => current,
     }
 }
@@ -2399,12 +2436,13 @@ async fn consume_llm_stream(
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|seconds| *seconds >= 60)
         .map(std::time::Duration::from_secs)
-        .unwrap_or_else(|| std::time::Duration::from_secs(300));
+        .unwrap_or_else(|| std::time::Duration::from_secs(600));
     // Active output phases use a tight watchdog; explicit thinking and
     // provider decision gaps between output items use the generous reasoning
     // budget. This mirrors provider-side SSE gates for Anthropic/Codex and
     // local thinking-capable providers such as Ollama.
-    let stream_idle_phase = std::sync::atomic::AtomicU8::new(StreamIdlePhase::Initial as u8);
+    let stream_idle_phase =
+        std::sync::atomic::AtomicU8::new(StreamIdlePhase::AwaitingFirstEvent as u8);
     let idle_timeout = || {
         select_stream_idle_budget(
             StreamIdlePhase::from_u8(stream_idle_phase.load(std::sync::atomic::Ordering::Relaxed)),
@@ -2416,10 +2454,22 @@ async fn consume_llm_stream(
     while let Some(event) = match tokio::time::timeout(idle_timeout(), rx.recv()).await {
         Ok(event) => event,
         Err(_) => {
-            let reason = format!(
-                "LLM stream idle for {}s — connection may be stalled",
-                idle_timeout().as_secs()
+            let phase = StreamIdlePhase::from_u8(
+                stream_idle_phase.load(std::sync::atomic::Ordering::Relaxed),
             );
+            let reason = if phase.is_ambiguous_reasoning() {
+                format!(
+                    "LLM stream had no observable activity for {}s during {} — this may be a long-running reasoning window or a stalled stream",
+                    idle_timeout().as_secs(),
+                    phase.label()
+                )
+            } else {
+                format!(
+                    "LLM stream idle for {}s during {} — connection may be stalled",
+                    idle_timeout().as_secs(),
+                    phase.label()
+                )
+            };
             let _ = events.send(AgentEvent::MessageAbort {
                 reason: Some(reason.clone()),
             });
@@ -4461,33 +4511,53 @@ mod tests {
         use std::time::Duration;
         let initial = Duration::from_secs(90);
         let content = Duration::from_secs(90);
-        let reasoning = Duration::from_secs(300);
+        let reasoning = Duration::from_secs(600);
 
         // Explicit reasoning uses the generous reasoning budget.
         assert_eq!(
-            select_stream_idle_budget(StreamIdlePhase::ActiveThinking, initial, content, reasoning),
+            select_stream_idle_budget(
+                StreamIdlePhase::ReasoningStreaming,
+                initial,
+                content,
+                reasoning
+            ),
             reasoning
         );
         // Active content uses the tighter active budget.
         assert_eq!(
-            select_stream_idle_budget(StreamIdlePhase::ActiveContent, initial, content, reasoning),
+            select_stream_idle_budget(
+                StreamIdlePhase::OutputStreaming,
+                initial,
+                content,
+                reasoning
+            ),
             content
         );
         // Active tool-call streaming is also active output, not a reasoning gap.
         assert_eq!(
-            select_stream_idle_budget(StreamIdlePhase::ActiveToolCall, initial, content, reasoning),
+            select_stream_idle_budget(StreamIdlePhase::ToolStreaming, initial, content, reasoning),
             content
         );
         // Inter-item gaps after text/thinking/tool blocks get the generous
         // budget because providers may legally go silent while deciding the
         // next block/item.
         assert_eq!(
-            select_stream_idle_budget(StreamIdlePhase::InterItemGap, initial, content, reasoning),
+            select_stream_idle_budget(
+                StreamIdlePhase::AmbiguousSilent,
+                initial,
+                content,
+                reasoning
+            ),
             reasoning
         );
         // Nothing yet → the initial budget.
         assert_eq!(
-            select_stream_idle_budget(StreamIdlePhase::Initial, initial, content, reasoning),
+            select_stream_idle_budget(
+                StreamIdlePhase::AwaitingFirstEvent,
+                initial,
+                content,
+                reasoning
+            ),
             initial
         );
         // The reasoning leash must strictly exceed the content leash.
@@ -4505,45 +4575,48 @@ mod tests {
 
         assert_eq!(
             apply(
-                StreamIdlePhase::Initial,
+                StreamIdlePhase::AwaitingFirstEvent,
                 &[
                     LlmEvent::TextStart,
                     LlmEvent::TextDelta { delta: "hi".into() },
                 ],
             ),
-            StreamIdlePhase::ActiveContent
+            StreamIdlePhase::OutputStreaming
         );
         assert_eq!(
-            apply(StreamIdlePhase::ActiveContent, &[LlmEvent::TextEnd]),
-            StreamIdlePhase::InterItemGap
+            apply(StreamIdlePhase::OutputStreaming, &[LlmEvent::TextEnd]),
+            StreamIdlePhase::AmbiguousSilent
         );
         assert_eq!(
             apply(
-                StreamIdlePhase::InterItemGap,
+                StreamIdlePhase::AmbiguousSilent,
                 &[
                     LlmEvent::ThinkingStart,
                     LlmEvent::ThinkingDelta { delta: "".into() },
                 ],
             ),
-            StreamIdlePhase::ActiveThinking
-        );
-        assert_eq!(
-            apply(StreamIdlePhase::ActiveThinking, &[LlmEvent::ThinkingEnd]),
-            StreamIdlePhase::InterItemGap
+            StreamIdlePhase::ReasoningStreaming
         );
         assert_eq!(
             apply(
-                StreamIdlePhase::InterItemGap,
+                StreamIdlePhase::ReasoningStreaming,
+                &[LlmEvent::ThinkingEnd]
+            ),
+            StreamIdlePhase::AmbiguousSilent
+        );
+        assert_eq!(
+            apply(
+                StreamIdlePhase::AmbiguousSilent,
                 &[
                     LlmEvent::ToolCallStart,
                     LlmEvent::ToolCallDelta { delta: "{}".into() },
                 ],
             ),
-            StreamIdlePhase::ActiveToolCall
+            StreamIdlePhase::ToolStreaming
         );
         assert_eq!(
             apply(
-                StreamIdlePhase::ActiveToolCall,
+                StreamIdlePhase::ToolStreaming,
                 &[LlmEvent::ToolCallEnd {
                     tool_call: crate::bridge::WireToolCall {
                         id: "call-1".into(),
@@ -4552,11 +4625,11 @@ mod tests {
                     },
                 }],
             ),
-            StreamIdlePhase::InterItemGap
+            StreamIdlePhase::AmbiguousSilent
         );
         assert_eq!(
-            stream_idle_phase_after_event(StreamIdlePhase::Initial, &LlmEvent::Start),
-            StreamIdlePhase::Initial
+            stream_idle_phase_after_event(StreamIdlePhase::AwaitingFirstEvent, &LlmEvent::Start),
+            StreamIdlePhase::AwaitingFirstEvent
         );
     }
 
@@ -5898,12 +5971,13 @@ mod tests {
     #[test]
     fn tui_mode_stall_exhaustion_fires_on_elapsed_time() {
         // TUI mode: max_retries == 0
-        // Stalls bail after 600s cumulative elapsed (10 min), not attempt count.
+        // Non-OpenAI stalls bail after 600s cumulative elapsed (10 min), not attempt count.
         let config = LoopConfig {
             max_retries: 0,
             ..Default::default()
         };
         let transient_kind = Some(crate::upstream_errors::TransientFailureKind::StalledStream);
+        let threshold = stall_exhaustion_secs("anthropic", "claude-sonnet-4-5", None);
 
         // Under threshold
         for elapsed_secs in [30u64, 120, 300, 599] {
@@ -5912,19 +5986,46 @@ mod tests {
                     transient_kind,
                     Some(crate::upstream_errors::TransientFailureKind::StalledStream)
                 )
-                && elapsed_secs >= 600;
+                && elapsed_secs >= threshold;
             assert!(!stall_exhausted, "{elapsed_secs}s should NOT exhaust");
         }
 
         // At threshold
-        let elapsed_secs = 600u64;
+        let elapsed_secs = threshold;
         let stall_exhausted = config.max_retries == 0
             && matches!(
                 transient_kind,
                 Some(crate::upstream_errors::TransientFailureKind::StalledStream)
             )
-            && elapsed_secs >= 600;
-        assert!(stall_exhausted, "600s should trigger stall exhaustion");
+            && elapsed_secs >= threshold;
+        assert!(
+            stall_exhausted,
+            "{threshold}s should trigger stall exhaustion"
+        );
+    }
+
+    #[test]
+    fn openai_reasoning_stall_exhaustion_uses_longer_windows() {
+        assert_eq!(
+            stall_exhaustion_secs("openai-codex", "gpt-5.5", Some("high")),
+            2_400
+        );
+        assert_eq!(
+            stall_exhaustion_secs("openai-codex", "gpt-5.5", Some("medium")),
+            1_800
+        );
+        assert_eq!(
+            stall_exhaustion_secs("openai-codex", "gpt-5.5", Some("minimal")),
+            1_200
+        );
+        assert_eq!(
+            stall_exhaustion_secs("openai", "gpt-5.5", Some("high")),
+            2_400
+        );
+        assert_eq!(
+            stall_exhaustion_secs("anthropic", "claude-sonnet-4-5", Some("high")),
+            600
+        );
     }
 
     #[test]
@@ -5941,7 +6042,7 @@ mod tests {
                 transient_kind,
                 Some(crate::upstream_errors::TransientFailureKind::StalledStream)
             )
-            && elapsed_secs >= 600;
+            && elapsed_secs >= stall_exhaustion_secs("anthropic", "claude-sonnet-4-5", None);
         assert!(
             !stall_exhausted,
             "rate-limit failures should not use stall path"

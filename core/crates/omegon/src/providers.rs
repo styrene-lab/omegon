@@ -960,9 +960,9 @@ fn sse_idle_budget() -> SseIdleBudget {
         // override retains the original env var and 90s default.
         active: env_secs("OMEGON_SSE_IDLE_TIMEOUT_SECS", 90, 30),
         // Reasoning / pre-first-token phase: reasoning models stream nothing
-        // on the wire for minutes. 300s tolerates that while still catching a
-        // genuinely dead stream within ~2 retries of the loop exhaustion budget.
-        reasoning: env_secs("OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS", 300, 60),
+        // on the wire for minutes. 600s tolerates long reasoning while still catching a
+        // genuinely dead stream before the interactive hard budget.
+        reasoning: env_secs("OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS", 600, 60),
     }
 }
 
@@ -3687,8 +3687,8 @@ mod tests {
     fn sse_idle_budget_defaults_are_research_backed() {
         // Defaults derived from provider streaming behavior research:
         //   active   = 90s  (Anthropic ping keep-alive cadence keeps it warm)
-        //   reasoning = 300s (reasoning models stream nothing for minutes;
-        //                     OpenAI's own SDK request timeout is 15 min)
+        //   reasoning = 600s (reasoning models stream nothing for minutes;
+        //                     OpenAI's own SDK request timeout is 10-15 min)
         // Only assert defaults when the operator has not overridden via env.
         if std::env::var("OMEGON_SSE_IDLE_TIMEOUT_SECS").is_err() {
             assert_eq!(sse_idle_budget().active, std::time::Duration::from_secs(90));
@@ -3696,7 +3696,7 @@ mod tests {
         if std::env::var("OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS").is_err() {
             assert_eq!(
                 sse_idle_budget().reasoning,
-                std::time::Duration::from_secs(300)
+                std::time::Duration::from_secs(600)
             );
         }
     }
