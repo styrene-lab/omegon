@@ -973,6 +973,37 @@ impl AgentSetup {
 
         // Populate MCP/plugin info from discovered features
         harness_status.update_from_bus(&bus);
+        if let Ok(skills) = crate::skills::list_structured() {
+            harness_status
+                .installed_plugins
+                .extend(skills.into_iter().filter(|skill| skill.installed || skill.project_local).map(
+                    |skill| crate::status::PluginSummary {
+                        id: skill.id.unwrap_or_else(|| skill.name.clone()),
+                        name: skill.name,
+                        plugin_type: "skill".into(),
+                        version: skill.version.unwrap_or_default(),
+                        description: skill.description,
+                    },
+                ));
+        }
+        if let Ok(extensions_dir) = crate::extension_cli::extensions_dir()
+            && let Ok(extensions) =
+                crate::capabilities::extensions::list_installed_extension_capabilities_from_dir(
+                    &extensions_dir,
+                )
+        {
+            harness_status
+                .installed_plugins
+                .extend(extensions.into_iter().map(|extension| {
+                    crate::status::PluginSummary {
+                        id: extension.name.clone(),
+                        name: extension.name,
+                        plugin_type: "extension".into(),
+                        version: extension.version,
+                        description: extension.description,
+                    }
+                }));
+        }
         harness_status.web_auth_mode = Some(web_auth_state.mode_name().to_string());
         harness_status.web_auth_source = Some(web_auth_state.source_name().to_string());
 
