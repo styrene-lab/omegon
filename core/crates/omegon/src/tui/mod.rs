@@ -742,6 +742,7 @@ pub enum CanonicalSlashCommand {
     AuthLogin(String),
     AuthLogout(String),
     SkillsView,
+    SkillsReload,
     SkillsInstall(Option<String>),
     SkillCreate(Option<SkillCreateScope>),
     SkillImport {
@@ -1073,6 +1074,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "skills" | "skill" => {
             if args.is_empty() || args == "list" {
                 Some(CanonicalSlashCommand::SkillsView)
+            } else if args == "reload" {
+                Some(CanonicalSlashCommand::SkillsReload)
             } else if args == "install" {
                 Some(CanonicalSlashCommand::SkillsInstall(None))
             } else if let Some(name) = args.strip_prefix("install ") {
@@ -6330,9 +6333,40 @@ Scroll transcript:
             }
 
             "skills" | "skill" => {
-                const USAGE: &str = "Usage: /skills [list|install [name|skills/name]|create [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]";
+                const USAGE: &str = "Usage: /skills [list|reload|install [name|skills/name]|create [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]";
                 if let Some(command) = canonical_slash_command("skills", args) {
                     match command {
+                        CanonicalSlashCommand::SkillsReload => {
+                            let cwd = self.cwd().to_path_buf();
+                            if let Some(ref mut registry) = self.augment_registry {
+                                registry.load_skills(&cwd);
+                                let loaded = registry.skill_count();
+                                let events = registry.skill_activation_events();
+                                let mut out = format!(
+                                    "## Skills reloaded\n\nLoaded {loaded} active skill directive(s) from user and project skill directories. Changes apply to subsequent model requests in this session.\n"
+                                );
+                                if !events.is_empty() {
+                                    out.push_str("\nActivation events:\n");
+                                    for event in events {
+                                        out.push_str(&format!(
+                                            "- {} · {} · {}\n",
+                                            event.active_ref, event.reason, event.resolution
+                                        ));
+                                        if !event.suppressing.is_empty() {
+                                            out.push_str(&format!(
+                                                "  - suppressing: {}\n",
+                                                event.suppressing.join(", ")
+                                            ));
+                                        }
+                                    }
+                                }
+                                SlashResult::Display(out)
+                            } else {
+                                SlashResult::Display(
+                                    "Skills reload unavailable: no active augment registry in this TUI session.".into(),
+                                )
+                            }
+                        }
                         CanonicalSlashCommand::SkillCreate(scope) => {
                             // Queue the skill builder prompt — the agent converses
                             // with the operator to create a new skill.
@@ -6372,7 +6406,7 @@ Scroll transcript:
                             };
                             let safe_path = path.replace('`', "\\`");
                             let prompt = format!(
-                                "Import the Omegon skill from `{safe_path}`{scope_hint}. Read and validate the skill frontmatter, copy it to the requested skill directory, and report any schema or collision issues before overwriting existing files."
+                                "Import the Omegon skill from `{safe_path}`{scope_hint}. Read and validate the skill frontmatter, copy it to the requested external skill directory, and report any schema or collision issues before overwriting existing files. Do not write to bundled/internal skill paths. After import, tell the operator to run `/skills reload` to activate it in this session, then `/skills get <name>` to inspect it."
                             );
                             if let Err(result) = Self::submit_prompt_from_slash(
                                 tx,
@@ -11667,6 +11701,14 @@ mod slash_command_parsing_tests {
             Some(CanonicalSlashCommand::SkillsInstall(Some(name))) => assert_eq!(name, "security"),
             other => panic!("expected SkillsInstall(Some), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn skills_reload() {
+        assert!(matches!(
+            canonical_slash_command("skills", "reload"),
+            Some(CanonicalSlashCommand::SkillsReload)
+        ));
     }
 
     #[test]

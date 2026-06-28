@@ -365,6 +365,7 @@ pub fn control_request_from_slash(
             provider: provider.clone(),
         },
         crate::tui::CanonicalSlashCommand::SkillsView => ControlRequest::SkillsView,
+        crate::tui::CanonicalSlashCommand::SkillsReload => return None,
         crate::tui::CanonicalSlashCommand::SkillsInstall(name) => {
             ControlRequest::SkillsInstall { name: name.clone() }
         }
@@ -3451,6 +3452,11 @@ fn skills_palette_projection(
             "/skills install <name>",
             "install one skill from the armory",
         ),
+        PaletteRowProjection::action(
+            "skills.reload",
+            "/skills reload",
+            "reload user/project skills into the current TUI session",
+        ),
     ];
 
     let skill_rows = entries
@@ -3484,7 +3490,7 @@ fn skills_palette_projection(
                 .with_rows(skill_rows),
         )
         .with_footer(
-            "Details stay behind `/skills get <name>` so the default surface remains scan-friendly.",
+            "Details stay behind `/skills get <name>`. Use `/skills reload` after creating or importing a skill to activate it in this session.",
         )
 }
 

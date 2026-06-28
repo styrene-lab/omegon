@@ -396,7 +396,7 @@ First create the directory, then write the file:
   mkdir -p {cwd}/.omegon/skills/<name>/
   Then write to {cwd}/.omegon/skills/<name>/SKILL.md
 
-After writing, confirm the full path to the operator and tell them the skill will be active in their next session.
+After writing, confirm the full path to the operator. Tell them to run `/skills reload` to activate it in the current TUI session, or start a new session. Also suggest `/skills get <name>` to inspect the resolved manifest/body. Do not write to bundled/internal skill paths; create only user-level or project-local external skills.
 
 Do NOT ask all questions at once. Start with question 1 only."#,
         cwd = cwd.display()
