@@ -293,6 +293,184 @@ pub fn adapted_skill_warnings(body: &str) -> Vec<String> {
     warnings
 }
 
+/// Extract `trusted_paths` from SKILL.md frontmatter.
+///
+/// Skills that need to read/write outside the workspace can declare paths
+/// in their frontmatter. On session startup, these paths are auto-trusted
+/// (added to settings.trusted_directories if not already present), so the
+/// user isn't prompted repeatedly.
+///
+/// YAML format:
+/// ```yaml
+/// trusted_paths:
+///   - ~/Documents/pastperformance/
+///   - ~/Library/Mobile Documents/iCloud~md~obsidian/Documents/jaredp/evaluations/
+/// ```
+///
+/// TOML format:
+/// ```toml
+/// trusted_paths = ["~/Documents/pastperformance/"]
+/// ```
+pub fn extract_trusted_paths(content: &str) -> Vec<String> {
+    let (body, delimiter) = if let Some(b) = content.strip_prefix("---\n") {
+        (b, "\n---")
+    } else if let Some(b) = content.strip_prefix("+++\n") {
+        (b, "\n+++")
+    } else {
+        return Vec::new();
+    };
+    let end = match body.find(delimiter) {
+        Some(e) => e,
+        None => return Vec::new(),
+    };
+    let frontmatter = &body[..end];
+
+    let mut paths = Vec::new();
+
+    // TOML: trusted_paths = ["path1", "path2"]
+    for line in frontmatter.lines() {
+        if let Some(rest) = line.strip_prefix("trusted_paths") {
+            let rest = rest.trim();
+            if let Some(rest) = rest.strip_prefix('=') {
+                let rest = rest.trim();
+                if rest.starts_with('[') {
+                    // Parse simple TOML array: ["path1", "path2"]
+                    let inner = rest.trim_start_matches('[').trim_end_matches(']');
+                    for item in inner.split(',') {
+                        let item = item.trim().trim_matches('"').trim_matches('\'');
+                        if !item.is_empty() {
+                            paths.push(item.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // YAML: trusted_paths:\n  - path1\n  - path2
+    let mut in_trusted_paths = false;
+    for line in frontmatter.lines() {
+        if line.starts_with("trusted_paths:") {
+            in_trusted_paths = true;
+            // Check for inline value: trusted_paths: [path1, path2]
+            let rest = line.strip_prefix("trusted_paths:").unwrap().trim();
+            if rest.starts_with('[') {
+                let inner = rest.trim_start_matches('[').trim_end_matches(']');
+                for item in inner.split(',') {
+                    let item = item.trim().trim_matches('"').trim_matches('\'');
+                    if !item.is_empty() {
+                        paths.push(item.to_string());
+                    }
+                }
+                in_trusted_paths = false;
+            }
+            continue;
+        }
+        if in_trusted_paths {
+            let trimmed = line.trim();
+            if let Some(path) = trimmed.strip_prefix("- ") {
+                let path = path.trim().trim_matches('"').trim_matches('\'');
+                if !path.is_empty() {
+                    paths.push(path.to_string());
+                }
+            } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                // Not a list item — end of trusted_paths block
+                in_trusted_paths = false;
+            }
+        }
+    }
+
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// Collect trusted_paths from all loaded skill content strings.
+pub fn collect_trusted_paths(skills: &[String]) -> Vec<String> {
+    let mut all_paths = Vec::new();
+    for content in skills {
+        all_paths.extend(extract_trusted_paths(content));
+    }
+    all_paths.sort();
+    all_paths.dedup();
+    all_paths
+}
+
+/// Extract phase/step markers from skill content for completion tracking.
+///
+/// Looks for markdown headings that indicate numbered phases or steps:
+///   `## Phase 1:`, `## Phase 2:`, ..., `## Step 1:`, `## Step 2:`, ...
+///   `## Phase 0.5:`, `## Phase 1.75:` (fractional phases like in jputman's skill)
+///
+/// Returns the total number of phases and the label of the final phase
+/// (e.g., "Phase 10: Export to File"). Used by the loop to detect
+/// premature completion — if the agent declares "done" without reaching
+/// the final phase, it gets nudged.
+pub fn extract_phase_info(content: &str) -> Option<SkillPhaseInfo> {
+    let mut phases: Vec<(String, String)> = Vec::new(); // (number, full heading)
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Match: ## Phase N: ... or ## Step N: ...
+        // Also handles ### Phase N, # Phase N, etc.
+        if let Some(rest) = trimmed
+            .strip_prefix('#')
+            .and_then(|s| {
+                s.trim_start_matches('#')
+                    .trim_start()
+                    .strip_prefix("Phase ")
+            })
+            .or_else(|| {
+                trimmed
+                    .strip_prefix('#')
+                    .and_then(|s| s.trim_start_matches('#').trim_start().strip_prefix("Step "))
+            })
+        {
+            // Extract the phase number (may be fractional: "0.5", "1.75")
+            let num_end = rest
+                .find(|c: char| !c.is_ascii_digit() && c != '.')
+                .unwrap_or(rest.len());
+            let num = &rest[..num_end];
+            if !num.is_empty() {
+                let heading = trimmed.trim_start_matches('#').trim().to_string();
+                phases.push((num.to_string(), heading));
+            }
+        }
+    }
+
+    if phases.is_empty() {
+        return None;
+    }
+
+    let final_phase = phases.last().unwrap();
+    Some(SkillPhaseInfo {
+        total_phases: phases.len(),
+        final_phase_label: final_phase.1.clone(),
+        final_phase_number: final_phase.0.clone(),
+    })
+}
+
+/// Phase tracking info extracted from a skill's content.
+#[derive(Debug, Clone)]
+pub struct SkillPhaseInfo {
+    /// Total number of phase/step headings found.
+    pub total_phases: usize,
+    /// The heading text of the final phase (e.g., "Phase 10: Export to File").
+    pub final_phase_label: String,
+    /// The phase number string (e.g., "10", "1.75").
+    pub final_phase_number: String,
+}
+
+/// Collect phase info from all loaded skills. Returns info for any skill
+/// that has numbered phases (most skills don't — only structured workflows like
+/// jputman's opportunity-eval).
+pub fn collect_phase_info(skills: &[String]) -> Vec<SkillPhaseInfo> {
+    skills
+        .iter()
+        .filter_map(|s| extract_phase_info(s))
+        .collect()
+}
+
 /// A resolved skill entry with structured metadata for settings and command surfaces.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SkillEntry {
@@ -1039,5 +1217,59 @@ mod tests {
             vec!["resources/templates/readme.md".to_string()]
         );
         assert_eq!(summary.conflicts, vec!["user/other-rust".to_string()]);
+    }
+    #[test]
+    fn trusted_paths_extract_yaml_toml_inline_and_dedupe() {
+        let yaml = "---
+trusted_paths:
+  - ~/Documents/a
+  - '~/Documents/b'
+---
+Body";
+        assert_eq!(
+            extract_trusted_paths(yaml),
+            vec!["~/Documents/a".to_string(), "~/Documents/b".to_string()]
+        );
+
+        let toml = "+++
+trusted_paths = [\"~/Documents/b\", \"~/Documents/a\"]
++++
+Body";
+        assert_eq!(
+            extract_trusted_paths(toml),
+            vec!["~/Documents/a".to_string(), "~/Documents/b".to_string()]
+        );
+
+        let inline = "---
+trusted_paths: [~/Documents/a, \"~/Documents/a\", ~/Documents/c]
+---
+Body";
+        assert_eq!(
+            extract_trusted_paths(inline),
+            vec!["~/Documents/a".to_string(), "~/Documents/c".to_string()]
+        );
+        assert!(extract_trusted_paths("No frontmatter").is_empty());
+    }
+
+    #[test]
+    fn collect_trusted_paths_deduplicates_across_skills() {
+        let skills = vec![
+            "---\ntrusted_paths: [~/a, ~/b]\n---\nBody".to_string(),
+            "+++\ntrusted_paths = [\"~/b\", \"~/c\"]\n+++\nBody".to_string(),
+        ];
+        assert_eq!(
+            collect_trusted_paths(&skills),
+            vec!["~/a".to_string(), "~/b".to_string(), "~/c".to_string()]
+        );
+    }
+
+    #[test]
+    fn phase_info_extracts_numbered_and_fractional_workflows() {
+        let content = "## Phase 0.5: Prep\n\n## Phase 1: Run\n\n### Step 2: Finish\n";
+        let info = extract_phase_info(content).unwrap();
+        assert_eq!(info.total_phases, 3);
+        assert_eq!(info.final_phase_number, "2");
+        assert_eq!(info.final_phase_label, "Step 2: Finish");
+        assert!(extract_phase_info("## Overview\nNo phases").is_none());
     }
 }
