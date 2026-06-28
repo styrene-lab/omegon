@@ -4201,6 +4201,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let login_prompt_tx: std::sync::Arc<
         tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<String>>>,
     > = std::sync::Arc::new(tokio::sync::Mutex::new(None));
+    let runtime_inventory = setup::RuntimeSubstrateInventory::from_agent_setup(&agent);
+    let runtime_generation = 1;
     let extension_widgets = std::mem::take(&mut agent.extension_widgets);
     let widget_receivers = std::mem::take(&mut agent.widget_receivers);
     let voice_notification_receivers = std::mem::take(&mut agent.voice_notification_receivers);
@@ -4214,6 +4216,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         initial,
         no_splash: cli.no_splash || !is_first_run,
         bus_commands,
+        runtime_generation,
+        runtime_inventory,
         dashboard_handles: agent.dashboard_handles.clone(),
         initial_prompt,
         start_tutorial: cli.tutorial,
