@@ -695,6 +695,7 @@ pub enum CanonicalSlashCommand {
     PermissionTrustAdd(String),
     PermissionTrustRemove(String),
     StatusView,
+    RuntimeRestart,
     WorkspaceStatusView,
     WorkspaceListView,
     WorkspaceNew(String),
@@ -951,6 +952,9 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             }
         }
         "status" if args.is_empty() => Some(CanonicalSlashCommand::StatusView),
+        "runtime" if args == "restart" || args == "hot-restart" => {
+            Some(CanonicalSlashCommand::RuntimeRestart)
+        }
         "workspace" if args.is_empty() => Some(CanonicalSlashCommand::WorkspaceStatusView),
         "workspace" if args == "status" => Some(CanonicalSlashCommand::WorkspaceStatusView),
         "workspace" if args == "list" => Some(CanonicalSlashCommand::WorkspaceListView),
@@ -6424,6 +6428,30 @@ Scroll transcript:
                 }
             }
 
+            "runtime" => {
+                if let Some(CanonicalSlashCommand::RuntimeRestart) =
+                    canonical_slash_command("runtime", args)
+                {
+                    if self.agent_active {
+                        SlashResult::Display(
+                            "Runtime hot restart unavailable while a model turn is active. Wait for completion or cancel the turn first.".into(),
+                        )
+                    } else {
+                        let active_skills = self
+                            .augment_registry
+                            .as_ref()
+                            .map(|registry| registry.skill_count())
+                            .unwrap_or(0);
+                        SlashResult::Display(format!(
+                            "## Runtime hot restart preview\n\nStatus: guarded preview only; substrate swap is not implemented yet.\nRuntime generation: 1\n\nWould preserve: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nWould rebuild: EventBus, tools, commands, extensions, widgets, skills, context providers, harness inventory.\nCurrent active skill directives: {active_skills}\nExtension widgets mounted: {}\n\nNext implementation step: extract a transactional runtime substrate builder, then swap only after build succeeds.",
+                            self.extension_widgets.len()
+                        ))
+                    }
+                } else {
+                    SlashResult::Display("Usage: /runtime restart".into())
+                }
+            }
+
             "stats" => {
                 if args == "bench" {
                     return self.handle_slash_command("/bench", tx);
@@ -11434,6 +11462,18 @@ mod slash_command_parsing_tests {
         assert!(matches!(
             canonical_slash_command("skills", "reload"),
             Some(CanonicalSlashCommand::SkillsReload)
+        ));
+    }
+
+    #[test]
+    fn runtime_restart() {
+        assert!(matches!(
+            canonical_slash_command("runtime", "restart"),
+            Some(CanonicalSlashCommand::RuntimeRestart)
+        ));
+        assert!(matches!(
+            canonical_slash_command("runtime", "hot-restart"),
+            Some(CanonicalSlashCommand::RuntimeRestart)
         ));
     }
 
