@@ -50,6 +50,7 @@ fn agent_event_kind(event: &omegon_traits::AgentEvent) -> &'static str {
         omegon_traits::AgentEvent::RouteChanged { .. } => "route_changed",
         omegon_traits::AgentEvent::SkillActivation { .. } => "skill_activation",
         omegon_traits::AgentEvent::SystemNotification { .. } => "system_notification",
+        omegon_traits::AgentEvent::StreamIdle { .. } => "stream_idle",
         omegon_traits::AgentEvent::ProviderRetry { .. } => "provider_retry",
         omegon_traits::AgentEvent::ProviderFailure { .. } => "provider_failure",
         omegon_traits::AgentEvent::TurnCancelled { .. } => "turn_cancelled",

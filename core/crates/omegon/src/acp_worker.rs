@@ -106,6 +106,15 @@ pub enum WorkerEvent {
     SessionTitle(String),
     /// Status update from the agent loop (e.g., "Loading model into memory…")
     StatusUpdate(String),
+    /// Structured stream-idle telemetry.
+    StreamIdle {
+        provider: String,
+        model: String,
+        phase: String,
+        idle_secs: u64,
+        ambiguous: bool,
+        message: String,
+    },
     /// Structured provider retry telemetry.
     ProviderRetry {
         provider: String,
@@ -391,6 +400,21 @@ async fn worker_loop(
                             omegon_traits::AgentEvent::SystemNotification { message } => {
                                 Some(WorkerEvent::StatusUpdate(message))
                             }
+                            omegon_traits::AgentEvent::StreamIdle {
+                                provider,
+                                model,
+                                phase,
+                                idle_secs,
+                                ambiguous,
+                                message,
+                            } => Some(WorkerEvent::StreamIdle {
+                                provider,
+                                model,
+                                phase,
+                                idle_secs,
+                                ambiguous,
+                                message,
+                            }),
                             omegon_traits::AgentEvent::ProviderRetry {
                                 provider,
                                 model,

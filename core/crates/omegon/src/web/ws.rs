@@ -2319,6 +2319,23 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "event_name": "system.notification",
             "message": escape_html(message),
         }),
+        AgentEvent::StreamIdle {
+            provider,
+            model,
+            phase,
+            idle_secs,
+            ambiguous,
+            message,
+        } => json!({
+            "type": "stream_idle",
+            "event_name": "stream.idle",
+            "provider": provider,
+            "model": model,
+            "phase": phase,
+            "idle_secs": idle_secs,
+            "ambiguous": ambiguous,
+            "message": escape_html(message),
+        }),
         AgentEvent::ProviderRetry {
             provider,
             model,
@@ -3047,6 +3064,7 @@ mod tests {
             AgentEvent::RouteChanged { .. } => {}
             AgentEvent::SkillActivation { .. } => {}
             AgentEvent::SystemNotification { .. } => {}
+            AgentEvent::StreamIdle { .. } => {}
             AgentEvent::ProviderRetry { .. } => {}
             AgentEvent::ProviderFailure { .. } => {}
             AgentEvent::TurnCancelled { .. } => {}

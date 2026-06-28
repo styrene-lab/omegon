@@ -183,6 +183,17 @@ fn send_acp_ext_notification(
 }
 
 #[derive(Debug, Clone)]
+struct StreamIdlePayload {
+    session_id: String,
+    provider: String,
+    model: String,
+    phase: String,
+    idle_secs: u64,
+    ambiguous: bool,
+    message: String,
+}
+
+#[derive(Debug, Clone)]
 struct ProviderRetryPayload {
     session_id: String,
     provider: String,
@@ -204,6 +215,18 @@ struct ProviderFailurePayload {
     message: String,
     retryable: bool,
     recommended_action: String,
+}
+
+fn stream_idle_payload(payload: StreamIdlePayload) -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": payload.session_id,
+        "provider": payload.provider,
+        "model": payload.model,
+        "phase": payload.phase,
+        "idleSecs": payload.idle_secs,
+        "ambiguous": payload.ambiguous,
+        "message": payload.message,
+    })
 }
 
 fn provider_retry_payload(payload: ProviderRetryPayload) -> serde_json::Value {
@@ -1458,6 +1481,27 @@ impl OmegonAcpAgent {
                                     SessionUpdate::Plan(Plan::new(plan_entries)),
                                 )
                                 .await;
+                            }
+                        }
+                        Ok(WorkerEvent::StreamIdle {
+                            provider,
+                            model,
+                            phase,
+                            idle_secs,
+                            ambiguous,
+                            message,
+                        }) => {
+                            if let Some(c) = conn.borrow().as_ref() {
+                                let payload = stream_idle_payload(StreamIdlePayload {
+                                    session_id: stream_sid.to_string(),
+                                    provider,
+                                    model,
+                                    phase,
+                                    idle_secs,
+                                    ambiguous,
+                                    message: redact(&message),
+                                });
+                                let _ = send_acp_ext_notification(c, "_stream/idle", payload);
                             }
                         }
                         Ok(WorkerEvent::ProviderRetry {
@@ -5863,6 +5907,27 @@ Progress: 1/2"
             "⚠ anthropic is seeing repeated transient upstream failures: 10 consecutive failures"
         ));
         assert!(!acp_status_is_provider_telemetry("Plan executing."));
+    }
+
+    #[test]
+    fn stream_idle_payload_matches_flynt_contract() {
+        let payload = stream_idle_payload(StreamIdlePayload {
+            session_id: "s-1".to_string(),
+            provider: "openai-codex".to_string(),
+            model: "gpt-5.5".to_string(),
+            phase: "ambiguous silent reasoning".to_string(),
+            idle_secs: 600,
+            ambiguous: true,
+            message: "stream idle".to_string(),
+        });
+
+        assert_eq!(payload["sessionId"], "s-1");
+        assert_eq!(payload["provider"], "openai-codex");
+        assert_eq!(payload["model"], "gpt-5.5");
+        assert_eq!(payload["phase"], "ambiguous silent reasoning");
+        assert_eq!(payload["idleSecs"], 600);
+        assert_eq!(payload["ambiguous"], true);
+        assert_eq!(payload["message"], "stream idle");
     }
 
     #[test]
