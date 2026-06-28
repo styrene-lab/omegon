@@ -11633,6 +11633,12 @@ mod slash_command_parsing_tests {
                 assert_eq!(prompt.queue_mode, PromptQueueMode::UntilReady);
                 assert!(prompt.image_paths.is_empty());
                 assert!(prompt.text.contains("skill"));
+                assert!(prompt.text.contains("upstream-assisted skill workflow"));
+                assert!(
+                    prompt
+                        .text
+                        .contains("Do not blindly install arbitrary prompt packs")
+                );
             }
             other => panic!("expected skill builder SubmitPrompt, got {other:?}"),
         }
