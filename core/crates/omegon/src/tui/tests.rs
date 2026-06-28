@@ -4403,10 +4403,10 @@ fn slash_runtime_substrate_refresh_displays_guarded_preview() {
     let result = app.handle_slash_command("/runtime restart", &tx);
     match result {
         SlashResult::Display(message) => {
-            assert!(message.contains("Runtime substrate refresh preview"), "{message}");
-            assert!(message.contains("guarded candidate inventory only"), "{message}");
-            assert!(message.contains("Would preserve"), "{message}");
-            assert!(message.contains("Would refresh"), "{message}");
+            assert!(message.contains("Runtime substrate refresh"), "{message}");
+            assert!(message.contains("partial live refresh completed"), "{message}");
+            assert!(message.contains("Preserved"), "{message}");
+            assert!(message.contains("Refreshed now"), "{message}");
             assert!(message.contains("Extension metadata entries"), "{message}");
             assert!(message.contains("Startup skill activation events"), "{message}");
         }

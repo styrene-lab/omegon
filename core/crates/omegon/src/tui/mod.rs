@@ -6480,7 +6480,9 @@ Scroll transcript:
 
             "extension" | "ext" => {
                 if let Some(command) = canonical_slash_command("extension", args) {
-                    if let Some(request) =
+                    if matches!(command, CanonicalSlashCommand::RuntimeSubstrateRefresh) {
+                        self.handle_slash_command("/runtime refresh", tx)
+                    } else if let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
@@ -6577,12 +6579,23 @@ Scroll transcript:
                             "Runtime substrate refresh unavailable while a model turn is active. Wait for completion or cancel the turn first.".into(),
                         )
                     } else {
-                        let active_skills = self
+                        let cwd = self.cwd().to_path_buf();
+                        let before_generation = self.runtime_generation;
+                        let skills_before = self
                             .augment_registry
                             .as_ref()
                             .map(|registry| registry.skill_count())
                             .unwrap_or(0);
-                        match crate::setup::runtime_substrate_refresh_candidate(self.cwd()) {
+                        let skills_after = if let Some(ref mut registry) = self.augment_registry {
+                            registry.load_skills(&cwd);
+                            registry.skill_count()
+                        } else {
+                            skills_before
+                        };
+                        if self.augment_registry.is_some() {
+                            self.runtime_generation = self.runtime_generation.saturating_add(1);
+                        }
+                        match crate::setup::runtime_substrate_refresh_candidate(&cwd) {
                             Ok(dry_run) => {
                                 let invalid = if dry_run.invalid_manifests.is_empty() {
                                     "none".to_string()
@@ -6590,7 +6603,7 @@ Scroll transcript:
                                     dry_run.invalid_manifests.join("; ")
                                 };
                                 SlashResult::Display(format!(
-                                    "## Runtime substrate refresh preview\n\nStatus: guarded candidate inventory only; generation promotion is not implemented yet.\nRuntime generation: {}\n\nWould preserve: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nWould refresh: discovered extensions, widgets, RPC handles, skill augments, commands/tools, context-provider registrations, harness inventory.\nCurrent active skill directives: {active_skills}\nCommand definitions registered: {}\n\nLive substrate inventory:\n- Extension widgets mounted: {}\n- Extension metadata entries: {}\n- Extension RPC handles: {}\n- Widget receivers: {}\n- Voice notification receivers: {}\n- Voice polling handles: {}\n- Vox polling handles: {}\n- Startup skill activation events: {}\n\nCandidate refresh inventory:\n- Extension candidates: {}\n- Skipped by policy: {}\n- Disabled extensions: {}\n- Invalid manifests: {invalid}\n- Candidate widgets: {}\n- Candidate metadata entries: {}\n- Candidate RPC handles: {}\n- Candidate widget receivers: {}\n- Candidate vox polling handles: {}\n- Reloadable skill entries: {}\n\nNext implementation step: build the complete candidate generation transactionally, then promote only after validation succeeds.",
+                                    "## Runtime substrate refresh\n\nStatus: partial live refresh completed; extension process/widget promotion is not implemented yet.\nRuntime generation: {before_generation} -> {}\n\nPreserved: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nRefreshed now: user/project/extension skill augments.\nInspected only: discovered extensions, widgets, RPC handles, commands/tools, context-provider registrations, harness inventory.\nActive skill directives: {skills_before} -> {skills_after}\nCommand definitions registered: {}\n\nLive substrate inventory:\n- Extension widgets mounted: {}\n- Extension metadata entries: {}\n- Extension RPC handles: {}\n- Widget receivers: {}\n- Voice notification receivers: {}\n- Voice polling handles: {}\n- Vox polling handles: {}\n- Startup skill activation events: {}\n\nCandidate refresh inventory:\n- Extension candidates: {}\n- Skipped by policy: {}\n- Disabled extensions: {}\n- Invalid manifests: {invalid}\n- Candidate widgets: {}\n- Candidate metadata entries: {}\n- Candidate RPC handles: {}\n- Candidate widget receivers: {}\n- Candidate vox polling handles: {}\n- Reloadable skill entries: {}\n\nNext implementation step: promote validated extension-owned handles without replacing the whole runtime bus.",
                                     self.runtime_generation,
                                     self.bus_commands.len(),
                                     self.runtime_inventory.extension_widgets,
@@ -6613,7 +6626,7 @@ Scroll transcript:
                                 ))
                             }
                             Err(err) => SlashResult::Display(format!(
-                                "Runtime substrate refresh candidate failed before touching live runtime: {err}"
+                                "Runtime substrate refresh candidate inspection failed after skill refresh: {err}"
                             )),
                         }
                     }

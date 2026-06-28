@@ -17,7 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
-- Added `/extension refresh`, `/extension reload`, and `/extension restart` as safe aliases for the guarded runtime substrate-refresh candidate surface, and point extension install/update/enable/disable responses at that inspection step.
+- Added `/extension refresh`, `/extension reload`, and `/extension restart` as safe aliases for a partial live runtime substrate refresh: skill augments reload immediately, extension/process/widget changes remain candidate inventory until explicit promotion support lands.
 - Added a guarded `/runtime restart` substrate-refresh candidate surface with runtime generation, live startup substrate inventory, and non-mutating extension/skill candidate inventory so the extension/runtime reload design has an operator-visible command seam before generation promotion lands.
 - Added `/skills reload` as an in-TUI current-session affordance for reloading user and project skills after creation/import, and updated skill creation/import prompts plus the skills palette to point operators at reload/get inspection steps.
 - Added `docs/web-ui-backend-rbac-identity-requirements.md` to capture the Web UI backend identity, RBAC, trusted-proxy principal, stream-auth, contract, and validation requirements for future work.
