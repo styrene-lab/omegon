@@ -344,12 +344,21 @@ mod tests {
     fn bootstrap_shows_profile_expectation_deltas() {
         let mut status = HarnessStatus::default();
         status.dispatcher.active_profile = Some("frontier".into());
+        status.dispatcher.active_model = Some("anthropic:claude-sonnet-4.6".into());
         status.cleave_available = false;
         status.update_bootstrap_expectations();
 
         let output = render_bootstrap(&status, false);
         assert!(
             output.contains("profile expects cleave orchestration"),
+            "output: {output}"
+        );
+        assert!(
+            output.contains("profile expects skill inventory"),
+            "output: {output}"
+        );
+        assert!(
+            output.contains("profile expects extension inventory"),
             "output: {output}"
         );
     }

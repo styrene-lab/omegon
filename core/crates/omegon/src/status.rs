@@ -119,9 +119,20 @@ impl BootstrapExpectationStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BootstrapExpectationSubjectKind {
+    Orchestration,
+    InferenceBackend,
+    Memory,
+    SkillInventory,
+    ExtensionInventory,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BootstrapExpectation {
     pub source: String,
+    pub subject_kind: BootstrapExpectationSubjectKind,
     pub subject: String,
     pub status: BootstrapExpectationStatus,
     pub message: String,
@@ -679,6 +690,7 @@ impl HarnessStatus {
         if matches!(profile, "frontier" | "max") {
             expectations.push(BootstrapExpectation {
                 source: "profile".into(),
+                subject_kind: BootstrapExpectationSubjectKind::Orchestration,
                 subject: "cleave orchestration".into(),
                 status: if self.cleave_available {
                     BootstrapExpectationStatus::Met
@@ -700,6 +712,7 @@ impl HarnessStatus {
                 .any(|backend| backend.available);
             expectations.push(BootstrapExpectation {
                 source: "profile".into(),
+                subject_kind: BootstrapExpectationSubjectKind::InferenceBackend,
                 subject: "local inference fallback".into(),
                 status: if has_local_inference {
                     BootstrapExpectationStatus::Met
@@ -717,6 +730,7 @@ impl HarnessStatus {
         if self.memory.total_facts > 0 {
             expectations.push(BootstrapExpectation {
                 source: "profile".into(),
+                subject_kind: BootstrapExpectationSubjectKind::Memory,
                 subject: "memory orientation".into(),
                 status: if self.memory_available {
                     BootstrapExpectationStatus::Met
@@ -730,6 +744,58 @@ impl HarnessStatus {
                 },
             });
         }
+
+        let has_skill_inventory = self
+            .active_persona
+            .as_ref()
+            .is_some_and(|persona| !persona.activated_skills.is_empty())
+            || self
+                .installed_plugins
+                .iter()
+                .any(|plugin| plugin.plugin_type == "skill");
+        expectations.push(BootstrapExpectation {
+            source: "profile".into(),
+            subject_kind: BootstrapExpectationSubjectKind::SkillInventory,
+            subject: "skill inventory".into(),
+            status: if has_skill_inventory {
+                BootstrapExpectationStatus::Met
+            } else if self.dispatcher.active_model.is_some() {
+                BootstrapExpectationStatus::Missing
+            } else {
+                BootstrapExpectationStatus::Skipped
+            },
+            message: if has_skill_inventory {
+                "profile expects skill inventory; active skills discovered".into()
+            } else if self.dispatcher.active_model.is_some() {
+                "profile expects skill inventory; no active skills discovered".into()
+            } else {
+                "profile expects skill inventory; skipped until route is selected".into()
+            },
+        });
+
+        let has_extension_inventory = self
+            .installed_plugins
+            .iter()
+            .any(|plugin| plugin.plugin_type == "extension");
+        expectations.push(BootstrapExpectation {
+            source: "profile".into(),
+            subject_kind: BootstrapExpectationSubjectKind::ExtensionInventory,
+            subject: "extension inventory".into(),
+            status: if has_extension_inventory {
+                BootstrapExpectationStatus::Met
+            } else if self.dispatcher.active_model.is_some() {
+                BootstrapExpectationStatus::Missing
+            } else {
+                BootstrapExpectationStatus::Skipped
+            },
+            message: if has_extension_inventory {
+                "profile expects extension inventory; installed extensions discovered".into()
+            } else if self.dispatcher.active_model.is_some() {
+                "profile expects extension inventory; no installed extensions discovered".into()
+            } else {
+                "profile expects extension inventory; skipped until route is selected".into()
+            },
+        });
 
         self.bootstrap_expectations = expectations;
     }
