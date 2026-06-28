@@ -37,6 +37,7 @@ pub mod mutation;
 pub mod persona;
 pub mod prompt;
 pub mod session_log;
+pub mod skills;
 pub mod terminal_title;
 pub mod usage;
 pub mod user_commands;

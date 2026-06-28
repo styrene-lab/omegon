@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added dedicated agent-callable skills tools (`skills_list`, `skills_get`, `skills_create`, `skills_import`, `skills_install`, `skills_delete`, `skills_reload`) backed by a first-class skills feature and shared augment registry reload path.
 - Added `/extension refresh`, `/extension reload`, and `/extension restart` as safe aliases for a partial live runtime substrate refresh: skill augments reload immediately, extension/process/widget changes remain candidate inventory until explicit promotion support lands.
 - Added a guarded `/runtime restart` substrate-refresh candidate surface with runtime generation, live startup substrate inventory, and non-mutating extension/skill candidate inventory so the extension/runtime reload design has an operator-visible command seam before generation promotion lands.
 - Aligned `/skill`/`/skills` command discovery, TUI usage, ACP help, and the skills palette with current skill internals: scoped create/new/import, Armory installs, reload/refresh aliases, provenance/shadow/conflict inspection, and current-session reload semantics.

@@ -275,7 +275,31 @@ pub fn cmd_doctor() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn validate_skill_name(name: &str) -> anyhow::Result<String> {
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SkillInstallSummary {
+    pub destination: std::path::PathBuf,
+    pub installed: usize,
+    pub updated: usize,
+    pub removed_legacy: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SkillImportSummary {
+    pub name: String,
+    pub scope: String,
+    pub source: std::path::PathBuf,
+    pub destination: std::path::PathBuf,
+    pub bundle: SkillBundleSummary,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SkillDeleteSummary {
+    pub name: String,
+    pub scope: String,
+    pub path: std::path::PathBuf,
+}
+
+pub fn validate_skill_name(name: &str) -> anyhow::Result<String> {
     let slug: String = name
         .trim()
         .to_lowercase()
@@ -348,7 +372,11 @@ fn print_import_summary(summary: &SkillBundleSummary) {
     }
 }
 
-pub fn cmd_import(path: &std::path::Path, project: bool, force: bool) -> anyhow::Result<()> {
+pub fn import_skill(
+    path: &std::path::Path,
+    project: bool,
+    force: bool,
+) -> anyhow::Result<SkillImportSummary> {
     let source = path.canonicalize()?;
     let (source_dir, skill_file) = if source.is_dir() {
         (source.clone(), source.join("SKILL.md"))
@@ -397,15 +425,26 @@ pub fn cmd_import(path: &std::path::Path, project: bool, force: bool) -> anyhow:
         std::fs::create_dir_all(&destination)?;
         std::fs::copy(&skill_file, destination.join("SKILL.md"))?;
     }
-    let summary = summarize_imported_skill(&destination, &slug);
+    let bundle = summarize_imported_skill(&destination, &slug);
+    Ok(SkillImportSummary {
+        name: slug,
+        scope: if project { "project" } else { "user" }.into(),
+        source,
+        destination,
+        bundle,
+    })
+}
+
+pub fn cmd_import(path: &std::path::Path, project: bool, force: bool) -> anyhow::Result<()> {
+    let summary = import_skill(path, project, force)?;
     println!(
         "Imported {} skill '{}' from {} to {}",
-        if project { "project-local" } else { "user" },
-        slug,
-        source.display(),
-        destination.display()
+        summary.scope,
+        summary.name,
+        summary.source.display(),
+        summary.destination.display()
     );
-    print_import_summary(&summary);
+    print_import_summary(&summary.bundle);
     Ok(())
 }
 
@@ -431,7 +470,7 @@ fn remove_legacy_bundled_vault_skill(skills_dir: &std::path::Path) -> anyhow::Re
 
 /// Install all bundled skills to ~/.omegon/skills/.
 /// Existing files are overwritten. Project-local skills are never touched.
-pub fn cmd_install() -> anyhow::Result<()> {
+pub fn install_bundled_skills() -> anyhow::Result<SkillInstallSummary> {
     let skills_dir =
         skills_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
 
@@ -440,9 +479,7 @@ pub fn cmd_install() -> anyhow::Result<()> {
     let mut installed = 0;
     let mut updated = 0;
 
-    if remove_legacy_bundled_vault_skill(&skills_dir)? {
-        println!("  - vault  (removed; renamed to flynt)");
-    }
+    let removed_legacy = remove_legacy_bundled_vault_skill(&skills_dir)?;
 
     for (name, content) in BUNDLED {
         let skill_dir = skills_dir.join(name);
@@ -462,21 +499,37 @@ pub fn cmd_install() -> anyhow::Result<()> {
         std::fs::write(&skill_file, content)?;
 
         if !already_exists {
-            println!("  + {name}");
             installed += 1;
         } else if changed {
-            println!("  ↑ {name}  (updated)");
             updated += 1;
-        } else {
-            println!("  ✓ {name}  (unchanged)");
         }
+    }
+
+    Ok(SkillInstallSummary {
+        destination: skills_dir,
+        installed,
+        updated,
+        removed_legacy,
+    })
+}
+
+/// Install all bundled skills to ~/.omegon/skills/.
+/// Existing files are overwritten. Project-local skills are never touched.
+pub fn cmd_install() -> anyhow::Result<()> {
+    let summary = install_bundled_skills()?;
+
+    if summary.removed_legacy {
+        println!("  - vault  (removed; renamed to flynt)");
+    }
+    for (name, _content) in BUNDLED {
+        println!("  ✓ {name}");
     }
 
     println!(
         "\n{} skill(s) installed, {} updated → {}",
-        installed,
-        updated,
-        skills_dir.display()
+        summary.installed,
+        summary.updated,
+        summary.destination.display()
     );
     println!("Skills are active immediately in new sessions.");
 
@@ -752,6 +805,34 @@ pub struct SkillDetails {
     pub body: String,
     pub path: std::path::PathBuf,
     pub entry: Option<SkillEntry>,
+}
+
+pub fn delete_external_skill(name: &str) -> anyhow::Result<SkillDeleteSummary> {
+    let slug = validate_skill_name(name)?;
+    let cwd = std::env::current_dir()?;
+    let project_dir = cwd.join(".omegon/skills").join(&slug);
+    if project_dir.exists() {
+        std::fs::remove_dir_all(&project_dir)?;
+        return Ok(SkillDeleteSummary {
+            name: slug,
+            scope: "project".into(),
+            path: project_dir,
+        });
+    }
+
+    let user_dir = skills_dir()
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
+        .join(&slug);
+    if user_dir.exists() {
+        std::fs::remove_dir_all(&user_dir)?;
+        return Ok(SkillDeleteSummary {
+            name: slug,
+            scope: "user".into(),
+            path: user_dir,
+        });
+    }
+
+    anyhow::bail!("external skill '{slug}' not found")
 }
 
 /// Read a single skill's resolved manifest, body content, and listing metadata.

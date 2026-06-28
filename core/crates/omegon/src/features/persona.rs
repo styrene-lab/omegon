@@ -6,9 +6,9 @@
 //! - `list_personas` — enumerate available personas and tones
 
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::sync::{
-    Mutex,
+    Arc, Mutex, MutexGuard,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -19,24 +19,37 @@ use omegon_traits::{
 use crate::plugins::persona_loader;
 use crate::plugins::registry::AugmentRegistry;
 
+#[derive(Clone)]
+pub struct SharedAugmentRegistry(Arc<Mutex<AugmentRegistry>>);
+
+impl SharedAugmentRegistry {
+    pub fn new(registry: AugmentRegistry) -> Self {
+        Self(Arc::new(Mutex::new(registry)))
+    }
+
+    pub fn lock(&self) -> MutexGuard<'_, AugmentRegistry> {
+        self.0.lock().unwrap()
+    }
+}
+
 /// Feature that exposes persona/tone management as agent tools.
 pub struct PersonaFeature {
-    registry: Mutex<AugmentRegistry>,
+    registry: SharedAugmentRegistry,
     /// Flag indicating harness status should be refreshed on next turn boundary
     refresh_status_pending: AtomicBool,
 }
 
 impl PersonaFeature {
-    pub fn new(registry: AugmentRegistry) -> Self {
+    pub fn new(registry: SharedAugmentRegistry) -> Self {
         Self {
-            registry: Mutex::new(registry),
+            registry,
             refresh_status_pending: AtomicBool::new(false),
         }
     }
 
     /// Get a reference to the inner registry (for HarnessStatus, etc.)
     pub fn registry(&self) -> std::sync::MutexGuard<'_, AugmentRegistry> {
-        self.registry.lock().unwrap()
+        self.registry.lock()
     }
 }
 
@@ -114,7 +127,7 @@ impl Feature for PersonaFeature {
 
                 if name == "off" {
                     // Deactivate current persona
-                    let result = self.registry.lock().unwrap().deactivate_persona();
+                    let result = self.registry.lock().deactivate_persona();
                     self.refresh_status_pending.store(true, Ordering::Relaxed);
 
                     if result.removed_id.is_some() {
@@ -140,11 +153,8 @@ impl Feature for PersonaFeature {
                                 let skills = loaded_persona.activated_skills.join(", ");
 
                                 // Actually activate the persona
-                                let activation_result = self
-                                    .registry
-                                    .lock()
-                                    .unwrap()
-                                    .activate_persona(loaded_persona);
+                                let activation_result =
+                                    self.registry.lock().activate_persona(loaded_persona);
                                 self.refresh_status_pending.store(true, Ordering::Relaxed);
 
                                 let mut message = format!(
@@ -186,7 +196,7 @@ impl Feature for PersonaFeature {
 
                 if name == "off" {
                     // Deactivate current tone
-                    let removed = self.registry.lock().unwrap().deactivate_tone();
+                    let removed = self.registry.lock().deactivate_tone();
                     self.refresh_status_pending.store(true, Ordering::Relaxed);
 
                     if removed.is_some() {
@@ -209,8 +219,7 @@ impl Feature for PersonaFeature {
                                 let exemplar_count = loaded_tone.exemplars.len();
 
                                 // Actually activate the tone
-                                let previous =
-                                    self.registry.lock().unwrap().activate_tone(loaded_tone);
+                                let previous = self.registry.lock().activate_tone(loaded_tone);
                                 self.refresh_status_pending.store(true, Ordering::Relaxed);
 
                                 let mut message = format!(
@@ -249,7 +258,7 @@ impl Feature for PersonaFeature {
 
             crate::tool_registry::persona::LIST_PERSONAS => {
                 let (personas, tones) = persona_loader::scan_available();
-                let registry = self.registry.lock().unwrap();
+                let registry = self.registry.lock();
                 let active_persona = registry.active_persona().map(|p| &p.id);
                 let active_tone = registry.active_tone().map(|t| &t.id);
 
@@ -297,7 +306,7 @@ impl Feature for PersonaFeature {
             // On session start, log the active persona/tone
             BusEvent::SessionStart { .. } => {
                 let mut requests = Vec::new();
-                let registry = self.registry.lock().unwrap();
+                let registry = self.registry.lock();
                 if let Some(persona) = registry.active_persona() {
                     let badge = persona.badge.as_deref().unwrap_or("⚙");
                     requests.push(BusRequest::Notify {
@@ -331,7 +340,7 @@ impl Feature for PersonaFeature {
         _signals: &omegon_traits::ContextSignals<'_>,
     ) -> Option<omegon_traits::ContextInjection> {
         // Inject persona directive + tone directive as context
-        let prompt = self.registry.lock().unwrap().build_system_prompt();
+        let prompt = self.registry.lock().build_system_prompt();
         if prompt.is_empty() {
             return None;
         }
@@ -354,6 +363,15 @@ fn text_result(text: &str) -> ToolResult {
     }
 }
 
+fn text_result_with_details(text: &str, details: Value) -> ToolResult {
+    ToolResult {
+        content: vec![ContentBlock::Text {
+            text: text.to_string(),
+        }],
+        details,
+    }
+}
+
 fn error_result(text: &str) -> ToolResult {
     ToolResult {
         content: vec![ContentBlock::Text {
@@ -373,7 +391,7 @@ mod tests {
 
     #[test]
     fn feature_exposes_three_tools() {
-        let feature = PersonaFeature::new(test_registry());
+        let feature = PersonaFeature::new(SharedAugmentRegistry::new(test_registry()));
         let tools = feature.tools();
         assert_eq!(tools.len(), 3);
         assert!(tools.iter().any(|t| t.name == "switch_persona"));
@@ -383,7 +401,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_personas_empty() {
-        let feature = PersonaFeature::new(test_registry());
+        let feature = PersonaFeature::new(SharedAugmentRegistry::new(test_registry()));
         let cancel = tokio_util::sync::CancellationToken::new();
         let result = feature
             .execute("list_personas", "c1", json!({}), cancel)
@@ -401,7 +419,7 @@ mod tests {
 
     #[tokio::test]
     async fn switch_persona_not_found() {
-        let feature = PersonaFeature::new(test_registry());
+        let feature = PersonaFeature::new(SharedAugmentRegistry::new(test_registry()));
         let cancel = tokio_util::sync::CancellationToken::new();
         let result = feature
             .execute(
@@ -423,7 +441,7 @@ mod tests {
 
     #[tokio::test]
     async fn switch_tone_not_found() {
-        let feature = PersonaFeature::new(test_registry());
+        let feature = PersonaFeature::new(SharedAugmentRegistry::new(test_registry()));
         let cancel = tokio_util::sync::CancellationToken::new();
         let result = feature
             .execute("switch_tone", "c1", json!({"name": "nonexistent"}), cancel)
@@ -440,7 +458,7 @@ mod tests {
 
     #[test]
     fn provide_context_empty_when_no_persona() {
-        let feature = PersonaFeature::new(test_registry());
+        let feature = PersonaFeature::new(SharedAugmentRegistry::new(test_registry()));
         let signals = omegon_traits::ContextSignals {
             user_prompt: "test",
             recent_tools: &[],
@@ -469,7 +487,7 @@ mod tests {
             disabled_tools: vec![],
             badge: Some("🧪".into()),
         });
-        let feature = PersonaFeature::new(registry);
+        let feature = PersonaFeature::new(SharedAugmentRegistry::new(registry));
         let signals = omegon_traits::ContextSignals {
             user_prompt: "test",
             recent_tools: &[],
@@ -504,7 +522,7 @@ mod tests {
             disabled_tools: vec![],
             badge: Some("🧪".into()),
         });
-        let mut feature = PersonaFeature::new(registry);
+        let mut feature = PersonaFeature::new(SharedAugmentRegistry::new(registry));
         let requests = feature.on_event(&BusEvent::SessionStart {
             cwd: std::path::PathBuf::from("/tmp"),
             session_id: "test".into(),
@@ -514,7 +532,7 @@ mod tests {
 
     #[test]
     fn on_event_session_start_no_persona() {
-        let mut feature = PersonaFeature::new(test_registry());
+        let mut feature = PersonaFeature::new(SharedAugmentRegistry::new(test_registry()));
         let requests = feature.on_event(&BusEvent::SessionStart {
             cwd: std::path::PathBuf::from("/tmp"),
             session_id: "test".into(),
