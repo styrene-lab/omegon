@@ -4177,7 +4177,7 @@ fn slash_runtime_restart_displays_guarded_preview() {
     match result {
         SlashResult::Display(message) => {
             assert!(message.contains("Runtime hot restart preview"), "{message}");
-            assert!(message.contains("guarded preview only"), "{message}");
+            assert!(message.contains("guarded dry-run only"), "{message}");
             assert!(message.contains("Would preserve"), "{message}");
             assert!(message.contains("Would rebuild"), "{message}");
             assert!(message.contains("Extension metadata entries"), "{message}");

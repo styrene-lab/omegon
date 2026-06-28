@@ -135,6 +135,85 @@ impl RuntimeSubstrateInventory {
     }
 }
 
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeRestartDryRun {
+    pub inventory: RuntimeSubstrateInventory,
+    pub extension_candidates: usize,
+    pub skipped_by_policy: usize,
+    pub disabled_extensions: usize,
+    pub invalid_manifests: Vec<String>,
+}
+
+/// Build the restart substrate inventory without mutating live runtime state.
+///
+/// This intentionally does not spawn extension subprocesses or register bus
+/// features. It verifies the filesystem/profile side of extension discovery so
+/// `/runtime restart` can report whether a transactional rebuild is plausible
+/// before the later swap implementation exists.
+pub fn runtime_restart_dry_run(cwd: &Path) -> anyhow::Result<RuntimeRestartDryRun> {
+    let cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    let mut dry_run = RuntimeRestartDryRun::default();
+    dry_run.inventory.skill_activation_events = crate::skills::list_structured()
+        .map(|entries| entries.into_iter().filter(|entry| entry.reloadable).count())
+        .unwrap_or_default();
+
+    let ext_dir = crate::paths::omegon_home()?.join("extensions");
+    if !ext_dir.exists() {
+        return Ok(dry_run);
+    }
+
+    let profile = crate::settings::Profile::load(&cwd);
+    let env_enabled = crate::parse_csv_env("OMEGON_CHILD_ENABLED_EXTENSIONS");
+    let env_disabled = crate::parse_csv_env("OMEGON_CHILD_DISABLED_EXTENSIONS");
+
+    for entry in std::fs::read_dir(&ext_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let manifest_path = path.join("manifest.toml");
+        if !manifest_path.exists() {
+            continue;
+        }
+        let ext_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        if !profile
+            .extensions
+            .permits(&ext_name, &env_enabled, &env_disabled)
+        {
+            dry_run.skipped_by_policy += 1;
+            continue;
+        }
+        if extension_state_disabled(&path) {
+            dry_run.disabled_extensions += 1;
+            continue;
+        }
+        match crate::extensions::ExtensionManifest::from_extension_dir(&path) {
+            Ok(manifest) => {
+                dry_run.extension_candidates += 1;
+                dry_run.inventory.extension_metadata_entries += 1;
+                dry_run.inventory.extension_rpc_handles += 1;
+                dry_run.inventory.widget_receivers += 1;
+                dry_run.inventory.extension_widgets += manifest.widgets.len();
+                if manifest.capabilities.voice {
+                    dry_run.inventory.voice_notification_receivers += 1;
+                    dry_run.inventory.voice_polling_handles += 1;
+                }
+            }
+            Err(err) => dry_run
+                .invalid_manifests
+                .push(format!("{ext_name}: {err}")),
+        }
+    }
+
+    Ok(dry_run)
+}
+
 /// Pre-computed state gathered during setup for TUI initial display.
 pub(crate) struct StartupSnapshot {
     pub total_facts: usize,
