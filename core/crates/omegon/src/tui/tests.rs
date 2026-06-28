@@ -4189,6 +4189,51 @@ fn slash_runtime_substrate_refresh_displays_guarded_preview() {
 }
 
 #[test]
+fn runtime_substrate_refresh_reloads_skill_augments_and_advances_generation() {
+    let dir = tempfile::tempdir().unwrap();
+    let skill_dir = dir.path().join(".omegon/skills/runtime-refresh-skill");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        r#"---
+name: runtime-refresh-skill
+description: Runtime refresh skill fixture
+activation: always
+---
+
+# Runtime Refresh Skill
+
+Loaded by runtime substrate refresh.
+"#,
+    )
+    .unwrap();
+    let _cwd = push_current_dir(dir.path());
+
+    let mut app = test_app();
+    let before_generation = app.runtime_generation;
+    assert_eq!(
+        app.augment_registry
+            .as_ref()
+            .map(|registry| registry.skill_count()),
+        Some(0)
+    );
+
+    let message = app.refresh_runtime_substrate();
+
+    assert_eq!(app.runtime_generation, before_generation + 1);
+    let registry = app.augment_registry.as_ref().expect("registry exists");
+    assert!(registry.skill_count() > 0);
+    assert!(
+        registry
+            .skill_activation_events()
+            .iter()
+            .any(|event| event.active_ref.contains("runtime-refresh-skill"))
+    );
+    assert!(message.contains("Active skill directives: 0 ->"), "{message}");
+    assert!(message.contains("partial live refresh completed"), "{message}");
+}
+
+#[test]
 fn slash_secrets_enqueues_execute_control() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
