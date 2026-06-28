@@ -1082,7 +1082,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "skills" | "skill" => {
             if args.is_empty() || args == "list" {
                 Some(CanonicalSlashCommand::SkillsView)
-            } else if args == "reload" {
+            } else if matches!(args, "reload" | "refresh") {
                 Some(CanonicalSlashCommand::SkillsReload)
             } else if args == "install" {
                 Some(CanonicalSlashCommand::SkillsInstall(None))
@@ -6398,17 +6398,20 @@ Scroll transcript:
             }
 
             "skills" | "skill" => {
-                const USAGE: &str = "Usage: /skills [list|reload|install [name|skills/name]|create [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]";
+                const USAGE: &str = "Usage: /skills [list|reload|refresh|install [name|skills/name]|create [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]";
                 if let Some(command) = canonical_slash_command("skills", args) {
                     match command {
                         CanonicalSlashCommand::SkillsReload => {
                             let cwd = self.cwd().to_path_buf();
                             if let Some(ref mut registry) = self.augment_registry {
+                                let before_generation = self.runtime_generation;
                                 registry.load_skills(&cwd);
                                 let loaded = registry.skill_count();
                                 let events = registry.skill_activation_events();
+                                self.runtime_generation = self.runtime_generation.saturating_add(1);
+                                let after_generation = self.runtime_generation;
                                 let mut out = format!(
-                                    "## Skills reloaded\n\nLoaded {loaded} active skill directive(s) from user and project skill directories. Changes apply to subsequent model requests in this session.\n"
+                                    "## Skills reloaded\n\nRuntime generation: {before_generation} -> {after_generation}\nLoaded {loaded} active skill directive(s) from user and project skill directories. Changes apply to subsequent model requests in this session.\n"
                                 );
                                 if !events.is_empty() {
                                     out.push_str("\nActivation events:\n");
@@ -11796,6 +11799,10 @@ mod slash_command_parsing_tests {
             canonical_slash_command("skills", "reload"),
             Some(CanonicalSlashCommand::SkillsReload)
         ));
+        assert!(matches!(
+            canonical_slash_command("skills", "refresh"),
+            Some(CanonicalSlashCommand::SkillsReload)
+        ));
     }
 
     #[test]
@@ -11808,6 +11815,26 @@ mod slash_command_parsing_tests {
             canonical_slash_command("runtime", "hot-restart"),
             Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
         ));
+    }
+
+    #[test]
+    fn skills_reload_advances_runtime_generation() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-5");
+        let mut app = App::new(settings);
+        let (tx, mut rx) = mpsc::channel(1);
+        let before_generation = app.runtime_generation;
+
+        let result = app.handle_slash_command("/skills reload", &tx);
+
+        match result {
+            SlashResult::Display(message) => {
+                assert!(message.contains("Skills reloaded"), "{message}");
+                assert!(message.contains("Runtime generation:"), "{message}");
+            }
+            other => panic!("expected skills reload display, got {other:?}"),
+        }
+        assert_eq!(app.runtime_generation, before_generation + 1);
+        assert!(rx.try_recv().is_err(), "reload is handled in-TUI");
     }
 
     #[test]
