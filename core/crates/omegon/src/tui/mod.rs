@@ -565,6 +565,10 @@ struct App {
     effects: effects::Effects,
     /// Command definitions from bus features.
     bus_commands: Vec<omegon_traits::CommandDefinition>,
+    /// Current restart-substrate generation shown by runtime restart preview.
+    runtime_generation: u64,
+    /// Copyable inventory of startup/runtime substrate side channels.
+    runtime_inventory: crate::setup::RuntimeSubstrateInventory,
     /// Shared handles for live dashboard updates.
     dashboard_handles: dashboard::DashboardHandles,
     /// Last instrument telemetry update timestamp.
@@ -2033,6 +2037,8 @@ impl App {
             slim_turn_state: SlimTurnState::Ready,
             effects: effects::Effects::new(),
             bus_commands: Vec::new(),
+            runtime_generation: 1,
+            runtime_inventory: crate::setup::RuntimeSubstrateInventory::default(),
             dashboard_handles: dashboard::DashboardHandles::default(),
             last_instrument_update: std::time::Instant::now(),
             cleave_tokens_accounted_in: 0,
@@ -6443,8 +6449,17 @@ Scroll transcript:
                             .map(|registry| registry.skill_count())
                             .unwrap_or(0);
                         SlashResult::Display(format!(
-                            "## Runtime hot restart preview\n\nStatus: guarded preview only; substrate swap is not implemented yet.\nRuntime generation: 1\n\nWould preserve: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nWould rebuild: EventBus, tools, commands, extensions, widgets, skills, context providers, harness inventory.\nCurrent active skill directives: {active_skills}\nExtension widgets mounted: {}\n\nNext implementation step: extract a transactional runtime substrate builder, then swap only after build succeeds.",
-                            self.extension_widgets.len()
+                            "## Runtime hot restart preview\n\nStatus: guarded preview only; substrate swap is not implemented yet.\nRuntime generation: {}\n\nWould preserve: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nWould rebuild: EventBus, tools, commands, extensions, widgets, skills, context providers, harness inventory.\nCurrent active skill directives: {active_skills}\nBus commands registered: {}\nExtension widgets mounted: {}\nExtension metadata entries: {}\nExtension RPC handles: {}\nWidget receivers: {}\nVoice notification receivers: {}\nVoice polling handles: {}\nVox polling handles: {}\nStartup skill activation events: {}\n\nNext implementation step: build a replacement RuntimeSubstrateInventory transactionally, then swap only after build succeeds.",
+                            self.runtime_generation,
+                            self.bus_commands.len(),
+                            self.runtime_inventory.extension_widgets,
+                            self.runtime_inventory.extension_metadata_entries,
+                            self.runtime_inventory.extension_rpc_handles,
+                            self.runtime_inventory.widget_receivers,
+                            self.runtime_inventory.voice_notification_receivers,
+                            self.runtime_inventory.voice_polling_handles,
+                            self.runtime_inventory.vox_polling_handles,
+                            self.runtime_inventory.skill_activation_events,
                         ))
                     }
                 } else {
@@ -8664,6 +8679,10 @@ pub struct TuiConfig {
     pub no_splash: bool,
     /// Command definitions from bus features — shown in command palette.
     pub bus_commands: Vec<omegon_traits::CommandDefinition>,
+    /// Runtime substrate generation shown in restart diagnostics.
+    pub runtime_generation: u64,
+    /// Startup/runtime substrate inventory for restart diagnostics.
+    pub runtime_inventory: crate::setup::RuntimeSubstrateInventory,
     /// Shared handles for live dashboard updates during the session.
     pub dashboard_handles: dashboard::DashboardHandles,
     /// Initial prompt to queue after startup (sent automatically, TUI stays open).

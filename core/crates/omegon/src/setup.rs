@@ -100,6 +100,41 @@ pub struct AgentSetup {
     pub voice_polling_handles: Vec<crate::extensions::ExtensionPollingHandle>,
 }
 
+
+/// Restart-substrate inventory captured at startup or before a future hot restart.
+///
+/// This is intentionally small and copyable: it lets operator-facing surfaces
+/// describe what the runtime substrate contains without taking ownership of
+/// process handles, receivers, or the event bus. Future hot restart code should
+/// build and validate a replacement substrate first, then publish a new
+/// inventory only after a successful swap.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeSubstrateInventory {
+    pub skill_activation_events: usize,
+    pub extension_widgets: usize,
+    pub extension_metadata_entries: usize,
+    pub extension_rpc_handles: usize,
+    pub widget_receivers: usize,
+    pub vox_polling_handles: usize,
+    pub voice_notification_receivers: usize,
+    pub voice_polling_handles: usize,
+}
+
+impl RuntimeSubstrateInventory {
+    pub fn from_agent_setup(setup: &AgentSetup) -> Self {
+        Self {
+            skill_activation_events: setup.startup_skill_activation_events.len(),
+            extension_widgets: setup.extension_widgets.len(),
+            extension_metadata_entries: setup.extension_metadata.len(),
+            extension_rpc_handles: setup.extension_rpc_handles.len(),
+            widget_receivers: setup.widget_receivers.len(),
+            vox_polling_handles: setup.vox_polling_handles.len(),
+            voice_notification_receivers: setup.voice_notification_receivers.len(),
+            voice_polling_handles: setup.voice_polling_handles.len(),
+        }
+    }
+}
+
 /// Pre-computed state gathered during setup for TUI initial display.
 pub(crate) struct StartupSnapshot {
     pub total_facts: usize,

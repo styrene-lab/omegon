@@ -4180,6 +4180,8 @@ fn slash_runtime_restart_displays_guarded_preview() {
             assert!(message.contains("guarded preview only"), "{message}");
             assert!(message.contains("Would preserve"), "{message}");
             assert!(message.contains("Would rebuild"), "{message}");
+            assert!(message.contains("Extension metadata entries"), "{message}");
+            assert!(message.contains("Startup skill activation events"), "{message}");
         }
         other => panic!("expected runtime restart preview display, got: {other:?}"),
     }
