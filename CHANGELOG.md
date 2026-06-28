@@ -54,7 +54,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added prompt skill conflict resolution so overlapping activation/trigger skills inject only one provider by default and user-facing output recommends project-local merge resolution.
 
 ### Changed
-- Bootstrap status now accounts for the active runtime settings before rendering, showing the selected route/profile alongside context and thinking instead of preserving the stale default `Tier: B` orientation. Bootstrap expectations are now computed as structured status data, and the panel reports first-pass profile expectation deltas when the active profile implies unavailable orchestration, local inference, or memory orientation capabilities.
+- Bootstrap status now accounts for the active runtime settings before rendering, showing the selected route/profile alongside context and thinking instead of preserving the stale default `Tier: B` orientation. Bootstrap expectations are now computed as structured status data with subject-kind classification for orchestration, inference, memory, skill inventory, and extension inventory deltas.
 - Disabled broad editor-area breathing/glow effects in the TUI so post-render color shifts no longer mutate engine-ribbon separator styling.
 - Expanded the omegon-web browser API capability descriptor with explicit surface stream, actions API, and legacy WebSocket flags, and typed the surface-stream WebSocket envelope for a stable UI contract.
 - Added `omegon skills install` cleanup and `skills doctor` detection for stale installed copies of the old bundled `vault` markdown skill after its rename to `flynt`.
