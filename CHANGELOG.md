@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added `/skills reload` as an in-TUI current-session affordance for reloading user and project skills after creation/import, and updated skill creation/import prompts plus the skills palette to point operators at reload/get inspection steps.
 - Added `docs/web-ui-backend-rbac-identity-requirements.md` to capture the Web UI backend identity, RBAC, trusted-proxy principal, stream-auth, contract, and validation requirements for future work.
 - Added `docs/web-ws-contract.md` as the authoritative contract for the legacy `/ws` WebSocket control surface, documenting auth, per-message role checks, inbound command payloads, slash-command remote-safety, server response envelopes, and security notes for Web UI compatibility clients.
 - Omegon Web now supports prompt attachments end to end: the SPA composer has a file picker that base64-stages files via `POST /api/web/attachments`, and `submit_prompt` resolves the staged ids to on-disk paths (materialized under their original filename so downstream extension-based image detection works) and forwards them as the prompt's attachment paths. Image-only prompts (attachments, no text) are accepted; unknown/expired/malformed attachment ids are rejected with `400`. Staging path-sanitizes filenames. The TUI-hosted web path gets full image support; the headless `serve` daemon logs and ignores attachments for now.

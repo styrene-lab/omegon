@@ -4153,6 +4153,22 @@ fn slash_skills_enqueues_execute_control() {
 }
 
 #[test]
+fn slash_skills_reload_displays_current_session_reload() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/skills reload", &tx);
+    match result {
+        SlashResult::Display(message) => {
+            assert!(message.contains("Skills reloaded"), "{message}");
+            assert!(message.contains("subsequent model requests"), "{message}");
+        }
+        other => panic!("expected reload display, got: {other:?}"),
+    }
+    assert!(rx.try_recv().is_err(), "reload is handled in-TUI");
+}
+
+#[test]
 fn slash_secrets_enqueues_execute_control() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
