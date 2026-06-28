@@ -266,6 +266,34 @@ where
                     selection: SegmentSelectionTreatment::Subtle,
                 },
             },
+            ConversationSegmentKind::Skill(skill) => SegmentPresentationModel {
+                producer: SegmentProducer::Skill {
+                    active_ref: skill.active_ref.as_ref(),
+                },
+                state: SegmentState::Informational,
+                content: SegmentContentPresentation {
+                    form: ContentForm::Structured,
+                    title: Some("skill"),
+                    summary: Some(skill.active_ref.as_ref()),
+                    body: Some(skill.reason.as_ref()),
+                },
+                metrics: vec![
+                    SegmentMetric::labeled("reason", skill.reason.as_ref())
+                        .with_emphasis(MetricEmphasis::Muted),
+                    SegmentMetric::labeled("resolution", skill.resolution.as_ref())
+                        .with_emphasis(MetricEmphasis::Muted),
+                ],
+                affordances: SegmentAffordances {
+                    selectable: true,
+                    copyable: true,
+                    ..Default::default()
+                },
+                surface: SegmentSurfacePolicy {
+                    surface: SegmentSurfaceTreatment::ChromeOnly,
+                    copy: SegmentCopyPolicy::Summary,
+                    selection: SegmentSelectionTreatment::Subtle,
+                },
+            },
             ConversationSegmentKind::Lifecycle(lifecycle) => SegmentPresentationModel {
                 producer: SegmentProducer::Lifecycle,
                 state: SegmentState::Informational,
@@ -336,6 +364,7 @@ pub enum ConversationSegmentKind<TText = String, TPath = PathBuf> {
     PeerAgent(PeerAgentSegment<TText>),
     Tool(ToolSegment<TText>),
     System(SystemSegment<TText>),
+    Skill(SkillEventSegment<TText>),
     Lifecycle(LifecycleSegment<TText>),
     Image(ImageSegment<TText, TPath>),
     Separator,
@@ -349,6 +378,7 @@ impl<TText, TPath> ConversationSegmentKind<TText, TPath> {
             Self::PeerAgent(_) => SegmentRole::PeerAgent,
             Self::Tool(_) => SegmentRole::Tool,
             Self::System(_) => SegmentRole::System,
+            Self::Skill(_) => SegmentRole::Lifecycle,
             Self::Lifecycle(_) => SegmentRole::Lifecycle,
             Self::Image(_) => SegmentRole::Media,
             Self::Separator => SegmentRole::Separator,
@@ -389,6 +419,9 @@ pub enum SegmentProducer<'a> {
     Tool {
         name: &'a str,
         category: ToolCategory,
+    },
+    Skill {
+        active_ref: &'a str,
     },
     System,
     Lifecycle,
@@ -589,6 +622,14 @@ pub struct ToolSegment<TText = String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemSegment<TText = String> {
     pub text: TText,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillEventSegment<TText = String> {
+    pub active_ref: TText,
+    pub reason: TText,
+    pub resolution: TText,
+    pub suppressing: Vec<TText>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

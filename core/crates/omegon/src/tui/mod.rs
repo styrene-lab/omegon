@@ -6284,6 +6284,7 @@ Scroll transcript:
                                 if !events.is_empty() {
                                     out.push_str("\nActivation events:\n");
                                     for event in events {
+                                        self.conversation.push_skill_event(event);
                                         out.push_str(&format!(
                                             "- {} · {} · {}\n",
                                             event.active_ref, event.reason, event.resolution
@@ -8726,6 +8727,8 @@ pub struct TuiConfig {
     pub runtime_generation: u64,
     /// Startup/runtime substrate inventory for restart diagnostics.
     pub runtime_inventory: crate::setup::RuntimeSubstrateInventory,
+    /// Skill activation/resolution events emitted while startup augments loaded.
+    pub startup_skill_activation_events: Vec<omegon_traits::SkillActivationEvent>,
     /// Shared handles for live dashboard updates during the session.
     pub dashboard_handles: dashboard::DashboardHandles,
     /// Initial prompt to queue after startup (sent automatically, TUI stays open).
@@ -9426,6 +9429,9 @@ pub async fn run_tui(
         registry.load_skills(std::path::Path::new(&config.cwd));
     }
     app.footer_data.is_oauth = config.is_oauth;
+    for event in &config.startup_skill_activation_events {
+        app.conversation.push_skill_event(event);
+    }
     app.bus_commands = config.bus_commands;
     app.dashboard_handles = config.dashboard_handles;
     app.cancel = cancel;
