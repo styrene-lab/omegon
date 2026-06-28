@@ -1624,7 +1624,10 @@ async fn main() -> anyhow::Result<()> {
             strict_port,
         }) => run_sentry_command(config, control_port, strict_port, &cli).await,
         Some(Commands::Doctor) => run_doctor_command(&cli).await,
-        Some(Commands::Skills { ref action }) => match action {
+        Some(Commands::Skills { ref action }) => {
+            let previous_cwd = std::env::current_dir()?;
+            std::env::set_current_dir(&cli.cwd)?;
+            let result = match action {
             SkillsAction::List => skills::cmd_list(),
             SkillsAction::Doctor => skills::cmd_doctor(),
             SkillsAction::Install { name } => {
@@ -1725,7 +1728,13 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Ok(())
             }
-        },
+        };
+            let restore_result = std::env::set_current_dir(previous_cwd);
+            if let Err(err) = restore_result {
+                return Err(err.into());
+            }
+            result
+        }
         Some(Commands::Catalog { ref action }) => match action {
             CatalogAction::List => catalog::cmd_list(),
             CatalogAction::Install { offline } => catalog::cmd_install(*offline).await,
