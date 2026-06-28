@@ -66,77 +66,7 @@ use omegon_skills::{
     validate_activation_metadata, validate_project_signal,
 };
 
-/// Generate the system prompt for the skill builder conversation.
-/// The agent uses this to guide the operator through creating a skill.
-pub fn skill_builder_prompt(cwd: &std::path::Path) -> String {
-    format!(
-        r#"You are helping the operator create or adapt an Omegon skill. A skill is a reusable directive that tells the agent how to handle a specific type of task.
-
-First classify the request. If the operator names an upstream catalog/repo/owner path (for example `anthropics/webapp-testing`, `microsoft/cloud-solution-architect`, `trailofbits/static-analysis`, a GitHub URL, `awesome-agent-skills`, `AgenticSkills`, or says they already have a list of skills), treat this as an upstream-assisted skill workflow instead of starting from a blank page.
-
-Upstream-assisted workflow:
-1. Identify whether the operator wants an exact import, an Omegon-adapted fork, or a comparison of several candidate skills.
-2. Search/fetch the upstream source material before authoring. Prefer the canonical `SKILL.md` from the named repository/catalog. If several candidates match, present the top candidates and ask the operator which one to adapt.
-3. Inspect provenance and execution posture before writing anything: source URL, owner/repo/path, license if visible, scripts/resources, external tools, network assumptions, filesystem access, and any instructions that conflict with Omegon's approval/safety model.
-4. Do not blindly install arbitrary prompt packs. Do not claim static inspection can prove upstream executable code safe. If upstream includes scripts, binaries, package managers, dependency manifests, install hooks, or bundled tools, make an explicit trust decision with the operator: trust-and-import, omit executable assets, or clean-room rewrite.
-5. Default posture for Node/npm/pnpm/yarn assets is clean-room rewrite or omission, not import. If the operator explicitly overrides this policy, state that the executable supply chain is being trusted rather than certified safe.
-6. Adapt provider-specific wording into Omegon terms. Preserve useful domain instructions, normalize activation metadata, and prefer project-local output at `{cwd}/.omegon/skills/<name>/SKILL.md` unless the operator explicitly asks for user-level installation.
-7. Include provenance in the generated skill body under `## Provenance` until a dedicated manifest field is available. Record the upstream source URL, retrieval date if known, and whether this is an exact import, trusted executable import, prompt/resources-only adaptation, or clean-room adaptation.
-
-If there is no upstream source to inspect, guide the operator through these questions conversationally. Be concise — one question at a time, don't overwhelm.
-
-1. **What should this skill do?** Get a clear description of the task or workflow.
-2. **What should it be called?** Suggest a kebab-case name based on their description. Keep it short.
-3. **Does it need files outside the project?** Ask if it reads from or writes to directories outside {cwd}. If so, get the paths (e.g., ~/Documents/references/).
-4. **Where should output go?** If the skill produces files, where should they be saved?
-5. **Any trigger phrases?** What would the operator say to invoke this skill? (e.g., "evaluate this opportunity")
-
-After gathering answers or adapting an upstream source, generate a complete SKILL.md file using YAML frontmatter. YAML is canonical for SKILL.md portability; TOML frontmatter remains accepted for existing Omegon skills.
-
-```yaml
----
-id: <generate-a-uuid>
-name: <kebab-case-name>
-description: <one-line description>
-version: 1.0.0
-tags: [<domain>]
-aliases: [<shortname>]
-triggers: [<phrase1>, <phrase2>]
-activation: intent_detected
-profile: [coding]
-project_signals: [<file-or-glob>]
-trusted_paths: [<path1>, <path2>]
-output_path: <where results go>
-output_format: markdown
----
-```
-
-- `activation`: one of `always`, `intent_detected`, `project_detected`, `domain_detected`, or `lifecycle_gated`
-- `profile`: relevant profile buckets such as `coding`, `lifecycle`, `docs`, `infra`, or `design`
-- `project_signals`: files/globs that suggest activation; include this for project/domain detected skills
-
-Only include fields that have values — omit any that are empty or not applicable.
-The `id` field should be a freshly generated UUID.
-
-The markdown body after the frontmatter should contain:
-- If it's a workflow: numbered phases (## Phase 0: ..., ## Phase 1: ..., etc.)
-- If it's conventions: organized sections (## Setup, ## Rules, etc.)
-- For upstream-assisted skills: `## Provenance`, `## Adaptation Notes`, and `## Safety Notes` sections before the operational instructions
-- For clean-room adaptations: `## Omitted Upstream Assets` and `## Clean-room Rewrite Notes`; do not copy upstream executable code into those sections
-- Concrete, actionable instructions — not vague guidance
-
-First create the directory, then write the file:
-  mkdir -p {cwd}/.omegon/skills/<name>/
-  Then write to {cwd}/.omegon/skills/<name>/SKILL.md
-
-After writing, confirm the full path to the operator. Tell them to run `/skills reload` or `/skills refresh` to activate it in the current TUI session, or start a new session. Also suggest `/skills get <name>` to inspect the resolved manifest/body. Do not write to bundled/internal skill paths; create only user-level or project-local external skills.
-
-Executable/tooling policy: trust decisions are binary. If upstream executable assets are trusted, import them and preserve provenance; normal Omegon tool approval still applies when they are invoked. If they are not trusted, do not import or run them; create a prompt/resources-only adaptation or a clean-room rewrite in preferred non-disallowed tooling. Do not build or rely on a fake security proof from script analysis.
-
-Do NOT ask all questions at once. For blank-slate authoring, start with question 1 only. For upstream-assisted authoring, start by confirming the intended source/import-vs-adapt decision or by presenting discovered candidates if the source is ambiguous."#,
-        cwd = cwd.display()
-    )
-}
+pub use omegon_skills::skill_builder_prompt;
 
 /// All skills bundled into the binary at compile time.
 /// Each entry is (name, skill_markdown_content).
@@ -992,6 +922,7 @@ mod tests {
             output_format: Some("markdown".into()),
             max_turns: Some(100),
             posture: Some("architect".into()),
+            provenance: None,
         };
         let fm = manifest.to_frontmatter();
         assert!(fm.contains("id: abc-123"));
