@@ -17,7 +17,7 @@ use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
     ConversationSegmentProjection, ImageSegment, LifecycleSegment, PeerAgentSegment,
     PeerAgentSource, PeerAgentStatus, ProjectConversationSegment, SegmentCopyPolicy,
-    SegmentPresentation, SegmentRole, SystemSegment, ToolSegment, UserSegment,
+    SegmentPresentation, SegmentRole, SkillEventSegment, SystemSegment, ToolSegment, UserSegment,
 };
 
 const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
@@ -1438,6 +1438,14 @@ pub enum SegmentContent {
     /// System notification (slash command response, info message).
     SystemNotification { text: String },
 
+    /// Skill activation/provenance event.
+    SkillEvent {
+        active_ref: String,
+        reason: String,
+        resolution: String,
+        suppressing: Vec<String>,
+    },
+
     /// Lifecycle event (phase change, decomposition).
     LifecycleEvent { icon: String, text: String },
 
@@ -1525,6 +1533,18 @@ impl Segment {
             content: SegmentContent::SystemNotification { text: text.into() },
         }
     }
+    pub fn skill_event(event: &omegon_traits::SkillActivationEvent) -> Self {
+        Self {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::SkillEvent {
+                active_ref: event.active_ref.clone(),
+                reason: event.reason.clone(),
+                resolution: event.resolution.clone(),
+                suppressing: event.suppressing.clone(),
+            },
+        }
+    }
+
     pub fn lifecycle(icon: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
             meta: SegmentMeta::default(),
@@ -1607,6 +1627,17 @@ impl<'a> ProjectConversationSegment<'a> for Segment {
                     text: text.as_str(),
                 })
             }
+            SegmentContent::SkillEvent {
+                active_ref,
+                reason,
+                resolution,
+                suppressing,
+            } => ConversationSegmentKind::Skill(SkillEventSegment {
+                active_ref: active_ref.as_str(),
+                reason: reason.as_str(),
+                resolution: resolution.as_str(),
+                suppressing: suppressing.iter().map(String::as_str).collect(),
+            }),
             SegmentContent::LifecycleEvent { icon, text } => {
                 ConversationSegmentKind::Lifecycle(LifecycleSegment {
                     icon: icon.as_str(),
@@ -1671,6 +1702,7 @@ impl Segment {
                 external_dto_candidate: false,
                 ..SegmentCapabilities::timeline_item()
             },
+            SegmentContent::SkillEvent { .. } => SegmentCapabilities::timeline_item(),
             SegmentContent::LifecycleEvent { .. } => SegmentCapabilities::timeline_item(),
             SegmentContent::Image { .. } => SegmentCapabilities {
                 artifact_bearing: true,
@@ -1774,6 +1806,18 @@ status: {}
                 lines.join("\n")
             }
             SegmentContent::SystemNotification { text } => text.clone(),
+            SegmentContent::SkillEvent {
+                active_ref,
+                reason,
+                resolution,
+                suppressing,
+            } => {
+                let mut text = format!("★ skill · {active_ref} · {reason} · {resolution}");
+                if !suppressing.is_empty() {
+                    text.push_str(&format!(" · suppressing {}", suppressing.join(", ")));
+                }
+                text
+            }
             SegmentContent::LifecycleEvent { icon, text } => format!("{icon} {text}"),
             SegmentContent::Image { path, alt } => {
                 let mut lines = vec![format!("image: {}", path.display())];
@@ -1796,6 +1840,9 @@ status: {}
                 | SegmentContent::SystemNotification { text }
                 | SegmentContent::LifecycleEvent { text, .. }
                 | SegmentContent::PeerAgentText { text, .. } => export_text_fragment(text, mode),
+                SegmentContent::SkillEvent { .. } => {
+                    export_text_fragment(&self.export_text(mode), mode)
+                }
                 SegmentContent::AssistantText { text, .. } => export_text_fragment(text, mode),
                 SegmentContent::ToolCard {
                     detail_result,
@@ -1974,6 +2021,26 @@ status: {}
                 buf,
                 render_ctx,
             ),
+            SkillEvent {
+                active_ref,
+                reason,
+                resolution,
+                suppressing,
+            } => {
+                let mut text = format!("skill · {active_ref} · {reason} · {resolution}");
+                if !suppressing.is_empty() {
+                    text.push_str(&format!(" · suppressing {}", suppressing.join(", ")));
+                }
+                super::segment_components::lifecycle::render(
+                    super::segment_components::lifecycle::LifecycleRenderProps {
+                        icon: "★",
+                        text: &text,
+                    },
+                    area,
+                    buf,
+                    render_ctx,
+                );
+            }
             LifecycleEvent { icon, text } => super::segment_components::lifecycle::render(
                 super::segment_components::lifecycle::LifecycleRenderProps { icon, text },
                 area,
@@ -2006,6 +2073,7 @@ status: {}
         // Quick paths for fixed-height types
         match &self.content {
             TurnSeparator => return 1,
+            SkillEvent { .. } => return 1,
             LifecycleEvent { .. } => return 1,
             Image { .. } => return 14, // Fixed: 12 rows image + 1 caption + 1 spacing
             _ => {}

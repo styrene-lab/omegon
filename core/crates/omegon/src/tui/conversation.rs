@@ -422,6 +422,12 @@ impl ConversationView {
         self.conv_state.auto_scroll_to_bottom();
     }
 
+    pub fn push_skill_event(&mut self, event: &omegon_traits::SkillActivationEvent) {
+        self.segments.push(Segment::skill_event(event));
+        self.conv_state.invalidate();
+        self.conv_state.auto_scroll_to_bottom();
+    }
+
     pub fn push_lifecycle(&mut self, icon: &str, text: &str) {
         self.segments.push(Segment::lifecycle(icon, text));
         self.conv_state.invalidate();

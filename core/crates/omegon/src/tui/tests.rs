@@ -7,6 +7,7 @@ use super::settings_menu::build_model_selector_options;
 use super::workbench::{PlanDisplayItem, PlanDisplayStatus, SlimTurnState};
 use super::*;
 use crate::settings::{ContextClass, Settings, ThinkingLevel};
+use crate::tui::segments::Segment;
 use crate::tui::theme::Theme;
 use crate::update::UpdateInfo;
 use crate::web::WebDaemonStatus;
@@ -4380,6 +4381,62 @@ fn slash_skills_enqueues_execute_control() {
 }
 
 #[test]
+fn skill_event_segment_projects_and_exports_single_line() {
+    let event = omegon_traits::SkillActivationEvent {
+        active_ref: "security".to_string(),
+        activation: Some("always".to_string()),
+        reason: "always".to_string(),
+        matched_signals: Vec::new(),
+        suppressing: vec!["bundled:security".to_string()],
+        resolution: "active".to_string(),
+        recommendation: None,
+        injected: true,
+    };
+    let segment = Segment::skill_event(&event);
+
+    assert!(matches!(segment.content, SegmentContent::SkillEvent { .. }));
+    assert_eq!(
+        segment.plain_text(),
+        "★ skill · security · always · active · suppressing bundled:security"
+    );
+    assert!(matches!(
+        segment.projection().kind,
+        crate::surfaces::conversation::ConversationSegmentKind::Skill(_)
+    ));
+}
+
+#[test]
+fn skills_reload_pushes_skill_event_segments() {
+    let dir = tempfile::tempdir().unwrap();
+    let skill_dir = dir.path().join(".omegon/skills/reload-event-skill");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        r#"---
+name: reload-event-skill
+description: Reload event skill fixture
+activation: always
+---
+
+# Reload Event Skill
+"#,
+    )
+    .unwrap();
+    let _cwd = push_current_dir(dir.path());
+
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+    let result = app.handle_slash_command("/skills reload", &tx);
+
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(rx.try_recv().is_err(), "reload is handled in-TUI");
+    assert!(app.conversation.segments().iter().any(|segment| matches!(
+        segment.content,
+        SegmentContent::SkillEvent { ref active_ref, .. } if active_ref.contains("reload-event-skill")
+    )));
+}
+
+#[test]
 fn slash_skills_reload_displays_current_session_reload() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
@@ -4404,11 +4461,17 @@ fn slash_runtime_substrate_refresh_displays_guarded_preview() {
     match result {
         SlashResult::Display(message) => {
             assert!(message.contains("Runtime substrate refresh"), "{message}");
-            assert!(message.contains("partial live refresh completed"), "{message}");
+            assert!(
+                message.contains("partial live refresh completed"),
+                "{message}"
+            );
             assert!(message.contains("Preserved"), "{message}");
             assert!(message.contains("Refreshed now"), "{message}");
             assert!(message.contains("Extension metadata entries"), "{message}");
-            assert!(message.contains("Startup skill activation events"), "{message}");
+            assert!(
+                message.contains("Startup skill activation events"),
+                "{message}"
+            );
         }
         other => panic!("expected runtime restart preview display, got: {other:?}"),
     }
@@ -4456,8 +4519,14 @@ Loaded by runtime substrate refresh.
             .iter()
             .any(|event| event.active_ref.contains("runtime-refresh-skill"))
     );
-    assert!(message.contains("Active skill directives: 0 ->"), "{message}");
-    assert!(message.contains("partial live refresh completed"), "{message}");
+    assert!(
+        message.contains("Active skill directives: 0 ->"),
+        "{message}"
+    );
+    assert!(
+        message.contains("partial live refresh completed"),
+        "{message}"
+    );
 }
 
 #[test]

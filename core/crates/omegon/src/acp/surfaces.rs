@@ -112,6 +112,12 @@ pub enum AcpConversationSegmentKind {
     System {
         text: String,
     },
+    Skill {
+        active_ref: String,
+        reason: String,
+        resolution: String,
+        suppressing: Vec<String>,
+    },
     Lifecycle {
         icon: String,
         text: String,
@@ -223,6 +229,16 @@ where
         }
         ConversationSegmentKind::System(system) => AcpConversationSegmentKind::System {
             text: redact(system.text.as_ref()),
+        },
+        ConversationSegmentKind::Skill(skill) => AcpConversationSegmentKind::Skill {
+            active_ref: redact(skill.active_ref.as_ref()),
+            reason: redact(skill.reason.as_ref()),
+            resolution: redact(skill.resolution.as_ref()),
+            suppressing: skill
+                .suppressing
+                .iter()
+                .map(|text| redact(text.as_ref()))
+                .collect(),
         },
         ConversationSegmentKind::Lifecycle(lifecycle) => AcpConversationSegmentKind::Lifecycle {
             icon: redact(lifecycle.icon.as_ref()),

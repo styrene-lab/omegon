@@ -1628,107 +1628,107 @@ async fn main() -> anyhow::Result<()> {
             let previous_cwd = std::env::current_dir()?;
             std::env::set_current_dir(&cli.cwd)?;
             let result = match action {
-            SkillsAction::List => skills::cmd_list(),
-            SkillsAction::Doctor => skills::cmd_doctor(),
-            SkillsAction::Install { name } => {
-                if let Some(name) = name.as_deref() {
-                    armory::cmd_install(name, armory::ArmoryInstallKind::Skill, &cli.cwd).await
-                } else {
-                    skills::cmd_install()
+                SkillsAction::List => skills::cmd_list(),
+                SkillsAction::Doctor => skills::cmd_doctor(),
+                SkillsAction::Install { name } => {
+                    if let Some(name) = name.as_deref() {
+                        armory::cmd_install(name, armory::ArmoryInstallKind::Skill, &cli.cwd).await
+                    } else {
+                        skills::cmd_install()
+                    }
                 }
-            }
-            SkillsAction::Get { name } => match skills::get_skill_details(name) {
-                Ok(details) => {
-                    let manifest = &details.manifest;
-                    println!("Skill: {}", manifest.name);
-                    if !manifest.description.is_empty() {
-                        println!("Description: {}", manifest.description);
-                    }
-                    if let Some(ref v) = manifest.version {
-                        println!("Version: {v}");
-                    }
-                    if let Some(ref entry) = details.entry {
-                        println!("Source: {}", entry.source);
-                        println!("Editable: {}", entry.editable);
-                        println!("Reloadable: {}", entry.reloadable);
-                        if !entry.shadows.is_empty() {
-                            println!("Shadows: {}", entry.shadows.join(", "));
+                SkillsAction::Get { name } => match skills::get_skill_details(name) {
+                    Ok(details) => {
+                        let manifest = &details.manifest;
+                        println!("Skill: {}", manifest.name);
+                        if !manifest.description.is_empty() {
+                            println!("Description: {}", manifest.description);
                         }
-                        if !entry.conflicts.is_empty() {
-                            println!("Conflicts: {}", entry.conflicts.join(", "));
-                            println!(
-                                "Recommended resolution: merge into a project-local skill so one activation slot injects one merged directive."
-                            );
+                        if let Some(ref v) = manifest.version {
+                            println!("Version: {v}");
                         }
+                        if let Some(ref entry) = details.entry {
+                            println!("Source: {}", entry.source);
+                            println!("Editable: {}", entry.editable);
+                            println!("Reloadable: {}", entry.reloadable);
+                            if !entry.shadows.is_empty() {
+                                println!("Shadows: {}", entry.shadows.join(", "));
+                            }
+                            if !entry.conflicts.is_empty() {
+                                println!("Conflicts: {}", entry.conflicts.join(", "));
+                                println!(
+                                    "Recommended resolution: merge into a project-local skill so one activation slot injects one merged directive."
+                                );
+                            }
+                        }
+                        if !manifest.tags.is_empty() {
+                            println!("Tags: {}", manifest.tags.join(", "));
+                        }
+                        if !manifest.triggers.is_empty() {
+                            println!("Triggers: {}", manifest.triggers.join(", "));
+                        }
+                        if let Some(ref p) = manifest.posture {
+                            println!("Posture: {p}");
+                        }
+                        println!("Path: {}", details.path.display());
+                        println!("\n{}", details.body);
+                        Ok(())
                     }
-                    if !manifest.tags.is_empty() {
-                        println!("Tags: {}", manifest.tags.join(", "));
+                    Err(e) => Err(e),
+                },
+                SkillsAction::Import {
+                    path,
+                    project,
+                    force,
+                } => skills::cmd_import(path, *project, *force),
+                SkillsAction::Create {
+                    name,
+                    content,
+                    project_local,
+                } => {
+                    let slug: String = name
+                        .to_lowercase()
+                        .replace(' ', "-")
+                        .chars()
+                        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                        .collect();
+                    if slug.is_empty() {
+                        anyhow::bail!("invalid skill name");
                     }
-                    if !manifest.triggers.is_empty() {
-                        println!("Triggers: {}", manifest.triggers.join(", "));
-                    }
-                    if let Some(ref p) = manifest.posture {
-                        println!("Posture: {p}");
-                    }
-                    println!("Path: {}", details.path.display());
-                    println!("\n{}", details.body);
+                    let body = std::fs::read_to_string(content)?;
+                    let skill_dir = if *project_local {
+                        std::env::current_dir()?.join(".omegon/skills").join(&slug)
+                    } else {
+                        paths::omegon_home()?.join("skills").join(&slug)
+                    };
+                    std::fs::create_dir_all(&skill_dir)?;
+                    std::fs::write(skill_dir.join("SKILL.md"), &body)?;
+                    println!("Created skill '{slug}' at {}", skill_dir.display());
                     Ok(())
                 }
-                Err(e) => Err(e),
-            },
-            SkillsAction::Import {
-                path,
-                project,
-                force,
-            } => skills::cmd_import(path, *project, *force),
-            SkillsAction::Create {
-                name,
-                content,
-                project_local,
-            } => {
-                let slug: String = name
-                    .to_lowercase()
-                    .replace(' ', "-")
-                    .chars()
-                    .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-                    .collect();
-                if slug.is_empty() {
-                    anyhow::bail!("invalid skill name");
+                SkillsAction::Delete { name } => {
+                    if name.contains('/')
+                        || name.contains('\\')
+                        || name.contains("..")
+                        || name.contains('\0')
+                    {
+                        anyhow::bail!("invalid skill name: path traversal rejected");
+                    }
+                    let cwd = std::env::current_dir()?;
+                    let project_dir = cwd.join(".omegon/skills").join(name);
+                    let user_dir = paths::omegon_home()?.join("skills").join(name);
+                    if project_dir.exists() {
+                        std::fs::remove_dir_all(&project_dir)?;
+                        println!("Deleted project-local skill '{name}'");
+                    } else if user_dir.exists() {
+                        std::fs::remove_dir_all(&user_dir)?;
+                        println!("Deleted skill '{name}'");
+                    } else {
+                        anyhow::bail!("skill '{name}' not found");
+                    }
+                    Ok(())
                 }
-                let body = std::fs::read_to_string(content)?;
-                let skill_dir = if *project_local {
-                    std::env::current_dir()?.join(".omegon/skills").join(&slug)
-                } else {
-                    paths::omegon_home()?.join("skills").join(&slug)
-                };
-                std::fs::create_dir_all(&skill_dir)?;
-                std::fs::write(skill_dir.join("SKILL.md"), &body)?;
-                println!("Created skill '{slug}' at {}", skill_dir.display());
-                Ok(())
-            }
-            SkillsAction::Delete { name } => {
-                if name.contains('/')
-                    || name.contains('\\')
-                    || name.contains("..")
-                    || name.contains('\0')
-                {
-                    anyhow::bail!("invalid skill name: path traversal rejected");
-                }
-                let cwd = std::env::current_dir()?;
-                let project_dir = cwd.join(".omegon/skills").join(name);
-                let user_dir = paths::omegon_home()?.join("skills").join(name);
-                if project_dir.exists() {
-                    std::fs::remove_dir_all(&project_dir)?;
-                    println!("Deleted project-local skill '{name}'");
-                } else if user_dir.exists() {
-                    std::fs::remove_dir_all(&user_dir)?;
-                    println!("Deleted skill '{name}'");
-                } else {
-                    anyhow::bail!("skill '{name}' not found");
-                }
-                Ok(())
-            }
-        };
+            };
             let restore_result = std::env::set_current_dir(previous_cwd);
             if let Err(err) = restore_result {
                 return Err(err.into());
@@ -4211,6 +4211,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<String>>>,
     > = std::sync::Arc::new(tokio::sync::Mutex::new(None));
     let runtime_inventory = setup::RuntimeSubstrateInventory::from_agent_setup(&agent);
+    let startup_skill_activation_events = agent.startup_skill_activation_events.clone();
     let runtime_generation = 1;
     let extension_widgets = std::mem::take(&mut agent.extension_widgets);
     let widget_receivers = std::mem::take(&mut agent.widget_receivers);
@@ -4227,6 +4228,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         bus_commands,
         runtime_generation,
         runtime_inventory,
+        startup_skill_activation_events,
         dashboard_handles: agent.dashboard_handles.clone(),
         initial_prompt,
         start_tutorial: cli.tutorial,
