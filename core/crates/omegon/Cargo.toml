@@ -23,12 +23,13 @@ omegon-memory = { path = "../omegon-memory", features = ["agent"] }
 omegon-codescan = { path = "../omegon-codescan" }
 omegon-secrets = { path = "../omegon-secrets", features = ["agent"] }
 omegon-opsx = { path = "../omegon-opsx" }
+omegon-skills = { path = "../omegon-skills" }
 omegon-web = { path = "../omegon-web" }
 tokio = { workspace = true }
 serde = { workspace = true }
-toml = "0.8"
+toml = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = "0.9"
+serde_yaml = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

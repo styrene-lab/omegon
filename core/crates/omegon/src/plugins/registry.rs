@@ -81,7 +81,7 @@ struct PromptSkillCandidate {
     source: String,
     content: String,
     order: usize,
-    manifest: crate::skills::SkillManifest,
+    manifest: omegon_skills::SkillManifest,
 }
 
 #[derive(Debug, Clone)]
@@ -278,7 +278,7 @@ impl AugmentRegistry {
                 if let Ok(content) = std::fs::read_to_string(&skill_file)
                     && !content.trim().is_empty()
                 {
-                    let (manifest, _body) = crate::skills::parse_skill_file(&content);
+                    let (manifest, _body) = omegon_skills::parse_skill_file(&content);
                     skills.insert(
                         skill_name.clone(),
                         PromptSkillCandidate {

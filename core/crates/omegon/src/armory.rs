@@ -703,7 +703,7 @@ fn ensure_skill_frontmatter(
         return guidance.to_string();
     }
 
-    let skill_manifest = crate::skills::SkillManifest {
+    let skill_manifest = omegon_skills::SkillManifest {
         name: slug.to_string(),
         description: manifest.plugin.description.clone(),
         id: Some(manifest.plugin.id.clone()),
@@ -903,7 +903,7 @@ mod tests {
         )
         .unwrap();
         let content = ensure_skill_frontmatter("security", &manifest, "# Security\n");
-        let (manifest, body) = crate::skills::parse_skill_file(&content);
+        let (manifest, body) = omegon_skills::parse_skill_file(&content);
         assert_eq!(manifest.name, "security");
         assert_eq!(manifest.description, "Security checklist");
         assert_eq!(
