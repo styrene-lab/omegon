@@ -1,6 +1,5 @@
 ---
-source: crates/omegon/src/tui/snapshot_tests.rs
-assertion_line: 241
+source: core/crates/omegon/src/tui/snapshot_tests.rs
 expression: output
 ---
 
@@ -8,4 +7,4 @@ expression: output
 
   no providers — /login to configure
 
-  Git: unknown  Context: Compact  Thinking: Medium  Tier: B
+  Git: unknown  Route: not selected  Profile: unknown  Context: Compact  Thinking: Medium

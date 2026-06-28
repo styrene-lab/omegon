@@ -956,6 +956,16 @@ impl AgentSetup {
         // ─── Assemble harness status (bootstrap probe) ──────────────────
         let mut harness_status = crate::status::HarnessStatus::assemble();
 
+        // Account for the active runtime profile before rendering bootstrap.
+        // `HarnessStatus::assemble()` starts from conservative defaults; the
+        // profile/model/settings are the authoritative source for route,
+        // context, thinking, and capability orientation.
+        if let Some(settings) = settings.as_ref()
+            && let Ok(settings_guard) = settings.lock()
+        {
+            harness_status.update_from_settings(&settings_guard);
+        }
+
         // Probe all authentication providers
         let auth_status = crate::auth::probe_all_providers().await;
         harness_status.providers = crate::auth::auth_status_to_provider_statuses(&auth_status);

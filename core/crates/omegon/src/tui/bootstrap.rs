@@ -110,8 +110,26 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
     } else {
         format!("{dim}unknown{reset}")
     };
-    out.push_str(&format!("  {dim}Git:{reset} {repo_state}  {dim}Context:{reset} {cyan}{}{reset}  {dim}Thinking:{reset} {cyan}{}{reset}  {dim}Tier:{reset} {cyan}{}{reset}\n",
-        status.context_class, status.thinking_level, status.capability_grade));
+    let route = status
+        .dispatcher
+        .active_model
+        .as_deref()
+        .unwrap_or("not selected");
+    let profile = if status.dispatcher.active_model.is_some() {
+        status
+            .dispatcher
+            .active_profile
+            .as_deref()
+            .unwrap_or("unknown")
+    } else {
+        "unknown"
+    };
+    out.push_str(&format!("  {dim}Git:{reset} {repo_state}  {dim}Route:{reset} {cyan}{route}{reset}  {dim}Profile:{reset} {cyan}{profile}{reset}  {dim}Context:{reset} {cyan}{}{reset}  {dim}Thinking:{reset} {cyan}{}{reset}\n",
+        status.context_class, status.thinking_level));
+
+    for check in profile_expectation_deltas(status) {
+        out.push_str(&format!("  {yellow}⚠{reset} {check}\n"));
+    }
 
     // Memory — single line
     let mem = &status.memory;
@@ -138,6 +156,27 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
     out
 }
 
+fn profile_expectation_deltas(status: &HarnessStatus) -> Vec<String> {
+    let profile = status.dispatcher.active_profile.as_deref().unwrap_or("");
+    let mut checks = Vec::new();
+
+    if matches!(profile, "frontier" | "max") && !status.cleave_available {
+        checks.push("profile expects cleave orchestration; cleave tools unavailable".to_string());
+    }
+
+    let needs_local_inference = matches!(profile, "leaf" | "mid");
+    let has_local_inference = status.inference_backends.iter().any(|backend| backend.available);
+    if needs_local_inference && !has_local_inference {
+        checks.push("profile expects local inference fallback; no local backend available".to_string());
+    }
+
+    if status.memory.total_facts > 0 && !status.memory_available {
+        checks.push("profile expects memory orientation; memory backend unavailable".to_string());
+    }
+
+    checks
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::field_reassign_with_default)]
@@ -151,7 +190,8 @@ mod tests {
         assert!(output.contains("Omegon"));
         assert!(output.contains("Git:"));
         assert!(output.contains("Context:"));
-        assert!(output.contains("Tier:"));
+        assert!(output.contains("Route:"));
+        assert!(output.contains("Profile:"));
     }
 
     #[test]
@@ -315,6 +355,19 @@ mod tests {
             "should show current thinking level"
         );
         assert!(output.contains("1200"), "should show current fact count");
+    }
+
+    #[test]
+    fn bootstrap_shows_profile_expectation_deltas() {
+        let mut status = HarnessStatus::default();
+        status.dispatcher.active_profile = Some("frontier".into());
+        status.cleave_available = false;
+
+        let output = render_bootstrap(&status, false);
+        assert!(
+            output.contains("profile expects cleave orchestration"),
+            "output: {output}"
+        );
     }
 
     #[test]

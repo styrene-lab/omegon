@@ -1,6 +1,5 @@
 ---
-source: crates/omegon/src/tui/snapshot_tests.rs
-assertion_line: 550
+source: core/crates/omegon/src/tui/snapshot_tests.rs
 expression: output
 ---
 
@@ -12,5 +11,6 @@ expression: output
   ✓ podman       5.3.1
   ✓ mcp          1/1 connected, 5 tools
 
-  Git: unknown  Context: Standard  Thinking: High  Tier: B
+  Git: unknown  Route: anthropic:claude-sonnet-4.6  Profile: frontier  Context: Standard  Thinking: High
+  2440 facts, 45 episodes, 120 edges
   ⚙ Systems Engineer
