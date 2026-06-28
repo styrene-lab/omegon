@@ -115,7 +115,7 @@ pub enum BootstrapExpectationStatus {
 
 impl BootstrapExpectationStatus {
     pub fn is_operator_relevant(self) -> bool {
-        !matches!(self, Self::Met)
+        matches!(self, Self::Missing | Self::Degraded)
     }
 }
 

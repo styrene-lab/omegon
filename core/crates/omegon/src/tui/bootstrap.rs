@@ -364,6 +364,18 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_does_not_render_skipped_expectations() {
+        let mut status = HarnessStatus::default();
+        status.update_bootstrap_expectations();
+
+        let output = render_bootstrap(&status, false);
+        assert!(
+            !output.contains("skipped until route is selected"),
+            "output: {output}"
+        );
+    }
+
+    #[test]
     fn bootstrap_marks_runtime_degraded_provider() {
         let mut status = HarnessStatus::default();
         status.providers.push(ProviderStatus {
