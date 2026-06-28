@@ -53,13 +53,16 @@
 pub use omegon_skills::{SkillEntry, SkillManifest};
 
 use omegon_skills::{
-    PendingSkillEntry, SkillActivation, SkillProfile, SkillSignalMatch, adapted_skill_warnings,
-    finalize_skill_entries, is_ignored_signal_dir, match_project_signal, parse_skill_file,
-    skill_entry_provider_rank, skill_ref, skill_sources_conflict, validate_activation_metadata,
+    PendingSkillEntry, SkillActivation, SkillBundleSummary, SkillProfile, SkillSignalMatch,
+    adapted_skill_warnings, discover_skill_bundles, doctor_candidate_conflicts,
+    finalize_skill_entries, match_project_signal, parse_skill_file, skill_entry_provider_rank,
+    validate_activation_metadata,
 };
 
 #[cfg(test)]
-use omegon_skills::{SkillSignalKind, validate_project_signal};
+use omegon_skills::{
+    SkillSignalKind, find_script_references, skill_sources_conflict, validate_project_signal,
+};
 
 /// Generate the system prompt for the skill builder conversation.
 /// The agent uses this to guide the operator through creating a skill.
@@ -217,15 +220,6 @@ pub fn cmd_list() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-struct SkillBundleCandidate {
-    source: String,
-    name: String,
-    path: std::path::PathBuf,
-    manifest: SkillManifest,
-    missing_script_refs: Vec<String>,
-}
-
 fn claude_skill_roots(cwd: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
     let mut roots = Vec::new();
     if let Some(home) = dirs::home_dir() {
@@ -241,120 +235,6 @@ fn claude_skill_roots(cwd: &std::path::Path) -> Vec<(String, std::path::PathBuf)
         cwd.join(".claude-code").join("skills"),
     ));
     roots
-}
-
-fn find_script_references(body: &str) -> Vec<String> {
-    let mut refs = Vec::new();
-    for token in body
-        .split(|ch: char| ch.is_whitespace() || matches!(ch, '`' | '\'' | '"' | ')' | '(' | ','))
-    {
-        let token = token.trim_matches(|ch: char| matches!(ch, ':' | ';' | '.'));
-        if !token.starts_with("scripts/") {
-            continue;
-        }
-        let relative = std::path::Path::new(token);
-        if relative.is_absolute()
-            || relative.components().any(|component| {
-                matches!(
-                    component,
-                    std::path::Component::ParentDir | std::path::Component::Prefix(_)
-                )
-            })
-        {
-            continue;
-        }
-        if !refs.iter().any(|existing| existing == token) {
-            refs.push(token.to_string());
-        }
-    }
-    refs
-}
-
-fn discover_skill_bundles(
-    source: &str,
-    root: &std::path::Path,
-) -> anyhow::Result<Vec<SkillBundleCandidate>> {
-    if !root.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut bundles = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let skill_file = dir.join("SKILL.md");
-        if skill_file.exists() {
-            let content = std::fs::read_to_string(&skill_file).unwrap_or_default();
-            if !content.trim().is_empty() {
-                let (manifest, body) = parse_skill_file(&content);
-                let name = if !manifest.name.is_empty() {
-                    manifest.name.clone()
-                } else {
-                    dir.file_name()
-                        .map(|name| name.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "unknown".into())
-                };
-                let missing_script_refs = find_script_references(&body)
-                    .into_iter()
-                    .filter(|reference| !dir.join(reference).exists())
-                    .collect();
-                bundles.push(SkillBundleCandidate {
-                    source: source.to_string(),
-                    name,
-                    path: dir,
-                    manifest,
-                    missing_script_refs,
-                });
-            }
-            continue;
-        }
-        let Ok(read_dir) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in read_dir.filter_map(|entry| entry.ok()) {
-            let path = entry.path();
-            if path.is_dir() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if !is_ignored_signal_dir(&name) {
-                    stack.push(path);
-                }
-            }
-        }
-    }
-    bundles.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(bundles)
-}
-
-fn doctor_candidate_conflicts(
-    candidate: &SkillBundleCandidate,
-    entries: &[SkillEntry],
-) -> Vec<String> {
-    let candidate_entry = SkillEntry {
-        name: candidate.name.clone(),
-        description: candidate.manifest.description.clone(),
-        id: candidate.manifest.id.clone(),
-        version: candidate.manifest.version.clone(),
-        tags: candidate.manifest.tags.clone(),
-        aliases: candidate.manifest.aliases.clone(),
-        triggers: candidate.manifest.triggers.clone(),
-        activation: candidate.manifest.activation.clone(),
-        profile: candidate.manifest.profile.clone(),
-        project_signals: candidate.manifest.project_signals.clone(),
-        posture: candidate.manifest.posture.clone(),
-        max_turns: candidate.manifest.max_turns,
-        installed: true,
-        bundled: false,
-        project_local: false,
-        source: candidate.source.clone(),
-        editable: false,
-        reloadable: true,
-        shadows: Vec::new(),
-        conflicts: Vec::new(),
-        path: candidate.path.display().to_string(),
-    };
-    entries
-        .iter()
-        .filter(|entry| skill_sources_conflict(&candidate_entry, entry))
-        .map(|entry| skill_ref(&entry.source, &entry.name))
-        .collect()
 }
 
 fn shell_quote_path(path: &std::path::Path) -> String {
@@ -505,64 +385,9 @@ fn copy_skill_bundle_dir(
     Ok(())
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct SkillBundleSummary {
-    scripts: Vec<String>,
-    resources: Vec<String>,
-    conflicts: Vec<String>,
-}
-
-fn relative_file_list(root: &std::path::Path, subdir: &str) -> Vec<String> {
-    let base = root.join(subdir);
-    if !base.is_dir() {
-        return Vec::new();
-    }
-    let mut stack = vec![base];
-    let mut files = Vec::new();
-    while let Some(dir) = stack.pop() {
-        let Ok(read_dir) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in read_dir.filter_map(|entry| entry.ok()) {
-            let path = entry.path();
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            if file_type.is_dir() {
-                stack.push(path);
-            } else if file_type.is_file()
-                && let Ok(relative) = path.strip_prefix(root)
-            {
-                files.push(relative.to_string_lossy().to_string());
-            }
-        }
-    }
-    files.sort();
-    files
-}
-
 fn summarize_imported_skill(root: &std::path::Path, entry_name: &str) -> SkillBundleSummary {
-    let candidate = std::fs::read_to_string(root.join("SKILL.md"))
-        .ok()
-        .map(|content| {
-            let (manifest, _body) = parse_skill_file(&content);
-            SkillBundleCandidate {
-                source: "import".into(),
-                name: entry_name.into(),
-                path: root.to_path_buf(),
-                manifest,
-                missing_script_refs: Vec::new(),
-            }
-        });
     let entries = list_structured().unwrap_or_default();
-    SkillBundleSummary {
-        scripts: relative_file_list(root, "scripts"),
-        resources: relative_file_list(root, "resources"),
-        conflicts: candidate
-            .as_ref()
-            .map(|candidate| doctor_candidate_conflicts(candidate, &entries))
-            .unwrap_or_default(),
-    }
+    omegon_skills::summarize_imported_skill(root, entry_name, &entries)
 }
 
 fn print_import_summary(summary: &SkillBundleSummary) {
