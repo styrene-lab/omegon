@@ -985,9 +985,6 @@ fn scan_conventions(cwd: &Path) -> Vec<DetectedConvention> {
 mod tests {
     use super::*;
 
-    static TEST_ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
-        std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
-
     struct EnvRestore {
         key: &'static str,
         value: Option<std::ffi::OsString>,
@@ -1044,7 +1041,7 @@ mod tests {
 
     #[test]
     fn migrate_claude_code_imports_project_skill_bundle() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::env::lock();
         let home = tempfile::tempdir().unwrap();
         let cwd = tempfile::tempdir().unwrap();
         let _home = EnvRestore::set("OMEGON_HOME", home.path());
@@ -1075,7 +1072,7 @@ mod tests {
 
     #[test]
     fn migrate_claude_code_skips_existing_skill_with_force_hint() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::env::lock();
         let home = tempfile::tempdir().unwrap();
         let cwd = tempfile::tempdir().unwrap();
         let _home = EnvRestore::set("OMEGON_HOME", home.path());

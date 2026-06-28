@@ -724,16 +724,23 @@ pub fn render_activity_panel(
 
     match (tools.as_slice(), operation) {
         ([tool], Some(operation)) => {
-            let tool_height = area.height.min(4);
+            let render_detail = should_render_activity_tool_detail(tool, area.height);
+            let tool_height = if render_detail { area.height.min(4) } else { 1 };
             let tool_area = Rect::new(area.x, area.y, area.width, tool_height);
-            if let Some(segment) = conversation.tool_segment_by_id(&tool.segment_id) {
-                crate::tui::segment_detail::render_tool_card(
-                    tool_area,
-                    frame.buffer_mut(),
-                    t,
-                    segment,
-                    activity_tool_mode(tool.mode),
-                );
+            if render_detail {
+                if let Some(segment) = conversation.tool_segment_by_id(&tool.segment_id) {
+                    crate::tui::segment_detail::render_tool_card(
+                        tool_area,
+                        frame.buffer_mut(),
+                        t,
+                        segment,
+                        activity_tool_mode(tool.mode),
+                    );
+                } else {
+                    render_activity_tool_rows(tool_area, frame, t, std::slice::from_ref(tool));
+                }
+            } else {
+                render_activity_tool_rows(tool_area, frame, t, std::slice::from_ref(tool));
             }
             if area.height > tool_height {
                 let op_area = Rect::new(
@@ -745,10 +752,7 @@ pub fn render_activity_panel(
                 render_operation_workbench_panel(op_area, frame, t, operation);
             }
         }
-        ([tool], None)
-            if tool.mode == crate::surfaces::activity::ActivityToolMode::Detail
-                || tool.status == crate::surfaces::activity::ActivityToolStatus::Running =>
-        {
+        ([tool], None) if should_render_activity_tool_detail(tool, area.height) => {
             if let Some(segment) = conversation.tool_segment_by_id(&tool.segment_id) {
                 crate::tui::segment_detail::render_tool_card(
                     area,
@@ -758,6 +762,9 @@ pub fn render_activity_panel(
                     activity_tool_mode(tool.mode),
                 );
             }
+        }
+        ([tool], None) => {
+            render_activity_tool_rows(area, frame, t, std::slice::from_ref(tool));
         }
         ([], Some(operation)) => render_operation_workbench_panel(area, frame, t, operation),
         ([], None) => {}
@@ -782,6 +789,21 @@ pub fn render_activity_panel(
             }
         }
     }
+}
+
+fn should_render_activity_tool_detail(
+    tool: &crate::surfaces::activity::ActivityToolProjection,
+    height: u16,
+) -> bool {
+    height >= 3
+        && match tool.mode {
+            crate::surfaces::activity::ActivityToolMode::Detail => true,
+            crate::surfaces::activity::ActivityToolMode::Live => matches!(
+                tool.status,
+                crate::surfaces::activity::ActivityToolStatus::Running
+                    | crate::surfaces::activity::ActivityToolStatus::Error
+            ),
+        }
 }
 
 fn render_activity_tool_rows(
@@ -1558,6 +1580,28 @@ mod tests {
             )),
             "{text}"
         );
+    }
+
+    #[test]
+    fn activity_tool_detail_requires_room_and_active_or_detail_status() {
+        let running = crate::surfaces::activity::ActivityToolProjection {
+            segment_id: "tool-1".to_string(),
+            mode: crate::surfaces::activity::ActivityToolMode::Live,
+            status: crate::surfaces::activity::ActivityToolStatus::Running,
+            name: "bash".to_string(),
+            args_summary: None,
+            result_summary: None,
+        };
+        let mut complete = running.clone();
+        complete.status = crate::surfaces::activity::ActivityToolStatus::Complete;
+        let mut error = running.clone();
+        error.status = crate::surfaces::activity::ActivityToolStatus::Error;
+        error.mode = crate::surfaces::activity::ActivityToolMode::Detail;
+
+        assert!(should_render_activity_tool_detail(&running, 3));
+        assert!(!should_render_activity_tool_detail(&running, 2));
+        assert!(!should_render_activity_tool_detail(&complete, 4));
+        assert!(should_render_activity_tool_detail(&error, 4));
     }
 
     #[test]
