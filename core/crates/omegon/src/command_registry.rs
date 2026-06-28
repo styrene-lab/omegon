@@ -373,7 +373,16 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::acp_state_changing(
         "skills",
         "manage bundled, user, project-local, and armory skills",
-        &["list", "install", "create", "get", "delete"],
+        &[
+            "list", "reload", "refresh", "install", "create", "import", "get", "delete",
+        ],
+    ),
+    BuiltinCommandSpec::state_changing(
+        "skill",
+        "alias for /skills",
+        &[
+            "list", "reload", "refresh", "install", "create", "import", "get", "delete",
+        ],
     ),
     BuiltinCommandSpec::acp_external_side_effect(
         "extension",

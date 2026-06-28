@@ -4032,9 +4032,10 @@ impl OmegonAcpAgent {
             "/skills" => {
                 let args = args.trim();
                 match args {
-                    "" | "list" => "Use the **skills/list** RPC to get structured skill data, or type `/skills list` to see a summary.\nAvailable: list, get <name>, create, delete <name>, install [name|skills/name]".into(),
-                    "install" => "Use the **skills/install** RPC to install bundled skills, or pass a skill name to install through Armory.".into(),
-                    _ => format!("Skills subcommand: {args}. Use the **skills/{args}** RPC for structured operations."),
+                    "" | "list" => "Use the **skills/list** RPC to get structured skill data, or type `/skills list` to see a summary.\nAvailable: list, reload, refresh, get <name>, create, import, delete <name>, install [name|skills/name]".into(),
+                    "reload" | "refresh" => "Reload user/project skills into the current TUI session with `/skills reload` (alias: `/skills refresh`). ACP sessions should start a new session until structured reload RPC support lands.".into(),
+                    "install" => "Use the **skills/install** RPC to install bundled skills, or pass a skill name to install through Armory. Run `/skills reload` afterward to activate user/project changes in the current TUI session.".into(),
+                    _ => format!("Skills subcommand: {args}. Available slash affordances: list, reload, refresh, install, create, import, get <name>, delete <name>."),
                 }
             }
             "/extension" | "/ext" => {
