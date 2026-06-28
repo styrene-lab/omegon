@@ -293,6 +293,112 @@ pub fn adapted_skill_warnings(body: &str) -> Vec<String> {
     warnings
 }
 
+/// A resolved skill entry with structured metadata for settings and command surfaces.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SkillEntry {
+    pub name: String,
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub tags: Vec<String>,
+    pub aliases: Vec<String>,
+    pub triggers: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub profile: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub project_signals: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub posture: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
+    pub installed: bool,
+    pub bundled: bool,
+    pub project_local: bool,
+    /// Provider source for the resolved entry: bundled, user, project, or extension.
+    pub source: String,
+    /// Whether the operator can edit this skill source directly.
+    pub editable: bool,
+    /// Whether an explicit skills reload can refresh this source without rebuilding Omegon.
+    pub reloadable: bool,
+    /// Same-name lower-precedence provider labels shadowed by this entry.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shadows: Vec<String>,
+    /// Non-overriding activation/trigger conflicts with other skills.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub conflicts: Vec<String>,
+    pub path: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingSkillEntry {
+    pub entry: SkillEntry,
+    pub provider_rank: u8,
+}
+
+pub fn skill_entry_provider_rank(source: &str) -> u8 {
+    match source {
+        "bundled" => 0,
+        source if source.starts_with("extension:") => 1,
+        "user" => 2,
+        "project" => 3,
+        _ => 1,
+    }
+}
+
+pub fn skill_ref(source: &str, name: &str) -> String {
+    format!("{source}/{name}")
+}
+
+fn normalized_skill_token(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn skill_token_overlap(left: &[String], right: &[String]) -> bool {
+    left.iter().any(|left| {
+        let left = normalized_skill_token(left);
+        !left.is_empty()
+            && right
+                .iter()
+                .any(|right| normalized_skill_token(right) == left)
+    })
+}
+
+pub fn skill_sources_conflict(a: &SkillEntry, b: &SkillEntry) -> bool {
+    if normalized_skill_token(&a.name) == normalized_skill_token(&b.name) {
+        return false;
+    }
+    let trigger_overlap = skill_token_overlap(&a.triggers, &b.triggers);
+    let alias_overlap = skill_token_overlap(&a.aliases, &b.aliases);
+    let activation_overlap = a.activation.is_some()
+        && a.activation == b.activation
+        && (!a.profile.is_empty() && a.profile.iter().any(|profile| b.profile.contains(profile))
+            || !a.project_signals.is_empty()
+                && a.project_signals
+                    .iter()
+                    .any(|signal| b.project_signals.contains(signal)));
+    trigger_overlap || alias_overlap || activation_overlap
+}
+
+pub fn finalize_skill_entries(pending: Vec<PendingSkillEntry>) -> Vec<SkillEntry> {
+    let mut entries: Vec<SkillEntry> = pending.into_iter().map(|pending| pending.entry).collect();
+    for index in 0..entries.len() {
+        let conflicts = entries
+            .iter()
+            .enumerate()
+            .filter(|(other_index, other)| {
+                *other_index != index && skill_sources_conflict(&entries[index], other)
+            })
+            .map(|(_, other)| skill_ref(&other.source, &other.name))
+            .collect();
+        entries[index].conflicts = conflicts;
+    }
+    entries
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkillSignalKind {
     Literal,
