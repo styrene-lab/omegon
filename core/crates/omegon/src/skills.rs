@@ -2082,9 +2082,6 @@ path = "{skill_path}"
         .unwrap();
     }
 
-    static TEST_ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
-        std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
-
     struct EnvRestore {
         key: &'static str,
         value: Option<std::ffi::OsString>,
@@ -2138,7 +2135,7 @@ path = "{skill_path}"
 
     #[test]
     fn doctor_report_mentions_claude_migration_fast_path() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::env::lock();
         let dir = tempfile::tempdir().unwrap();
         let _cwd = CwdRestore::enter(dir.path());
         let report = doctor_report().unwrap();
@@ -2147,7 +2144,7 @@ path = "{skill_path}"
 
     #[test]
     fn doctor_report_mentions_claude_roots() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::env::lock();
         let dir = tempfile::tempdir().unwrap();
         let _cwd = CwdRestore::enter(dir.path());
         let report = doctor_report().unwrap();
@@ -2230,7 +2227,7 @@ description: Example
 
     #[test]
     fn import_skill_bundle_preserves_scripts_and_refuses_overwrite() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::env::lock();
         let home = tempfile::tempdir().unwrap();
         let _home = EnvRestore::set("OMEGON_HOME", home.path());
         let source = tempfile::tempdir().unwrap();
@@ -2254,7 +2251,7 @@ description: Example
 
     #[test]
     fn import_direct_skill_file_does_not_copy_unrelated_sibling_files() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::env::lock();
         let home = tempfile::tempdir().unwrap();
         let _home = EnvRestore::set("OMEGON_HOME", home.path());
         let source = tempfile::tempdir().unwrap();
@@ -2275,7 +2272,7 @@ description: Example
 
     #[test]
     fn import_skill_file_into_project_uses_manifest_name() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::env::lock();
         let cwd = tempfile::tempdir().unwrap();
         let _cwd = CwdRestore::enter(cwd.path());
         let source = tempfile::tempdir().unwrap();
@@ -2359,7 +2356,7 @@ description: Example
 
     #[test]
     fn list_structured_includes_extension_skill_and_conflict_metadata() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::env::lock();
         let home = tempfile::tempdir().unwrap();
         let _home = EnvRestore::set("OMEGON_HOME", home.path());
         let extension_dir = home.path().join("extensions/recro");
@@ -2414,7 +2411,7 @@ description: Example
 
     #[test]
     fn list_structured_includes_project_override_shadow_metadata() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::env::lock();
         let dir = tempfile::tempdir().unwrap();
         let project_skill = dir.path().join(".omegon/skills/git");
         std::fs::create_dir_all(&project_skill).unwrap();
@@ -2447,7 +2444,7 @@ description: Project git override
 
     #[test]
     fn get_skill_details_uses_resolved_project_override_metadata() {
-        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::env::lock();
         let dir = tempfile::tempdir().unwrap();
         let project_skill = dir.path().join(".omegon/skills/git");
         std::fs::create_dir_all(&project_skill).unwrap();

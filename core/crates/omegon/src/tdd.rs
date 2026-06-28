@@ -700,19 +700,15 @@ mod tests {
     #[test]
     fn runner_classifies_pass_and_fail() {
         let cwd = std::env::current_dir().unwrap();
+        let python = std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_string());
         let pass = TddCommand::new(vec![
-            "python3".into(),
+            python.clone(),
             "-c".into(),
             "raise SystemExit(0)".into(),
         ])
         .unwrap();
         assert_eq!(run_command(&cwd, &pass).unwrap().state, TddState::Passing);
-        let fail = TddCommand::new(vec![
-            "python3".into(),
-            "-c".into(),
-            "raise SystemExit(7)".into(),
-        ])
-        .unwrap();
+        let fail = TddCommand::new(vec![python, "-c".into(), "raise SystemExit(7)".into()]).unwrap();
         assert_eq!(run_command(&cwd, &fail).unwrap().state, TddState::Failing);
     }
 

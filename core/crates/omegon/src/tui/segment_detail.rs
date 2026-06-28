@@ -141,7 +141,11 @@ pub fn render_tool_card(
                 args_summary: args_summary.as_deref(),
                 state,
                 title_prefix: mode.title_prefix(),
-                elapsed: started_at.map(|instant| instant.elapsed()),
+                elapsed: if *complete {
+                    None
+                } else {
+                    started_at.map(|instant| instant.elapsed())
+                },
                 content_form,
                 lines: &lines,
             },
