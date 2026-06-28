@@ -58,6 +58,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added prompt skill conflict resolution so overlapping activation/trigger skills inject only one provider by default and user-facing output recommends project-local merge resolution.
 
 ### Changed
+- OpenAI/Codex stream-stall exhaustion now uses longer, reasoning-aware budgets and operator wording that distinguishes ambiguous silent reasoning windows from definite wedged streams.
 - `/skills reload` now advances and reports the runtime generation, and `/skills refresh` is accepted as an alias so iterative skill authoring has the same operator vocabulary as substrate refresh flows.
 - Skill activation/resolution events now have a first-class conversation segment and ACP projection so startup and reload skill provenance can render as single-line TUI timeline affordances instead of generic system text.
 - The skill creator prompt now supports upstream-assisted authoring: named public skill sources are searched/fetched/reviewed first, adapted with provenance and safety notes, and only then written to external skill directories.
