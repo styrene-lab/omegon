@@ -126,60 +126,30 @@ impl Effects {
 
     // ── Editor ──────────────────────────────────────────────────────────
 
-    /// Thinking wave — WavePattern-modulated hue shift during agent thinking.
-    /// Spatial variation across the editor border creates a "processing wavefront"
-    /// rather than a flat uniform glow.
-    pub fn start_spinner_glow(&mut self) {
-        let glow = self.editor.unique(
-            EditorSlot::SpinnerGlow,
-            fx::never_complete(fx::ping_pong(fx::hsl_shift_fg(
-                [25.0, 0.0, 0.12],
-                EffectTimer::from_ms(2500, Interpolation::SineInOut),
-            ))),
-        );
-        self.editor.add_effect(glow);
-    }
+    /// Legacy editor breathing/glow effects are intentionally disabled.
+    ///
+    /// These used to apply broad post-render foreground HSL shifts across the entire
+    /// editor area. In lean mode that area includes the engine ribbon, so the effect
+    /// mutated Powerline separator colors after the ribbon renderer had assigned
+    /// explicit bridge styles. Keep the lifecycle methods as no-ops so event handling
+    /// remains simple while the visual boundary stays deterministic.
+    pub fn start_spinner_glow(&mut self) {}
 
-    /// Stop the spinner glow.
+    /// Stop the disabled spinner glow.
     pub fn stop_spinner_glow(&mut self) {
         self.editor.cancel_unique_effect(EditorSlot::SpinnerGlow);
     }
 
-    /// Subtle border pulse during active turns.
-    pub fn start_border_pulse(&mut self) {
-        let pulse = self.editor.unique(
-            EditorSlot::BorderPulse,
-            fx::never_complete(fx::ping_pong(fx::hsl_shift_fg(
-                [15.0, 0.0, 0.05],
-                EffectTimer::from_ms(3000, Interpolation::SineInOut),
-            ))),
-        );
-        self.editor.add_effect(pulse);
-    }
+    /// Disabled broad editor border pulse; see `start_spinner_glow`.
+    pub fn start_border_pulse(&mut self) {}
 
-    /// Stop the border pulse.
+    /// Stop the disabled border pulse.
     pub fn stop_border_pulse(&mut self) {
         self.editor.cancel_unique_effect(EditorSlot::BorderPulse);
     }
 
-    /// Turn-complete sweep — positive "your turn" confirmation.
-    /// A brief lightness sweep across the editor when agent finishes.
-    pub fn sweep_turn_complete(&mut self) {
-        let sweep = self.editor.unique(
-            EditorSlot::TurnComplete,
-            fx::sequence(&[
-                fx::hsl_shift_fg(
-                    [0.0, 0.0, 0.20],
-                    EffectTimer::from_ms(150, Interpolation::QuadOut),
-                ),
-                fx::hsl_shift_fg(
-                    [0.0, 0.0, -0.20],
-                    EffectTimer::from_ms(250, Interpolation::QuadIn),
-                ),
-            ]),
-        );
-        self.editor.add_effect(sweep);
-    }
+    /// Disabled broad turn-complete sweep; see `start_spinner_glow`.
+    pub fn sweep_turn_complete(&mut self) {}
 
     // ── Conversation ───────────────────────────────────────────────────
 
@@ -322,27 +292,29 @@ mod tests {
     }
 
     #[test]
-    fn spinner_glow_lifecycle() {
+    fn disabled_editor_breathing_does_not_activate_effects() {
         let mut fx = Effects::new();
         fx.start_spinner_glow();
-        assert!(fx.has_active());
-        fx.stop_spinner_glow();
+        fx.start_border_pulse();
+        fx.sweep_turn_complete();
+        assert!(!fx.editor.is_running());
+        assert!(!fx.has_active());
     }
 
     #[test]
     fn effects_are_zone_isolated() {
         let mut fx = Effects::new();
-        fx.start_spinner_glow();
+        fx.pulse_new_card();
         assert!(!fx.footer.is_running());
-        assert!(fx.editor.is_running());
-        assert!(!fx.conversation.is_running());
+        assert!(!fx.editor.is_running());
+        assert!(fx.conversation.is_running());
     }
 
     #[test]
-    fn turn_complete_sweep_activates() {
+    fn disabled_turn_complete_sweep_does_not_activate_editor() {
         let mut fx = Effects::new();
         fx.sweep_turn_complete();
-        assert!(fx.editor.is_running());
+        assert!(!fx.editor.is_running());
     }
 
     #[test]
