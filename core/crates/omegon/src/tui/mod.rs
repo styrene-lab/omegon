@@ -6580,19 +6580,40 @@ Scroll transcript:
                             .as_ref()
                             .map(|registry| registry.skill_count())
                             .unwrap_or(0);
-                        SlashResult::Display(format!(
-                            "## Runtime hot restart preview\n\nStatus: guarded preview only; substrate swap is not implemented yet.\nRuntime generation: {}\n\nWould preserve: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nWould rebuild: EventBus, tools, commands, extensions, widgets, skills, context providers, harness inventory.\nCurrent active skill directives: {active_skills}\nBus commands registered: {}\nExtension widgets mounted: {}\nExtension metadata entries: {}\nExtension RPC handles: {}\nWidget receivers: {}\nVoice notification receivers: {}\nVoice polling handles: {}\nVox polling handles: {}\nStartup skill activation events: {}\n\nNext implementation step: build a replacement RuntimeSubstrateInventory transactionally, then swap only after build succeeds.",
-                            self.runtime_generation,
-                            self.bus_commands.len(),
-                            self.runtime_inventory.extension_widgets,
-                            self.runtime_inventory.extension_metadata_entries,
-                            self.runtime_inventory.extension_rpc_handles,
-                            self.runtime_inventory.widget_receivers,
-                            self.runtime_inventory.voice_notification_receivers,
-                            self.runtime_inventory.voice_polling_handles,
-                            self.runtime_inventory.vox_polling_handles,
-                            self.runtime_inventory.skill_activation_events,
-                        ))
+                        match crate::setup::runtime_restart_dry_run(self.cwd()) {
+                            Ok(dry_run) => {
+                                let invalid = if dry_run.invalid_manifests.is_empty() {
+                                    "none".to_string()
+                                } else {
+                                    dry_run.invalid_manifests.join("; ")
+                                };
+                                SlashResult::Display(format!(
+                                    "## Runtime hot restart preview\n\nStatus: guarded dry-run only; substrate swap is not implemented yet.\nRuntime generation: {}\n\nWould preserve: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nWould rebuild: EventBus, tools, commands, extensions, widgets, skills, context providers, harness inventory.\nCurrent active skill directives: {active_skills}\nBus commands registered: {}\n\nLive substrate inventory:\n- Extension widgets mounted: {}\n- Extension metadata entries: {}\n- Extension RPC handles: {}\n- Widget receivers: {}\n- Voice notification receivers: {}\n- Voice polling handles: {}\n- Vox polling handles: {}\n- Startup skill activation events: {}\n\nDry-run rebuild inventory:\n- Extension candidates: {}\n- Skipped by policy: {}\n- Disabled extensions: {}\n- Invalid manifests: {invalid}\n- Candidate widgets: {}\n- Candidate metadata entries: {}\n- Candidate RPC handles: {}\n- Candidate widget receivers: {}\n- Candidate vox polling handles: {}\n- Reloadable skill entries: {}\n\nNext implementation step: build the replacement EventBus and side-channel handles transactionally, then swap only after build succeeds.",
+                                    self.runtime_generation,
+                                    self.bus_commands.len(),
+                                    self.runtime_inventory.extension_widgets,
+                                    self.runtime_inventory.extension_metadata_entries,
+                                    self.runtime_inventory.extension_rpc_handles,
+                                    self.runtime_inventory.widget_receivers,
+                                    self.runtime_inventory.voice_notification_receivers,
+                                    self.runtime_inventory.voice_polling_handles,
+                                    self.runtime_inventory.vox_polling_handles,
+                                    self.runtime_inventory.skill_activation_events,
+                                    dry_run.extension_candidates,
+                                    dry_run.skipped_by_policy,
+                                    dry_run.disabled_extensions,
+                                    dry_run.inventory.extension_widgets,
+                                    dry_run.inventory.extension_metadata_entries,
+                                    dry_run.inventory.extension_rpc_handles,
+                                    dry_run.inventory.widget_receivers,
+                                    dry_run.inventory.vox_polling_handles,
+                                    dry_run.inventory.skill_activation_events,
+                                ))
+                            }
+                            Err(err) => SlashResult::Display(format!(
+                                "Runtime hot restart dry-run failed before touching live runtime: {err}"
+                            )),
+                        }
                     }
                 } else {
                     SlashResult::Display("Usage: /runtime restart".into())

@@ -17,7 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
-- Added a guarded `/runtime restart` hot-restart preview surface with runtime generation status and startup substrate inventory so the extension/runtime reload design has an operator-visible command seam before substrate swapping lands.
+- Added a guarded `/runtime restart` hot-restart dry-run surface with runtime generation, live startup substrate inventory, and non-mutating extension/skill candidate inventory so the extension/runtime reload design has an operator-visible command seam before substrate swapping lands.
 - Added `/skills reload` as an in-TUI current-session affordance for reloading user and project skills after creation/import, and updated skill creation/import prompts plus the skills palette to point operators at reload/get inspection steps.
 - Added `docs/web-ui-backend-rbac-identity-requirements.md` to capture the Web UI backend identity, RBAC, trusted-proxy principal, stream-auth, contract, and validation requirements for future work.
 - Added `docs/web-ws-contract.md` as the authoritative contract for the legacy `/ws` WebSocket control surface, documenting auth, per-message role checks, inbound command payloads, slash-command remote-safety, server response envelopes, and security notes for Web UI compatibility clients.
