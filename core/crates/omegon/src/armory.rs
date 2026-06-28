@@ -719,6 +719,7 @@ fn ensure_skill_frontmatter(
         output_format: None,
         max_turns: None,
         posture: None,
+        provenance: None,
     };
     format!("{}\n\n{}", skill_manifest.to_frontmatter(), guidance)
 }

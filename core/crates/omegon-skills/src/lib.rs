@@ -1,5 +1,45 @@
 //! Skill manifest parsing and portable SKILL.md helpers.
 
+/// Structured provenance for upstream-imported or adapted skills.
+///
+/// This metadata is intentionally machine-readable so `skills doctor` can
+/// audit source identity and executable-asset trust posture before public skill
+/// packs are imported into an Omegon project.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct SkillProvenance {
+    /// Canonical upstream repository or catalog URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    /// Upstream git ref, tag, release, or catalog snapshot identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_ref: Option<String>,
+    /// Path within the upstream source, e.g. `skills/webapp-testing/SKILL.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    /// Retrieval date or timestamp as an operator-facing string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retrieved_at: Option<String>,
+    /// How this local skill relates to upstream material.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptation: Option<SkillAdaptationMode>,
+    /// Upstream assets deliberately omitted from this local skill.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub omitted_assets: Vec<String>,
+    /// Upstream executable assets explicitly trusted and imported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_assets: Vec<String>,
+}
+
+/// Machine-readable adaptation posture for an upstream-derived skill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillAdaptationMode {
+    ExactImport,
+    TrustedExecutableImport,
+    PromptOnlyAdaptation,
+    CleanRoomAdaptation,
+}
+
 /// Parsed skill manifest — the structured metadata from SKILL.md frontmatter.
 ///
 /// `name` and `description` are required for a useful skill, but parse-time
@@ -53,6 +93,9 @@ pub struct SkillManifest {
     /// Recommended posture (e.g., "architect", "fabricator").
     #[serde(default)]
     pub posture: Option<String>,
+    /// Structured source/adaptation metadata for upstream-derived skills.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<SkillProvenance>,
 }
 
 impl SkillManifest {
@@ -261,6 +304,91 @@ fn mentions_executable_tooling(body: &str) -> bool {
 }
 
 pub fn adapted_skill_warnings(body: &str) -> Vec<String> {
+    adapted_skill_manifest_warnings(&SkillManifest::default(), body)
+}
+
+pub fn adapted_skill_manifest_warnings(manifest: &SkillManifest, body: &str) -> Vec<String> {
+    if let Some(provenance) = manifest.provenance.as_ref() {
+        return structured_provenance_warnings(provenance, body);
+    }
+    markdown_adapted_skill_warnings(body)
+}
+
+fn structured_provenance_warnings(provenance: &SkillProvenance, body: &str) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if provenance
+        .source_url
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        warnings.push("structured provenance missing `source_url`".into());
+    }
+    if provenance
+        .source_path
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        warnings.push("structured provenance missing `source_path`".into());
+    }
+    let executable = mentions_executable_tooling(body);
+    match provenance.adaptation {
+        Some(SkillAdaptationMode::CleanRoomAdaptation) => {
+            if executable && provenance.omitted_assets.is_empty() {
+                warnings.push(
+                    "clean-room provenance mentions executable/tooling assets but declares no `omitted_assets`"
+                        .into(),
+                );
+            }
+            if !provenance.trusted_assets.is_empty() {
+                warnings.push(
+                    "clean-room provenance should not declare `trusted_assets`; use trusted_executable_import if executable assets are imported"
+                        .into(),
+                );
+            }
+        }
+        Some(SkillAdaptationMode::TrustedExecutableImport) => {
+            if executable && provenance.trusted_assets.is_empty() {
+                warnings.push(
+                    "trusted executable provenance mentions executable/tooling assets but declares no `trusted_assets`"
+                        .into(),
+                );
+            }
+        }
+        Some(SkillAdaptationMode::PromptOnlyAdaptation) => {
+            if executable && provenance.omitted_assets.is_empty() {
+                warnings.push(
+                    "prompt-only provenance mentions executable/tooling assets but declares no `omitted_assets`"
+                        .into(),
+                );
+            }
+            if !provenance.trusted_assets.is_empty() {
+                warnings.push(
+                    "prompt-only provenance should not declare `trusted_assets`; use trusted_executable_import if executable assets are imported"
+                        .into(),
+                );
+            }
+        }
+        Some(SkillAdaptationMode::ExactImport) => {
+            if executable
+                && provenance.trusted_assets.is_empty()
+                && provenance.omitted_assets.is_empty()
+            {
+                warnings.push(
+                    "exact-import provenance mentions executable/tooling assets but declares neither `trusted_assets` nor `omitted_assets`"
+                        .into(),
+                );
+            }
+        }
+        None => warnings.push("structured provenance missing `adaptation`".into()),
+    }
+    warnings
+}
+
+fn markdown_adapted_skill_warnings(body: &str) -> Vec<String> {
     let kind = classify_skill_adaptation(body);
     let mut warnings = Vec::new();
     if kind == SkillAdaptationKind::NotAdapted && !mentions_executable_tooling(body) {
@@ -1217,6 +1345,82 @@ mod tests {
                 "{signal} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn structured_provenance_round_trips_and_drives_warnings() {
+        let content = r#"---
+name: webapp-testing
+description: Adapted web application testing guidance
+provenance:
+  source_url: https://github.com/anthropics/skills
+  source_ref: main
+  source_path: skills/webapp-testing/SKILL.md
+  retrieved_at: 2026-06-28
+  adaptation: clean_room_adaptation
+  omitted_assets:
+    - scripts/with_server.py
+  trusted_assets: []
+---
+
+# Webapp Testing
+
+Clean-room adaptation. Upstream used npm and package.json tooling, but local skill omits it.
+"#;
+        let (manifest, body) = parse_skill_file(content);
+        let provenance = manifest.provenance.as_ref().expect("provenance parsed");
+        assert_eq!(
+            provenance.source_url.as_deref(),
+            Some("https://github.com/anthropics/skills")
+        );
+        assert_eq!(
+            provenance.source_path.as_deref(),
+            Some("skills/webapp-testing/SKILL.md")
+        );
+        assert_eq!(
+            provenance.adaptation,
+            Some(SkillAdaptationMode::CleanRoomAdaptation)
+        );
+        assert_eq!(provenance.omitted_assets, vec!["scripts/with_server.py"]);
+        assert!(adapted_skill_manifest_warnings(&manifest, &body).is_empty());
+
+        let rendered = manifest.to_frontmatter();
+        assert!(rendered.contains("provenance:"), "{rendered}");
+        assert!(
+            rendered.contains("adaptation: clean_room_adaptation"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("scripts/with_server.py"), "{rendered}");
+
+        let missing = SkillManifest {
+            name: "bad-adaptation".into(),
+            description: "Missing structured provenance fields".into(),
+            provenance: Some(SkillProvenance {
+                adaptation: Some(SkillAdaptationMode::PromptOnlyAdaptation),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let warnings =
+            adapted_skill_manifest_warnings(&missing, "Run npm install from package.json");
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("source_url")),
+            "{warnings:?}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("source_path")),
+            "{warnings:?}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("omitted_assets")),
+            "{warnings:?}"
+        );
     }
 
     #[test]

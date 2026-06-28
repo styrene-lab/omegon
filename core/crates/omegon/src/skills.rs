@@ -55,7 +55,7 @@ pub use omegon_skills::{
 };
 
 use omegon_skills::{
-    PendingSkillEntry, SkillBundleSummary, adapted_skill_warnings, discover_skill_bundles,
+    PendingSkillEntry, SkillBundleSummary, adapted_skill_manifest_warnings, discover_skill_bundles,
     doctor_candidate_conflicts, finalize_skill_entries, parse_skill_file,
     skill_entry_provider_rank,
 };
@@ -293,8 +293,8 @@ pub fn doctor_report() -> anyhow::Result<String> {
             }
             let skill_file = bundle.path.join("SKILL.md");
             if let Ok(content) = std::fs::read_to_string(&skill_file) {
-                let (_manifest, body) = parse_skill_file(&content);
-                for warning in adapted_skill_warnings(&body) {
+                let (manifest, body) = parse_skill_file(&content);
+                for warning in adapted_skill_manifest_warnings(&manifest, &body) {
                     metadata.push(format!("adaptation-warning:{warning}"));
                 }
             }
