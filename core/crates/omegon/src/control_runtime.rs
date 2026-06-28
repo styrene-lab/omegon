@@ -3896,7 +3896,10 @@ pub async fn extension_enable_response(name: &str) -> SlashCommandResponse {
     match crate::extension_cli::enable(name.trim()) {
         Ok(()) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("Enabled extension {}. Run `/extension refresh` to inspect the current-session refresh candidate.", name.trim())),
+            output: Some(format!(
+                "Enabled extension {}. Run `/extension refresh` to inspect the current-session refresh candidate.",
+                name.trim()
+            )),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
@@ -3909,7 +3912,10 @@ pub async fn extension_disable_response(name: &str) -> SlashCommandResponse {
     match crate::extension_cli::disable(name.trim()) {
         Ok(()) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("Disabled extension {}. Run `/extension refresh` to inspect the current-session refresh candidate.", name.trim())),
+            output: Some(format!(
+                "Disabled extension {}. Run `/extension refresh` to inspect the current-session refresh candidate.",
+                name.trim()
+            )),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
