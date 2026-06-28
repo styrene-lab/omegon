@@ -577,6 +577,138 @@ pub fn finalize_skill_entries(pending: Vec<PendingSkillEntry>) -> Vec<SkillEntry
     entries
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillSource {
+    Bundled,
+    UserInstalled,
+    ProjectLocal,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParsedSkill {
+    pub name: String,
+    pub manifest: SkillManifest,
+    pub source: SkillSource,
+    pub path: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SkillSuggestion {
+    pub name: String,
+    pub source: SkillSource,
+    pub activation: Option<SkillActivation>,
+    pub profiles: Vec<SkillProfile>,
+    pub signal_matches: Vec<SkillSignalMatch>,
+    pub warnings: Vec<String>,
+}
+
+pub struct SkillSuggestionContext<'a> {
+    pub root: &'a std::path::Path,
+    pub profiles: &'a [SkillProfile],
+    pub intent_terms: &'a [&'a str],
+}
+
+pub fn suggest_skills_for_context(
+    skills: &[ParsedSkill],
+    ctx: SkillSuggestionContext<'_>,
+) -> Vec<SkillSuggestion> {
+    skills
+        .iter()
+        .filter_map(|skill| suggest_one_skill(skill, &ctx))
+        .collect()
+}
+
+fn suggest_one_skill(
+    skill: &ParsedSkill,
+    ctx: &SkillSuggestionContext<'_>,
+) -> Option<SkillSuggestion> {
+    let diagnostics = validate_activation_metadata(&skill.manifest);
+    let intent_matches = skill_intent_matches(skill, ctx.intent_terms);
+    let profile_matches = diagnostics
+        .profiles
+        .iter()
+        .any(|profile| ctx.profiles.contains(profile));
+    let (signal_matches, signal_warnings) =
+        collect_skill_signal_matches(ctx.root, &skill.manifest.project_signals);
+    let signal_matched = !signal_matches.is_empty();
+    let lifecycle_requested = ctx.profiles.contains(&SkillProfile::Lifecycle)
+        || ctx.intent_terms.iter().any(|term| {
+            term.eq_ignore_ascii_case("lifecycle") || term.eq_ignore_ascii_case("openspec")
+        });
+
+    let mut warnings = diagnostics.warnings.clone();
+    warnings.extend(signal_warnings);
+    let suggested = match diagnostics.activation {
+        Some(SkillActivation::Always) => profile_matches,
+        Some(SkillActivation::IntentDetected) => intent_matches,
+        Some(SkillActivation::ProjectDetected) => profile_matches && signal_matched,
+        Some(SkillActivation::DomainDetected) => {
+            (profile_matches || intent_matches) && signal_matched
+        }
+        Some(SkillActivation::LifecycleGated) => lifecycle_requested && signal_matched,
+        None => {
+            if skill.manifest.activation.is_none() {
+                if intent_matches {
+                    warnings.push("activation metadata unspecified".into());
+                    true
+                } else {
+                    false
+                }
+            } else {
+                intent_matches
+            }
+        }
+    };
+
+    suggested.then(|| SkillSuggestion {
+        name: skill.name.clone(),
+        source: skill.source,
+        activation: diagnostics.activation,
+        profiles: diagnostics.profiles,
+        signal_matches,
+        warnings,
+    })
+}
+
+fn collect_skill_signal_matches(
+    root: &std::path::Path,
+    signals: &[String],
+) -> (Vec<SkillSignalMatch>, Vec<String>) {
+    let mut matches = Vec::new();
+    let mut warnings = Vec::new();
+    for signal in signals {
+        match match_project_signal(root, signal) {
+            Ok(Some(signal_match)) => matches.push(signal_match),
+            Ok(None) => {}
+            Err(err) => warnings.push(format!("invalid project_signal '{signal}': {err}")),
+        }
+    }
+    (matches, warnings)
+}
+
+fn skill_intent_matches(skill: &ParsedSkill, intent_terms: &[&str]) -> bool {
+    intent_terms.iter().any(|term| {
+        let term = term.trim();
+        !term.is_empty()
+            && (skill.name.eq_ignore_ascii_case(term)
+                || skill
+                    .manifest
+                    .tags
+                    .iter()
+                    .any(|value| value.eq_ignore_ascii_case(term))
+                || skill
+                    .manifest
+                    .aliases
+                    .iter()
+                    .any(|value| value.eq_ignore_ascii_case(term))
+                || skill.manifest.triggers.iter().any(|value| {
+                    value
+                        .to_ascii_lowercase()
+                        .contains(&term.to_ascii_lowercase())
+                }))
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct SkillBundleCandidate {
     pub source: String,
@@ -1271,5 +1403,227 @@ Body";
         assert_eq!(info.final_phase_number, "2");
         assert_eq!(info.final_phase_label, "Step 2: Finish");
         assert!(extract_phase_info("## Overview\nNo phases").is_none());
+    }
+    fn parsed_skill(
+        name: &str,
+        activation: Option<&str>,
+        profile: &[&str],
+        project_signals: &[&str],
+        aliases: &[&str],
+        triggers: &[&str],
+        source: SkillSource,
+    ) -> ParsedSkill {
+        ParsedSkill {
+            name: name.into(),
+            manifest: SkillManifest {
+                name: name.into(),
+                description: format!("{name} skill"),
+                activation: activation.map(str::to_string),
+                profile: profile.iter().map(|value| value.to_string()).collect(),
+                project_signals: project_signals
+                    .iter()
+                    .map(|value| value.to_string())
+                    .collect(),
+                aliases: aliases.iter().map(|value| value.to_string()).collect(),
+                triggers: triggers.iter().map(|value| value.to_string()).collect(),
+                ..Default::default()
+            },
+            source,
+            path: None,
+        }
+    }
+
+    #[test]
+    fn skill_suggestions_are_source_agnostic_for_coding_projects() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("Cargo.toml"), "[package]\n").unwrap();
+        let skills = vec![
+            parsed_skill(
+                "rust",
+                Some("project_detected"),
+                &["coding"],
+                &["Cargo.toml"],
+                &[],
+                &[],
+                SkillSource::Bundled,
+            ),
+            parsed_skill(
+                "git",
+                Some("always"),
+                &["coding"],
+                &[],
+                &[],
+                &[],
+                SkillSource::Bundled,
+            ),
+            parsed_skill(
+                "security",
+                Some("always"),
+                &["coding"],
+                &[],
+                &[],
+                &[],
+                SkillSource::Bundled,
+            ),
+        ];
+
+        let suggestions = suggest_skills_for_context(
+            &skills,
+            SkillSuggestionContext {
+                root,
+                profiles: &[SkillProfile::Coding],
+                intent_terms: &[],
+            },
+        );
+        let names: Vec<&str> = suggestions
+            .iter()
+            .map(|suggestion| suggestion.name.as_str())
+            .collect();
+        assert!(names.contains(&"rust"), "suggestions: {names:?}");
+        assert!(names.contains(&"git"), "suggestions: {names:?}");
+        assert!(names.contains(&"security"), "suggestions: {names:?}");
+    }
+
+    #[test]
+    fn skill_suggestions_gate_domain_and_lifecycle_skills() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("README.md"), "# docs\n").unwrap();
+        std::fs::create_dir_all(root.join("openspec/changes/demo")).unwrap();
+        let skills = vec![
+            parsed_skill(
+                "flynt",
+                Some("domain_detected"),
+                &["docs"],
+                &["README.md"],
+                &[],
+                &[],
+                SkillSource::Bundled,
+            ),
+            parsed_skill(
+                "openspec",
+                Some("lifecycle_gated"),
+                &["lifecycle"],
+                &["openspec/changes"],
+                &[],
+                &[],
+                SkillSource::Bundled,
+            ),
+        ];
+
+        let coding = suggest_skills_for_context(
+            &skills,
+            SkillSuggestionContext {
+                root,
+                profiles: &[SkillProfile::Coding],
+                intent_terms: &[],
+            },
+        );
+        assert!(coding.is_empty(), "coding suggestions: {coding:?}");
+
+        let docs = suggest_skills_for_context(
+            &skills,
+            SkillSuggestionContext {
+                root,
+                profiles: &[SkillProfile::Docs],
+                intent_terms: &[],
+            },
+        );
+        assert!(docs.iter().any(|suggestion| suggestion.name == "flynt"));
+        assert!(!docs.iter().any(|suggestion| suggestion.name == "openspec"));
+
+        let lifecycle = suggest_skills_for_context(
+            &skills,
+            SkillSuggestionContext {
+                root,
+                profiles: &[SkillProfile::Lifecycle],
+                intent_terms: &[],
+            },
+        );
+        assert!(
+            lifecycle
+                .iter()
+                .any(|suggestion| suggestion.name == "openspec")
+        );
+    }
+
+    #[test]
+    fn skill_suggestions_use_intent_and_preserve_external_warnings() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let legacy = parsed_skill(
+            "legacy-batch",
+            None,
+            &[],
+            &[],
+            &["batch"],
+            &[],
+            SkillSource::UserInstalled,
+        );
+        let unknown = parsed_skill(
+            "odd",
+            Some("projectish"),
+            &["codign"],
+            &["../bad"],
+            &["odd"],
+            &[],
+            SkillSource::ProjectLocal,
+        );
+        let code_act = parsed_skill(
+            "code-act",
+            Some("intent_detected"),
+            &["coding"],
+            &[],
+            &["script"],
+            &["write a script"],
+            SkillSource::Bundled,
+        );
+        let skills = vec![legacy, unknown, code_act];
+
+        let suggestions = suggest_skills_for_context(
+            &skills,
+            SkillSuggestionContext {
+                root,
+                profiles: &[SkillProfile::Coding],
+                intent_terms: &["batch", "odd", "script"],
+            },
+        );
+        let legacy = suggestions
+            .iter()
+            .find(|suggestion| suggestion.name == "legacy-batch")
+            .expect("legacy skill should be suggested by explicit intent");
+        assert_eq!(legacy.source, SkillSource::UserInstalled);
+        assert!(
+            legacy
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("unspecified"))
+        );
+        assert!(
+            suggestions
+                .iter()
+                .any(|suggestion| suggestion.name == "code-act")
+        );
+        let odd = suggestions
+            .iter()
+            .find(|suggestion| suggestion.name == "odd")
+            .expect("unknown metadata skill should remain visible by explicit intent");
+        assert_eq!(odd.source, SkillSource::ProjectLocal);
+        assert!(
+            odd.warnings
+                .iter()
+                .any(|warning| warning.contains("unknown activation"))
+        );
+        assert!(
+            odd.warnings
+                .iter()
+                .any(|warning| warning.contains("unknown profile"))
+        );
+        assert!(
+            odd.warnings
+                .iter()
+                .any(|warning| warning.contains("invalid project_signal"))
+        );
     }
 }
