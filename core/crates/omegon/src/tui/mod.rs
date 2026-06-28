@@ -12358,14 +12358,24 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn commands_array_skills_includes_delete() {
+    fn commands_array_skills_includes_reload_affordances() {
         let skills = crate::command_registry::BUILTIN_COMMANDS
             .iter()
             .find(|command| command.name == "skills")
             .expect("/skills must be in COMMANDS");
-        assert!(skills.subcommands.contains(&"create"));
-        assert!(skills.subcommands.contains(&"delete"));
-        assert!(skills.subcommands.contains(&"get"));
+        for expected in ["create", "delete", "get", "import", "reload", "refresh"] {
+            assert!(
+                skills.subcommands.contains(&expected),
+                "missing /skills {expected}"
+            );
+        }
+
+        let skill_alias = crate::command_registry::BUILTIN_COMMANDS
+            .iter()
+            .find(|command| command.name == "skill")
+            .expect("/skill alias must be in COMMANDS");
+        assert!(skill_alias.subcommands.contains(&"reload"));
+        assert!(skill_alias.subcommands.contains(&"refresh"));
     }
 
     #[test]
