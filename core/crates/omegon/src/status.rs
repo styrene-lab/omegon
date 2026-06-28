@@ -603,6 +603,49 @@ impl HarnessStatus {
         self.authorization = authorization.into();
     }
 
+    /// Update routing/profile state from the active runtime settings.
+    pub fn update_from_settings(&mut self, settings: &crate::settings::Settings) {
+        let operating_profile = settings.operating_profile();
+        let operating_profile_label = operating_profile.summary();
+        let principal_id = operating_profile
+            .identity
+            .principal_id
+            .as_deref()
+            .unwrap_or("anonymous");
+        let identity_issuer = operating_profile
+            .identity
+            .issuer
+            .as_deref()
+            .unwrap_or("unknown");
+        let session_kind = operating_profile
+            .identity
+            .session_kind
+            .as_deref()
+            .unwrap_or("unknown");
+        let authorization = operating_profile.authorization.summary();
+        let grade_band = crate::routing::infer_model_grade_band(&settings.model);
+        let grade_label = match grade_band {
+            crate::routing::CapabilityGradeBand::Max => "S",
+            crate::routing::CapabilityGradeBand::Frontier => "A",
+            crate::routing::CapabilityGradeBand::Mid => "C",
+            crate::routing::CapabilityGradeBand::Leaf => "F",
+        };
+
+        self.update_routing(
+            settings.effective_requested_class().label(),
+            settings.thinking.as_str(),
+            grade_label,
+            operating_profile.posture.effective.display_name(),
+            &operating_profile_label,
+            principal_id,
+            identity_issuer,
+            session_kind,
+            &authorization,
+        );
+        self.dispatcher.active_profile = Some(grade_band.to_string());
+        self.dispatcher.active_model = Some(settings.model.clone());
+    }
+
     /// Update deployment/autonomy posture exported to IPC/Web/Auspex surfaces.
     pub fn update_runtime_posture(
         &mut self,
