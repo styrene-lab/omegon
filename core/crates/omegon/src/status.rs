@@ -54,6 +54,8 @@ pub struct HarnessStatus {
     pub runtime_profile: omegon_traits::OmegonRuntimeProfile,
     pub autonomy_mode: omegon_traits::OmegonAutonomyMode,
     pub dispatcher: DispatcherStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bootstrap_expectations: Vec<BootstrapExpectation>,
 
     // ── Memory ───────────────────────────────────────────────
     pub memory: MemoryStatus,
@@ -100,6 +102,29 @@ pub struct VoiceTtsStatus {
     pub backend: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BootstrapExpectationStatus {
+    Met,
+    Missing,
+    Skipped,
+    Degraded,
+}
+
+impl BootstrapExpectationStatus {
+    pub fn is_operator_relevant(self) -> bool {
+        !matches!(self, Self::Met)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BootstrapExpectation {
+    pub source: String,
+    pub subject: String,
+    pub status: BootstrapExpectationStatus,
+    pub message: String,
 }
 
 /// Summary of an active delegate process.
@@ -646,6 +671,69 @@ impl HarnessStatus {
         self.dispatcher.active_model = Some(settings.model.clone());
     }
 
+    /// Compute first-pass bootstrap expectation deltas from the active route/profile.
+    pub fn update_bootstrap_expectations(&mut self) {
+        let mut expectations = Vec::new();
+        let profile = self.dispatcher.active_profile.as_deref().unwrap_or("");
+
+        if matches!(profile, "frontier" | "max") {
+            expectations.push(BootstrapExpectation {
+                source: "profile".into(),
+                subject: "cleave orchestration".into(),
+                status: if self.cleave_available {
+                    BootstrapExpectationStatus::Met
+                } else {
+                    BootstrapExpectationStatus::Missing
+                },
+                message: if self.cleave_available {
+                    "profile expects cleave orchestration; cleave tools available".into()
+                } else {
+                    "profile expects cleave orchestration; cleave tools unavailable".into()
+                },
+            });
+        }
+
+        if matches!(profile, "leaf" | "mid") {
+            let has_local_inference = self
+                .inference_backends
+                .iter()
+                .any(|backend| backend.available);
+            expectations.push(BootstrapExpectation {
+                source: "profile".into(),
+                subject: "local inference fallback".into(),
+                status: if has_local_inference {
+                    BootstrapExpectationStatus::Met
+                } else {
+                    BootstrapExpectationStatus::Missing
+                },
+                message: if has_local_inference {
+                    "profile expects local inference fallback; local backend available".into()
+                } else {
+                    "profile expects local inference fallback; no local backend available".into()
+                },
+            });
+        }
+
+        if self.memory.total_facts > 0 {
+            expectations.push(BootstrapExpectation {
+                source: "profile".into(),
+                subject: "memory orientation".into(),
+                status: if self.memory_available {
+                    BootstrapExpectationStatus::Met
+                } else {
+                    BootstrapExpectationStatus::Missing
+                },
+                message: if self.memory_available {
+                    "profile expects memory orientation; memory backend available".into()
+                } else {
+                    "profile expects memory orientation; memory backend unavailable".into()
+                },
+            });
+        }
+
+        self.bootstrap_expectations = expectations;
+    }
+
     /// Update deployment/autonomy posture exported to IPC/Web/Auspex surfaces.
     pub fn update_runtime_posture(
         &mut self,
@@ -889,6 +977,7 @@ impl Default for HarnessStatus {
                 failure_code: None,
                 note: None,
             },
+            bootstrap_expectations: vec![],
             memory: MemoryStatus {
                 total_facts: 0,
                 active_facts: 0,

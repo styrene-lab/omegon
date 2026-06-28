@@ -127,8 +127,12 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
     out.push_str(&format!("  {dim}Git:{reset} {repo_state}  {dim}Route:{reset} {cyan}{route}{reset}  {dim}Profile:{reset} {cyan}{profile}{reset}  {dim}Context:{reset} {cyan}{}{reset}  {dim}Thinking:{reset} {cyan}{}{reset}\n",
         status.context_class, status.thinking_level));
 
-    for check in profile_expectation_deltas(status) {
-        out.push_str(&format!("  {yellow}⚠{reset} {check}\n"));
+    for expectation in status
+        .bootstrap_expectations
+        .iter()
+        .filter(|expectation| expectation.status.is_operator_relevant())
+    {
+        out.push_str(&format!("  {yellow}⚠{reset} {}\n", expectation.message));
     }
 
     // Memory — single line
@@ -154,27 +158,6 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
     out.push('\n');
 
     out
-}
-
-fn profile_expectation_deltas(status: &HarnessStatus) -> Vec<String> {
-    let profile = status.dispatcher.active_profile.as_deref().unwrap_or("");
-    let mut checks = Vec::new();
-
-    if matches!(profile, "frontier" | "max") && !status.cleave_available {
-        checks.push("profile expects cleave orchestration; cleave tools unavailable".to_string());
-    }
-
-    let needs_local_inference = matches!(profile, "leaf" | "mid");
-    let has_local_inference = status.inference_backends.iter().any(|backend| backend.available);
-    if needs_local_inference && !has_local_inference {
-        checks.push("profile expects local inference fallback; no local backend available".to_string());
-    }
-
-    if status.memory.total_facts > 0 && !status.memory_available {
-        checks.push("profile expects memory orientation; memory backend unavailable".to_string());
-    }
-
-    checks
 }
 
 #[cfg(test)]
@@ -362,6 +345,7 @@ mod tests {
         let mut status = HarnessStatus::default();
         status.dispatcher.active_profile = Some("frontier".into());
         status.cleave_available = false;
+        status.update_bootstrap_expectations();
 
         let output = render_bootstrap(&status, false);
         assert!(

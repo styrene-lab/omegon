@@ -986,6 +986,7 @@ impl AgentSetup {
                 harness_status.memory_warning = Some(warning.clone());
             }
         }
+        harness_status.update_bootstrap_expectations();
 
         tracing::info!(
             providers = harness_status.providers.len(),
