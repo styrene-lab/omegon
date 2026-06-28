@@ -395,28 +395,33 @@ mod tests {
         let mut state = test_state();
         state.web_role = styrene_rbac::Role::Monitor;
 
-        assert!(require_surface_stream_operation(
-            &super::super::rbac::WebPrincipal::from_state(&state),
-            Some("default")
-        )
-        .is_ok());
-        assert!(require_surface_stream_operation(
-            &super::super::rbac::WebPrincipal::from_state(&state),
-            None
-        )
-        .is_ok());
+        assert!(
+            require_surface_stream_operation(
+                &super::super::rbac::WebPrincipal::from_state(&state),
+                Some("default")
+            )
+            .is_ok()
+        );
+        assert!(
+            require_surface_stream_operation(
+                &super::super::rbac::WebPrincipal::from_state(&state),
+                None
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn surface_stream_principal_headers_accept_trusted_proxy() {
         let state = test_state();
-        let principal = super::super::rbac::principal_from_headers(
-            &state,
-            &trusted_proxy_headers("monitor"),
-        )
-        .expect("trusted proxy principal");
+        let principal =
+            super::super::rbac::principal_from_headers(&state, &trusted_proxy_headers("monitor"))
+                .expect("trusted proxy principal");
 
-        assert_eq!(principal.issuer, super::super::rbac::WebPrincipalIssuer::TrustedProxy);
+        assert_eq!(
+            principal.issuer,
+            super::super::rbac::WebPrincipalIssuer::TrustedProxy
+        );
         assert_eq!(principal.role, styrene_rbac::Role::Monitor);
         assert!(require_surface_stream_operation(&principal, Some("default")).is_ok());
     }

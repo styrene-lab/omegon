@@ -708,7 +708,8 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(run_command(&cwd, &pass).unwrap().state, TddState::Passing);
-        let fail = TddCommand::new(vec![python, "-c".into(), "raise SystemExit(7)".into()]).unwrap();
+        let fail =
+            TddCommand::new(vec![python, "-c".into(), "raise SystemExit(7)".into()]).unwrap();
         assert_eq!(run_command(&cwd, &fail).unwrap().state, TddState::Failing);
     }
 

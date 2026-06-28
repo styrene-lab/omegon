@@ -100,7 +100,6 @@ pub struct AgentSetup {
     pub voice_polling_handles: Vec<crate::extensions::ExtensionPollingHandle>,
 }
 
-
 /// Runtime-substrate inventory captured at startup or before a future substrate refresh.
 ///
 /// This is intentionally small and copyable: it lets operator-facing surfaces
@@ -135,7 +134,6 @@ impl RuntimeSubstrateInventory {
     }
 }
 
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeSubstrateRefreshCandidate {
     pub inventory: RuntimeSubstrateInventory,
@@ -151,7 +149,9 @@ pub struct RuntimeSubstrateRefreshCandidate {
 /// features. It verifies the filesystem/profile side of extension discovery so
 /// `/runtime restart` can report whether a candidate refresh is plausible
 /// before the later promotion implementation exists.
-pub fn runtime_substrate_refresh_candidate(cwd: &Path) -> anyhow::Result<RuntimeSubstrateRefreshCandidate> {
+pub fn runtime_substrate_refresh_candidate(
+    cwd: &Path,
+) -> anyhow::Result<RuntimeSubstrateRefreshCandidate> {
     let cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let mut dry_run = RuntimeSubstrateRefreshCandidate::default();
     dry_run.inventory.skill_activation_events = crate::skills::list_structured()
@@ -205,9 +205,7 @@ pub fn runtime_substrate_refresh_candidate(cwd: &Path) -> anyhow::Result<Runtime
                     dry_run.inventory.voice_polling_handles += 1;
                 }
             }
-            Err(err) => dry_run
-                .invalid_manifests
-                .push(format!("{ext_name}: {err}")),
+            Err(err) => dry_run.invalid_manifests.push(format!("{ext_name}: {err}")),
         }
     }
 
@@ -1088,17 +1086,18 @@ impl AgentSetup {
         // Populate MCP/plugin info from discovered features
         harness_status.update_from_bus(&bus);
         if let Ok(skills) = crate::skills::list_structured() {
-            harness_status
-                .installed_plugins
-                .extend(skills.into_iter().filter(|skill| skill.installed || skill.project_local).map(
-                    |skill| crate::status::PluginSummary {
+            harness_status.installed_plugins.extend(
+                skills
+                    .into_iter()
+                    .filter(|skill| skill.installed || skill.project_local)
+                    .map(|skill| crate::status::PluginSummary {
                         id: skill.id.unwrap_or_else(|| skill.name.clone()),
                         name: skill.name,
                         plugin_type: "skill".into(),
                         version: skill.version.unwrap_or_default(),
                         description: skill.description,
-                    },
-                ));
+                    }),
+            );
         }
         if let Ok(extensions_dir) = crate::extension_cli::extensions_dir()
             && let Ok(extensions) =
@@ -1108,15 +1107,17 @@ impl AgentSetup {
         {
             harness_status
                 .installed_plugins
-                .extend(extensions.into_iter().map(|extension| {
-                    crate::status::PluginSummary {
-                        id: extension.name.clone(),
-                        name: extension.name,
-                        plugin_type: "extension".into(),
-                        version: extension.version,
-                        description: extension.description,
-                    }
-                }));
+                .extend(
+                    extensions
+                        .into_iter()
+                        .map(|extension| crate::status::PluginSummary {
+                            id: extension.name.clone(),
+                            name: extension.name,
+                            plugin_type: "extension".into(),
+                            version: extension.version,
+                            description: extension.description,
+                        }),
+                );
         }
         harness_status.web_auth_mode = Some(web_auth_state.mode_name().to_string());
         harness_status.web_auth_source = Some(web_auth_state.source_name().to_string());

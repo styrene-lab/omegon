@@ -2434,7 +2434,10 @@ mod tests {
         assert!(command_rx.try_recv().is_err(), "should not enqueue prompt");
         let msg = snapshot_rx.recv().await.expect("snapshot message");
         assert_eq!(msg["type"], "system_message");
-        assert_eq!(msg["message"], "caller role is insufficient for user_prompt");
+        assert_eq!(
+            msg["message"],
+            "caller role is insufficient for user_prompt"
+        );
     }
 
     #[tokio::test]

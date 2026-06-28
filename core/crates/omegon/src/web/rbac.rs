@@ -104,7 +104,7 @@ impl RbacError {
                 role: None,
                 mode: "styrene-mapped",
             },
-        RbacError::InvalidRole { role } => RbacErrorResponse {
+            RbacError::InvalidRole { role } => RbacErrorResponse {
                 schema_version: 1,
                 error: "invalid_role",
                 reason: if role == "missing" {
@@ -472,7 +472,10 @@ mod tests {
     fn principal_from_headers_ignores_stray_role_without_proxy_marker() {
         let state = test_state();
         let mut headers = bearer_headers("test");
-        headers.insert("omegon-principal-role", axum::http::HeaderValue::from_static("admin"));
+        headers.insert(
+            "omegon-principal-role",
+            axum::http::HeaderValue::from_static("admin"),
+        );
 
         let principal = principal_from_headers(&state, &headers).expect("local bearer principal");
 
@@ -484,11 +487,26 @@ mod tests {
     fn principal_from_headers_accepts_trusted_proxy_identity() {
         let state = test_state();
         let mut headers = bearer_headers("test");
-        headers.insert("omegon-principal-issuer", axum::http::HeaderValue::from_static("auspex"));
-        headers.insert("omegon-principal-subject", axum::http::HeaderValue::from_static("user:alice"));
-        headers.insert("omegon-principal-role", axum::http::HeaderValue::from_static("operator"));
-        headers.insert("omegon-principal-display-name", axum::http::HeaderValue::from_static("Alice"));
-        headers.insert("omegon-principal-session-id", axum::http::HeaderValue::from_static("s-1"));
+        headers.insert(
+            "omegon-principal-issuer",
+            axum::http::HeaderValue::from_static("auspex"),
+        );
+        headers.insert(
+            "omegon-principal-subject",
+            axum::http::HeaderValue::from_static("user:alice"),
+        );
+        headers.insert(
+            "omegon-principal-role",
+            axum::http::HeaderValue::from_static("operator"),
+        );
+        headers.insert(
+            "omegon-principal-display-name",
+            axum::http::HeaderValue::from_static("Alice"),
+        );
+        headers.insert(
+            "omegon-principal-session-id",
+            axum::http::HeaderValue::from_static("s-1"),
+        );
 
         let principal = principal_from_headers(&state, &headers).expect("proxy principal");
 
@@ -504,24 +522,46 @@ mod tests {
     fn principal_from_headers_rejects_invalid_proxy_identity() {
         let state = test_state();
         let mut untrusted = bearer_headers("test");
-        untrusted.insert("omegon-principal-issuer", axum::http::HeaderValue::from_static("evil"));
+        untrusted.insert(
+            "omegon-principal-issuer",
+            axum::http::HeaderValue::from_static("evil"),
+        );
         assert!(matches!(
             principal_from_headers(&state, &untrusted),
-            Err(RbacError::PolicyUnavailable { reason: "untrusted_proxy" })
+            Err(RbacError::PolicyUnavailable {
+                reason: "untrusted_proxy"
+            })
         ));
 
         let mut missing_subject = bearer_headers("test");
-        missing_subject.insert("omegon-principal-issuer", axum::http::HeaderValue::from_static("auspex"));
-        missing_subject.insert("omegon-principal-role", axum::http::HeaderValue::from_static("operator"));
+        missing_subject.insert(
+            "omegon-principal-issuer",
+            axum::http::HeaderValue::from_static("auspex"),
+        );
+        missing_subject.insert(
+            "omegon-principal-role",
+            axum::http::HeaderValue::from_static("operator"),
+        );
         assert!(matches!(
             principal_from_headers(&state, &missing_subject),
-            Err(RbacError::PolicyUnavailable { reason: "missing_proxy_subject" })
+            Err(RbacError::PolicyUnavailable {
+                reason: "missing_proxy_subject"
+            })
         ));
 
         let mut invalid_role = bearer_headers("test");
-        invalid_role.insert("omegon-principal-issuer", axum::http::HeaderValue::from_static("auspex"));
-        invalid_role.insert("omegon-principal-subject", axum::http::HeaderValue::from_static("user:alice"));
-        invalid_role.insert("omegon-principal-role", axum::http::HeaderValue::from_static("root"));
+        invalid_role.insert(
+            "omegon-principal-issuer",
+            axum::http::HeaderValue::from_static("auspex"),
+        );
+        invalid_role.insert(
+            "omegon-principal-subject",
+            axum::http::HeaderValue::from_static("user:alice"),
+        );
+        invalid_role.insert(
+            "omegon-principal-role",
+            axum::http::HeaderValue::from_static("root"),
+        );
         assert!(matches!(
             principal_from_headers(&state, &invalid_role),
             Err(RbacError::InvalidRole { role }) if role == "root"

@@ -697,8 +697,8 @@ pub async fn post_native_session(
     headers: HeaderMap,
     Json(request): Json<NativeSessionCreateRequest>,
 ) -> Result<(StatusCode, Json<NativeSessionCreateResponse>), StatusCode> {
-    let principal = super::rbac::principal_from_headers(&state, &headers)
-        .map_err(|error| error.status())?;
+    let principal =
+        super::rbac::principal_from_headers(&state, &headers).map_err(|error| error.status())?;
     if let Err(error) = super::rbac::require_principal_operation(
         &principal,
         omegon_rbac::OmegonOperation::NativeSessionCreate,
@@ -751,8 +751,8 @@ pub async fn get_native_session(
     axum::extract::Path(session_id): axum::extract::Path<String>,
 ) -> Result<Json<WebSessionShowResponse>, StatusCode> {
     validate_native_session_id(&session_id)?;
-    let principal = super::rbac::principal_from_headers(&state, &headers)
-        .map_err(|error| error.status())?;
+    let principal =
+        super::rbac::principal_from_headers(&state, &headers).map_err(|error| error.status())?;
     if let Err(error) = super::rbac::require_principal_operation(
         &principal,
         omegon_rbac::OmegonOperation::NativeSessionRead,
@@ -781,8 +781,8 @@ pub async fn get_native_session_surfaces(
     axum::extract::Path(session_id): axum::extract::Path<String>,
 ) -> Result<Json<super::surfaces::WebSurfacesSnapshot>, StatusCode> {
     validate_native_session_id(&session_id)?;
-    let principal = super::rbac::principal_from_headers(&state, &headers)
-        .map_err(|error| error.status())?;
+    let principal =
+        super::rbac::principal_from_headers(&state, &headers).map_err(|error| error.status())?;
     if let Err(error) = super::rbac::require_principal_operation(
         &principal,
         omegon_rbac::OmegonOperation::SurfaceRead,
@@ -827,11 +827,13 @@ pub async fn post_native_session_action(
         Err(error) => {
             return (
                 error.status(),
-                Json(crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
-                    session_id,
-                    action_id,
-                    error.response().reason,
-                )),
+                Json(
+                    crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                        session_id,
+                        action_id,
+                        error.response().reason,
+                    ),
+                ),
             );
         }
     };
@@ -1078,11 +1080,13 @@ pub async fn post_web_action(
         Err(error) => {
             return (
                 error.status(),
-                Json(crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
-                    request.session_id,
-                    request.action_id,
-                    error.response().reason,
-                )),
+                Json(
+                    crate::ui_runtime::envelope::UiActionOutcomeEnvelope::rejected(
+                        request.session_id,
+                        request.action_id,
+                        error.response().reason,
+                    ),
+                ),
             );
         }
     };

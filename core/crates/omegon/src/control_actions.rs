@@ -764,7 +764,10 @@ mod tests {
         for (method, role) in cases {
             let action = classify_web_method(method);
             assert_eq!(action.role, role, "{method} role drifted");
-            assert!(action.remote_safe, "{method} is exposed by /ws and must be classified remote-safe");
+            assert!(
+                action.remote_safe,
+                "{method} is exposed by /ws and must be classified remote-safe"
+            );
         }
     }
 
