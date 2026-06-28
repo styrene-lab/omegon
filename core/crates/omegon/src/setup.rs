@@ -137,7 +137,7 @@ impl RuntimeSubstrateInventory {
 
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RuntimeRestartDryRun {
+pub struct RuntimeSubstrateRefreshCandidate {
     pub inventory: RuntimeSubstrateInventory,
     pub extension_candidates: usize,
     pub skipped_by_policy: usize,
@@ -151,9 +151,9 @@ pub struct RuntimeRestartDryRun {
 /// features. It verifies the filesystem/profile side of extension discovery so
 /// `/runtime restart` can report whether a candidate refresh is plausible
 /// before the later promotion implementation exists.
-pub fn runtime_restart_dry_run(cwd: &Path) -> anyhow::Result<RuntimeRestartDryRun> {
+pub fn runtime_substrate_refresh_candidate(cwd: &Path) -> anyhow::Result<RuntimeSubstrateRefreshCandidate> {
     let cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-    let mut dry_run = RuntimeRestartDryRun::default();
+    let mut dry_run = RuntimeSubstrateRefreshCandidate::default();
     dry_run.inventory.skill_activation_events = crate::skills::list_structured()
         .map(|entries| entries.into_iter().filter(|entry| entry.reloadable).count())
         .unwrap_or_default();

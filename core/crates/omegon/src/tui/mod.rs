@@ -699,7 +699,7 @@ pub enum CanonicalSlashCommand {
     PermissionTrustAdd(String),
     PermissionTrustRemove(String),
     StatusView,
-    RuntimeRestart,
+    RuntimeSubstrateRefresh,
     WorkspaceStatusView,
     WorkspaceListView,
     WorkspaceNew(String),
@@ -957,7 +957,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         }
         "status" if args.is_empty() => Some(CanonicalSlashCommand::StatusView),
         "runtime" if args == "restart" || args == "hot-restart" => {
-            Some(CanonicalSlashCommand::RuntimeRestart)
+            Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
         }
         "workspace" if args.is_empty() => Some(CanonicalSlashCommand::WorkspaceStatusView),
         "workspace" if args == "status" => Some(CanonicalSlashCommand::WorkspaceStatusView),
@@ -6435,7 +6435,7 @@ Scroll transcript:
             }
 
             "runtime" => {
-                if let Some(CanonicalSlashCommand::RuntimeRestart) =
+                if let Some(CanonicalSlashCommand::RuntimeSubstrateRefresh) =
                     canonical_slash_command("runtime", args)
                 {
                     if self.agent_active {
@@ -6448,7 +6448,7 @@ Scroll transcript:
                             .as_ref()
                             .map(|registry| registry.skill_count())
                             .unwrap_or(0);
-                        match crate::setup::runtime_restart_dry_run(self.cwd()) {
+                        match crate::setup::runtime_substrate_refresh_candidate(self.cwd()) {
                             Ok(dry_run) => {
                                 let invalid = if dry_run.invalid_manifests.is_empty() {
                                     "none".to_string()
@@ -11506,14 +11506,14 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn runtime_restart() {
+    fn runtime_substrate_refresh() {
         assert!(matches!(
             canonical_slash_command("runtime", "restart"),
-            Some(CanonicalSlashCommand::RuntimeRestart)
+            Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
         ));
         assert!(matches!(
             canonical_slash_command("runtime", "hot-restart"),
-            Some(CanonicalSlashCommand::RuntimeRestart)
+            Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
         ));
     }
 
