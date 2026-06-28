@@ -1202,6 +1202,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             } else if let Some(name) = args.strip_prefix("remove ") {
                 let name = name.trim();
                 (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionRemove(name.to_string()))
+            } else if matches!(args, "refresh" | "reload" | "restart") {
+                Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
             } else if args == "update" {
                 Some(CanonicalSlashCommand::ExtensionUpdate(None))
             } else if let Some(name) = args.strip_prefix("update ") {
@@ -6488,13 +6490,13 @@ Scroll transcript:
                         SlashResult::Handled
                     } else {
                         SlashResult::Display(
-                            "Usage: /extension [list|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|search [query]]"
+                            "Usage: /extension [list|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|refresh|reload|restart|search [query]]"
                                 .into(),
                         )
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /extension [list|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|search [query]]"
+                        "Usage: /extension [list|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|refresh|reload|restart|search [query]]"
                             .into(),
                     )
                 }
@@ -12091,6 +12093,16 @@ mod slash_command_parsing_tests {
         match canonical_slash_command("extension", "update scribe") {
             Some(CanonicalSlashCommand::ExtensionUpdate(Some(name))) => assert_eq!(name, "scribe"),
             other => panic!("expected ExtensionUpdate(Some), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extension_refresh_aliases_runtime_substrate_refresh() {
+        for args in ["refresh", "reload", "restart"] {
+            assert!(matches!(
+                canonical_slash_command("extension", args),
+                Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
+            ));
         }
     }
 

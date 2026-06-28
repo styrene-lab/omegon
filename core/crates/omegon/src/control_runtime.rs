@@ -3586,7 +3586,7 @@ pub async fn skills_install_response(name: Option<&str>) -> SlashCommandResponse
         {
             Ok(result) => SlashCommandResponse {
                 accepted: true,
-                output: Some(armory_install_output(result)),
+                output: Some(format!("{}\n\nRun `/extension refresh` to inspect the current-session refresh candidate.", armory_install_output(result))),
             },
             Err(err) => SlashCommandResponse {
                 accepted: false,
@@ -3854,7 +3854,7 @@ pub async fn extension_install_response(uri: &str) -> SlashCommandResponse {
     match crate::armory::install_extension(uri.trim(), None).await {
         Ok(result) => SlashCommandResponse {
             accepted: true,
-            output: Some(armory_install_output(result)),
+            output: Some(format!("{}\n\nRun `/extension refresh` to inspect the current-session refresh candidate.", armory_install_output(result))),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
@@ -3881,8 +3881,8 @@ pub async fn extension_update_response(name: Option<&str>) -> SlashCommandRespon
         Ok(()) => SlashCommandResponse {
             accepted: true,
             output: Some(match name.map(str::trim).filter(|s| !s.is_empty()) {
-                Some(name) => format!("Updated extension {name}"),
-                None => "Updated installed extensions.".to_string(),
+                Some(name) => format!("Updated extension {name}. Run `/extension refresh` to inspect the current-session refresh candidate."),
+                None => "Updated installed extensions. Run `/extension refresh` to inspect the current-session refresh candidate.".to_string(),
             }),
         },
         Err(err) => SlashCommandResponse {
@@ -3896,7 +3896,7 @@ pub async fn extension_enable_response(name: &str) -> SlashCommandResponse {
     match crate::extension_cli::enable(name.trim()) {
         Ok(()) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("Enabled extension {}", name.trim())),
+            output: Some(format!("Enabled extension {}. Run `/extension refresh` to inspect the current-session refresh candidate.", name.trim())),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
@@ -3909,7 +3909,7 @@ pub async fn extension_disable_response(name: &str) -> SlashCommandResponse {
     match crate::extension_cli::disable(name.trim()) {
         Ok(()) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("Disabled extension {}", name.trim())),
+            output: Some(format!("Disabled extension {}. Run `/extension refresh` to inspect the current-session refresh candidate.", name.trim())),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
@@ -3989,7 +3989,7 @@ pub async fn armory_install_response(target: &str) -> SlashCommandResponse {
     match crate::armory::install(target, crate::armory::ArmoryInstallKind::Auto, &cwd).await {
         Ok(result) => SlashCommandResponse {
             accepted: true,
-            output: Some(armory_install_output(result)),
+            output: Some(format!("{}\n\nRun `/extension refresh` to inspect the current-session refresh candidate.", armory_install_output(result))),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
