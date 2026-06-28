@@ -8,6 +8,7 @@ members = [
     "core/crates/omegon-traits",
     "core/crates/omegon-opsx",
     "core/crates/omegon-rbac",
+    "core/crates/omegon-skills",
     "core/crates/omegon-web",
 ]
 
@@ -38,6 +39,8 @@ repository = "https://github.com/styrene-lab/omegon"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"

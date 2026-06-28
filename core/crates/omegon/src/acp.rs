@@ -3672,7 +3672,7 @@ impl OmegonAcpAgent {
                 } else {
                     // Partial update: merge provided manifest fields with existing content
                     let existing = std::fs::read_to_string(&skill_file)?;
-                    let (mut manifest, body) = crate::skills::parse_skill_file(&existing);
+                    let (mut manifest, body) = omegon_skills::parse_skill_file(&existing);
 
                     if let Some(desc) = params.get("description").and_then(|v| v.as_str()) {
                         manifest.description = desc.to_string();
@@ -6150,7 +6150,7 @@ Progress: 1/2"
 
         // Read back
         let raw = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
-        let (manifest, body) = crate::skills::parse_skill_file(&raw);
+        let (manifest, body) = omegon_skills::parse_skill_file(&raw);
         assert_eq!(manifest.name, "test-skill");
         assert_eq!(manifest.description, "A test");
         assert_eq!(manifest.tags, vec!["testing"]);
@@ -6164,7 +6164,7 @@ Progress: 1/2"
 
         // Verify update
         let raw = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
-        let (manifest, body) = crate::skills::parse_skill_file(&raw);
+        let (manifest, body) = omegon_skills::parse_skill_file(&raw);
         assert_eq!(manifest.description, "Updated description");
         assert_eq!(manifest.tags, vec!["testing", "updated"]);
         assert!(body.contains("Do testing things."));
