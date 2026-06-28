@@ -4396,7 +4396,7 @@ fn slash_skills_reload_displays_current_session_reload() {
 }
 
 #[test]
-fn slash_runtime_restart_displays_guarded_preview() {
+fn slash_runtime_substrate_refresh_displays_guarded_preview() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 

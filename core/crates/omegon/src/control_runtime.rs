@@ -79,7 +79,7 @@ pub enum ControlRequest {
         path: String,
     },
     StatusView,
-    RuntimeRestart,
+    RuntimeSubstrateRefresh,
     WorkspaceStatusView,
     WorkspaceListView,
     WorkspaceNew {
@@ -294,7 +294,7 @@ pub fn control_request_from_slash(
             ControlRequest::PermissionTrustRemove { path: path.clone() }
         }
         crate::tui::CanonicalSlashCommand::StatusView => ControlRequest::StatusView,
-        crate::tui::CanonicalSlashCommand::RuntimeRestart => return None,
+        crate::tui::CanonicalSlashCommand::RuntimeSubstrateRefresh => return None,
         crate::tui::CanonicalSlashCommand::WorkspaceStatusView => {
             ControlRequest::WorkspaceStatusView
         }
