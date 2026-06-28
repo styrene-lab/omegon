@@ -4396,6 +4396,24 @@ fn slash_skills_reload_displays_current_session_reload() {
 }
 
 #[test]
+fn slash_runtime_restart_displays_guarded_preview() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/runtime restart", &tx);
+    match result {
+        SlashResult::Display(message) => {
+            assert!(message.contains("Runtime hot restart preview"), "{message}");
+            assert!(message.contains("guarded preview only"), "{message}");
+            assert!(message.contains("Would preserve"), "{message}");
+            assert!(message.contains("Would rebuild"), "{message}");
+        }
+        other => panic!("expected runtime restart preview display, got: {other:?}"),
+    }
+    assert!(rx.try_recv().is_err(), "preview is handled in-TUI");
+}
+
+#[test]
 fn slash_secrets_enqueues_execute_control() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();

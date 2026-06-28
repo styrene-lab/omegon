@@ -79,6 +79,7 @@ pub enum ControlRequest {
         path: String,
     },
     StatusView,
+    RuntimeRestart,
     WorkspaceStatusView,
     WorkspaceListView,
     WorkspaceNew {
@@ -293,6 +294,7 @@ pub fn control_request_from_slash(
             ControlRequest::PermissionTrustRemove { path: path.clone() }
         }
         crate::tui::CanonicalSlashCommand::StatusView => ControlRequest::StatusView,
+        crate::tui::CanonicalSlashCommand::RuntimeRestart => return None,
         crate::tui::CanonicalSlashCommand::WorkspaceStatusView => {
             ControlRequest::WorkspaceStatusView
         }
@@ -637,7 +639,7 @@ pub async fn execute_control(
             .await
         }
         ControlRequest::StatusView => {
-            status_view_response(ctx.runtime_state, ctx.shared_settings).await
+            status_view_response(ctx.runtime_state, ctx.agent, ctx.shared_settings).await
         }
         ControlRequest::WorkspaceStatusView => {
             let workspace_ctx = workspace_control_context(ctx.agent);
@@ -1471,6 +1473,7 @@ pub async fn set_runtime_mode_response(
 
 pub async fn status_view_response(
     _runtime_state: &InteractiveAgentState,
+    agent: &InteractiveAgentHost,
     shared_settings: &settings::SharedSettings,
 ) -> SlashCommandResponse {
     let mut status = crate::status::HarnessStatus::assemble();
@@ -1505,8 +1508,11 @@ pub async fn status_view_response(
         &authorization,
     );
     let panel = format!(
-        "{}\nAutomation\n  Level:        {} ({})",
+        "{}\nRuntime\n  Generation:   {}\n  Session:      {}\n  Instance:     {}\nAutomation\n  Level:        {} ({})",
         crate::tui::bootstrap::render_bootstrap(&status, false),
+        agent.runtime_generation,
+        agent.session_id,
+        agent.instance_id,
         settings.automation_level.as_str(),
         settings.automation_level.summary()
     );
@@ -5007,6 +5013,7 @@ mod context_compaction_tests {
                 },
                 admission: crate::workspace::types::AdmissionOutcome::GrantedMutable,
             },
+            runtime_generation: 1,
         }
     }
 
