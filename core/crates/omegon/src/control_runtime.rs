@@ -3446,7 +3446,17 @@ fn skills_palette_projection(
         PaletteRowProjection::action(
             "skills.get",
             "/skills get <name>",
-            "inspect manifest metadata and body preview",
+            "inspect manifest, provenance, activation, shadow, and conflict metadata",
+        ),
+        PaletteRowProjection::action(
+            "skills.create.project",
+            "/skills create --project",
+            "author a project-local skill through the skill builder prompt",
+        ),
+        PaletteRowProjection::action(
+            "skills.import.project",
+            "/skills import --project <path>",
+            "import a reviewed skill bundle into project-local skills",
         ),
         PaletteRowProjection::action(
             "skills.install.all",
@@ -3456,12 +3466,17 @@ fn skills_palette_projection(
         PaletteRowProjection::action(
             "skills.install.one",
             "/skills install <name>",
-            "install one skill from the armory",
+            "install one public skill from Armory, then reload if needed",
         ),
         PaletteRowProjection::action(
             "skills.reload",
             "/skills reload",
-            "reload user/project skills into the current TUI session",
+            "reload user/project/extension skills into the current TUI session",
+        ),
+        PaletteRowProjection::action(
+            "skills.refresh",
+            "/skills refresh",
+            "alias for reload when iterating on skill files",
         ),
     ];
 
@@ -3599,7 +3614,7 @@ pub async fn skills_install_response(name: Option<&str>) -> SlashCommandResponse
         Ok(()) => SlashCommandResponse {
             accepted: true,
             output: Some(
-                "Installed bundled skills to ~/.omegon/skills. New sessions will load them."
+                "Installed bundled skills to ~/.omegon/skills. Run /skills reload to activate user/project skill changes in this session, or start a new session."
                     .to_string(),
             ),
         },
@@ -4835,7 +4850,11 @@ mod tests {
         assert!(rendered.starts_with("## Skills"));
         assert!(rendered.contains("### Actions"));
         assert!(rendered.contains("`/skills get <name>`"));
+        assert!(rendered.contains("`/skills create --project`"));
+        assert!(rendered.contains("`/skills import --project <path>`"));
         assert!(rendered.contains("`/skills install <name>`"));
+        assert!(rendered.contains("`/skills reload`"));
+        assert!(rendered.contains("`/skills refresh`"));
         assert!(rendered.contains("### Skill rows"));
         assert!(rendered.contains(
             "- `rust` — bundled · available · project_detected · profile:coding · tags:lang · read-only"

@@ -6398,7 +6398,7 @@ Scroll transcript:
             }
 
             "skills" | "skill" => {
-                const USAGE: &str = "Usage: /skills [list|reload|refresh|install [name|skills/name]|create [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]";
+                const USAGE: &str = "Usage: /skills [list|reload|refresh|install [name|skills/name]|create|new [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]";
                 if let Some(command) = canonical_slash_command("skills", args) {
                     match command {
                         CanonicalSlashCommand::SkillsReload => {
@@ -12363,7 +12363,21 @@ mod slash_command_parsing_tests {
             .iter()
             .find(|command| command.name == "skills")
             .expect("/skills must be in COMMANDS");
-        for expected in ["create", "delete", "get", "import", "reload", "refresh"] {
+        for expected in [
+            "create",
+            "create --project",
+            "create --user",
+            "delete <name>",
+            "get <name>",
+            "import <path>",
+            "import --project <path>",
+            "import --user <path>",
+            "install <name>",
+            "new --project",
+            "new --user",
+            "reload",
+            "refresh",
+        ] {
             assert!(
                 skills.subcommands.contains(&expected),
                 "missing /skills {expected}"
