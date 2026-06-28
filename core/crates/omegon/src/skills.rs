@@ -197,6 +197,89 @@ pub fn validate_activation_metadata(manifest: &SkillManifest) -> SkillActivation
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillAdaptationKind {
+    NotAdapted,
+    PromptOnlyAdaptation,
+    CleanRoomAdaptation,
+    TrustedExecutableImport,
+    ExactImport,
+}
+
+pub fn classify_skill_adaptation(body: &str) -> SkillAdaptationKind {
+    let lower = body.to_ascii_lowercase();
+    if lower.contains("clean-room adaptation") || lower.contains("clean-room rewrite") {
+        SkillAdaptationKind::CleanRoomAdaptation
+    } else if lower.contains("trusted executable import") || lower.contains("trust-and-import") {
+        SkillAdaptationKind::TrustedExecutableImport
+    } else if lower.contains("exact import") {
+        SkillAdaptationKind::ExactImport
+    } else if lower.contains("prompt/resources-only adaptation")
+        || lower.contains("prompt-only adaptation")
+        || lower.contains("## provenance")
+    {
+        SkillAdaptationKind::PromptOnlyAdaptation
+    } else {
+        SkillAdaptationKind::NotAdapted
+    }
+}
+
+fn has_section(body: &str, section: &str) -> bool {
+    body.lines()
+        .any(|line| line.trim().eq_ignore_ascii_case(section))
+}
+
+fn mentions_executable_tooling(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    [
+        "npm",
+        "pnpm",
+        "yarn",
+        "node_modules",
+        "package.json",
+        "scripts/",
+        "#!/bin/sh",
+        "#!/usr/bin/env bash",
+        "```sh",
+        "```bash",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+pub fn adapted_skill_warnings(body: &str) -> Vec<String> {
+    let kind = classify_skill_adaptation(body);
+    let mut warnings = Vec::new();
+    if kind == SkillAdaptationKind::NotAdapted && !mentions_executable_tooling(body) {
+        return warnings;
+    }
+    if kind != SkillAdaptationKind::NotAdapted {
+        for section in ["## Provenance", "## Adaptation Notes", "## Safety Notes"] {
+            if !has_section(body, section) {
+                warnings.push(format!(
+                    "adapted skill missing required section `{section}`"
+                ));
+            }
+        }
+    }
+    if kind == SkillAdaptationKind::CleanRoomAdaptation {
+        for section in ["## Omitted Upstream Assets", "## Clean-room Rewrite Notes"] {
+            if !has_section(body, section) {
+                warnings.push(format!(
+                    "clean-room adapted skill missing required section `{section}`"
+                ));
+            }
+        }
+    }
+    if mentions_executable_tooling(body) && kind == SkillAdaptationKind::NotAdapted {
+        warnings.push(
+            "skill mentions executable/tooling assets without explicit adaptation trust posture"
+                .into(),
+        );
+    }
+    warnings
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkillSignalKind {
     Literal,
@@ -697,6 +780,13 @@ pub fn doctor_report() -> anyhow::Result<String> {
             }
             if !conflicts.is_empty() {
                 metadata.push(format!("conflicts:{}", conflicts.join(",")));
+            }
+            let skill_file = bundle.path.join("SKILL.md");
+            if let Ok(content) = std::fs::read_to_string(&skill_file) {
+                let (_manifest, body) = parse_skill_file(&content);
+                for warning in adapted_skill_warnings(&body) {
+                    metadata.push(format!("adaptation-warning:{warning}"));
+                }
             }
             if metadata.is_empty() {
                 metadata.push("compatible".into());
@@ -2819,6 +2909,54 @@ description: Project git override
         }
     }
 
+    #[test]
+    fn adapted_skill_warnings_cover_provenance_and_executable_posture() {
+        assert!(adapted_skill_warnings("# Normal Skill\n\nNo upstream provenance.").is_empty());
+
+        let missing = adapted_skill_warnings("## Provenance\nSource: upstream\n");
+        assert!(
+            missing.iter().any(|w| w.contains("## Adaptation Notes")),
+            "{missing:?}"
+        );
+        assert!(
+            missing.iter().any(|w| w.contains("## Safety Notes")),
+            "{missing:?}"
+        );
+
+        let clean_missing = adapted_skill_warnings(
+            "## Provenance\nKind: clean-room adaptation\n## Adaptation Notes\nNotes\n## Safety Notes\nSafe\n",
+        );
+        assert!(
+            clean_missing
+                .iter()
+                .any(|w| w.contains("## Omitted Upstream Assets")),
+            "{clean_missing:?}"
+        );
+        assert!(
+            clean_missing
+                .iter()
+                .any(|w| w.contains("## Clean-room Rewrite Notes")),
+            "{clean_missing:?}"
+        );
+
+        let executable_missing = adapted_skill_warnings("Run npm install from package.json");
+        assert!(
+            executable_missing
+                .iter()
+                .any(|w| w.contains("without explicit adaptation trust posture")),
+            "{executable_missing:?}"
+        );
+
+        let complete_clean = adapted_skill_warnings(
+            "## Provenance\nKind: clean-room adaptation\n## Adaptation Notes\nNotes\n## Safety Notes\nSafe\n## Omitted Upstream Assets\n- package.json\n## Clean-room Rewrite Notes\nRewritten without npm.\n",
+        );
+        assert!(complete_clean.is_empty(), "{complete_clean:?}");
+
+        let trusted = adapted_skill_warnings(
+            "## Provenance\nKind: trusted executable import\n## Adaptation Notes\nNotes\n## Safety Notes\nOperator trusts package.json.\nRun npm install.\n",
+        );
+        assert!(trusted.is_empty(), "{trusted:?}");
+    }
     #[test]
     fn skill_builder_prompt_supports_upstream_assisted_authoring() {
         let prompt = skill_builder_prompt(std::path::Path::new("/tmp/project"));
