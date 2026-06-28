@@ -4029,13 +4029,13 @@ impl OmegonAcpAgent {
                 lines.join("\n")
             }
             "/login" | "/auth" => "Omegon manages authentication independently.\nRun `omegon auth login` in a terminal or set API keys.".into(),
-            "/skills" => {
+            "/skills" | "/skill" => {
                 let args = args.trim();
                 match args {
-                    "" | "list" => "Use the **skills/list** RPC to get structured skill data, or type `/skills list` to see a summary.\nAvailable: list, reload, refresh, get <name>, create, import, delete <name>, install [name|skills/name]".into(),
+                    "" | "list" => "Use the **skills/list** RPC to get structured skill data, or type `/skills list` to see a summary.\nAvailable: list, reload, refresh, install [name|skills/name], create|new [--project|--user], import [--project|--user] <path>, get <name>, delete <name>".into(),
                     "reload" | "refresh" => "Reload user/project skills into the current TUI session with `/skills reload` (alias: `/skills refresh`). ACP sessions should start a new session until structured reload RPC support lands.".into(),
                     "install" => "Use the **skills/install** RPC to install bundled skills, or pass a skill name to install through Armory. Run `/skills reload` afterward to activate user/project changes in the current TUI session.".into(),
-                    _ => format!("Skills subcommand: {args}. Available slash affordances: list, reload, refresh, install, create, import, get <name>, delete <name>."),
+                    _ => format!("Skills subcommand: {args}. Available slash affordances: list, reload, refresh, install [name], create|new [--project|--user], import [--project|--user] <path>, get <name>, delete <name>."),
                 }
             }
             "/extension" | "/ext" => {
