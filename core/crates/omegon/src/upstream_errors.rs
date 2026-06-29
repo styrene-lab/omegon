@@ -266,7 +266,16 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
     ErrorRule {
         providers: &[],
         class: UpstreamErrorClass::StalledStream,
-        substrings: &["stream idle for", "connection may be stalled"],
+        substrings: &[
+            "stream idle for",
+            "connection may be stalled",
+            // Consumer ambiguous-reasoning-phase bail. Without these, the
+            // "no observable activity ... or a stalled stream" message falls
+            // through to Unknown (non-transient) and hard-fails the turn
+            // instead of retrying a wedged reasoning stream.
+            "no observable activity",
+            "stalled stream",
+        ],
         word_tokens: &[],
     },
     ErrorRule {
@@ -856,6 +865,46 @@ mod tests {
             );
         }
         assert!(UpstreamErrorClass::BridgeDropped.transient_kind().is_some());
+    }
+
+    #[test]
+    fn classify_all_provider_stall_and_drop_strings_as_transient() {
+        // Every stream-stall / completion-guard string emitted by the provider
+        // parsers and the consumer/producer watchdogs must classify as a
+        // transient class so the retry loop handles them — never Unknown (which
+        // would hard-fail the turn).
+        let drops = [
+            // Completion guards (BridgeDropped).
+            "ollama: stream closed without completion (had 10b content, 0b thinking)",
+            "antigravity: stream closed without completion (had 5b text, 0 tool calls)",
+        ];
+        for msg in drops {
+            assert_eq!(
+                classify_upstream_error(msg),
+                UpstreamErrorClass::BridgeDropped,
+                "{msg:?} must be BridgeDropped"
+            );
+        }
+        let stalls = [
+            // Producer (process_sse) reasoning-phase bail.
+            "SSE stream idle timeout (600s with no data, reasoning phase) — connection may be stalled",
+            // Antigravity idle bail.
+            "antigravity: stream idle for 600s — connection may be stalled",
+            // Consumer active-phase bail.
+            "LLM stream idle for 90s during output streaming — connection may be stalled",
+            // Consumer ambiguous-reasoning-phase bail (previously fell through
+            // to Unknown and hard-failed).
+            "LLM stream had no observable activity for 600s during ambiguous silent — this may be a long-running reasoning window or a stalled stream",
+        ];
+        for msg in stalls {
+            assert_eq!(
+                classify_upstream_error(msg),
+                UpstreamErrorClass::StalledStream,
+                "{msg:?} must be StalledStream"
+            );
+        }
+        assert!(UpstreamErrorClass::StalledStream.transient_kind().is_some());
+        assert!(is_transient_error(stalls[3]));
     }
 
     #[test]

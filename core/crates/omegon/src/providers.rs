@@ -1008,18 +1008,29 @@ where
             }
             Ok(None) => break, // stream ended
             Err(_) => {
-                let phase = if gate.phase() == SSE_PHASE_REASONING {
-                    "reasoning"
-                } else {
-                    "active"
-                };
+                // Idle timeout. Mirror the consumer-side re-arm: an active-phase
+                // silence is most often a reasoning provider pausing between or
+                // within output items (notably the OpenAI Responses API behind
+                // openai-codex) without the writer closure having flipped the
+                // gate back to reasoning yet. Downgrade to the reasoning budget
+                // once and keep reading instead of aborting a live turn. A
+                // genuine stall still dies on the next timeout (now evaluated in
+                // the reasoning phase), and any resumed delta flips the gate back
+                // to active via the writer closure.
+                if gate.phase() == SSE_PHASE_ACTIVE {
+                    gate.reasoning();
+                    tracing::debug!(
+                        idle_secs = idle_timeout.as_secs(),
+                        "SSE active-phase idle — re-arming with reasoning budget before treating as stalled"
+                    );
+                    continue;
+                }
                 tracing::warn!(
-                    phase,
-                    "SSE stream idle for {}s ({phase} phase) — treating as stalled",
+                    "SSE stream idle for {}s (reasoning phase) — treating as stalled",
                     idle_timeout.as_secs()
                 );
                 anyhow::bail!(
-                    "SSE stream idle timeout ({}s with no data, {phase} phase)",
+                    "SSE stream idle timeout ({}s with no data, reasoning phase) — connection may be stalled",
                     idle_timeout.as_secs()
                 );
             }
@@ -3272,6 +3283,10 @@ async fn parse_ollama_ndjson_stream(
     let mut input_tokens = 0u64;
     let mut output_tokens = 0u64;
     let mut final_message = json!({});
+    // Tracks whether the NDJSON stream delivered its `{"done":true}` terminal
+    // chunk. A stream that ends without it (connection drop) must not be
+    // replayed as a completed turn — mirrors the Codex/Anthropic/OpenAI guards.
+    let mut saw_done = false;
 
     let byte_stream = response.bytes_stream();
     let reader =
@@ -3302,6 +3317,7 @@ async fn parse_ollama_ndjson_stream(
             if let Some(msg) = chunk.get("message") {
                 final_message = msg.clone();
             }
+            saw_done = true;
             break;
         }
 
@@ -3359,6 +3375,27 @@ async fn parse_ollama_ndjson_stream(
         // Ensure at least one text start/end pair
         let _ = tx.send(LlmEvent::TextStart).await;
         let _ = tx.send(LlmEvent::TextEnd).await;
+    }
+
+    if !saw_done {
+        // The NDJSON stream ended without a `{"done":true}` chunk — Ollama
+        // dropped the connection mid-response. Surface a transient error so the
+        // retry loop handles it; never feed partial content back as complete.
+        tracing::warn!(
+            content_len = full_content.len(),
+            thinking_len = full_thinking.len(),
+            "Ollama stream closed without a done chunk — treating as error to prevent partial-content poisoning"
+        );
+        let _ = tx
+            .send(LlmEvent::Error {
+                message: format!(
+                    "ollama: stream closed without completion (had {}b content, {}b thinking)",
+                    full_content.len(),
+                    full_thinking.len()
+                ),
+            })
+            .await;
+        return Ok(());
     }
 
     // Tool calls from the final message
@@ -3581,7 +3618,18 @@ impl LlmBridge for AntigravityClient {
             let mut output_tokens = 0u64;
 
             let mut buffer = String::new();
-            let stream_timeout = tokio::time::Duration::from_secs(90);
+            let budget = sse_idle_budget();
+            let mut stream_timeout = budget.active;
+            // Re-arm once with the reasoning budget on the first idle, matching
+            // the shared process_sse / consumer watchdog behaviour. Gemini can
+            // pause mid-response while reasoning.
+            let mut rearmed = false;
+            // Whether a `finishReason` terminal signal was observed. A stream
+            // that ends without it dropped mid-response and must not be replayed
+            // as a completed turn.
+            let mut finished = false;
+            // Whether we already emitted an Error and must suppress the Done.
+            let mut aborted = false;
 
             loop {
                 let chunk = match tokio::time::timeout(stream_timeout, response.chunk()).await {
@@ -3593,17 +3641,40 @@ impl LlmBridge for AntigravityClient {
                                 message: format!("stream error: {e}"),
                             })
                             .await;
+                        aborted = true;
                         break;
                     }
                     Err(_) => {
+                        if !rearmed {
+                            // First idle: re-arm with the reasoning budget and
+                            // keep reading instead of aborting a live turn.
+                            rearmed = true;
+                            stream_timeout = budget.reasoning;
+                            tracing::debug!(
+                                idle_secs = budget.active.as_secs(),
+                                "Antigravity active-phase idle — re-arming with reasoning budget"
+                            );
+                            continue;
+                        }
                         let _ = tx
                             .send(LlmEvent::Error {
-                                message: "Antigravity stream timed out (90s idle)".to_string(),
+                                message: format!(
+                                    "antigravity: stream idle for {}s — connection may be stalled",
+                                    budget.reasoning.as_secs()
+                                ),
                             })
                             .await;
+                        aborted = true;
                         break;
                     }
                 };
+
+                // Activity resets the leash: each streaming burst gets the
+                // tight budget, and each subsequent pause gets one re-arm.
+                if rearmed {
+                    rearmed = false;
+                    stream_timeout = budget.active;
+                }
 
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -3653,6 +3724,14 @@ impl LlmBridge for AntigravityClient {
 
                     if let Some(candidates) = candidates {
                         for candidate in candidates {
+                            // A non-empty finishReason marks a complete response.
+                            if candidate
+                                .get("finishReason")
+                                .and_then(|v| v.as_str())
+                                .is_some_and(|s| !s.is_empty())
+                            {
+                                finished = true;
+                            }
                             let parts = candidate
                                 .get("content")
                                 .and_then(|c| c.get("parts"))
@@ -3716,6 +3795,33 @@ impl LlmBridge for AntigravityClient {
 
             if text_started {
                 let _ = tx.send(LlmEvent::TextEnd).await;
+            }
+
+            if aborted {
+                // An idle/stream error was already surfaced; do not also emit a
+                // Done with partial content.
+                return;
+            }
+
+            if !finished {
+                // Stream ended without a finishReason — Gemini dropped the
+                // connection mid-response. Surface a transient error instead of
+                // replaying truncated content as a completed turn.
+                tracing::warn!(
+                    text_len = full_text.len(),
+                    tool_calls = tool_calls.len(),
+                    "Antigravity stream closed without finishReason — treating as error to prevent partial-content poisoning"
+                );
+                let _ = tx
+                    .send(LlmEvent::Error {
+                        message: format!(
+                            "antigravity: stream closed without completion (had {}b text, {} tool calls)",
+                            full_text.len(),
+                            tool_calls.len()
+                        ),
+                    })
+                    .await;
+                return;
             }
 
             // Build the done message

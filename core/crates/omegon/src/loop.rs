@@ -7934,6 +7934,27 @@ This is the right first slice."#;
                 false,
                 true
             )
+            .contains("wedged stream")
+        );
+        // The stalled-stream advice must be distinct from the network-unstable
+        // advice, regardless of which provider-specific wording is used.
+        assert!(
+            !exhaustion_advice(
+                "openai",
+                Some(TransientFailureKind::StalledStream),
+                false,
+                true
+            )
+            .contains("network path is unstable")
+        );
+        // Generic providers still get the plain stalled-stream wording.
+        assert!(
+            exhaustion_advice(
+                "some-other-provider",
+                Some(TransientFailureKind::StalledStream),
+                false,
+                true
+            )
             .contains("stream is unresponsive")
         );
     }

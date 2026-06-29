@@ -202,3 +202,55 @@ Both shapes match the existing `BridgeDropped` classifier substrings
 (`"stream closed without completion"`, `"stream ended without"`), so they
 classify as transient `BridgeDropped` → `RetrySameProvider`. Test:
 `upstream_errors.rs::classify_anthropic_and_openai_incomplete_streams`.
+
+## Update 2026-06-29 — full-surface adversarial sweep
+
+A complete audit of the stream-stall surface across every provider found four
+further defects beyond the codex re-arm and the Anthropic/OpenAI completion
+guards. All are now fixed with tests.
+
+### F0 (critical) — ambiguous-phase bail hard-failed instead of retrying
+
+The consumer's ambiguous-reasoning-phase timeout message
+(`"...had no observable activity ... or a stalled stream"`) matched none of the
+`StalledStream` classifier substrings, so it fell through to `Unknown`, whose
+`transient_kind()` is `None` → the loop treated it as fatal and did **not**
+retry. This directly interacts with the active-output re-arm: a genuinely dead
+stream re-armed into the ambiguous phase would hard-fail rather than retry.
+Fix: added `"no observable activity"` and `"stalled stream"` to the
+`StalledStream` rule. Test: `classify_all_provider_stall_and_drop_strings_as_transient`.
+
+### F1 (high) — producer watchdog had no re-arm
+
+`process_sse` (shared by Anthropic/OpenAI/codex) aborted on the *first*
+active-phase idle. Because producer and consumer race at ~90s, the consumer
+re-arm alone was insufficient — the producer could fire first and relay a
+`Timeout`. `process_sse` now downgrades the gate to reasoning once on an
+active-phase idle and keeps reading; only a second idle (reasoning phase) bails.
+The bail message now reads `connection may be stalled` so it classifies as
+`StalledStream`, unifying stall accounting across both watchdogs.
+
+### F2 (medium) — Ollama NDJSON had no completion guard
+
+`parse_ollama_ndjson_stream` emitted `Done` with whatever partial content it had
+even when the stream ended without a `{"done":true}` chunk (mid-response drop on
+ollama-cloud). Now tracks `saw_done` and emits a `BridgeDropped` error otherwise.
+
+### F3/F4 (medium) — Antigravity/Gemini flat idle + no completion guard + double-emit
+
+The Gemini (Cloud Code Assist) parser used a flat 90s idle (aborting reasoning
+gaps), never checked `finishReason` (replaying truncated content as complete),
+and emitted a `Done` even *after* it had already sent a timeout `Error`. Now: a
+single re-arm to the reasoning budget on first idle (reset on activity), a
+`finishReason` completion guard that emits `BridgeDropped` on a drop, and an
+`aborted` flag that suppresses the trailing `Done` after any error.
+
+### Out of scope / noted
+
+- Ollama's producer has no idle timeout at all (relies on the consumer
+  watchdog); a consumer-side abort can orphan the producer task until the HTTP
+  layer times out. Local-only, low value — left as a known limitation.
+- `stream_with_retry`'s `started` clock is never reset, so exhaustion measures
+  cumulative wall-clock across retries. The re-arm fixes remove the dominant
+  false-positive source; the cumulative semantics are intentional ("~10–20 min
+  of cumulative stalls") and left as-is.

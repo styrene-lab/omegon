@@ -17,6 +17,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Fixed
+- Reclassified the consumer ambiguous-reasoning-phase idle bail as a transient stalled stream instead of an unknown (non-transient) error. Previously a wedged reasoning stream that timed out in the ambiguous phase hard-failed the turn with no retry; it now retries like every other stall.
+- Gave the producer-side SSE watchdog (`process_sse`, shared by Anthropic/OpenAI/codex) the same single re-arm as the consumer: an active-phase silence downgrades once to the reasoning budget before being treated as a stall, so legitimate inter-item reasoning gaps no longer abort live turns. Producer stalls now classify as stalled streams consistently with the consumer.
+- Added completion guards to the Ollama (NDJSON `done`) and Google Antigravity (Gemini `finishReason`) stream parsers so a mid-response connection drop surfaces a transient error instead of replaying truncated content as a completed turn.
+- Made the Antigravity/Gemini stream watchdog phase-aware (re-arm to the reasoning budget once) instead of a flat 90s idle, and stopped it from emitting a `Done` after it had already surfaced a stream error.
 - Closed a partial-content poisoning gap on the Anthropic and OpenAI streaming paths: when the SSE byte stream ends without a `message_stop`/`finish_reason` terminal event (a mid-response connection drop), the producer now emits a `BridgeDropped` error so the retry loop handles it, instead of silently returning truncated text/tool-calls as a completed turn. Mirrors the existing Codex completion guard.
 - Stopped the consumer stream watchdog from raising spurious `Upstream stalled stream — retrying` failures when reasoning providers (notably `openai-codex`) pause between output items without first closing the active text/tool block. The first active-output silence now re-arms once to the generous reasoning budget; a genuinely dead stream still surfaces inside the retry budget.
 - Added `/resume <session-id>` and `/sessions resume <session-id>` to switch the live TUI to a saved session by id/prefix.
