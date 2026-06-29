@@ -16,6 +16,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+- Prevented explicit provider-qualified model specs from silently falling back to unrelated automation-safe providers, and refreshed the TUI Workbench workspace context from live git state so the displayed branch reflects the current checkout instead of a stale harness snapshot after workspace/branch changes.
+
 ### Added
 - Added structured stream-idle telemetry (`AgentEvent::StreamIdle`, Web `stream.idle`, ACP `_stream/idle`) so provider idle/stall diagnostics can flow to UIs without being rendered as assistant-authored content.
 - Added dedicated agent-callable skills tools (`skills_list`, `skills_get`, `skills_create`, `skills_import`, `skills_install`, `skills_delete`, `skills_reload`) backed by a first-class skills feature and shared augment registry reload path.

@@ -113,12 +113,18 @@ pub fn initialize_shared_settings(init: &SettingsInit<'_>) -> SharedSettings {
 ///
 /// Used by headless and smoke test entrypoints that cannot start without a provider.
 pub async fn resolve_bridge_or_bail(model: &str) -> anyhow::Result<Box<dyn LlmBridge>> {
+    let explicit_provider = providers::explicit_provider_id(model);
     match providers::auto_detect_bridge(model).await {
         Some(bridge) => {
             tracing::info!("using native LLM provider");
             Ok(bridge)
         }
         None => {
+            if let Some(provider) = explicit_provider {
+                anyhow::bail!(
+                    "Explicit provider '{provider}' is not available for model '{model}'. Configure that provider or choose a different model."
+                );
+            }
             // Try auto-detecting any available provider before giving up.
             if let Some(safe_model) = providers::automation_safe_model()
                 && let Some(bridge) = providers::auto_detect_bridge(&safe_model).await
