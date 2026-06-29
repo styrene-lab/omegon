@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 - Added `/resume <session-id>` and `/sessions resume <session-id>` to switch the live TUI to a saved session by id/prefix.
 - Added human-readable session descriptions to saved session metadata and session list/web summaries so resume IDs have operator context.
+- Printed both CLI (`omegon --resume <id>`) and in-app (`/resume <id>`) resume commands when sessions are saved on exit.
 - Printed the saved session id and exact `omegon --resume <id>` command when an interactive or standalone headless session exits.
 - Prevented native and OCI extension stderr logs from leaking into the interactive terminal by piping extension stderr into Omegon tracing instead of inheriting it.
 - Surfaced the active profile source in the engine line so project/user/default profile state is visible at a glance.

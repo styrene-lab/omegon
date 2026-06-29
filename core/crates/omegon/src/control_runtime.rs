@@ -2922,20 +2922,28 @@ pub async fn profile_capture_response(
     cwd: &Path,
     target: settings::ProfileSaveTarget,
 ) -> SlashCommandResponse {
-    let Ok(s) = shared_settings.lock() else {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("failed to read settings".into()),
+    let (profile, current_source) = {
+        let Ok(s) = shared_settings.lock() else {
+            return SlashCommandResponse {
+                accepted: false,
+                output: Some("failed to read settings".into()),
+            };
         };
+        let loaded = settings::Profile::load_with_source(cwd);
+        let mut profile = loaded.profile;
+        profile.capture_from(&s);
+        (profile, loaded.source)
     };
-    let loaded = settings::Profile::load_with_source(cwd);
-    let mut profile = loaded.profile;
-    profile.capture_from(&s);
-    match profile.save_to_target(cwd, target, &loaded.source) {
-        Ok(source) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!("Profile captured from live runtime ({source}).")),
-        },
+    match profile.save_to_target(cwd, target, &current_source) {
+        Ok(source) => {
+            if let Ok(mut s) = shared_settings.lock() {
+                s.profile_source = source.clone();
+            }
+            SlashCommandResponse {
+                accepted: true,
+                output: Some(format!("Profile captured from live runtime ({source}).")),
+            }
+        }
         Err(e) => SlashCommandResponse {
             accepted: false,
             output: Some(format!("failed to save profile: {e}")),
@@ -4832,6 +4840,22 @@ mod tests {
         let profile = settings::Profile::load(tmp.path());
         assert_eq!(profile.thinking_level.as_deref(), Some("high"));
         assert_eq!(profile.requested_context_class.as_deref(), Some("massive"));
+    }
+
+    #[tokio::test]
+    async fn profile_capture_response_updates_runtime_profile_source_for_user_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+        let response =
+            profile_capture_response(&settings, tmp.path(), settings::ProfileSaveTarget::User)
+                .await;
+
+        assert!(response.accepted, "{response:?}");
+        let source = settings.lock().unwrap().profile_source.clone();
+        assert!(
+            matches!(source, settings::ProfileSource::User(_)),
+            "{source:?}"
+        );
     }
 
     #[tokio::test]

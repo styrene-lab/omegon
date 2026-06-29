@@ -3563,6 +3563,40 @@ fn slash_tone_off_deactivates() {
 }
 
 #[test]
+fn slash_resume_enqueues_execute_control() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/resume 2026-session", &tx);
+    assert!(matches!(result, SlashResult::Display(msg) if msg == "Resuming session 2026-session…"));
+
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::ResumeSession { id },
+            ..
+        } => assert_eq!(id, "2026-session"),
+        other => panic!("expected resume session request, got {other:?}"),
+    }
+}
+
+#[test]
+fn slash_sessions_resume_enqueues_execute_control() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/sessions resume abc123", &tx);
+    assert!(matches!(result, SlashResult::Display(msg) if msg == "Resuming session abc123…"));
+
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::ResumeSession { id },
+            ..
+        } => assert_eq!(id, "abc123"),
+        other => panic!("expected resume session request, got {other:?}"),
+    }
+}
+
+#[test]
 fn slash_auth_no_args_shows_status() {
     let mut app = test_app();
     let tx = test_tx();

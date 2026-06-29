@@ -7181,9 +7181,37 @@ Scroll transcript:
                 SlashResult::Handled
             }
 
+            "resume" => {
+                let id = args.trim();
+                if id.is_empty() {
+                    SlashResult::Display("Usage: /resume <session-id>".into())
+                } else {
+                    let _ = tx.try_send(TuiCommand::ExecuteControl {
+                        request: crate::control_runtime::ControlRequest::ResumeSession {
+                            id: id.to_string(),
+                        },
+                        respond_to: None,
+                    });
+                    SlashResult::Display(format!("Resuming session {id}…"))
+                }
+            }
+
             "sessions" => {
-                let _ = tx.try_send(TuiCommand::ListSessions { respond_to: None });
-                SlashResult::Handled
+                match canonical_slash_command("sessions", args) {
+                    Some(CanonicalSlashCommand::ResumeSession(id)) => {
+                        let _ = tx.try_send(TuiCommand::ExecuteControl {
+                            request: crate::control_runtime::ControlRequest::ResumeSession {
+                                id: id.clone(),
+                            },
+                            respond_to: None,
+                        });
+                        SlashResult::Display(format!("Resuming session {id}…"))
+                    }
+                    Some(CanonicalSlashCommand::ListSessions) | _ => {
+                        let _ = tx.try_send(TuiCommand::ListSessions { respond_to: None });
+                        SlashResult::Handled
+                    }
+                }
             }
 
             "memory" => SlashResult::Display(format!(

@@ -5684,7 +5684,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         ) {
             Ok(path) => {
                 eprintln!(
-                    "Session saved: {}\nResume this session with: omegon --resume {}",
+                    "Session saved: {}\nResume this session with: omegon --resume {}\nOr from inside Omegon: /resume {}",
+                    agent.session_id,
                     agent.session_id,
                     agent.session_id
                 );
@@ -7005,7 +7006,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
                                 .unwrap_or("latest")
                         });
                     eprintln!(
-                        "Session saved: {session_id}\nResume this session with: omegon --resume {session_id}"
+                        "Session saved: {session_id}\nResume this session with: omegon --resume {session_id}\nOr from inside Omegon: /resume {session_id}"
                     );
                     tracing::info!(path = %path.display(), session_id, "Session saved");
                 }
