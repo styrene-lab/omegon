@@ -38,9 +38,11 @@ pub struct SettingsInit<'a> {
 /// This replaces the 3-6 duplicated "shared setup" blocks across main.rs.
 pub fn initialize_shared_settings(init: &SettingsInit<'_>) -> SharedSettings {
     let shared = settings::shared(init.model);
-    let profile = settings::Profile::load(init.cwd);
+    let loaded_profile = settings::Profile::load_with_source(init.cwd);
+    let profile = loaded_profile.profile.clone();
 
     if let Ok(mut s) = shared.lock() {
+        s.profile_source = loaded_profile.source;
         if init.apply_profile_posture {
             profile.apply_to_with_posture(&mut s, init.cwd);
         } else {

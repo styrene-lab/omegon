@@ -340,17 +340,20 @@ pub struct WebSessionSummary {
     pub created_at: String,
     pub turns: u32,
     pub tool_calls: u32,
+    pub description: String,
     pub last_prompt_snippet: String,
     pub current: bool,
 }
 
 fn web_session_summary(entry: crate::session::SessionEntry) -> WebSessionSummary {
+    let description = crate::session::session_display_description(&entry.meta);
     WebSessionSummary {
         session_id: entry.meta.session_id,
         cwd: entry.meta.cwd,
         created_at: entry.meta.created_at,
         turns: entry.meta.turns,
         tool_calls: entry.meta.tool_calls,
+        description,
         last_prompt_snippet: entry.meta.last_prompt_snippet,
         current: false,
     }
@@ -388,6 +391,7 @@ fn default_live_session_summary(state: &WebState) -> Result<WebSessionSummary, S
         created_at: chrono::Utc::now().to_rfc3339(),
         turns: session.turns,
         tool_calls: session.tool_calls,
+        description: "Current live session".to_string(),
         last_prompt_snippet: "Current live session".to_string(),
         current: true,
     })
@@ -879,6 +883,7 @@ pub async fn get_web_sessions() -> Result<Json<WebSessionListResponse>, StatusCo
             created_at: chrono::Utc::now().to_rfc3339(),
             turns: 0,
             tool_calls: 0,
+            description: "Current live session".to_string(),
             last_prompt_snippet: "Current live session".to_string(),
             current: true,
         },
@@ -911,6 +916,7 @@ pub async fn get_web_session(
                 .ok()
                 .map(|s| s.tool_calls)
                 .unwrap_or(0),
+            description: "Current live session".to_string(),
             last_prompt_snippet: "Current live session".to_string(),
             current: true,
         }

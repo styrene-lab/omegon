@@ -5676,14 +5676,24 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     }
 
     // Save session + profile
-    if !cli.no_session
-        && let Err(e) = session::save_session(
+    if !cli.no_session {
+        match session::save_session(
             &runtime_state.conversation,
             &agent.cwd,
             Some(agent.session_id.as_str()),
-        )
-    {
-        tracing::debug!("Session save failed: {e}");
+        ) {
+            Ok(path) => {
+                eprintln!(
+                    "Session saved: {}\nResume this session with: omegon --resume {}",
+                    agent.session_id,
+                    agent.session_id
+                );
+                tracing::debug!(path = %path.display(), session_id = %agent.session_id, "interactive session saved on exit");
+            }
+            Err(e) => {
+                tracing::debug!("Session save failed: {e}");
+            }
+        }
     }
     // Always persist profile on exit (captures thinking level changes, etc.)
     if let Ok(s) = shared_settings.lock() {
@@ -6984,7 +6994,21 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
                 &agent.cwd,
                 agent.resume_info.as_ref().map(|r| r.session_id.as_str()),
             ) {
-                Ok(path) => tracing::info!(path = %path.display(), "Session saved"),
+                Ok(path) => {
+                    let session_id = agent
+                        .resume_info
+                        .as_ref()
+                        .map(|r| r.session_id.as_str())
+                        .unwrap_or_else(|| {
+                            path.file_stem()
+                                .and_then(|stem| stem.to_str())
+                                .unwrap_or("latest")
+                        });
+                    eprintln!(
+                        "Session saved: {session_id}\nResume this session with: omegon --resume {session_id}"
+                    );
+                    tracing::info!(path = %path.display(), session_id, "Session saved");
+                }
                 Err(e) => tracing::debug!("Session save failed (non-fatal): {e}"),
             }
         }
@@ -7416,7 +7440,10 @@ fn list_sessions_message(cwd: &Path) -> String {
             .map(|s| {
                 format!(
                     "  {} — {} turns, {} tools — {}",
-                    s.meta.session_id, s.meta.turns, s.meta.tool_calls, s.meta.last_prompt_snippet
+                    s.meta.session_id,
+                    s.meta.turns,
+                    s.meta.tool_calls,
+                    session::session_display_description(&s.meta)
                 )
             })
             .collect();

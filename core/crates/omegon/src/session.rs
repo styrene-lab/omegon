@@ -19,6 +19,8 @@ pub struct SessionMeta {
     pub created_at: String, // ISO 8601
     pub turns: u32,
     pub tool_calls: u32,
+    #[serde(default)]
+    pub description: String,
     pub last_prompt_snippet: String,
 }
 
@@ -123,6 +125,9 @@ pub fn save_session(
         chrono_lite_timestamp().replace('T', " ").replace('-', ":")
     };
 
+    let last_prompt_snippet = truncate_snippet(conversation.last_user_prompt(), 80);
+    let description = session_description(&last_prompt_snippet, conversation.turn_count());
+
     // Build metadata
     let meta = SessionMeta {
         session_id: session_id.clone(),
@@ -130,7 +135,8 @@ pub fn save_session(
         created_at,
         turns: conversation.turn_count(),
         tool_calls: conversation.intent.stats.tool_calls,
-        last_prompt_snippet: truncate_snippet(conversation.last_user_prompt(), 80),
+        description,
+        last_prompt_snippet,
     };
 
     conversation.save_session(&path)?;
@@ -231,6 +237,29 @@ pub fn find_session(cwd: &Path, resume_arg: Option<&str>) -> Option<PathBuf> {
     }
 }
 
+pub fn session_display_description(meta: &SessionMeta) -> String {
+    let description = meta.description.trim();
+    if !description.is_empty() {
+        return description.to_string();
+    }
+    let snippet = meta.last_prompt_snippet.trim();
+    if !snippet.is_empty() {
+        return snippet.to_string();
+    }
+    format!("Session {}", meta.session_id)
+}
+
+fn session_description(last_prompt_snippet: &str, turns: u32) -> String {
+    let trimmed = last_prompt_snippet.trim();
+    if !trimmed.is_empty() {
+        trimmed.to_string()
+    } else if turns == 0 {
+        "Empty session".to_string()
+    } else {
+        format!("Session with {turns} turns")
+    }
+}
+
 fn truncate_snippet(s: &str, max: usize) -> String {
     let first_line = s.lines().next().unwrap_or(s);
     if first_line.len() <= max {
@@ -305,6 +334,7 @@ mod tests {
             created_at: "2026-03-18 14:22:03".into(),
             turns: 3,
             tool_calls: 12,
+            description: "Fix the auth bug".into(),
             last_prompt_snippet: "Fix the auth bug".into(),
         };
         let meta_path = path.with_extension("meta.json");
@@ -360,6 +390,7 @@ mod tests {
             created_at: "2026-03-18 14:22:03".into(),
             turns: 9,
             tool_calls: 2,
+            description: "missing snapshot".into(),
             last_prompt_snippet: "missing snapshot".into(),
         };
         fs::write(
@@ -387,6 +418,7 @@ mod tests {
                     created_at: "later".into(),
                     turns: 0,
                     tool_calls: 0,
+                    description: String::new(),
                     last_prompt_snippet: String::new(),
                 },
             },
@@ -398,6 +430,7 @@ mod tests {
                     created_at: "earlier".into(),
                     turns: 0,
                     tool_calls: 0,
+                    description: String::new(),
                     last_prompt_snippet: String::new(),
                 },
             },

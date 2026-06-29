@@ -137,6 +137,9 @@ pub enum ControlRequest {
     },
     NewSession,
     ListSessions,
+    ResumeSession {
+        id: String,
+    },
     AuthStatus,
     AuthUnlock,
     AuthLogin {
@@ -359,6 +362,9 @@ pub fn control_request_from_slash(
         }
         crate::tui::CanonicalSlashCommand::NewSession => ControlRequest::NewSession,
         crate::tui::CanonicalSlashCommand::ListSessions => ControlRequest::ListSessions,
+        crate::tui::CanonicalSlashCommand::ResumeSession(id) => {
+            ControlRequest::ResumeSession { id: id.clone() }
+        }
         crate::tui::CanonicalSlashCommand::AuthStatus => ControlRequest::AuthStatus,
         crate::tui::CanonicalSlashCommand::AuthLogin(provider) => ControlRequest::AuthLogin {
             provider: provider.clone(),
@@ -753,6 +759,9 @@ pub async fn execute_control(
             new_session_response(ctx.runtime_state, ctx.agent, ctx.cli, ctx.events_tx).await
         }
         ControlRequest::ListSessions => list_sessions_response(ctx.agent).await,
+        ControlRequest::ResumeSession { id } => {
+            resume_session_response(ctx.runtime_state, ctx.agent, ctx.cli, ctx.events_tx, &id).await
+        }
         ControlRequest::AuthLogin { provider } => {
             auth_login_response(
                 ctx.shared_settings,
@@ -887,7 +896,10 @@ pub fn list_sessions_message(cwd: &Path) -> String {
             .map(|s| {
                 format!(
                     "  {} — {} turns, {} tools — {}",
-                    s.meta.session_id, s.meta.turns, s.meta.tool_calls, s.meta.last_prompt_snippet
+                    s.meta.session_id,
+                    s.meta.turns,
+                    s.meta.tool_calls,
+                    session::session_display_description(&s.meta)
                 )
             })
             .collect();
@@ -2296,6 +2308,79 @@ pub async fn list_sessions_response(agent: &InteractiveAgentHost) -> SlashComman
     SlashCommandResponse {
         accepted: true,
         output: Some(list_sessions_message(&agent.cwd)),
+    }
+}
+
+pub async fn resume_session_response(
+    runtime_state: &mut InteractiveAgentState,
+    agent: &mut InteractiveAgentHost,
+    cli: &CliRuntimeView<'_>,
+    events_tx: &broadcast::Sender<AgentEvent>,
+    id: &str,
+) -> SlashCommandResponse {
+    let id = id.trim();
+    if id.is_empty() {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some("Usage: /resume <session-id>".to_string()),
+        };
+    }
+    if !cli.no_session {
+        let _ = session::save_session(
+            &runtime_state.conversation,
+            &agent.cwd,
+            Some(agent.session_id.as_str()),
+        );
+    }
+    let Some(path) = session::find_session(&agent.cwd, Some(id)) else {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "No saved session matches '{id}'. Use /sessions to list recent sessions."
+            )),
+        };
+    };
+    match crate::conversation::ConversationState::load_session(&path) {
+        Ok(conversation) => {
+            let meta_path = path.with_extension("meta.json");
+            let meta = std::fs::read_to_string(&meta_path)
+                .ok()
+                .and_then(|j| serde_json::from_str::<session::SessionMeta>(&j).ok());
+            let session_id = meta
+                .as_ref()
+                .map(|m| m.session_id.clone())
+                .or_else(|| {
+                    path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| id.to_string());
+            let description = meta
+                .as_ref()
+                .map(|m| session::session_display_description(m))
+                .unwrap_or_else(|| format!("Session {session_id}"));
+            agent.resume_info = meta.as_ref().map(|m| crate::setup::ResumeInfo {
+                session_id: m.session_id.clone(),
+                turns: m.turns,
+                description: description.clone(),
+                last_prompt_snippet: m.last_prompt_snippet.clone(),
+                created_at: m.created_at.clone(),
+            });
+            agent.session_id = session_id.clone();
+            runtime_state.conversation = conversation;
+            let _ = events_tx.send(AgentEvent::SessionReset);
+            SlashCommandResponse {
+                accepted: true,
+                output: Some(format!("Resumed session {session_id}: {description}")),
+            }
+        }
+        Err(error) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Failed to resume session '{}': {error}",
+                path.display()
+            )),
+        },
     }
 }
 

@@ -743,6 +743,7 @@ pub enum CanonicalSlashCommand {
     SetContextClass(crate::settings::ContextClass),
     NewSession,
     ListSessions,
+    ResumeSession(String),
     AuthStatus,
     AuthLogin(String),
     AuthLogout(String),
@@ -1063,6 +1064,13 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         }
         "new" if args.is_empty() => Some(CanonicalSlashCommand::ContextClear),
         "sessions" if args.is_empty() => Some(CanonicalSlashCommand::ListSessions),
+        "resume" if !args.is_empty() => {
+            Some(CanonicalSlashCommand::ResumeSession(args.to_string()))
+        }
+        "sessions" if let Some(id) = args.strip_prefix("resume ") => {
+            let id = id.trim();
+            (!id.is_empty()).then(|| CanonicalSlashCommand::ResumeSession(id.to_string()))
+        }
         "auth" => match args {
             "" | "status" => Some(CanonicalSlashCommand::AuthStatus),
             _ if args.starts_with("login ") => {
@@ -5353,6 +5361,19 @@ impl App {
                 } else {
                     format!("{} {grade}", glyphs.engine(EngineGlyphRole::GradeEmblem))
                 };
+                let profile_source = self.settings().profile_source;
+                let (profile_glyph, profile_label) = match profile_source {
+                    crate::settings::ProfileSource::Project(_) => {
+                        (glyphs.engine(EngineGlyphRole::ProfileProject), "project")
+                    }
+                    crate::settings::ProfileSource::User(_) => {
+                        (glyphs.engine(EngineGlyphRole::ProfileUser), "user")
+                    }
+                    crate::settings::ProfileSource::BuiltInDefault => {
+                        (glyphs.engine(EngineGlyphRole::ProfileDefault), "default")
+                    }
+                };
+                let profile_text = format!("{profile_glyph} {profile_label}");
                 let thinking_text = format!(
                     "{} {}",
                     glyphs.engine(EngineGlyphRole::Thinking),
@@ -5402,6 +5423,11 @@ impl App {
                         grade_text,
                         Style::default().fg(t.bg()).add_modifier(Modifier::BOLD),
                         grade_bg,
+                    ),
+                    (
+                        profile_text,
+                        Style::default().fg(t.fg()).add_modifier(Modifier::BOLD),
+                        thinking_bg,
                     ),
                     (
                         thinking_text,

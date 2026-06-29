@@ -918,6 +918,7 @@ async fn spawn_process_handles(
     manifest: &ExtensionManifest,
     ext_dir: &Path,
 ) -> Result<ProcessHandles> {
+    let extension_name = manifest.extension.name.clone();
     let mut child = match &manifest.runtime {
         RuntimeConfig::Native { .. } => {
             let binary = manifest.native_binary_path(ext_dir)?;
@@ -925,7 +926,7 @@ async fn spawn_process_handles(
             cmd.arg("--rpc")
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::piped())
                 .spawn()?
         }
         RuntimeConfig::Oci { .. } => {
@@ -938,14 +939,41 @@ async fn spawn_process_handles(
             cmd.arg(&image)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::piped())
                 .spawn()?
         }
     };
 
+    if let Some(stderr) = child.stderr.take() {
+        spawn_extension_stderr_drain(extension_name, stderr);
+    }
+
     let stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
     Ok(ProcessHandles::new(child, stdin, stdout))
+}
+
+fn spawn_extension_stderr_drain(extension_name: String, stderr: tokio::process::ChildStderr) {
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    let message = line.trim_end();
+                    if !message.is_empty() {
+                        tracing::debug!(extension = %extension_name, message, "extension stderr");
+                    }
+                }
+                Err(error) => {
+                    tracing::debug!(extension = %extension_name, %error, "failed to read extension stderr");
+                    break;
+                }
+            }
+        }
+    });
 }
 
 /// Run the extension handshake sequence on a single process:

@@ -23,6 +23,7 @@ use crate::tools;
 pub struct ResumeInfo {
     pub session_id: String,
     pub turns: u32,
+    pub description: String,
     pub last_prompt_snippet: String,
     pub created_at: String,
 }
@@ -1268,9 +1269,12 @@ impl AgentSetup {
                                     }
                                 }
 
+                                let description =
+                                    crate::session::session_display_description(&meta);
                                 resume_info = Some(ResumeInfo {
                                     session_id: meta.session_id,
                                     turns: meta.turns,
+                                    description,
                                     last_prompt_snippet: meta.last_prompt_snippet,
                                     created_at: meta.created_at,
                                 });

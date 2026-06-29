@@ -332,6 +332,10 @@ pub struct Settings {
     /// Tool display detail level.
     pub tool_detail: ToolDetail,
 
+    /// Source of the active persisted profile loaded for this runtime.
+    #[serde(skip)]
+    pub profile_source: ProfileSource,
+
     /// Provider preference order for routing. First = most preferred.
     #[serde(default)]
     pub provider_order: Vec<String>,
@@ -672,6 +676,7 @@ impl Default for Settings {
             context_class: ContextClass::from_tokens(context_window),
             requested_context_class: None,
             tool_detail: ToolDetail::Detailed,
+            profile_source: ProfileSource::BuiltInDefault,
             provider_order: Vec::new(),
             fallback_providers: Vec::new(),
             update_channel: default_update_channel(),
@@ -1038,10 +1043,11 @@ pub fn shared(model: &str) -> SharedSettings {
 
 /// Profile: settings that persist with the project in .omegon/profile.json.
 /// Read on startup, written on change. Travels with git.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum ProfileSource {
     Project(PathBuf),
     User(PathBuf),
+    #[default]
     BuiltInDefault,
 }
 
