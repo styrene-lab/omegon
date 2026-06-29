@@ -468,6 +468,7 @@ mod tests {
             failure_kind: None,
             tasks: Vec::new(),
             tasks_done: 2,
+            result_viewed: false,
         }
     }
 
@@ -640,6 +641,7 @@ mod tests {
             running: 1,
             completed: 1,
             failed: 0,
+            pending_results: 1,
             children: vec![
                 delegate_child("scout-mod", "running"),
                 delegate_child("scout-tests", "completed"),
@@ -666,6 +668,7 @@ mod tests {
             running: 1,
             completed: 0,
             failed: 0,
+            pending_results: 0,
             children: vec![delegate_child("deleg-a", "running")],
         })));
         state.handles.cleave = Some(Arc::new(Mutex::new(CleaveProgress {

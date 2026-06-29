@@ -4477,47 +4477,6 @@ impl App {
             .await;
     }
 
-    async fn dispatch_next_queued_prompt(&mut self, command_tx: &mpsc::Sender<TuiCommand>) {
-        if self.agent_active || self.should_quit {
-            return;
-        }
-        let Some(queued) = self.queued_prompts.pop_front() else {
-            return;
-        };
-        let text = queued.text;
-        let attachments = queued.attachments;
-        let metadata = queued.metadata;
-        let queue_mode = queued.queue_mode;
-        let meta = segment_meta_from_prompt_metadata(&metadata);
-        if attachments.is_empty() {
-            self.conversation.push_user_with_meta(&text, meta);
-        } else {
-            self.conversation
-                .push_user_with_attachments_and_meta(&text, &attachments, meta);
-        }
-        self.history.push(text.clone());
-        self.exit_history_recall();
-        self.agent_active = true;
-        if let Ok(mut ss) = self.dashboard_handles.session.lock() {
-            ss.busy = true;
-        }
-        let image_paths = if attachments.is_empty() {
-            Vec::new()
-        } else {
-            attachments
-        };
-        let _ = command_tx
-            .send(TuiCommand::SubmitPrompt(PromptSubmission {
-                text,
-                image_paths,
-                submitted_by: "local-tui".to_string(),
-                via: "tui",
-                queue_mode,
-                metadata,
-            }))
-            .await;
-    }
-
     fn suppress_editor_input_for(&mut self, duration: Duration) {
         self.suppress_editor_input_until = Some(std::time::Instant::now() + duration);
     }
@@ -11011,82 +10970,70 @@ pub async fn run_tui(
                                 .await;
                         }
                         (KeyCode::Left, KeyModifiers::ALT) => {
-                            if matches!(app.pane_focus, PaneFocus::Editor) {
-                                let _ = app
-                                    .handle_ui_action(
-                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
-                                            direction: ComposerCursorDirection::Backward,
-                                            unit: ComposerCursorUnit::Word,
-                                        }),
-                                        &command_tx,
-                                    )
-                                    .await;
-                            }
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                        direction: ComposerCursorDirection::Backward,
+                                        unit: ComposerCursorUnit::Word,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Right, KeyModifiers::ALT) => {
-                            if matches!(app.pane_focus, PaneFocus::Editor) {
-                                let _ = app
-                                    .handle_ui_action(
-                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
-                                            direction: ComposerCursorDirection::Forward,
-                                            unit: ComposerCursorUnit::Word,
-                                        }),
-                                        &command_tx,
-                                    )
-                                    .await;
-                            }
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                        direction: ComposerCursorDirection::Forward,
+                                        unit: ComposerCursorUnit::Word,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Left, _) => {
-                            if matches!(app.pane_focus, PaneFocus::Editor) {
-                                let _ = app
-                                    .handle_ui_action(
-                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
-                                            direction: ComposerCursorDirection::Backward,
-                                            unit: ComposerCursorUnit::Character,
-                                        }),
-                                        &command_tx,
-                                    )
-                                    .await;
-                            }
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                        direction: ComposerCursorDirection::Backward,
+                                        unit: ComposerCursorUnit::Character,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Right, _) => {
-                            if matches!(app.pane_focus, PaneFocus::Editor) {
-                                let _ = app
-                                    .handle_ui_action(
-                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
-                                            direction: ComposerCursorDirection::Forward,
-                                            unit: ComposerCursorUnit::Character,
-                                        }),
-                                        &command_tx,
-                                    )
-                                    .await;
-                            }
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                        direction: ComposerCursorDirection::Forward,
+                                        unit: ComposerCursorUnit::Character,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::Home, _) => {
-                            if matches!(app.pane_focus, PaneFocus::Editor) {
-                                let _ = app
-                                    .handle_ui_action(
-                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
-                                            direction: ComposerCursorDirection::Home,
-                                            unit: ComposerCursorUnit::Line,
-                                        }),
-                                        &command_tx,
-                                    )
-                                    .await;
-                            }
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                        direction: ComposerCursorDirection::Home,
+                                        unit: ComposerCursorUnit::Line,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
                         (KeyCode::End, _) => {
-                            if matches!(app.pane_focus, PaneFocus::Editor) {
-                                let _ = app
-                                    .handle_ui_action(
-                                        UiAction::MoveComposerCursor(MoveComposerCursorAction {
-                                            direction: ComposerCursorDirection::End,
-                                            unit: ComposerCursorUnit::Line,
-                                        }),
-                                        &command_tx,
-                                    )
-                                    .await;
-                            }
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::MoveComposerCursor(MoveComposerCursorAction {
+                                        direction: ComposerCursorDirection::End,
+                                        unit: ComposerCursorUnit::Line,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                         }
 
                         // ── Scrolling ────────────────────────────────

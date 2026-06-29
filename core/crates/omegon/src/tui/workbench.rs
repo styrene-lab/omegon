@@ -1313,6 +1313,7 @@ mod tests {
             }),
             result_summary: None,
             failure: None,
+            result_viewed: true,
         };
 
         let row = WorkerChromeRowProjection::from_operation_child(&child);
@@ -1346,6 +1347,7 @@ mod tests {
                 message: Some("validator failed".into()),
                 recoverable: true,
             }),
+            result_viewed: true,
         };
 
         let row = WorkerChromeRowProjection::from_operation_child(&child);
