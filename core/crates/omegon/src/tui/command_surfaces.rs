@@ -45,6 +45,7 @@ pub fn render_prompt(area: Rect, buf: &mut Buffer, theme: &dyn Theme, prompt: &C
         severity: prompt.severity,
         copyable: false,
         scroll: 0,
+        return_target: None,
     };
     render_panel(area, buf, theme, &panel);
 }
@@ -63,10 +64,11 @@ pub fn render_panel(area: Rect, buf: &mut Buffer, theme: &dyn Theme, panel: &Com
         CommandSeverity::Warning => theme.warning(),
         CommandSeverity::Error => theme.error(),
     };
-    let footer = if panel.copyable {
-        " Esc close · ^Y copy "
-    } else {
-        " Esc close "
+    let footer = match (panel.copyable, panel.return_target) {
+        (true, Some(target)) => format!(" Esc back to {} · q close · ^Y copy ", target.label()),
+        (false, Some(target)) => format!(" Esc back to {} · q close ", target.label()),
+        (true, None) => " Esc close · ^Y copy ".to_string(),
+        (false, None) => " Esc close ".to_string(),
     };
     let block = Block::default()
         .borders(Borders::ALL)

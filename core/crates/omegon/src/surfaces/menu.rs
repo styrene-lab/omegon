@@ -79,6 +79,7 @@ pub struct MenuActionProjection {
     pub label: String,
     pub key: Option<String>,
     pub command: Option<String>,
+    pub target_row_id: Option<String>,
     pub requires_confirmation: bool,
 }
 
@@ -92,6 +93,78 @@ impl MenuProjection {
             actions: Vec::new(),
             footer: None,
         }
+    }
+
+
+    pub fn render_markdown(&self) -> String {
+        let mut out = format!("## {}\n", self.title);
+        if let Some(summary) = self.summary.as_deref().filter(|summary| !summary.is_empty()) {
+            out.push_str("\n");
+            out.push_str(summary);
+            out.push_str("\n");
+        }
+
+        for tab in &self.tabs {
+            if self.tabs.len() > 1 {
+                out.push_str("\n### ");
+                out.push_str(&tab.label);
+                out.push_str("\n");
+            }
+            for group in &tab.groups {
+                out.push_str("\n### ");
+                out.push_str(&group.label);
+                out.push_str("\n");
+                if let Some(description) = group.description.as_deref().filter(|value| !value.is_empty()) {
+                    out.push_str(description);
+                    out.push_str("\n");
+                }
+                for row in &group.rows {
+                    out.push_str("- `");
+                    out.push_str(&row.label);
+                    out.push('`');
+                    if let Some(value) = row.value.as_deref().filter(|value| !value.is_empty()) {
+                        out.push_str(" — ");
+                        out.push_str(value);
+                    }
+                    let badges = row.badges.iter().map(|badge| badge.label.as_str());
+                    let metadata = row.metadata.iter().map(String::as_str);
+                    let extras: Vec<&str> = badges.chain(metadata).collect();
+                    if !extras.is_empty() {
+                        out.push_str(" · ");
+                        out.push_str(&extras.join(" · "));
+                    }
+                    if let Some(command) = row.primary_action.as_ref().and_then(|action| action.command.as_deref()) {
+                        out.push_str(" · Enter: `");
+                        out.push_str(command);
+                        out.push('`');
+                    }
+                    for action in &row.actions {
+                        if let Some(command) = action.command.as_deref() {
+                            out.push_str(" · ");
+                            if let Some(key) = action.key.as_deref() {
+                                out.push_str(key);
+                                out.push_str(": ");
+                            }
+                            out.push('`');
+                            out.push_str(command);
+                            out.push('`');
+                        }
+                    }
+                    if !row.description.is_empty() {
+                        out.push_str("\n  ");
+                        out.push_str(&row.description);
+                    }
+                    out.push_str("\n");
+                }
+            }
+        }
+
+        if let Some(footer) = self.footer.as_deref().filter(|footer| !footer.is_empty()) {
+            out.push_str("\n");
+            out.push_str(footer);
+            out.push_str("\n");
+        }
+        out
     }
 
     pub fn from_palette(id: impl Into<String>, palette: PaletteProjection) -> Self {
@@ -212,6 +285,7 @@ impl MenuActionProjection {
             label: label.into(),
             key: None,
             command: Some(command.into()),
+            target_row_id: None,
             requires_confirmation: false,
         }
     }

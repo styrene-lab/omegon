@@ -118,7 +118,6 @@ use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
 use self::layout_projection::{TuiLayoutInputs, plan_tui_layout};
 use self::menu_surface::{ActiveMenu, MenuMode};
-use crate::surfaces::menu::MenuProjection;
 use self::permission_lane::{format_permission_prompt, permission_response_for_key};
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode};
 use self::settings_menu::SelectorKind;
@@ -130,7 +129,8 @@ use self::workbench::{
     workbench_preferred_height,
 };
 use crate::surfaces::command::{
-    CommandPanel, CommandPrompt, CommandPromptAction, CommandSeverity, CommandToast,
+    CommandPanel, CommandPanelReturnTarget, CommandPrompt, CommandPromptAction, CommandSeverity,
+    CommandToast,
 };
 use crate::surfaces::layout::UiSurfaces;
 use crate::surfaces::operations::OperationMilestoneProjection;
@@ -547,8 +547,6 @@ struct App {
     selector: Option<selector::Selector>,
     /// What the selector is for — determines what happens on confirm.
     selector_kind: Option<SelectorKind>,
-    /// Persistent settings screen state backed by the shared settings surface projection.
-    settings_screen: Option<settings_menu::SettingsScreen>,
     /// Active structured menu popup for command inventories such as /skills.
     active_menu: Option<ActiveMenu>,
     /// Active @-file picker popup.
@@ -753,6 +751,7 @@ pub enum CanonicalSlashCommand {
     AuthLogin(String),
     AuthLogout(String),
     SkillsView,
+    SkillsHelp,
     SkillsReload,
     SkillsInstall(Option<String>),
     SkillCreate(Option<SkillCreateScope>),
@@ -1095,6 +1094,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "skills" | "skill" => {
             if args.is_empty() || args == "list" {
                 Some(CanonicalSlashCommand::SkillsView)
+            } else if matches!(args, "--help" | "help" | "-h") {
+                Some(CanonicalSlashCommand::SkillsHelp)
             } else if matches!(args, "reload" | "refresh") {
                 Some(CanonicalSlashCommand::SkillsReload)
             } else if args == "install" {
@@ -2193,7 +2194,6 @@ impl App {
             command_prompt: None,
             selector: None,
             selector_kind: None,
-            settings_screen: None,
             active_menu: None,
             at_picker: None,
             last_tool_name: None,
@@ -2416,6 +2416,48 @@ impl App {
         self.selector_kind = Some(SelectorKind::Model);
     }
 
+    fn open_model_grade_selector(&mut self) {
+        let current = self
+            .active_menu
+            .as_ref()
+            .and_then(|menu| menu.projection.tabs.iter().flat_map(|tab| tab.groups.iter()).flat_map(|group| group.rows.iter()).find(|row| row.id == "model.grade"))
+            .and_then(|row| row.value.as_deref())
+            .unwrap_or("B");
+        self.selector = Some(selector::Selector::new(
+            "Select Model Grade",
+            settings_menu::model_grade_selector_options(current),
+        ));
+        self.selector_kind = Some(SelectorKind::ModelGrade);
+    }
+
+    fn open_model_provider_selector(&mut self) {
+        let current = self
+            .active_menu
+            .as_ref()
+            .and_then(|menu| menu.projection.tabs.iter().flat_map(|tab| tab.groups.iter()).flat_map(|group| group.rows.iter()).find(|row| row.id == "model.provider"))
+            .and_then(|row| row.value.as_deref())
+            .unwrap_or("auto");
+        self.selector = Some(selector::Selector::new(
+            "Select Provider Intent",
+            settings_menu::model_provider_selector_options(current),
+        ));
+        self.selector_kind = Some(SelectorKind::ModelProvider);
+    }
+
+    fn open_model_policy_selector(&mut self) {
+        let current = self
+            .active_menu
+            .as_ref()
+            .and_then(|menu| menu.projection.tabs.iter().flat_map(|tab| tab.groups.iter()).flat_map(|group| group.rows.iter()).find(|row| row.id == "model.policy"))
+            .and_then(|row| row.value.as_deref())
+            .unwrap_or("minimum");
+        self.selector = Some(selector::Selector::new(
+            "Select Routing Policy",
+            settings_menu::model_policy_selector_options(current),
+        ));
+        self.selector_kind = Some(SelectorKind::ModelPolicy);
+    }
+
     fn open_thinking_selector(&mut self) {
         let current = self.settings().thinking;
         let options = settings_menu::thinking_selector_options(current);
@@ -2599,9 +2641,126 @@ impl App {
         )
     }
 
+    fn open_menu_projection(&mut self, projection: crate::surfaces::menu::MenuProjection) {
+        self.active_menu = Some(ActiveMenu::new(projection));
+        self.command_panel = None;
+        self.command_prompt = None;
+    }
+
     fn open_settings_screen(&mut self) {
-        let projection = self.settings_projection();
-        self.settings_screen = Some(settings_menu::SettingsScreen::from_projection(&projection));
+        self.open_menu_projection(self.settings_menu_projection());
+    }
+
+    fn open_command_inventory_menu(&mut self) {
+        let mut projection = crate::surfaces::menu::MenuProjection::from_command_menu(
+            "commands",
+            "Commands",
+            self.command_menu_projection(),
+        );
+        projection.summary = Some(
+            "Slash command inventory. Enter runs the selected command; / filters by command, metadata, or subcommand."
+                .into(),
+        );
+        projection.footer = Some(
+            "↑/↓ navigate · / filter · Enter run · Esc close · /help all for text readout".into(),
+        );
+        self.open_menu_projection(projection);
+    }
+
+    fn settings_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
+        };
+        use crate::surfaces::settings::{
+            SettingsEditorProjection, SettingsStatusProjection,
+        };
+
+        let settings = self.settings_projection();
+        let settings_snapshot = self.settings();
+        let loaded_profile = crate::settings::Profile::load_with_source(self.cwd());
+        let profile_drift = crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
+            &loaded_profile.profile,
+            loaded_profile.source,
+            &settings_snapshot,
+        );
+        let profile_source_line = settings_profile_source_line(&profile_drift.source);
+        let drift_line = if profile_drift.changed_count > 0 {
+            format!(
+                "{profile_source_line} · runtime drift: Δ{} · /profile save or /profile apply",
+                profile_drift.changed_count
+            )
+        } else {
+            format!("{profile_source_line} · runtime drift: clean")
+        };
+        let mut menu = MenuProjection::new("settings", "Settings");
+        menu.summary = Some(format!(
+            "Runtime, workspace, profile, and update settings. Enter edits the selected row.\n{drift_line}"
+        ));
+        menu.footer = Some("↑/↓ navigate · Tab switch tabs · / filter · Enter edit · s save profile · a apply profile · Esc close".into());
+        menu.tabs = settings
+            .tabs
+            .into_iter()
+            .map(|tab| MenuTabProjection {
+                id: tab.id.clone(),
+                label: tab.label.clone(),
+                groups: vec![MenuGroupProjection {
+                    id: format!("settings.{}", tab.id),
+                    label: tab.label,
+                    description: None,
+                    rows: tab
+                        .rows
+                        .into_iter()
+                        .map(|row| {
+                            let tone = match row.status {
+                                SettingsStatusProjection::Normal => MenuBadgeTone::Neutral,
+                                SettingsStatusProjection::Warning => MenuBadgeTone::Warning,
+                                SettingsStatusProjection::Error => MenuBadgeTone::Danger,
+                                SettingsStatusProjection::Disabled => MenuBadgeTone::Info,
+                            };
+                            let editor = match row.editor {
+                                SettingsEditorProjection::Choice => "choice",
+                                SettingsEditorProjection::Toggle => "toggle",
+                                SettingsEditorProjection::Text => "text",
+                                SettingsEditorProjection::Number => "number",
+                                SettingsEditorProjection::Action => "action",
+                                SettingsEditorProjection::ReadOnly => "read only",
+                            };
+                            let mut metadata = vec![row.persistence.label().to_string(), editor.to_string()];
+                            if let Some(profile) = row.profile {
+                                metadata.push(format!("profile: {}", profile.profile_value));
+                            }
+                            MenuRowProjection {
+                                id: row.id,
+                                label: row.label,
+                                description: row.description,
+                                value: Some(row.value),
+                                kind: MenuRowKind::Object,
+                                badges: vec![MenuBadgeProjection { label: format!("{:?}", row.status).to_lowercase(), tone }],
+                                metadata,
+                                primary_action: None,
+                                actions: Vec::new(),
+                                safety: None,
+                                availability: None,
+                            }
+                        })
+                        .collect(),
+                }],
+            })
+            .collect();
+        menu.actions = vec![
+            {
+                let mut action = MenuActionProjection::command("settings.save", "Save profile", "/profile save");
+                action.key = Some("s".into());
+                action
+            },
+            {
+                let mut action = MenuActionProjection::command("settings.apply", "Apply profile", "/profile apply");
+                action.key = Some("a".into());
+                action
+            },
+        ];
+        menu
     }
 
     fn open_skills_menu(&mut self) -> Result<(), String> {
@@ -2610,11 +2769,8 @@ impl App {
         if entries.is_empty() {
             return Err("No skills found. Run /skills install to install bundled skills.".into());
         }
-        let palette = crate::control_runtime::skills_palette_projection(&entries);
-        let projection = MenuProjection::from_palette("skills", palette);
-        self.active_menu = Some(ActiveMenu::new(projection));
-        self.command_panel = None;
-        self.command_prompt = None;
+        let projection = crate::control_runtime::skills_menu_projection(&entries);
+        self.open_menu_projection(projection);
         Ok(())
     }
 
@@ -2642,12 +2798,164 @@ impl App {
         ));
     }
 
-    fn open_selected_settings_row(&mut self) {
-        let Some(screen) = self.settings_screen.as_ref() else {
-            return;
+    fn execute_active_menu_command(
+        &mut self,
+        command: String,
+        tx: &mpsc::Sender<TuiCommand>,
+    ) -> SlashResult {
+        match self.handle_slash_command(&command, tx) {
+            SlashResult::Display(response) => {
+                self.history.push(command.clone());
+                self.exit_history_recall();
+                self.open_command_panel(
+                    CommandPanel::from_slash(&command, response).with_return_target(CommandPanelReturnTarget::Menu),
+                );
+                SlashResult::Handled
+            }
+            SlashResult::Handled => {
+                self.active_menu = None;
+                self.history.push(command);
+                self.exit_history_recall();
+                SlashResult::Handled
+            }
+            SlashResult::Quit => {
+                self.active_menu = None;
+                self.history.push(command);
+                self.exit_history_recall();
+                self.should_quit = true;
+                SlashResult::Quit
+            }
+            SlashResult::NotACommand => SlashResult::Handled,
+        }
+    }
+
+
+    fn open_model_menu(&mut self) {
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
         };
+
+        let settings = self.settings();
+        let selected_model = settings.model.clone();
+        let intent = crate::route::ModelIntent::pinned_model(selected_model.clone());
+        let grade_value = intent
+            .grade
+            .as_ref()
+            .map(crate::route::ModelGrade::as_str)
+            .unwrap_or("auto")
+            .to_string();
+        let provider_value = match &intent.provider_selection {
+            crate::route::ProviderSelection::Auto => "auto".to_string(),
+            crate::route::ProviderSelection::Local => "local".to_string(),
+            crate::route::ProviderSelection::Upstream => "upstream".to_string(),
+            crate::route::ProviderSelection::Endpoint(endpoint) => endpoint.clone(),
+        };
+        let policy_value = match &intent.grade_policy {
+            crate::route::GradePolicy::Exact => "exact".to_string(),
+            crate::route::GradePolicy::Minimum => "minimum".to_string(),
+            crate::route::GradePolicy::NearestAllowed { .. } => "nearest".to_string(),
+        };
+        let mut menu = MenuProjection::new("model", "Model");
+        menu.summary = Some(format!(
+            "Current model: {selected_model}. Enter opens the provider/model selector; use row actions to route intent."
+        ));
+        menu.footer = Some("↑/↓ navigate · Enter choose model · g grade · p provider · o policy · u unpin · / filter · Esc close".into());
+        menu.tabs = vec![MenuTabProjection {
+            id: "routing".into(),
+            label: "Routing".into(),
+            groups: vec![MenuGroupProjection {
+                id: "model.routing".into(),
+                label: "Routing".into(),
+                description: Some("Model routing intents and exact pin controls.".into()),
+                rows: vec![
+                    MenuRowProjection {
+                        id: "model.current".into(),
+                        label: "Current model".into(),
+                        description: "Open the model selector to choose an exact provider:model route.".into(),
+                        value: Some(selected_model),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "active".into(), tone: MenuBadgeTone::Success }],
+                        metadata: vec!["selector".into(), "exact model".into()],
+                        primary_action: None,
+                        actions: vec![
+                            { let mut action = MenuActionProjection::command("model.current.grade", "Grade row", "/model grade S"); action.key = Some("g".into()); action.target_row_id = Some("model.grade".into()); action },
+                            { let mut action = MenuActionProjection::command("model.current.provider", "Provider row", "/model provider auto"); action.key = Some("p".into()); action.target_row_id = Some("model.provider".into()); action },
+                            { let mut action = MenuActionProjection::command("model.current.policy", "Policy row", "/model policy exact"); action.key = Some("o".into()); action.target_row_id = Some("model.policy".into()); action },
+                        ],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "model.grade".into(),
+                        label: "Model grade".into(),
+                        description: "Set model quality intent: F, D, C, B, A, or S.".into(),
+                        value: Some(grade_value),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "intent".into(), tone: MenuBadgeTone::Info }],
+                        metadata: vec!["/model grade <F|D|C|B|A|S>".into()],
+                        primary_action: None,
+                        actions: vec![{ let mut action = MenuActionProjection::command("model.grade.action", "Choose grade", "/model grade S"); action.command = None; action.key = Some("g".into()); action.target_row_id = Some("model.grade".into()); action }],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "model.provider".into(),
+                        label: "Provider intent".into(),
+                        description: "Set provider intent: auto, local, upstream, or endpoint.".into(),
+                        value: Some(provider_value),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "intent".into(), tone: MenuBadgeTone::Info }],
+                        metadata: vec!["/model provider <auto|local|upstream|endpoint>".into()],
+                        primary_action: None,
+                        actions: vec![{ let mut action = MenuActionProjection::command("model.provider.action", "Choose provider", "/model provider auto"); action.command = None; action.key = Some("p".into()); action.target_row_id = Some("model.provider".into()); action }],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "model.policy".into(),
+                        label: "Routing policy".into(),
+                        description: "Set routing policy: exact, minimum, or nearest.".into(),
+                        value: Some(policy_value),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "policy".into(), tone: MenuBadgeTone::Neutral }],
+                        metadata: vec!["/model policy <exact|minimum|nearest>".into()],
+                        primary_action: None,
+                        actions: vec![{ let mut action = MenuActionProjection::command("model.policy.action", "Choose policy", "/model policy exact"); action.command = None; action.key = Some("o".into()); action.target_row_id = Some("model.policy".into()); action }],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "model.unpin".into(),
+                        label: "Clear exact pin".into(),
+                        description: "Clear the exact model pin and route by current intent.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "action".into(), tone: MenuBadgeTone::Warning }],
+                        metadata: vec!["/model unpin".into()],
+                        primary_action: Some(MenuActionProjection::command("model.unpin.primary", "Unpin", "/model unpin")),
+                        actions: vec![{ let mut action = MenuActionProjection::command("model.unpin.action", "Unpin", "/model unpin"); action.key = Some("u".into()); action }],
+                        safety: None,
+                        availability: None,
+                    },
+                ],
+            }],
+        }];
+        self.open_menu_projection(menu);
+    }
+
+    fn open_selected_settings_row(&mut self) {
         let projection = self.settings_projection();
-        let Some(row) = screen.selected_row(&projection) else {
+        let selected_id = self
+            .active_menu
+            .as_ref()
+            .filter(|menu| menu.projection.id == "settings")
+            .and_then(|menu| menu.state.selected_row(&menu.projection))
+            .map(|row| row.row.id.clone());
+        let Some(row) = selected_id
+            .as_deref()
+            .and_then(|id| projection.tabs.iter().flat_map(|tab| tab.rows.iter()).find(|row| row.id == id))
+        else {
             self.show_command_toast(CommandToast::new(
                 "No settings row selected",
                 CommandSeverity::Warning,
@@ -2955,6 +3263,27 @@ impl App {
                     respond_to: None,
                 });
                 Some(format!("Switching model → {value}"))
+            }
+            SelectorKind::ModelGrade => {
+                let _ = tx.try_send(TuiCommand::SetModelGrade {
+                    grade: value.clone(),
+                    respond_to: None,
+                });
+                Some(format!("Switching Model Intent → grade {value}"))
+            }
+            SelectorKind::ModelProvider => {
+                let _ = tx.try_send(TuiCommand::SetModelProvider {
+                    provider: value.clone(),
+                    respond_to: None,
+                });
+                Some(format!("Switching Model Provider Intent → {value}"))
+            }
+            SelectorKind::ModelPolicy => {
+                let _ = tx.try_send(TuiCommand::SetModelPolicy {
+                    policy: value.clone(),
+                    respond_to: None,
+                });
+                Some(format!("Switching Model Policy Intent → {value}"))
             }
             SelectorKind::ThinkingLevel => {
                 let outcome = settings_menu::apply_thinking_selection(&value);
@@ -4584,138 +4913,6 @@ impl App {
         footer_cols[0].union(footer_cols[2])
     }
 
-    fn render_settings_screen(&self, area: Rect, frame: &mut Frame) {
-        let settings = self.settings();
-        let loaded_profile = crate::settings::Profile::load_with_source(self.cwd());
-        let profile_drift =
-            crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
-                &loaded_profile.profile,
-                loaded_profile.source.clone(),
-                &settings,
-            );
-        let projection =
-            crate::surfaces::settings::SettingsSurfaceProjection::from_settings_with_profile_drift(
-                &settings,
-                Some(&profile_drift),
-            );
-        let Some(screen) = self.settings_screen.as_ref() else {
-            return;
-        };
-        let rows = screen.active_rows(&projection);
-        let search_line = if screen.filter.is_empty() {
-            "search: / to filter settings".to_string()
-        } else {
-            format!("search: {}", screen.filter)
-        };
-        let tab_line = projection
-            .tabs
-            .iter()
-            .map(|tab| {
-                if tab.id == screen.active_tab {
-                    format!("[{}]", tab.label)
-                } else {
-                    format!(" {} ", tab.label)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("  ");
-        let profile_source_line = settings_profile_source_line(&profile_drift.source);
-        // TODO(settings): add a selectable button/action for opening the active profile file.
-        let drift_line = if profile_drift.dirty {
-            format!(
-                "{profile_source_line} · runtime drift: Δ{} · /profile save or /profile apply",
-                profile_drift.changed_count
-            )
-        } else {
-            format!("{profile_source_line} · runtime drift: clean")
-        };
-        let mut lines = vec![
-            ratatui::text::Line::from(ratatui::text::Span::styled(
-                "Settings",
-                ratatui::style::Style::default()
-                    .fg(self.theme.accent())
-                    .add_modifier(ratatui::style::Modifier::BOLD),
-            )),
-            ratatui::text::Line::from(ratatui::text::Span::styled(
-                drift_line,
-                ratatui::style::Style::default().fg(self.theme.muted()),
-            )),
-            ratatui::text::Line::from(ratatui::text::Span::styled(
-                tab_line,
-                ratatui::style::Style::default().fg(self.theme.muted()),
-            )),
-            ratatui::text::Line::from(ratatui::text::Span::styled(
-                search_line,
-                ratatui::style::Style::default().fg(
-                    if screen.mode == settings_menu::SettingsScreenMode::Search {
-                        self.theme.accent_bright()
-                    } else {
-                        self.theme.dim()
-                    },
-                ),
-            )),
-            ratatui::text::Line::from(""),
-        ];
-        for (idx, row) in rows.iter().enumerate() {
-            let marker = if idx == screen.selected_row {
-                "›"
-            } else {
-                " "
-            };
-            lines.push(ratatui::text::Line::from(vec![
-                ratatui::text::Span::raw(format!("{marker} ")),
-                ratatui::text::Span::styled(
-                    format!("{:<18}", row.label),
-                    ratatui::style::Style::default().fg(self.theme.fg()),
-                ),
-                ratatui::text::Span::styled(
-                    row.value.clone(),
-                    ratatui::style::Style::default().fg(self.theme.accent_bright()),
-                ),
-            ]));
-            let profile_note = row
-                .profile
-                .as_ref()
-                .map(|profile| {
-                    format!(
-                        " · profile {} → live {} ({})",
-                        profile.profile_value,
-                        profile.runtime_value,
-                        row.persistence.label()
-                    )
-                })
-                .unwrap_or_default();
-            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
-                format!("    {}{}", row.description, profile_note),
-                ratatui::style::Style::default().fg(self.theme.muted()),
-            )));
-        }
-        lines.push(ratatui::text::Line::from(""));
-        lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
-            if screen.mode == settings_menu::SettingsScreenMode::Search {
-                "type to filter · Backspace edit · Esc browse · Enter edit"
-            } else if screen.filter.is_empty() {
-                "↑/↓ navigate · Tab category · / search · Enter edit · s /profile save · a /profile apply · Esc close"
-            } else {
-                "↑/↓ navigate · Tab category · / edit search · Esc clear filter · Enter edit"
-            },
-            ratatui::style::Style::default().fg(self.theme.dim()),
-        )));
-
-        let popup = command_surfaces::command_modal_area(area);
-        let block = ratatui::widgets::Block::default()
-            .borders(ratatui::widgets::Borders::ALL)
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(self.theme.style_border())
-            .title(" settings ");
-        let paragraph = ratatui::widgets::Paragraph::new(lines)
-            .block(block)
-            .wrap(ratatui::widgets::Wrap { trim: true });
-
-        frame.render_widget(ratatui::widgets::Clear, popup);
-        frame.render_widget(paragraph, popup);
-    }
-
     fn draw(&mut self, frame: &mut Frame) {
         self.refresh_at_picker();
         let area = frame.area();
@@ -5557,10 +5754,6 @@ impl App {
             picker.render(area, frame, t.as_ref());
         }
 
-        if self.settings_screen.is_some() {
-            self.render_settings_screen(area, frame);
-        }
-
         if let Some(menu) = &self.active_menu {
             menu_surface::render_menu_surface(
                 frame,
@@ -6202,6 +6395,19 @@ impl App {
         self.command_panel = Some(panel);
     }
 
+    fn close_command_panel_to_return_target(&mut self) {
+        self.command_panel = None;
+    }
+
+    fn close_command_panel_stack(&mut self) {
+        let return_target = self.command_panel.as_ref().and_then(|panel| panel.return_target);
+        self.command_panel = None;
+        match return_target {
+            Some(CommandPanelReturnTarget::Menu) => self.active_menu = None,
+            None => {}
+        }
+    }
+
     fn show_command_toast(&mut self, toast: CommandToast) {
         let toast_type = match toast.severity {
             CommandSeverity::Info => ratatui_toaster::ToastType::Info,
@@ -6377,6 +6583,11 @@ Scroll transcript:
                     return self.handle_tutorial_prev(tx);
                 }
 
+                if args.is_empty() || matches!(args, "menu" | "commands") {
+                    self.open_command_inventory_menu();
+                    return SlashResult::Handled;
+                }
+
                 let show_all = args == "all";
                 let slim = !show_all && self.settings.lock().ok().is_some_and(|s| s.is_slim());
                 // Harness-lifecycle commands hidden in slim/Cruise zone.
@@ -6434,8 +6645,8 @@ Scroll transcript:
             },
 
             "model" => {
-                if args.is_empty() {
-                    self.open_model_selector();
+                if args.is_empty() || args == "route" {
+                    self.open_model_menu();
                     SlashResult::Handled
                 } else {
                     match canonical_slash_command("model", args) {
@@ -6565,12 +6776,18 @@ Scroll transcript:
 
             "skills" | "skill" => {
                 const USAGE: &str = "Usage: /skills [list|reload|refresh|install [name|skills/name]|create|new [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]";
+                if cmd == "skill" && args.trim().is_empty() {
+                    return SlashResult::Display("Usage: /skill <skills-subcommand>\nAlias for /skills. Run /skills for the active skills menu or /skills --help for command syntax.".into());
+                }
                 if let Some(command) = canonical_slash_command("skills", args) {
                     match command {
                         CanonicalSlashCommand::SkillsView => match self.open_skills_menu() {
                             Ok(()) => SlashResult::Handled,
                             Err(message) => SlashResult::Display(message),
                         },
+                        CanonicalSlashCommand::SkillsHelp => {
+                            SlashResult::Display(crate::control_runtime::skills_help_text().into())
+                        }
                         CanonicalSlashCommand::SkillsReload => {
                             let cwd = self.cwd().to_path_buf();
                             if let Some(ref mut registry) = self.augment_registry {
@@ -10219,7 +10436,11 @@ pub async fn run_tui(
                     if let Some(panel) = app.command_panel.as_mut() {
                         match (key.code, key.modifiers) {
                             (KeyCode::Esc, _) => {
-                                app.command_panel = None;
+                                app.close_command_panel_to_return_target();
+                                continue;
+                            }
+                            (KeyCode::Char('q'), _) if panel.return_target.is_some() => {
+                                app.close_command_panel_stack();
                                 continue;
                             }
                             (KeyCode::Up, _) => {
@@ -10350,30 +10571,71 @@ pub async fn run_tui(
                                     menu.state.pop_filter_char(&menu.projection);
                                 }
                             }
+                            KeyCode::Char('s') | KeyCode::Char('S')
+                                if app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "settings") =>
+                            {
+                                app.queue_settings_profile_save(&command_tx);
+                            }
+                            KeyCode::Char('a') | KeyCode::Char('A')
+                                if app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "settings") =>
+                            {
+                                app.queue_settings_profile_apply(&command_tx);
+                            }
+                            KeyCode::Char(ch)
+                                if app.active_menu.as_ref().is_some_and(|menu| {
+                                    menu.state.mode != MenuMode::Search
+                                }) && !key.modifiers.contains(KeyModifiers::CONTROL)
+                                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+                            {
+                                if let Some(target_row_id) = app.active_menu.as_ref().and_then(|menu| {
+                                    menu.state.row_target_for_action_key(&menu.projection, ch)
+                                }) && let Some(menu) = app.active_menu.as_mut() {
+                                    menu.state.select_row_by_id(&menu.projection, &target_row_id);
+                                    continue;
+                                }
+                                let command = app.active_menu.as_ref().and_then(|menu| {
+                                    menu.state.selected_action_command_for_key(&menu.projection, ch)
+                                });
+                                if let Some(command) = command
+                                    && matches!(
+                                        app.execute_active_menu_command(command, &command_tx),
+                                        SlashResult::Quit
+                                    )
+                                {
+                                    let _ = command_tx.send(TuiCommand::Quit).await;
+                                }
+                            }
                             KeyCode::Enter => {
-                                let command = app
-                                    .active_menu
-                                    .as_ref()
-                                    .and_then(|menu| menu.state.selected_command(&menu.projection));
-                                if let Some(command) = command {
-                                    app.active_menu = None;
-                                    match app.handle_slash_command(&command, &command_tx) {
-                                        SlashResult::Display(response) => {
-                                            app.history.push(command.clone());
-                                            app.exit_history_recall();
-                                            app.show_slash_response(&command, &response);
-                                        }
-                                        SlashResult::Handled => {
-                                            app.history.push(command);
-                                            app.exit_history_recall();
-                                        }
-                                        SlashResult::Quit => {
-                                            app.history.push(command);
-                                            app.exit_history_recall();
-                                            app.should_quit = true;
+                                if app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "settings") {
+                                    app.open_selected_settings_row();
+                                } else if app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "model") {
+                                    let row_id = app.active_menu.as_ref().and_then(|menu| menu.state.selected_row(&menu.projection)).map(|row| row.row.id.clone());
+                                    match row_id.as_deref() {
+                                        Some("model.current") => app.open_model_selector(),
+                                        Some("model.grade") => app.open_model_grade_selector(),
+                                        Some("model.provider") => app.open_model_provider_selector(),
+                                        Some("model.policy") => app.open_model_policy_selector(),
+                                        _ => {
+                                        let command = app.active_menu.as_ref().and_then(|menu| menu.state.selected_command(&menu.projection));
+                                        if let Some(command) = command
+                                            && matches!(app.execute_active_menu_command(command, &command_tx), SlashResult::Quit)
+                                        {
                                             let _ = command_tx.send(TuiCommand::Quit).await;
                                         }
-                                        SlashResult::NotACommand => {}
+                                        }
+                                    }
+                                } else {
+                                    let command = app
+                                        .active_menu
+                                        .as_ref()
+                                        .and_then(|menu| menu.state.selected_command(&menu.projection));
+                                    if let Some(command) = command
+                                        && matches!(
+                                            app.execute_active_menu_command(command, &command_tx),
+                                            SlashResult::Quit
+                                        )
+                                    {
+                                        let _ = command_tx.send(TuiCommand::Quit).await;
                                     }
                                 }
                             }
@@ -10390,84 +10652,6 @@ pub async fn run_tui(
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
                                 app.active_menu = None;
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    // ── Settings screen intercepts navigation when open ────
-                    if app.settings_screen.is_some() && app.selector.is_none() {
-                        match key.code {
-                            KeyCode::Up => {
-                                if let Some(screen) = app.settings_screen.as_mut() {
-                                    screen.move_up();
-                                }
-                            }
-                            KeyCode::Down => {
-                                let projection = app.settings_projection();
-                                if let Some(screen) = app.settings_screen.as_mut() {
-                                    screen.move_down(&projection);
-                                }
-                            }
-                            KeyCode::Tab => {
-                                let projection = app.settings_projection();
-                                if let Some(screen) = app.settings_screen.as_mut() {
-                                    screen.next_tab(&projection);
-                                }
-                            }
-                            KeyCode::BackTab => {
-                                let projection = app.settings_projection();
-                                if let Some(screen) = app.settings_screen.as_mut() {
-                                    screen.previous_tab(&projection);
-                                }
-                            }
-                            KeyCode::Enter => app.open_selected_settings_row(),
-                            KeyCode::Char('s') | KeyCode::Char('S') => {
-                                app.queue_settings_profile_save(&command_tx);
-                            }
-                            KeyCode::Char('a') | KeyCode::Char('A') => {
-                                app.queue_settings_profile_apply(&command_tx);
-                            }
-                            KeyCode::Char('/') => {
-                                if let Some(screen) = app.settings_screen.as_mut() {
-                                    screen.enter_search();
-                                }
-                            }
-                            KeyCode::Char(ch)
-                                if app.settings_screen.as_ref().is_some_and(|screen| {
-                                    screen.mode == settings_menu::SettingsScreenMode::Search
-                                }) && !key.modifiers.contains(KeyModifiers::CONTROL)
-                                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-                            {
-                                let projection = app.settings_projection();
-                                if let Some(screen) = app.settings_screen.as_mut() {
-                                    screen.push_filter_char(&projection, ch);
-                                }
-                            }
-                            KeyCode::Backspace
-                                if app.settings_screen.as_ref().is_some_and(|screen| {
-                                    screen.mode == settings_menu::SettingsScreenMode::Search
-                                }) =>
-                            {
-                                let projection = app.settings_projection();
-                                if let Some(screen) = app.settings_screen.as_mut() {
-                                    screen.pop_filter_char(&projection);
-                                }
-                            }
-                            KeyCode::Esc => {
-                                let handled = app
-                                    .settings_screen
-                                    .as_mut()
-                                    .is_some_and(|screen| screen.exit_search());
-                                if !handled {
-                                    app.settings_screen = None;
-                                }
-                            }
-                            KeyCode::Char('c') | KeyCode::Char('C')
-                                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                            {
-                                app.settings_screen = None;
                             }
                             _ => {}
                         }
@@ -10805,7 +10989,7 @@ pub async fn run_tui(
                             if app.copy_text_modal.is_some() {
                                 app.close_copy_text_modal();
                             } else if app.command_panel.is_some() {
-                                app.command_panel = None;
+                                app.close_command_panel_to_return_target();
                             } else if app.active_modal.is_some() {
                                 app.active_modal = None;
                                 if app.terminal_copy_mode {

@@ -149,6 +149,7 @@ pub enum ControlRequest {
         provider: String,
     },
     SkillsView,
+    SkillsHelp,
     SkillsInstall {
         name: Option<String>,
     },
@@ -373,6 +374,7 @@ pub fn control_request_from_slash(
             provider: provider.clone(),
         },
         crate::tui::CanonicalSlashCommand::SkillsView => ControlRequest::SkillsView,
+        crate::tui::CanonicalSlashCommand::SkillsHelp => ControlRequest::SkillsHelp,
         crate::tui::CanonicalSlashCommand::SkillsReload => return None,
         crate::tui::CanonicalSlashCommand::SkillsInstall(name) => {
             ControlRequest::SkillsInstall { name: name.clone() }
@@ -500,6 +502,7 @@ async fn try_stateless_control(
             resp
         }
         ControlRequest::SkillsView => skills_view_response().await,
+        ControlRequest::SkillsHelp => skills_help_response(),
         ControlRequest::SkillsInstall { name } => skills_install_response(name.as_deref()).await,
         ControlRequest::SkillGet { name } => skill_get_response(name).await,
         ControlRequest::SkillDelete { name } => skill_delete_response(name).await,
@@ -3489,6 +3492,17 @@ pub async fn persona_switch_response(name: &str) -> SlashCommandResponse {
     }
 }
 
+pub fn skills_help_text() -> &'static str {
+    "Usage: /skills [list|reload|refresh|install [name|skills/name]|create|new [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]\n\n/skills opens the active skills inventory menu in the TUI and renders a readout on remote/CLI surfaces.\n/skills --help shows this command syntax.\n\nTUI menu keys:\n  ↑/↓     navigate skills and actions\n  Enter   inspect selected skill or run selected action\n  i       install/refresh selected skill\n  /       filter by name, source, state, tag, or profile\n  Esc     close\n\nCommon commands:\n  /skills get <name>          inspect manifest, provenance, activation, shadow, and conflicts\n  /skills reload              reload user/project/extension skills into this TUI session\n  /skills install [name]      install/refresh bundled skills or one public skill\n  /skills create --project    author a project-local skill\n  /skills import --project <path>\n                              import a reviewed skill bundle"
+}
+
+pub fn skills_help_response() -> SlashCommandResponse {
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(skills_help_text().into()),
+    }
+}
+
 pub async fn skills_view_response() -> SlashCommandResponse {
     match crate::skills::list_structured() {
         Ok(entries) => {
@@ -3503,7 +3517,7 @@ pub async fn skills_view_response() -> SlashCommandResponse {
 
             SlashCommandResponse {
                 accepted: true,
-                output: Some(render_skills_palette(&entries)),
+                output: Some(render_skills_menu(&entries)),
             }
         }
         Err(err) => SlashCommandResponse {
@@ -3513,15 +3527,16 @@ pub async fn skills_view_response() -> SlashCommandResponse {
     }
 }
 
-fn render_skills_palette(entries: &[crate::skills::SkillEntry]) -> String {
-    skills_palette_projection(entries).render_markdown()
+fn render_skills_menu(entries: &[crate::skills::SkillEntry]) -> String {
+    skills_menu_projection(entries).render_markdown()
 }
 
-pub(crate) fn skills_palette_projection(
+pub(crate) fn skills_menu_projection(
     entries: &[crate::skills::SkillEntry],
-) -> crate::surfaces::palette::PaletteProjection {
-    use crate::surfaces::palette::{
-        PaletteBadgeTone, PaletteGroupProjection, PaletteProjection, PaletteRowProjection,
+) -> crate::surfaces::menu::MenuProjection {
+    use crate::surfaces::menu::{
+        MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+        MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
     };
 
     let bundled_total = entries.iter().filter(|entry| entry.bundled).count();
@@ -3535,77 +3550,153 @@ pub(crate) fn skills_palette_projection(
         .count();
     let project_total = entries.iter().filter(|entry| entry.project_local).count();
 
-    let action_rows = vec![
-        PaletteRowProjection::action(
-            "skills.get",
-            "/skills get <name>",
-            "inspect manifest, provenance, activation, shadow, and conflict metadata",
-        ),
-        PaletteRowProjection::action(
-            "skills.create.project",
-            "/skills create --project",
-            "author a project-local skill through the skill builder prompt",
-        ),
-        PaletteRowProjection::action(
-            "skills.import.project",
-            "/skills import --project <path>",
-            "import a reviewed skill bundle into project-local skills",
-        ),
-        PaletteRowProjection::action(
-            "skills.install.all",
-            "/skills install",
-            "install or refresh all bundled skills",
-        ),
-        PaletteRowProjection::action(
-            "skills.install.one",
-            "/skills install <name>",
-            "install one public skill from Armory, then reload if needed",
-        ),
-        PaletteRowProjection::action(
-            "skills.reload",
-            "/skills reload",
-            "reload user/project/extension skills into the current TUI session",
-        ),
-        PaletteRowProjection::action(
-            "skills.refresh",
-            "/skills refresh",
-            "alias for reload when iterating on skill files",
-        ),
-    ];
-
     let skill_rows = entries
         .iter()
         .map(|entry| {
-            let metadata = skill_palette_metadata(entry);
             let description = crate::util::truncate(entry.description.trim(), 88);
-            let mut row =
-                PaletteRowProjection::object(format!("skills.{}", entry.name), entry.name.clone())
-                    .with_badge(skill_scope_label(entry), PaletteBadgeTone::Info)
-                    .with_badge(skill_state_label(entry), skill_state_tone(entry))
-                    .with_command(format!("/skills get {}", entry.name));
-            for item in metadata {
-                row = row.with_metadata(item);
+            MenuRowProjection {
+                id: format!("skills.{}", entry.name),
+                label: entry.name.clone(),
+                description,
+                value: Some("Enter: inspect · i: install/refresh".into()),
+                kind: MenuRowKind::Object,
+                badges: vec![
+                    MenuBadgeProjection {
+                        label: skill_scope_label(entry).to_string(),
+                        tone: MenuBadgeTone::Info,
+                    },
+                    MenuBadgeProjection {
+                        label: skill_state_label(entry).to_string(),
+                        tone: match skill_state_tone(entry) {
+                            crate::surfaces::palette::PaletteBadgeTone::Neutral => MenuBadgeTone::Neutral,
+                            crate::surfaces::palette::PaletteBadgeTone::Success => MenuBadgeTone::Success,
+                            crate::surfaces::palette::PaletteBadgeTone::Warning => MenuBadgeTone::Warning,
+                            crate::surfaces::palette::PaletteBadgeTone::Danger => MenuBadgeTone::Danger,
+                            crate::surfaces::palette::PaletteBadgeTone::Info => MenuBadgeTone::Info,
+                        },
+                    },
+                ],
+                metadata: skill_palette_metadata(entry),
+                primary_action: Some(MenuActionProjection::command(
+                    format!("skills.get.{}", entry.name),
+                    "Inspect",
+                    format!("/skills get {}", entry.name),
+                )),
+                actions: vec![{
+                    let mut action = MenuActionProjection::command(
+                        format!("skills.install.{}", entry.name),
+                        "Install/refresh",
+                        format!("/skills install {}", entry.name),
+                    );
+                    action.key = Some("i".into());
+                    action
+                }],
+                safety: None,
+                availability: None,
             }
-            if !description.is_empty() {
-                row = row.with_description(description);
-            }
-            row
         })
         .collect();
 
-    PaletteProjection::new("Skills")
-        .with_summary(format!(
+    let action_rows = vec![
+        MenuRowProjection {
+            id: "skills.reload".into(),
+            label: "Reload active skills".into(),
+            description: "reload user/project/extension skills into the current TUI session".into(),
+            value: Some("/skills reload".into()),
+            kind: MenuRowKind::Action,
+            badges: Vec::new(),
+            metadata: vec!["session".into()],
+            primary_action: Some(MenuActionProjection::command(
+                "skills.reload",
+                "Reload",
+                "/skills reload",
+            )),
+            actions: Vec::new(),
+            safety: None,
+            availability: None,
+        },
+        MenuRowProjection {
+            id: "skills.install.all".into(),
+            label: "Install/refresh bundled skills".into(),
+            description: "install or refresh all bundled skills".into(),
+            value: Some("/skills install".into()),
+            kind: MenuRowKind::Action,
+            badges: Vec::new(),
+            metadata: vec!["bundled".into()],
+            primary_action: Some(MenuActionProjection::command(
+                "skills.install.all",
+                "Install",
+                "/skills install",
+            )),
+            actions: Vec::new(),
+            safety: None,
+            availability: None,
+        },
+        MenuRowProjection {
+            id: "skills.create.project".into(),
+            label: "Create project skill".into(),
+            description: "author a project-local skill through the skill builder prompt".into(),
+            value: Some("/skills create --project".into()),
+            kind: MenuRowKind::Action,
+            badges: Vec::new(),
+            metadata: vec!["project".into(), "authoring".into()],
+            primary_action: Some(MenuActionProjection::command(
+                "skills.create.project",
+                "Create",
+                "/skills create --project",
+            )),
+            actions: Vec::new(),
+            safety: None,
+            availability: None,
+        },
+        MenuRowProjection {
+            id: "skills.import.project".into(),
+            label: "Import project skill".into(),
+            description: "import a reviewed skill bundle into project-local skills".into(),
+            value: Some("/skills import --project <path>".into()),
+            kind: MenuRowKind::Action,
+            badges: Vec::new(),
+            metadata: vec!["project".into(), "import".into()],
+            primary_action: None,
+            actions: Vec::new(),
+            safety: None,
+            availability: None,
+        },
+    ];
+
+    MenuProjection {
+        id: "skills".into(),
+        title: "Skills".into(),
+        summary: Some(format!(
             "Bundled {bundled_installed}/{bundled_total} installed · User {user_total} · Project {project_total}"
-        ))
-        .with_group(PaletteGroupProjection::new("Actions").with_rows(action_rows))
-        .with_group(
-            PaletteGroupProjection::new("Skill rows")
-                .with_description("`name` · source · state · activation/profile/tags · edit/reload/shadow metadata")
-                .with_rows(skill_rows),
-        )
-        .with_footer(
-            "Details stay behind `/skills get <name>`. Use `/skills reload` after creating or importing a skill to activate it in this session.",
-        )
+        )),
+        tabs: vec![MenuTabProjection {
+            id: "overview".into(),
+            label: "Overview".into(),
+            groups: vec![
+                MenuGroupProjection {
+                    id: "skills".into(),
+                    label: "Installed and available skills".into(),
+                    description: Some(
+                        "Enter inspects the selected skill; filter by name, source, state, tag, or profile."
+                            .into(),
+                    ),
+                    rows: skill_rows,
+                },
+                MenuGroupProjection {
+                    id: "actions".into(),
+                    label: "Actions".into(),
+                    description: Some("Session and project-level skill operations.".into()),
+                    rows: action_rows,
+                },
+            ],
+        }],
+        actions: Vec::new(),
+        footer: Some(
+            "↑/↓ navigate · Enter inspect/run · i install selected skill · / filter · `/skills --help` syntax · Esc close"
+                .into(),
+        ),
+    }
 }
 
 fn skill_scope_label(entry: &crate::skills::SkillEntry) -> &str {
@@ -4904,7 +4995,7 @@ mod tests {
     }
 
     #[test]
-    fn skills_palette_renders_action_and_object_rows() {
+    fn skills_menu_projection_renders_action_and_object_rows() {
         let entries = vec![
             crate::skills::SkillEntry {
                 name: "rust".into(),
@@ -4954,25 +5045,24 @@ mod tests {
             },
         ];
 
-        let rendered = render_skills_palette(&entries);
+        let rendered = render_skills_menu(&entries);
 
         assert!(rendered.starts_with("## Skills"));
         assert!(rendered.contains("### Actions"));
-        assert!(rendered.contains("`/skills get <name>`"));
-        assert!(rendered.contains("`/skills create --project`"));
-        assert!(rendered.contains("`/skills import --project <path>`"));
-        assert!(rendered.contains("`/skills install <name>`"));
-        assert!(rendered.contains("`/skills reload`"));
-        assert!(rendered.contains("`/skills refresh`"));
-        assert!(rendered.contains("### Skill rows"));
+        assert!(rendered.contains("### Installed and available skills"));
+        assert!(rendered.contains("Enter: `/skills get rust`"));
+        assert!(rendered.contains("i: `/skills install rust`"));
+        assert!(rendered.contains("### Actions"));
+        assert!(rendered.contains("Enter: `/skills reload`"));
+        assert!(rendered.contains("Enter: `/skills create --project`"));
         assert!(rendered.contains(
-            "- `rust` — bundled · available · project_detected · profile:coding · tags:lang · read-only"
+            "- `rust` — Enter: inspect · i: install/refresh · bundled · available · project_detected · profile:coding · tags:lang · read-only"
         ));
         assert!(rendered.contains(
-            "- `team` — project · local · always · editable · reloadable · shadows:bundled · conflicts:bundled/rust · resolve:merge-recommended"
+            "- `team` — Enter: inspect · i: install/refresh · project · local · always · editable · reloadable · shadows:bundled · conflicts:bundled/rust · resolve:merge-recommended"
         ));
         assert!(!rendered.contains("+ = installed"));
-        assert!(rendered.contains("Details stay behind `/skills get <name>`"));
+        assert!(rendered.contains("`/skills --help` syntax"));
     }
 
     #[tokio::test]

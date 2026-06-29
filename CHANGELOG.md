@@ -17,6 +17,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Fixed
+- Kept structured menus open underneath menu-launched command output and rendered those raw slash responses in a returnable, scrollable command panel instead of dumping them into the conversation transcript.
+- Routed `/settings` through the shared structured menu substrate and removed the legacy in-app settings screen render/input state from the TUI app.
+- Routed `/help` to the shared command inventory menu by default while preserving `/help all` as the full text readout, establishing the first general-purpose slash-command menu affordance beyond skills/settings.
+- Routed bare `/model` to a shared model-routing menu with current-model selector entry, grade/provider/policy rows, and row-target action affordances for menu-local navigation.
 - Reclassified the consumer ambiguous-reasoning-phase idle bail as a transient stalled stream instead of an unknown (non-transient) error. Previously a wedged reasoning stream that timed out in the ambiguous phase hard-failed the turn with no retry; it now retries like every other stall.
 - Gave the producer-side SSE watchdog (`process_sse`, shared by Anthropic/OpenAI/codex) the same single re-arm as the consumer: an active-phase silence downgrades once to the reasoning budget before being treated as a stall, so legitimate inter-item reasoning gaps no longer abort live turns. Producer stalls now classify as stalled streams consistently with the consumer.
 - Added completion guards to the Ollama (NDJSON `done`) and Google Antigravity (Gemini `finishReason`) stream parsers so a mid-response connection drop surfaces a transient error instead of replaying truncated content as a completed turn.
@@ -35,6 +39,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
 
 ### Added
+- Made `/skills` a top-level active skills readout: skill inventory rows now come first with inspect/install actions, `i` installs the selected skill from the menu, session/project operations are grouped separately, and `/skills --help` owns command syntax help.
 - Added a renderer-neutral menu projection and TUI menu surface, then routed `/skills` to a structured keyboard-first menu with tabs, filtering, badges, grouped rows, and selected-command execution through the existing slash-command path.
 - Added structured stream-idle telemetry (`AgentEvent::StreamIdle`, Web `stream.idle`, ACP `_stream/idle`) so provider idle/stall diagnostics can flow to UIs without being rendered as assistant-authored content.
 - Added dedicated agent-callable skills tools (`skills_list`, `skills_get`, `skills_create`, `skills_import`, `skills_install`, `skills_delete`, `skills_reload`) backed by a first-class skills feature and shared augment registry reload path.

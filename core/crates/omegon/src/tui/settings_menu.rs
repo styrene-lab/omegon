@@ -7,178 +7,13 @@
 
 use super::selector;
 
-/// Persistent settings screen navigation state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SettingsScreen {
-    pub active_tab: String,
-    pub selected_row: usize,
-    pub filter: String,
-    pub mode: SettingsScreenMode,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SettingsScreenMode {
-    Browse,
-    Search,
-}
-
-impl SettingsScreen {
-    pub(crate) fn new() -> Self {
-        Self {
-            active_tab: "runtime".into(),
-            selected_row: 0,
-            filter: String::new(),
-            mode: SettingsScreenMode::Browse,
-        }
-    }
-
-    pub(crate) fn from_projection(
-        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
-    ) -> Self {
-        let active_tab = projection
-            .tabs
-            .first()
-            .map(|tab| tab.id.clone())
-            .unwrap_or_else(|| "runtime".into());
-        Self {
-            active_tab,
-            ..Self::new()
-        }
-    }
-
-    pub(crate) fn active_rows<'a>(
-        &self,
-        projection: &'a crate::surfaces::settings::SettingsSurfaceProjection,
-    ) -> Vec<&'a crate::surfaces::settings::SettingsRowProjection> {
-        let rows = projection
-            .tabs
-            .iter()
-            .find(|tab| tab.id == self.active_tab)
-            .map(|tab| tab.rows.as_slice())
-            .unwrap_or(&[]);
-        let filter = self.filter.trim().to_lowercase();
-        if filter.is_empty() {
-            return rows.iter().collect();
-        }
-        rows.iter()
-            .filter(|row| {
-                row.label.to_lowercase().contains(&filter)
-                    || row.value.to_lowercase().contains(&filter)
-                    || row.description.to_lowercase().contains(&filter)
-                    || row.id.to_lowercase().contains(&filter)
-            })
-            .collect()
-    }
-
-    pub(crate) fn selected_row<'a>(
-        &self,
-        projection: &'a crate::surfaces::settings::SettingsSurfaceProjection,
-    ) -> Option<&'a crate::surfaces::settings::SettingsRowProjection> {
-        self.active_rows(projection).get(self.selected_row).copied()
-    }
-
-    pub(crate) fn move_up(&mut self) {
-        self.selected_row = self.selected_row.saturating_sub(1);
-    }
-
-    pub(crate) fn move_down(
-        &mut self,
-        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
-    ) {
-        let len = self.active_rows(projection).len();
-        if len > 0 {
-            self.selected_row = (self.selected_row + 1).min(len - 1);
-        }
-    }
-
-    pub(crate) fn enter_search(&mut self) {
-        self.mode = SettingsScreenMode::Search;
-        self.selected_row = 0;
-    }
-
-    pub(crate) fn push_filter_char(
-        &mut self,
-        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
-        ch: char,
-    ) {
-        self.filter.push(ch);
-        self.clamp_selection(projection);
-    }
-
-    pub(crate) fn pop_filter_char(
-        &mut self,
-        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
-    ) {
-        self.filter.pop();
-        self.clamp_selection(projection);
-    }
-
-    pub(crate) fn exit_search(&mut self) -> bool {
-        match self.mode {
-            SettingsScreenMode::Search => {
-                self.mode = SettingsScreenMode::Browse;
-                true
-            }
-            SettingsScreenMode::Browse if !self.filter.is_empty() => {
-                self.filter.clear();
-                self.selected_row = 0;
-                true
-            }
-            SettingsScreenMode::Browse => false,
-        }
-    }
-
-    fn clamp_selection(
-        &mut self,
-        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
-    ) {
-        let len = self.active_rows(projection).len();
-        if len == 0 {
-            self.selected_row = 0;
-        } else {
-            self.selected_row = self.selected_row.min(len - 1);
-        }
-    }
-
-    pub(crate) fn next_tab(
-        &mut self,
-        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
-    ) {
-        self.switch_tab(projection, 1);
-    }
-
-    pub(crate) fn previous_tab(
-        &mut self,
-        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
-    ) {
-        self.switch_tab(projection, -1);
-    }
-
-    fn switch_tab(
-        &mut self,
-        projection: &crate::surfaces::settings::SettingsSurfaceProjection,
-        direction: isize,
-    ) {
-        if projection.tabs.is_empty() {
-            self.selected_row = 0;
-            return;
-        }
-        let current = projection
-            .tabs
-            .iter()
-            .position(|tab| tab.id == self.active_tab)
-            .unwrap_or(0);
-        let len = projection.tabs.len() as isize;
-        let next = (current as isize + direction).rem_euclid(len) as usize;
-        self.active_tab = projection.tabs[next].id.clone();
-        self.selected_row = 0;
-    }
-}
-
 /// What the active selector is editing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum SelectorKind {
     Model,
+    ModelGrade,
+    ModelProvider,
+    ModelPolicy,
     ThinkingLevel,
     ContextClass,
     Persona,
@@ -463,6 +298,63 @@ pub(crate) fn max_turns_selector_options(current: u32) -> Vec<selector::SelectOp
             active: turns == current,
         })
         .collect()
+}
+
+
+pub(crate) fn model_grade_selector_options(current: &str) -> Vec<selector::SelectOption> {
+    ["F", "D", "C", "B", "A", "S"]
+        .into_iter()
+        .map(|grade| selector::SelectOption {
+            value: grade.to_string(),
+            label: format!("Grade {grade}"),
+            description: match grade {
+                "S" => "Maximum capability / strongest available route".to_string(),
+                "A" | "B" => "Frontier-class routing intent".to_string(),
+                "C" | "D" => "Mid-tier/local-friendly routing intent".to_string(),
+                "F" => "Leaf/cheap routing intent".to_string(),
+                _ => unreachable!(),
+            },
+            active: current.eq_ignore_ascii_case(grade),
+        })
+        .collect()
+}
+
+pub(crate) fn model_provider_selector_options(current: &str) -> Vec<selector::SelectOption> {
+    [
+        ("auto", "Auto", "Let the route controller choose a policy-compliant provider"),
+        ("local", "Local", "Prefer local providers such as Ollama"),
+        ("upstream", "Upstream", "Avoid local providers and use hosted upstream providers"),
+        ("anthropic", "Anthropic", "Route specifically to Anthropic when available"),
+        ("openai-codex", "OpenAI Codex", "Route specifically to OpenAI Codex when available"),
+        ("openai", "OpenAI", "Route specifically to OpenAI API when available"),
+        ("openrouter", "OpenRouter", "Route specifically to OpenRouter when available"),
+        ("google", "Google Gemini", "Route specifically to Google Gemini when available"),
+        ("ollama", "Ollama", "Route specifically to local Ollama when available"),
+    ]
+    .into_iter()
+    .map(|(value, label, description)| selector::SelectOption {
+        value: value.to_string(),
+        label: label.to_string(),
+        description: description.to_string(),
+        active: current.eq_ignore_ascii_case(value),
+    })
+    .collect()
+}
+
+pub(crate) fn model_policy_selector_options(current: &str) -> Vec<selector::SelectOption> {
+    [
+        ("exact", "Exact", "Require the requested grade exactly"),
+        ("minimum", "Minimum", "Allow the requested grade or better"),
+        ("nearest", "Nearest", "Allow nearest policy-compliant fallback"),
+    ]
+    .into_iter()
+    .map(|(value, label, description)| selector::SelectOption {
+        value: value.to_string(),
+        label: label.to_string(),
+        description: description.to_string(),
+        active: current.eq_ignore_ascii_case(value),
+    })
+    .collect()
 }
 
 pub(crate) fn tool_detail_selector_options(
@@ -834,20 +726,4 @@ mod tests {
         assert_eq!(outcome.message(), "Unknown density: nope");
     }
 
-    #[test]
-    fn settings_screen_defaults_to_projection_first_tab() {
-        let settings = crate::settings::Settings::new("test-model");
-        let projection =
-            crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
-        let screen = SettingsScreen::from_projection(&projection);
-
-        assert_eq!(screen.active_tab, "runtime");
-        assert_eq!(screen.selected_row, 0);
-        assert!(
-            screen
-                .active_rows(&projection)
-                .iter()
-                .any(|row| row.id == "runtime.model")
-        );
-    }
 }

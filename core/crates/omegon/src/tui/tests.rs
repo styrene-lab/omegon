@@ -3,6 +3,7 @@
 //! These test the App struct as a state machine: feed inputs, check outputs.
 //! No terminal rendering — uses App::new() with test settings.
 
+use super::menu_surface::{MenuMode, MenuState};
 use super::settings_menu::build_model_selector_options;
 use super::workbench::{PlanDisplayItem, PlanDisplayStatus, SlimTurnState};
 use super::*;
@@ -2731,6 +2732,68 @@ fn usage_slash_responses_still_use_command_panel() {
     assert_eq!(panel.body, response);
 }
 
+
+#[test]
+fn active_menu_display_commands_open_returnable_command_panel() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_skills_menu().expect("skills menu opens");
+
+    let result = app.execute_active_menu_command("/version".to_string(), &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.active_menu.is_some(), "menu remains underneath output panel");
+    assert!(app.conversation.segments().is_empty());
+    let panel = app.command_panel.as_ref().expect("command output panel");
+    assert_eq!(panel.source.as_deref(), Some("/version"));
+    assert_eq!(panel.return_target.map(|target| target.label()), Some("menu"));
+    assert!(panel.body.starts_with("Version\n"));
+}
+
+
+#[test]
+fn returnable_command_panel_escape_preserves_underlying_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_skills_menu().expect("skills menu opens");
+    app.execute_active_menu_command("/version".to_string(), &tx);
+
+    app.close_command_panel_to_return_target();
+
+    assert!(app.command_panel.is_none());
+    assert!(app.active_menu.is_some(), "Esc should return to the menu");
+}
+
+#[test]
+fn returnable_command_panel_stack_close_clears_menu_target() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_skills_menu().expect("skills menu opens");
+    app.execute_active_menu_command("/version".to_string(), &tx);
+
+    app.close_command_panel_stack();
+
+    assert!(app.command_panel.is_none());
+    assert!(app.active_menu.is_none(), "q should close the whole menu output stack");
+}
+
+#[test]
+fn returnable_command_panel_scroll_does_not_move_underlying_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_skills_menu().expect("skills menu opens");
+    let selected_before = app.active_menu.as_ref().expect("menu").state.selected_row;
+    app.execute_active_menu_command("/version".to_string(), &tx);
+
+    app.command_panel.as_mut().expect("panel").scroll_down(20);
+
+    assert_eq!(
+        app.active_menu.as_ref().expect("menu").state.selected_row,
+        selected_before
+    );
+    assert!(app.command_panel.as_ref().expect("panel").scroll > 0);
+}
+
 #[test]
 fn slash_version_displays_multiline_build_info() {
     let mut app = test_app();
@@ -2854,25 +2917,18 @@ fn ui_status_lists_toggle_controls() {
 }
 
 #[test]
-fn slash_help_lists_ui_and_runtime_mode_commands() {
+fn slash_help_opens_command_inventory_menu() {
     let mut app = test_app();
     let tx = test_tx();
     let result = app.handle_slash_command("/help", &tx);
-    let SlashResult::Display(text) = result else {
-        panic!("expected display");
-    };
-    assert!(text.contains("/ui"), "{text}");
-    assert!(text.contains("/ui           switch UI presets"), "{text}");
-    assert!(text.contains("detail|density"), "{text}");
-    assert!(text.contains("/stats"), "{text}");
-    assert!(!text.contains("/bench"), "{text}");
-    assert!(
-        !text.contains("/detail       tool output density"),
-        "{text}"
-    );
-    assert!(!text.contains("/shackle"), "{text}");
-    assert!(!text.contains("/unshackle"), "{text}");
-    assert!(!text.contains("/warp"), "{text}");
+
+    assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("command menu");
+    assert_eq!(menu.projection.id, "commands");
+    let rows = menu.state.visible_rows(&menu.projection);
+    assert!(rows.iter().any(|row| row.row.label == "/ui"));
+    assert!(rows.iter().any(|row| row.row.label == "/stats"));
+    assert!(menu.projection.summary.as_deref().is_some_and(|summary| summary.contains("Slash command inventory")));
 }
 
 #[test]
@@ -3300,10 +3356,10 @@ fn slash_workspace_kind_clear_enqueues_execute_control() {
 }
 
 #[test]
-fn slash_help_returns_display() {
+fn slash_help_all_returns_display() {
     let mut app = test_app();
     let tx = test_tx();
-    let result = app.handle_slash_command("/help", &tx);
+    let result = app.handle_slash_command("/help all", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     if let SlashResult::Display(text) = result {
         assert!(text.contains("Commands:"), "should list commands: {text}");
@@ -4398,6 +4454,25 @@ fn slash_plugin_list_enqueues_execute_control() {
 }
 
 #[test]
+fn skills_registry_advertises_help_aliases() {
+    let definitions = crate::command_registry::builtin_command_definitions();
+    for name in ["skills", "skill"] {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.name == name)
+            .expect("skills registry row");
+        assert!(definition.availability.cli, "{name} should be CLI visible");
+        assert!(definition.availability.acp, "{name} should be ACP visible");
+        for subcommand in ["--help", "-h", "help"] {
+            assert!(
+                definition.subcommands.iter().any(|item| item == subcommand),
+                "{name} should advertise {subcommand}"
+            );
+        }
+    }
+}
+
+#[test]
 fn slash_skills_opens_structured_menu() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
@@ -4412,7 +4487,76 @@ fn slash_skills_opens_structured_menu() {
         .state
         .visible_rows(&menu.projection)
         .iter()
+        .any(|row| row.row.label == "code-act"));
+    assert!(!menu
+        .state
+        .visible_rows(&menu.projection)
+        .iter()
         .any(|row| row.row.label.contains("/skills get")));
+}
+
+#[test]
+fn slash_skills_menu_lists_skills_before_actions() {
+    let mut app = test_app();
+    let (tx, _rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/skills", &tx);
+    assert!(matches!(result, SlashResult::Handled));
+
+    let menu = app.active_menu.as_ref().expect("skills menu opened");
+    let rows = menu.state.visible_rows(&menu.projection);
+    assert!(rows.len() > 2, "expected skill inventory plus actions");
+    assert_eq!(rows[0].group_id, "skills");
+    assert_ne!(rows[0].row.kind, crate::surfaces::menu::MenuRowKind::Action);
+    assert!(rows
+        .iter()
+        .any(|row| row.group_id == "actions" && row.row.id == "skills.reload"));
+}
+
+#[test]
+fn slash_skills_help_keeps_command_syntax_out_of_inventory() {
+    assert_eq!(canonical_slash_command("skills", "--help"), Some(CanonicalSlashCommand::SkillsHelp));
+    assert_eq!(canonical_slash_command("skills", "-h"), Some(CanonicalSlashCommand::SkillsHelp));
+    assert_eq!(canonical_slash_command("skills", "help"), Some(CanonicalSlashCommand::SkillsHelp));
+}
+
+#[test]
+fn slash_skills_help_displays_meta_use_without_opening_inventory() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/skills --help", &tx);
+    let SlashResult::Display(text) = result else {
+        panic!("expected display help");
+    };
+
+    assert!(text.contains("Usage: /skills"));
+    assert!(text.contains("/skills opens the active skills inventory menu"));
+    assert!(text.contains("Menu keys:"));
+    assert!(text.contains("/skills get <name>"));
+    assert!(app.active_menu.is_none());
+}
+
+#[test]
+fn slash_skills_menu_rows_have_operator_expected_labels_and_values() {
+    let mut app = test_app();
+    let (tx, _rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/skills", &tx);
+    assert!(matches!(result, SlashResult::Handled));
+
+    let menu = app.active_menu.as_ref().expect("skills menu opened");
+    let rows = menu.state.visible_rows(&menu.projection);
+    let code_act = rows
+        .iter()
+        .find(|row| row.row.label == "code-act")
+        .expect("code-act skill row");
+    assert_eq!(
+        code_act.row.primary_action.as_ref().unwrap().command.as_deref(),
+        Some("/skills get code-act")
+    );
+    assert!(code_act.row.value.as_deref().is_some_and(|value| value.contains("Enter: inspect")));
+    assert!(code_act.row.value.as_deref().is_some_and(|value| value.contains("i: install")));
 }
 
 #[test]
@@ -5736,9 +5880,10 @@ fn slash_prefix_matching_unique() {
     // /hel should uniquely prefix-match /help
     let result = app.handle_slash_command("/hel", &tx);
     assert!(
-        matches!(result, SlashResult::Display(_)),
-        "/hel should prefix-match /help and show help text"
+        matches!(result, SlashResult::Handled),
+        "/hel should prefix-match /help and open the command menu"
     );
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "commands"));
 }
 
 #[test]
@@ -6912,7 +7057,7 @@ fn settings_projection_helper_marks_runtime_profile_drift() {
 }
 
 #[test]
-fn settings_screen_renders_profile_source_and_drift_actions() {
+fn settings_menu_renders_profile_source_and_drift_actions() {
     let mut app = test_app();
     let tmp = tempfile::tempdir().expect("tempdir");
     let profile_path = tmp.path().join(".omegon/profile.json");
@@ -6971,22 +7116,24 @@ fn settings_profile_shortcuts_queue_existing_profile_commands() {
 }
 
 #[test]
-fn slash_settings_opens_settings_screen_without_command_panel() {
+fn slash_settings_opens_active_menu_without_command_panel() {
     let mut app = test_app();
     let tx = test_tx();
 
     let result = app.handle_slash_command("/settings", &tx);
 
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.settings_screen.is_some());
+    let menu = app.active_menu.as_ref().expect("settings menu");
+    assert_eq!(menu.projection.id, "settings");
+    assert!(app.command_panel.is_none());
 }
 
 #[test]
-fn settings_screen_opens_choice_rows_from_projection_metadata() {
+fn settings_menu_opens_choice_rows_from_projection_metadata() {
     let mut app = test_app();
 
     app.open_settings_screen();
-    app.settings_screen.as_mut().unwrap().selected_row = 1;
+    app.active_menu.as_mut().unwrap().state.selected_row = 1;
     app.open_selected_settings_row();
 
     assert_eq!(app.selector_kind, Some(SelectorKind::ThinkingLevel));
@@ -6995,83 +7142,83 @@ fn settings_screen_opens_choice_rows_from_projection_metadata() {
 }
 
 #[test]
-fn settings_screen_navigation_helpers_bound_rows_and_wrap_tabs() {
-    let settings = Settings::new("test-model");
-    let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
-    let mut screen = settings_menu::SettingsScreen::from_projection(&projection);
+fn settings_menu_navigation_helpers_bound_rows_and_wrap_tabs() {
+    let app = test_app();
+    let projection = app.settings_menu_projection();
+    let mut state = MenuState::new(&projection);
 
-    screen.move_up();
-    assert_eq!(screen.selected_row, 0);
+    state.move_up();
+    assert_eq!(state.selected_row, 0);
 
     for _ in 0..10 {
-        screen.move_down(&projection);
+        state.move_down(&projection);
     }
     assert_eq!(
-        screen.selected_row,
-        screen.active_rows(&projection).len().saturating_sub(1)
+        state.selected_row,
+        state.visible_rows(&projection).len().saturating_sub(1)
     );
 
-    screen.next_tab(&projection);
-    assert_eq!(screen.active_tab, "ui");
-    assert_eq!(screen.selected_row, 0);
+    state.next_tab(&projection);
+    assert_eq!(state.active_tab, "ui");
+    assert_eq!(state.selected_row, 0);
 
-    screen.previous_tab(&projection);
-    assert_eq!(screen.active_tab, "runtime");
+    state.previous_tab(&projection);
+    assert_eq!(state.active_tab, "runtime");
 
-    screen.previous_tab(&projection);
-    assert_eq!(screen.active_tab, "updates");
+    state.previous_tab(&projection);
+    assert_eq!(state.active_tab, "updates");
 }
 
 #[test]
-fn settings_screen_filter_matches_row_metadata_and_exit_search_clears_in_browse() {
-    let settings = Settings::new("test-model");
-    let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
-    let mut screen = settings_menu::SettingsScreen::from_projection(&projection);
+fn settings_menu_filter_matches_row_metadata_and_exit_search_clears_in_browse() {
+    let app = test_app();
+    let projection = app.settings_menu_projection();
+    let mut state = MenuState::new(&projection);
 
-    screen.enter_search();
+    state.enter_search();
     for ch in "auto".chars() {
-        screen.push_filter_char(&projection, ch);
+        state.push_filter_char(&projection, ch);
     }
 
-    let rows = screen.active_rows(&projection);
+    let rows = state.visible_rows(&projection);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].id, "runtime.max_turns");
+    assert_eq!(rows[0].row.id, "runtime.max_turns");
 
-    assert!(screen.exit_search());
-    assert_eq!(screen.mode, settings_menu::SettingsScreenMode::Browse);
-    assert_eq!(screen.filter, "auto");
+    assert!(state.exit_search());
+    assert_eq!(state.mode, MenuMode::Browse);
+    assert_eq!(state.filter, "auto");
 
-    assert!(screen.exit_search());
-    assert!(screen.filter.is_empty());
+    assert!(state.exit_search());
+    assert!(state.filter.is_empty());
 }
 
 #[test]
-fn settings_screen_filter_backspace_clamps_empty_results() {
-    let settings = Settings::new("test-model");
-    let projection = crate::surfaces::settings::SettingsSurfaceProjection::from_settings(&settings);
-    let mut screen = settings_menu::SettingsScreen::from_projection(&projection);
+fn settings_menu_filter_backspace_clamps_empty_results() {
+    let app = test_app();
+    let projection = app.settings_menu_projection();
+    let mut state = MenuState::new(&projection);
 
-    screen.selected_row = 3;
-    screen.enter_search();
+    state.selected_row = 3;
+    state.enter_search();
     for ch in "zzzz".chars() {
-        screen.push_filter_char(&projection, ch);
+        state.push_filter_char(&projection, ch);
     }
-    assert!(screen.active_rows(&projection).is_empty());
-    assert_eq!(screen.selected_row, 0);
+    assert!(state.visible_rows(&projection).is_empty());
+    assert_eq!(state.selected_row, 0);
 
     for _ in 0..4 {
-        screen.pop_filter_char(&projection);
+        state.pop_filter_char(&projection);
     }
-    assert_eq!(screen.active_rows(&projection).len(), 4);
+    assert_eq!(state.visible_rows(&projection).len(), 4);
 }
 
 #[test]
-fn settings_screen_max_turns_row_queues_existing_control_request() {
+fn settings_menu_max_turns_row_queues_existing_control_request() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 
     app.open_settings_screen();
-    app.settings_screen.as_mut().unwrap().selected_row = 3;
+    app.active_menu.as_mut().unwrap().state.selected_row = 3;
     app.open_selected_settings_row();
     app.selector.as_mut().unwrap().cursor = 4;
 
@@ -7088,14 +7235,14 @@ fn settings_screen_max_turns_row_queues_existing_control_request() {
 }
 
 #[test]
-fn settings_screen_auto_update_row_toggles_persisted_setting() {
+fn settings_menu_auto_update_row_toggles_persisted_setting() {
     let mut app = test_app();
 
     app.open_settings_screen();
     {
-        let screen = app.settings_screen.as_mut().unwrap();
-        screen.active_tab = "updates".into();
-        screen.selected_row = 1;
+        let menu = app.active_menu.as_mut().unwrap();
+        menu.state.active_tab = "updates".into();
+        menu.state.selected_row = 1;
     }
     app.open_selected_settings_row();
 
@@ -7103,19 +7250,51 @@ fn settings_screen_auto_update_row_toggles_persisted_setting() {
 }
 
 #[test]
-fn settings_screen_sandbox_row_disables_persisted_setting() {
+fn settings_menu_sandbox_row_disables_persisted_setting() {
     let mut app = test_app();
     app.update_settings(|s| s.sandbox = true);
 
     app.open_settings_screen();
     {
-        let screen = app.settings_screen.as_mut().unwrap();
-        screen.active_tab = "workspace".into();
-        screen.selected_row = 1;
+        let menu = app.active_menu.as_mut().unwrap();
+        menu.state.active_tab = "workspace".into();
+        menu.state.selected_row = 1;
     }
     app.open_selected_settings_row();
 
     assert!(!app.settings().sandbox);
+}
+
+
+#[test]
+fn slash_model_opens_model_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/model", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("model menu");
+    assert_eq!(menu.projection.id, "model");
+    assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id == "model.current"));
+}
+
+#[test]
+fn model_menu_action_keys_select_intent_rows() {
+    let mut app = test_app();
+    app.open_model_menu();
+
+    let menu = app.active_menu.as_mut().expect("model menu");
+    let target = menu
+        .state
+        .row_target_for_action_key(&menu.projection, 'g')
+        .expect("grade target");
+    assert_eq!(target, "model.grade");
+    assert!(menu.state.select_row_by_id(&menu.projection, &target));
+    assert_eq!(
+        menu.state.selected_row(&menu.projection).map(|row| row.row.id.as_str()),
+        Some("model.grade")
+    );
 }
 
 #[test]

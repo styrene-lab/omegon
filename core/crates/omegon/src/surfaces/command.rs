@@ -19,6 +19,19 @@ pub enum CommandSeverity {
     Error,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandPanelReturnTarget {
+    Menu,
+}
+
+impl CommandPanelReturnTarget {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Menu => "menu",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandPanel {
     pub title: String,
@@ -27,6 +40,7 @@ pub struct CommandPanel {
     pub severity: CommandSeverity,
     pub copyable: bool,
     pub scroll: u16,
+    pub return_target: Option<CommandPanelReturnTarget>,
 }
 
 impl CommandPanel {
@@ -38,6 +52,7 @@ impl CommandPanel {
             severity: CommandSeverity::Info,
             copyable: true,
             scroll: 0,
+            return_target: None,
         }
     }
 
@@ -50,7 +65,13 @@ impl CommandPanel {
             severity: CommandSeverity::Info,
             copyable: true,
             scroll: 0,
+            return_target: None,
         }
+    }
+
+    pub fn with_return_target(mut self, target: CommandPanelReturnTarget) -> Self {
+        self.return_target = Some(target);
+        self
     }
 
     pub fn scroll_up(&mut self, amount: u16) {
@@ -152,6 +173,17 @@ mod tests {
         assert_eq!(panel.body, "runtime ok");
         assert!(panel.copyable);
         assert_eq!(panel.scroll, 0);
+        assert_eq!(panel.return_target, None);
+    }
+
+    #[test]
+    fn panel_return_target_marks_parent_surface() {
+        let panel = CommandPanel::from_slash("/skills get rust", "details")
+            .with_return_target(CommandPanelReturnTarget::Menu);
+
+        assert_eq!(panel.return_target, Some(CommandPanelReturnTarget::Menu));
+        assert_eq!(panel.return_target.unwrap().label(), "menu");
+        assert_eq!(panel.source.as_deref(), Some("/skills get rust"));
     }
 
     #[test]

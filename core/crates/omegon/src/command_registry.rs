@@ -370,11 +370,14 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::cli_read_only("sessions", "list saved sessions", &[]),
     BuiltinCommandSpec::cli_read_only("memory", "memory stats", &[]),
     BuiltinCommandSpec::state_changing("settings", "open settings page", &[]),
-    BuiltinCommandSpec::acp_state_changing(
+    BuiltinCommandSpec::cli_acp_state_changing(
         "skills",
         "manage bundled, user, project-local, and armory skills",
         &[
             "list",
+            "--help",
+            "-h",
+            "help",
             "reload",
             "refresh",
             "install",
@@ -392,11 +395,14 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
             "delete <name>",
         ],
     ),
-    BuiltinCommandSpec::acp_state_changing(
+    BuiltinCommandSpec::cli_acp_state_changing(
         "skill",
         "alias for /skills",
         &[
             "list",
+            "--help",
+            "-h",
+            "help",
             "reload",
             "refresh",
             "install",

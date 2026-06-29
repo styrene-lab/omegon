@@ -7578,6 +7578,21 @@ fn remote_builtin_policy(
         return RemoteBuiltinPolicy::Deny;
     };
 
+    if registry_name == "skills" {
+        return match command {
+            crate::tui::CanonicalSlashCommand::SkillsView
+            | crate::tui::CanonicalSlashCommand::SkillsHelp
+            | crate::tui::CanonicalSlashCommand::SkillGet(_) => RemoteBuiltinPolicy::Allow,
+            crate::tui::CanonicalSlashCommand::SkillsInstall(_)
+            | crate::tui::CanonicalSlashCommand::SkillDelete(_) => {
+                RemoteBuiltinPolicy::RequiresBypass
+            }
+            crate::tui::CanonicalSlashCommand::SkillCreate(_)
+            | crate::tui::CanonicalSlashCommand::SkillImport { .. } => RemoteBuiltinPolicy::Deny,
+            _ => RemoteBuiltinPolicy::Deny,
+        };
+    }
+
     if !definition.availability.cli {
         return RemoteBuiltinPolicy::Deny;
     }
@@ -7599,6 +7614,14 @@ fn remote_registry_name_for_command<'a>(
         | crate::tui::CanonicalSlashCommand::AutomationSet(_) => "automation",
         crate::tui::CanonicalSlashCommand::AuthLogin { .. }
         | crate::tui::CanonicalSlashCommand::AuthLogout { .. } => "auth",
+        crate::tui::CanonicalSlashCommand::SkillsView
+        | crate::tui::CanonicalSlashCommand::SkillsHelp
+        | crate::tui::CanonicalSlashCommand::SkillsReload
+        | crate::tui::CanonicalSlashCommand::SkillsInstall(_)
+        | crate::tui::CanonicalSlashCommand::SkillCreate(_)
+        | crate::tui::CanonicalSlashCommand::SkillImport { .. }
+        | crate::tui::CanonicalSlashCommand::SkillGet(_)
+        | crate::tui::CanonicalSlashCommand::SkillDelete(_) => "skills",
         crate::tui::CanonicalSlashCommand::NoteAdd { .. }
         | crate::tui::CanonicalSlashCommand::NotesView
         | crate::tui::CanonicalSlashCommand::NotesClear
@@ -9889,6 +9912,108 @@ mod tests {
 
         assert!(response.accepted);
         assert!(response.output.unwrap().contains("Session Overview"));
+    }
+
+    #[test]
+    fn remote_slash_skills_help_is_allowed_without_bypass() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let agent = test_agent_setup();
+        let (events_tx, _) = broadcast::channel(16);
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
+            "anthropic:claude-sonnet-4-6",
+        )));
+        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(Box::new(
+            crate::bridge::NullBridge,
+        ) as Box<dyn LlmBridge>));
+        let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
+        let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
+
+        let (mut agent, mut runtime_state) = split_interactive_agent(agent);
+
+        let response = rt.block_on(execute_remote_slash_command(
+            &mut runtime_state,
+            &mut agent,
+            &events_tx,
+            &shared_settings,
+            &bridge,
+            &login_prompt_tx,
+            &cli,
+            "skills",
+            "--help",
+        ));
+
+        assert!(response.accepted);
+        let output = response.output.unwrap();
+        assert!(output.contains("Usage: /skills"), "got: {output}");
+        assert!(output.contains("/skills opens the active skills inventory menu"), "got: {output}");
+    }
+
+    #[test]
+    fn remote_slash_skills_install_requires_bypass() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let agent = test_agent_setup();
+        let (events_tx, _) = broadcast::channel(16);
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
+            "anthropic:claude-sonnet-4-6",
+        )));
+        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(Box::new(
+            crate::bridge::NullBridge,
+        ) as Box<dyn LlmBridge>));
+        let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
+        let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
+
+        let (mut agent, mut runtime_state) = split_interactive_agent(agent);
+
+        let response = rt.block_on(execute_remote_slash_command(
+            &mut runtime_state,
+            &mut agent,
+            &events_tx,
+            &shared_settings,
+            &bridge,
+            &login_prompt_tx,
+            &cli,
+            "skills",
+            "install code-act",
+        ));
+
+        assert!(!response.accepted);
+        assert!(
+            response.output.unwrap().contains("requires interactive confirmation")
+        );
+    }
+
+    #[test]
+    fn remote_slash_skills_create_is_interactive_only() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let agent = test_agent_setup();
+        let (events_tx, _) = broadcast::channel(16);
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
+            "anthropic:claude-sonnet-4-6",
+        )));
+        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(Box::new(
+            crate::bridge::NullBridge,
+        ) as Box<dyn LlmBridge>));
+        let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
+        let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
+
+        let (mut agent, mut runtime_state) = split_interactive_agent(agent);
+
+        let response = rt.block_on(execute_remote_slash_command(
+            &mut runtime_state,
+            &mut agent,
+            &events_tx,
+            &shared_settings,
+            &bridge,
+            &login_prompt_tx,
+            &cli,
+            "skills",
+            "create --project",
+        ));
+
+        assert!(!response.accepted);
+        assert!(
+            response.output.unwrap().contains("interactive-only or unavailable")
+        );
     }
 
     #[test]

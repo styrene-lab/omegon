@@ -113,7 +113,9 @@ fn menu_lines<'a>(
         Style::default().fg(theme.accent()).add_modifier(Modifier::BOLD),
     )));
     if let Some(summary) = projection.summary.as_deref().filter(|summary| !summary.is_empty()) {
-        lines.push(Line::from(Span::styled(summary.to_string(), Style::default().fg(theme.muted()))));
+        for line in summary.lines() {
+            lines.push(Line::from(Span::styled(line.to_string(), Style::default().fg(theme.muted()))));
+        }
     }
 
     if projection.tabs.len() > 1 {
@@ -295,6 +297,49 @@ impl MenuState {
             .and_then(|action| action.command.clone())
     }
 
+    pub(crate) fn selected_action_command_for_key(
+        &self,
+        projection: &MenuProjection,
+        key: char,
+    ) -> Option<String> {
+        self.action_for_key(projection, key).and_then(|action| action.command.clone())
+    }
+
+    pub(crate) fn row_target_for_action_key(
+        &self,
+        projection: &MenuProjection,
+        key: char,
+    ) -> Option<String> {
+        self.action_for_key(projection, key)
+            .and_then(|action| action.target_row_id.clone())
+    }
+
+    fn action_for_key<'a>(
+        &self,
+        projection: &'a MenuProjection,
+        key: char,
+    ) -> Option<&'a crate::surfaces::menu::MenuActionProjection> {
+        let key = key.to_ascii_lowercase().to_string();
+        self.selected_row(projection).and_then(|row| {
+            row.row.actions.iter().find(|action| {
+                action
+                    .key
+                    .as_deref()
+                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(&key))
+            })
+        })
+    }
+
+    pub(crate) fn select_row_by_id(&mut self, projection: &MenuProjection, row_id: &str) -> bool {
+        let rows = self.visible_rows(projection);
+        if let Some(index) = rows.iter().position(|row| row.row.id == row_id) {
+            self.selected_row = index;
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn move_up(&mut self) {
         self.selected_row = self.selected_row.saturating_sub(1);
     }
@@ -399,7 +444,15 @@ mod tests {
             badges: Vec::new(),
             metadata: vec![format!("meta-{id}")],
             primary_action: Some(MenuActionProjection::command(id, label, command)),
-            actions: Vec::new(),
+            actions: vec![{
+                let mut action = MenuActionProjection::command(
+                    format!("install-{id}"),
+                    "Install",
+                    format!("/skills install {label}"),
+                );
+                action.key = Some("i".into());
+                action
+            }],
             safety: None,
             availability: None,
         }
@@ -491,6 +544,19 @@ mod tests {
         state.move_down(&projection);
 
         assert_eq!(state.selected_command(&projection).as_deref(), Some("/skills get python"));
+    }
+
+    #[test]
+    fn selected_action_command_returns_matching_keyed_action() {
+        let projection = projection();
+        let mut state = MenuState::new(&projection);
+        state.move_down(&projection);
+
+        assert_eq!(
+            state.selected_action_command_for_key(&projection, 'I').as_deref(),
+            Some("/skills install Python")
+        );
+        assert_eq!(state.selected_action_command_for_key(&projection, 'x'), None);
     }
 
     #[test]
