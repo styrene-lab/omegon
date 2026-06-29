@@ -286,6 +286,7 @@ fn is_known_provider_id(provider_id: &str) -> bool {
             | "huggingface"
             | "ollama"
             | "ollama-cloud"
+            | "dwarfstar"
             | "local"
     )
 }
@@ -375,6 +376,14 @@ pub fn infer_provider_id_strict(model_spec: &str) -> Option<String> {
     }
 
     Some(infer_provider_id(trimmed))
+}
+
+pub fn explicit_provider_id(model_spec: &str) -> Option<String> {
+    let (head, _tail) = model_spec.trim().split_once(':')?;
+    if head == "local" {
+        return Some("ollama".to_string());
+    }
+    is_known_provider_id(head).then(|| head.to_string())
 }
 
 fn model_id_from_spec(model_spec: &str) -> &str {
@@ -538,7 +547,7 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
         }
         // OpenAI-compatible providers — all use the Chat Completions protocol
         "groq" | "xai" | "mistral" | "cerebras" | "google" | "huggingface" | "ollama"
-        | "opencode-go" | "perplexity" => {
+        | "opencode-go" | "perplexity" | "dwarfstar" => {
             OpenAICompatClient::from_env(provider_id).map(|c| Box::new(c) as Box<dyn LlmBridge>)
         }
         "ollama-cloud" => OllamaCloudClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
@@ -2746,6 +2755,7 @@ pub fn compat_base_url(provider_id: &str) -> Option<&'static str> {
         "google-antigravity" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
         "huggingface" => Some("https://router.huggingface.co"),
         "ollama" => Some("http://localhost:11434"),
+        "dwarfstar" => Some("http://127.0.0.1:8000/v1"),
         _ => None,
     }
 }
@@ -2879,6 +2889,17 @@ impl OpenAICompatClient {
         // Local Ollama doesn't need an API key — just check reachability.
         if provider_id == "ollama" {
             return Self::from_env_ollama(base_url);
+        }
+
+        // DwarfStar is a local OpenAI-compatible endpoint. Treat the base URL
+        // as the availability signal and allow an optional API key for secured
+        // deployments.
+        if provider_id == "dwarfstar" {
+            let base_url = std::env::var("OMEGON_DWARFSTAR_BASE_URL")
+                .or_else(|_| std::env::var("DWARFSTAR_BASE_URL"))
+                .unwrap_or_else(|_| base_url.to_string());
+            let key = resolve_api_key(provider_id).unwrap_or_default();
+            return Some(Self::new(key, base_url, provider_id.to_string()));
         }
 
         let key = resolve_api_key(provider_id)?;
@@ -4965,6 +4986,24 @@ mod tests {
             vec!["openrouter"]
         );
         assert_eq!(fallback_order_for_model("ollama:qwen3:32b"), vec!["ollama"]);
+        assert_eq!(
+            fallback_order_for_model("dwarfstar:deepseek-v4-flash"),
+            vec!["dwarfstar"]
+        );
+    }
+
+    #[test]
+    fn explicit_provider_id_detects_known_prefixed_specs() {
+        assert_eq!(
+            explicit_provider_id("dwarfstar:deepseek-v4-flash").as_deref(),
+            Some("dwarfstar")
+        );
+        assert_eq!(
+            explicit_provider_id("local:qwen3:32b").as_deref(),
+            Some("ollama")
+        );
+        assert_eq!(explicit_provider_id("deepseek-v4-flash"), None);
+        assert_eq!(explicit_provider_id("not-a-provider:model"), None);
     }
 
     #[test]

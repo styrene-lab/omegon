@@ -155,6 +155,18 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         description: "API key — Sonar models with built-in search via api.perplexity.ai",
     },
     ProviderCredential {
+        id: "dwarfstar",
+        auth_key: "dwarfstar",
+        display_name: "DwarfStar Local",
+        env_vars: &[
+            "OMEGON_DWARFSTAR_BASE_URL",
+            "DWARFSTAR_BASE_URL",
+            "DWARFSTAR_API_KEY",
+        ],
+        auth_method: AuthMethod::ApiKey,
+        description: "Local OpenAI-compatible inference endpoint",
+    },
+    ProviderCredential {
         id: "ollama",
         auth_key: "ollama",
         display_name: "Ollama (Local)",
@@ -238,6 +250,9 @@ pub fn canonical_provider_id(id: &str) -> &str {
         "openai" => "openai",
         "openai-codex" => "openai-codex",
         "openrouter" => "openrouter",
+        "opencode-go" => "opencode-go",
+        "perplexity" => "perplexity",
+        "dwarfstar" => "dwarfstar",
         "ollama-cloud" => "ollama-cloud",
         "ollama" => "ollama",
         "groq" => "groq",

@@ -1707,6 +1707,17 @@ fn workbench_repo_display_name(cwd: &std::path::Path) -> Option<String> {
     git_remote_repo_name(&repo)
 }
 
+fn workbench_git_branch(cwd: &std::path::Path) -> Option<String> {
+    let repo = git2::Repository::discover(cwd).ok()?;
+    let head = repo.head().ok()?;
+    if !head.is_branch() {
+        return None;
+    }
+    head.shorthand()
+        .filter(|branch| !branch.is_empty())
+        .map(str::to_string)
+}
+
 fn git_remote_repo_name(repo: &git2::Repository) -> Option<String> {
     let remote = repo
         .find_remote("upstream")
@@ -2341,7 +2352,8 @@ impl App {
         WorkbenchWorkspaceContext {
             repo,
             dir,
-            git_branch: self.footer_data.harness.git_branch.clone(),
+            git_branch: workbench_git_branch(cwd)
+                .or_else(|| self.footer_data.harness.git_branch.clone()),
         }
     }
 
@@ -8742,10 +8754,15 @@ Scroll transcript:
                             .push_system(&snapshot.system_notification_text("Plan progress"));
                     }
                     self.conversation.snap_to_bottom();
+                    let refreshed_workspace = self.current_workbench_workspace_context();
                     self.workbench_state = WorkbenchState {
                         active: None,
                         workstreams: dock_state.workstreams,
-                        workspace: self.workbench_state.workspace.clone(),
+                        workspace: if refreshed_workspace.has_visible_context() {
+                            refreshed_workspace
+                        } else {
+                            self.workbench_state.workspace.clone()
+                        },
                     };
                 } else {
                     self.workbench_state.active = dock_state.active;
@@ -8794,6 +8811,7 @@ Scroll transcript:
                     status.operating_profile = operating_profile_summary;
                     self.footer_data.update_harness(status.clone());
                     self.previous_harness_status = Some(status);
+                    self.workbench_state.workspace = self.current_workbench_workspace_context();
 
                     // Visual effect
                     self.effects.ping_footer(self.theme.as_ref());
