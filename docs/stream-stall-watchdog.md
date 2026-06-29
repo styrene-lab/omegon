@@ -134,3 +134,41 @@ catching a genuinely dead stream inside the retry budget.
   without ever emitting `ThinkingStart` would fall back to the initial/content
   budgets. Not observed for the Responses API (reasoning `output_item.added`
   arrives promptly), but it is the most likely blind spot.
+
+## Update 2026-06-29 — the third path (active-output re-arm)
+
+The predicted "third path" above was confirmed in the field with
+`openai-codex:gpt-5.5`: the provider streams **text/tool deltas for one output
+item**, then pauses for minutes while deciding the next item — *without* first
+emitting a `TextEnd`/`ToolCallEnd`. The phase therefore stays
+`OutputStreaming`/`ToolStreaming`, the tight 90s active budget fires, and the
+operator sees a spurious:
+
+```
+Upstream stalled stream — retrying (attempt 2, delay 1500ms): openai-codex stream stopped producing output
+```
+
+### Fix
+
+The consumer (`consume_llm_stream`) now **re-arms once** instead of aborting on
+the first active-output silence. `rearm_idle_phase(phase)` returns
+`Some(AmbiguousSilent)` for `OutputStreaming`/`ToolStreaming` and `None`
+otherwise. On the first timeout in an active phase the watchdog:
+
+1. stores `AmbiguousSilent` (picks up the generous reasoning budget),
+2. emits a non-fatal `StreamIdle{ ambiguous: true }` breadcrumb,
+3. `continue`s the recv loop — it does **not** abort or count a stall.
+
+Any resumed delta flips the phase back to active via
+`stream_idle_phase_after_event`. A *second* silence is now evaluated in
+`AmbiguousSilent`, which does not re-arm, so a genuinely dead stream still dies
+inside the retry budget. `AwaitingFirstEvent` does **not** re-arm — pre-first-token
+silence is a connection problem, not a reasoning gap.
+
+Net effect: the legal inter-item reasoning gap gets one tight budget + one
+reasoning budget (~90s + ~600s) before any stall is counted, while a dead
+connection costs at most one extra tight budget before it surfaces.
+
+- `loop.rs`: `active_output_silence_rearms_to_reasoning_budget` — asserts the
+  active phases re-arm to the reasoning budget exactly once, and that ambiguous,
+  reasoning, and awaiting-first-event phases do not re-arm.

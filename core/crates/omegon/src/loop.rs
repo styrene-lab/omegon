@@ -2377,6 +2377,29 @@ fn select_stream_idle_budget(
     }
 }
 
+/// Decide whether a stream that idled out under the tight *active* budget
+/// should be re-armed with the generous reasoning budget instead of being
+/// treated as a stall.
+///
+/// Reasoning-capable providers (notably the OpenAI Responses API behind
+/// `openai-codex`) can stream output deltas for one item, then pause for
+/// minutes while deciding the next item — *without* first emitting a
+/// `TextEnd`/`ToolCallEnd` that would move the phase out of the active band.
+/// The first such silence should not abort the turn; it should fall through to
+/// the ambiguous-silent phase and get the reasoning leash. A second silence
+/// (now evaluated in `AmbiguousSilent`) is a genuine stall and is *not*
+/// re-armed, so a dead stream still dies inside the retry budget.
+fn rearm_idle_phase(phase: StreamIdlePhase) -> Option<StreamIdlePhase> {
+    match phase {
+        StreamIdlePhase::OutputStreaming | StreamIdlePhase::ToolStreaming => {
+            Some(StreamIdlePhase::AmbiguousSilent)
+        }
+        StreamIdlePhase::AwaitingFirstEvent
+        | StreamIdlePhase::ReasoningStreaming
+        | StreamIdlePhase::AmbiguousSilent => None,
+    }
+}
+
 fn stream_idle_phase_after_event(current: StreamIdlePhase, event: &LlmEvent) -> StreamIdlePhase {
     match event {
         LlmEvent::Start => current,
@@ -2460,37 +2483,76 @@ async fn consume_llm_stream(
             reasoning_idle_timeout,
         )
     };
-    while let Some(event) = match tokio::time::timeout(idle_timeout(), rx.recv()).await {
-        Ok(event) => event,
-        Err(_) => {
-            let phase = StreamIdlePhase::from_u8(
-                stream_idle_phase.load(std::sync::atomic::Ordering::Relaxed),
-            );
-            let reason = if phase.is_ambiguous_reasoning() {
-                format!(
-                    "LLM stream had no observable activity for {}s during {} — this may be a long-running reasoning window or a stalled stream",
-                    idle_timeout().as_secs(),
-                    phase.label()
-                )
-            } else {
-                format!(
-                    "LLM stream idle for {}s during {} — connection may be stalled",
-                    idle_timeout().as_secs(),
-                    phase.label()
-                )
-            };
-            let _ = events.send(AgentEvent::StreamIdle {
-                provider: provider.to_string(),
-                model: model.to_string(),
-                phase: phase.label().to_string(),
-                idle_secs: idle_timeout().as_secs(),
-                ambiguous: phase.is_ambiguous_reasoning(),
-                message: reason.clone(),
-            });
-            let _ = events.send(AgentEvent::MessageAbort {
-                reason: Some(reason.clone()),
-            });
-            anyhow::bail!("{reason}");
+    while let Some(event) = 'recv: loop {
+        match tokio::time::timeout(idle_timeout(), rx.recv()).await {
+            Ok(event) => break 'recv event,
+            Err(_) => {
+                let phase = StreamIdlePhase::from_u8(
+                    stream_idle_phase.load(std::sync::atomic::Ordering::Relaxed),
+                );
+                // A silent gap *after* active output/tool streaming is most
+                // often a reasoning-capable provider (notably the OpenAI
+                // Responses API used by openai-codex) pausing between output
+                // items without first emitting a TextEnd/ToolCallEnd. The phase
+                // is still OutputStreaming/ToolStreaming, so the tight active
+                // budget would abort a live reasoning gap and surface as a
+                // spurious "stalled stream — retrying". Downgrade once to the
+                // ambiguous-silent phase and re-arm with the generous reasoning
+                // budget instead of aborting. A genuinely dead stream still
+                // dies on the next timeout (now evaluated in the ambiguous
+                // phase), and any resumed delta flips the phase back to active.
+                if let Some(rearmed) = rearm_idle_phase(phase) {
+                    stream_idle_phase.store(
+                        rearmed as u8,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    let idle_secs = idle_timeout().as_secs();
+                    tracing::debug!(
+                        provider,
+                        model,
+                        from_phase = phase.label(),
+                        idle_secs,
+                        "stream idle after active output — re-arming with reasoning budget before treating as a stall"
+                    );
+                    let _ = events.send(AgentEvent::StreamIdle {
+                        provider: provider.to_string(),
+                        model: model.to_string(),
+                        phase: phase.label().to_string(),
+                        idle_secs,
+                        ambiguous: true,
+                        message: format!(
+                            "LLM stream idle for {idle_secs}s after {} — re-arming with reasoning budget before treating as a stall",
+                            phase.label()
+                        ),
+                    });
+                    continue 'recv;
+                }
+                let reason = if phase.is_ambiguous_reasoning() {
+                    format!(
+                        "LLM stream had no observable activity for {}s during {} — this may be a long-running reasoning window or a stalled stream",
+                        idle_timeout().as_secs(),
+                        phase.label()
+                    )
+                } else {
+                    format!(
+                        "LLM stream idle for {}s during {} — connection may be stalled",
+                        idle_timeout().as_secs(),
+                        phase.label()
+                    )
+                };
+                let _ = events.send(AgentEvent::StreamIdle {
+                    provider: provider.to_string(),
+                    model: model.to_string(),
+                    phase: phase.label().to_string(),
+                    idle_secs: idle_timeout().as_secs(),
+                    ambiguous: phase.is_ambiguous_reasoning(),
+                    message: reason.clone(),
+                });
+                let _ = events.send(AgentEvent::MessageAbort {
+                    reason: Some(reason.clone()),
+                });
+                anyhow::bail!("{reason}");
+            }
         }
     } {
         let next_phase = stream_idle_phase_after_event(
@@ -4579,6 +4641,42 @@ mod tests {
         );
         // The reasoning leash must strictly exceed the content leash.
         assert!(reasoning > content);
+    }
+
+    #[test]
+    fn active_output_silence_rearms_to_reasoning_budget() {
+        use std::time::Duration;
+        let initial = Duration::from_secs(90);
+        let content = Duration::from_secs(90);
+        let reasoning = Duration::from_secs(600);
+
+        // Regression: openai-codex (OpenAI Responses API) streams text deltas
+        // for one item, then pauses for minutes deciding the next item without
+        // first emitting TextEnd. The phase is still OutputStreaming, so the
+        // *first* silence must re-arm to the ambiguous-silent phase and pick up
+        // the generous reasoning leash instead of aborting at the tight budget.
+        for active_phase in [
+            StreamIdlePhase::OutputStreaming,
+            StreamIdlePhase::ToolStreaming,
+        ] {
+            let rearmed =
+                rearm_idle_phase(active_phase).expect("active output silence must re-arm once");
+            assert_eq!(rearmed, StreamIdlePhase::AmbiguousSilent);
+            assert_eq!(
+                select_stream_idle_budget(rearmed, initial, content, reasoning),
+                reasoning,
+                "re-armed phase must use the generous reasoning budget"
+            );
+        }
+
+        // A *second* silence is now evaluated in the ambiguous phase: it must
+        // NOT re-arm, so a genuinely dead stream still dies inside the retry
+        // budget rather than looping forever.
+        assert_eq!(rearm_idle_phase(StreamIdlePhase::AmbiguousSilent), None);
+        assert_eq!(rearm_idle_phase(StreamIdlePhase::ReasoningStreaming), None);
+        // Awaiting-first-event silence is a connection problem, not a reasoning
+        // gap; it must surface as a stall, not re-arm.
+        assert_eq!(rearm_idle_phase(StreamIdlePhase::AwaitingFirstEvent), None);
     }
 
     #[test]
