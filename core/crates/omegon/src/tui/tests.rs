@@ -6224,6 +6224,10 @@ fn editor_top_line_dividers_bridge_gradient_segment_backgrounds() {
             ),
             (
                 crate::tui::theme::Alpharius.card_bg(),
+                crate::tui::theme::Alpharius.card_bg()
+            ),
+            (
+                crate::tui::theme::Alpharius.card_bg(),
                 crate::tui::theme::Alpharius.surface_bg()
             ),
             (
@@ -6231,7 +6235,7 @@ fn editor_top_line_dividers_bridge_gradient_segment_backgrounds() {
                 crate::tui::theme::Alpharius.surface_bg()
             ),
         ],
-        "engine ribbon should bridge route → grade → thinking → context → editor backgrounds: {divider_styles:?}"
+        "engine ribbon should bridge route → grade → profile → thinking → context → editor backgrounds: {divider_styles:?}"
     );
 }
 
@@ -6271,7 +6275,7 @@ fn editor_top_line_grades_actual_model_not_route_intent() {
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(
-        rendered.contains("openai-codex/gpt-5.5  󰿃 S   low   ctx:"),
+        rendered.contains("openai-codex/gpt-5.5  󰿃 S  default   low   ctx:"),
         "{rendered}"
     );
 }
@@ -6291,7 +6295,7 @@ fn active_turn_keeps_engine_ribbon_and_moves_spinner_to_status_row() {
     let rendered = render_app_to_string(&mut app, 160, 20);
 
     assert!(
-        rendered.contains("openai-codex/gpt-5.5  󰿃 S   high   ctx:"),
+        rendered.contains("openai-codex/gpt-5.5  󰿃 S  default   high   ctx:"),
         "active turn must keep engine route/grade/thinking/context visible: {rendered}"
     );
     assert!(
@@ -7113,3 +7117,6 @@ fn legacy_model_tier_slash_commands_are_unknown() {
         }
     }
 }
+
+
+
