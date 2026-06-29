@@ -838,6 +838,27 @@ mod tests {
     }
 
     #[test]
+    fn classify_anthropic_and_openai_incomplete_streams() {
+        // Regression: Anthropic/OpenAI producers now emit a completion guard
+        // when the SSE byte stream ends without message_stop/finish_reason.
+        // All four message shapes must classify as transient BridgeDropped so
+        // the loop retries instead of poisoning history with truncated content.
+        for msg in [
+            "anthropic: stream closed without completion (had 800b text, 0 tool calls)",
+            "anthropic: stream ended without a completion event",
+            "openai: stream closed without completion (had 42b text, 1 tool calls)",
+            "openai: stream ended without a completion event",
+        ] {
+            assert_eq!(
+                classify_upstream_error(msg),
+                UpstreamErrorClass::BridgeDropped,
+                "{msg:?} must classify as BridgeDropped"
+            );
+        }
+        assert!(UpstreamErrorClass::BridgeDropped.transient_kind().is_some());
+    }
+
+    #[test]
     fn provider_specific_override() {
         // Anthropic overloaded_error → ProviderOverloaded, not generic
         assert_eq!(

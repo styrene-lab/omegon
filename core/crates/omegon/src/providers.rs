@@ -1453,6 +1453,11 @@ async fn parse_anthropic_stream(
     let mut acc_cache_read_tokens: u64 = 0;
     let mut acc_cache_creation_tokens: u64 = 0;
     let mut stop_reason: Option<String> = None;
+    // Tracks whether the stream reached a `message_stop` terminal event. If the
+    // SSE byte stream ends (Ok(None) in process_sse) without this, Anthropic
+    // dropped the connection mid-response and we must never feed partial text
+    // back as a completed turn (see the post-stream guard below).
+    let mut completed = false;
 
     tracing::debug!("parsing Anthropic SSE stream");
     let provider_telemetry_done = provider_telemetry.clone();
@@ -1650,12 +1655,45 @@ async fn parse_anthropic_stream(
                     cache_creation_tokens: acc_cache_creation_tokens,
                     provider_telemetry: provider_telemetry_done.clone(),
                 });
+                completed = true;
                 return false; // stop
             }
             _ => {}
         }
         true
-    }).await
+    }).await?;
+
+    if !completed {
+        // The SSE byte stream ended without a `message_stop` terminal event —
+        // Anthropic dropped the connection mid-response (network drop, server
+        // restart, missed event variant). Surface an error so the retry loop
+        // handles it; never silently feed truncated content back into history.
+        // Mirrors the Codex completion guard in parse_codex_stream.
+        if !full_text.is_empty() || !tool_calls.is_empty() {
+            tracing::warn!(
+                text_len = full_text.len(),
+                tool_calls = tool_calls.len(),
+                "Anthropic stream closed without message_stop — treating as error to prevent partial-content poisoning"
+            );
+            let _ = tx
+                .send(LlmEvent::Error {
+                    message: format!(
+                        "anthropic: stream closed without completion (had {}b text, {} tool calls)",
+                        full_text.len(),
+                        tool_calls.len()
+                    ),
+                })
+                .await;
+        } else {
+            let _ = tx
+                .send(LlmEvent::Error {
+                    message: "anthropic: stream ended without a completion event".into(),
+                })
+                .await;
+        }
+    }
+
+    Ok(())
 }
 
 pub struct OpenAIClient {
@@ -1837,6 +1875,10 @@ async fn parse_openai_stream(
     let mut acc_input_tokens: u64 = 0;
     let mut acc_output_tokens: u64 = 0;
     let provider_telemetry_done = provider_telemetry.clone();
+    // Tracks whether the stream reached a `finish_reason` terminal event. A
+    // mid-stream SSE drop (Ok(None) in process_sse) without this means the
+    // provider dropped the connection; never feed partial content back.
+    let mut completed = false;
 
     let _ = tx.try_send(LlmEvent::Start);
     let _ = tx.try_send(LlmEvent::TextStart);
@@ -1929,11 +1971,42 @@ async fn parse_openai_stream(
                 cache_creation_tokens: 0,
                 provider_telemetry: provider_telemetry_done.clone(),
             });
+            completed = true;
             return false;
         }
         true
     })
-    .await
+    .await?;
+
+    if !completed {
+        // SSE byte stream ended without a `finish_reason` terminal event — the
+        // provider dropped the connection mid-response. Surface an error so the
+        // retry loop handles it; never silently feed truncated content back.
+        if !full_text.is_empty() || !tool_calls.is_empty() {
+            tracing::warn!(
+                text_len = full_text.len(),
+                tool_calls = tool_calls.len(),
+                "OpenAI stream closed without finish_reason — treating as error to prevent partial-content poisoning"
+            );
+            let _ = tx
+                .send(LlmEvent::Error {
+                    message: format!(
+                        "openai: stream closed without completion (had {}b text, {} tool calls)",
+                        full_text.len(),
+                        tool_calls.len()
+                    ),
+                })
+                .await;
+        } else {
+            let _ = tx
+                .send(LlmEvent::Error {
+                    message: "openai: stream ended without a completion event".into(),
+                })
+                .await;
+        }
+    }
+
+    Ok(())
 }
 
 //

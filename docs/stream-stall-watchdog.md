@@ -172,3 +172,33 @@ connection costs at most one extra tight budget before it surfaces.
 - `loop.rs`: `active_output_silence_rearms_to_reasoning_budget` — asserts the
   active phases re-arm to the reasoning budget exactly once, and that ambiguous,
   reasoning, and awaiting-first-event phases do not re-arm.
+
+## Update 2026-06-29 — completion guard parity (BridgeDropped)
+
+A separate-but-related failure surfaced alongside the stall retries:
+
+```
+Upstream bridge dropped stream — retrying (attempt 1, delay 750ms): anthropic dropped the response stream before completion
+```
+
+This is a **different class** from a stall. `process_sse` returns `Ok(())`
+whether the SSE byte stream ends cleanly (terminal event seen) **or** drops
+mid-flight (`Ok(None)` → break). Only the Codex parser (`parse_codex_stream`)
+guarded against the drop case; the Anthropic (`parse_anthropic_stream`) and
+OpenAI/OpenRouter (`parse_openai_stream`) parsers did not. A drop *after*
+partial content silently fed truncated text/tool-calls back into history as a
+completed turn — the exact poisoning the Codex guard prevents.
+
+### Fix
+
+Both parsers now track a `completed` flag set on their terminal event
+(`message_stop` for Anthropic, `finish_reason` for OpenAI). If the byte stream
+ends with `completed == false`, the parser emits an `LlmEvent::Error`:
+
+- with partial content → `"<provider>: stream closed without completion (had Nb text, M tool calls)"`
+- with no content → `"<provider>: stream ended without a completion event"`
+
+Both shapes match the existing `BridgeDropped` classifier substrings
+(`"stream closed without completion"`, `"stream ended without"`), so they
+classify as transient `BridgeDropped` → `RetrySameProvider`. Test:
+`upstream_errors.rs::classify_anthropic_and_openai_incomplete_streams`.
