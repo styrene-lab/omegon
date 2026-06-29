@@ -7117,6 +7117,3 @@ fn legacy_model_tier_slash_commands_are_unknown() {
         }
     }
 }
-
-
-
