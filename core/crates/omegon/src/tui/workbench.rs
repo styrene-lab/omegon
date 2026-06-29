@@ -46,9 +46,28 @@ pub fn activity_preferred_height(
     if width == 0 || projection.is_empty() {
         return 0;
     }
+    let tool_count = projection
+        .entries
+        .iter()
+        .filter(|entry| entry.tool.is_some())
+        .count() as u16;
+    let wants_tool_detail = projection.entries.iter().any(|entry| {
+        entry
+            .tool
+            .as_ref()
+            .is_some_and(|tool| should_render_activity_tool_detail(tool, 3))
+    });
     match (projection.has_tool(), projection.has_operation()) {
-        (true, true) => 7,
-        (true, false) => 4,
+        (true, true) => {
+            let tool_height = if wants_tool_detail {
+                4
+            } else {
+                tool_count.max(1)
+            };
+            tool_height.saturating_add(3)
+        }
+        (true, false) if wants_tool_detail => 4,
+        (true, false) => tool_count.max(1),
         (false, true) => 5,
         (false, false) => 0,
     }

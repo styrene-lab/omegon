@@ -1709,13 +1709,86 @@ fn workbench_repo_display_name(cwd: &std::path::Path) -> Option<String> {
 
 fn workbench_git_branch(cwd: &std::path::Path) -> Option<String> {
     let repo = git2::Repository::discover(cwd).ok()?;
+    workbench_git_branch_for_repo(&repo)
+}
+
+fn workbench_git_branch_for_repo(repo: &git2::Repository) -> Option<String> {
     let head = repo.head().ok()?;
-    if !head.is_branch() {
-        return None;
+    let mut label = if head.is_branch() {
+        head.shorthand()
+            .filter(|branch| !branch.is_empty())?
+            .to_string()
+    } else {
+        let short = head
+            .target()
+            .map(|oid| oid.to_string().chars().take(7).collect::<String>())?;
+        format!("HEAD@{short}")
+    };
+
+    if let Some((ahead, behind)) = git_ahead_behind(repo, &head) {
+        if ahead > 0 {
+            label.push_str(&format!(" ↑{ahead}"));
+        }
+        if behind > 0 {
+            label.push_str(&format!(" ↓{behind}"));
+        }
     }
-    head.shorthand()
-        .filter(|branch| !branch.is_empty())
-        .map(str::to_string)
+
+    if git_has_tracked_changes(repo) {
+        label.push_str(" *");
+    }
+
+    if let Some(state) = git_state_label(repo.state()) {
+        label.push_str(" · ");
+        label.push_str(state);
+    }
+
+    Some(label)
+}
+
+fn git_ahead_behind(repo: &git2::Repository, head: &git2::Reference<'_>) -> Option<(usize, usize)> {
+    let branch_name = head.shorthand()?;
+    let local_oid = head.target()?;
+    let upstream = repo
+        .find_branch(branch_name, git2::BranchType::Local)
+        .ok()?
+        .upstream()
+        .ok()?
+        .get()
+        .target()?;
+    repo.graph_ahead_behind(local_oid, upstream).ok()
+}
+
+fn git_has_tracked_changes(repo: &git2::Repository) -> bool {
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(false)
+        .renames_head_to_index(true)
+        .renames_index_to_workdir(true);
+    repo.statuses(Some(&mut opts))
+        .map(|statuses| {
+            statuses
+                .iter()
+                .any(|entry| entry.status() != git2::Status::CURRENT)
+        })
+        .unwrap_or(false)
+}
+
+fn git_state_label(state: git2::RepositoryState) -> Option<&'static str> {
+    match state {
+        git2::RepositoryState::Clean => None,
+        git2::RepositoryState::Merge => Some("merge"),
+        git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence => Some("revert"),
+        git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence => {
+            Some("cherry-pick")
+        }
+        git2::RepositoryState::Bisect => Some("bisect"),
+        git2::RepositoryState::Rebase
+        | git2::RepositoryState::RebaseInteractive
+        | git2::RepositoryState::RebaseMerge => Some("rebase"),
+        git2::RepositoryState::ApplyMailbox | git2::RepositoryState::ApplyMailboxOrRebase => {
+            Some("apply")
+        }
+    }
 }
 
 fn git_remote_repo_name(repo: &git2::Repository) -> Option<String> {
@@ -1803,6 +1876,74 @@ mod workspace_context_tests {
             Some("canonical-name".to_string())
         );
         assert_eq!(workspace_dir_basename(&checkout), "local-checkout-name");
+    }
+
+    #[test]
+    fn workbench_git_branch_includes_ahead_behind_and_dirty_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Omegon Test").unwrap();
+            config
+                .set_str("user.email", "omegon@example.invalid")
+                .unwrap();
+        }
+        std::fs::write(dir.path().join("file.txt"), "base\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("file.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let base = repo
+            .commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+            .unwrap();
+        let base_commit = repo.find_commit(base).unwrap();
+        repo.branch("upstream", &base_commit, false).unwrap();
+        repo.find_branch("main", git2::BranchType::Local)
+            .unwrap()
+            .set_upstream(Some("upstream"))
+            .unwrap();
+
+        std::fs::write(dir.path().join("file.txt"), "next\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("file.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "next", &tree, &[&base_commit])
+            .unwrap();
+        std::fs::write(dir.path().join("file.txt"), "dirty\n").unwrap();
+
+        assert_eq!(
+            workbench_git_branch_for_repo(&repo).as_deref(),
+            Some("main ↑1 *")
+        );
+    }
+
+    #[test]
+    fn workbench_git_branch_reports_detached_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Omegon Test").unwrap();
+            config
+                .set_str("user.email", "omegon@example.invalid")
+                .unwrap();
+        }
+        std::fs::write(dir.path().join("file.txt"), "base\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("file.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let commit_id = repo
+            .commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+            .unwrap();
+        repo.set_head_detached(commit_id).unwrap();
+
+        let label = workbench_git_branch_for_repo(&repo).unwrap();
+        assert!(label.starts_with("HEAD@"), "{label}");
     }
 }
 

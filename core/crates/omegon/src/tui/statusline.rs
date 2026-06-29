@@ -221,8 +221,15 @@ impl SessionRow {
             }
         }
 
-        // Right-align version string
-        let version = concat!("v", env!("CARGO_PKG_VERSION"));
+        // Right-align version string. Official tag builds can stay compact;
+        // branch/nightly/dev builds include the baked git hash for specificity.
+        let version = if env!("OMEGON_GIT_DESCRIBE").is_empty()
+            && !env!("OMEGON_GIT_SHA").contains("-dirty")
+        {
+            concat!("v", env!("CARGO_PKG_VERSION")).to_string()
+        } else {
+            format!("v{} {}", env!("CARGO_PKG_VERSION"), env!("OMEGON_GIT_SHA"))
+        };
         let version_width = version.len() + 1; // +1 for trailing space
         if used + version_width < w {
             let pad = w - used - version_width;

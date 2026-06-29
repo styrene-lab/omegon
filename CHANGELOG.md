@@ -17,7 +17,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Fixed
-- Prevented explicit provider-qualified model specs from silently falling back to unrelated automation-safe providers, and refreshed the TUI Workbench workspace context from live git state so the displayed branch reflects the current checkout instead of a stale harness snapshot after workspace/branch changes.
+- Prevented explicit provider-qualified model specs from silently falling back to unrelated automation-safe providers.
+- Refreshed the TUI Workbench workspace context from live git state so the displayed branch reflects the current checkout instead of a stale harness snapshot after workspace/branch changes.
+- Added compact git state to the TUI Workbench branch field: ahead/behind counts, tracked dirty marker, detached HEAD label, and merge/rebase/cherry-pick state when present.
+- Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
 
 ### Added
 - Added structured stream-idle telemetry (`AgentEvent::StreamIdle`, Web `stream.idle`, ACP `_stream/idle`) so provider idle/stall diagnostics can flow to UIs without being rendered as assistant-authored content.
