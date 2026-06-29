@@ -22,7 +22,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Printed both CLI (`omegon --resume <id>`) and in-app (`/resume <id>`) resume commands when sessions are saved on exit.
 - Printed the saved session id and exact `omegon --resume <id>` command when an interactive or standalone headless session exits.
 - Prevented native and OCI extension stderr logs from leaking into the interactive terminal by piping extension stderr into Omegon tracing instead of inheriting it.
-- Surfaced the active profile source in the engine line so project/user/default profile state is visible at a glance.
+- Surfaced the active profile source in the engine line so project/user/default profile state is visible at a glance; named profiles now render by short name instead of source-only labels.
 - Prevented explicit provider-qualified model specs from silently falling back to unrelated automation-safe providers.
 - Refreshed the TUI Workbench workspace context from live git state so the displayed branch reflects the current checkout instead of a stale harness snapshot after workspace/branch changes.
 - Added compact git state to the TUI Workbench branch field: ahead/behind counts, tracked dirty marker, detached HEAD label, and merge/rebase/cherry-pick state when present.

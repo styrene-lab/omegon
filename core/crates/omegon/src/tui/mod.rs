@@ -5361,19 +5361,17 @@ impl App {
                 } else {
                     format!("{} {grade}", glyphs.engine(EngineGlyphRole::GradeEmblem))
                 };
-                let profile_source = self.settings().profile_source;
-                let (profile_glyph, profile_label) = match profile_source {
-                    crate::settings::ProfileSource::Project(_) => {
-                        (glyphs.engine(EngineGlyphRole::ProfileProject), "project")
-                    }
-                    crate::settings::ProfileSource::User(_) => {
-                        (glyphs.engine(EngineGlyphRole::ProfileUser), "user")
-                    }
-                    crate::settings::ProfileSource::BuiltInDefault => {
-                        (glyphs.engine(EngineGlyphRole::ProfileDefault), "default")
-                    }
+                let settings_snapshot = self.settings();
+                let profile_source = settings_snapshot.profile_source;
+                let profile_name = settings_snapshot.profile_name.clone();
+                let source_label = match profile_source {
+                    crate::settings::ProfileSource::Project(_) => "project",
+                    crate::settings::ProfileSource::User(_) => "user",
+                    crate::settings::ProfileSource::BuiltInDefault => "default",
                 };
-                let profile_text = format!("{profile_glyph} {profile_label}");
+                let profile_text = profile_name
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| source_label.to_string());
                 let thinking_text = format!(
                     "{} {}",
                     glyphs.engine(EngineGlyphRole::Thinking),

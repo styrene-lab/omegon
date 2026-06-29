@@ -286,6 +286,10 @@ pub struct Settings {
     /// Active model (provider:model-id format).
     pub model: String,
 
+    /// Human-readable name of the active persisted profile, when provided.
+    #[serde(default, skip)]
+    pub profile_name: Option<String>,
+
     /// Behavioral posture for the current session/runtime.
     #[serde(default)]
     pub posture: BehavioralPosture,
@@ -667,6 +671,7 @@ impl Default for Settings {
         let context_window = 200_000;
         Self {
             model: "anthropic:claude-sonnet-4-6".into(),
+            profile_name: None,
             posture: BehavioralPosture::fixed(PosturePreset::Architect),
             thinking: ThinkingLevel::Medium,
             max_turns: 50,
@@ -1087,6 +1092,12 @@ pub struct LoadedProfile {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
+    /// Stable, human-readable profile identifier for compact UI surfaces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Optional longer display label for settings and help surfaces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used_model: Option<ProfileModel>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1374,6 +1385,20 @@ impl ProfileExtensions {
 }
 
 impl Profile {
+    /// Compact human-readable identity for status surfaces.
+    pub fn compact_label(&self) -> Option<&str> {
+        self.name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                self.display_name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+            })
+    }
+
     /// Load profile. Project-level (`<repo>/.omegon/profile.json`) overrides
     /// user-level (`~/.omegon/profile.json`). Both are optional.
     pub fn load(cwd: &std::path::Path) -> Self {
@@ -1511,6 +1536,8 @@ impl Profile {
 
     /// Apply profile to settings (called at startup).
     pub fn apply_to(&self, settings: &mut Settings) {
+        settings.profile_name = self.compact_label().map(ToOwned::to_owned);
+
         if let Some(ref m) = self.last_used_model {
             settings.set_model(&format!("{}:{}", m.provider, m.model_id));
         }
@@ -2502,6 +2529,29 @@ mod tests {
         profile.capture_from(&settings);
 
         assert_eq!(profile.requested_context_class.as_deref(), Some("extended"));
+    }
+
+    #[test]
+    fn profile_name_round_trips_and_sets_compact_runtime_label() {
+        let profile: Profile =
+            serde_json::from_str(r#"{"name":"minimal","displayName":"Minimal project profile"}"#)
+                .unwrap();
+        let json = serde_json::to_value(&profile).unwrap();
+        assert_eq!(json["name"], "minimal");
+        assert_eq!(json["displayName"], "Minimal project profile");
+        assert_eq!(profile.compact_label(), Some("minimal"));
+
+        let mut settings = Settings::new("anthropic:claude-sonnet-4-6");
+        profile.apply_to(&mut settings);
+        assert_eq!(settings.profile_name.as_deref(), Some("minimal"));
+    }
+
+    #[test]
+    fn profile_compact_label_falls_back_to_display_name() {
+        let profile: Profile =
+            serde_json::from_str(r#"{"name":"   ","displayName":"Team defaults"}"#).unwrap();
+
+        assert_eq!(profile.compact_label(), Some("Team defaults"));
     }
 
     #[test]

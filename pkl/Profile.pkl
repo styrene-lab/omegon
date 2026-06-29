@@ -14,6 +14,12 @@ class ModelRef {
   modelId: String(length > 0)
 }
 
+/// Stable, human-readable profile identifier for compact UI surfaces.
+name: String(length > 0)?
+
+/// Optional longer display label for settings and help surfaces.
+displayName: String(length > 0)?
+
 /// Last used model selection.
 lastUsedModel: ModelRef?
 
