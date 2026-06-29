@@ -3517,7 +3517,7 @@ fn render_skills_palette(entries: &[crate::skills::SkillEntry]) -> String {
     skills_palette_projection(entries).render_markdown()
 }
 
-fn skills_palette_projection(
+pub(crate) fn skills_palette_projection(
     entries: &[crate::skills::SkillEntry],
 ) -> crate::surfaces::palette::PaletteProjection {
     use crate::surfaces::palette::{

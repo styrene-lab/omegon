@@ -33,6 +33,7 @@ pub mod permission_lane;
 pub mod segment_components;
 pub mod segment_detail;
 pub mod segments;
+pub(crate) mod menu_surface;
 pub mod selector;
 pub(crate) mod settings_menu;
 pub mod spinner;
@@ -116,6 +117,8 @@ use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
 use self::layout_projection::{TuiLayoutInputs, plan_tui_layout};
+use self::menu_surface::{ActiveMenu, MenuMode};
+use crate::surfaces::menu::MenuProjection;
 use self::permission_lane::{format_permission_prompt, permission_response_for_key};
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode};
 use self::settings_menu::SelectorKind;
@@ -546,6 +549,8 @@ struct App {
     selector_kind: Option<SelectorKind>,
     /// Persistent settings screen state backed by the shared settings surface projection.
     settings_screen: Option<settings_menu::SettingsScreen>,
+    /// Active structured menu popup for command inventories such as /skills.
+    active_menu: Option<ActiveMenu>,
     /// Active @-file picker popup.
     at_picker: Option<selector::Selector>,
     /// Last tool name from ToolStart — used to track memory mutations.
@@ -2189,6 +2194,7 @@ impl App {
             selector: None,
             selector_kind: None,
             settings_screen: None,
+            active_menu: None,
             at_picker: None,
             last_tool_name: None,
             completed_tool_name: None,
@@ -2596,6 +2602,20 @@ impl App {
     fn open_settings_screen(&mut self) {
         let projection = self.settings_projection();
         self.settings_screen = Some(settings_menu::SettingsScreen::from_projection(&projection));
+    }
+
+    fn open_skills_menu(&mut self) -> Result<(), String> {
+        let entries = crate::skills::list_structured()
+            .map_err(|err| format!("/skills list failed: {err}"))?;
+        if entries.is_empty() {
+            return Err("No skills found. Run /skills install to install bundled skills.".into());
+        }
+        let palette = crate::control_runtime::skills_palette_projection(&entries);
+        let projection = MenuProjection::from_palette("skills", palette);
+        self.active_menu = Some(ActiveMenu::new(projection));
+        self.command_panel = None;
+        self.command_prompt = None;
+        Ok(())
     }
 
     fn queue_settings_profile_save(&mut self, tx: &mpsc::Sender<TuiCommand>) {
@@ -5541,6 +5561,16 @@ impl App {
             self.render_settings_screen(area, frame);
         }
 
+        if let Some(menu) = &self.active_menu {
+            menu_surface::render_menu_surface(
+                frame,
+                area,
+                self.theme.as_ref(),
+                &menu.projection,
+                &menu.state,
+            );
+        }
+
         // Selector popup (overlays everything when active)
         if let Some(ref sel) = self.selector {
             sel.render(area, frame, t.as_ref());
@@ -6537,6 +6567,10 @@ Scroll transcript:
                 const USAGE: &str = "Usage: /skills [list|reload|refresh|install [name|skills/name]|create|new [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]";
                 if let Some(command) = canonical_slash_command("skills", args) {
                     match command {
+                        CanonicalSlashCommand::SkillsView => match self.open_skills_menu() {
+                            Ok(()) => SlashResult::Handled,
+                            Err(message) => SlashResult::Display(message),
+                        },
                         CanonicalSlashCommand::SkillsReload => {
                             let cwd = self.cwd().to_path_buf();
                             if let Some(ref mut registry) = self.augment_registry {
@@ -10261,6 +10295,104 @@ pub async fn run_tui(
                     }
 
                     if app.should_discard_key_after_interrupt(&key) {
+                        continue;
+                    }
+
+                    // ── Structured menu intercepts navigation when open ────
+                    if app.active_menu.is_some() {
+                        if matches!(key.code, KeyCode::Esc)
+                            && app.should_discard_key_after_interrupt(&key)
+                        {
+                            continue;
+                        }
+                        match key.code {
+                            KeyCode::Up => {
+                                if let Some(menu) = app.active_menu.as_mut() {
+                                    menu.state.move_up();
+                                }
+                            }
+                            KeyCode::Down => {
+                                if let Some(menu) = app.active_menu.as_mut() {
+                                    menu.state.move_down(&menu.projection);
+                                }
+                            }
+                            KeyCode::Tab => {
+                                if let Some(menu) = app.active_menu.as_mut() {
+                                    menu.state.next_tab(&menu.projection);
+                                }
+                            }
+                            KeyCode::BackTab => {
+                                if let Some(menu) = app.active_menu.as_mut() {
+                                    menu.state.previous_tab(&menu.projection);
+                                }
+                            }
+                            KeyCode::Char('/') => {
+                                if let Some(menu) = app.active_menu.as_mut() {
+                                    menu.state.enter_search();
+                                }
+                            }
+                            KeyCode::Char(ch)
+                                if app.active_menu.as_ref().is_some_and(|menu| {
+                                    menu.state.mode == MenuMode::Search
+                                }) && !key.modifiers.contains(KeyModifiers::CONTROL)
+                                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+                            {
+                                if let Some(menu) = app.active_menu.as_mut() {
+                                    menu.state.push_filter_char(&menu.projection, ch);
+                                }
+                            }
+                            KeyCode::Backspace
+                                if app.active_menu.as_ref().is_some_and(|menu| {
+                                    menu.state.mode == MenuMode::Search
+                                }) =>
+                            {
+                                if let Some(menu) = app.active_menu.as_mut() {
+                                    menu.state.pop_filter_char(&menu.projection);
+                                }
+                            }
+                            KeyCode::Enter => {
+                                let command = app
+                                    .active_menu
+                                    .as_ref()
+                                    .and_then(|menu| menu.state.selected_command(&menu.projection));
+                                if let Some(command) = command {
+                                    app.active_menu = None;
+                                    match app.handle_slash_command(&command, &command_tx) {
+                                        SlashResult::Display(response) => {
+                                            app.history.push(command.clone());
+                                            app.exit_history_recall();
+                                            app.show_slash_response(&command, &response);
+                                        }
+                                        SlashResult::Handled => {
+                                            app.history.push(command);
+                                            app.exit_history_recall();
+                                        }
+                                        SlashResult::Quit => {
+                                            app.history.push(command);
+                                            app.exit_history_recall();
+                                            app.should_quit = true;
+                                            let _ = command_tx.send(TuiCommand::Quit).await;
+                                        }
+                                        SlashResult::NotACommand => {}
+                                    }
+                                }
+                            }
+                            KeyCode::Esc => {
+                                let handled = app
+                                    .active_menu
+                                    .as_mut()
+                                    .is_some_and(|menu| menu.state.exit_search());
+                                if !handled {
+                                    app.active_menu = None;
+                                }
+                            }
+                            KeyCode::Char('c') | KeyCode::Char('C')
+                                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                            {
+                                app.active_menu = None;
+                            }
+                            _ => {}
+                        }
                         continue;
                     }
 

@@ -35,6 +35,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
 
 ### Added
+- Added a renderer-neutral menu projection and TUI menu surface, then routed `/skills` to a structured keyboard-first menu with tabs, filtering, badges, grouped rows, and selected-command execution through the existing slash-command path.
 - Added structured stream-idle telemetry (`AgentEvent::StreamIdle`, Web `stream.idle`, ACP `_stream/idle`) so provider idle/stall diagnostics can flow to UIs without being rendered as assistant-authored content.
 - Added dedicated agent-callable skills tools (`skills_list`, `skills_get`, `skills_create`, `skills_import`, `skills_install`, `skills_delete`, `skills_reload`) backed by a first-class skills feature and shared augment registry reload path.
 - Added `/extension refresh`, `/extension reload`, and `/extension restart` as safe aliases for a partial live runtime substrate refresh: skill augments reload immediately, extension/process/widget changes remain candidate inventory until explicit promotion support lands.

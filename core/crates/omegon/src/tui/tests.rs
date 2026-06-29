@@ -4398,20 +4398,67 @@ fn slash_plugin_list_enqueues_execute_control() {
 }
 
 #[test]
-fn slash_skills_enqueues_execute_control() {
+fn slash_skills_opens_structured_menu() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 
     let result = app.handle_slash_command("/skills", &tx);
     assert!(matches!(result, SlashResult::Handled));
+    assert!(rx.try_recv().is_err(), "skills menu is handled in-TUI");
 
-    match rx.try_recv().expect("queued command") {
-        TuiCommand::ExecuteControl {
-            request: crate::control_runtime::ControlRequest::SkillsView,
-            ..
-        } => {}
-        other => panic!("expected skills view control request, got: {other:?}"),
+    let menu = app.active_menu.as_ref().expect("skills menu opened");
+    assert_eq!(menu.projection.id, "skills");
+    assert!(menu
+        .state
+        .visible_rows(&menu.projection)
+        .iter()
+        .any(|row| row.row.label.contains("/skills get")));
+}
+
+#[test]
+fn slash_skills_menu_exposes_executable_primary_commands() {
+    let mut app = test_app();
+    let (tx, _rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/skills", &tx);
+    assert!(matches!(result, SlashResult::Handled));
+
+    let menu = app.active_menu.as_mut().expect("skills menu opened");
+    menu.state.enter_search();
+    for ch in "skills.reload".chars() {
+        menu.state.push_filter_char(&menu.projection, ch);
     }
+
+    assert_eq!(
+        menu.state.selected_command(&menu.projection).as_deref(),
+        Some("/skills reload")
+    );
+}
+
+#[test]
+fn slash_help_command_registry_converts_to_menu_projection() {
+    let menu = crate::surfaces::command_menu::command_menu_projection(
+        crate::command_registry::builtin_command_definitions(),
+        Vec::new(),
+        &[],
+    );
+    let projection = crate::surfaces::menu::MenuProjection::from_command_menu(
+        "commands",
+        "Commands",
+        menu,
+    );
+
+    let row = projection.tabs[0]
+        .groups[0]
+        .rows
+        .iter()
+        .find(|row| row.id == "help")
+        .expect("help row");
+    assert_eq!(row.primary_action.as_ref().unwrap().command.as_deref(), Some("/help"));
+    assert!(row.availability.unwrap().tui);
+    assert!(row.availability.unwrap().cli);
+    assert!(row.availability.unwrap().acp);
+    assert_eq!(row.safety.unwrap().class, omegon_traits::CommandSafetyClass::ReadOnly);
 }
 
 #[test]
