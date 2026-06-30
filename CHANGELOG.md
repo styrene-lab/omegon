@@ -44,6 +44,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
 
 ### Added
+- Routed bare `/sessions` to a shared saved-session menu with resume actions while preserving `/sessions list` and `/sessions all` as text readouts.
 - Routed bare `/ui` and `/ui surfaces` to the shared UI menu while preserving `/ui status` as the text readout and keeping direct preset/surface toggle commands.
 - Made `/skills` a top-level active skills readout: skill inventory rows now come first with inspect/install actions, `i` installs the selected skill from the menu, session/project operations are grouped separately, and `/skills --help` owns command syntax help.
 - Added a renderer-neutral menu projection and TUI menu surface, then routed `/skills` to a structured keyboard-first menu with tabs, filtering, badges, grouped rows, and selected-command execution through the existing slash-command path.

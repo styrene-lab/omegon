@@ -3668,6 +3668,89 @@ fn slash_resume_enqueues_execute_control() {
 }
 
 #[test]
+fn slash_sessions_opens_shared_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/sessions", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("sessions menu");
+    assert_eq!(menu.projection.id, "sessions");
+    assert!(
+        menu.state
+            .visible_rows(&menu.projection)
+            .iter()
+            .any(|row| row.row.id == "sessions.empty" || row.row.id.starts_with("session."))
+    );
+}
+
+#[test]
+fn slash_sessions_all_preserves_text_readout() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/sessions all", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.active_menu.is_none());
+    assert!(matches!(rx.try_recv().expect("list sessions"), TuiCommand::ListSessions { .. }));
+}
+
+#[test]
+fn slash_sessions_list_preserves_text_readout() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/sessions list", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.active_menu.is_none());
+    assert!(matches!(rx.try_recv().expect("list sessions"), TuiCommand::ListSessions { .. }));
+}
+
+#[test]
+fn sessions_menu_rows_resume_by_session_id() {
+    let mut app = test_app();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
+    let dir = crate::session::sessions_dir(tmp.path()).expect("sessions dir");
+    std::fs::create_dir_all(&dir).expect("session dir");
+    let session_id = "2026-01-02T03-04-05_deadbeef";
+    let session_path = dir.join(format!("{session_id}.json"));
+    std::fs::write(&session_path, "{}").expect("session");
+    let meta = crate::session::SessionMeta {
+        session_id: session_id.into(),
+        cwd: tmp.path().to_string_lossy().to_string(),
+        created_at: "2026:01:02 03:04:05".into(),
+        turns: 3,
+        tool_calls: 7,
+        description: "Resume target".into(),
+        last_prompt_snippet: "last prompt".into(),
+    };
+    std::fs::write(
+        session_path.with_extension("meta.json"),
+        serde_json::to_string_pretty(&meta).unwrap(),
+    )
+    .expect("meta");
+
+    app.open_sessions_menu();
+    let menu = app.active_menu.as_ref().expect("sessions menu");
+    let row = menu
+        .state
+        .visible_rows(&menu.projection)
+        .into_iter()
+        .find(|row| row.row.id == format!("session.{session_id}"))
+        .expect("session row");
+
+    assert_eq!(row.row.label, "Resume target");
+    assert_eq!(
+        row.row.primary_action.as_ref().and_then(|action| action.command.as_deref()),
+        Some("/sessions resume 2026-01-02T03-04-05_deadbeef")
+    );
+}
+
+#[test]
 fn slash_sessions_resume_enqueues_execute_control() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();

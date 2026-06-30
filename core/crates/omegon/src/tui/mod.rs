@@ -1067,7 +1067,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             }
         }
         "new" if args.is_empty() => Some(CanonicalSlashCommand::ContextClear),
-        "sessions" if args.is_empty() => Some(CanonicalSlashCommand::ListSessions),
+        "sessions" if matches!(args, "" | "list" | "all") => Some(CanonicalSlashCommand::ListSessions),
         "resume" if !args.is_empty() => {
             Some(CanonicalSlashCommand::ResumeSession(args.to_string()))
         }
@@ -2827,6 +2827,90 @@ impl App {
 
     fn open_context_menu(&mut self) {
         self.open_menu_projection(self.context_menu_projection());
+    }
+
+    fn sessions_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
+        };
+
+        let entries = crate::session::list_sessions(self.cwd());
+        let mut menu = MenuProjection::new("sessions", "Sessions");
+        menu.summary = Some("Saved sessions for this workspace. Enter resumes the selected session; use /sessions list for the text readout.".into());
+        menu.footer = Some("↑/↓ navigate · / filter · Enter resume · Esc close".into());
+
+        let rows = if entries.is_empty() {
+            vec![MenuRowProjection {
+                id: "sessions.empty".into(),
+                label: "No saved sessions".into(),
+                description: "Sessions are saved when an interactive session exits.".into(),
+                value: None,
+                kind: MenuRowKind::Object,
+                badges: vec![MenuBadgeProjection { label: "empty".into(), tone: MenuBadgeTone::Neutral }],
+                metadata: vec!["/sessions list".into()],
+                primary_action: None,
+                actions: vec![],
+                safety: None,
+                availability: None,
+            }]
+        } else {
+            entries
+                .into_iter()
+                .map(|entry| {
+                    let id = entry.meta.session_id.clone();
+                    let command = format!("/sessions resume {id}");
+                    MenuRowProjection {
+                        id: format!("session.{id}"),
+                        label: crate::session::session_display_description(&entry.meta),
+                        description: format!(
+                            "{} · {} turns · {} tool calls",
+                            entry.meta.created_at, entry.meta.turns, entry.meta.tool_calls
+                        ),
+                        value: Some(id.clone()),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "resume".into(), tone: MenuBadgeTone::Info }],
+                        metadata: vec![
+                            format!("id: {id}"),
+                            command.clone(),
+                            entry.path.display().to_string(),
+                        ],
+                        primary_action: Some(MenuActionProjection::command(
+                            format!("session.{id}.resume"),
+                            "Resume",
+                            command.clone(),
+                        )),
+                        actions: vec![{
+                            let mut action = MenuActionProjection::command(
+                                format!("session.{id}.resume.action"),
+                                "Resume",
+                                command,
+                            );
+                            action.key = Some("r".into());
+                            action
+                        }],
+                        safety: None,
+                        availability: None,
+                    }
+                })
+                .collect()
+        };
+
+        menu.tabs = vec![MenuTabProjection {
+            id: "saved".into(),
+            label: "Saved".into(),
+            groups: vec![MenuGroupProjection {
+                id: "sessions.saved".into(),
+                label: "Saved sessions".into(),
+                description: Some("Resume a saved conversation by id.".into()),
+                rows,
+            }],
+        }];
+        menu
+    }
+
+    fn open_sessions_menu(&mut self) {
+        self.open_menu_projection(self.sessions_menu_projection());
     }
 
     fn profile_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
@@ -7855,6 +7939,10 @@ Scroll transcript:
                             respond_to: None,
                         });
                         SlashResult::Display(format!("Resuming session {id}…"))
+                    }
+                    Some(CanonicalSlashCommand::ListSessions) if matches!(args.trim(), "") => {
+                        self.open_sessions_menu();
+                        SlashResult::Handled
                     }
                     Some(CanonicalSlashCommand::ListSessions) | _ => {
                         let _ = tx.try_send(TuiCommand::ListSessions { respond_to: None });
