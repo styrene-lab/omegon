@@ -7279,6 +7279,23 @@ fn slash_model_opens_model_menu() {
     assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id == "model.current"));
 }
 
+
+#[test]
+fn slash_model_providers_opens_provider_status_tab() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/model providers", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("model menu");
+    assert_eq!(menu.projection.id, "model");
+    assert_eq!(menu.state.active_tab, "providers");
+    let rows = menu.state.visible_rows(&menu.projection);
+    assert!(rows.iter().any(|row| row.row.id.starts_with("provider.")));
+    assert!(rows.iter().any(|row| row.row.metadata.iter().any(|item| item.starts_with("/auth login "))));
+}
+
 #[test]
 fn model_menu_action_keys_select_intent_rows() {
     let mut app = test_app();

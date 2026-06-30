@@ -2861,6 +2861,53 @@ impl App {
             "Current model: {selected_model}. Enter opens the provider/model selector; use row actions to route intent."
         ));
         menu.footer = Some("↑/↓ navigate · Enter choose model · g grade · p provider · o policy · u unpin · / filter · Esc close".into());
+        let provider_ids = [
+            "anthropic",
+            "openai-codex",
+            "openai",
+            "openrouter",
+            "google",
+            "ollama",
+        ];
+        let provider_rows = provider_ids
+            .into_iter()
+            .map(|provider| {
+                let state = crate::route::CredentialLedger.probe(provider);
+                let (badge, tone) = if state.is_valid() {
+                    ("valid", MenuBadgeTone::Success)
+                } else {
+                    ("unavailable", MenuBadgeTone::Warning)
+                };
+                let login_command = format!("/auth login {provider}");
+                MenuRowProjection {
+                    id: format!("provider.{provider}"),
+                    label: crate::auth::provider_by_id(provider)
+                        .map(|p| p.display_name.to_string())
+                        .unwrap_or_else(|| provider.to_string()),
+                    description: state.summary(),
+                    value: Some(provider.to_string()),
+                    kind: MenuRowKind::Object,
+                    badges: vec![MenuBadgeProjection { label: badge.into(), tone }],
+                    metadata: vec![login_command.clone(), format!("provider: {provider}")],
+                    primary_action: Some(MenuActionProjection::command(
+                        format!("provider.{provider}.login"),
+                        "Login",
+                        login_command.clone(),
+                    )),
+                    actions: vec![{
+                        let mut action = MenuActionProjection::command(
+                            format!("provider.{provider}.login.action"),
+                            "Login",
+                            login_command,
+                        );
+                        action.key = Some("l".into());
+                        action
+                    }],
+                    safety: None,
+                    availability: None,
+                }
+            })
+            .collect();
         menu.tabs = vec![MenuTabProjection {
             id: "routing".into(),
             label: "Routing".into(),
@@ -2939,6 +2986,15 @@ impl App {
                         availability: None,
                     },
                 ],
+            }],
+        }, MenuTabProjection {
+            id: "providers".into(),
+            label: "Providers".into(),
+            groups: vec![MenuGroupProjection {
+                id: "model.providers".into(),
+                label: "Provider status".into(),
+                description: Some("Credential probe status and login actions for common model providers.".into()),
+                rows: provider_rows,
             }],
         }];
         self.open_menu_projection(menu);
@@ -6647,6 +6703,13 @@ Scroll transcript:
             "model" => {
                 if args.is_empty() || args == "route" {
                     self.open_model_menu();
+                    SlashResult::Handled
+                } else if matches!(args, "providers" | "provider") {
+                    self.open_model_menu();
+                    if let Some(menu) = self.active_menu.as_mut() {
+                        menu.state.active_tab = "providers".into();
+                        menu.state.selected_row = 0;
+                    }
                     SlashResult::Handled
                 } else {
                     match canonical_slash_command("model", args) {
