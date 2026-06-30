@@ -549,6 +549,12 @@ struct App {
     selector_kind: Option<SelectorKind>,
     /// Active structured menu popup for command inventories such as /skills.
     active_menu: Option<ActiveMenu>,
+    /// Last provider route state observed from route-change events.
+    route_state: Option<String>,
+    /// Last selected model observed from route-change events.
+    route_selected_model: Option<String>,
+    /// Last serving model observed from route-change events.
+    route_serving_model: Option<String>,
     /// Pending confirmation action id for menu actions that require a second activation.
     pending_menu_confirmation: Option<String>,
     /// Active @-file picker popup.
@@ -2201,6 +2207,9 @@ impl App {
             selector: None,
             selector_kind: None,
             active_menu: None,
+            route_state: None,
+            route_selected_model: None,
+            route_serving_model: None,
             pending_menu_confirmation: None,
             at_picker: None,
             last_tool_name: None,
@@ -3506,7 +3515,7 @@ impl App {
 
     fn provider_status_rows(&self, row_prefix: &str) -> Vec<crate::surfaces::menu::MenuRowProjection> {
         use crate::surfaces::menu::{
-            MenuActionProjection, MenuBadgeProjection, MenuRowKind, MenuRowProjection,
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuRowKind, MenuRowProjection,
         };
         let provider_ids = [
             "anthropic",
@@ -3516,6 +3525,12 @@ impl App {
             "google",
             "ollama",
         ];
+        let selected_provider = self.route_selected_model.as_deref().map(crate::providers::infer_provider_id);
+        let serving_provider = self
+            .route_serving_model
+            .as_deref()
+            .or_else(|| (!self.footer_data.model_id.is_empty()).then_some(self.footer_data.model_id.as_str()))
+            .map(crate::providers::infer_provider_id);
         provider_ids
             .into_iter()
             .map(|provider| {
@@ -3525,21 +3540,31 @@ impl App {
                     .clone()
                     .unwrap_or_else(|| format!("/login {provider}"));
                 let logout_command = format!("/logout {provider}");
+                let mut badges = vec![MenuBadgeProjection {
+                    label: status.badge_label().into(),
+                    tone: status.badge_tone(),
+                }];
+                let mut metadata = vec![
+                    login_command.clone(),
+                    logout_command.clone(),
+                    format!("provider: {}", status.provider_id),
+                ];
+                if selected_provider.as_deref() == Some(provider) {
+                    badges.push(MenuBadgeProjection { label: "selected".into(), tone: MenuBadgeTone::Info });
+                    metadata.push("route: selected".into());
+                }
+                if serving_provider.as_deref() == Some(provider) {
+                    badges.push(MenuBadgeProjection { label: "serving".into(), tone: MenuBadgeTone::Success });
+                    metadata.push("route: serving".into());
+                }
                 MenuRowProjection {
                     id: format!("{row_prefix}.{provider}"),
                     label: status.display_name.clone(),
                     description: status.credential_state.clone(),
                     value: Some(status.provider_id.clone()),
                     kind: MenuRowKind::Object,
-                    badges: vec![MenuBadgeProjection {
-                        label: status.badge_label().into(),
-                        tone: status.badge_tone(),
-                    }],
-                    metadata: vec![
-                        login_command.clone(),
-                        logout_command.clone(),
-                        format!("provider: {}", status.provider_id),
-                    ],
+                    badges,
+                    metadata,
                     primary_action: Some(MenuActionProjection::command(
                         format!("{row_prefix}.{provider}.login"),
                         "Login",
@@ -9893,11 +9918,14 @@ Scroll transcript:
             }
             AgentEvent::RouteChanged {
                 state,
-                selected: _,
+                selected,
                 serving,
                 warning,
                 message,
             } => {
+                self.route_state = Some(state.clone());
+                self.route_selected_model = selected.clone();
+                self.route_serving_model = serving.clone();
                 if let Some(serving) = serving.as_ref() {
                     self.footer_data.model_id = serving.clone();
                     self.footer_data.model_provider = crate::providers::infer_provider_id(serving);

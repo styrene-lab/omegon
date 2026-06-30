@@ -22,6 +22,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Routed `/help` to the shared command inventory menu by default while preserving `/help all` as the full text readout, establishing the first general-purpose slash-command menu affordance beyond skills/settings.
 - Routed bare `/model` to a shared model-routing menu with current-model selector entry, grade/provider/policy rows, and row-target action affordances for menu-local navigation.
 - Routed bare `/auth` and `/login` to the shared provider credential menu, reusing the provider status rows from `/model providers` while preserving direct login/logout commands.
+- Added route-aware selected/serving badges to provider menu rows and included route state, serving model, and route warnings in the `/model` menu summary.
 - Routed bare `/context` to a shared context-control menu with policy selection, status, compact, and fresh-context actions while preserving direct context subcommands.
 - Hardened `/secrets set` so direct secret values entered on the slash line are redirected into hidden input instead of being queued as plaintext control requests; recipe forms (`env:`, `cmd:`, `vault:`) still queue normally.
 - Tightened canonical `/secrets set` parsing so plaintext values are rejected before they can become generic control requests; only recipe forms canonicalize outside hidden input.
