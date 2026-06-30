@@ -3525,7 +3525,12 @@ impl App {
             "google",
             "ollama",
         ];
-        let selected_provider = self.route_selected_model.as_deref().map(crate::providers::infer_provider_id);
+        let settings_model = self.settings().model.clone();
+        let selected_provider = self
+            .route_selected_model
+            .as_deref()
+            .or_else(|| (!settings_model.is_empty()).then_some(settings_model.as_str()))
+            .map(crate::providers::infer_provider_id);
         let serving_provider = self
             .route_serving_model
             .as_deref()
@@ -3556,6 +3561,12 @@ impl App {
                 if serving_provider.as_deref() == Some(provider) {
                     badges.push(MenuBadgeProjection { label: "serving".into(), tone: MenuBadgeTone::Success });
                     metadata.push("route: serving".into());
+                    if self.route_state.as_deref() == Some("fallback")
+                        && selected_provider.as_deref().is_some_and(|selected| selected != provider)
+                    {
+                        badges.push(MenuBadgeProjection { label: "fallback".into(), tone: MenuBadgeTone::Warning });
+                        metadata.push("route: fallback serving".into());
+                    }
                 }
                 MenuRowProjection {
                     id: format!("{row_prefix}.{provider}"),
@@ -3600,9 +3611,23 @@ impl App {
     fn open_auth_menu(&mut self) {
         use crate::surfaces::menu::{MenuGroupProjection, MenuProjection, MenuTabProjection};
         let mut menu = MenuProjection::new("auth", "Authentication");
-        menu.summary = Some(
-            "Provider authentication status. Enter logs into the selected provider; l login; o logout; / filters providers.".into(),
-        );
+        let mut summary = "Provider authentication status. Enter logs into the selected provider; l login; o logout; / filters providers.".to_string();
+        if self.route_state.is_some() || self.route_selected_model.is_some() || self.route_serving_model.is_some() || self.footer_data.route_warning.is_some() {
+            let route_state = self.route_state.as_deref().unwrap_or("unknown");
+            summary.push_str(&format!("
+route: {route_state}"));
+            if let Some(selected) = self.route_selected_model.as_deref() {
+                summary.push_str(&format!(" · selected: {selected}"));
+            }
+            if let Some(serving) = self.route_serving_model.as_deref() {
+                summary.push_str(&format!(" · serving: {serving}"));
+            }
+            if let Some(warning) = self.footer_data.route_warning.as_deref() {
+                summary.push_str(&format!("
+warning: {warning}"));
+            }
+        }
+        menu.summary = Some(summary);
         menu.footer = Some(
             "↑/↓ navigate · Enter login · l login · o logout · / filter · Esc close · /auth status for text readout".into(),
         );
@@ -3647,7 +3672,7 @@ impl App {
         };
         let mut menu = MenuProjection::new("model", "Model");
         let mut summary = format!(
-            "Current model: {selected_model}. Enter opens the provider/model selector; use row actions to route intent."
+            "Configured model: {selected_model}. Enter opens the provider/model selector; use row actions to route intent."
         );
         if self.route_state.is_some() || self.route_selected_model.is_some() || self.route_serving_model.is_some() || self.footer_data.route_warning.is_some() {
             let route_state = self.route_state.as_deref().unwrap_or("unknown");

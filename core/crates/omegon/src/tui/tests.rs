@@ -7806,6 +7806,63 @@ fn model_and_auth_provider_rows_share_login_metadata() {
 }
 
 
+
+#[test]
+fn provider_rows_mark_settings_model_as_selected_before_route_event() {
+    let mut app = test_app();
+    app.route_selected_model = None;
+    app.update_settings(|settings| settings.model = "openai:gpt-4.1".into());
+
+    let rows = app.provider_status_rows("provider");
+    let openai = rows.iter().find(|row| row.id == "provider.openai").expect("openai row");
+
+    assert!(openai.badges.iter().any(|badge| badge.label == "selected"));
+    assert!(openai.metadata.iter().any(|item| item == "route: selected"));
+}
+
+#[test]
+fn provider_rows_mark_fallback_serving_provider() {
+    let mut app = test_app();
+    app.route_state = Some("fallback".into());
+    app.route_selected_model = Some("openai-codex:gpt-5.4".into());
+    app.route_serving_model = Some("anthropic:claude-sonnet-4-6".into());
+
+    let rows = app.provider_status_rows("provider");
+    let anthropic = rows.iter().find(|row| row.id == "provider.anthropic").expect("anthropic row");
+
+    assert!(anthropic.badges.iter().any(|badge| badge.label == "serving"));
+    assert!(anthropic.badges.iter().any(|badge| badge.label == "fallback"));
+    assert!(anthropic.metadata.iter().any(|item| item == "route: fallback serving"));
+}
+
+#[test]
+fn auth_menu_summary_includes_route_state_and_warning() {
+    let mut app = test_app();
+    app.route_state = Some("fallback".into());
+    app.route_selected_model = Some("openai-codex:gpt-5.4".into());
+    app.route_serving_model = Some("anthropic:claude-sonnet-4-6".into());
+    app.footer_data.route_warning = Some("selected provider unavailable".into());
+
+    app.open_auth_menu();
+
+    let summary = app.active_menu.as_ref().and_then(|menu| menu.projection.summary.as_deref()).expect("summary");
+    assert!(summary.contains("route: fallback"), "{summary}");
+    assert!(summary.contains("selected: openai-codex:gpt-5.4"), "{summary}");
+    assert!(summary.contains("serving: anthropic:claude-sonnet-4-6"), "{summary}");
+    assert!(summary.contains("selected provider unavailable"), "{summary}");
+}
+
+#[test]
+fn model_menu_summary_uses_configured_model_label() {
+    let mut app = test_app();
+
+    app.open_model_menu();
+
+    let summary = app.active_menu.as_ref().and_then(|menu| menu.projection.summary.as_deref()).expect("summary");
+    assert!(summary.contains("Configured model:"), "{summary}");
+    assert!(!summary.contains("Current model:"), "{summary}");
+}
+
 #[test]
 fn provider_rows_mark_selected_and_serving_route_roles() {
     let mut app = test_app();
