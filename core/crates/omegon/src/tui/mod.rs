@@ -3646,9 +3646,24 @@ impl App {
             crate::route::GradePolicy::NearestAllowed { .. } => "nearest".to_string(),
         };
         let mut menu = MenuProjection::new("model", "Model");
-        menu.summary = Some(format!(
+        let mut summary = format!(
             "Current model: {selected_model}. Enter opens the provider/model selector; use row actions to route intent."
-        ));
+        );
+        if self.route_state.is_some() || self.route_selected_model.is_some() || self.route_serving_model.is_some() || self.footer_data.route_warning.is_some() {
+            let route_state = self.route_state.as_deref().unwrap_or("unknown");
+            let selected = self.route_selected_model.as_deref().unwrap_or(&selected_model);
+            let serving = self.route_serving_model.as_deref().unwrap_or(&self.footer_data.model_id);
+            summary.push_str(&format!("
+route: {route_state} · selected: {selected}"));
+            if !serving.is_empty() {
+                summary.push_str(&format!(" · serving: {serving}"));
+            }
+            if let Some(warning) = self.footer_data.route_warning.as_deref() {
+                summary.push_str(&format!("
+warning: {warning}"));
+            }
+        }
+        menu.summary = Some(summary);
         menu.footer = Some("↑/↓ navigate · Enter choose model · g grade · p provider · o policy · u unpin · / filter · Esc close".into());
         let provider_rows = self.provider_status_rows("provider");
         menu.tabs = vec![MenuTabProjection {

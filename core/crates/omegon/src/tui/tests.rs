@@ -7805,6 +7805,40 @@ fn model_and_auth_provider_rows_share_login_metadata() {
     assert_eq!(auth_row.description, model_row.description);
 }
 
+
+#[test]
+fn provider_rows_mark_selected_and_serving_route_roles() {
+    let mut app = test_app();
+    app.route_selected_model = Some("openai-codex:gpt-5.4".into());
+    app.route_serving_model = Some("anthropic:claude-sonnet-4-6".into());
+
+    let rows = app.provider_status_rows("provider");
+    let openai = rows.iter().find(|row| row.id == "provider.openai-codex").expect("openai-codex row");
+    let anthropic = rows.iter().find(|row| row.id == "provider.anthropic").expect("anthropic row");
+
+    assert!(openai.badges.iter().any(|badge| badge.label == "selected"));
+    assert!(openai.metadata.iter().any(|item| item == "route: selected"));
+    assert!(anthropic.badges.iter().any(|badge| badge.label == "serving"));
+    assert!(anthropic.metadata.iter().any(|item| item == "route: serving"));
+}
+
+#[test]
+fn model_menu_summary_includes_route_state_and_warning() {
+    let mut app = test_app();
+    app.route_state = Some("fallback".into());
+    app.route_selected_model = Some("openai-codex:gpt-5.4".into());
+    app.route_serving_model = Some("anthropic:claude-sonnet-4-6".into());
+    app.footer_data.route_warning = Some("selected provider unavailable".into());
+
+    app.open_model_menu();
+
+    let summary = app.active_menu.as_ref().and_then(|menu| menu.projection.summary.as_deref()).expect("summary");
+    assert!(summary.contains("route: fallback"), "{summary}");
+    assert!(summary.contains("selected: openai-codex:gpt-5.4"), "{summary}");
+    assert!(summary.contains("serving: anthropic:claude-sonnet-4-6"), "{summary}");
+    assert!(summary.contains("selected provider unavailable"), "{summary}");
+}
+
 #[test]
 fn slash_model_opens_model_menu() {
     let mut app = test_app();
