@@ -299,6 +299,13 @@ impl MenuState {
             .and_then(|row| row.row.primary_action.clone())
     }
 
+    pub(crate) fn selected_action(
+        &self,
+        projection: &MenuProjection,
+    ) -> Option<crate::surfaces::menu::MenuActionProjection> {
+        self.selected_primary_action(projection)
+    }
+
     pub(crate) fn selected_command(&self, projection: &MenuProjection) -> Option<String> {
         self.selected_primary_action(projection)
             .and_then(|action| action.command)

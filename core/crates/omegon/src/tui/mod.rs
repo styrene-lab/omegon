@@ -2664,7 +2664,7 @@ impl App {
         self.command_prompt = None;
     }
 
-    fn open_settings_screen(&mut self) {
+    fn open_settings_menu(&mut self) {
         self.open_menu_projection(self.settings_menu_projection());
     }
 
@@ -3218,7 +3218,7 @@ impl App {
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
                             metadata: vec!["/extension search".into(), "/extension search <query>".into()],
-                            primary_action: Some(MenuActionProjection::command("extension.search.primary", "Search", "/extension search")),
+                            primary_action: Some(MenuActionProjection::prime_editor("extension.search.primary", "Search", "/extension search ", "Type an extension search query, then press Enter")),
                             actions: vec![],
                             safety: None,
                             availability: None,
@@ -3462,6 +3462,7 @@ impl App {
                             if let Some(profile) = row.profile {
                                 metadata.push(format!("profile: {}", profile.profile_value));
                             }
+                            let row_id = row.id.clone();
                             MenuRowProjection {
                                 id: row.id,
                                 label: row.label,
@@ -3470,7 +3471,11 @@ impl App {
                                 kind: MenuRowKind::Object,
                                 badges: vec![MenuBadgeProjection { label: format!("{:?}", row.status).to_lowercase(), tone }],
                                 metadata,
-                                primary_action: None,
+                                primary_action: Some(MenuActionProjection::open_settings_row(
+                                    format!("settings.{row_id}.open"),
+                                    "Edit",
+                                    row_id,
+                                )),
                                 actions: Vec::new(),
                                 safety: None,
                                 availability: None,
@@ -3590,6 +3595,17 @@ impl App {
                         format!("No selector registered for {}", action.label),
                         CommandSeverity::Warning,
                     )),
+                }
+                SlashResult::Handled
+            }
+            crate::surfaces::menu::MenuActionDisposition::OpenSettingsRow => {
+                if let Some(row_id) = action.target_row_id.as_deref() {
+                    self.open_settings_row_by_id(row_id);
+                } else {
+                    self.show_command_toast(CommandToast::new(
+                        format!("No settings row registered for {}", action.label),
+                        CommandSeverity::Warning,
+                    ));
                 }
                 SlashResult::Handled
             }
@@ -3921,20 +3937,16 @@ warning: {warning}"));
         self.open_menu_projection(menu);
     }
 
-    fn open_selected_settings_row(&mut self) {
+    fn open_settings_row_by_id(&mut self, row_id: &str) {
         let projection = self.settings_projection();
-        let selected_id = self
-            .active_menu
-            .as_ref()
-            .filter(|menu| menu.projection.id == "settings")
-            .and_then(|menu| menu.state.selected_row(&menu.projection))
-            .map(|row| row.row.id.clone());
-        let Some(row) = selected_id
-            .as_deref()
-            .and_then(|id| projection.tabs.iter().flat_map(|tab| tab.rows.iter()).find(|row| row.id == id))
+        let Some(row) = projection
+            .tabs
+            .iter()
+            .flat_map(|tab| tab.rows.iter())
+            .find(|row| row.id == row_id)
         else {
             self.show_command_toast(CommandToast::new(
-                "No settings row selected",
+                format!("No settings row registered for {row_id}"),
                 CommandSeverity::Warning,
             ));
             return;
@@ -3983,22 +3995,6 @@ warning: {warning}"));
                 format!("No editor registered for {}", row.label),
                 CommandSeverity::Warning,
             )),
-        }
-    }
-
-    fn open_selected_extension_runtime_row(&mut self) -> bool {
-        let Some(row_id) = self.active_menu.as_ref()
-            .filter(|menu| menu.projection.id == "extension-runtime")
-            .and_then(|menu| menu.state.selected_row(&menu.projection))
-            .map(|row| row.row.id.clone()) else { return false; };
-        match row_id.as_str() {
-            "extension.search" => {
-                self.active_menu = None;
-                self.editor.set_text("/extension search ");
-                self.show_command_toast(CommandToast::new("Type an extension search query, then press Enter", CommandSeverity::Info));
-                true
-            }
-            _ => false,
         }
     }
 
@@ -8415,7 +8411,11 @@ Scroll transcript:
             }
 
             "sessions" => {
-                match canonical_slash_command("sessions", args) {
+                if args.trim().is_empty() {
+                    self.open_sessions_menu();
+                    SlashResult::Handled
+                } else {
+                    match canonical_slash_command("sessions", args) {
                     Some(CanonicalSlashCommand::ResumeSession(id)) => {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
                             request: crate::control_runtime::ControlRequest::ResumeSession {
@@ -8425,14 +8425,11 @@ Scroll transcript:
                         });
                         SlashResult::Display(format!("Resuming session {id}…"))
                     }
-                    Some(CanonicalSlashCommand::ListSessions) if matches!(args.trim(), "") => {
-                        self.open_sessions_menu();
-                        SlashResult::Handled
-                    }
                     Some(CanonicalSlashCommand::ListSessions) | _ => {
                         let _ = tx.try_send(TuiCommand::ListSessions { respond_to: None });
                         SlashResult::Handled
                     }
+                }
                 }
             }
 
@@ -9091,7 +9088,7 @@ Scroll transcript:
             "thinking" => self.handle_slash_command(&format!("/think {args}"), tx),
             "models" => self.handle_slash_command("/model", tx),
             "settings" => {
-                self.open_settings_screen();
+                self.open_settings_menu();
                 self.command_panel = None;
                 SlashResult::Handled
             }
@@ -11621,22 +11618,17 @@ pub async fn run_tui(
                                 }
                             }
                             KeyCode::Enter => {
-                                if app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "settings") {
-                                    app.open_selected_settings_row();
-                                } else if app.open_selected_extension_runtime_row() {
-                                } else {
-                                    let action = app
-                                        .active_menu
-                                        .as_ref()
-                                        .and_then(|menu| menu.state.selected_primary_action(&menu.projection));
-                                    if let Some(action) = action
-                                        && matches!(
-                                            app.execute_active_menu_action(action, &command_tx),
-                                            SlashResult::Quit
-                                        )
-                                    {
-                                        let _ = command_tx.send(TuiCommand::Quit).await;
-                                    }
+                                let action = app
+                                    .active_menu
+                                    .as_ref()
+                                    .and_then(|menu| menu.state.selected_primary_action(&menu.projection));
+                                if let Some(action) = action
+                                    && matches!(
+                                        app.execute_active_menu_action(action, &command_tx),
+                                        SlashResult::Quit
+                                    )
+                                {
+                                    let _ = command_tx.send(TuiCommand::Quit).await;
                                 }
                             }
                             KeyCode::Esc => {

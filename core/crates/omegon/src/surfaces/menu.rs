@@ -79,6 +79,7 @@ pub enum MenuActionDisposition {
     FocusRow,
     PrimeEditor,
     OpenSelector,
+    OpenSettingsRow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -417,6 +418,21 @@ impl MenuActionProjection {
             editor_text: None,
             message: None,
             disposition: MenuActionDisposition::OpenSelector,
+            close_policy: MenuActionClosePolicy::KeepOpen,
+            requires_confirmation: false,
+        }
+    }
+
+    pub fn open_settings_row(id: impl Into<String>, label: impl Into<String>, row_id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            key: None,
+            command: None,
+            target_row_id: Some(row_id.into()),
+            editor_text: None,
+            message: None,
+            disposition: MenuActionDisposition::OpenSettingsRow,
             close_policy: MenuActionClosePolicy::KeepOpen,
             requires_confirmation: false,
         }

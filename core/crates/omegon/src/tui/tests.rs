@@ -4970,7 +4970,10 @@ fn extension_search_menu_row_primes_editor_for_query() {
         assert!(menu.state.select_row_by_id(&menu.projection, "extension.search"));
     }
 
-    assert!(app.open_selected_extension_runtime_row());
+    let action = app.active_menu.as_ref()
+        .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
+        .expect("extension search action");
+    assert!(matches!(app.execute_active_menu_action(action, &test_tx()), SlashResult::Handled));
     assert_eq!(app.editor.render_text(), "/extension search ");
     assert!(app.active_menu.is_none());
 }
@@ -7450,7 +7453,7 @@ fn settings_menu_renders_profile_source_and_drift_actions() {
         s.set_requested_context_class(ContextClass::Massive);
     });
 
-    app.open_settings_screen();
+    app.open_settings_menu();
     let rendered = render_app_to_string(&mut app, 120, 32);
 
     assert!(rendered.contains("profile: project"), "{rendered}");
@@ -7621,9 +7624,11 @@ fn slash_settings_opens_active_menu_without_command_panel() {
 fn settings_menu_opens_choice_rows_from_projection_metadata() {
     let mut app = test_app();
 
-    app.open_settings_screen();
+    app.open_settings_menu();
     app.active_menu.as_mut().unwrap().state.selected_row = 1;
-    app.open_selected_settings_row();
+    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection));
+    assert!(action.is_some(), "settings row should expose a typed action");
+    app.execute_active_menu_action(action.unwrap(), &test_tx());
 
     assert_eq!(app.selector_kind, Some(SelectorKind::ThinkingLevel));
     let selector = app.selector.as_ref().expect("thinking selector");
@@ -7706,9 +7711,11 @@ fn settings_menu_max_turns_row_queues_existing_control_request() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 
-    app.open_settings_screen();
+    app.open_settings_menu();
     app.active_menu.as_mut().unwrap().state.selected_row = 3;
-    app.open_selected_settings_row();
+    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection));
+    assert!(action.is_some(), "max turns row should expose a typed action");
+    app.execute_active_menu_action(action.unwrap(), &tx);
     app.selector.as_mut().unwrap().cursor = 4;
 
     let message = app.confirm_selector(&tx).expect("max turns message");
@@ -7727,13 +7734,15 @@ fn settings_menu_max_turns_row_queues_existing_control_request() {
 fn settings_menu_auto_update_row_toggles_persisted_setting() {
     let mut app = test_app();
 
-    app.open_settings_screen();
+    app.open_settings_menu();
     {
         let menu = app.active_menu.as_mut().unwrap();
         menu.state.active_tab = "updates".into();
         menu.state.selected_row = 1;
     }
-    app.open_selected_settings_row();
+    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection));
+    assert!(action.is_some(), "auto-update row should expose a typed action");
+    app.execute_active_menu_action(action.unwrap(), &test_tx());
 
     assert!(app.settings().auto_update);
 }
@@ -7743,13 +7752,15 @@ fn settings_menu_sandbox_row_disables_persisted_setting() {
     let mut app = test_app();
     app.update_settings(|s| s.sandbox = true);
 
-    app.open_settings_screen();
+    app.open_settings_menu();
     {
         let menu = app.active_menu.as_mut().unwrap();
         menu.state.active_tab = "workspace".into();
         menu.state.selected_row = 1;
     }
-    app.open_selected_settings_row();
+    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection));
+    assert!(action.is_some(), "sandbox row should expose a typed action");
+    app.execute_active_menu_action(action.unwrap(), &test_tx());
 
     assert!(!app.settings().sandbox);
 }
