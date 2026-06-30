@@ -3914,7 +3914,7 @@ fn memory_menu_argument_rows_prime_editor() {
 
     app.execute_active_menu_action(action, &test_tx());
 
-    assert_eq!(app.editor.render_text(), "/memory_focus ");
+    assert_eq!(app.editor.render_text(), "/memory focus ");
     assert!(app.active_menu.is_none());
 }
 
@@ -3928,7 +3928,7 @@ fn memory_menu_compact_requires_confirmation() {
 
     let action = menu.state.selected_action(&menu.projection).expect("compact action");
 
-    assert_eq!(action.command.as_deref(), Some("/memory_compact"));
+    assert_eq!(action.command.as_deref(), Some("/memory compact"));
     assert!(action.requires_confirmation);
 }
 
