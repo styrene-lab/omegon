@@ -2655,6 +2655,84 @@ impl App {
         self.open_menu_projection(self.settings_menu_projection());
     }
 
+    fn context_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
+        use crate::surfaces::menu::{MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection, MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection};
+        let settings = self.settings();
+        let requested = settings.requested_context_class.map(|class| class.label().to_string()).unwrap_or_else(|| "track model".to_string());
+        let actual = settings.context_class.label().to_string();
+        let mut menu = MenuProjection::new("context", "Context");
+        menu.summary = Some(format!("Context policy and working-set controls. Requested: {requested}; model capacity: {actual}."));
+        menu.footer = Some("↑/↓ navigate · / filter · Enter run/edit · c compact · n new context · Esc close".into());
+        menu.tabs = vec![MenuTabProjection {
+            id: "context".into(),
+            label: "Context".into(),
+            groups: vec![MenuGroupProjection {
+                id: "context.controls".into(),
+                label: "Context controls".into(),
+                description: Some("Inspect usage, choose context policy, compact, or start fresh.".into()),
+                rows: vec![
+                    MenuRowProjection {
+                        id: "context.class".into(),
+                        label: "Context policy".into(),
+                        description: "Choose the requested working-set policy class.".into(),
+                        value: Some(requested),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "policy".into(), tone: MenuBadgeTone::Info }],
+                        metadata: vec!["/context <compact|standard|extended|massive>".into()],
+                        primary_action: None,
+                        actions: vec![{ let mut action = MenuActionProjection::command("context.class.choose", "Choose", "/context standard"); action.command = None; action.key = Some("p".into()); action.target_row_id = Some("context.class".into()); action }],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "context.status".into(),
+                        label: "Status".into(),
+                        description: "Show current context usage and available actions.".into(),
+                        value: Some(actual),
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
+                        metadata: vec!["/context status".into()],
+                        primary_action: Some(MenuActionProjection::command("context.status.primary", "Status", "/context status")),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "context.compact".into(),
+                        label: "Compact".into(),
+                        description: "Request context compaction for the current session.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Warning }],
+                        metadata: vec!["/context compact".into()],
+                        primary_action: Some(MenuActionProjection::command("context.compact.primary", "Compact", "/context compact")),
+                        actions: vec![{ let mut action = MenuActionProjection::command("context.compact.action", "Compact", "/context compact"); action.key = Some("c".into()); action }],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "context.clear".into(),
+                        label: "New context".into(),
+                        description: "Clear conversation context and start fresh.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "destructive".into(), tone: MenuBadgeTone::Danger }],
+                        metadata: vec!["/context clear".into(), "/new".into()],
+                        primary_action: Some(MenuActionProjection::command("context.clear.primary", "Start fresh", "/context clear")),
+                        actions: vec![{ let mut action = MenuActionProjection::command("context.clear.action", "New", "/context clear"); action.key = Some("n".into()); action }],
+                        safety: None,
+                        availability: None,
+                    },
+                ],
+            }],
+        }];
+        menu
+    }
+
+    fn open_context_menu(&mut self) {
+        self.open_menu_projection(self.context_menu_projection());
+    }
+
     fn open_command_inventory_menu(&mut self) {
         let mut projection = crate::surfaces::menu::MenuProjection::from_command_menu(
             "commands",
@@ -3117,6 +3195,17 @@ impl App {
                 format!("No editor registered for {}", row.label),
                 CommandSeverity::Warning,
             )),
+        }
+    }
+
+    fn open_selected_context_row(&mut self) -> bool {
+        let Some(row_id) = self.active_menu.as_ref()
+            .filter(|menu| menu.projection.id == "context")
+            .and_then(|menu| menu.state.selected_row(&menu.projection))
+            .map(|row| row.row.id.clone()) else { return false; };
+        match row_id.as_str() {
+            "context.class" => { self.open_context_selector(); true }
+            _ => false,
         }
     }
 
@@ -7466,7 +7555,7 @@ Scroll transcript:
 
             "context" => {
                 if args.is_empty() {
-                    self.open_context_selector();
+                    self.open_context_menu();
                     SlashResult::Handled
                 } else {
                     match canonical_slash_command("context", args) {
@@ -10771,6 +10860,7 @@ pub async fn run_tui(
                                         }
                                         }
                                     }
+                                } else if app.open_selected_context_row() {
                                 } else {
                                     let command = app
                                         .active_menu

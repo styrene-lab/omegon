@@ -6997,6 +6997,49 @@ fn palette_system_notification_matrix_accounts_for_palette_slash_outputs() {
     }
 }
 
+
+#[test]
+fn slash_context_opens_context_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/context", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("context menu");
+    assert_eq!(menu.projection.id, "context");
+    assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id == "context.class"));
+}
+
+#[test]
+fn context_menu_class_row_opens_existing_selector() {
+    let mut app = test_app();
+    app.open_context_menu();
+
+    assert!(app.open_selected_context_row());
+
+    assert_eq!(app.selector_kind, Some(SelectorKind::ContextClass));
+    let selector = app.selector.as_ref().expect("context selector");
+    assert!(selector.options.iter().any(|option| option.label.contains("Massive")));
+}
+
+#[test]
+fn context_menu_compact_action_uses_shared_command_path() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_context_menu();
+    app.active_menu.as_mut().unwrap().state.selected_row = 2;
+
+    let command = app.active_menu.as_ref().and_then(|menu| menu.state.selected_command(&menu.projection));
+
+    assert_eq!(command.as_deref(), Some("/context compact"));
+    assert!(matches!(
+        app.execute_active_menu_command(command.unwrap(), &tx),
+        SlashResult::Handled
+    ));
+    assert!(app.command_panel.is_some());
+}
+
 #[test]
 fn slash_context_without_subcommand_maps_to_status() {
     assert_eq!(
