@@ -3881,6 +3881,58 @@ fn slash_logout_without_provider_shows_provider_usage() {
 }
 
 #[test]
+fn memory_menu_includes_action_rows() {
+    let mut app = test_app();
+    app.open_memory_menu();
+    let menu = app.active_menu.as_mut().expect("memory menu");
+    menu.state.active_tab = "actions".into();
+
+    let ids: Vec<_> = menu
+        .state
+        .visible_rows(&menu.projection)
+        .into_iter()
+        .map(|row| row.row.id.as_str())
+        .collect();
+
+    assert!(ids.contains(&"memory.recall"), "{ids:?}");
+    assert!(ids.contains(&"memory.list"), "{ids:?}");
+    assert!(ids.contains(&"memory.focus"), "{ids:?}");
+    assert!(ids.contains(&"memory.release"), "{ids:?}");
+    assert!(ids.contains(&"memory.compact"), "{ids:?}");
+}
+
+#[test]
+fn memory_menu_argument_rows_prime_editor() {
+    let mut app = test_app();
+    app.open_memory_menu();
+    {
+        let menu = app.active_menu.as_mut().expect("memory menu");
+        menu.state.active_tab = "actions".into();
+        assert!(menu.state.select_row_by_id(&menu.projection, "memory.focus"));
+    }
+    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection)).expect("focus action");
+
+    app.execute_active_menu_action(action, &test_tx());
+
+    assert_eq!(app.editor.render_text(), "/memory_focus ");
+    assert!(app.active_menu.is_none());
+}
+
+#[test]
+fn memory_menu_compact_requires_confirmation() {
+    let mut app = test_app();
+    app.open_memory_menu();
+    let menu = app.active_menu.as_mut().expect("memory menu");
+    menu.state.active_tab = "actions".into();
+    assert!(menu.state.select_row_by_id(&menu.projection, "memory.compact"));
+
+    let action = menu.state.selected_action(&menu.projection).expect("compact action");
+
+    assert_eq!(action.command.as_deref(), Some("/memory_compact"));
+    assert!(action.requires_confirmation);
+}
+
+#[test]
 fn slash_memory_opens_shared_menu() {
     let mut app = test_app();
     app.footer_data.total_facts = 18;
