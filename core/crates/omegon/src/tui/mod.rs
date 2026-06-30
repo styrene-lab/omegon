@@ -2807,9 +2807,15 @@ impl App {
             SlashResult::Display(response) => {
                 self.history.push(command.clone());
                 self.exit_history_recall();
-                self.open_command_panel(
-                    CommandPanel::from_slash(&command, response).with_return_target(CommandPanelReturnTarget::Menu),
-                );
+                if matches!(self.editor.mode(), editor::EditorMode::SecretInput { .. }) {
+                    self.active_menu = None;
+                    self.show_command_toast(CommandToast::new(response, CommandSeverity::Info));
+                } else {
+                    self.open_command_panel(
+                        CommandPanel::from_slash(&command, response)
+                            .with_return_target(CommandPanelReturnTarget::Menu),
+                    );
+                }
                 SlashResult::Handled
             }
             SlashResult::Handled => {
@@ -3844,6 +3850,31 @@ impl App {
                 self.open_secret_name_selector();
                 SlashResult::Handled
             }
+            "set" if parts.len() >= 3 && !parts[1].trim().is_empty() => {
+                let name = parts[1].trim();
+                let value = parts[2].trim();
+                let recipe_like = value.starts_with("env:")
+                    || value.starts_with("cmd:")
+                    || value.starts_with("vault:");
+                if recipe_like {
+                    if let Some(command) = canonical_slash_command("secrets", args)
+                        && let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    {
+                        let _ = tx.try_send(TuiCommand::ExecuteControl {
+                            request,
+                            respond_to: None,
+                        });
+                        SlashResult::Handled
+                    } else {
+                        SlashResult::Display("Usage: /secrets set <name> <env:VAR|cmd:COMMAND|vault:PATH>".into())
+                    }
+                } else {
+                    self.editor.start_secret_input(name);
+                    SlashResult::Display(format!(
+                        "🔒 Direct secret values are captured only through hidden input. Paste or type value for {name} now (input is hidden):"
+                    ))
+                }
+            }
             _ => {
                 if let Some(command) = canonical_slash_command("secrets", args) {
                     if let Some(request) =
@@ -3856,13 +3887,13 @@ impl App {
                         SlashResult::Handled
                     } else {
                         SlashResult::Display(
-                            "Usage: /secrets [list|status|set <name> [value-or-recipe]|get <name>|delete|remove|rm <name>]"
+                            "Usage: /secrets [list|status|set <name> [env:VAR|cmd:COMMAND|vault:PATH]|get <name>|delete|remove|rm <name>]"
                                 .into(),
                         )
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /secrets [list|status|set <name> [value-or-recipe]|get <name>|delete|remove|rm <name>]".into(),
+                        "Usage: /secrets [list|status|set <name> [env:VAR|cmd:COMMAND|vault:PATH]|get <name>|delete|remove|rm <name>]".into(),
                     )
                 }
             }

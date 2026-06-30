@@ -3672,7 +3672,7 @@ fn slash_auth_login_redirects_to_top_level_login() {
 fn slash_login_provider_dispatches_to_runtime() {
     let mut app = test_app();
     let tx = test_tx();
-    let result = app.handle_slash_command("/login anthropic", &tx);
+    let result = app.handle_slash_command("/login openai", &tx);
     assert!(matches!(result, SlashResult::Handled));
 }
 
@@ -7268,6 +7268,50 @@ fn settings_menu_sandbox_row_disables_persisted_setting() {
 
 
 #[test]
+fn menu_login_secret_input_closes_menu_without_output_panel() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_auth_menu();
+
+    let result = app.execute_active_menu_command("/login openai".to_string(), &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(matches!(app.editor.mode(), super::editor::EditorMode::SecretInput { .. }));
+    assert!(app.active_menu.is_none());
+    assert!(app.command_panel.is_none());
+    assert!(app.operator_events.iter().any(|event| event.message.contains("Paste") || event.message.contains("API key")));
+}
+
+#[test]
+fn secrets_set_direct_value_uses_hidden_input_instead_of_control_request() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/secrets set API_TOKEN super-secret-value", &tx);
+
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(matches!(app.editor.mode(), super::editor::EditorMode::SecretInput { .. }));
+    assert!(rx.try_recv().is_err(), "direct value must not be queued as a control request");
+}
+
+#[test]
+fn secrets_set_recipe_still_queues_control_request() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/secrets set API_TOKEN env:API_TOKEN", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    match rx.try_recv().expect("control request") {
+        TuiCommand::ExecuteControl { request: crate::control_runtime::ControlRequest::SecretsSet { name, value }, .. } => {
+            assert_eq!(name, "API_TOKEN");
+            assert_eq!(value, "env:API_TOKEN");
+        }
+        other => panic!("expected secrets set request, got {other:?}"),
+    }
+}
+
+#[test]
 fn slash_auth_opens_provider_auth_menu() {
     let mut app = test_app();
     let tx = test_tx();
@@ -7279,7 +7323,7 @@ fn slash_auth_opens_provider_auth_menu() {
     assert_eq!(menu.projection.id, "auth");
     let rows = menu.state.visible_rows(&menu.projection);
     assert!(rows.iter().any(|row| row.row.id == "auth.provider.anthropic"));
-    assert!(rows.iter().any(|row| row.row.metadata.iter().any(|m| m == "/login anthropic")));
+    assert!(rows.iter().any(|row| row.row.metadata.iter().any(|m| m == "/login openai")));
 }
 
 #[test]
