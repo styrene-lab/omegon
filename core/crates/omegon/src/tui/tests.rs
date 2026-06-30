@@ -3823,11 +3823,28 @@ fn slash_sessions_resume_enqueues_execute_control() {
 }
 
 #[test]
-fn slash_auth_no_args_shows_status() {
+fn slash_auth_no_args_opens_provider_menu() {
     let mut app = test_app();
     let tx = test_tx();
     let result = app.handle_slash_command("/auth", &tx);
+
     assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("auth menu");
+    assert_eq!(menu.projection.id, "auth");
+    assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id.starts_with("auth.provider.")));
+}
+
+#[test]
+fn slash_auth_status_preserves_status_command() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+    let result = app.handle_slash_command("/auth status", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    match rx.try_recv().expect("auth status command") {
+        TuiCommand::AuthStatus { .. } => {}
+        other => panic!("expected auth status command, got {other:?}"),
+    }
 }
 
 #[test]
