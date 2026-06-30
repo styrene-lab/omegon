@@ -77,6 +77,8 @@ pub enum MenuBadgeTone {
 pub enum MenuActionDisposition {
     RunCommand,
     FocusRow,
+    PrimeEditor,
+    OpenSelector,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +96,8 @@ pub struct MenuActionProjection {
     pub key: Option<String>,
     pub command: Option<String>,
     pub target_row_id: Option<String>,
+    pub editor_text: Option<String>,
+    pub message: Option<String>,
     pub disposition: MenuActionDisposition,
     pub close_policy: MenuActionClosePolicy,
     pub requires_confirmation: bool,
@@ -360,6 +364,8 @@ impl MenuActionProjection {
             key: None,
             command: Some(command.into()),
             target_row_id: None,
+            editor_text: None,
+            message: None,
             disposition: MenuActionDisposition::RunCommand,
             close_policy: MenuActionClosePolicy::Default,
             requires_confirmation: false,
@@ -373,11 +379,49 @@ impl MenuActionProjection {
             key: None,
             command: None,
             target_row_id: Some(target_row_id.into()),
+            editor_text: None,
+            message: None,
             disposition: MenuActionDisposition::FocusRow,
             close_policy: MenuActionClosePolicy::KeepOpen,
             requires_confirmation: false,
         }
     }
+
+    pub fn prime_editor(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        editor_text: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            key: None,
+            command: None,
+            target_row_id: None,
+            editor_text: Some(editor_text.into()),
+            message: Some(message.into()),
+            disposition: MenuActionDisposition::PrimeEditor,
+            close_policy: MenuActionClosePolicy::CloseMenu,
+            requires_confirmation: false,
+        }
+    }
+
+    pub fn open_selector(id: impl Into<String>, label: impl Into<String>, selector_id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            key: None,
+            command: None,
+            target_row_id: Some(selector_id.into()),
+            editor_text: None,
+            message: None,
+            disposition: MenuActionDisposition::OpenSelector,
+            close_policy: MenuActionClosePolicy::KeepOpen,
+            requires_confirmation: false,
+        }
+    }
+
 }
 
 impl From<PaletteRowKind> for MenuRowKind {

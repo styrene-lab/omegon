@@ -4920,6 +4920,60 @@ fn runtime_refresh_aliases_canonicalize() {
 }
 
 #[test]
+fn runtime_refresh_menu_action_requires_confirmation() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_extension_runtime_menu();
+    {
+        let menu = app.active_menu.as_mut().expect("runtime menu");
+        assert!(menu.state.select_row_by_id(&menu.projection, "runtime.refresh"));
+    }
+    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_primary_action(&menu.projection)).expect("runtime refresh action");
+
+    let first = app.execute_active_menu_action(action.clone(), &tx);
+    assert!(matches!(first, SlashResult::Handled));
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "extension-runtime"));
+    assert!(app.command_panel.is_none());
+    assert_eq!(app.pending_menu_confirmation.as_deref(), Some("runtime.refresh.primary"));
+
+    let second = app.execute_active_menu_action(action, &tx);
+    assert!(matches!(second, SlashResult::Handled));
+    assert!(app.command_panel.is_some(), "confirmed refresh should show output panel");
+}
+
+#[test]
+fn extension_update_menu_action_requires_confirmation() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_extension_runtime_menu();
+    {
+        let menu = app.active_menu.as_mut().expect("runtime menu");
+        assert!(menu.state.select_row_by_id(&menu.projection, "extension.update"));
+    }
+    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_primary_action(&menu.projection)).expect("extension update action");
+
+    let first = app.execute_active_menu_action(action.clone(), &tx);
+    assert!(matches!(first, SlashResult::Handled));
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "extension-runtime"));
+    assert!(app.command_panel.is_none());
+    assert_eq!(app.pending_menu_confirmation.as_deref(), Some("extension.update.primary"));
+}
+
+#[test]
+fn extension_search_menu_row_primes_editor_for_query() {
+    let mut app = test_app();
+    app.open_extension_runtime_menu();
+    {
+        let menu = app.active_menu.as_mut().expect("runtime menu");
+        assert!(menu.state.select_row_by_id(&menu.projection, "extension.search"));
+    }
+
+    assert!(app.open_selected_extension_runtime_row());
+    assert_eq!(app.editor.render_text(), "/extension search ");
+    assert!(app.active_menu.is_none());
+}
+
+#[test]
 fn extension_refresh_aliases_execute_runtime_refresh() {
     let mut app = test_app();
     let tx = test_tx();
@@ -5011,45 +5065,33 @@ Loaded by runtime substrate refresh.
 }
 
 #[test]
-fn slash_secrets_enqueues_execute_control() {
+fn slash_secrets_opens_shared_menu() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 
     let result = app.handle_slash_command("/secrets", &tx);
     assert!(matches!(result, SlashResult::Handled));
 
-    assert!(
-        rx.try_recv().is_err(),
-        "/secrets opens the secrets action selector"
-    );
-    assert!(app.selector.is_some());
-    let selector = app.selector.as_ref().expect("selector should be open");
-    assert!(
-        selector.options.iter().all(|option| !option.active),
-        "secret action selector should not mark an arbitrary default active"
-    );
-    assert_eq!(app.selector_kind, Some(SelectorKind::SecretAction));
+    assert!(rx.try_recv().is_err(), "/secrets should not queue control work");
+    assert!(app.selector.is_none());
+    let menu = app.active_menu.as_ref().expect("secrets menu");
+    assert_eq!(menu.projection.id, "secrets");
+    let rows = menu.state.visible_rows(&menu.projection);
+    assert!(rows.iter().any(|row| row.row.id == "secrets.status"));
+    assert!(rows.iter().all(|row| !row.row.metadata.iter().any(|m| m.contains("super-secret"))));
 }
 
 #[test]
-fn secret_action_selector_list_enqueues_execute_control() {
+fn secrets_menu_status_row_enqueues_execute_control() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 
     app.handle_slash_command("/secrets", &tx);
-    let selector = app.selector.as_mut().expect("selector should be open");
-    let index = selector
-        .options
-        .iter()
-        .position(|o| o.value == "list")
-        .expect("list option present");
-    selector.cursor = index;
+    let menu = app.active_menu.as_mut().expect("secrets menu");
+    assert!(menu.state.select_row_by_id(&menu.projection, "secrets.status"));
+    let command = menu.state.selected_command(&menu.projection).expect("status command");
 
-    let message = app
-        .confirm_selector(&tx)
-        .expect("selector confirmation should return message");
-
-    assert!(message.contains("Listing"), "unexpected message: {message}");
+    assert!(matches!(app.execute_active_menu_command(command, &tx), SlashResult::Handled));
     match rx.try_recv().expect("queued command") {
         TuiCommand::ExecuteControl {
             request: crate::control_runtime::ControlRequest::SecretsView,
@@ -5060,57 +5102,39 @@ fn secret_action_selector_list_enqueues_execute_control() {
 }
 
 #[test]
-fn secret_action_selector_set_opens_secret_name_selector() {
-    let mut app = test_app();
-    let tx = test_tx();
+fn secrets_menu_template_rows_prime_editor_without_control_request() {
+    for (row_id, expected) in [
+        ("secrets.set", "/secrets set "),
+        ("secrets.recipe", "/secrets set "),
+        ("secrets.get", "/secrets get "),
+        ("secrets.delete", "/secrets delete "),
+    ] {
+        let mut app = test_app();
+        let (tx, mut rx) = test_tx_with_rx();
 
-    app.handle_slash_command("/secrets", &tx);
-    let selector = app.selector.as_mut().expect("selector should be open");
-    let index = selector
-        .options
-        .iter()
-        .position(|o| o.value == "set")
-        .expect("set option present");
-    selector.cursor = index;
+        app.handle_slash_command("/secrets", &tx);
+        {
+            let menu = app.active_menu.as_mut().expect("secrets menu");
+            assert!(menu.state.select_row_by_id(&menu.projection, row_id));
+        }
 
-    let message = app
-        .confirm_selector(&tx)
-        .expect("selector confirmation should return message");
-
-    assert!(
-        message.contains("Pick a secret"),
-        "unexpected message: {message}"
-    );
-    assert!(
-        app.selector.is_some(),
-        "expected secret-name selector to open"
-    );
-    assert_eq!(app.selector_kind, Some(SelectorKind::SecretName));
+        assert!(app.open_selected_secrets_row(), "{row_id} should be handled");
+        assert_eq!(app.editor.render_text(), expected);
+        assert!(app.active_menu.is_none(), "{row_id} should close the menu");
+        assert!(rx.try_recv().is_err(), "{row_id} should not queue control work");
+    }
 }
 
 #[test]
-fn secret_action_selector_delete_primes_editor() {
+fn slash_secrets_configure_opens_shared_menu() {
     let mut app = test_app();
     let tx = test_tx();
 
-    app.handle_slash_command("/secrets", &tx);
-    let selector = app.selector.as_mut().expect("selector should be open");
-    let index = selector
-        .options
-        .iter()
-        .position(|o| o.value == "delete")
-        .expect("delete option present");
-    selector.cursor = index;
+    let result = app.handle_slash_command("/secrets configure", &tx);
 
-    let message = app
-        .confirm_selector(&tx)
-        .expect("selector confirmation should return message");
-
-    assert_eq!(app.editor.render_text(), "/secrets delete ");
-    assert!(
-        message.contains("secret name"),
-        "unexpected message: {message}"
-    );
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.selector.is_none());
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "secrets"));
 }
 
 #[test]
@@ -5224,31 +5248,14 @@ fn vault_configure_selector_confirm_primes_editor() {
 }
 
 #[test]
-fn slash_secrets_set_without_value_opens_selector() {
+fn slash_secrets_set_without_value_opens_menu() {
     let mut app = test_app();
     let tx = test_tx();
 
     let result = app.handle_slash_command("/secrets set", &tx);
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.selector.is_some(), "expected secret selector to open");
-    assert!(matches!(
-        app.selector_kind,
-        Some(super::SelectorKind::SecretName)
-    ));
-}
-
-#[test]
-fn slash_secrets_configure_without_value_opens_selector() {
-    let mut app = test_app();
-    let tx = test_tx();
-
-    let result = app.handle_slash_command("/secrets configure", &tx);
-    assert!(matches!(result, SlashResult::Handled));
-    assert!(app.selector.is_some(), "expected secret selector to open");
-    assert!(matches!(
-        app.selector_kind,
-        Some(super::SelectorKind::SecretName)
-    ));
+    assert!(app.selector.is_none(), "expected shared menu, not selector");
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "secrets"));
 }
 
 #[test]
@@ -5268,10 +5275,10 @@ fn slash_secrets_set_name_enters_hidden_secret_input() {
 }
 
 #[test]
-fn secret_selector_confirm_starts_hidden_secret_input() {
+fn secret_name_selector_confirm_starts_hidden_secret_input() {
     let mut app = test_app();
     let tx = test_tx();
-    app.handle_slash_command("/secrets configure", &tx);
+    app.open_secret_name_selector();
     let selector = app.selector.as_mut().expect("selector should be open");
     let index = selector
         .options

@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Fixed
+- Hardened shared `/extension` and `/runtime` menu actions: refresh/update require confirmed menu activation, and extension search now primes `/extension search ` for an explicit query instead of executing a query-less menu command.
 - Kept structured menus open underneath menu-launched command output and rendered those raw slash responses in a returnable, scrollable command panel instead of dumping them into the conversation transcript.
 - Routed `/settings` through the shared structured menu substrate and removed the legacy in-app settings screen render/input state from the TUI app.
 - Routed `/help` to the shared command inventory menu by default while preserving `/help all` as the full text readout, establishing the first general-purpose slash-command menu affordance beyond skills/settings.

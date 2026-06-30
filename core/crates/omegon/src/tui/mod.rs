@@ -2841,7 +2841,7 @@ impl App {
                         kind: MenuRowKind::Action,
                         badges: vec![MenuBadgeProjection { label: "destructive".into(), tone: MenuBadgeTone::Danger }],
                         metadata: vec!["explicit command required: /context clear".into(), "/new".into()],
-                        primary_action: None,
+                        primary_action: Some(MenuActionProjection::prime_editor("secrets.delete.prepare", "Prepare", "/secrets delete ", "Type the exact secret name to delete")),
                         actions: vec![],
                         safety: None,
                         availability: None,
@@ -2854,6 +2854,94 @@ impl App {
 
     fn open_context_menu(&mut self) {
         self.open_menu_projection(self.context_menu_projection());
+    }
+
+    fn secrets_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
+        use crate::surfaces::menu::{MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection, MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection};
+        let mut menu = MenuProjection::new("secrets", "Secrets");
+        menu.summary = Some("Secret configuration surface. Values are never displayed; setting plaintext secrets always uses hidden input.".into());
+        menu.footer = Some("↑/↓ navigate · Enter prepare action · / filter · Esc close · /secrets status for text readout".into());
+        menu.tabs = vec![MenuTabProjection {
+            id: "actions".into(),
+            label: "Actions".into(),
+            groups: vec![MenuGroupProjection {
+                id: "secrets.actions".into(),
+                label: "Secret actions".into(),
+                description: Some("Prepare safe secret commands without exposing values in the menu.".into()),
+                rows: vec![
+                    MenuRowProjection {
+                        id: "secrets.status".into(),
+                        label: "List configured secrets".into(),
+                        description: "Show configured secret names and recipes; never prints resolved values.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "safe".into(), tone: MenuBadgeTone::Success }],
+                        metadata: vec!["/secrets status".into(), "values redacted".into()],
+                        primary_action: Some(MenuActionProjection::command("secrets.status.primary", "List", "/secrets status")),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "secrets.set".into(),
+                        label: "Set hidden secret".into(),
+                        description: "Prepare /secrets set NAME; Enter then type the name and use hidden input for the value.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "hidden input".into(), tone: MenuBadgeTone::Warning }],
+                        metadata: vec!["/secrets set NAME".into(), "plaintext values are never captured from menu rows".into()],
+                        primary_action: Some(MenuActionProjection::prime_editor("secrets.set.prepare", "Prepare", "/secrets set ", "Type secret name, then Enter for hidden input")),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "secrets.recipe".into(),
+                        label: "Configure recipe".into(),
+                        description: "Prepare a recipe-backed secret using env:, cmd:, or vault:.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "recipe".into(), tone: MenuBadgeTone::Info }],
+                        metadata: vec!["env:VAR".into(), "cmd:COMMAND".into(), "vault:PATH".into()],
+                        primary_action: Some(MenuActionProjection::prime_editor("secrets.recipe.prepare", "Prepare", "/secrets set ", "Type NAME env:VAR, cmd:COMMAND, or vault:PATH")),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "secrets.get".into(),
+                        label: "Check resolution".into(),
+                        description: "Prepare /secrets get NAME; checks whether a secret resolves without printing it.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "redacted".into(), tone: MenuBadgeTone::Success }],
+                        metadata: vec!["/secrets get NAME".into(), "never prints value".into()],
+                        primary_action: Some(MenuActionProjection::prime_editor("secrets.get.prepare", "Prepare", "/secrets get ", "Type the secret name to check resolution; value stays redacted")),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "secrets.delete".into(),
+                        label: "Delete secret".into(),
+                        description: "Prepare /secrets delete NAME. Delete requires an explicit typed name.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "explicit".into(), tone: MenuBadgeTone::Danger }],
+                        metadata: vec!["/secrets delete NAME".into(), "no direct menu delete".into()],
+                        primary_action: None,
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                ],
+            }],
+        }];
+        menu
+    }
+
+    fn open_secrets_menu(&mut self) {
+        self.open_menu_projection(self.secrets_menu_projection());
     }
 
     fn sessions_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
@@ -3455,6 +3543,31 @@ impl App {
                 }
                 SlashResult::Handled
             }
+            crate::surfaces::menu::MenuActionDisposition::PrimeEditor => {
+                self.active_menu = None;
+                if let Some(text) = action.editor_text {
+                    self.editor.set_text(&text);
+                }
+                if let Some(message) = action.message {
+                    self.show_command_toast(CommandToast::new(message, CommandSeverity::Info));
+                }
+                SlashResult::Handled
+            }
+            crate::surfaces::menu::MenuActionDisposition::OpenSelector => {
+                match action.target_row_id.as_deref() {
+                    Some("context.class") => self.open_context_selector(),
+                    Some("model.current") => self.open_model_selector(),
+                    Some("model.grade") => self.open_model_grade_selector(),
+                    Some("model.provider") => self.open_model_provider_selector(),
+                    Some("model.policy") => self.open_model_policy_selector(),
+                    Some("secrets.name") => self.open_secret_name_selector(),
+                    _ => self.show_command_toast(CommandToast::new(
+                        format!("No selector registered for {}", action.label),
+                        CommandSeverity::Warning,
+                    )),
+                }
+                SlashResult::Handled
+            }
             crate::surfaces::menu::MenuActionDisposition::RunCommand => {
                 if let Some(command) = action.command {
                     let menu_id = self.active_menu.as_ref().map(|menu| menu.projection.id.clone());
@@ -3845,6 +3958,22 @@ warning: {warning}"));
                 format!("No editor registered for {}", row.label),
                 CommandSeverity::Warning,
             )),
+        }
+    }
+
+    fn open_selected_extension_runtime_row(&mut self) -> bool {
+        let Some(row_id) = self.active_menu.as_ref()
+            .filter(|menu| menu.projection.id == "extension-runtime")
+            .and_then(|menu| menu.state.selected_row(&menu.projection))
+            .map(|row| row.row.id.clone()) else { return false; };
+        match row_id.as_str() {
+            "extension.search" => {
+                self.active_menu = None;
+                self.editor.set_text("/extension search ");
+                self.show_command_toast(CommandToast::new("Type an extension search query, then press Enter", CommandSeverity::Info));
+                true
+            }
+            _ => false,
         }
     }
 
@@ -4552,31 +4681,7 @@ warning: {warning}"));
         let parts: Vec<&str> = args.splitn(3, ' ').collect();
         match parts.first().copied().unwrap_or("") {
             "" => {
-                let options = vec![
-                    selector::SelectOption {
-                        value: "list".to_string(),
-                        label: "List configured secrets".to_string(),
-                        description: "show secret names and readiness without revealing values"
-                            .to_string(),
-                        active: false,
-                    },
-                    selector::SelectOption {
-                        value: "set".to_string(),
-                        label: "Set or configure a secret".to_string(),
-                        description: "pick a known provider secret or enter a custom name"
-                            .to_string(),
-                        active: false,
-                    },
-                    selector::SelectOption {
-                        value: "delete".to_string(),
-                        label: "Delete a secret".to_string(),
-                        description: "type /secrets delete NAME; values are never displayed"
-                            .to_string(),
-                        active: false,
-                    },
-                ];
-                self.selector = Some(selector::Selector::new("Secrets", options));
-                self.selector_kind = Some(SelectorKind::SecretAction);
+                self.open_secrets_menu();
                 SlashResult::Handled
             }
             // /secrets set NAME → enter hidden input mode for arbitrary operator secrets.
@@ -4587,10 +4692,10 @@ warning: {warning}"));
                     "🔒 Paste or type value for {name} (input is hidden):"
                 ))
             }
-            // /secrets configure and /secrets set with no name/value → open selector
+            // /secrets configure and /secrets set with no name/value → open shared menu
             "configure" | "set" if parts.len() < 3 => {
                 let _ = tx;
-                self.open_secret_name_selector();
+                self.open_secrets_menu();
                 SlashResult::Handled
             }
             "set" if parts.len() >= 3 && !parts[1].trim().is_empty() => {
@@ -11521,6 +11626,7 @@ pub async fn run_tui(
                                         }
                                     }
                                 } else if app.open_selected_context_row() {
+                                } else if app.open_selected_extension_runtime_row() {
                                 } else {
                                     let action = app
                                         .active_menu
