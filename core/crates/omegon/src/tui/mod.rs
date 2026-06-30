@@ -2729,8 +2729,8 @@ impl App {
                         surface_row("activity", "Activity", surfaces.activity, "/ui toggle activity"),
                         MenuRowProjection {
                             id: "ui.detail".into(),
-                            label: "Tool detail".into(),
-                            description: "Open/toggle tool output density controls.".into(),
+                            label: "Tool output detail".into(),
+                            description: "Adjust tool output density/detail level.".into(),
                             value: Some(self.settings().tool_detail.as_str().into()),
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: "density".into(), tone: MenuBadgeTone::Neutral }],
@@ -2808,14 +2808,14 @@ impl App {
                     },
                     MenuRowProjection {
                         id: "context.clear".into(),
-                        label: "New context".into(),
-                        description: "Clear conversation context and start fresh.".into(),
+                        label: "Clear conversation context".into(),
+                        description: "Clears the current transcript context and starts fresh. Direct command: /context clear.".into(),
                         value: None,
                         kind: MenuRowKind::Action,
                         badges: vec![MenuBadgeProjection { label: "destructive".into(), tone: MenuBadgeTone::Danger }],
-                        metadata: vec!["/context clear".into(), "/new".into()],
-                        primary_action: Some(MenuActionProjection::command("context.clear.primary", "Start fresh", "/context clear")),
-                        actions: vec![{ let mut action = MenuActionProjection::command("context.clear.action", "New", "/context clear"); action.key = Some("n".into()); action }],
+                        metadata: vec!["explicit command required: /context clear".into(), "/new".into()],
+                        primary_action: None,
+                        actions: vec![],
                         safety: None,
                         availability: None,
                     },
@@ -2842,7 +2842,7 @@ impl App {
         let drift_value = if drift.changed_count > 0 { format!("Δ{}", drift.changed_count) } else { "clean".into() };
         let mut menu = MenuProjection::new("profile", "Profile");
         menu.summary = Some(format!("Persisted profile controls. {source_line}; runtime drift: {drift_value}."));
-        menu.footer = Some("↑/↓ navigate · / filter · Enter run · s save · a apply · Esc close".into());
+        menu.footer = Some("↑/↓ navigate · / filter · Enter run · s save · explicit /profile apply to apply · Esc close".into());
         menu.tabs = vec![MenuTabProjection {
             id: "profile".into(),
             label: "Profile".into(),
@@ -2879,14 +2879,14 @@ impl App {
                     },
                     MenuRowProjection {
                         id: "profile.apply".into(),
-                        label: "Apply profile".into(),
-                        description: "Apply persisted profile defaults to the current runtime.".into(),
+                        label: "Apply persisted profile".into(),
+                        description: "Apply persisted profile defaults to current runtime settings.".into(),
                         value: None,
                         kind: MenuRowKind::Action,
                         badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Warning }],
                         metadata: vec!["/profile apply".into()],
                         primary_action: Some(MenuActionProjection::command("profile.apply.primary", "Apply", "/profile apply")),
-                        actions: vec![{ let mut action = MenuActionProjection::command("profile.apply.action", "Apply", "/profile apply"); action.key = Some("a".into()); action }],
+                        actions: vec![],
                         safety: None,
                         availability: None,
                     },

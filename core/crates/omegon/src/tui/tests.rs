@@ -7056,6 +7056,18 @@ fn context_menu_class_row_opens_existing_selector() {
 }
 
 #[test]
+fn context_menu_clear_requires_explicit_command() {
+    let mut app = test_app();
+    app.open_context_menu();
+    let menu = app.active_menu.as_mut().expect("context menu");
+    assert!(menu.state.select_row_by_id(&menu.projection, "context.clear"));
+
+    assert_eq!(menu.state.selected_command(&menu.projection), None);
+    let row = menu.state.selected_row(&menu.projection).expect("clear row");
+    assert!(row.row.metadata.iter().any(|value| value.contains("/context clear")));
+}
+
+#[test]
 fn context_menu_compact_action_uses_shared_command_path() {
     let mut app = test_app();
     let tx = test_tx();
@@ -7195,8 +7207,24 @@ fn profile_menu_save_and_apply_hotkeys_use_shared_rows() {
         assert!(menu.state.select_row_by_id(&menu.projection, "profile.apply"));
     }
     let menu = app.active_menu.as_ref().expect("profile menu");
+    assert_eq!(menu.state.selected_action_command_for_key(&menu.projection, 'a'), None);
+    assert_eq!(menu.state.selected_action_command_for_key(&menu.projection, 'a'), None);
     assert_eq!(
-        menu.state.selected_action_command_for_key(&menu.projection, 'a').as_deref(),
+        menu.state.selected_command(&menu.projection).as_deref(),
+        Some("/profile apply")
+    );
+}
+
+#[test]
+fn profile_apply_is_selectable_without_hotkey() {
+    let mut app = test_app();
+    app.open_profile_menu();
+    let menu = app.active_menu.as_mut().expect("profile menu");
+    assert!(menu.state.select_row_by_id(&menu.projection, "profile.apply"));
+
+    assert_eq!(menu.state.selected_action_command_for_key(&menu.projection, 'a'), None);
+    assert_eq!(
+        menu.state.selected_command(&menu.projection).as_deref(),
         Some("/profile apply")
     );
 }
