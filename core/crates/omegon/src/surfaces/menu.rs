@@ -133,7 +133,7 @@ impl ProviderStatusProjection {
         } else {
             ProviderAvailabilityProjection::MissingCredentials
         };
-        let remediation_command = (!credential_available).then(|| format!("/auth login {provider_id}"));
+        let remediation_command = (!credential_available).then(|| format!("/login {provider_id}"));
         Self {
             provider_id: provider_id.to_string(),
             display_name,

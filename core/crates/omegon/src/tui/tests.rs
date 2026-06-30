@@ -5065,6 +5065,38 @@ Loaded by runtime substrate refresh.
 }
 
 #[test]
+fn secrets_menu_separates_inventory_from_actions() {
+    let mut app = test_app();
+    app.open_secrets_menu();
+
+    let menu = app.active_menu.as_ref().expect("secrets menu");
+    assert_eq!(menu.projection.id, "secrets");
+    assert_eq!(menu.projection.tabs[0].id, "inventory");
+    assert_eq!(menu.projection.tabs[1].id, "actions");
+    let inventory_rows = &menu.projection.tabs[0].groups[0].rows;
+    assert_eq!(inventory_rows[0].id, "secrets.inventory.empty");
+    assert!(inventory_rows[0].description.contains("No extension/agent secret inventory"));
+    assert!(inventory_rows[0].primary_action.is_none());
+}
+
+#[test]
+fn secrets_menu_actions_tab_contains_prime_editor_rows() {
+    let mut app = test_app();
+    app.open_secrets_menu();
+    let menu = app.active_menu.as_mut().expect("secrets menu");
+    menu.state.active_tab = "actions".into();
+
+    let rows: Vec<_> = menu.state.visible_rows(&menu.projection);
+    for id in ["secrets.set", "secrets.recipe", "secrets.get", "secrets.delete"] {
+        let row = rows.iter().find(|row| row.row.id == id).expect(id);
+        let action = row.row.primary_action.as_ref().expect("prime action");
+        assert_eq!(action.disposition, crate::surfaces::menu::MenuActionDisposition::PrimeEditor);
+        assert!(action.command.is_none());
+        assert!(action.editor_text.as_deref().unwrap_or_default().starts_with("/secrets "));
+    }
+}
+
+#[test]
 fn slash_secrets_opens_shared_menu() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
@@ -5076,9 +5108,14 @@ fn slash_secrets_opens_shared_menu() {
     assert!(app.selector.is_none());
     let menu = app.active_menu.as_ref().expect("secrets menu");
     assert_eq!(menu.projection.id, "secrets");
+    assert_eq!(menu.state.active_tab, "inventory");
+    let rows = menu.state.visible_rows(&menu.projection);
+    assert!(rows.iter().any(|row| row.row.id == "secrets.inventory.empty"));
+    assert!(rows.iter().all(|row| !row.row.metadata.iter().any(|m| m.contains("super-secret"))));
+    let menu = app.active_menu.as_mut().expect("secrets menu");
+    menu.state.active_tab = "actions".into();
     let rows = menu.state.visible_rows(&menu.projection);
     assert!(rows.iter().any(|row| row.row.id == "secrets.status"));
-    assert!(rows.iter().all(|row| !row.row.metadata.iter().any(|m| m.contains("super-secret"))));
 }
 
 #[test]
@@ -5088,6 +5125,7 @@ fn secrets_menu_status_row_enqueues_execute_control() {
 
     app.handle_slash_command("/secrets", &tx);
     let menu = app.active_menu.as_mut().expect("secrets menu");
+    menu.state.active_tab = "actions".into();
     assert!(menu.state.select_row_by_id(&menu.projection, "secrets.status"));
     let command = menu.state.selected_command(&menu.projection).expect("status command");
 
@@ -5115,6 +5153,7 @@ fn secrets_menu_template_rows_prime_editor_without_control_request() {
         app.handle_slash_command("/secrets", &tx);
         {
             let menu = app.active_menu.as_mut().expect("secrets menu");
+            menu.state.active_tab = "actions".into();
             assert!(menu.state.select_row_by_id(&menu.projection, row_id));
         }
 

@@ -2862,6 +2862,27 @@ impl App {
         menu.summary = Some("Secret configuration surface. Values are never displayed; setting plaintext secrets always uses hidden input.".into());
         menu.footer = Some("↑/↓ navigate · Enter prepare action · / filter · Esc close · /secrets status for text readout".into());
         menu.tabs = vec![MenuTabProjection {
+            id: "inventory".into(),
+            label: "Inventory".into(),
+            groups: vec![MenuGroupProjection {
+                id: "secrets.inventory".into(),
+                label: "Secret inventory".into(),
+                description: Some("Declared secret readiness from capability metadata. Values are never resolved while rendering this menu.".into()),
+                rows: vec![MenuRowProjection {
+                    id: "secrets.inventory.empty".into(),
+                    label: "No secret readiness snapshot loaded".into(),
+                    description: "No extension/agent secret inventory is currently available in the TUI; use Actions for safe recipes or /secrets status for configured recipe names.".into(),
+                    value: None,
+                    kind: MenuRowKind::Object,
+                    badges: vec![MenuBadgeProjection { label: "metadata only".into(), tone: MenuBadgeTone::Neutral }],
+                    metadata: vec!["values never displayed".into(), "provider auth lives under /auth".into()],
+                    primary_action: None,
+                    actions: vec![],
+                    safety: None,
+                    availability: None,
+                }],
+            }],
+        }, MenuTabProjection {
             id: "actions".into(),
             label: "Actions".into(),
             groups: vec![MenuGroupProjection {
