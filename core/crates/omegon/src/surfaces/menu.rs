@@ -83,6 +83,64 @@ pub struct MenuActionProjection {
     pub requires_confirmation: bool,
 }
 
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderStatusProjection {
+    pub provider_id: String,
+    pub display_name: String,
+    pub credential_state: String,
+    pub credential_available: bool,
+    pub availability: ProviderAvailabilityProjection,
+    pub remediation_command: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderAvailabilityProjection {
+    Available,
+    MissingCredentials,
+    Unavailable,
+}
+
+impl ProviderStatusProjection {
+    pub fn from_credential_probe(provider_id: &str) -> Self {
+        let credential = crate::route::CredentialLedger.probe(provider_id);
+        let display_name = crate::auth::provider_by_id(provider_id)
+            .map(|provider| provider.display_name.to_string())
+            .unwrap_or_else(|| provider_id.to_string());
+        let credential_available = credential.is_valid();
+        let availability = if credential_available {
+            ProviderAvailabilityProjection::Available
+        } else {
+            ProviderAvailabilityProjection::MissingCredentials
+        };
+        let remediation_command = (!credential_available).then(|| format!("/auth login {provider_id}"));
+        Self {
+            provider_id: provider_id.to_string(),
+            display_name,
+            credential_state: credential.summary(),
+            credential_available,
+            availability,
+            remediation_command,
+        }
+    }
+
+    pub fn badge_label(&self) -> &'static str {
+        match self.availability {
+            ProviderAvailabilityProjection::Available => "valid",
+            ProviderAvailabilityProjection::MissingCredentials => "missing",
+            ProviderAvailabilityProjection::Unavailable => "unavailable",
+        }
+    }
+
+    pub fn badge_tone(&self) -> MenuBadgeTone {
+        match self.availability {
+            ProviderAvailabilityProjection::Available => MenuBadgeTone::Success,
+            ProviderAvailabilityProjection::MissingCredentials => MenuBadgeTone::Warning,
+            ProviderAvailabilityProjection::Unavailable => MenuBadgeTone::Danger,
+        }
+    }
+}
+
 impl MenuProjection {
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
         Self {

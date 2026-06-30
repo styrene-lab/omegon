@@ -2872,23 +2872,22 @@ impl App {
         let provider_rows = provider_ids
             .into_iter()
             .map(|provider| {
-                let state = crate::route::CredentialLedger.probe(provider);
-                let (badge, tone) = if state.is_valid() {
-                    ("valid", MenuBadgeTone::Success)
-                } else {
-                    ("unavailable", MenuBadgeTone::Warning)
-                };
-                let login_command = format!("/auth login {provider}");
+                let status = crate::surfaces::menu::ProviderStatusProjection::from_credential_probe(provider);
+                let login_command = status
+                    .remediation_command
+                    .clone()
+                    .unwrap_or_else(|| format!("/auth login {provider}"));
                 MenuRowProjection {
                     id: format!("provider.{provider}"),
-                    label: crate::auth::provider_by_id(provider)
-                        .map(|p| p.display_name.to_string())
-                        .unwrap_or_else(|| provider.to_string()),
-                    description: state.summary(),
-                    value: Some(provider.to_string()),
+                    label: status.display_name.clone(),
+                    description: status.credential_state.clone(),
+                    value: Some(status.provider_id.clone()),
                     kind: MenuRowKind::Object,
-                    badges: vec![MenuBadgeProjection { label: badge.into(), tone }],
-                    metadata: vec![login_command.clone(), format!("provider: {provider}")],
+                    badges: vec![MenuBadgeProjection {
+                        label: status.badge_label().into(),
+                        tone: status.badge_tone(),
+                    }],
+                    metadata: vec![login_command.clone(), format!("provider: {}", status.provider_id)],
                     primary_action: Some(MenuActionProjection::command(
                         format!("provider.{provider}.login"),
                         "Login",
