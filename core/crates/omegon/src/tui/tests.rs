@@ -7129,6 +7129,61 @@ fn settings_profile_source_line_separates_source_from_full_path() {
 }
 
 #[test]
+fn slash_profile_opens_profile_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/profile", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("profile menu");
+    assert_eq!(menu.projection.id, "profile");
+    assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id == "profile.save"));
+    assert!(menu.projection.summary.as_deref().is_some_and(|summary| summary.contains("runtime drift")));
+}
+
+#[test]
+fn profile_menu_save_and_apply_hotkeys_use_shared_rows() {
+    let mut app = test_app();
+    app.open_profile_menu();
+    {
+        let menu = app.active_menu.as_mut().expect("profile menu");
+        assert!(menu.state.select_row_by_id(&menu.projection, "profile.save"));
+    }
+    let menu = app.active_menu.as_ref().expect("profile menu");
+    assert_eq!(
+        menu.state.selected_action_command_for_key(&menu.projection, 's').as_deref(),
+        Some("/profile save")
+    );
+    {
+        let menu = app.active_menu.as_mut().expect("profile menu");
+        assert!(menu.state.select_row_by_id(&menu.projection, "profile.apply"));
+    }
+    let menu = app.active_menu.as_ref().expect("profile menu");
+    assert_eq!(
+        menu.state.selected_action_command_for_key(&menu.projection, 'a').as_deref(),
+        Some("/profile apply")
+    );
+}
+
+#[test]
+fn profile_view_still_queues_text_readout_command() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/profile view", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    match rx.try_recv().expect("profile view command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::ProfileView,
+            ..
+        } => {}
+        other => panic!("expected profile view request, got {other:?}"),
+    }
+}
+
+#[test]
 fn settings_profile_shortcuts_queue_existing_profile_commands() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();

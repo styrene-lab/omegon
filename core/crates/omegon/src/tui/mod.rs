@@ -2733,6 +2733,116 @@ impl App {
         self.open_menu_projection(self.context_menu_projection());
     }
 
+    fn profile_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
+        use crate::surfaces::menu::{MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection, MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection};
+        let settings = self.settings();
+        let loaded_profile = crate::settings::Profile::load_with_source(self.cwd());
+        let drift = crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
+            &loaded_profile.profile,
+            loaded_profile.source,
+            &settings,
+        );
+        let source_line = settings_profile_source_line(&drift.source);
+        let drift_value = if drift.changed_count > 0 { format!("Δ{}", drift.changed_count) } else { "clean".into() };
+        let mut menu = MenuProjection::new("profile", "Profile");
+        menu.summary = Some(format!("Persisted profile controls. {source_line}; runtime drift: {drift_value}."));
+        menu.footer = Some("↑/↓ navigate · / filter · Enter run · s save · a apply · Esc close".into());
+        menu.tabs = vec![MenuTabProjection {
+            id: "profile".into(),
+            label: "Profile".into(),
+            groups: vec![MenuGroupProjection {
+                id: "profile.controls".into(),
+                label: "Profile controls".into(),
+                description: Some("Inspect, save, apply, and export persisted runtime profile state.".into()),
+                rows: vec![
+                    MenuRowProjection {
+                        id: "profile.status".into(),
+                        label: "Profile status".into(),
+                        description: source_line.clone(),
+                        value: Some(drift_value.clone()),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "status".into(), tone: MenuBadgeTone::Info }],
+                        metadata: vec!["/profile view".into(), source_line.clone()],
+                        primary_action: Some(MenuActionProjection::command("profile.status.primary", "View", "/profile view")),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "profile.save".into(),
+                        label: "Save active profile".into(),
+                        description: "Capture current runtime settings to the active profile source.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "writes".into(), tone: MenuBadgeTone::Warning }],
+                        metadata: vec!["/profile save".into()],
+                        primary_action: Some(MenuActionProjection::command("profile.save.primary", "Save", "/profile save")),
+                        actions: vec![{ let mut action = MenuActionProjection::command("profile.save.action", "Save", "/profile save"); action.key = Some("s".into()); action }],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "profile.apply".into(),
+                        label: "Apply profile".into(),
+                        description: "Apply persisted profile defaults to the current runtime.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Warning }],
+                        metadata: vec!["/profile apply".into()],
+                        primary_action: Some(MenuActionProjection::command("profile.apply.primary", "Apply", "/profile apply")),
+                        actions: vec![{ let mut action = MenuActionProjection::command("profile.apply.action", "Apply", "/profile apply"); action.key = Some("a".into()); action }],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "profile.save_project".into(),
+                        label: "Save project profile".into(),
+                        description: "Capture current runtime settings to .omegon/profile.json.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "writes".into(), tone: MenuBadgeTone::Warning }],
+                        metadata: vec!["/profile save --project".into()],
+                        primary_action: Some(MenuActionProjection::command("profile.save_project.primary", "Save project", "/profile save --project")),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "profile.save_user".into(),
+                        label: "Save user profile".into(),
+                        description: "Capture current runtime settings to the user profile.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "writes".into(), tone: MenuBadgeTone::Warning }],
+                        metadata: vec!["/profile save --user".into()],
+                        primary_action: Some(MenuActionProjection::command("profile.save_user.primary", "Save user", "/profile save --user")),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "profile.export".into(),
+                        label: "Export profile".into(),
+                        description: "Render the current runtime profile as a text readout.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
+                        metadata: vec!["/profile export".into()],
+                        primary_action: Some(MenuActionProjection::command("profile.export.primary", "Export", "/profile export")),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                ],
+            }],
+        }];
+        menu
+    }
+
+    fn open_profile_menu(&mut self) {
+        self.open_menu_projection(self.profile_menu_projection());
+    }
+
     fn open_command_inventory_menu(&mut self) {
         let mut projection = crate::surfaces::menu::MenuProjection::from_command_menu(
             "commands",
@@ -6952,7 +7062,10 @@ Scroll transcript:
             }
 
             "profile" => {
-                if let Some(command) = canonical_slash_command("profile", args)
+                if args.trim().is_empty() {
+                    self.open_profile_menu();
+                    SlashResult::Handled
+                } else if let Some(command) = canonical_slash_command("profile", args)
                     && let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
                 {
