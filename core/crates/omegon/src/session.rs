@@ -21,6 +21,8 @@ pub struct SessionMeta {
     pub tool_calls: u32,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub friendly_name: String,
     pub last_prompt_snippet: String,
 }
 
@@ -55,6 +57,43 @@ pub fn allocate_session_id() -> String {
     let ts = chrono_lite_timestamp();
     let rand_part: u32 = now.subsec_nanos() ^ 0xDEAD_BEEF;
     format!("{ts}_{rand_part:08x}")
+}
+
+pub fn friendly_session_name_for_id(session_id: &str) -> String {
+    const ADJECTIVES: &[&str] = &[
+        "amber", "brave", "calm", "clear", "cobalt", "daring", "eager", "ember",
+        "frost", "gentle", "hidden", "keen", "lunar", "patient", "quiet", "rapid",
+        "silver", "steady", "tidal", "vivid", "wise", "zealous",
+    ];
+    const NOUNS: &[&str] = &[
+        "anchor", "basilisk", "beacon", "cedar", "cipher", "comet", "forge", "harbor",
+        "keel", "lantern", "machinist", "meridian", "otter", "raven", "signal",
+        "sparrow", "warden", "waypoint", "willow", "wyrm",
+    ];
+    let hash = session_id.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    });
+    let adjective = ADJECTIVES[(hash as usize) % ADJECTIVES.len()];
+    let noun = NOUNS[((hash >> 16) as usize) % NOUNS.len()];
+    format!("{adjective}_{noun}")
+}
+
+pub fn is_canonical_session_id(id: &str) -> bool {
+    let Some((timestamp, suffix)) = id.split_once('_') else {
+        return false;
+    };
+    timestamp.len() == "YYYY-MM-DDTHH-MM-SS".len()
+        && timestamp.as_bytes().get(4) == Some(&b'-')
+        && timestamp.as_bytes().get(7) == Some(&b'-')
+        && timestamp.as_bytes().get(10) == Some(&b'T')
+        && timestamp.as_bytes().get(13) == Some(&b'-')
+        && timestamp.as_bytes().get(16) == Some(&b'-')
+        && timestamp
+            .bytes()
+            .enumerate()
+            .all(|(idx, byte)| matches!(idx, 4 | 7 | 13 | 16) && byte == b'-' || idx == 10 && byte == b'T' || byte.is_ascii_digit())
+        && suffix.len() == 8
+        && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// ISO 8601-ish timestamp for filenames: `2026-03-18T14-22-03`
@@ -106,27 +145,35 @@ pub fn save_session(
 
     // When resuming, overwrite the original session file so the chain stays clean.
     // When starting fresh, generate a new timestamped ID.
-    let session_id = resume_id
-        .map(|s| s.to_string())
-        .unwrap_or_else(allocate_session_id);
+    let session_id = match resume_id {
+        Some(id) if is_canonical_session_id(id) => id.to_string(),
+        Some(id) => anyhow::bail!("Invalid session id '{id}'; sessions must use Omegon canonical ids"),
+        None => allocate_session_id(),
+    };
     let filename = format!("{session_id}.json");
     let path = dir.join(&filename);
 
     // Preserve the original created_at if overwriting; otherwise use now.
-    let created_at = if resume_id.is_some() {
-        // Read existing meta to preserve the original timestamp.
-        let existing_meta_path = path.with_extension("meta.json");
-        fs::read_to_string(&existing_meta_path)
+    let existing_meta = if resume_id.is_some() {
+        fs::read_to_string(path.with_extension("meta.json"))
             .ok()
             .and_then(|j| serde_json::from_str::<SessionMeta>(&j).ok())
-            .map(|m| m.created_at)
-            .unwrap_or_else(|| chrono_lite_timestamp().replace('T', " ").replace('-', ":"))
     } else {
-        chrono_lite_timestamp().replace('T', " ").replace('-', ":")
+        None
     };
+    let created_at = existing_meta
+        .as_ref()
+        .map(|m| m.created_at.clone())
+        .unwrap_or_else(|| chrono_lite_timestamp().replace('T', " ").replace('-', ":"));
 
     let last_prompt_snippet = truncate_snippet(conversation.last_user_prompt(), 80);
     let description = session_description(&last_prompt_snippet, conversation.turn_count());
+    let friendly_name = existing_meta
+        .as_ref()
+        .map(|m| m.friendly_name.trim())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| friendly_session_name_for_id(&session_id));
 
     // Build metadata
     let meta = SessionMeta {
@@ -136,6 +183,7 @@ pub fn save_session(
         turns: conversation.turn_count(),
         tool_calls: conversation.intent.stats.tool_calls,
         description,
+        friendly_name,
         last_prompt_snippet,
     };
 
@@ -197,6 +245,13 @@ pub fn list_sessions(cwd: &Path) -> Vec<SessionEntry> {
             Ok(m) => m,
             Err(_) => continue,
         };
+        if !is_canonical_session_id(&meta.session_id) {
+            continue;
+        }
+        let expected_filename = format!("{}.json", meta.session_id);
+        if session_path.file_name().and_then(|name| name.to_str()) != Some(expected_filename.as_str()) {
+            continue;
+        }
 
         entries.push(SessionEntry {
             path: session_path,
@@ -204,8 +259,8 @@ pub fn list_sessions(cwd: &Path) -> Vec<SessionEntry> {
         });
     }
 
-    // Sort by filename (which starts with timestamp) — newest first
-    entries.sort_by(|a, b| b.path.file_name().cmp(&a.path.file_name()));
+    // Canonical session ids start with sortable timestamps — newest first.
+    entries.sort_by(|a, b| b.meta.session_id.cmp(&a.meta.session_id));
     entries
 }
 
@@ -222,18 +277,29 @@ pub fn find_session(cwd: &Path, resume_arg: Option<&str>) -> Option<PathBuf> {
             Some(sessions[0].path.clone())
         }
         Some(id) => {
-            // Match by session_id prefix or filename prefix
-            sessions
-                .iter()
-                .find(|s| {
-                    s.meta.session_id.starts_with(id)
-                        || s.path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .is_some_and(|n| n.starts_with(id))
-                })
-                .map(|s| s.path.clone())
+            let id = id.trim();
+            if let Some(session) = sessions.iter().find(|s| s.meta.session_id == id) {
+                return Some(session.path.clone());
+            }
+            let mut exact_friendly = sessions.iter().filter(|s| s.meta.friendly_name == id);
+            if let Some(first) = exact_friendly.next() {
+                return exact_friendly.next().is_none().then(|| first.path.clone());
+            }
+            let mut matches = sessions.iter().filter(|s| {
+                s.meta.session_id.starts_with(id) || s.meta.friendly_name.starts_with(id)
+            });
+            let first = matches.next()?;
+            matches.next().is_none().then(|| first.path.clone())
         }
+    }
+}
+
+pub fn session_display_name(meta: &SessionMeta) -> String {
+    let friendly = meta.friendly_name.trim();
+    if !friendly.is_empty() {
+        friendly.to_string()
+    } else {
+        friendly_session_name_for_id(&meta.session_id)
     }
 }
 
@@ -295,6 +361,16 @@ mod tests {
     }
 
     #[test]
+    fn session_id_validator_accepts_only_canonical_ids() {
+        assert!(is_canonical_session_id("2026-01-02T03-04-05_deadbeef"));
+        assert!(is_canonical_session_id(&allocate_session_id()));
+        assert!(!is_canonical_session_id("manual-session"));
+        assert!(!is_canonical_session_id("2026-01-02T03-04-05"));
+        assert!(!is_canonical_session_id("2026-01-02T03-04-05_nothexzz"));
+        assert!(!is_canonical_session_id("2026-1-02T03-04-05_deadbeef"));
+    }
+
+    #[test]
     fn days_to_ymd_epoch() {
         let (y, m, d) = days_to_ymd(0);
         assert_eq!((y, m, d), (1970, 1, 1));
@@ -335,6 +411,7 @@ mod tests {
             turns: 3,
             tool_calls: 12,
             description: "Fix the auth bug".into(),
+            friendly_name: friendly_session_name_for_id(&session_id),
             last_prompt_snippet: "Fix the auth bug".into(),
         };
         let meta_path = path.with_extension("meta.json");
@@ -370,6 +447,13 @@ mod tests {
             }
             let meta: SessionMeta =
                 serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            if !is_canonical_session_id(&meta.session_id) {
+                continue;
+            }
+            let expected_filename = format!("{}.json", meta.session_id);
+            if session_path.file_name().and_then(|name| name.to_str()) != Some(expected_filename.as_str()) {
+                continue;
+            }
             entries.push(SessionEntry {
                 path: session_path,
                 meta,
@@ -391,6 +475,7 @@ mod tests {
             turns: 9,
             tool_calls: 2,
             description: "missing snapshot".into(),
+            friendly_name: "quiet_anchor".into(),
             last_prompt_snippet: "missing snapshot".into(),
         };
         fs::write(
@@ -419,6 +504,7 @@ mod tests {
                     turns: 0,
                     tool_calls: 0,
                     description: String::new(),
+                    friendly_name: String::new(),
                     last_prompt_snippet: String::new(),
                 },
             },
@@ -431,12 +517,64 @@ mod tests {
                     turns: 0,
                     tool_calls: 0,
                     description: String::new(),
+                    friendly_name: String::new(),
                     last_prompt_snippet: String::new(),
                 },
             },
         ];
         // Newest first means b_later is first
         assert_eq!(sessions[0].meta.session_id, "b");
+    }
+
+    #[test]
+    fn friendly_session_names_are_stable_and_typable() {
+        let id = "2026-01-02T03-04-05_deadbeef";
+        let name = friendly_session_name_for_id(id);
+        assert_eq!(name, friendly_session_name_for_id(id));
+        assert!(name.contains('_'));
+        assert!(name.chars().all(|ch| ch.is_ascii_lowercase() || ch == '_'));
+    }
+
+    #[test]
+    fn friendly_session_lookup_requires_unique_name_or_prefix() {
+        let tmp = std::env::temp_dir().join("omegon-session-test-friendly-lookup");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let cwd = tmp.join("workspace");
+        fs::create_dir_all(&cwd).unwrap();
+        let dir = sessions_dir(&cwd).unwrap();
+        fs::create_dir_all(&dir).unwrap();
+
+        for (id, friendly) in [
+            ("2026-01-02T03-04-05_deadbeef", "quiet_anchor"),
+            ("2026-01-03T03-04-05_cafebabe", "quiet_anchor"),
+            ("2026-01-04T03-04-05_abcdef12", "brave_harbor"),
+        ] {
+            fs::write(dir.join(format!("{id}.json")), "{}").unwrap();
+            let meta = SessionMeta {
+                session_id: id.into(),
+                cwd: cwd.to_string_lossy().to_string(),
+                created_at: "2026-01-02 03:04:05".into(),
+                turns: 0,
+                tool_calls: 0,
+                description: String::new(),
+                friendly_name: friendly.into(),
+                last_prompt_snippet: String::new(),
+            };
+            fs::write(
+                dir.join(format!("{id}.meta.json")),
+                serde_json::to_string_pretty(&meta).unwrap(),
+            )
+            .unwrap();
+        }
+
+        assert!(find_session(&cwd, Some("quiet_anchor")).is_none());
+        assert!(find_session(&cwd, Some("quiet")).is_none());
+        assert!(find_session(&cwd, Some("brave_harbor")).is_some());
+        assert!(find_session(&cwd, Some("brave")).is_some());
+        assert!(find_session(&cwd, Some("2026-01-02T03-04-05_deadbeef")).is_some());
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

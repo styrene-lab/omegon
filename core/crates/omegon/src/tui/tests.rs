@@ -3779,6 +3779,7 @@ fn sessions_menu_rows_resume_by_session_id() {
         turns: 3,
         tool_calls: 7,
         description: "Resume target".into(),
+        friendly_name: "quiet_anchor".into(),
         last_prompt_snippet: "last prompt".into(),
     };
     std::fs::write(
@@ -3796,7 +3797,8 @@ fn sessions_menu_rows_resume_by_session_id() {
         .find(|row| row.row.id == format!("session.{session_id}"))
         .expect("session row");
 
-    assert_eq!(row.row.label, "Resume target");
+    assert_eq!(row.row.label, "quiet_anchor");
+    assert!(row.row.description.contains("Resume target"));
     assert_eq!(
         row.row.primary_action.as_ref().and_then(|action| action.command.as_deref()),
         Some("/sessions resume 2026-01-02T03-04-05_deadbeef")

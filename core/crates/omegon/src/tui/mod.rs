@@ -2996,18 +2996,20 @@ impl App {
                 .map(|entry| {
                     let id = entry.meta.session_id.clone();
                     let command = format!("/sessions resume {id}");
+                    let description = crate::session::session_display_description(&entry.meta);
                     MenuRowProjection {
                         id: format!("session.{id}"),
-                        label: crate::session::session_display_description(&entry.meta),
+                        label: crate::session::session_display_name(&entry.meta),
                         description: format!(
-                            "{} · {} turns · {} tool calls",
-                            entry.meta.created_at, entry.meta.turns, entry.meta.tool_calls
+                            "{} · {} · {} turns · {} tool calls",
+                            description, entry.meta.created_at, entry.meta.turns, entry.meta.tool_calls
                         ),
                         value: Some(id.clone()),
                         kind: MenuRowKind::Object,
                         badges: vec![MenuBadgeProjection { label: "resume".into(), tone: MenuBadgeTone::Info }],
                         metadata: vec![
                             format!("id: {id}"),
+                            format!("name: {}", crate::session::session_display_name(&entry.meta)),
                             command.clone(),
                             entry.path.display().to_string(),
                         ],

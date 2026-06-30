@@ -898,11 +898,12 @@ pub fn list_sessions_message(cwd: &Path) -> String {
             .take(10)
             .map(|s| {
                 format!(
-                    "  {} — {} turns, {} tools — {}",
-                    s.meta.session_id,
+                    "  {} — {} — {} turns, {} tools — id {}",
+                    session::session_display_name(&s.meta),
+                    session::session_display_description(&s.meta),
                     s.meta.turns,
                     s.meta.tool_calls,
-                    session::session_display_description(&s.meta)
+                    s.meta.session_id
                 )
             })
             .collect();
