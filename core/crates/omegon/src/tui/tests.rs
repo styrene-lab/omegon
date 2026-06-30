@@ -3408,23 +3408,20 @@ fn slash_exit_returns_quit() {
 }
 
 #[test]
-fn slash_context_no_args_opens_selector() {
+fn slash_context_no_args_opens_menu() {
     let mut app = test_app();
     let tx = test_tx();
     let result = app.handle_slash_command("/context", &tx);
     assert!(matches!(result, SlashResult::Handled));
-    assert!(
-        app.selector.is_some(),
-        "bare /context should open the selector"
-    );
-    assert_eq!(app.selector_kind, Some(SelectorKind::ContextClass));
+    assert!(app.selector.is_none());
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "context"));
 }
 
 #[test]
 fn context_selector_confirm_enqueues_set_context_class() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
-    app.handle_slash_command("/context", &tx);
+    app.open_context_selector();
     let selector = app.selector.as_mut().expect("selector should be open");
     let index = selector
         .options
