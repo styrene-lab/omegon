@@ -2802,8 +2802,8 @@ impl App {
                         kind: MenuRowKind::Object,
                         badges: vec![MenuBadgeProjection { label: "policy".into(), tone: MenuBadgeTone::Info }],
                         metadata: vec!["/context <compact|standard|extended|massive>".into()],
-                        primary_action: None,
-                        actions: vec![{ let mut action = MenuActionProjection::focus_row("context.class.choose", "Choose", "context.class"); action.key = Some("p".into()); action }],
+                        primary_action: Some(MenuActionProjection::open_selector("context.class.select", "Choose", "context.class")),
+                        actions: vec![{ let mut action = MenuActionProjection::open_selector("context.class.choose", "Choose", "context.class"); action.key = Some("p".into()); action }],
                         safety: None,
                         availability: None,
                     },
@@ -2841,7 +2841,7 @@ impl App {
                         kind: MenuRowKind::Action,
                         badges: vec![MenuBadgeProjection { label: "destructive".into(), tone: MenuBadgeTone::Danger }],
                         metadata: vec!["explicit command required: /context clear".into(), "/new".into()],
-                        primary_action: Some(MenuActionProjection::prime_editor("secrets.delete.prepare", "Prepare", "/secrets delete ", "Type the exact secret name to delete")),
+                        primary_action: None,
                         actions: vec![],
                         safety: None,
                         availability: None,
@@ -3820,7 +3820,7 @@ warning: {warning}"));
                         kind: MenuRowKind::Object,
                         badges: vec![MenuBadgeProjection { label: "active".into(), tone: MenuBadgeTone::Success }],
                         metadata: vec!["selector".into(), "exact model".into()],
-                        primary_action: None,
+                        primary_action: Some(MenuActionProjection::open_selector("model.current.select", "Choose model", "model.current")),
                         actions: vec![
                             { let mut action = MenuActionProjection::focus_row("model.current.grade", "Grade row", "model.grade"); action.key = Some("g".into()); action },
                             { let mut action = MenuActionProjection::focus_row("model.current.provider", "Provider row", "model.provider"); action.key = Some("p".into()); action },
@@ -3973,17 +3973,6 @@ warning: {warning}"));
                 self.show_command_toast(CommandToast::new("Type an extension search query, then press Enter", CommandSeverity::Info));
                 true
             }
-            _ => false,
-        }
-    }
-
-    fn open_selected_context_row(&mut self) -> bool {
-        let Some(row_id) = self.active_menu.as_ref()
-            .filter(|menu| menu.projection.id == "context")
-            .and_then(|menu| menu.state.selected_row(&menu.projection))
-            .map(|row| row.row.id.clone()) else { return false; };
-        match row_id.as_str() {
-            "context.class" => { self.open_context_selector(); true }
             _ => false,
         }
     }
@@ -11609,23 +11598,6 @@ pub async fn run_tui(
                             KeyCode::Enter => {
                                 if app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "settings") {
                                     app.open_selected_settings_row();
-                                } else if app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "model") {
-                                    let row_id = app.active_menu.as_ref().and_then(|menu| menu.state.selected_row(&menu.projection)).map(|row| row.row.id.clone());
-                                    match row_id.as_deref() {
-                                        Some("model.current") => app.open_model_selector(),
-                                        Some("model.grade") => app.open_model_grade_selector(),
-                                        Some("model.provider") => app.open_model_provider_selector(),
-                                        Some("model.policy") => app.open_model_policy_selector(),
-                                        _ => {
-                                        let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_primary_action(&menu.projection));
-                                        if let Some(action) = action
-                                            && matches!(app.execute_active_menu_action(action, &command_tx), SlashResult::Quit)
-                                        {
-                                            let _ = command_tx.send(TuiCommand::Quit).await;
-                                        }
-                                        }
-                                    }
-                                } else if app.open_selected_context_row() {
                                 } else if app.open_selected_extension_runtime_row() {
                                 } else {
                                     let action = app

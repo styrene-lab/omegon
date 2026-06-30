@@ -7291,8 +7291,16 @@ fn slash_context_opens_context_menu() {
 fn context_menu_class_row_opens_existing_selector() {
     let mut app = test_app();
     app.open_context_menu();
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
+        .expect("context class selector action");
 
-    assert!(app.open_selected_context_row());
+    assert!(matches!(
+        app.execute_active_menu_action(action, &test_tx()),
+        SlashResult::Handled
+    ));
 
     assert_eq!(app.selector_kind, Some(SelectorKind::ContextClass));
     let selector = app.selector.as_ref().expect("context selector");
