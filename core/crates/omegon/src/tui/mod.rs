@@ -2672,6 +2672,20 @@ impl App {
             if surfaces.activity { "on" } else { "off" },
         ));
         menu.footer = Some("↑/↓ navigate · / filter · Enter run · l lean · f full · Esc close · /ui status for text readout".into());
+        menu.actions = vec![
+            {
+                let mut action = MenuActionProjection::command("ui.global.lean", "Lean", "/ui lean");
+                action.key = Some("l".into());
+                action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                action
+            },
+            {
+                let mut action = MenuActionProjection::command("ui.global.full", "Full", "/ui full");
+                action.key = Some("f".into());
+                action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                action
+            },
+        ];
         let surface_row = |id: &str, label: &str, enabled: bool, command: &str| MenuRowProjection {
             id: format!("ui.surface.{id}"),
             label: label.into(),
@@ -2680,7 +2694,7 @@ impl App {
             kind: MenuRowKind::Action,
             badges: vec![MenuBadgeProjection { label: if enabled { "on".into() } else { "off".into() }, tone: if enabled { MenuBadgeTone::Success } else { MenuBadgeTone::Neutral } }],
             metadata: vec![command.into()],
-            primary_action: Some(MenuActionProjection::command(format!("ui.surface.{id}.toggle"), "Toggle", command)),
+            primary_action: Some({ let mut action = MenuActionProjection::command(format!("ui.surface.{id}.toggle"), "Toggle", command); action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
             actions: vec![],
             safety: None,
             availability: None,
@@ -2702,8 +2716,8 @@ impl App {
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: if surfaces.preset_name() == "lean" { "active".into() } else { "preset".into() }, tone: if surfaces.preset_name() == "lean" { MenuBadgeTone::Success } else { MenuBadgeTone::Info } }],
                             metadata: vec!["/ui lean".into()],
-                            primary_action: Some(MenuActionProjection::command("ui.preset.lean.primary", "Lean", "/ui lean")),
-                            actions: vec![{ let mut action = MenuActionProjection::command("ui.preset.lean.action", "Lean", "/ui lean"); action.key = Some("l".into()); action }],
+                            primary_action: Some({ let mut action = MenuActionProjection::command("ui.preset.lean.primary", "Lean", "/ui lean"); action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
+                            actions: vec![{ let mut action = MenuActionProjection::command("ui.preset.lean.action", "Lean", "/ui lean"); action.key = Some("l".into()); action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }],
                             safety: None,
                             availability: None,
                         },
@@ -2715,8 +2729,8 @@ impl App {
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: if surfaces.preset_name() == "full" { "active".into() } else { "preset".into() }, tone: if surfaces.preset_name() == "full" { MenuBadgeTone::Success } else { MenuBadgeTone::Info } }],
                             metadata: vec!["/ui full".into()],
-                            primary_action: Some(MenuActionProjection::command("ui.preset.full.primary", "Full", "/ui full")),
-                            actions: vec![{ let mut action = MenuActionProjection::command("ui.preset.full.action", "Full", "/ui full"); action.key = Some("f".into()); action }],
+                            primary_action: Some({ let mut action = MenuActionProjection::command("ui.preset.full.primary", "Full", "/ui full"); action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
+                            actions: vec![{ let mut action = MenuActionProjection::command("ui.preset.full.action", "Full", "/ui full"); action.key = Some("f".into()); action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }],
                             safety: None,
                             availability: None,
                         },
@@ -3395,6 +3409,16 @@ impl App {
         ));
     }
 
+    fn rebuild_active_menu(&mut self, menu_id: &str) -> bool {
+        let projection = match menu_id {
+            "ui" => self.ui_menu_projection(),
+            _ => return false,
+        };
+        self.active_menu = Some(ActiveMenu::new(projection));
+        self.pending_menu_confirmation = None;
+        true
+    }
+
     fn execute_active_menu_action(
         &mut self,
         action: crate::surfaces::menu::MenuActionProjection,
@@ -3424,7 +3448,16 @@ impl App {
             }
             crate::surfaces::menu::MenuActionDisposition::RunCommand => {
                 if let Some(command) = action.command {
-                    self.execute_active_menu_command(command, tx)
+                    let menu_id = self.active_menu.as_ref().map(|menu| menu.projection.id.clone());
+                    let result = self.execute_active_menu_command(command, tx);
+                    if matches!(result, SlashResult::Handled)
+                        && matches!(action.close_policy, crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu)
+                        && let Some(menu_id) = menu_id.as_deref()
+                        && self.rebuild_active_menu(menu_id)
+                    {
+                        return SlashResult::Handled;
+                    }
+                    result
                 } else {
                     SlashResult::Handled
                 }

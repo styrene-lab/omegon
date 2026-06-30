@@ -2939,6 +2939,59 @@ fn slash_ui_status_preserves_text_readout() {
 }
 
 #[test]
+fn ui_menu_toggle_refreshes_menu_state() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.apply_ui_preset(UiSurfaces::lean());
+    app.open_ui_menu();
+    {
+        let menu = app.active_menu.as_mut().expect("ui menu");
+        assert!(menu.state.select_row_by_id(&menu.projection, "ui.surface.dashboard"));
+    }
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
+        .expect("dashboard toggle");
+
+    assert!(matches!(app.execute_active_menu_action(action, &tx), SlashResult::Handled));
+
+    let menu = app.active_menu.as_ref().expect("ui menu refreshed");
+    let row = menu
+        .state
+        .visible_rows(&menu.projection)
+        .into_iter()
+        .find(|row| row.row.id == "ui.surface.dashboard")
+        .expect("dashboard row");
+    assert_eq!(row.row.value.as_deref(), Some("on"));
+}
+
+#[test]
+fn ui_menu_preset_hotkey_refreshes_menu_state() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.apply_ui_preset(UiSurfaces::lean());
+    app.open_ui_menu();
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_action_for_key(&menu.projection, 'f'))
+        .expect("global full action");
+
+    assert_eq!(action.command.as_deref(), Some("/ui full"));
+    assert!(matches!(app.execute_active_menu_action(action, &tx), SlashResult::Handled));
+
+    let menu = app.active_menu.as_ref().expect("ui menu refreshed");
+    let row = menu
+        .state
+        .visible_rows(&menu.projection)
+        .into_iter()
+        .find(|row| row.row.id == "ui.preset.full")
+        .expect("full row");
+    assert_eq!(row.row.value.as_deref(), Some("active"));
+}
+
+#[test]
 fn ui_menu_toggle_rows_use_shared_commands() {
     let mut app = test_app();
     app.open_ui_menu();

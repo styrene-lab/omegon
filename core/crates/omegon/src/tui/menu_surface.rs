@@ -335,14 +335,23 @@ impl MenuState {
         key: char,
     ) -> Option<&'a crate::surfaces::menu::MenuActionProjection> {
         let key = key.to_ascii_lowercase().to_string();
-        self.selected_row(projection).and_then(|row| {
-            row.row.actions.iter().find(|action| {
-                action
-                    .key
-                    .as_deref()
-                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(&key))
+        self.selected_row(projection)
+            .and_then(|row| {
+                row.row.actions.iter().find(|action| {
+                    action
+                        .key
+                        .as_deref()
+                        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(&key))
+                })
             })
-        })
+            .or_else(|| {
+                projection.actions.iter().find(|action| {
+                    action
+                        .key
+                        .as_deref()
+                        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(&key))
+                })
+            })
     }
 
     pub(crate) fn select_row_by_id(&mut self, projection: &MenuProjection, row_id: &str) -> bool {

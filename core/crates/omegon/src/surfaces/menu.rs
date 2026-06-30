@@ -79,6 +79,14 @@ pub enum MenuActionDisposition {
     FocusRow,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuActionClosePolicy {
+    Default,
+    KeepOpen,
+    RefreshMenu,
+    CloseMenu,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuActionProjection {
     pub id: String,
@@ -87,6 +95,7 @@ pub struct MenuActionProjection {
     pub command: Option<String>,
     pub target_row_id: Option<String>,
     pub disposition: MenuActionDisposition,
+    pub close_policy: MenuActionClosePolicy,
     pub requires_confirmation: bool,
 }
 
@@ -352,6 +361,7 @@ impl MenuActionProjection {
             command: Some(command.into()),
             target_row_id: None,
             disposition: MenuActionDisposition::RunCommand,
+            close_policy: MenuActionClosePolicy::Default,
             requires_confirmation: false,
         }
     }
@@ -364,6 +374,7 @@ impl MenuActionProjection {
             command: None,
             target_row_id: Some(target_row_id.into()),
             disposition: MenuActionDisposition::FocusRow,
+            close_policy: MenuActionClosePolicy::KeepOpen,
             requires_confirmation: false,
         }
     }

@@ -44,6 +44,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
 
 ### Added
+- Added refreshable menu action close policies and menu-level action hotkeys so `/ui` toggles and lean/full shortcuts update the active menu in place.
 - Added typed menu action dispositions for run-command versus focus-row actions, and routed TUI menu dispatch through the typed action substrate while retaining compatibility helpers.
 - Added second-activation confirmation gating for high-impact menu actions such as profile apply, extension update, and runtime substrate refresh.
 - Routed bare `/sessions` to a shared saved-session menu with resume actions while preserving `/sessions list` and `/sessions all` as text readouts.
