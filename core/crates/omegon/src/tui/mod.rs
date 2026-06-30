@@ -966,7 +966,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             }
         }
         "status" if args.is_empty() => Some(CanonicalSlashCommand::StatusView),
-        "runtime" if args == "restart" || args == "hot-restart" => {
+        "runtime" if matches!(args, "restart" | "hot-restart" | "refresh" | "reload") => {
             Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
         }
         "workspace" if args.is_empty() => Some(CanonicalSlashCommand::WorkspaceStatusView),
@@ -1205,7 +1205,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             }
         }
         "extension" | "ext" => {
-            if args.is_empty() || args == "list" {
+            if matches!(args, "" | "list" | "view") {
                 Some(CanonicalSlashCommand::ExtensionView)
             } else if let Some(name) = args.strip_prefix("get ") {
                 let name = name.trim();
@@ -3040,6 +3040,97 @@ impl App {
 
     fn open_memory_menu(&mut self) {
         self.open_menu_projection(self.memory_menu_projection());
+    }
+
+    fn extension_runtime_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
+        };
+        let mut menu = MenuProjection::new("extension-runtime", "Extensions & Runtime");
+        menu.summary = Some("Extension inventory and runtime substrate controls. Argument-taking extension operations remain direct slash commands.".into());
+        menu.footer = Some("↑/↓ navigate · / filter · Enter run · Esc close".into());
+        menu.tabs = vec![MenuTabProjection {
+            id: "overview".into(),
+            label: "Overview".into(),
+            groups: vec![
+                MenuGroupProjection {
+                    id: "extension.inventory".into(),
+                    label: "Extensions".into(),
+                    description: Some("Read extension inventory or search/install through explicit slash commands.".into()),
+                    rows: vec![
+                        MenuRowProjection {
+                            id: "extension.view".into(),
+                            label: "Extension inventory".into(),
+                            description: "Show installed extension inventory as a text readout.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
+                            metadata: vec!["/extension view".into(), "/extension list".into()],
+                            primary_action: Some(MenuActionProjection::command("extension.view.primary", "View", "/extension view")),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "extension.search".into(),
+                            label: "Search extensions".into(),
+                            description: "Search extension armory/catalog. Add a query with /extension search <query>.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
+                            metadata: vec!["/extension search".into(), "/extension search <query>".into()],
+                            primary_action: Some(MenuActionProjection::command("extension.search.primary", "Search", "/extension search")),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "extension.update".into(),
+                            label: "Update extensions".into(),
+                            description: "Run the extension update flow for installed extensions.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Warning }],
+                            metadata: vec!["/extension update".into()],
+                            primary_action: Some(MenuActionProjection::command("extension.update.primary", "Update", "/extension update")),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                    ],
+                },
+                MenuGroupProjection {
+                    id: "runtime.substrate".into(),
+                    label: "Runtime substrate".into(),
+                    description: Some("Refresh live skill/extension/runtime candidate inventory.".into()),
+                    rows: vec![
+                        MenuRowProjection {
+                            id: "runtime.refresh".into(),
+                            label: "Refresh runtime substrate".into(),
+                            description: "Reload skill augments and inspect extension/runtime candidates; unavailable while a model turn is active.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection { label: "runtime".into(), tone: MenuBadgeTone::Warning }],
+                            metadata: vec!["/runtime refresh".into(), "/extension refresh".into()],
+                            primary_action: Some(MenuActionProjection::command("runtime.refresh.primary", "Refresh", "/runtime refresh")),
+                            actions: vec![{
+                                let mut action = MenuActionProjection::command("runtime.refresh.action", "Refresh", "/runtime refresh");
+                                action.key = Some("r".into());
+                                action
+                            }],
+                            safety: None,
+                            availability: None,
+                        },
+                    ],
+                },
+            ],
+        }];
+        menu
+    }
+
+    fn open_extension_runtime_menu(&mut self) {
+        self.open_menu_projection(self.extension_runtime_menu_projection());
     }
 
     fn profile_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
@@ -7577,7 +7668,10 @@ Scroll transcript:
             }
 
             "extension" | "ext" => {
-                if let Some(command) = canonical_slash_command("extension", args) {
+                if args.trim().is_empty() {
+                    self.open_extension_runtime_menu();
+                    SlashResult::Handled
+                } else if let Some(command) = canonical_slash_command("extension", args) {
                     if matches!(command, CanonicalSlashCommand::RuntimeSubstrateRefresh) {
                         self.handle_slash_command("/runtime refresh", tx)
                     } else if let Some(request) =
@@ -7590,13 +7684,13 @@ Scroll transcript:
                         SlashResult::Handled
                     } else {
                         SlashResult::Display(
-                            "Usage: /extension [list|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|refresh|reload|restart|search [query]]"
+                            "Usage: /extension [list|view|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|refresh|reload|restart|search [query]]"
                                 .into(),
                         )
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /extension [list|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|refresh|reload|restart|search [query]]"
+                        "Usage: /extension [list|view|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|refresh|reload|restart|search [query]]"
                             .into(),
                     )
                 }
@@ -7669,7 +7763,10 @@ Scroll transcript:
             }
 
             "runtime" => {
-                if let Some(CanonicalSlashCommand::RuntimeSubstrateRefresh) =
+                if args.trim().is_empty() {
+                    self.open_extension_runtime_menu();
+                    SlashResult::Handled
+                } else if let Some(CanonicalSlashCommand::RuntimeSubstrateRefresh) =
                     canonical_slash_command("runtime", args)
                 {
                     if self.agent_active {
@@ -7680,7 +7777,7 @@ Scroll transcript:
                         SlashResult::Display(self.refresh_runtime_substrate())
                     }
                 } else {
-                    SlashResult::Display("Usage: /runtime restart".into())
+                    SlashResult::Display("Usage: /runtime [refresh|reload|restart|hot-restart]".into())
                 }
             }
 

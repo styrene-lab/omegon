@@ -4805,6 +4805,82 @@ fn slash_skills_reload_displays_current_session_reload() {
 }
 
 #[test]
+fn slash_extension_opens_runtime_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/extension", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "extension-runtime"));
+}
+
+#[test]
+fn slash_ext_opens_runtime_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/ext", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "extension-runtime"));
+}
+
+#[test]
+fn slash_runtime_opens_runtime_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/runtime", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "extension-runtime"));
+}
+
+#[test]
+fn extension_view_preserves_text_readout() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/extension view", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.active_menu.is_none());
+    match rx.try_recv().expect("extension view command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::ExtensionView,
+            ..
+        } => {}
+        other => panic!("expected extension view request, got {other:?}"),
+    }
+}
+
+#[test]
+fn runtime_refresh_aliases_canonicalize() {
+    for args in ["refresh", "reload", "restart", "hot-restart"] {
+        assert_eq!(
+            crate::tui::canonical_slash_command("runtime", args),
+            Some(crate::tui::CanonicalSlashCommand::RuntimeSubstrateRefresh),
+            "runtime {args}"
+        );
+    }
+}
+
+#[test]
+fn extension_refresh_aliases_execute_runtime_refresh() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    for command in ["/extension refresh", "/extension reload", "/extension restart"] {
+        let result = app.handle_slash_command(command, &tx);
+        let SlashResult::Display(message) = result else {
+            panic!("{command} should display refresh output");
+        };
+        assert!(message.contains("Runtime substrate refresh"), "{command}: {message}");
+    }
+}
+
+#[test]
 fn slash_runtime_substrate_refresh_displays_guarded_preview() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
