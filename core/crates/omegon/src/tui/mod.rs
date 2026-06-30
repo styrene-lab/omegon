@@ -821,8 +821,8 @@ pub enum CanonicalSlashCommand {
 pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<CanonicalSlashCommand> {
     let args = args.trim();
     match cmd {
-        "model" if args.is_empty() || args == "route" => Some(CanonicalSlashCommand::ModelView),
-        "model" if args == "list" || args == "providers" => Some(CanonicalSlashCommand::ModelList),
+        "model" if args.is_empty() || args == "route" => None,
+        "model" if matches!(args, "list" | "providers" | "status" | "view") => Some(CanonicalSlashCommand::ModelList),
         "model" if args == "unpin" => Some(CanonicalSlashCommand::ModelUnpin),
         "model" if let Some(policy) = args.strip_prefix("policy ") => {
             let policy = policy.trim();
@@ -855,9 +855,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "think" => {
             crate::settings::ThinkingLevel::parse(args).map(CanonicalSlashCommand::SetThinking)
         }
-        "profile" if args.is_empty() || args == "status" || args == "view" => {
-            Some(CanonicalSlashCommand::ProfileView)
-        }
+        "profile" if args.is_empty() => None,
+        "profile" if args == "status" || args == "view" => Some(CanonicalSlashCommand::ProfileView),
         "profile" if args == "export" => Some(CanonicalSlashCommand::ProfileExport),
         "profile"
             if matches!(
@@ -1041,7 +1040,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "notes" if args.is_empty() => Some(CanonicalSlashCommand::NotesView),
         "notes" if args == "clear" => Some(CanonicalSlashCommand::NotesClear),
         "checkin" if args.is_empty() => Some(CanonicalSlashCommand::CheckinView),
-        "context" if args.is_empty() => Some(CanonicalSlashCommand::ContextStatus),
+        "context" if args.is_empty() => None,
         "context" => {
             let (sub, rest) = args.split_once(' ').unwrap_or((args, ""));
             match sub {
@@ -1075,7 +1074,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             }
         }
         "new" if args.is_empty() => Some(CanonicalSlashCommand::ContextClear),
-        "sessions" if matches!(args, "" | "list" | "all") => Some(CanonicalSlashCommand::ListSessions),
+        "sessions" if args.is_empty() => None,
+        "sessions" if matches!(args, "list" | "all") => Some(CanonicalSlashCommand::ListSessions),
         "resume" if !args.is_empty() => {
             Some(CanonicalSlashCommand::ResumeSession(args.to_string()))
         }
@@ -13103,8 +13103,9 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn profile_commands_parse() {
+        assert_eq!(canonical_slash_command("profile", ""), None);
         assert_eq!(
-            canonical_slash_command("profile", ""),
+            canonical_slash_command("profile", "status"),
             Some(CanonicalSlashCommand::ProfileView)
         );
         assert_eq!(

@@ -297,7 +297,7 @@ pub(crate) fn builtin_command_definitions() -> Vec<omegon_traits::CommandDefinit
 /// these via `CommandMenuProjection`; keep new metadata on this registry-shaped
 /// spec instead of adding renderer-local autocomplete tables.
 pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
-    BuiltinCommandSpec::cli_acp_read_only("help", "show available commands", &[]),
+    BuiltinCommandSpec::cli_acp_read_only("help", "open command inventory", &[]),
     BuiltinCommandSpec::read_only(
         "copy",
         "copy selected segment, latest answer, or session",
@@ -315,7 +315,7 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     ),
     BuiltinCommandSpec::cli_acp_state_changing(
         "model",
-        "view or switch model",
+        "open model routing menu or switch model",
         &["list", "grade", "unpin"],
     ),
     BuiltinCommandSpec::cli_acp_state_changing(
@@ -325,7 +325,7 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     ),
     BuiltinCommandSpec::cli_state_changing(
         "profile",
-        "view, capture, apply, or edit runtime profile defaults",
+        "open profile menu or manage runtime profile defaults",
         &[
             "view",
             "capture",
@@ -348,14 +348,14 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::cli_queue_mutation("new", "quick alias for /context reset", &[]),
     BuiltinCommandSpec::state_changing(
         "ui",
-        "switch UI presets or toggle individual surfaces",
+        "open UI controls menu or toggle surfaces",
         &[
             "status", "lean", "full", "show", "hide", "toggle", "detail", "density",
         ],
     ),
     BuiltinCommandSpec::cli_queue_mutation(
         "context",
-        "context lifecycle and budget management",
+        "open context menu or manage context lifecycle",
         &[
             "status", "compact", "reset", "clear", "request", "standard", "extended", "massive",
         ],
@@ -367,9 +367,9 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
             "status", "list", "set", "approve", "execute", "advance", "skip", "clear",
         ],
     ),
-    BuiltinCommandSpec::cli_read_only("sessions", "list saved sessions", &[]),
-    BuiltinCommandSpec::cli_read_only("memory", "memory stats", &[]),
-    BuiltinCommandSpec::state_changing("settings", "open settings page", &[]),
+    BuiltinCommandSpec::cli_read_only("sessions", "open saved sessions menu", &["list", "all", "resume"]),
+    BuiltinCommandSpec::cli_read_only("memory", "open memory overview menu", &["status", "overview"]),
+    BuiltinCommandSpec::state_changing("settings", "open settings menu", &[]),
     BuiltinCommandSpec::cli_acp_state_changing(
         "skills",
         "manage bundled, user, project-local, and armory skills",

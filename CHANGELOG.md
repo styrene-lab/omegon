@@ -52,6 +52,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added second-activation confirmation gating for high-impact menu actions such as profile apply, extension update, and runtime substrate refresh.
 - Routed bare `/sessions` to a shared saved-session menu with resume actions while preserving `/sessions list` and `/sessions all` as text readouts.
 - Added human-friendly Docker-style session display names, kept canonical timestamp ids as the filename/order key, and made friendly-name resume lookup require uniqueness.
+- Cleaned up slash-command metadata drift so menu-default commands advertise menus and bare `/context`, `/model route`, `/profile`, and `/sessions` no longer canonicalize as legacy text readouts.
 - Hardened extension/runtime menu mutations so runtime refresh and extension update require confirmation and refresh the shared menu after execution.
 - Routed bare `/memory` to a read-only shared memory overview menu while preserving `/memory status` and `/memory overview` as text readouts.
 - Routed bare `/extension`, `/ext`, and `/runtime` to a shared Extensions & Runtime menu, preserved extension inventory readouts, and made runtime refresh/reload aliases canonical.

@@ -7378,9 +7378,10 @@ fn context_menu_compact_action_uses_shared_command_path() {
 }
 
 #[test]
-fn slash_context_without_subcommand_maps_to_status() {
+fn slash_context_without_subcommand_is_menu_only_not_canonical_status() {
+    assert_eq!(canonical_slash_command("context", ""), None);
     assert_eq!(
-        canonical_slash_command("context", ""),
+        canonical_slash_command("context", "status"),
         Some(CanonicalSlashCommand::ContextStatus)
     );
 }
@@ -8017,7 +8018,7 @@ fn model_menu_action_keys_select_intent_rows() {
 fn model_grade_slash_command_parses_and_rejects_local_grade() {
     assert_eq!(
         crate::tui::canonical_slash_command("model", "route"),
-        Some(crate::tui::CanonicalSlashCommand::ModelView)
+        None
     );
     assert_eq!(
         crate::tui::canonical_slash_command("model", "providers"),
