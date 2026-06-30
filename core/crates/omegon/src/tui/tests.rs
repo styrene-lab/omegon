@@ -7283,6 +7283,21 @@ fn menu_login_secret_input_closes_menu_without_output_panel() {
 }
 
 #[test]
+fn canonical_secrets_set_rejects_plaintext_values() {
+    assert_eq!(
+        canonical_slash_command("secrets", "set API_TOKEN super-secret-value"),
+        None
+    );
+    assert_eq!(
+        canonical_slash_command("secrets", "set API_TOKEN env:API_TOKEN"),
+        Some(CanonicalSlashCommand::SecretsSet {
+            name: "API_TOKEN".into(),
+            value: "env:API_TOKEN".into(),
+        })
+    );
+}
+
+#[test]
 fn secrets_set_direct_value_uses_hidden_input_instead_of_control_request() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();

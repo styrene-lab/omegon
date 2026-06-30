@@ -1316,9 +1316,13 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             match parts.first().copied().unwrap_or("") {
                 "" | "list" | "status" => Some(CanonicalSlashCommand::SecretsView),
                 "set" if parts.len() >= 3 && !parts[1].trim().is_empty() => {
-                    Some(CanonicalSlashCommand::SecretsSet {
+                    let value = parts[2].trim();
+                    (value.starts_with("env:")
+                        || value.starts_with("cmd:")
+                        || value.starts_with("vault:"))
+                    .then(|| CanonicalSlashCommand::SecretsSet {
                         name: parts[1].trim().to_string(),
-                        value: parts[2].trim().to_string(),
+                        value: value.to_string(),
                     })
                 }
                 "get" if parts.len() >= 2 && !parts[1].trim().is_empty() => Some(
