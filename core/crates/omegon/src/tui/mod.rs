@@ -3229,7 +3229,7 @@ impl App {
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Warning }],
                             metadata: vec!["/extension update".into()],
-                            primary_action: Some({ let mut action = MenuActionProjection::command("extension.update.primary", "Update", "/extension update"); action.requires_confirmation = true; action }),
+                            primary_action: Some({ let mut action = MenuActionProjection::command("extension.update.primary", "Update", "/extension update"); action.requires_confirmation = true; action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
                             actions: vec![],
                             safety: None,
                             availability: None,
@@ -3249,11 +3249,12 @@ impl App {
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: "runtime".into(), tone: MenuBadgeTone::Warning }],
                             metadata: vec!["/runtime refresh".into(), "/extension refresh".into()],
-                            primary_action: Some({ let mut action = MenuActionProjection::command("runtime.refresh.primary", "Refresh", "/runtime refresh"); action.requires_confirmation = true; action }),
+                            primary_action: Some({ let mut action = MenuActionProjection::command("runtime.refresh.primary", "Refresh", "/runtime refresh"); action.requires_confirmation = true; action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
                             actions: vec![{
                                 let mut action = MenuActionProjection::command("runtime.refresh.action", "Refresh", "/runtime refresh");
                                 action.key = Some("r".into());
                                 action.requires_confirmation = true;
+                                action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
                                 action
                             }],
                             safety: None,
@@ -3530,6 +3531,7 @@ impl App {
     fn rebuild_active_menu(&mut self, menu_id: &str) -> bool {
         let projection = match menu_id {
             "ui" => self.ui_menu_projection(),
+            "extension-runtime" => self.extension_runtime_menu_projection(),
             _ => return false,
         };
         self.active_menu = Some(ActiveMenu::new(projection));
