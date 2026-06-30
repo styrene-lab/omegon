@@ -7266,6 +7266,67 @@ fn settings_menu_sandbox_row_disables_persisted_setting() {
 }
 
 
+
+#[test]
+fn slash_auth_opens_provider_auth_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/auth", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("auth menu");
+    assert_eq!(menu.projection.id, "auth");
+    let rows = menu.state.visible_rows(&menu.projection);
+    assert!(rows.iter().any(|row| row.row.id == "auth.provider.anthropic"));
+    assert!(rows.iter().any(|row| row.row.metadata.iter().any(|m| m == "/login anthropic")));
+}
+
+#[test]
+fn bare_login_opens_provider_auth_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/login", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "auth"));
+}
+
+#[test]
+fn model_and_auth_provider_rows_share_login_metadata() {
+    let mut app = test_app();
+    app.open_auth_menu();
+    let auth_row = app
+        .active_menu
+        .as_ref()
+        .unwrap()
+        .state
+        .visible_rows(&app.active_menu.as_ref().unwrap().projection)
+        .into_iter()
+        .find(|row| row.row.id == "auth.provider.openai")
+        .expect("auth openai row")
+        .row
+        .clone();
+
+    app.open_model_menu();
+    app.active_menu.as_mut().unwrap().state.active_tab = "providers".into();
+    let model_row = app
+        .active_menu
+        .as_ref()
+        .unwrap()
+        .state
+        .visible_rows(&app.active_menu.as_ref().unwrap().projection)
+        .into_iter()
+        .find(|row| row.row.id == "provider.openai")
+        .expect("model openai row")
+        .row
+        .clone();
+
+    assert_eq!(auth_row.metadata[0], model_row.metadata[0]);
+    assert_eq!(auth_row.description, model_row.description);
+}
+
 #[test]
 fn slash_model_opens_model_menu() {
     let mut app = test_app();

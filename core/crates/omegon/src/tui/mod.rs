@@ -2830,6 +2830,97 @@ impl App {
     }
 
 
+
+    fn provider_status_rows(&self, row_prefix: &str) -> Vec<crate::surfaces::menu::MenuRowProjection> {
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuRowKind, MenuRowProjection,
+        };
+        let provider_ids = [
+            "anthropic",
+            "openai-codex",
+            "openai",
+            "openrouter",
+            "google",
+            "ollama",
+        ];
+        provider_ids
+            .into_iter()
+            .map(|provider| {
+                let status = crate::surfaces::menu::ProviderStatusProjection::from_credential_probe(provider);
+                let login_command = status
+                    .remediation_command
+                    .clone()
+                    .unwrap_or_else(|| format!("/login {provider}"));
+                let logout_command = format!("/logout {provider}");
+                MenuRowProjection {
+                    id: format!("{row_prefix}.{provider}"),
+                    label: status.display_name.clone(),
+                    description: status.credential_state.clone(),
+                    value: Some(status.provider_id.clone()),
+                    kind: MenuRowKind::Object,
+                    badges: vec![MenuBadgeProjection {
+                        label: status.badge_label().into(),
+                        tone: status.badge_tone(),
+                    }],
+                    metadata: vec![
+                        login_command.clone(),
+                        logout_command.clone(),
+                        format!("provider: {}", status.provider_id),
+                    ],
+                    primary_action: Some(MenuActionProjection::command(
+                        format!("{row_prefix}.{provider}.login"),
+                        "Login",
+                        login_command.clone(),
+                    )),
+                    actions: vec![
+                        {
+                            let mut action = MenuActionProjection::command(
+                                format!("{row_prefix}.{provider}.login.action"),
+                                "Login",
+                                login_command,
+                            );
+                            action.key = Some("l".into());
+                            action
+                        },
+                        {
+                            let mut action = MenuActionProjection::command(
+                                format!("{row_prefix}.{provider}.logout.action"),
+                                "Logout",
+                                logout_command,
+                            );
+                            action.key = Some("o".into());
+                            action
+                        },
+                    ],
+                    safety: None,
+                    availability: None,
+                }
+            })
+            .collect()
+    }
+
+    fn open_auth_menu(&mut self) {
+        use crate::surfaces::menu::{MenuGroupProjection, MenuProjection, MenuTabProjection};
+        let mut menu = MenuProjection::new("auth", "Authentication");
+        menu.summary = Some(
+            "Provider authentication status. Enter logs into the selected provider; l login; o logout; / filters providers.".into(),
+        );
+        menu.footer = Some(
+            "↑/↓ navigate · Enter login · l login · o logout · / filter · Esc close · /auth status for text readout".into(),
+        );
+        menu.tabs = vec![MenuTabProjection {
+            id: "providers".into(),
+            label: "Providers".into(),
+            groups: vec![MenuGroupProjection {
+                id: "auth.providers".into(),
+                label: "Provider credentials".into(),
+                description: Some("Credential probe status and login/logout actions.".into()),
+                rows: self.provider_status_rows("auth.provider"),
+            }],
+        }];
+        self.open_menu_projection(menu);
+    }
+
     fn open_model_menu(&mut self) {
         use crate::surfaces::menu::{
             MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
@@ -2861,52 +2952,7 @@ impl App {
             "Current model: {selected_model}. Enter opens the provider/model selector; use row actions to route intent."
         ));
         menu.footer = Some("↑/↓ navigate · Enter choose model · g grade · p provider · o policy · u unpin · / filter · Esc close".into());
-        let provider_ids = [
-            "anthropic",
-            "openai-codex",
-            "openai",
-            "openrouter",
-            "google",
-            "ollama",
-        ];
-        let provider_rows = provider_ids
-            .into_iter()
-            .map(|provider| {
-                let status = crate::surfaces::menu::ProviderStatusProjection::from_credential_probe(provider);
-                let login_command = status
-                    .remediation_command
-                    .clone()
-                    .unwrap_or_else(|| format!("/auth login {provider}"));
-                MenuRowProjection {
-                    id: format!("provider.{provider}"),
-                    label: status.display_name.clone(),
-                    description: status.credential_state.clone(),
-                    value: Some(status.provider_id.clone()),
-                    kind: MenuRowKind::Object,
-                    badges: vec![MenuBadgeProjection {
-                        label: status.badge_label().into(),
-                        tone: status.badge_tone(),
-                    }],
-                    metadata: vec![login_command.clone(), format!("provider: {}", status.provider_id)],
-                    primary_action: Some(MenuActionProjection::command(
-                        format!("provider.{provider}.login"),
-                        "Login",
-                        login_command.clone(),
-                    )),
-                    actions: vec![{
-                        let mut action = MenuActionProjection::command(
-                            format!("provider.{provider}.login.action"),
-                            "Login",
-                            login_command,
-                        );
-                        action.key = Some("l".into());
-                        action
-                    }],
-                    safety: None,
-                    availability: None,
-                }
-            })
-            .collect();
+        let provider_rows = self.provider_status_rows("provider");
         menu.tabs = vec![MenuTabProjection {
             id: "routing".into(),
             label: "Routing".into(),
@@ -7502,6 +7548,10 @@ Scroll transcript:
             )),
 
             "auth" => match canonical_slash_command("auth", args) {
+                Some(CanonicalSlashCommand::AuthStatus) if args.trim().is_empty() => {
+                    self.open_auth_menu();
+                    SlashResult::Handled
+                }
                 Some(CanonicalSlashCommand::AuthStatus) => {
                     let _ = tx.try_send(TuiCommand::AuthStatus { respond_to: None });
                     SlashResult::Handled
@@ -7998,7 +8048,7 @@ Scroll transcript:
             // /login [provider] — open selector or login directly
             "login" => {
                 if args.is_empty() {
-                    self.open_login_selector();
+                    self.open_auth_menu();
                     SlashResult::Handled
                 } else if crate::auth::provider_by_id(args).is_some_and(|p| {
                     matches!(p.auth_method, crate::auth::AuthMethod::ApiKey)
