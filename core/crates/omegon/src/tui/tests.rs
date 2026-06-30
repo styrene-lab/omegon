@@ -2904,16 +2904,51 @@ fn empty_editor_hint_mentions_ui_surfaces_when_dashboard_hidden() {
 }
 
 #[test]
-fn ui_status_lists_toggle_controls() {
+fn slash_ui_opens_shared_menu() {
     let mut app = test_app();
     let tx = test_tx();
     let result = app.handle_slash_command("/ui", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("ui menu");
+    assert_eq!(menu.projection.id, "ui");
+    assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id == "ui.surface.dashboard"));
+}
+
+#[test]
+fn slash_ui_surfaces_opens_shared_menu() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/ui surfaces", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "ui"));
+}
+
+#[test]
+fn slash_ui_status_preserves_text_readout() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/ui status", &tx);
     let SlashResult::Display(text) = result else {
         panic!("expected display");
     };
     assert!(text.contains("dashboard"), "{text}");
     assert!(text.contains("instruments"), "{text}");
     assert!(text.contains("footer"), "{text}");
+}
+
+#[test]
+fn ui_menu_toggle_rows_use_shared_commands() {
+    let mut app = test_app();
+    app.open_ui_menu();
+    let menu = app.active_menu.as_mut().expect("ui menu");
+    assert!(menu.state.select_row_by_id(&menu.projection, "ui.surface.dashboard"));
+
+    assert_eq!(
+        menu.state.selected_command(&menu.projection).as_deref(),
+        Some("/ui toggle dashboard")
+    );
 }
 
 #[test]

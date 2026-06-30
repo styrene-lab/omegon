@@ -2655,6 +2655,102 @@ impl App {
         self.open_menu_projection(self.settings_menu_projection());
     }
 
+    fn ui_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
+        use crate::surfaces::menu::{MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection, MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection};
+        let surfaces = self.ui_surfaces;
+        let mut menu = MenuProjection::new("ui", "UI");
+        menu.summary = Some(format!(
+            "TUI surface controls. Preset: {}; dashboard: {}; instruments: {}; footer: {}; activity: {}.",
+            surfaces.preset_name(),
+            if surfaces.dashboard { "on" } else { "off" },
+            if surfaces.instruments { "on" } else { "off" },
+            if surfaces.footer { "on" } else { "off" },
+            if surfaces.activity { "on" } else { "off" },
+        ));
+        menu.footer = Some("↑/↓ navigate · / filter · Enter run · l lean · f full · Esc close · /ui status for text readout".into());
+        let surface_row = |id: &str, label: &str, enabled: bool, command: &str| MenuRowProjection {
+            id: format!("ui.surface.{id}"),
+            label: label.into(),
+            description: format!("Toggle the {label} surface."),
+            value: Some(if enabled { "on" } else { "off" }.into()),
+            kind: MenuRowKind::Action,
+            badges: vec![MenuBadgeProjection { label: if enabled { "on".into() } else { "off".into() }, tone: if enabled { MenuBadgeTone::Success } else { MenuBadgeTone::Neutral } }],
+            metadata: vec![command.into()],
+            primary_action: Some(MenuActionProjection::command(format!("ui.surface.{id}.toggle"), "Toggle", command)),
+            actions: vec![],
+            safety: None,
+            availability: None,
+        };
+        menu.tabs = vec![MenuTabProjection {
+            id: "ui".into(),
+            label: "UI".into(),
+            groups: vec![
+                MenuGroupProjection {
+                    id: "ui.presets".into(),
+                    label: "Presets".into(),
+                    description: Some("Switch coarse TUI surface presets.".into()),
+                    rows: vec![
+                        MenuRowProjection {
+                            id: "ui.preset.lean".into(),
+                            label: "Lean preset".into(),
+                            description: "Conversation + activity, no dashboard chrome.".into(),
+                            value: Some(if surfaces.preset_name() == "lean" { "active" } else { "" }.into()),
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection { label: if surfaces.preset_name() == "lean" { "active".into() } else { "preset".into() }, tone: if surfaces.preset_name() == "lean" { MenuBadgeTone::Success } else { MenuBadgeTone::Info } }],
+                            metadata: vec!["/ui lean".into()],
+                            primary_action: Some(MenuActionProjection::command("ui.preset.lean.primary", "Lean", "/ui lean")),
+                            actions: vec![{ let mut action = MenuActionProjection::command("ui.preset.lean.action", "Lean", "/ui lean"); action.key = Some("l".into()); action }],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "ui.preset.full".into(),
+                            label: "Full preset".into(),
+                            description: "Dashboard, instruments, footer, and activity.".into(),
+                            value: Some(if surfaces.preset_name() == "full" { "active" } else { "" }.into()),
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection { label: if surfaces.preset_name() == "full" { "active".into() } else { "preset".into() }, tone: if surfaces.preset_name() == "full" { MenuBadgeTone::Success } else { MenuBadgeTone::Info } }],
+                            metadata: vec!["/ui full".into()],
+                            primary_action: Some(MenuActionProjection::command("ui.preset.full.primary", "Full", "/ui full")),
+                            actions: vec![{ let mut action = MenuActionProjection::command("ui.preset.full.action", "Full", "/ui full"); action.key = Some("f".into()); action }],
+                            safety: None,
+                            availability: None,
+                        },
+                    ],
+                },
+                MenuGroupProjection {
+                    id: "ui.surfaces".into(),
+                    label: "Surfaces".into(),
+                    description: Some("Toggle individual TUI surfaces.".into()),
+                    rows: vec![
+                        surface_row("dashboard", "Dashboard", surfaces.dashboard, "/ui toggle dashboard"),
+                        surface_row("instruments", "Instruments", surfaces.instruments, "/ui toggle instruments"),
+                        surface_row("footer", "Footer", surfaces.footer, "/ui toggle footer"),
+                        surface_row("activity", "Activity", surfaces.activity, "/ui toggle activity"),
+                        MenuRowProjection {
+                            id: "ui.detail".into(),
+                            label: "Tool detail".into(),
+                            description: "Open/toggle tool output density controls.".into(),
+                            value: Some(self.settings().tool_detail.as_str().into()),
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection { label: "density".into(), tone: MenuBadgeTone::Neutral }],
+                            metadata: vec!["/ui detail".into(), "/detail".into()],
+                            primary_action: Some(MenuActionProjection::command("ui.detail.primary", "Detail", "/ui detail")),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                    ],
+                },
+            ],
+        }];
+        menu
+    }
+
+    fn open_ui_menu(&mut self) {
+        self.open_menu_projection(self.ui_menu_projection());
+    }
+
     fn context_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
         use crate::surfaces::menu::{MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection, MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection};
         let settings = self.settings();
@@ -8080,7 +8176,10 @@ Scroll transcript:
                 if matches!(args, "detail" | "density") {
                     return self.handle_slash_command("/detail", tx);
                 }
-                if args.is_empty() || args == "status" {
+                if args.is_empty() || args == "surfaces" {
+                    self.open_ui_menu();
+                    SlashResult::Handled
+                } else if args == "status" {
                     SlashResult::Display(self.ui_status_text())
                 } else if args == "lean" {
                     let outcome = self.handle_ui_preset_action(SetUiPresetAction {
