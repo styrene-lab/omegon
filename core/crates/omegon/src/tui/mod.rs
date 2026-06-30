@@ -2929,7 +2929,7 @@ impl App {
                         kind: MenuRowKind::Action,
                         badges: vec![MenuBadgeProjection { label: "explicit".into(), tone: MenuBadgeTone::Danger }],
                         metadata: vec!["/secrets delete NAME".into(), "no direct menu delete".into()],
-                        primary_action: None,
+                        primary_action: Some(MenuActionProjection::prime_editor("secrets.delete.prepare", "Prepare", "/secrets delete ", "Type the exact secret name to delete")),
                         actions: vec![],
                         safety: None,
                         availability: None,

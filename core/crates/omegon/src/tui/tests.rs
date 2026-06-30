@@ -5118,7 +5118,20 @@ fn secrets_menu_template_rows_prime_editor_without_control_request() {
             assert!(menu.state.select_row_by_id(&menu.projection, row_id));
         }
 
-        assert!(app.open_selected_secrets_row(), "{row_id} should be handled");
+        let action = app
+            .active_menu
+            .as_ref()
+            .and_then(|menu| {
+                menu
+                    .state
+                    .selected_row(&menu.projection)
+                    .and_then(|row| row.row.primary_action.clone())
+            })
+            .expect("prime editor action");
+        assert!(matches!(
+            app.execute_active_menu_action(action, &tx),
+            SlashResult::Handled
+        ));
         assert_eq!(app.editor.render_text(), expected);
         assert!(app.active_menu.is_none(), "{row_id} should close the menu");
         assert!(rx.try_recv().is_err(), "{row_id} should not queue control work");
