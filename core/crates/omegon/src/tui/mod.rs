@@ -5360,7 +5360,7 @@ warning: {warning}"));
                     SlashResult::Display(response) => {
                         self.history.push(action.raw.clone());
                         self.exit_history_recall();
-                        self.show_slash_response(&action.raw, &response);
+                        self.open_command_panel(CommandPanel::from_slash(&action.raw, &response));
                         UiActionOutcome::accepted_message(response)
                     }
                     SlashResult::Handled => {
@@ -10225,7 +10225,7 @@ Scroll transcript:
                 } else if message.starts_with('↯') || is_one_shot_context_notification(&message) {
                     self.show_toast(&message, ratatui_toaster::ToastType::Info);
                 } else if let Some(command) = slash_command_for_palette_notification(&message) {
-                    self.show_slash_response(command, &message);
+                    self.open_command_panel(CommandPanel::from_slash(command, &message));
                 } else {
                     self.conversation.push_system(&message);
                 }
