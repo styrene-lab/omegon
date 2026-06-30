@@ -2913,6 +2913,135 @@ impl App {
         self.open_menu_projection(self.sessions_menu_projection());
     }
 
+    fn memory_status_text(&self) -> String {
+        format!(
+            "Memory Overview\n\nFacts\n  Total:            {}\n  Injected:         {}\n  Working set:      {}\n  Estimate:         ~{} tokens\n\nHarness\n  Project facts:    {}\n  Persona facts:    {}\n  Episodes:         {}\n  Active persona:   {}",
+            self.footer_data.total_facts,
+            self.footer_data.injected_facts,
+            self.footer_data.working_memory,
+            self.footer_data.memory_tokens_est,
+            self.footer_data.harness.memory.project_facts,
+            self.footer_data.harness.memory.persona_facts,
+            self.footer_data.harness.memory.episodes,
+            self.footer_data
+                .harness
+                .memory
+                .active_persona_mind
+                .clone()
+                .unwrap_or_else(|| "none".to_string()),
+        )
+    }
+
+    fn memory_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
+        };
+        let memory = &self.footer_data.harness.memory;
+        let mut menu = MenuProjection::new("memory", "Memory");
+        menu.summary = Some(format!(
+            "Memory context overview. Injected: {} facts · working set: {} facts · estimate: ~{} tokens.",
+            self.footer_data.injected_facts,
+            self.footer_data.working_memory,
+            self.footer_data.memory_tokens_est
+        ));
+        menu.footer = Some("↑/↓ navigate · / filter · Enter status readout · Esc close".into());
+        menu.tabs = vec![MenuTabProjection {
+            id: "overview".into(),
+            label: "Overview".into(),
+            groups: vec![MenuGroupProjection {
+                id: "memory.facts".into(),
+                label: "Memory facts".into(),
+                description: Some("Read-only memory counters currently injected into this session.".into()),
+                rows: vec![
+                    MenuRowProjection {
+                        id: "memory.status".into(),
+                        label: "Memory overview".into(),
+                        description: "Show the full text memory overview.".into(),
+                        value: Some(format!("{} total facts", self.footer_data.total_facts)),
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
+                        metadata: vec!["/memory status".into(), "/memory overview".into()],
+                        primary_action: Some(MenuActionProjection::command("memory.status.primary", "Status", "/memory status")),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "memory.injected".into(),
+                        label: "Injected facts".into(),
+                        description: "Facts currently injected into the prompt context.".into(),
+                        value: Some(self.footer_data.injected_facts.to_string()),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "context".into(), tone: MenuBadgeTone::Info }],
+                        metadata: vec![format!("estimate: ~{} tokens", self.footer_data.memory_tokens_est)],
+                        primary_action: None,
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "memory.working_set".into(),
+                        label: "Working-set facts".into(),
+                        description: "Facts pinned or selected for active working memory.".into(),
+                        value: Some(self.footer_data.working_memory.to_string()),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "working".into(), tone: MenuBadgeTone::Info }],
+                        metadata: vec![],
+                        primary_action: None,
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "memory.project".into(),
+                        label: "Project facts".into(),
+                        description: "Durable project memory facts available to this session.".into(),
+                        value: Some(memory.project_facts.to_string()),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "project".into(), tone: MenuBadgeTone::Neutral }],
+                        metadata: vec![],
+                        primary_action: None,
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "memory.persona".into(),
+                        label: "Persona facts".into(),
+                        description: "Persona mind facts available to this session.".into(),
+                        value: Some(memory.persona_facts.to_string()),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "persona".into(), tone: MenuBadgeTone::Neutral }],
+                        metadata: vec![format!("active persona: {}", memory.active_persona_mind.clone().unwrap_or_else(|| "none".into()))],
+                        primary_action: None,
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "memory.episodes".into(),
+                        label: "Episodes".into(),
+                        description: "Session episode narratives available for recall.".into(),
+                        value: Some(memory.episodes.to_string()),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection { label: "episodes".into(), tone: MenuBadgeTone::Neutral }],
+                        metadata: vec![],
+                        primary_action: None,
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                ],
+            }],
+        }];
+        menu
+    }
+
+    fn open_memory_menu(&mut self) {
+        self.open_menu_projection(self.memory_menu_projection());
+    }
+
     fn profile_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
         use crate::surfaces::menu::{MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection, MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection};
         let settings = self.settings();
@@ -7951,22 +8080,19 @@ Scroll transcript:
                 }
             }
 
-            "memory" => SlashResult::Display(format!(
-                "Memory Overview\n\nFacts\n  Total:            {}\n  Injected:         {}\n  Working set:      {}\n  Estimate:         ~{} tokens\n\nHarness\n  Project facts:    {}\n  Persona facts:    {}\n  Episodes:         {}\n  Active persona:   {}",
-                self.footer_data.total_facts,
-                self.footer_data.injected_facts,
-                self.footer_data.working_memory,
-                self.footer_data.memory_tokens_est,
-                self.footer_data.harness.memory.project_facts,
-                self.footer_data.harness.memory.persona_facts,
-                self.footer_data.harness.memory.episodes,
-                self.footer_data
-                    .harness
-                    .memory
-                    .active_persona_mind
-                    .clone()
-                    .unwrap_or_else(|| "none".to_string()),
-            )),
+            "memory" => {
+                let sub = args.trim();
+                if sub.is_empty() {
+                    self.open_memory_menu();
+                    SlashResult::Handled
+                } else if matches!(sub, "status" | "overview") {
+                    SlashResult::Display(self.memory_status_text())
+                } else {
+                    SlashResult::Display(format!(
+                        "Unknown memory command: {sub}\n\nUsage: /memory [status|overview]"
+                    ))
+                }
+            }
 
             "auth" => match canonical_slash_command("auth", args) {
                 Some(CanonicalSlashCommand::AuthStatus) if args.trim().is_empty() => {

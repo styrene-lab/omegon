@@ -3809,7 +3809,7 @@ fn slash_logout_without_provider_shows_provider_usage() {
 }
 
 #[test]
-fn slash_memory_returns_stats() {
+fn slash_memory_opens_shared_menu() {
     let mut app = test_app();
     app.footer_data.total_facts = 18;
     app.footer_data.injected_facts = 3;
@@ -3820,29 +3820,41 @@ fn slash_memory_returns_stats() {
     app.footer_data.harness.memory.episodes = 5;
     app.footer_data.harness.memory.active_persona_mind = Some("Engineer".into());
     let tx = test_tx();
+
     let result = app.handle_slash_command("/memory", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("memory menu");
+    assert_eq!(menu.projection.id, "memory");
+    assert!(menu.projection.summary.as_deref().is_some_and(|summary| summary.contains("Injected: 3")));
+    let rows = menu.state.visible_rows(&menu.projection);
+    assert!(rows.iter().any(|row| row.row.id == "memory.injected" && row.row.value.as_deref() == Some("3")));
+    assert!(rows.iter().any(|row| row.row.id == "memory.working_set" && row.row.label == "Working-set facts"));
+    assert!(rows.iter().any(|row| row.row.id == "memory.persona" && row.row.metadata.iter().any(|m| m.contains("Engineer"))));
+}
+
+#[test]
+fn slash_memory_status_preserves_text_readout() {
+    let mut app = test_app();
+    app.footer_data.total_facts = 18;
+    app.footer_data.injected_facts = 3;
+    app.footer_data.working_memory = 4;
+    app.footer_data.memory_tokens_est = 1200;
+    app.footer_data.harness.memory.project_facts = 11;
+    app.footer_data.harness.memory.persona_facts = 2;
+    app.footer_data.harness.memory.episodes = 5;
+    app.footer_data.harness.memory.active_persona_mind = Some("Engineer".into());
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/memory status", &tx);
+
     if let SlashResult::Display(text) = result {
-        assert!(
-            text.contains("Memory Overview"),
-            "should show titled memory view: {text}"
-        );
-        assert!(
-            text.contains("Injected"),
-            "should show injected facts: {text}"
-        );
-        assert!(
-            text.contains("Project facts"),
-            "should show harness memory breakdown: {text}"
-        );
-        assert!(
-            text.contains("Engineer"),
-            "should show active persona memory: {text}"
-        );
+        assert!(text.contains("Memory Overview"), "should show titled memory view: {text}");
+        assert!(text.contains("Injected"), "should show injected facts: {text}");
+        assert!(text.contains("Project facts"), "should show harness memory breakdown: {text}");
+        assert!(text.contains("Engineer"), "should show active persona memory: {text}");
     } else {
-        panic!(
-            "expected Display result, got {:?}",
-            std::mem::discriminant(&result)
-        );
+        panic!("expected Display result, got {:?}", std::mem::discriminant(&result));
     }
 }
 
