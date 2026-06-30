@@ -549,6 +549,8 @@ struct App {
     selector_kind: Option<SelectorKind>,
     /// Active structured menu popup for command inventories such as /skills.
     active_menu: Option<ActiveMenu>,
+    /// Pending confirmation action id for menu actions that require a second activation.
+    pending_menu_confirmation: Option<String>,
     /// Active @-file picker popup.
     at_picker: Option<selector::Selector>,
     /// Last tool name from ToolStart — used to track memory mutations.
@@ -2199,6 +2201,7 @@ impl App {
             selector: None,
             selector_kind: None,
             active_menu: None,
+            pending_menu_confirmation: None,
             at_picker: None,
             last_tool_name: None,
             completed_tool_name: None,
@@ -2647,6 +2650,7 @@ impl App {
 
     fn open_menu_projection(&mut self, projection: crate::surfaces::menu::MenuProjection) {
         self.active_menu = Some(ActiveMenu::new(projection));
+        self.pending_menu_confirmation = None;
         self.command_panel = None;
         self.command_prompt = None;
     }
@@ -3093,7 +3097,7 @@ impl App {
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Warning }],
                             metadata: vec!["/extension update".into()],
-                            primary_action: Some(MenuActionProjection::command("extension.update.primary", "Update", "/extension update")),
+                            primary_action: Some({ let mut action = MenuActionProjection::command("extension.update.primary", "Update", "/extension update"); action.requires_confirmation = true; action }),
                             actions: vec![],
                             safety: None,
                             availability: None,
@@ -3113,10 +3117,11 @@ impl App {
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: "runtime".into(), tone: MenuBadgeTone::Warning }],
                             metadata: vec!["/runtime refresh".into(), "/extension refresh".into()],
-                            primary_action: Some(MenuActionProjection::command("runtime.refresh.primary", "Refresh", "/runtime refresh")),
+                            primary_action: Some({ let mut action = MenuActionProjection::command("runtime.refresh.primary", "Refresh", "/runtime refresh"); action.requires_confirmation = true; action }),
                             actions: vec![{
                                 let mut action = MenuActionProjection::command("runtime.refresh.action", "Refresh", "/runtime refresh");
                                 action.key = Some("r".into());
+                                action.requires_confirmation = true;
                                 action
                             }],
                             safety: None,
@@ -3189,7 +3194,7 @@ impl App {
                         kind: MenuRowKind::Action,
                         badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Warning }],
                         metadata: vec!["/profile apply".into()],
-                        primary_action: Some(MenuActionProjection::command("profile.apply.primary", "Apply", "/profile apply")),
+                        primary_action: Some({ let mut action = MenuActionProjection::command("profile.apply.primary", "Apply", "/profile apply"); action.requires_confirmation = true; action }),
                         actions: vec![],
                         safety: None,
                         availability: None,
@@ -3395,6 +3400,19 @@ impl App {
         action: crate::surfaces::menu::MenuActionProjection,
         tx: &mpsc::Sender<TuiCommand>,
     ) -> SlashResult {
+        if action.requires_confirmation {
+            if self.pending_menu_confirmation.as_deref() != Some(action.id.as_str()) {
+                self.pending_menu_confirmation = Some(action.id.clone());
+                self.show_command_toast(CommandToast::new(
+                    format!("Press Enter/shortcut again to confirm {}", action.label),
+                    CommandSeverity::Warning,
+                ));
+                return SlashResult::Handled;
+            }
+            self.pending_menu_confirmation = None;
+        } else {
+            self.pending_menu_confirmation = None;
+        }
         match action.disposition {
             crate::surfaces::menu::MenuActionDisposition::FocusRow => {
                 if let Some(target_row_id) = action.target_row_id
@@ -11424,6 +11442,7 @@ pub async fn run_tui(
                                     .is_some_and(|menu| menu.state.exit_search());
                                 if !handled {
                                     app.active_menu = None;
+                                    app.pending_menu_confirmation = None;
                                 }
                             }
                             KeyCode::Char('c') | KeyCode::Char('C')

@@ -7361,6 +7361,43 @@ fn slash_profile_opens_profile_menu() {
 }
 
 #[test]
+fn menu_action_confirmation_requires_second_activation() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_profile_menu();
+    {
+        let menu = app.active_menu.as_mut().expect("profile menu");
+        assert!(menu.state.select_row_by_id(&menu.projection, "profile.apply"));
+    }
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
+        .expect("apply action");
+
+    assert!(matches!(app.execute_active_menu_action(action.clone(), &tx), SlashResult::Handled));
+    assert_eq!(app.pending_menu_confirmation.as_deref(), Some("profile.apply.primary"));
+    assert!(app.active_menu.is_some(), "first activation should keep menu open");
+
+    assert!(matches!(app.execute_active_menu_action(action, &tx), SlashResult::Handled));
+    assert_eq!(app.pending_menu_confirmation, None);
+    assert!(app.active_menu.is_none(), "confirmed command should use normal handled close policy");
+}
+
+#[test]
+fn non_confirming_menu_action_clears_pending_confirmation() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_profile_menu();
+    app.pending_menu_confirmation = Some("profile.apply.primary".into());
+    let action = crate::surfaces::menu::MenuActionProjection::command("profile.view.test", "View", "/profile view");
+
+    assert!(matches!(app.execute_active_menu_action(action, &tx), SlashResult::Handled));
+
+    assert_eq!(app.pending_menu_confirmation, None);
+}
+
+#[test]
 fn profile_menu_save_and_apply_hotkeys_use_shared_rows() {
     let mut app = test_app();
     app.open_profile_menu();
