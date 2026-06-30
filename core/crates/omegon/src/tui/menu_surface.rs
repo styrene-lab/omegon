@@ -291,10 +291,25 @@ impl MenuState {
         self.visible_rows(projection).get(self.selected_row).cloned()
     }
 
-    pub(crate) fn selected_command(&self, projection: &MenuProjection) -> Option<String> {
+    pub(crate) fn selected_primary_action(
+        &self,
+        projection: &MenuProjection,
+    ) -> Option<crate::surfaces::menu::MenuActionProjection> {
         self.selected_row(projection)
-            .and_then(|row| row.row.primary_action.as_ref())
-            .and_then(|action| action.command.clone())
+            .and_then(|row| row.row.primary_action.clone())
+    }
+
+    pub(crate) fn selected_command(&self, projection: &MenuProjection) -> Option<String> {
+        self.selected_primary_action(projection)
+            .and_then(|action| action.command)
+    }
+
+    pub(crate) fn selected_action_for_key(
+        &self,
+        projection: &MenuProjection,
+        key: char,
+    ) -> Option<crate::surfaces::menu::MenuActionProjection> {
+        self.action_for_key(projection, key).cloned()
     }
 
     pub(crate) fn selected_action_command_for_key(
@@ -302,7 +317,7 @@ impl MenuState {
         projection: &MenuProjection,
         key: char,
     ) -> Option<String> {
-        self.action_for_key(projection, key).and_then(|action| action.command.clone())
+        self.selected_action_for_key(projection, key).and_then(|action| action.command)
     }
 
     pub(crate) fn row_target_for_action_key(
@@ -310,8 +325,8 @@ impl MenuState {
         projection: &MenuProjection,
         key: char,
     ) -> Option<String> {
-        self.action_for_key(projection, key)
-            .and_then(|action| action.target_row_id.clone())
+        self.selected_action_for_key(projection, key)
+            .and_then(|action| action.target_row_id)
     }
 
     fn action_for_key<'a>(
@@ -544,6 +559,21 @@ mod tests {
         state.move_down(&projection);
 
         assert_eq!(state.selected_command(&projection).as_deref(), Some("/skills get python"));
+    }
+
+    #[test]
+    fn selected_action_for_key_returns_full_action() {
+        let projection = projection();
+        let mut state = MenuState::new(&projection);
+        state.move_down(&projection);
+
+        let action = state
+            .selected_action_for_key(&projection, 'I')
+            .expect("keyed action");
+
+        assert_eq!(action.label, "Install");
+        assert_eq!(action.command.as_deref(), Some("/skills install Python"));
+        assert_eq!(action.disposition, crate::surfaces::menu::MenuActionDisposition::RunCommand);
     }
 
     #[test]

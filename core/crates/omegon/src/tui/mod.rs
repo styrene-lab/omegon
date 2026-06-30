@@ -2776,7 +2776,7 @@ impl App {
                         badges: vec![MenuBadgeProjection { label: "policy".into(), tone: MenuBadgeTone::Info }],
                         metadata: vec!["/context <compact|standard|extended|massive>".into()],
                         primary_action: None,
-                        actions: vec![{ let mut action = MenuActionProjection::command("context.class.choose", "Choose", "/context standard"); action.command = None; action.key = Some("p".into()); action.target_row_id = Some("context.class".into()); action }],
+                        actions: vec![{ let mut action = MenuActionProjection::focus_row("context.class.choose", "Choose", "context.class"); action.key = Some("p".into()); action }],
                         safety: None,
                         availability: None,
                     },
@@ -3390,6 +3390,30 @@ impl App {
         ));
     }
 
+    fn execute_active_menu_action(
+        &mut self,
+        action: crate::surfaces::menu::MenuActionProjection,
+        tx: &mpsc::Sender<TuiCommand>,
+    ) -> SlashResult {
+        match action.disposition {
+            crate::surfaces::menu::MenuActionDisposition::FocusRow => {
+                if let Some(target_row_id) = action.target_row_id
+                    && let Some(menu) = self.active_menu.as_mut()
+                {
+                    menu.state.select_row_by_id(&menu.projection, &target_row_id);
+                }
+                SlashResult::Handled
+            }
+            crate::surfaces::menu::MenuActionDisposition::RunCommand => {
+                if let Some(command) = action.command {
+                    self.execute_active_menu_command(command, tx)
+                } else {
+                    SlashResult::Handled
+                }
+            }
+        }
+    }
+
     fn execute_active_menu_command(
         &mut self,
         command: String,
@@ -3569,9 +3593,9 @@ impl App {
                         metadata: vec!["selector".into(), "exact model".into()],
                         primary_action: None,
                         actions: vec![
-                            { let mut action = MenuActionProjection::command("model.current.grade", "Grade row", "/model grade S"); action.key = Some("g".into()); action.target_row_id = Some("model.grade".into()); action },
-                            { let mut action = MenuActionProjection::command("model.current.provider", "Provider row", "/model provider auto"); action.key = Some("p".into()); action.target_row_id = Some("model.provider".into()); action },
-                            { let mut action = MenuActionProjection::command("model.current.policy", "Policy row", "/model policy exact"); action.key = Some("o".into()); action.target_row_id = Some("model.policy".into()); action },
+                            { let mut action = MenuActionProjection::focus_row("model.current.grade", "Grade row", "model.grade"); action.key = Some("g".into()); action },
+                            { let mut action = MenuActionProjection::focus_row("model.current.provider", "Provider row", "model.provider"); action.key = Some("p".into()); action },
+                            { let mut action = MenuActionProjection::focus_row("model.current.policy", "Policy row", "model.policy"); action.key = Some("o".into()); action },
                         ],
                         safety: None,
                         availability: None,
@@ -3585,7 +3609,7 @@ impl App {
                         badges: vec![MenuBadgeProjection { label: "intent".into(), tone: MenuBadgeTone::Info }],
                         metadata: vec!["/model grade <F|D|C|B|A|S>".into()],
                         primary_action: None,
-                        actions: vec![{ let mut action = MenuActionProjection::command("model.grade.action", "Choose grade", "/model grade S"); action.command = None; action.key = Some("g".into()); action.target_row_id = Some("model.grade".into()); action }],
+                        actions: vec![{ let mut action = MenuActionProjection::focus_row("model.grade.action", "Choose grade", "model.grade"); action.key = Some("g".into()); action }],
                         safety: None,
                         availability: None,
                     },
@@ -3598,7 +3622,7 @@ impl App {
                         badges: vec![MenuBadgeProjection { label: "intent".into(), tone: MenuBadgeTone::Info }],
                         metadata: vec!["/model provider <auto|local|upstream|endpoint>".into()],
                         primary_action: None,
-                        actions: vec![{ let mut action = MenuActionProjection::command("model.provider.action", "Choose provider", "/model provider auto"); action.command = None; action.key = Some("p".into()); action.target_row_id = Some("model.provider".into()); action }],
+                        actions: vec![{ let mut action = MenuActionProjection::focus_row("model.provider.action", "Choose provider", "model.provider"); action.key = Some("p".into()); action }],
                         safety: None,
                         availability: None,
                     },
@@ -3611,7 +3635,7 @@ impl App {
                         badges: vec![MenuBadgeProjection { label: "policy".into(), tone: MenuBadgeTone::Neutral }],
                         metadata: vec!["/model policy <exact|minimum|nearest>".into()],
                         primary_action: None,
-                        actions: vec![{ let mut action = MenuActionProjection::command("model.policy.action", "Choose policy", "/model policy exact"); action.command = None; action.key = Some("o".into()); action.target_row_id = Some("model.policy".into()); action }],
+                        actions: vec![{ let mut action = MenuActionProjection::focus_row("model.policy.action", "Choose policy", "model.policy"); action.key = Some("o".into()); action }],
                         safety: None,
                         availability: None,
                     },
@@ -11346,18 +11370,12 @@ pub async fn run_tui(
                                 }) && !key.modifiers.contains(KeyModifiers::CONTROL)
                                     && !key.modifiers.contains(KeyModifiers::ALT) =>
                             {
-                                if let Some(target_row_id) = app.active_menu.as_ref().and_then(|menu| {
-                                    menu.state.row_target_for_action_key(&menu.projection, ch)
-                                }) && let Some(menu) = app.active_menu.as_mut() {
-                                    menu.state.select_row_by_id(&menu.projection, &target_row_id);
-                                    continue;
-                                }
-                                let command = app.active_menu.as_ref().and_then(|menu| {
-                                    menu.state.selected_action_command_for_key(&menu.projection, ch)
+                                let action = app.active_menu.as_ref().and_then(|menu| {
+                                    menu.state.selected_action_for_key(&menu.projection, ch)
                                 });
-                                if let Some(command) = command
+                                if let Some(action) = action
                                     && matches!(
-                                        app.execute_active_menu_command(command, &command_tx),
+                                        app.execute_active_menu_action(action, &command_tx),
                                         SlashResult::Quit
                                     )
                                 {
@@ -11375,9 +11393,9 @@ pub async fn run_tui(
                                         Some("model.provider") => app.open_model_provider_selector(),
                                         Some("model.policy") => app.open_model_policy_selector(),
                                         _ => {
-                                        let command = app.active_menu.as_ref().and_then(|menu| menu.state.selected_command(&menu.projection));
-                                        if let Some(command) = command
-                                            && matches!(app.execute_active_menu_command(command, &command_tx), SlashResult::Quit)
+                                        let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_primary_action(&menu.projection));
+                                        if let Some(action) = action
+                                            && matches!(app.execute_active_menu_action(action, &command_tx), SlashResult::Quit)
                                         {
                                             let _ = command_tx.send(TuiCommand::Quit).await;
                                         }
@@ -11385,13 +11403,13 @@ pub async fn run_tui(
                                     }
                                 } else if app.open_selected_context_row() {
                                 } else {
-                                    let command = app
+                                    let action = app
                                         .active_menu
                                         .as_ref()
-                                        .and_then(|menu| menu.state.selected_command(&menu.projection));
-                                    if let Some(command) = command
+                                        .and_then(|menu| menu.state.selected_primary_action(&menu.projection));
+                                    if let Some(action) = action
                                         && matches!(
-                                            app.execute_active_menu_command(command, &command_tx),
+                                            app.execute_active_menu_action(action, &command_tx),
                                             SlashResult::Quit
                                         )
                                     {

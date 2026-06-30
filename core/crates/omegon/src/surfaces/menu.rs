@@ -73,6 +73,12 @@ pub enum MenuBadgeTone {
     Info,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuActionDisposition {
+    RunCommand,
+    FocusRow,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuActionProjection {
     pub id: String,
@@ -80,6 +86,7 @@ pub struct MenuActionProjection {
     pub key: Option<String>,
     pub command: Option<String>,
     pub target_row_id: Option<String>,
+    pub disposition: MenuActionDisposition,
     pub requires_confirmation: bool,
 }
 
@@ -344,6 +351,19 @@ impl MenuActionProjection {
             key: None,
             command: Some(command.into()),
             target_row_id: None,
+            disposition: MenuActionDisposition::RunCommand,
+            requires_confirmation: false,
+        }
+    }
+
+    pub fn focus_row(id: impl Into<String>, label: impl Into<String>, target_row_id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            key: None,
+            command: None,
+            target_row_id: Some(target_row_id.into()),
+            disposition: MenuActionDisposition::FocusRow,
             requires_confirmation: false,
         }
     }
@@ -385,6 +405,24 @@ mod tests {
         CommandMenuSource, CommandSafetyProjection,
     };
     use crate::surfaces::palette::{PaletteGroupProjection, PaletteRowProjection};
+
+    #[test]
+    fn command_action_defaults_to_run_command_disposition() {
+        let action = MenuActionProjection::command("id", "Run", "/run");
+
+        assert_eq!(action.disposition, MenuActionDisposition::RunCommand);
+        assert_eq!(action.command.as_deref(), Some("/run"));
+        assert_eq!(action.target_row_id, None);
+    }
+
+    #[test]
+    fn focus_row_constructor_sets_focus_disposition() {
+        let action = MenuActionProjection::focus_row("id", "Focus", "target");
+
+        assert_eq!(action.disposition, MenuActionDisposition::FocusRow);
+        assert_eq!(action.command, None);
+        assert_eq!(action.target_row_id.as_deref(), Some("target"));
+    }
 
     #[test]
     fn palette_conversion_preserves_commands_badges_and_metadata() {

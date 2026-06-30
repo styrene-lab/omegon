@@ -44,6 +44,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
 
 ### Added
+- Added typed menu action dispositions for run-command versus focus-row actions, and routed TUI menu dispatch through the typed action substrate while retaining compatibility helpers.
 - Routed bare `/sessions` to a shared saved-session menu with resume actions while preserving `/sessions list` and `/sessions all` as text readouts.
 - Routed bare `/memory` to a read-only shared memory overview menu while preserving `/memory status` and `/memory overview` as text readouts.
 - Routed bare `/extension`, `/ext`, and `/runtime` to a shared Extensions & Runtime menu, preserved extension inventory readouts, and made runtime refresh/reload aliases canonical.
