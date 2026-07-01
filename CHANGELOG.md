@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Fixed
+- Rebuilt and relinked the development install as `0.27.0-rc.5`.
 - Rebuilt and relinked the development install as `0.27.0-rc.4`.
 - Rebuilt and relinked the development install as `0.27.0-rc.3`.
 - Fixed `/model list` in the TUI to open the interactive model selector instead of dumping the available-models text readout into the terminal, and closed parent structured menus when launching selector rows so arrow keys move the selector instead of the underlying menu.
