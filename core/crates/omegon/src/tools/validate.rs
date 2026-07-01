@@ -841,34 +841,95 @@ impl ValidationLevel {
     }
 }
 
-fn validation_plan_summary(
+#[derive(Debug, Clone, serde::Serialize)]
+struct ValidationPlanEntry {
+    id: String,
+    label: String,
+    kind: &'static str,
+    source: &'static str,
+    mode: &'static str,
+    status: &'static str,
+    paths: Vec<String>,
+    path_count: usize,
+    runner_summary: String,
+    replaces: Vec<String>,
+    replaced_by: Option<String>,
+    note: Option<String>,
+}
+
+impl ValidationPlanEntry {
+    fn display_line(&self) -> String {
+        match (
+            self.status,
+            self.replaced_by.as_deref(),
+            self.note.as_deref(),
+        ) {
+            ("replaced", Some(replaced_by), _) => format!(
+                "{}: replaced by {} for {} path(s)",
+                self.id, replaced_by, self.path_count
+            ),
+            ("unavailable", _, Some(note)) => format!(
+                "{}: unavailable; {} for {} path(s)",
+                self.id, note, self.path_count
+            ),
+            _ => format!(
+                "{}: {} {} validator `{}` for {} path(s)",
+                self.id, self.source, self.mode, self.runner_summary, self.path_count
+            ),
+        }
+    }
+}
+
+fn operator_replacing_builtin<'a>(
+    builtin_id: &str,
+    operator_validators: &'a [OperatorValidator],
+) -> Option<&'a OperatorValidator> {
+    operator_validators.iter().find(|validator| {
+        validator.mode == OperatorValidatorMode::Replace
+            && validator.replaces.iter().any(|id| id == builtin_id)
+    })
+}
+
+fn validation_plan_entries(
     paths: &[PathBuf],
     language_plan: &HashMap<ValidatorKind, Vec<PathBuf>>,
     operator_validators: &[OperatorValidator],
     cwd: &Path,
-) -> Vec<String> {
-    let mut lines = Vec::new();
+) -> Vec<ValidationPlanEntry> {
+    let mut entries = Vec::new();
     for kind in EMBEDDED_VALIDATORS {
-        let matched = paths
+        let matched_paths = paths
             .iter()
             .filter(|path| embedded_validator_for_file(path) == Some(*kind))
-            .count();
-        if matched == 0 {
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        if matched_paths.is_empty() {
             continue;
         }
-        if builtin_replaced_by_operator(*kind, operator_validators) {
-            lines.push(format!(
-                "{}: replaced by operator override for {} path(s)",
-                kind.id(),
-                matched
-            ));
-        } else {
-            lines.push(format!(
-                "{}: embedded validator for {} path(s)",
-                kind.id(),
-                matched
-            ));
-        }
+        let replaced_by = operator_replacing_builtin(kind.id(), operator_validators)
+            .map(|validator| validator.id.clone());
+        entries.push(ValidationPlanEntry {
+            id: kind.id().to_string(),
+            label: kind.label().to_string(),
+            kind: "artifact",
+            source: "builtin",
+            mode: if replaced_by.is_some() {
+                "replaced"
+            } else {
+                "supplement"
+            },
+            status: if replaced_by.is_some() {
+                "replaced"
+            } else {
+                "planned"
+            },
+            path_count: matched_paths.len(),
+            paths: matched_paths,
+            runner_summary: kind.runner_summary().to_string(),
+            replaces: Vec::new(),
+            replaced_by,
+            note: None,
+        });
     }
 
     let discovered = discover_validators(cwd);
@@ -880,48 +941,85 @@ fn validation_plan_summary(
         let Some(matched_paths) = language_plan.get(&kind) else {
             continue;
         };
-        if language_replaced_by_operator(kind, operator_validators) {
-            lines.push(format!(
-                "{}: replaced by operator override for {} path(s)",
-                kind.id(),
-                matched_paths.len()
-            ));
+        let paths = matched_paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        let replaced_by = operator_replacing_builtin(kind.id(), operator_validators)
+            .map(|validator| validator.id.clone());
+        let (status, mode, runner_summary, note) = if replaced_by.is_some() {
+            (
+                "replaced",
+                "replaced",
+                "external toolchain adapter".to_string(),
+                None,
+            )
         } else if let Some(config) = discovered.get(&kind) {
-            lines.push(format!(
-                "{}: toolchain adapter `{}` for {} path(s)",
-                kind.id(),
+            (
+                "planned",
+                "supplement",
                 format_command(config.command, &config.args),
-                matched_paths.len()
-            ));
+                None,
+            )
         } else {
-            lines.push(format!(
-                "{}: unavailable; missing {} for {} path(s)",
-                kind.id(),
-                kind.expected_config(),
-                matched_paths.len()
-            ));
-        }
+            (
+                "unavailable",
+                "supplement",
+                "external toolchain adapter".to_string(),
+                Some(format!("missing {}", kind.expected_config())),
+            )
+        };
+        entries.push(ValidationPlanEntry {
+            id: kind.id().to_string(),
+            label: kind.label().to_string(),
+            kind: "project",
+            source: "builtin-toolchain",
+            mode,
+            status,
+            path_count: paths.len(),
+            paths,
+            runner_summary,
+            replaces: Vec::new(),
+            replaced_by,
+            note,
+        });
     }
 
     for validator in operator_validators {
-        let matched = paths
+        let matched_paths = paths
             .iter()
             .filter(|path| validator.matches_path(path))
-            .count();
-        if matched == 0 {
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        if matched_paths.is_empty() {
             continue;
         }
-        lines.push(format!(
-            "{}: operator {} validator for {} path(s)",
-            validator.id,
-            match validator.mode {
+        entries.push(ValidationPlanEntry {
+            id: validator.id.clone(),
+            label: validator
+                .description
+                .as_deref()
+                .unwrap_or(&validator.id)
+                .to_string(),
+            kind: "operator",
+            source: "project",
+            mode: match validator.mode {
                 OperatorValidatorMode::Supplement => "supplement",
-                OperatorValidatorMode::Replace => "replacement",
+                OperatorValidatorMode::Replace => "replace",
             },
-            matched
-        ));
+            status: "planned",
+            path_count: matched_paths.len(),
+            paths: matched_paths,
+            runner_summary: format_dynamic_command(
+                &validator.runner.program,
+                &validator.runner.args,
+            ),
+            replaces: validator.replaces.clone(),
+            replaced_by: None,
+            note: Some(validator.source.display().to_string()),
+        });
     }
-    lines
+    entries
 }
 
 /// Run validation for the supplied paths and return a structured tool result.
@@ -1034,7 +1132,7 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
         run_operator_validators(&operator_validators, &unique_paths, cwd).await;
     validation_results.extend(operator_validation_results.iter().cloned());
     let validation_plan =
-        validation_plan_summary(&unique_paths, &language_plan, &operator_validators, cwd);
+        validation_plan_entries(&unique_paths, &language_plan, &operator_validators, cwd);
 
     if validation_results.is_empty() {
         let mut message =
@@ -1104,7 +1202,7 @@ Supported built-in types: JSON, TOML, YAML, Markdown, Rust, TypeScript, Python."
     if !validation_plan.is_empty() {
         output.push_str("\n\nValidation plan:\n");
         for step in &validation_plan {
-            output.push_str(&format!("  - {step}\n"));
+            output.push_str(&format!("  - {}\n", step.display_line()));
         }
     }
 
@@ -2056,12 +2154,14 @@ mod tests {
         };
         assert!(message.contains("Validation plan:"), "{message}");
         assert!(
-            message.contains("core.json: embedded validator for 1 path(s)"),
+            message.contains(
+                "core.json: builtin supplement validator `embedded serde_json parser` for 1 path(s)"
+            ),
             "{message}"
         );
-        assert_eq!(
-            result.details["validation_plan"][0],
-            "core.json: embedded validator for 1 path(s)"
-        );
+        assert_eq!(result.details["validation_plan"][0]["id"], "core.json");
+        assert_eq!(result.details["validation_plan"][0]["kind"], "artifact");
+        assert_eq!(result.details["validation_plan"][0]["source"], "builtin");
+        assert_eq!(result.details["validation_plan"][0]["path_count"], 1);
     }
 }
