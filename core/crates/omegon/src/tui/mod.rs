@@ -555,6 +555,8 @@ struct App {
     route_selected_model: Option<String>,
     /// Last serving model observed from route-change events.
     route_serving_model: Option<String>,
+    /// Last safe secret readiness snapshot available for the /secrets inventory menu.
+    secret_readiness: Option<crate::capabilities::secrets::SecretReadinessSnapshot>,
     /// Pending confirmation action id for menu actions that require a second activation.
     pending_menu_confirmation: Option<String>,
     /// Active @-file picker popup.
@@ -2210,6 +2212,7 @@ impl App {
             route_state: None,
             route_selected_model: None,
             route_serving_model: None,
+            secret_readiness: None,
             pending_menu_confirmation: None,
             at_picker: None,
             last_tool_name: None,
@@ -2868,19 +2871,7 @@ impl App {
                 id: "secrets.inventory".into(),
                 label: "Secret inventory".into(),
                 description: Some("Declared secret readiness from capability metadata. Values are never resolved while rendering this menu.".into()),
-                rows: vec![MenuRowProjection {
-                    id: "secrets.inventory.empty".into(),
-                    label: "No secret readiness snapshot loaded".into(),
-                    description: "No extension/agent secret inventory is currently available in the TUI; use Actions for safe recipes or /secrets status for configured recipe names.".into(),
-                    value: None,
-                    kind: MenuRowKind::Object,
-                    badges: vec![MenuBadgeProjection { label: "metadata only".into(), tone: MenuBadgeTone::Neutral }],
-                    metadata: vec!["values never displayed".into(), "provider auth lives under /auth".into()],
-                    primary_action: None,
-                    actions: vec![],
-                    safety: None,
-                    availability: None,
-                }],
+                rows: self.secret_readiness_rows(),
             }],
         }, MenuTabProjection {
             id: "actions".into(),
@@ -2959,6 +2950,82 @@ impl App {
             }],
         }];
         menu
+    }
+
+    fn secret_readiness_rows(&self) -> Vec<crate::surfaces::menu::MenuRowProjection> {
+        use crate::capabilities::secrets::SecretReadinessStatus;
+        use crate::surfaces::menu::{MenuBadgeProjection, MenuBadgeTone, MenuRowKind, MenuRowProjection};
+
+        let Some(snapshot) = self.secret_readiness.as_ref() else {
+            return vec![MenuRowProjection {
+                id: "secrets.inventory.unavailable".into(),
+                label: "No secret readiness snapshot loaded".into(),
+                description: "No extension/agent secret inventory is currently available in the TUI; use Actions for safe recipes or /secrets status for configured recipe names.".into(),
+                value: None,
+                kind: MenuRowKind::Object,
+                badges: vec![MenuBadgeProjection { label: "metadata only".into(), tone: MenuBadgeTone::Neutral }],
+                metadata: vec!["values never displayed".into(), "provider auth lives under /auth".into()],
+                primary_action: None,
+                actions: vec![],
+                safety: None,
+                availability: None,
+            }];
+        };
+
+        if snapshot.secrets.is_empty() {
+            return vec![MenuRowProjection {
+                id: "secrets.inventory.empty".into(),
+                label: "No declared secret requirements discovered".into(),
+                description: "Capability metadata did not declare extension or agent secret requirements for this session.".into(),
+                value: None,
+                kind: MenuRowKind::Object,
+                badges: vec![MenuBadgeProjection { label: "empty".into(), tone: MenuBadgeTone::Neutral }],
+                metadata: vec!["values never displayed".into(), "provider auth lives under /auth".into()],
+                primary_action: None,
+                actions: vec![],
+                safety: None,
+                availability: None,
+            }];
+        }
+
+        snapshot.secrets.iter().map(|secret| {
+            let (status_label, status_tone) = match secret.status {
+                SecretReadinessStatus::Warmed => ("warmed", MenuBadgeTone::Success),
+                SecretReadinessStatus::Configured => ("configured", MenuBadgeTone::Info),
+                SecretReadinessStatus::Deferred => ("deferred", MenuBadgeTone::Warning),
+                SecretReadinessStatus::Missing => ("missing", MenuBadgeTone::Danger),
+            };
+            let mut badges = vec![MenuBadgeProjection { label: status_label.into(), tone: status_tone }];
+            if secret.required {
+                badges.push(MenuBadgeProjection { label: "required".into(), tone: MenuBadgeTone::Danger });
+            }
+            if secret.optional {
+                badges.push(MenuBadgeProjection { label: "optional".into(), tone: MenuBadgeTone::Neutral });
+            }
+            let mut metadata = vec!["value redacted".into()];
+            if let Some(kind) = secret.recipe_kind.as_deref() {
+                metadata.push(format!("recipe: {kind}"));
+            }
+            if secret.warmed {
+                metadata.push("session: warmed".into());
+            }
+            for consumer in &secret.consumers {
+                metadata.push(format!("consumer: {:?}:{}", consumer.kind, consumer.id));
+            }
+            MenuRowProjection {
+                id: format!("secrets.inventory.{}", secret.name),
+                label: secret.name.clone(),
+                description: "Secret readiness metadata only; value is never resolved or displayed.".into(),
+                value: Some(status_label.into()),
+                kind: MenuRowKind::Object,
+                badges,
+                metadata,
+                primary_action: None,
+                actions: vec![],
+                safety: None,
+                availability: None,
+            }
+        }).collect()
     }
 
     fn open_secrets_menu(&mut self) {
@@ -10382,6 +10449,8 @@ pub struct TuiConfig {
     pub runtime_generation: u64,
     /// Startup/runtime substrate inventory for restart diagnostics.
     pub runtime_inventory: crate::setup::RuntimeSubstrateInventory,
+    /// Metadata-only secret readiness snapshot for the /secrets inventory menu.
+    pub secret_readiness: Option<crate::capabilities::secrets::SecretReadinessSnapshot>,
     /// Skill activation/resolution events emitted while startup augments loaded.
     pub startup_skill_activation_events: Vec<omegon_traits::SkillActivationEvent>,
     /// Shared handles for live dashboard updates during the session.
@@ -11044,6 +11113,7 @@ pub async fn run_tui(
     let mut app = App::new(settings.clone());
     app.mouse_capture_enabled = true;
     app.keyboard_enhancement = has_keyboard_enhancement;
+    app.secret_readiness = config.secret_readiness.clone();
     app.show_startup_notice();
     // Populate extension widgets and receivers from config
     for widget in config.extension_widgets {

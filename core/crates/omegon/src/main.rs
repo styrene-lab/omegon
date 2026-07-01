@@ -4215,6 +4215,55 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let runtime_generation = 1;
     let extension_widgets = std::mem::take(&mut agent.extension_widgets);
     let widget_receivers = std::mem::take(&mut agent.widget_receivers);
+fn build_tui_secret_readiness_snapshot(
+    agent: &setup::AgentSetup,
+) -> Option<crate::capabilities::secrets::SecretReadinessSnapshot> {
+    let home = crate::paths::omegon_home().ok()?;
+    let armory_home = home.join("armory");
+    let project_armory = agent.cwd.join("../omegon-armory");
+    let armory_root =
+        if !armory_home.join("profiles").exists() && project_armory.join("profiles").exists() {
+            project_armory.as_path()
+        } else {
+            armory_home.as_path()
+        };
+    let roots = crate::capabilities::inventory::CapabilityInventoryRoots {
+        extensions_dir: &home.join("extensions"),
+        armory_root,
+        catalog_dir: &home.join("catalog"),
+    };
+    let secret_inputs = crate::capabilities::secrets::SecretReadinessInputs {
+        session_diagnostics: agent
+            .secrets
+            .session_diagnostics()
+            .into_iter()
+            .map(|diag| crate::capabilities::secrets::SecretSessionDiagnostic {
+                name: diag.name,
+                warmed: diag.warmed,
+            })
+            .collect(),
+        recipe_descriptors: agent
+            .secrets
+            .list_recipe_descriptors()
+            .into_iter()
+            .map(|descriptor| crate::capabilities::secrets::SecretRecipeDescriptorSummary {
+                name: descriptor.name,
+                kind: descriptor.kind,
+            })
+            .collect(),
+    };
+    crate::capabilities::inventory::build_capability_inventory_snapshot_with_secrets(
+        roots,
+        secret_inputs,
+    )
+    .map(|snapshot| snapshot.secret_readiness)
+    .map_err(|error| {
+        tracing::warn!(?error, "failed to build TUI secret readiness snapshot");
+        error
+    })
+    .ok()
+}
+
     let voice_notification_receivers = std::mem::take(&mut agent.voice_notification_receivers);
     let voice_polling_handles = std::mem::take(&mut agent.voice_polling_handles);
     // Show splash only on first launch; skip on subsequent runs unless
@@ -4228,6 +4277,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         bus_commands,
         runtime_generation,
         runtime_inventory,
+        secret_readiness: build_tui_secret_readiness_snapshot(&agent),
         startup_skill_activation_events,
         dashboard_handles: agent.dashboard_handles.clone(),
         initial_prompt,
