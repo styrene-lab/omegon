@@ -50,6 +50,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 - Documented the validator capability UX plan, including `/validate` Overview/Active/Available/Overrides/Runs/Settings tabs, Armory/community validator trust lifecycle, explain output, backend DTOs, and phased implementation plan.
+- Added a self-contained `core.skill-manifest` domain validator for `skills/**/SKILL.md`, covering YAML/TOML frontmatter parsing, required `name`/`description`, and optional skill metadata field shapes.
 - Added a self-contained `core.openapi-contract` domain validator for `*.openapi.yaml`/`*.openapi.yml` specs, covering required metadata, paths, operation responses/ids, path parameters, and local `$ref` resolution.
 - Added a self-contained `core.model-registry` domain validator for `data/model-registry.json` that checks required model fields, duplicate provider/model ids, and default/grade references.
 - Structured `validate` plan details as DTO-style entries with validator id, kind, source, mode, status, paths, runner summary, and replacement metadata so UIs no longer need to parse prose.

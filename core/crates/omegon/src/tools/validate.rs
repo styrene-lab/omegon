@@ -246,6 +246,7 @@ const EMBEDDED_VALIDATORS: &[EmbeddedValidatorKind] = &[
 enum DomainValidatorKind {
     ModelRegistry,
     OpenApiContract,
+    SkillManifest,
 }
 
 impl DomainValidatorKind {
@@ -253,6 +254,7 @@ impl DomainValidatorKind {
         match self {
             Self::ModelRegistry => "core.model-registry",
             Self::OpenApiContract => "core.openapi-contract",
+            Self::SkillManifest => "core.skill-manifest",
         }
     }
 
@@ -260,6 +262,7 @@ impl DomainValidatorKind {
         match self {
             Self::ModelRegistry => "Model registry",
             Self::OpenApiContract => "OpenAPI contract",
+            Self::SkillManifest => "Skill manifest",
         }
     }
 
@@ -267,6 +270,7 @@ impl DomainValidatorKind {
         match self {
             Self::ModelRegistry => vec!["data/model-registry.json"],
             Self::OpenApiContract => vec!["**/*.openapi.yaml", "**/*.openapi.yml"],
+            Self::SkillManifest => vec!["skills/**/SKILL.md"],
         }
     }
 
@@ -274,6 +278,7 @@ impl DomainValidatorKind {
         match self {
             Self::ModelRegistry => "embedded model registry contract validator",
             Self::OpenApiContract => "embedded OpenAPI contract validator",
+            Self::SkillManifest => "embedded skill frontmatter validator",
         }
     }
 }
@@ -281,6 +286,7 @@ impl DomainValidatorKind {
 const DOMAIN_VALIDATORS: &[DomainValidatorKind] = &[
     DomainValidatorKind::ModelRegistry,
     DomainValidatorKind::OpenApiContract,
+    DomainValidatorKind::SkillManifest,
 ];
 
 #[derive(Debug, Clone)]
@@ -829,6 +835,8 @@ fn domain_validator_for_file(path: &Path, cwd: &Path) -> Option<DomainValidatorK
         Some(DomainValidatorKind::ModelRegistry)
     } else if is_openapi_contract_path(path) {
         Some(DomainValidatorKind::OpenApiContract)
+    } else if is_skill_manifest_path(path, cwd) {
+        Some(DomainValidatorKind::SkillManifest)
     } else {
         None
     }
@@ -863,6 +871,98 @@ fn validate_domain_content(
     match kind {
         DomainValidatorKind::ModelRegistry => validate_model_registry_content(path, content),
         DomainValidatorKind::OpenApiContract => validate_openapi_contract_content(path, content),
+        DomainValidatorKind::SkillManifest => validate_skill_manifest_content(path, content),
+    }
+}
+
+fn is_skill_manifest_path(path: &Path, cwd: &Path) -> bool {
+    let relative = path.strip_prefix(cwd).unwrap_or(path);
+    let normalized = relative.to_string_lossy().replace('\\', "/");
+    normalized.starts_with("skills/") && normalized.ends_with("/SKILL.md")
+}
+
+fn validate_skill_manifest_content(path: &Path, content: &str) -> std::result::Result<(), String> {
+    let Some((format, frontmatter)) = split_skill_frontmatter(content) else {
+        return Err(format!(
+            "{}: missing YAML (`---`) or TOML (`+++`) frontmatter",
+            path.display()
+        ));
+    };
+    let value = match format {
+        SkillFrontmatterFormat::Yaml => serde_yaml::from_str::<serde_json::Value>(frontmatter)
+            .map_err(|error| format!("{}: invalid YAML frontmatter: {error}", path.display()))?,
+        SkillFrontmatterFormat::Toml => {
+            let toml_value = toml::from_str::<toml::Value>(frontmatter).map_err(|error| {
+                format!("{}: invalid TOML frontmatter: {error}", path.display())
+            })?;
+            serde_json::to_value(toml_value).map_err(|error| {
+                format!(
+                    "{}: could not normalize TOML frontmatter: {error}",
+                    path.display()
+                )
+            })?
+        }
+    };
+    let mut errors = Vec::new();
+    for field in ["name", "description"] {
+        match value.get(field).and_then(serde_json::Value::as_str) {
+            Some(text) if !text.trim().is_empty() => {}
+            _ => errors.push(format!(
+                "{}: missing or empty string field `{field}`",
+                path.display()
+            )),
+        }
+    }
+    for field in ["tags", "aliases", "triggers", "profile", "project_signals"] {
+        if let Some(item) = value.get(field)
+            && !item
+                .as_array()
+                .is_some_and(|items| items.iter().all(|item| item.as_str().is_some()))
+        {
+            errors.push(format!(
+                "{}: `{field}` must be an array of strings when present",
+                path.display()
+            ));
+        }
+    }
+    for field in [
+        "activation",
+        "posture",
+        "version",
+        "output_path",
+        "output_format",
+    ] {
+        if let Some(item) = value.get(field)
+            && !item.as_str().is_some_and(|text| !text.trim().is_empty())
+        {
+            errors.push(format!(
+                "{}: `{field}` must be a non-empty string when present",
+                path.display()
+            ));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SkillFrontmatterFormat {
+    Yaml,
+    Toml,
+}
+
+fn split_skill_frontmatter(content: &str) -> Option<(SkillFrontmatterFormat, &str)> {
+    if let Some(rest) = content.strip_prefix("---\n") {
+        let end = rest.find("\n---")?;
+        Some((SkillFrontmatterFormat::Yaml, &rest[..end]))
+    } else if let Some(rest) = content.strip_prefix("+++\n") {
+        let end = rest.find("\n+++")?;
+        Some((SkillFrontmatterFormat::Toml, &rest[..end]))
+    } else {
+        None
     }
 }
 
@@ -2921,5 +3021,116 @@ paths:
             panic!("expected text result");
         };
         assert!(message.contains("path template param {id}"), "{message}");
+    }
+    #[tokio::test]
+    async fn skill_manifest_domain_validator_passes_yaml_frontmatter() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("skills/demo");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let path = skill_dir.join("SKILL.md");
+        std::fs::write(
+            &path,
+            "---\nname: demo\ndescription: Demo skill\ntags:\n  - test\n---\n\n# Demo\n",
+        )
+        .unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("embedded skill frontmatter validator"),
+            "{message}"
+        );
+        assert!(message.contains("✓ passed"), "{message}");
+        let plan = result.details["validation_plan"].as_array().unwrap();
+        assert!(
+            plan.iter()
+                .any(|entry| entry["id"] == "core.skill-manifest" && entry["kind"] == "domain"),
+            "{plan:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn skill_manifest_domain_validator_passes_toml_frontmatter() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("skills/demo");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let path = skill_dir.join("SKILL.md");
+        std::fs::write(
+            &path,
+            "+++\nname = \"demo\"\ndescription = \"Demo skill\"\n+++\n\n# Demo\n",
+        )
+        .unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("embedded skill frontmatter validator"),
+            "{message}"
+        );
+        assert!(message.contains("✓ passed"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn skill_manifest_domain_validator_rejects_missing_frontmatter() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("skills/demo");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let path = skill_dir.join("SKILL.md");
+        std::fs::write(&path, "# Demo\n").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("missing YAML (`---`) or TOML (`+++`) frontmatter"),
+            "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn skill_manifest_domain_validator_rejects_missing_description() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("skills/demo");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let path = skill_dir.join("SKILL.md");
+        std::fs::write(&path, "---\nname: demo\n---\n\n# Demo\n").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("missing or empty string field `description`"),
+            "{message}"
+        );
     }
 }
