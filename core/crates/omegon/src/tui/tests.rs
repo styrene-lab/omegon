@@ -5400,7 +5400,9 @@ fn secrets_menu_actions_tab_contains_prime_editor_rows() {
     let rows: Vec<_> = menu.state.visible_rows(&menu.projection);
     for id in [
         "secrets.set",
-        "secrets.recipe",
+        "secrets.recipe.env",
+        "secrets.recipe.cmd",
+        "secrets.recipe.vault",
         "secrets.get",
         "secrets.delete",
     ] {
@@ -5486,7 +5488,9 @@ fn secrets_menu_status_row_enqueues_execute_control() {
 fn secrets_menu_template_rows_prime_editor_without_control_request() {
     for (row_id, expected) in [
         ("secrets.set", "/secrets set "),
-        ("secrets.recipe", "/secrets set "),
+        ("secrets.recipe.env", "/secrets set "),
+        ("secrets.recipe.cmd", "/secrets set "),
+        ("secrets.recipe.vault", "/secrets set "),
         ("secrets.get", "/secrets get "),
         ("secrets.delete", "/secrets delete "),
     ] {
@@ -8660,6 +8664,102 @@ fn legacy_model_tier_slash_commands_are_unknown() {
             other => panic!("{command} should be unknown, got: {other:?}"),
         }
     }
+}
+
+#[test]
+fn variables_menu_inventory_rows_offer_update_and_delete() {
+    let mut app = test_app();
+    tokio::runtime::Runtime::new().unwrap().block_on(
+        crate::control::variables::variables_set_response("PROJECT_ENV", "staging"),
+    );
+    app.open_variables_menu();
+
+    let menu = app.active_menu.as_ref().expect("variables menu");
+    let row = menu
+        .projection
+        .tabs
+        .iter()
+        .find(|tab| tab.id == "inventory")
+        .and_then(|tab| {
+            tab.groups[0]
+                .rows
+                .iter()
+                .find(|row| row.id == "variables.inventory.PROJECT_ENV")
+        })
+        .expect("PROJECT_ENV inventory row");
+
+    let update = row
+        .actions
+        .iter()
+        .find(|action| action.label == "Update")
+        .expect("update action");
+    assert_eq!(
+        update.editor_text.as_deref(),
+        Some("/variables set PROJECT_ENV ")
+    );
+
+    let delete = row
+        .actions
+        .iter()
+        .find(|action| action.label == "Delete")
+        .expect("delete action");
+    assert_eq!(
+        delete.editor_text.as_deref(),
+        Some("/variables delete PROJECT_ENV")
+    );
+}
+
+#[test]
+fn secrets_menu_inventory_rows_offer_safe_crud_actions() {
+    let mut app = test_app();
+    app.secret_readiness = Some(crate::capabilities::secrets::SecretReadinessSnapshot {
+        secrets: vec![crate::capabilities::secrets::SecretReadiness {
+            name: "GITHUB_TOKEN".into(),
+            required: true,
+            optional: false,
+            consumers: vec![],
+            status: crate::capabilities::secrets::SecretReadinessStatus::Configured,
+            recipe_kind: Some("env".into()),
+            warmed: false,
+        }],
+    });
+
+    app.open_secrets_menu();
+    let menu = app.active_menu.as_ref().expect("secrets menu");
+    let row = menu
+        .projection
+        .tabs
+        .iter()
+        .find(|tab| tab.id == "inventory")
+        .and_then(|tab| {
+            tab.groups[0]
+                .rows
+                .iter()
+                .find(|row| row.id == "secrets.inventory.GITHUB_TOKEN")
+        })
+        .expect("GITHUB_TOKEN inventory row");
+
+    assert_eq!(
+        row.primary_action
+            .as_ref()
+            .and_then(|action| action.command.as_deref()),
+        Some("/secrets get GITHUB_TOKEN")
+    );
+    for expected in [
+        "/secrets set GITHUB_TOKEN",
+        "/secrets set GITHUB_TOKEN env:",
+        "/secrets set GITHUB_TOKEN cmd:",
+        "/secrets set GITHUB_TOKEN vault:",
+        "/secrets delete GITHUB_TOKEN",
+    ] {
+        assert!(
+            row.actions
+                .iter()
+                .any(|action| action.editor_text.as_deref() == Some(expected)),
+            "missing safe secret action for {expected}"
+        );
+    }
+    assert!(row.metadata.iter().any(|item| item == "value redacted"));
 }
 
 #[test]
