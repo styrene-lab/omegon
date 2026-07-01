@@ -16,45 +16,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-07-01
+
+0.27.0 is a hardening and surface-coherence line. It makes provider/auth routing explicit instead of implicit, gives operators truthful TUI status when credentials or fallbacks are involved, expands the backend capability substrate for future console clients, and continues extracting lifecycle/TUI surfaces behind shared semantic boundaries.
+
 ### Added
+
 - Added guided CRUD affordances to `/variables` and `/secrets` structured menus, including variable update actions, common variable templates, recipe-specific secret rows, and per-secret clear/replace actions that never display secret values.
-
-### Fixed
-- Rebuilt and relinked the development install as `0.27.0-rc.6`.
-- Rebuilt and relinked the development install as `0.27.0-rc.5`.
-- Rebuilt and relinked the development install as `0.27.0-rc.4`.
-- Rebuilt and relinked the development install as `0.27.0-rc.3`.
-- Fixed `/model list` in the TUI to open the interactive model selector instead of dumping the available-models text readout into the terminal, and closed parent structured menus when launching selector rows so arrow keys move the selector instead of the underlying menu.
-- Hardened shared `/extension` and `/runtime` menu actions: refresh/update require confirmed menu activation, and extension search now primes `/extension search ` for an explicit query instead of executing a query-less menu command.
-- Kept structured menus open underneath menu-launched command output and rendered those raw slash responses in a returnable, scrollable command panel instead of dumping them into the conversation transcript.
-- Routed `/settings` through the shared structured menu substrate and removed the legacy in-app settings screen render/input state from the TUI app.
-- Routed `/help` to the shared command inventory menu by default while preserving `/help all` as the full text readout, establishing the first general-purpose slash-command menu affordance beyond skills/settings.
-- Routed bare `/model` to a shared model-routing menu with current-model selector entry, grade/provider/policy rows, and row-target action affordances for menu-local navigation.
-- Routed bare `/auth` and `/login` to the shared provider credential menu, reusing the provider status rows from `/model providers` while preserving direct login/logout commands.
-- Added route-aware selected/serving badges to provider menu rows and included route state, serving model, and route warnings in the `/model` menu summary.
-- Hardened provider route menus with selected-provider fallback from configured settings, explicit fallback badges, route warnings in `/auth`, and clearer `/model` configured-model wording.
-- Routed bare `/context` to a shared context-control menu with policy selection, status, compact, and fresh-context actions while preserving direct context subcommands.
-- Hardened `/secrets set` so direct secret values entered on the slash line are redirected into hidden input instead of being queued as plaintext control requests; recipe forms (`env:`, `cmd:`, `vault:`) still queue normally.
-- Tightened canonical `/secrets set` parsing so plaintext values are rejected before they can become generic control requests; only recipe forms canonicalize outside hidden input.
-- Added a `/model providers` tab in the shared model menu with credential-probe status and login remediation actions for common model providers.
-- Reclassified the consumer ambiguous-reasoning-phase idle bail as a transient stalled stream instead of an unknown (non-transient) error. Previously a wedged reasoning stream that timed out in the ambiguous phase hard-failed the turn with no retry; it now retries like every other stall.
-- Gave the producer-side SSE watchdog (`process_sse`, shared by Anthropic/OpenAI/codex) the same single re-arm as the consumer: an active-phase silence downgrades once to the reasoning budget before being treated as a stall, so legitimate inter-item reasoning gaps no longer abort live turns. Producer stalls now classify as stalled streams consistently with the consumer.
-- Added completion guards to the Ollama (NDJSON `done`) and Google Antigravity (Gemini `finishReason`) stream parsers so a mid-response connection drop surfaces a transient error instead of replaying truncated content as a completed turn.
-- Made the Antigravity/Gemini stream watchdog phase-aware (re-arm to the reasoning budget once) instead of a flat 90s idle, and stopped it from emitting a `Done` after it had already surfaced a stream error.
-- Closed a partial-content poisoning gap on the Anthropic and OpenAI streaming paths: when the SSE byte stream ends without a `message_stop`/`finish_reason` terminal event (a mid-response connection drop), the producer now emits a `BridgeDropped` error so the retry loop handles it, instead of silently returning truncated text/tool-calls as a completed turn. Mirrors the existing Codex completion guard.
-- Stopped the consumer stream watchdog from raising spurious `Upstream stalled stream — retrying` failures when reasoning providers (notably `openai-codex`) pause between output items without first closing the active text/tool block. The first active-output silence now re-arms once to the generous reasoning budget; a genuinely dead stream still surfaces inside the retry budget.
-- Added `/resume <session-id>` and `/sessions resume <session-id>` to switch the live TUI to a saved session by id/prefix.
-- Added human-readable session descriptions to saved session metadata and session list/web summaries so resume IDs have operator context.
-- Printed both CLI (`omegon --resume <id>`) and in-app (`/resume <id>`) resume commands when sessions are saved on exit.
-- Printed the saved session id and exact `omegon --resume <id>` command when an interactive or standalone headless session exits.
-- Prevented native and OCI extension stderr logs from leaking into the interactive terminal by piping extension stderr into Omegon tracing instead of inheriting it.
-- Surfaced the active profile source in the engine line so project/user/default profile state is visible at a glance; named profiles now render by short name instead of source-only labels.
-- Prevented explicit provider-qualified model specs from silently falling back to unrelated automation-safe providers.
-- Refreshed the TUI Workbench workspace context from live git state so the displayed branch reflects the current checkout instead of a stale harness snapshot after workspace/branch changes.
-- Added compact git state to the TUI Workbench branch field: ahead/behind counts, tracked dirty marker, detached HEAD label, and merge/rebase/cherry-pick state when present.
-- Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
-
-### Added
 - Added `/variables` and `/vars` as the MVP non-secret session configuration surface, with list/status, set, get, and delete/remove/rm command plumbing plus plain-value control readouts; secret-like names are flagged with `/secrets` guidance without blocking operator-defined variables.
 - Added design notes for the `/variables` non-secret runtime configuration surface, including second- and third-order effects around OCI deployment, process injection, trust boundaries, and project portability.
 - Documented the validator capability UX plan, including `/validate` Overview/Active/Available/Overrides/Runs/Settings tabs, Armory/community validator trust lifecycle, explain output, backend DTOs, and phased implementation plan.
@@ -123,126 +91,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added `GET /api/providers/status` and `GET /api/extensions` read-only web backend endpoints for provider readiness and installed extension status inventory.
 - Added `GET /api/runtime/status` and `GET /api/runtime/capabilities` as stable read-only runtime foundation endpoints for the Omegon web/console backend.
 - Added prompt skill conflict resolution so overlapping activation/trigger skills inject only one provider by default and user-facing output recommends project-local merge resolution.
-
-### Changed
-- OpenAI/Codex stream-stall exhaustion now uses longer, reasoning-aware budgets and operator wording that distinguishes ambiguous silent reasoning windows from definite wedged streams.
-- `/skills reload` now advances and reports the runtime generation, and `/skills refresh` is accepted as an alias so iterative skill authoring has the same operator vocabulary as substrate refresh flows.
-- Skill activation/resolution events now have a first-class conversation segment and ACP projection so startup and reload skill provenance can render as single-line TUI timeline affordances instead of generic system text.
-- The skill creator prompt now supports upstream-assisted authoring: named public skill sources are searched/fetched/reviewed first, adapted with provenance and safety notes, and only then written to external skill directories.
-- Upstream skill adaptation now treats bundled executable assets as a binary trust decision rather than a static-analysis safety problem, defaults Node/npm/pnpm/yarn assets to clean-room rewrite or omission, and requires clean-room adaptations to document omitted upstream assets.
-- `skills doctor` now surfaces adapted-skill provenance warnings for missing safety/adaptation sections and executable/tooling mentions without an explicit trust posture.
-- Skill manifest parsing, activation metadata validation, project-signal matching, and adapted-skill linting now live in the new `omegon-skills` crate and are re-exported by the CLI skills module.
-- Resolved skill-entry metadata, provider ranking, shadow/conflict detection, and entry finalization now live in `omegon-skills`, leaving the CLI skills module focused on filesystem discovery and command rendering.
-- Skill bundle discovery, script-reference diagnostics, import-summary metadata, and bundle conflict detection now live in `omegon-skills`; the CLI skills module now wraps those helpers for filesystem roots and report formatting.
-- Runtime skill metadata extraction for trusted paths and phase/step tracking now lives in `omegon-skills`, with the CLI skills module retaining compatibility re-exports for setup and loop callers.
-- Skill manifests now support structured upstream provenance metadata, and `skills doctor` uses it to audit adaptation posture and executable-asset trust decisions before targeted imports.
-- Skill suggestion activation logic and source-aware recommendation tests now live in `omegon-skills`, leaving the CLI skills module focused on inventory and command surfaces.
-- Bootstrap status now accounts for the active runtime settings before rendering, showing the selected route/profile alongside context and thinking instead of preserving the stale default `Tier: B` orientation. Bootstrap expectations are now computed as structured status data with subject-kind classification for orchestration, inference, memory, skill inventory, and extension inventory deltas, backed by startup skill and extension inventory discovery.
-- Disabled broad editor-area breathing/glow effects in the TUI so post-render color shifts no longer mutate engine-ribbon separator styling.
-- Expanded the omegon-web browser API capability descriptor with explicit surface stream, actions API, and legacy WebSocket flags, and typed the surface-stream WebSocket envelope for a stable UI contract.
-- Added `omegon skills install` cleanup and `skills doctor` detection for stale installed copies of the old bundled `vault` markdown skill after its rename to `flynt`.
-- Renamed the bundled interlinked-markdown skill from `vault` to `flynt` so markdown workspace guidance no longer overloads HashiCorp Vault/security terminology.
-- Polished bundled skill guidance ahead of 0.27.0 by removing overly project-specific language, softening generic Python environment-manager defaults, and aligning the OCI CI example with immutable-tag guidance.
-- Surfaced startup skill activation events in the runtime event stream and mirrored them into audit logs so operators can see and review skill activation/provenance.
-- Added `omegon skills import <path> [--project] [--force]` for copying Claude/Omegon skill bundles or direct `SKILL.md` files into user or project skill roots, and updated `skills doctor` to recommend those import commands.
-- Renamed the abstract runtime guidance registry from `PluginRegistry` to `AugmentRegistry` to distinguish prompt/persona/skill augmentation from extension/plugin package concepts.
-- Included skill source/editability/reload/shadow metadata in `/skills get` and CLI `omegon skills get` output.
-- Rendered skill source/editability/reload/shadow metadata in the `/skills` palette so override provenance is visible without opening each skill.
-- Added source/editability/reload/shadow metadata to structured skill listings so project overrides expose the lower-precedence skills they shadow.
-- Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
-
-### Fixed
-- Made `omegon skills --cwd <path>` honor the requested project directory for project-local skill create/get/list/import/delete operations, so iterative skill work can target another checkout without changing the shell cwd.
-- Serialized skills and Claude migration tests that mutate process-global `OMEGON_HOME` or the current working directory, making plain parallel `cargo test -p omegon` pass without relying on `--test-threads=1`.
-- Made the loop stream idle watchdog phase-aware for post-text, post-thinking, and post-tool-call inter-item gaps so normal provider decision silence does not trip the tighter active-output stall timeout.
-- Improved the slim TUI engine/footer band: active turns no longer replace provider/model, tier, thinking, and context details with the spinner verb; thinking mode now renders as its own shaded engine-ribbon segment, and the spinner/status verb moves to a subtle always-on activity row above the engine line. Updated the stale memory-tool label assertion to match the shared `mem read` conversation-surface identity.
-- Fixed the stale-Workbench-plan problem where the agent could repeatedly claim completion while the visible plan still showed active/todo rows. The plan-reconciliation nudge was gated on a one-shot `plan_reconciliation_nudged` latch that fired once per session and never re-armed — so after a single early nudge, every later completion-claim-with-stale-plan went unguarded for the rest of the session. The nudge is now keyed on a fingerprint of the open (Pending/Active) plan items: a changed fingerprint (genuine progress, a replaced plan, or a newly orphaned one) re-arms it, while an identical stale state is bounded to `MAX_PLAN_RECONCILIATION_NUDGES` (3) to avoid livelock with a model that refuses to reconcile.
-- Made the **consumer-side** LLM stream watchdog reasoning-aware, fixing the remaining `stream stall exhaustion` failures on `openai-codex:gpt-5.5` and other reasoning models. `consume_llm_stream` previously treated `ThinkingStart` as "content received," dropping its idle budget to the 90s content window — so a silent reasoning gap (reasoning models can stream nothing, not even reasoning-summary deltas, for minutes) tripped the watchdog and, after cumulative retries, exhausted. A new reasoning phase (ThinkingStart..first content/tool) now carries a generous budget (default 300s, override `OMEGON_LLM_REASONING_IDLE_TIMEOUT_SECS`, min 60), cleared the moment real text or a tool call begins. This complements the earlier provider-side `process_sse` fix: both the network reader and the event consumer are now phase-aware.
-- Made the SSE stream watchdog phase-aware so extended reasoning is no longer misclassified as a stall: idle budget is now 90s while content/tool tokens actively stream and 300s while the model is reasoning or before the first token. Fixes repeated `stream stall exhaustion` failures on reasoning models (OpenAI gpt-5.x / o-series, Anthropic interleaved thinking) where the flat 90s idle timeout tripped during legitimate silent reasoning. Reasoning budget is overridable via `OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS` (default 300, min 60); active budget retains `OMEGON_SSE_IDLE_TIMEOUT_SECS` (default 90, min 30).
-- Auto-expanded TUI tool cards for direct bang shell commands like `!ls` so operator-requested command output is visible by default.
-- Made `memory_query` inventory-only for large stores so mature projects show section counts instead of noisy sample facts.
-- Rejected invalid native memory sections, including lifecycle ingestion paths, instead of silently defaulting them to Architecture, and made empty `memory_recall` queries return an explicit error result.
-- Clarified extension tool descriptions as extension-owned rather than Omegon core semantics, reducing confusion between Flynt document-memory tools and native `memory_*` runtime memory.
-- Tightened native memory tool guidance to discourage over-storing, prefer targeted recall, and reserve broad `memory_query` for inventory/debugging.
-- Routed all in-tree bash execution paths, including code-act proxy execution, through workspace-boundary mediation so path permission prompts remain harness-level instead of leaking back as ordinary tool output.
-- Kept completed live tool activity visible briefly before clearing the slim activity stream so successful and failed operations do not disappear abruptly.
-- Routed TUI prompt visibility through the runtime-start event so submitted and queued operator prompts do not render before the runtime actually starts sending them.
-- Cleared stale Workbench active-plan state when typed plan projections report no active lane, while preserving workspace context across plan updates.
-- Stopped ordinary startup from creating project-local `ai/` or `.omegon/` memory directories; uninitialized projects now stay clean until `/init` is run.
-- Retained bounded multi-tool activity rows with display-ready projection metadata so slim activity can show recent running/completed/cancelled tools without TUI-only conversation lookups.
-- Allowed workspace-boundary-safe temp directory paths by default so tools can use `/tmp`-style scratch files without unnecessary permission prompts.
-- Clarified permission prompts with typed request metadata so the TUI distinguishes policy-only approvals from persisted directory grants and shows the actual grant path.
-- Hardened extension-declared skill paths against absolute/path-traversal escapes and made skill conflict matching case-insensitive.
-- Resolved prompt assembly to load one directive per skill name so project-local skills override same-named user skills instead of injecting both.
-- Updated the in-code skill schema documentation to show YAML as canonical while documenting TOML as compatibility.
-- Matched `/skills get` provenance metadata to the resolved skill path so project-local overrides do not accidentally inherit bundled metadata.
-- Kept the Workbench context line reserved above active plan rows so expanded plans render below the Workbench instead of covering it.
-- Fixed direct plan item completion so completing the active item advances/reconciles the visible Workbench pointer even when later items were already marked done.
-- Made turn cancellation phase-aware: early interrupted submissions are forgotten from canonical replay, while interrupts after assistant/tool output keep the prompt for the next turn; the session bar now exposes interrupt/keep/forget disposition.
-- Fixed upstream LLM error recovery so a provider rejection is surfaced in the transcript without leaving the rejected active prompt in canonical replay and poisoning subsequent sends.
-- Fixed Codex Responses replay so assistant history uses request-safe `output_text` content blocks instead of invalid `input_text`, while preserving queued operator prompt visibility in the TUI conversation.
-- Display queued prompts as normal operator segments when the runtime actually starts them, instead of inserting them into the transcript at queue time.
-- Clarified memory tool segment labels and recall summaries so read/write/pin/compact operations are visually distinct and recall counts render as hits instead of total stored facts.
-- Split stable Workbench plan/context rendering from dynamic activity rendering so live tools plus cleave/delegate progress use tiered activity height instead of resizing the Workbench.
-
-### Changed
-- Renamed the internal plan surface aggregate to `PlanSurfaceInputs` and removed the local lane projection mirror so active plan lanes use the shared `omegon_traits` projection DTO end-to-end.
-- Promoted internal `PlanUpdated` events to typed plan surface projections while keeping web/IPC/MQTT legacy snapshot adapters for external compatibility.
-- Added a shared tool visual identity resolver for hierarchical tool realm/family/transport labels and routed transcript/workbench tool chrome through it, with unknown shell-mediated commands honestly retained as shell-family labels instead of expanding an exhaustive command taxonomy.
-- Routed TUI workbench plan projection tests through typed `omegon_traits` plan DTOs and tightened active-plan row copy around the next actionable item.
-- Added double-click expansion for the compact workbench plan row so operators can open full plan details from the workbench surface.
-- Added structured child vital-sign tool activity so instruments and websocket projections can preserve shell args summaries while keeping legacy `last_tool` compatibility.
-- Routed TUI tool category glyph selection through structured tool identity/category mappings instead of raw display-name matching where identity is available.
-- Updated tool inspection detail headers to use tool args summaries when resolving category glyphs for shell-mediated commands.
-- Refined Unicode TUI tool category glyphs to reduce box/diamond collisions across read, design, memory, and generic roles.
-- Moved the Nerd Font brain glyph to the memory tool category and made the generic fallback visually quiet.
-- Updated the TUI glyph matrix workspace, tool, and tool-state domains with the selected ASCII, Noto Symbols 2 Unicode, and Nerd Font symbols.
-- Restyled the lean editor engine block as an angular Nerd Font/Powerline ribbon with an omega mark, provider glyphs, grade emblem, thinking icon, and context database glyph.
-- Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
-
-### Fixed
-- Replayed assistant text for the ChatGPT/Codex Responses route with request-safe `input_text` content blocks instead of output-only `output_text` blocks, avoiding upstream `400 Unsupported content type` failures on continued turns.
-- Converted the slim turn-state TUI test away from brittle glyph/text assertions to semantic `SlimTurnState` and tool-card state checks.
-- Preserve structured Codex SSE error details in operator-facing failures instead of manufacturing bare `unknown error`, including upstream status/code/type context and tracing logs for raw error events.
-- Added semantic Workbench projection tests for typed operation worker rows so delegate/cleave coverage can assert structured status/tool/detail mapping before terminal rendering.
-- Added semantic Workbench projection tests for typed plan lanes so TUI coverage can assert DTO mapping without brittle terminal text matching.
-- Routed lifecycle-aware workbench plan snapshots through the same shared plan surface projection used by `plan list`/`plan show`, removing duplicate registry assembly in main loop surfaces.
-- Routed `plan list` and `plan show` text through shared plan renderers so direct command output and tool-result enrichment cannot drift across harness surfaces.
-- Always inject active plan context into the model when a session or repo-bound visible plan is live, even before any tool call/current-task/compaction signal exists.
-- Added typed PlanUpdated edge coverage for IPC and MQTT compatibility payloads so external legacy snapshots are proven to derive from `omegon_traits::PlanSurfaceProjection`.
-- Kept `manage_tools list` synchronized with the EventBus's finalized model-visible tool inventory so it no longer reports `0 total` tools while directly callable tools are available.
-- Render git tool rows with a dedicated git category glyph instead of reusing the file-write/edit document glyph.
-- Render lean editor engine ribbon tail fields as distinct gradient-style badge segments so grade, thinking, and context keep visible backgrounds and Powerline divider bridges instead of falling back to plain metadata text.
-- Routed slim tool segment category glyphs through the locked structured tool identity matrix, including shell-mediated read/search/write classifications, so compact tool rows no longer show stale generic/status symbols for context, codebase, search, and read tools.
-- Filled lean editor engine ribbon divider backgrounds so Powerline separators blend with the preceding route/card segments instead of rendering as floating triangles.
-- Preserve intentional theme badge backgrounds during final TUI background cleanup so the lean editor provider/model route remains visible as dark-on-accent text instead of being flattened to black-on-black.
-- Render the lean editor ribbon in route-first order (`provider/model`, grade, thinking, context) so `openai-codex/gpt-5.5` appears directly before the S-tier badge instead of after optional context fields.
-- Keep the lean editor ribbon provider/model route anchored at the right edge after optional context/grade/thinking segments so narrow terminals still show the active provider and model.
-- Collapsed the lean editor ribbon context segment to text-only summary so the context meter no longer consumes the remaining title width and hides the active model on narrow terminals.
-- Render the lean editor engine ribbon's pinned route as a single provider/model label with an explicit missing-provider fallback, so provider identity cannot disappear silently behind separator math or empty provider state.
-- Scoped OAuth expiry toasts to the active provider route so stale non-active provider credentials remain visible in auth status without interrupting healthy conversations.
-- Removed duplicate workspace dir/git metadata from the compact TUI session row now that the workbench row owns workspace context.
-- Populate the compact TUI workbench row with known workspace context (repo, dir, and git branch) even before a tool, plan, delegate, or cleave run is active.
-
-### Changed
-- Routed ACP plan update handling through typed plan projections and replaced JSON snapshot plan-entry tests with semantic projection coverage.
-- Documented IPC/MQTT `plan.updated` as a legacy compatibility envelope over the typed internal plan projection contract.
-- Removed legacy JSON workbench adapters from TUI plan state tests and routed workbench state through typed plan projections instead.
-- Polished the compact TUI workbench row with symbolic workspace labels for repo, directory, and git branch, deriving the repo label from git remote metadata instead of the local checkout directory and omitting duplicate directory labels when the repo and current directory share the same name.
-- Removed the Anthropic subscription ToS startup toast from normal interactive TUI sessions; the disclosure now stays scoped to headless automation and explicit `/cleave` background-worker launches.
-- Removed inline `^O details` affordances from slim tool rows now that single-click selects and double-click expands or copies segments.
-
-### Changed
-- Renamed the compact TUI rows internally around the engine/workbench/session contract and removed duplicated model/context fields from the bottom session row.
-- Moved command panel, prompt, toast, modal, and severity DTOs into renderer-neutral surface projections so TUI command modals share backend-decoupled state with future clients.
-- Unified TUI command/modal geometry across the persistent settings surface and slash-command selectors so tabs and nested command editors keep a cohesive footprint.
-- Added settings-screen search/filter mode so operators can narrow visible rows before editing.
-- Wired settings-screen max-turn, sandbox, and auto-update rows to existing control/persistence paths instead of showing placeholder toasts.
-- Moved settings-screen row selection and tab switching into reusable screen helpers and routed choice rows through their semantic projection metadata instead of hard-coded per-row selector builders.
-- Replaced the hard-to-discover inline conversation `Copy` button with a double-click copy flow: double-click a collapsed tool card to expand it, then double-click the expanded/copyable segment to copy plaintext.
-- Added selected conversation segment hints for double-click copy/expand actions and a visible centered action toast with conversation/footer pulses on successful copy.
-
-### Added
 - Added semantic composer draft UI actions for replacing, clearing, and attaching paths to the TUI editor through the shared `UiAction` seam.
 - Added semantic composer cursor/edit UI actions for character/word movement and bounded edit operations without exposing frontend key events.
 - Added semantic composer text insertion for typed characters and pasted text, including existing large-paste collapse behavior through the shared action seam.
@@ -274,87 +122,121 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a renderer-neutral settings surface projection under `surfaces/settings.rs` and routed the harness settings command/tool overview through it so TUI, ACP, CLI, web, and agent-facing paths can share one semantic settings model.
 - Exposed `/settings` through the shared command registry, including ACP availability, so ACP-hosted clients can read the same harness settings overview as the in-agent settings surface.
 - Added a pure permission policy evaluator for per-tool allow/prompt/deny rules with simple wildcard subject matching as the first slice of the broader permission-policy engine.
+- Wired live settings into delegate and cleave features so `/autonomy` changes resolve the same subagent policy for prompt/status and tool gate enforcement while preserving conservative fallback.
+- Made delegate and cleave autonomy gates policy-injectable so tests can prove higher-autonomy policies allow operations that conservative defaults gate, reducing prompt/status/tool policy drift.
+- Wired base prompt assembly to accept the operator-selected subagent policy so future `/autonomy autonomous` sessions can render orchestrator guidance instead of the conservative default.
+- Exposed the mapped subagent autonomy policy in `/automation status` so the operator can see delegate/cleave posture, limits, and the loop/scheduled-job non-escalation note.
+- Mapped `/autonomy flow` to the conservative subagent policy so flow continuation does not implicitly make `cleave_run` a normal operation; `/autonomy autonomous` remains the power-user orchestration posture.
+- Added a mapping from the existing `/autonomy` automation levels to subagent autonomy policy levels so future prompt/gate wiring can use one operator-facing knob.
+- Added an internal autonomy envelope model for session, loop, scheduled-job, and explicit-approval policy precedence without changing loop execution behavior yet.
+- Added execution substrate projection to IPC/web runtime snapshots so attached clients can see the detected host/container substrate alongside harness status.
+- Added a conservative subagent autonomy policy layer that now drives prompt guidance for delegate/cleave operations, keeping `cleave_run` approval-oriented by default while allowing bounded scout/verify delegates.
+- Gated mutating `delegate` patch workers behind structured approval details under the conservative subagent autonomy policy before allocating delegate tasks or spawning child workers.
+- Gated over-limit `cleave_run` requests behind structured approval details under the conservative subagent autonomy policy before creating cleave workspaces or spawning children.
+- Added CLI parser coverage for the `--oci` alias, OCI image/runtime overrides, and conflict handling with `--dangerously-bypass-permissions`.
+- Marked host-shim OCI launches with `OMEGON_RUNTIME_CONTEXT=host-shim-oci`/`OMEGON_OCI_LAUNCHER=omegon` and made recursive `--oci` requests inside an OCI container fail closed.
+- Added an orchestrated OCI runtime design for Kubernetes/CRI deployments where Omegon is launched by the orchestrator rather than by the native `--oci` host shim.
+- Added `--oci` as an alias for the existing OCI-backed `--sandboxed` launcher path, plus CLI/env image and runtime overrides that default the containerized substrate to `ghcr.io/styrene-lab/omegon-full:<version>`.
+- Added an OCI CLI execution-boundary design for a host-shim `omegon --oci` mode, covering image/runtime resolution, raw argv forwarding, mount/auth policy, daemon port mapping, extension isolation, and phased integration.
+- Documented the validated containerized daemon/control-port probe for the local `omegon-full` OCI image, including current provider-auth, host-extension, and IPC limitations.
+- Documented the validated Nix/Lima/nix2container/Podman smoke path for the local `omegon-full` OCI substrate and added local export/load recipes for pre-publication testing.
+- Added architecture-aware local OCI build guidance/target and made `oci-smoke` platform selection explicit via `OCI_PLATFORM` instead of forcing amd64 on Apple Silicon.
+- Added an initial Nex-facing `substrates/omegon-full` package/profile seed for the full-first subagent OCI substrate.
+- Expanded the subagent OCI substrate design around a full-first trim-down strategy, Armory/extension layer composition, mount policy, and Ratatui dogfooding constraints.
+- Documented the inherited-default subagent execution boundary and added a Podman-first OCI smoke target for the explicit isolated subagent substrate.
+- Added first-class delegate cancellation status so cancelled delegate children project as terminal non-failure operation rows instead of failed tasks.
+- Added `delegate_cancel` so running delegate tasks can be marked cancelled explicitly, preserving terminal non-failure state in delegate status and Workbench operation rows.
+- Fixed subagent/delegate review findings by keeping background delegate startup responses machine-readable, marking delegate/subagent status commands read-only, narrowing the plural `/subagents` alias, and avoiding cleave tool names in base prompts when only `delegate` is exposed.
+- Clarified subagent/delegate/cleave design guidance so requests like “use subagents to merge these branches into main” still route through `cleave_assess`/`cleave_run` when the task shape requires coordinated merge work.
+- Clarified subagent prompt guidance so operator requests to "use subagents" are classified by task shape and may still route to `cleave_assess`/`cleave_run` for coordinated multi-branch or multi-scope work.
+- Added ACP command-registry coverage for the `subagent` alias and clearer background subagent start messages with status/result retrieval guidance.
+- Added `/subagent` and `/subagents` as operator-facing aliases for delegate status, and updated delegate metadata to describe same-provider subagents as the default path.
+- Added `just link-doctor` to inspect launcher PATH resolution, selected target, channel files, and fallback binary state.
+- Added fixture coverage for the stable launcher resolution policy, including env overrides, nearest checkout selection, channels, fallback binaries, paths with spaces, dev-release fallback, and self-recursion rejection.
+- Added a stable `omegon`/`om` launcher installed by `just link`, with deterministic multi-checkout resolution via explicit env overrides, nearest checkout builds, named `~/.omegon/channels`, and a fallback installed binary.
+- Added backend surface contracts for ACP/RPC skill and prompt definition management, covering list/get/create/update/delete plus skill install and prompt preview endpoints in the capability registry, wired ACP/IPC/WebSocket dispatch for existing skill and prompt read/preview handlers, added reusable prompt definition storage and safety verdicts for bundled/user/project-local prompts, registered `/prompt` as the command-palette-native prompt routing surface, deprecated `_prompts/submit` as a read-only preview alias, and documented prompt/user-command authoring.
+- Added advisory activation metadata (`activation`, `profile`, `project_signals`) to bundled skill manifests and the skill builder schema so profile-aware skill loading can be implemented from declared intent instead of prose inference.
+- Added typed activation/profile diagnostics for skill manifests so future consumers can normalize advisory metadata and report unknown or unsafe user-skill values without crashing.
+- Added advisory project-signal matching helpers for skill activation metadata, including root-relative literal matching, root-only globs, recursive `**/` globs, ignored vendor/build directories, and invalid-pattern rejection.
+- Added a source-agnostic skill suggestion helper that evaluates parsed bundled, user-installed, Armory-installed, or project-local skills against profile, intent, and project-signal evidence without performing runtime injection, preserving external metadata diagnostics instead of silently dropping malformed activation hints.
+- Added the Modern Command Palettes design node for palette-style `/skills` and `/prompt` operator surfaces.
+- Add Java, Kotlin, and C# discovery/chunking to `codebase_search`; add a safe repo-relative `within` result scope, cancellation-aware index/search execution, and scope diagnostics in tool details.
+- Trace auth.json provider key-set deltas on credential writes, refreshes, and logout so future OpenAI/Codex credential disappearance incidents identify the mutating operation and whether `openai-codex` was dropped. Auth updates now also refuse to replace an unparsable existing auth store with a partial credential file.
+- Add redacted provider-auth and route-state diagnostic tracing for auth.json path selection, credential source/probe decisions, OAuth refresh/write-back, login outcomes, and fallback/disconnected route causes so relaunch login regressions leave an attributable trail.
+- Rebuild the release binary inside `just link` before selecting the binary to alias so local `omegon --version` cannot point at a stale artifact from an older HEAD.
+- Add peer-agent conversation representation/projection support so delegate/cleave/A2A output can carry producer identity independently from assistant/tool rendering.
+- Add an explicit assess-time assumption question to the design-tree prompt injection: reviewing a design node now directs the agent to ask what unstated assumptions the design makes and record them as `[assumption]`-tagged questions.
+- Add `just source-clean` and source-vs-agent-state dirty classification so live `.omegon/` telemetry no longer blocks source-plane cleanliness checks.
+- Add a provider route controller path for startup, login, model-tier switches, offline model switches, and runtime turn configuration so route state is explicit instead of inferred from whichever bridge happens to be installed.
+- Publish provider route changes as structured events and persist provider route warnings in the TUI footer so unavailable credentials, fallback routing, and disconnected states remain visible after the triggering operation.
+- Include provider route state in `/auth status`, including the selected route, served bridge, credential diagnostics, and remediation guidance.
+- Add explicit startup-route, route-login terminal outcome, and login-lifecycle regression coverage for connected, fallback, disconnected, relogin, and failed-login paths.
+- Add a read-only capability inventory substrate and ACP `_capabilities/inventory` surface for installed extensions, Armory assets, catalog agents, assistant profiles, capability graphs, trust summaries, secret readiness, assistant launch readiness, assistant-list projections, and assistant run read models.
+- Add assistant run read surfaces and terminal-state compatibility so the non-interactive run contract uses `completed` while still accepting legacy `succeeded`.
+- Add metadata-only backend endpoint registry entries for ACP/runtime/lifecycle/provider/extension/secret/package/plan/task surfaces, including provider retry/failure and turn-cancelled telemetry contracts.
+- Add richer cleave/delegate progress visibility, injected-child execution tests, timeout/cancellation coverage, and Workbench integration for active lifecycle workstreams.
+- Add headless ACP lifecycle read surfaces for lifecycle snapshots and design-node list/get/ready/blocked/frontier projections.
+- Add `/copy answer` plus focused `/help copy` and `/help mouse` guidance for normal-mode answer copy, transcript scroll, and mouse passthrough.
+- Add affected-crate validation tooling (`just affected`, `just test-changed`, `just check-changed`, `just clippy-changed`, `just test-commit`) plus `just source-clean` and source-vs-agent-state dirty classification for safer local commits.
+- Add provider-drift tooling with `just upstream-provider-check`, Anthropic public-model drift checks, Claude Fable 5 / limited-access Mythos 5 registry entries, and adaptive-thinking metadata derived from the model registry.
+- Add lifecycle/design documentation and an assess-time assumption prompt so design reviews explicitly ask what unstated assumptions should be recorded as `[assumption]` questions.
+- Add Codebase Mind metadata and design documentation for durable structural repository memory.
 
 ### Changed
+
+- OpenAI/Codex stream-stall exhaustion now uses longer, reasoning-aware budgets and operator wording that distinguishes ambiguous silent reasoning windows from definite wedged streams.
+- `/skills reload` now advances and reports the runtime generation, and `/skills refresh` is accepted as an alias so iterative skill authoring has the same operator vocabulary as substrate refresh flows.
+- Skill activation/resolution events now have a first-class conversation segment and ACP projection so startup and reload skill provenance can render as single-line TUI timeline affordances instead of generic system text.
+- The skill creator prompt now supports upstream-assisted authoring: named public skill sources are searched/fetched/reviewed first, adapted with provenance and safety notes, and only then written to external skill directories.
+- Upstream skill adaptation now treats bundled executable assets as a binary trust decision rather than a static-analysis safety problem, defaults Node/npm/pnpm/yarn assets to clean-room rewrite or omission, and requires clean-room adaptations to document omitted upstream assets.
+- `skills doctor` now surfaces adapted-skill provenance warnings for missing safety/adaptation sections and executable/tooling mentions without an explicit trust posture.
+- Skill manifest parsing, activation metadata validation, project-signal matching, and adapted-skill linting now live in the new `omegon-skills` crate and are re-exported by the CLI skills module.
+- Resolved skill-entry metadata, provider ranking, shadow/conflict detection, and entry finalization now live in `omegon-skills`, leaving the CLI skills module focused on filesystem discovery and command rendering.
+- Skill bundle discovery, script-reference diagnostics, import-summary metadata, and bundle conflict detection now live in `omegon-skills`; the CLI skills module now wraps those helpers for filesystem roots and report formatting.
+- Runtime skill metadata extraction for trusted paths and phase/step tracking now lives in `omegon-skills`, with the CLI skills module retaining compatibility re-exports for setup and loop callers.
+- Skill manifests now support structured upstream provenance metadata, and `skills doctor` uses it to audit adaptation posture and executable-asset trust decisions before targeted imports.
+- Skill suggestion activation logic and source-aware recommendation tests now live in `omegon-skills`, leaving the CLI skills module focused on inventory and command surfaces.
+- Bootstrap status now accounts for the active runtime settings before rendering, showing the selected route/profile alongside context and thinking instead of preserving the stale default `Tier: B` orientation. Bootstrap expectations are now computed as structured status data with subject-kind classification for orchestration, inference, memory, skill inventory, and extension inventory deltas, backed by startup skill and extension inventory discovery.
+- Disabled broad editor-area breathing/glow effects in the TUI so post-render color shifts no longer mutate engine-ribbon separator styling.
+- Expanded the omegon-web browser API capability descriptor with explicit surface stream, actions API, and legacy WebSocket flags, and typed the surface-stream WebSocket envelope for a stable UI contract.
+- Added `omegon skills install` cleanup and `skills doctor` detection for stale installed copies of the old bundled `vault` markdown skill after its rename to `flynt`.
+- Renamed the bundled interlinked-markdown skill from `vault` to `flynt` so markdown workspace guidance no longer overloads HashiCorp Vault/security terminology.
+- Polished bundled skill guidance ahead of 0.27.0 by removing overly project-specific language, softening generic Python environment-manager defaults, and aligning the OCI CI example with immutable-tag guidance.
+- Surfaced startup skill activation events in the runtime event stream and mirrored them into audit logs so operators can see and review skill activation/provenance.
+- Added `omegon skills import <path> [--project] [--force]` for copying Claude/Omegon skill bundles or direct `SKILL.md` files into user or project skill roots, and updated `skills doctor` to recommend those import commands.
+- Renamed the abstract runtime guidance registry from `PluginRegistry` to `AugmentRegistry` to distinguish prompt/persona/skill augmentation from extension/plugin package concepts.
+- Included skill source/editability/reload/shadow metadata in `/skills get` and CLI `omegon skills get` output.
+- Rendered skill source/editability/reload/shadow metadata in the `/skills` palette so override provenance is visible without opening each skill.
+- Added source/editability/reload/shadow metadata to structured skill listings so project overrides expose the lower-precedence skills they shadow.
+- Locked `SKILL.md` generation to YAML frontmatter as the canonical portable skill metadata format while preserving TOML frontmatter parsing for existing Omegon skills.
+- Renamed the internal plan surface aggregate to `PlanSurfaceInputs` and removed the local lane projection mirror so active plan lanes use the shared `omegon_traits` projection DTO end-to-end.
+- Promoted internal `PlanUpdated` events to typed plan surface projections while keeping web/IPC/MQTT legacy snapshot adapters for external compatibility.
+- Added a shared tool visual identity resolver for hierarchical tool realm/family/transport labels and routed transcript/workbench tool chrome through it, with unknown shell-mediated commands honestly retained as shell-family labels instead of expanding an exhaustive command taxonomy.
+- Routed TUI workbench plan projection tests through typed `omegon_traits` plan DTOs and tightened active-plan row copy around the next actionable item.
+- Added double-click expansion for the compact workbench plan row so operators can open full plan details from the workbench surface.
+- Added structured child vital-sign tool activity so instruments and websocket projections can preserve shell args summaries while keeping legacy `last_tool` compatibility.
+- Routed TUI tool category glyph selection through structured tool identity/category mappings instead of raw display-name matching where identity is available.
+- Updated tool inspection detail headers to use tool args summaries when resolving category glyphs for shell-mediated commands.
+- Refined Unicode TUI tool category glyphs to reduce box/diamond collisions across read, design, memory, and generic roles.
+- Moved the Nerd Font brain glyph to the memory tool category and made the generic fallback visually quiet.
+- Updated the TUI glyph matrix workspace, tool, and tool-state domains with the selected ASCII, Noto Symbols 2 Unicode, and Nerd Font symbols.
+- Restyled the lean editor engine block as an angular Nerd Font/Powerline ribbon with an omega mark, provider glyphs, grade emblem, thinking icon, and context database glyph.
+- Added TUI glyph profiles with confidence-scored Nerd Font detection, Kitty config/font-install probes, and portable fallback icons for terminals without compatible fonts.
+- Routed ACP plan update handling through typed plan projections and replaced JSON snapshot plan-entry tests with semantic projection coverage.
+- Documented IPC/MQTT `plan.updated` as a legacy compatibility envelope over the typed internal plan projection contract.
+- Removed legacy JSON workbench adapters from TUI plan state tests and routed workbench state through typed plan projections instead.
+- Polished the compact TUI workbench row with symbolic workspace labels for repo, directory, and git branch, deriving the repo label from git remote metadata instead of the local checkout directory and omitting duplicate directory labels when the repo and current directory share the same name.
+- Removed the Anthropic subscription ToS startup toast from normal interactive TUI sessions; the disclosure now stays scoped to headless automation and explicit `/cleave` background-worker launches.
+- Removed inline `^O details` affordances from slim tool rows now that single-click selects and double-click expands or copies segments.
+- Renamed the compact TUI rows internally around the engine/workbench/session contract and removed duplicated model/context fields from the bottom session row.
+- Moved command panel, prompt, toast, modal, and severity DTOs into renderer-neutral surface projections so TUI command modals share backend-decoupled state with future clients.
+- Unified TUI command/modal geometry across the persistent settings surface and slash-command selectors so tabs and nested command editors keep a cohesive footprint.
+- Added settings-screen search/filter mode so operators can narrow visible rows before editing.
+- Wired settings-screen max-turn, sandbox, and auto-update rows to existing control/persistence paths instead of showing placeholder toasts.
+- Moved settings-screen row selection and tab switching into reusable screen helpers and routed choice rows through their semantic projection metadata instead of hard-coded per-row selector builders.
+- Replaced the hard-to-discover inline conversation `Copy` button with a double-click copy flow: double-click a collapsed tool card to expand it, then double-click the expanded/copyable segment to copy plaintext.
+- Added selected conversation segment hints for double-click copy/expand actions and a visible centered action toast with conversation/footer pulses on successful copy.
 - Added a scrollable copy-text modal as an intermediate selected-segment detail surface before replacing selected-segment copy with inline transcript copy buttons.
-
-### Fixed
-- Routed command-panel rendering through the shared command modal geometry so slash-command output panels do not keep a separate ad hoc modal size.
-- Kept overflowing command selectors scroll-aligned around the cursor after standardizing modal height, so long menus remain navigable instead of rendering only their first page.
-- Clarified TUI settings profile-source chrome by rendering `profile: project|user · file: <full path>` instead of formatting the profile file as the project label; noted a future affordance for opening the active profile file.
-- Restored the inline conversation-segment copy affordance to the high-contrast `⧉` glyph and aligned its click target with the one-cell label.
-- Made inline conversation-segment `⧉` copy affordances use the same selected-segment copy path as keyboard shortcuts, including visible success/failure toasts.
-- Added a shared `Segment::human_plaintext_detail()` accessor for full operator/client-readable plaintext segment detail, and routed the selected-segment modal through it instead of copy-policy export.
-- Clarified the Rust skill's Cargo test filtering guidance so agents use one positional test filter per invocation or a single broader shared filter.
-- Routed verbose informational slash-command output into conversation system segments while keeping usage/error responses in command panels and unknown commands in compact warning toasts.
-- Projected semantic segment surface policy through ACP conversation DTOs so external clients can distinguish transcript, card, panel, copy, selection, and detail affordances without TUI-specific heuristics.
-- Routed selected/latest conversation copy through semantic segment copy policy so assistant copies exclude reasoning chrome, tool copies prefer result detail, and non-copyable media/chrome segments return no clipboard text.
-- Made slim TUI transcript rendering copy-friendlier by letting assistant, operator, and system message bodies avoid full-width trailing surface paint while keeping tool cards structured.
-- Reused the profile-aware settings projection for TUI settings modal navigation so tab/row bounds stay aligned with profile-drift rendering.
-- Wired TUI settings-modal `s` and `a` shortcuts to the existing `/profile save` and `/profile apply` control paths.
-- Added command-palette persistence hints for `/think`, `/context`, `/profile`, and `/settings`, and rendered command metadata in the TUI slash popup.
-- Rendered profile source, runtime drift, and `/profile save`/`/profile apply` affordances directly in the TUI settings modal so defaults count as the active profile source.
-- Routed the TUI settings screen through the profile-aware settings projection and added `/profile save` variants to command-palette completions so defaults/runtime drift and explicit save actions share the existing profile command path.
-- Expanded the profile-defaults/runtime-drift design with concrete settings menu renderer and slash popup/chrome staging guidance, including cached projection refresh requirements and profile drift chrome contracts.
-- Added profile-drift metadata to the shared settings surface projection and routed the agent-facing settings overview through profile-aware settings rows.
-- Made thinking and requested-context-class commands runtime-only by default; `/profile view` now shows the resulting drift and `/profile save|capture` is the explicit persistence path.
-- Added a renderer-neutral profile drift projection and routed `/profile view` through a human-readable drift summary with source metadata, save/apply actions, live runtime details, and saved profile JSON.
-- Expanded the profile-defaults/runtime-drift design with user/project source-target semantics, future signed Armory-published portable profile goals, plus a cutover-oriented TDD plan covering profile schema, drift projection, `/profile` view/save/revert, runtime-only `/think`/`/context`, settings rows, slash popup metadata, and chrome cues.
-- Documented the profile-defaults/runtime-drift design as a shared projection concern for settings menu rows, slash popup command semantics, chrome drift cues, and `/profile` save/apply affordances.
-- Simplified the TUI title context signal to show only the resolved upstream context envelope plus pressure, removing requested-to-actual class deltas from persistent chrome.
-- Removed model pricing ownership from routing, model registry metadata, model catalog UI, footer session summaries, and Sentry budgets so Omegon routes by capability/context/token limits rather than hardcoded dollar heuristics.
-- Completed provider-route-state-machine endpoint normalization lifecycle reconciliation.
-- Wired live route resolution after `/model grade`, `/model provider`, and `/model policy` intent changes while preserving durable model intent.
-- Corrected provider-route OpenSpec task state to keep OpenAI-compatible response/error normalization open until implemented.
-- Added the first durable model-intent state slice so route snapshots carry requested grade/provider intent separately from the active serving route.
-- Added registry validation coverage requiring every OpenAI-compatible endpoint to declare verified profile metadata.
-- Wired endpoint-declared auth schemes into provider API-key resolution for registry-only endpoints.
-- Migrated the model registry and routing internals from legacy tier fields to provider-neutral grade mappings while retaining external DTO compatibility where required.
-- Added endpoint definitions and OpenAI-compatible request shaping hooks to the model registry/provider path.
-- Added OpenAI-compatible endpoint profile metadata to the bundled model registry for known upstream endpoints, capturing supported capabilities, unsupported fields, optional headers, and provider quirks.
-- Added endpoint definitions to the bundled model registry, including endpoint class/protocol/auth metadata and validation for reserved selector tokens and duplicate endpoint IDs.
-- Migrated routing internals and the bundled model registry from legacy tier lookups to grade-based registry helpers while retaining one-release loader tolerance for old registry files.
-- Migrated the bundled model registry from legacy tier maps/route fields to grade-based registry data and removed registry tier compatibility shims.
-- Updated the routing baseline delta spec from legacy tier aliases to provider-neutral grade and provider-selector scenarios.
-- Updated baseline context-class routing scenarios from legacy tier names to grade-policy terminology.
-- Updated baseline routing and effort specs from legacy tier commands/tooling to model grades, endpoint selectors, and `set_model_intent`.
-- Migrated internal harness status and dispatcher projections from legacy model-tier values to provider-neutral grade values while preserving external snapshot field compatibility.
-- Adversarially corrected stale model-routing documentation that still claimed legacy public tiers were stable, and reopened implementation tasks for internal tier/data-model and baseline-spec cleanup.
-- Replaced the advertised model-tier control surface with provider-neutral model intent grades, added canonical `/model grade <F|D|C|B|A|S>` parsing, and removed legacy tier slash command dispatch.
-- Tightened the model-control redesign plan with adversarial follow-up requirements for Rust-native implementation scope, explicit grade/failover/degradation policies, atomic model-intent tooling, endpoint auth schemes, response/error normalization, and baseline spec cleanup.
-- Documented the 0.27.0 model-control redesign plan: provider-neutral F/D/C/B/A/S grades, separate endpoint/provider selection, protocol-profile-driven upstream provider matrix, and removal of legacy model-tier commands/tool semantics.
-- Strengthened model-facing Workbench/plan guidance so visible plans are treated as the operator's primary awareness surface and must be updated, completed, skipped, or cleared before final replies.
-- Added a runtime final-answer nudge when an assistant turn would end while the visible Workbench plan still has active/todo items.
-
-### Fixed
-- Moved TUI prompt-history navigation from `Ctrl+Up`/`Ctrl+Down` to macOS-safe `Alt+Up`/`Alt+Down`, avoiding Mission Control and Stage Manager shortcut collisions.
-- Made bare Up editor-navigation-only as well, so macOS/Kitty wheel gestures translated to Up cannot recall prompt history; explicit `Alt+Up`/`Alt+Down` remain the prompt history controls.
-- Made bare Down an editor-navigation-only key so Kitty wheel gestures translated to Down cannot advance or clear prompt history; explicit `Alt+Up`/`Alt+Down` remain the prompt history controls.
-- Split TUI mouse-wheel scrolling from keyboard history handling so crossterm mouse events cannot mutate the editor buffer or history index.
-- Hardened terminal session spawning to prefer an absolute bash path so PTY-backed terminal tests and sessions still start when `PATH` is empty.
-- Made the TUI model-grade badge reflect the actual displayed model capability from the registry instead of the current route-intent default, so `openai-codex:gpt-5.5` renders as `‹S›`, and replaced the duplicate editor context rail with a single `ctx:<class>@<capacity> <pct>% <fill> <used>` signal.
-- Documented the registry-backed slash-command matrix and added drift coverage for canonical parser commands versus intentional hidden compatibility aliases.
-- Gated built-in remote slash execution with command-registry CLI availability metadata so interactive-only commands are rejected consistently.
-- Added explicit built-in remote slash policy for confirmation-required commands while preserving remote logout compatibility.
-- Kept agent/tool `context_status` calls local to their tool card so they no longer enqueue the full `/context` palette into the transcript after assistant turns.
-- Persisted interactive `/think <level>` changes to the project profile and restored explicit thinking preferences after slim/full posture startup defaults.
-- Restored the full idle editor top-line engine block so it shows provider, tier, and thinking level beside the short model label.
-- Right-aligned slim tool-row detail affordances through the shared semantic inline renderer, including `read`/tool rows with crowded detail text.
-- Summarized `/context status` tool rows from the palette summary instead of repeating the `Context` block title at the end of the row.
-- Accounted for the skills command matrix by parsing `/skills create --project|--user` and `/skills import [--project|--user] <path>`, then routing both through runtime prompts instead of falling into usage text; import prompts now escape backticks in rendered path text.
-- Mapped bare `/context` to the status command so the matrix behavior matches the `/model`, `/skills`, and other view-command families.
-- Routed palette-shaped slash-command notifications for context, thinking, skills, and prompt list into the command panel instead of treating them as transcript system messages.
-- Routed `/context status` slash output to the command panel instead of appending the palette markdown as a plaintext system block at the end of the transcript.
-- Kept expanded `context_status` tool cards compact by suppressing the full palette markdown result body after the summary row.
-- Preserved slim compact-row child indentation across wrapped reasoning/tool continuation lines so multi-line details stay visually nested.
-- Made `/version` render multiline build details so it opens in the command-output panel instead of disappearing as a short toast, and documented `/q` and `/quit` alongside `/exit` in the slash palette.
-- Clamped slim reasoning and memory/tool segment rows to the visible terminal width so long summaries cannot bleed past the right edge.
-- Made `/settings` open the persistent settings page directly without also rendering a command-output panel, and let Ctrl+C close that page like Esc.
-- Removed mouse copyability from the preferences/settings menu and profile persistence while preserving `/mouse` and Ctrl+Shift+T as transient app-mouse versus terminal-selection controls.
-- Removed the obsolete hardcoded auth-based model selector scaffold in favor of the existing catalog-backed model selector path.
-- Cleared Clippy warnings that blocked `just lint`, including derivable defaults, single-character string pushes, manual contains checks, collapsible conditionals, bool assert comparisons, and explicit allowances for intentionally broad dispatcher signatures.
-
-### Changed
 - Removed the old TUI-local `/context status` dump and routed context status through the shared control-runtime palette projection.
 - Rendered `/think list` and `/think status` through the shared palette projection so thinking-level discovery now uses action rows while bare `/think` continues to open the existing TUI selector and `/think <level>` remains the direct setter.
 - Rendered `/prompt list` through the shared palette projection so prompt inventory now uses the same action/object row semantics as `/skills`.
@@ -398,82 +280,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Tightened the bundled `code-act` skill so batch scripting no longer overrides the canonical read → `edit` → `validate` loop for small source changes.
 - Updated bundled `typescript` and `openspec` skills to remove legacy `pi-*` SDK example drift and make lifecycle tool usage capability-aware.
 - Reworked the bundled OpenSpec skill so slash commands are documented as optional operator-surface conveniences rather than mandatory agent workflow steps.
-
-### Added
-- Wired live settings into delegate and cleave features so `/autonomy` changes resolve the same subagent policy for prompt/status and tool gate enforcement while preserving conservative fallback.
-- Made delegate and cleave autonomy gates policy-injectable so tests can prove higher-autonomy policies allow operations that conservative defaults gate, reducing prompt/status/tool policy drift.
-- Wired base prompt assembly to accept the operator-selected subagent policy so future `/autonomy autonomous` sessions can render orchestrator guidance instead of the conservative default.
-- Exposed the mapped subagent autonomy policy in `/automation status` so the operator can see delegate/cleave posture, limits, and the loop/scheduled-job non-escalation note.
-- Mapped `/autonomy flow` to the conservative subagent policy so flow continuation does not implicitly make `cleave_run` a normal operation; `/autonomy autonomous` remains the power-user orchestration posture.
-- Added a mapping from the existing `/autonomy` automation levels to subagent autonomy policy levels so future prompt/gate wiring can use one operator-facing knob.
-- Added an internal autonomy envelope model for session, loop, scheduled-job, and explicit-approval policy precedence without changing loop execution behavior yet.
-- Added execution substrate projection to IPC/web runtime snapshots so attached clients can see the detected host/container substrate alongside harness status.
-- Added a conservative subagent autonomy policy layer that now drives prompt guidance for delegate/cleave operations, keeping `cleave_run` approval-oriented by default while allowing bounded scout/verify delegates.
-- Gated mutating `delegate` patch workers behind structured approval details under the conservative subagent autonomy policy before allocating delegate tasks or spawning child workers.
-- Gated over-limit `cleave_run` requests behind structured approval details under the conservative subagent autonomy policy before creating cleave workspaces or spawning children.
-- Added CLI parser coverage for the `--oci` alias, OCI image/runtime overrides, and conflict handling with `--dangerously-bypass-permissions`.
-- Marked host-shim OCI launches with `OMEGON_RUNTIME_CONTEXT=host-shim-oci`/`OMEGON_OCI_LAUNCHER=omegon` and made recursive `--oci` requests inside an OCI container fail closed.
-- Added an orchestrated OCI runtime design for Kubernetes/CRI deployments where Omegon is launched by the orchestrator rather than by the native `--oci` host shim.
-- Added `--oci` as an alias for the existing OCI-backed `--sandboxed` launcher path, plus CLI/env image and runtime overrides that default the containerized substrate to `ghcr.io/styrene-lab/omegon-full:<version>`.
-- Added an OCI CLI execution-boundary design for a host-shim `omegon --oci` mode, covering image/runtime resolution, raw argv forwarding, mount/auth policy, daemon port mapping, extension isolation, and phased integration.
-- Documented the validated containerized daemon/control-port probe for the local `omegon-full` OCI image, including current provider-auth, host-extension, and IPC limitations.
-- Documented the validated Nix/Lima/nix2container/Podman smoke path for the local `omegon-full` OCI substrate and added local export/load recipes for pre-publication testing.
-- Added architecture-aware local OCI build guidance/target and made `oci-smoke` platform selection explicit via `OCI_PLATFORM` instead of forcing amd64 on Apple Silicon.
-- Added an initial Nex-facing `substrates/omegon-full` package/profile seed for the full-first subagent OCI substrate.
-- Expanded the subagent OCI substrate design around a full-first trim-down strategy, Armory/extension layer composition, mount policy, and Ratatui dogfooding constraints.
-- Documented the inherited-default subagent execution boundary and added a Podman-first OCI smoke target for the explicit isolated subagent substrate.
-- Added first-class delegate cancellation status so cancelled delegate children project as terminal non-failure operation rows instead of failed tasks.
-- Added `delegate_cancel` so running delegate tasks can be marked cancelled explicitly, preserving terminal non-failure state in delegate status and Workbench operation rows.
-- Fixed subagent/delegate review findings by keeping background delegate startup responses machine-readable, marking delegate/subagent status commands read-only, narrowing the plural `/subagents` alias, and avoiding cleave tool names in base prompts when only `delegate` is exposed.
-- Clarified subagent/delegate/cleave design guidance so requests like “use subagents to merge these branches into main” still route through `cleave_assess`/`cleave_run` when the task shape requires coordinated merge work.
-- Clarified subagent prompt guidance so operator requests to "use subagents" are classified by task shape and may still route to `cleave_assess`/`cleave_run` for coordinated multi-branch or multi-scope work.
-- Added ACP command-registry coverage for the `subagent` alias and clearer background subagent start messages with status/result retrieval guidance.
-- Added `/subagent` and `/subagents` as operator-facing aliases for delegate status, and updated delegate metadata to describe same-provider subagents as the default path.
-- Added `just link-doctor` to inspect launcher PATH resolution, selected target, channel files, and fallback binary state.
-- Added fixture coverage for the stable launcher resolution policy, including env overrides, nearest checkout selection, channels, fallback binaries, paths with spaces, dev-release fallback, and self-recursion rejection.
-- Added a stable `omegon`/`om` launcher installed by `just link`, with deterministic multi-checkout resolution via explicit env overrides, nearest checkout builds, named `~/.omegon/channels`, and a fallback installed binary.
-- Added backend surface contracts for ACP/RPC skill and prompt definition management, covering list/get/create/update/delete plus skill install and prompt preview endpoints in the capability registry, wired ACP/IPC/WebSocket dispatch for existing skill and prompt read/preview handlers, added reusable prompt definition storage and safety verdicts for bundled/user/project-local prompts, registered `/prompt` as the command-palette-native prompt routing surface, deprecated `_prompts/submit` as a read-only preview alias, and documented prompt/user-command authoring.
-- Added advisory activation metadata (`activation`, `profile`, `project_signals`) to bundled skill manifests and the skill builder schema so profile-aware skill loading can be implemented from declared intent instead of prose inference.
-- Added typed activation/profile diagnostics for skill manifests so future consumers can normalize advisory metadata and report unknown or unsafe user-skill values without crashing.
-- Added advisory project-signal matching helpers for skill activation metadata, including root-relative literal matching, root-only globs, recursive `**/` globs, ignored vendor/build directories, and invalid-pattern rejection.
-- Added a source-agnostic skill suggestion helper that evaluates parsed bundled, user-installed, Armory-installed, or project-local skills against profile, intent, and project-signal evidence without performing runtime injection, preserving external metadata diagnostics instead of silently dropping malformed activation hints.
-
-### Fixed
-- Documented that bash permission mediation is static/advisory for common shell forms and that hard filesystem containment belongs to the sandbox layer.
-- Guarded auth.json writes and logout mutations in test builds so credential mutation paths fail fast unless `OMEGON_AUTH_JSON_PATH` points at an explicit fixture, preventing test-suite runs from mutating the operator's real `~/.config/omegon/auth.json`.
-- Routed bash workspace-boundary hits through the same typed permission mediation as read/write/edit so approved outside-workspace shell writes retry instead of remaining bash-local blocks.
-- Made outside-workspace permission prompts wait for an explicit operator allow/deny decision instead of timing out as a denial after 120 seconds; explicit run cancellation still unblocks the wait as a denial/cancelled decision, and `--dangerously-bypass-permissions` still bypasses the prompt before it is raised.
-- Unified provider credential reads through canonical auth.json keys so OpenAI Codex OAuth aliases resolve the persisted `openai-codex` grant instead of forcing reauthentication after rebuilds.
-- Isolated the voice bridge extension fixture from ambient Kubernetes substrate environment so full-suite runs do not reject the native test extension.
-- Avoid caching Pkl binary availability so env-mutating tests or runtime PATH changes cannot poison agent manifest loading for the rest of the process.
-- `omegon --which` now reports checkout `HEAD` freshness for launcher-selected checkout/channel binaries and suggests `cd <root> && just link` when a local build is stale.
-- Replaced active ACP binary-linking guidance that recommended direct `~/.local/bin` symlinks with the stable launcher/channel workflow.
-- **Startup provider credential race** — interactive launch now performs a refresh/adoption pass before emitting a missing or expired credential warning for the selected provider. This prevents a just-saved `openai-codex` OAuth entry from being reported as absent on the next rebuilt launch.
-- **Slim tool row affordance alignment** — completed and live slim tool rows now reuse the shared inline row renderer so `⌃O details` stays right-aligned consistently instead of drifting in the legacy compact path.
-- **Selected segment focus rail** — selected conversation segments now use a plain vertical focus rail instead of repeated diamond glyphs that could collide with narrow terminal content.
-- **Auth store credential preservation** — provider credential writes now fail before touching disk if an update would remove unrelated provider entries, including existing `openai-codex` OAuth credentials.
-
-### Added
-
-- Added the Modern Command Palettes design node for palette-style `/skills` and `/prompt` operator surfaces.
-- Add Java, Kotlin, and C# discovery/chunking to `codebase_search`; add a safe repo-relative `within` result scope, cancellation-aware index/search execution, and scope diagnostics in tool details.
-- Trace auth.json provider key-set deltas on credential writes, refreshes, and logout so future OpenAI/Codex credential disappearance incidents identify the mutating operation and whether `openai-codex` was dropped. Auth updates now also refuse to replace an unparsable existing auth store with a partial credential file.
-- Add redacted provider-auth and route-state diagnostic tracing for auth.json path selection, credential source/probe decisions, OAuth refresh/write-back, login outcomes, and fallback/disconnected route causes so relaunch login regressions leave an attributable trail.
-- Rebuild the release binary inside `just link` before selecting the binary to alias so local `omegon --version` cannot point at a stale artifact from an older HEAD.
-- Add peer-agent conversation representation/projection support so delegate/cleave/A2A output can carry producer identity independently from assistant/tool rendering.
-- Add an explicit assess-time assumption question to the design-tree prompt injection: reviewing a design node now directs the agent to ask what unstated assumptions the design makes and record them as `[assumption]`-tagged questions.
-- Add `just source-clean` and source-vs-agent-state dirty classification so live `.omegon/` telemetry no longer blocks source-plane cleanliness checks.
-
-### Changed
-
 - Clarified bundled prompt, Lex, and OpenSpec guidance so `delegate` is the default one-shot subagent path while `cleave_run` is reserved for coordinated multi-child work.
 - Make `om` an exact synonym for `omegon`; launcher name no longer implicitly enables slim/explorator mode. Use explicit posture flags or profile defaults for runtime mode selection.
 - Update harness prompt/project directives for Workbench plan-state reconciliation, semantic surface discipline, registry-backed command surfaces, and prompt/loop provenance safety.
 - Interactive startup no longer silently falls back to `automation_safe_model()` when the selected provider is unavailable. Fallback is now opt-in via profile `fallbackProviders = ["provider-id"]`; otherwise startup enters an explicit disconnected state with remediation guidance. Operators who previously would have received a silent fallback now also get a one-time startup notice with the exact `fallbackProviders = [...]` snippet needed to opt back in.
-
 - Add explicit command registry availability/safety metadata, including CLI/ACP confirmation gates with `--dangerously-bypass-permissions` bypass support.
 - Preserve queued prompt dispatch mode at queue time so delayed prompts keep their original queue semantics.
-
 - Rename the TUI Plan Dock into a Workbench surface and surface active cleave/delegate progress there instead of only in optional instruments.
 - Render plan status glyphs (`●`/`◐`/`⊘`/`○`) in Workbench plan rows alongside the text labels so progress state is visible at a glance in Slim mode.
 - Make delegate runner script fixtures flush to disk before execution so CI timeout tests fail only on runner behavior, not file visibility races.
@@ -557,9 +369,189 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Move user prompt segment rendering into its dedicated component module.
 - Document the TUI surface architecture boundaries across shared semantic surfaces, ACP adapters, layout projection, sub-surfaces, and segment components.
 - Remove Google and Bing from zero-key web search: automatic free search now uses only DuckDuckGo, while reliable search remains available through configured Brave, Tavily, Serper, or Firecrawl API keys.
+- Interactive startup no longer silently falls back to `automation_safe_model()` when the selected provider is unavailable. Fallback is now explicit and opt-in through profile `fallbackProviders = ["provider-id"]`; otherwise Omegon enters a disconnected state with remediation guidance.
+- Import discovered external provider credentials into Omegon auth storage during startup hydration, adopt valid external credentials when internal auth storage is missing or expired, and warn visibly when profile-model credentials are unavailable.
+- Keep the selected provider/model distinct from the served bridge/model throughout fallback routing, turn configuration, active-model tracking, footer projection, and session-log emission.
+- Rename the TUI Plan Dock to the Workbench and surface active cleave/delegate/lifecycle work there with plan status glyphs (`●`/`◐`/`⊘`/`○`) in Slim mode.
+- Slim the TUI engine footer into a compact model/status sidecar and keep lifecycle, engine, inference, tools, and Workbench telemetry in separate rows/surfaces instead of competing for one footer block.
+- Replace the old full-dashboard tree renderer with a thin read-only project lifecycle strip above the footer/tooling area.
+- Extract TUI conversation, footer, dashboard, editor, instrument, layout, tool-card, segment, permission, plan, extension-overlay, focus-view, and tab-bar rendering behind semantic projection/component boundaries shared with future ACP surfaces.
+- Add command registry availability/safety metadata, including CLI/ACP confirmation gates and `--dangerously-bypass-permissions` bypass support.
+- Rename context classes from Squad/Maniple/Clan/Legion to Compact/Standard/Extended/Massive while retaining legacy aliases.
+- Route design-tree and OpenSpec lifecycle mutations through named lifecycle services for node creation, status, questions, research, decisions, links, implementation notes, branch, metadata, archive, implement scaffolding, query policy, FSM sync, and archive recovery.
+- Split `omegon-codescan` language-specific scanner logic into bounded modules, add Java/Kotlin/C# discovery, and attach extraction language/strategy/confidence metadata to code chunks.
+- Clarify trunk/release policy: `main` owns nightly/trunk work, `release/X.Y` branches are internal stabilization branches, and hardening fixes merge forward.
 
 ### Fixed
 
+- Fixed `/model list` in the TUI to open the interactive model selector instead of dumping the available-models text readout into the terminal, and closed parent structured menus when launching selector rows so arrow keys move the selector instead of the underlying menu.
+- Hardened shared `/extension` and `/runtime` menu actions: refresh/update require confirmed menu activation, and extension search now primes `/extension search ` for an explicit query instead of executing a query-less menu command.
+- Kept structured menus open underneath menu-launched command output and rendered those raw slash responses in a returnable, scrollable command panel instead of dumping them into the conversation transcript.
+- Routed `/settings` through the shared structured menu substrate and removed the legacy in-app settings screen render/input state from the TUI app.
+- Routed `/help` to the shared command inventory menu by default while preserving `/help all` as the full text readout, establishing the first general-purpose slash-command menu affordance beyond skills/settings.
+- Routed bare `/model` to a shared model-routing menu with current-model selector entry, grade/provider/policy rows, and row-target action affordances for menu-local navigation.
+- Routed bare `/auth` and `/login` to the shared provider credential menu, reusing the provider status rows from `/model providers` while preserving direct login/logout commands.
+- Added route-aware selected/serving badges to provider menu rows and included route state, serving model, and route warnings in the `/model` menu summary.
+- Hardened provider route menus with selected-provider fallback from configured settings, explicit fallback badges, route warnings in `/auth`, and clearer `/model` configured-model wording.
+- Routed bare `/context` to a shared context-control menu with policy selection, status, compact, and fresh-context actions while preserving direct context subcommands.
+- Hardened `/secrets set` so direct secret values entered on the slash line are redirected into hidden input instead of being queued as plaintext control requests; recipe forms (`env:`, `cmd:`, `vault:`) still queue normally.
+- Tightened canonical `/secrets set` parsing so plaintext values are rejected before they can become generic control requests; only recipe forms canonicalize outside hidden input.
+- Added a `/model providers` tab in the shared model menu with credential-probe status and login remediation actions for common model providers.
+- Reclassified the consumer ambiguous-reasoning-phase idle bail as a transient stalled stream instead of an unknown (non-transient) error. Previously a wedged reasoning stream that timed out in the ambiguous phase hard-failed the turn with no retry; it now retries like every other stall.
+- Gave the producer-side SSE watchdog (`process_sse`, shared by Anthropic/OpenAI/codex) the same single re-arm as the consumer: an active-phase silence downgrades once to the reasoning budget before being treated as a stall, so legitimate inter-item reasoning gaps no longer abort live turns. Producer stalls now classify as stalled streams consistently with the consumer.
+- Added completion guards to the Ollama (NDJSON `done`) and Google Antigravity (Gemini `finishReason`) stream parsers so a mid-response connection drop surfaces a transient error instead of replaying truncated content as a completed turn.
+- Made the Antigravity/Gemini stream watchdog phase-aware (re-arm to the reasoning budget once) instead of a flat 90s idle, and stopped it from emitting a `Done` after it had already surfaced a stream error.
+- Closed a partial-content poisoning gap on the Anthropic and OpenAI streaming paths: when the SSE byte stream ends without a `message_stop`/`finish_reason` terminal event (a mid-response connection drop), the producer now emits a `BridgeDropped` error so the retry loop handles it, instead of silently returning truncated text/tool-calls as a completed turn. Mirrors the existing Codex completion guard.
+- Stopped the consumer stream watchdog from raising spurious `Upstream stalled stream — retrying` failures when reasoning providers (notably `openai-codex`) pause between output items without first closing the active text/tool block. The first active-output silence now re-arms once to the generous reasoning budget; a genuinely dead stream still surfaces inside the retry budget.
+- Added `/resume <session-id>` and `/sessions resume <session-id>` to switch the live TUI to a saved session by id/prefix.
+- Added human-readable session descriptions to saved session metadata and session list/web summaries so resume IDs have operator context.
+- Printed both CLI (`omegon --resume <id>`) and in-app (`/resume <id>`) resume commands when sessions are saved on exit.
+- Printed the saved session id and exact `omegon --resume <id>` command when an interactive or standalone headless session exits.
+- Prevented native and OCI extension stderr logs from leaking into the interactive terminal by piping extension stderr into Omegon tracing instead of inheriting it.
+- Surfaced the active profile source in the engine line so project/user/default profile state is visible at a glance; named profiles now render by short name instead of source-only labels.
+- Prevented explicit provider-qualified model specs from silently falling back to unrelated automation-safe providers.
+- Refreshed the TUI Workbench workspace context from live git state so the displayed branch reflects the current checkout instead of a stale harness snapshot after workspace/branch changes.
+- Added compact git state to the TUI Workbench branch field: ahead/behind counts, tracked dirty marker, detached HEAD label, and merge/rebase/cherry-pick state when present.
+- Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
+- Made `omegon skills --cwd <path>` honor the requested project directory for project-local skill create/get/list/import/delete operations, so iterative skill work can target another checkout without changing the shell cwd.
+- Serialized skills and Claude migration tests that mutate process-global `OMEGON_HOME` or the current working directory, making plain parallel `cargo test -p omegon` pass without relying on `--test-threads=1`.
+- Made the loop stream idle watchdog phase-aware for post-text, post-thinking, and post-tool-call inter-item gaps so normal provider decision silence does not trip the tighter active-output stall timeout.
+- Improved the slim TUI engine/footer band: active turns no longer replace provider/model, tier, thinking, and context details with the spinner verb; thinking mode now renders as its own shaded engine-ribbon segment, and the spinner/status verb moves to a subtle always-on activity row above the engine line. Updated the stale memory-tool label assertion to match the shared `mem read` conversation-surface identity.
+- Fixed the stale-Workbench-plan problem where the agent could repeatedly claim completion while the visible plan still showed active/todo rows. The plan-reconciliation nudge was gated on a one-shot `plan_reconciliation_nudged` latch that fired once per session and never re-armed — so after a single early nudge, every later completion-claim-with-stale-plan went unguarded for the rest of the session. The nudge is now keyed on a fingerprint of the open (Pending/Active) plan items: a changed fingerprint (genuine progress, a replaced plan, or a newly orphaned one) re-arms it, while an identical stale state is bounded to `MAX_PLAN_RECONCILIATION_NUDGES` (3) to avoid livelock with a model that refuses to reconcile.
+- Made the **consumer-side** LLM stream watchdog reasoning-aware, fixing the remaining `stream stall exhaustion` failures on `openai-codex:gpt-5.5` and other reasoning models. `consume_llm_stream` previously treated `ThinkingStart` as "content received," dropping its idle budget to the 90s content window — so a silent reasoning gap (reasoning models can stream nothing, not even reasoning-summary deltas, for minutes) tripped the watchdog and, after cumulative retries, exhausted. A new reasoning phase (ThinkingStart..first content/tool) now carries a generous budget (default 300s, override `OMEGON_LLM_REASONING_IDLE_TIMEOUT_SECS`, min 60), cleared the moment real text or a tool call begins. This complements the earlier provider-side `process_sse` fix: both the network reader and the event consumer are now phase-aware.
+- Made the SSE stream watchdog phase-aware so extended reasoning is no longer misclassified as a stall: idle budget is now 90s while content/tool tokens actively stream and 300s while the model is reasoning or before the first token. Fixes repeated `stream stall exhaustion` failures on reasoning models (OpenAI gpt-5.x / o-series, Anthropic interleaved thinking) where the flat 90s idle timeout tripped during legitimate silent reasoning. Reasoning budget is overridable via `OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS` (default 300, min 60); active budget retains `OMEGON_SSE_IDLE_TIMEOUT_SECS` (default 90, min 30).
+- Auto-expanded TUI tool cards for direct bang shell commands like `!ls` so operator-requested command output is visible by default.
+- Made `memory_query` inventory-only for large stores so mature projects show section counts instead of noisy sample facts.
+- Rejected invalid native memory sections, including lifecycle ingestion paths, instead of silently defaulting them to Architecture, and made empty `memory_recall` queries return an explicit error result.
+- Clarified extension tool descriptions as extension-owned rather than Omegon core semantics, reducing confusion between Flynt document-memory tools and native `memory_*` runtime memory.
+- Tightened native memory tool guidance to discourage over-storing, prefer targeted recall, and reserve broad `memory_query` for inventory/debugging.
+- Routed all in-tree bash execution paths, including code-act proxy execution, through workspace-boundary mediation so path permission prompts remain harness-level instead of leaking back as ordinary tool output.
+- Kept completed live tool activity visible briefly before clearing the slim activity stream so successful and failed operations do not disappear abruptly.
+- Routed TUI prompt visibility through the runtime-start event so submitted and queued operator prompts do not render before the runtime actually starts sending them.
+- Cleared stale Workbench active-plan state when typed plan projections report no active lane, while preserving workspace context across plan updates.
+- Stopped ordinary startup from creating project-local `ai/` or `.omegon/` memory directories; uninitialized projects now stay clean until `/init` is run.
+- Retained bounded multi-tool activity rows with display-ready projection metadata so slim activity can show recent running/completed/cancelled tools without TUI-only conversation lookups.
+- Allowed workspace-boundary-safe temp directory paths by default so tools can use `/tmp`-style scratch files without unnecessary permission prompts.
+- Clarified permission prompts with typed request metadata so the TUI distinguishes policy-only approvals from persisted directory grants and shows the actual grant path.
+- Hardened extension-declared skill paths against absolute/path-traversal escapes and made skill conflict matching case-insensitive.
+- Resolved prompt assembly to load one directive per skill name so project-local skills override same-named user skills instead of injecting both.
+- Updated the in-code skill schema documentation to show YAML as canonical while documenting TOML as compatibility.
+- Matched `/skills get` provenance metadata to the resolved skill path so project-local overrides do not accidentally inherit bundled metadata.
+- Kept the Workbench context line reserved above active plan rows so expanded plans render below the Workbench instead of covering it.
+- Fixed direct plan item completion so completing the active item advances/reconciles the visible Workbench pointer even when later items were already marked done.
+- Made turn cancellation phase-aware: early interrupted submissions are forgotten from canonical replay, while interrupts after assistant/tool output keep the prompt for the next turn; the session bar now exposes interrupt/keep/forget disposition.
+- Fixed upstream LLM error recovery so a provider rejection is surfaced in the transcript without leaving the rejected active prompt in canonical replay and poisoning subsequent sends.
+- Fixed Codex Responses replay so assistant history uses request-safe `output_text` content blocks instead of invalid `input_text`, while preserving queued operator prompt visibility in the TUI conversation.
+- Display queued prompts as normal operator segments when the runtime actually starts them, instead of inserting them into the transcript at queue time.
+- Clarified memory tool segment labels and recall summaries so read/write/pin/compact operations are visually distinct and recall counts render as hits instead of total stored facts.
+- Split stable Workbench plan/context rendering from dynamic activity rendering so live tools plus cleave/delegate progress use tiered activity height instead of resizing the Workbench.
+- Replayed assistant text for the ChatGPT/Codex Responses route with request-safe `input_text` content blocks instead of output-only `output_text` blocks, avoiding upstream `400 Unsupported content type` failures on continued turns.
+- Converted the slim turn-state TUI test away from brittle glyph/text assertions to semantic `SlimTurnState` and tool-card state checks.
+- Preserve structured Codex SSE error details in operator-facing failures instead of manufacturing bare `unknown error`, including upstream status/code/type context and tracing logs for raw error events.
+- Added semantic Workbench projection tests for typed operation worker rows so delegate/cleave coverage can assert structured status/tool/detail mapping before terminal rendering.
+- Added semantic Workbench projection tests for typed plan lanes so TUI coverage can assert DTO mapping without brittle terminal text matching.
+- Routed lifecycle-aware workbench plan snapshots through the same shared plan surface projection used by `plan list`/`plan show`, removing duplicate registry assembly in main loop surfaces.
+- Routed `plan list` and `plan show` text through shared plan renderers so direct command output and tool-result enrichment cannot drift across harness surfaces.
+- Always inject active plan context into the model when a session or repo-bound visible plan is live, even before any tool call/current-task/compaction signal exists.
+- Added typed PlanUpdated edge coverage for IPC and MQTT compatibility payloads so external legacy snapshots are proven to derive from `omegon_traits::PlanSurfaceProjection`.
+- Kept `manage_tools list` synchronized with the EventBus's finalized model-visible tool inventory so it no longer reports `0 total` tools while directly callable tools are available.
+- Render git tool rows with a dedicated git category glyph instead of reusing the file-write/edit document glyph.
+- Render lean editor engine ribbon tail fields as distinct gradient-style badge segments so grade, thinking, and context keep visible backgrounds and Powerline divider bridges instead of falling back to plain metadata text.
+- Routed slim tool segment category glyphs through the locked structured tool identity matrix, including shell-mediated read/search/write classifications, so compact tool rows no longer show stale generic/status symbols for context, codebase, search, and read tools.
+- Filled lean editor engine ribbon divider backgrounds so Powerline separators blend with the preceding route/card segments instead of rendering as floating triangles.
+- Preserve intentional theme badge backgrounds during final TUI background cleanup so the lean editor provider/model route remains visible as dark-on-accent text instead of being flattened to black-on-black.
+- Render the lean editor ribbon in route-first order (`provider/model`, grade, thinking, context) so `openai-codex/gpt-5.5` appears directly before the S-tier badge instead of after optional context fields.
+- Keep the lean editor ribbon provider/model route anchored at the right edge after optional context/grade/thinking segments so narrow terminals still show the active provider and model.
+- Collapsed the lean editor ribbon context segment to text-only summary so the context meter no longer consumes the remaining title width and hides the active model on narrow terminals.
+- Render the lean editor engine ribbon's pinned route as a single provider/model label with an explicit missing-provider fallback, so provider identity cannot disappear silently behind separator math or empty provider state.
+- Scoped OAuth expiry toasts to the active provider route so stale non-active provider credentials remain visible in auth status without interrupting healthy conversations.
+- Removed duplicate workspace dir/git metadata from the compact TUI session row now that the workbench row owns workspace context.
+- Populate the compact TUI workbench row with known workspace context (repo, dir, and git branch) even before a tool, plan, delegate, or cleave run is active.
+- Routed command-panel rendering through the shared command modal geometry so slash-command output panels do not keep a separate ad hoc modal size.
+- Kept overflowing command selectors scroll-aligned around the cursor after standardizing modal height, so long menus remain navigable instead of rendering only their first page.
+- Clarified TUI settings profile-source chrome by rendering `profile: project|user · file: <full path>` instead of formatting the profile file as the project label; noted a future affordance for opening the active profile file.
+- Restored the inline conversation-segment copy affordance to the high-contrast `⧉` glyph and aligned its click target with the one-cell label.
+- Made inline conversation-segment `⧉` copy affordances use the same selected-segment copy path as keyboard shortcuts, including visible success/failure toasts.
+- Added a shared `Segment::human_plaintext_detail()` accessor for full operator/client-readable plaintext segment detail, and routed the selected-segment modal through it instead of copy-policy export.
+- Clarified the Rust skill's Cargo test filtering guidance so agents use one positional test filter per invocation or a single broader shared filter.
+- Routed verbose informational slash-command output into conversation system segments while keeping usage/error responses in command panels and unknown commands in compact warning toasts.
+- Projected semantic segment surface policy through ACP conversation DTOs so external clients can distinguish transcript, card, panel, copy, selection, and detail affordances without TUI-specific heuristics.
+- Routed selected/latest conversation copy through semantic segment copy policy so assistant copies exclude reasoning chrome, tool copies prefer result detail, and non-copyable media/chrome segments return no clipboard text.
+- Made slim TUI transcript rendering copy-friendlier by letting assistant, operator, and system message bodies avoid full-width trailing surface paint while keeping tool cards structured.
+- Reused the profile-aware settings projection for TUI settings modal navigation so tab/row bounds stay aligned with profile-drift rendering.
+- Wired TUI settings-modal `s` and `a` shortcuts to the existing `/profile save` and `/profile apply` control paths.
+- Added command-palette persistence hints for `/think`, `/context`, `/profile`, and `/settings`, and rendered command metadata in the TUI slash popup.
+- Rendered profile source, runtime drift, and `/profile save`/`/profile apply` affordances directly in the TUI settings modal so defaults count as the active profile source.
+- Routed the TUI settings screen through the profile-aware settings projection and added `/profile save` variants to command-palette completions so defaults/runtime drift and explicit save actions share the existing profile command path.
+- Expanded the profile-defaults/runtime-drift design with concrete settings menu renderer and slash popup/chrome staging guidance, including cached projection refresh requirements and profile drift chrome contracts.
+- Added profile-drift metadata to the shared settings surface projection and routed the agent-facing settings overview through profile-aware settings rows.
+- Made thinking and requested-context-class commands runtime-only by default; `/profile view` now shows the resulting drift and `/profile save|capture` is the explicit persistence path.
+- Added a renderer-neutral profile drift projection and routed `/profile view` through a human-readable drift summary with source metadata, save/apply actions, live runtime details, and saved profile JSON.
+- Expanded the profile-defaults/runtime-drift design with user/project source-target semantics, future signed Armory-published portable profile goals, plus a cutover-oriented TDD plan covering profile schema, drift projection, `/profile` view/save/revert, runtime-only `/think`/`/context`, settings rows, slash popup metadata, and chrome cues.
+- Documented the profile-defaults/runtime-drift design as a shared projection concern for settings menu rows, slash popup command semantics, chrome drift cues, and `/profile` save/apply affordances.
+- Simplified the TUI title context signal to show only the resolved upstream context envelope plus pressure, removing requested-to-actual class deltas from persistent chrome.
+- Removed model pricing ownership from routing, model registry metadata, model catalog UI, footer session summaries, and Sentry budgets so Omegon routes by capability/context/token limits rather than hardcoded dollar heuristics.
+- Completed provider-route-state-machine endpoint normalization lifecycle reconciliation.
+- Wired live route resolution after `/model grade`, `/model provider`, and `/model policy` intent changes while preserving durable model intent.
+- Corrected provider-route OpenSpec task state to keep OpenAI-compatible response/error normalization open until implemented.
+- Added the first durable model-intent state slice so route snapshots carry requested grade/provider intent separately from the active serving route.
+- Added registry validation coverage requiring every OpenAI-compatible endpoint to declare verified profile metadata.
+- Wired endpoint-declared auth schemes into provider API-key resolution for registry-only endpoints.
+- Migrated the model registry and routing internals from legacy tier fields to provider-neutral grade mappings while retaining external DTO compatibility where required.
+- Added endpoint definitions and OpenAI-compatible request shaping hooks to the model registry/provider path.
+- Added OpenAI-compatible endpoint profile metadata to the bundled model registry for known upstream endpoints, capturing supported capabilities, unsupported fields, optional headers, and provider quirks.
+- Added endpoint definitions to the bundled model registry, including endpoint class/protocol/auth metadata and validation for reserved selector tokens and duplicate endpoint IDs.
+- Migrated routing internals and the bundled model registry from legacy tier lookups to grade-based registry helpers while retaining one-release loader tolerance for old registry files.
+- Migrated the bundled model registry from legacy tier maps/route fields to grade-based registry data and removed registry tier compatibility shims.
+- Updated the routing baseline delta spec from legacy tier aliases to provider-neutral grade and provider-selector scenarios.
+- Updated baseline context-class routing scenarios from legacy tier names to grade-policy terminology.
+- Updated baseline routing and effort specs from legacy tier commands/tooling to model grades, endpoint selectors, and `set_model_intent`.
+- Migrated internal harness status and dispatcher projections from legacy model-tier values to provider-neutral grade values while preserving external snapshot field compatibility.
+- Adversarially corrected stale model-routing documentation that still claimed legacy public tiers were stable, and reopened implementation tasks for internal tier/data-model and baseline-spec cleanup.
+- Replaced the advertised model-tier control surface with provider-neutral model intent grades, added canonical `/model grade <F|D|C|B|A|S>` parsing, and removed legacy tier slash command dispatch.
+- Tightened the model-control redesign plan with adversarial follow-up requirements for Rust-native implementation scope, explicit grade/failover/degradation policies, atomic model-intent tooling, endpoint auth schemes, response/error normalization, and baseline spec cleanup.
+- Documented the 0.27.0 model-control redesign plan: provider-neutral F/D/C/B/A/S grades, separate endpoint/provider selection, protocol-profile-driven upstream provider matrix, and removal of legacy model-tier commands/tool semantics.
+- Strengthened model-facing Workbench/plan guidance so visible plans are treated as the operator's primary awareness surface and must be updated, completed, skipped, or cleared before final replies.
+- Added a runtime final-answer nudge when an assistant turn would end while the visible Workbench plan still has active/todo items.
+- Moved TUI prompt-history navigation from `Ctrl+Up`/`Ctrl+Down` to macOS-safe `Alt+Up`/`Alt+Down`, avoiding Mission Control and Stage Manager shortcut collisions.
+- Made bare Up editor-navigation-only as well, so macOS/Kitty wheel gestures translated to Up cannot recall prompt history; explicit `Alt+Up`/`Alt+Down` remain the prompt history controls.
+- Made bare Down an editor-navigation-only key so Kitty wheel gestures translated to Down cannot advance or clear prompt history; explicit `Alt+Up`/`Alt+Down` remain the prompt history controls.
+- Split TUI mouse-wheel scrolling from keyboard history handling so crossterm mouse events cannot mutate the editor buffer or history index.
+- Hardened terminal session spawning to prefer an absolute bash path so PTY-backed terminal tests and sessions still start when `PATH` is empty.
+- Made the TUI model-grade badge reflect the actual displayed model capability from the registry instead of the current route-intent default, so `openai-codex:gpt-5.5` renders as `‹S›`, and replaced the duplicate editor context rail with a single `ctx:<class>@<capacity> <pct>% <fill> <used>` signal.
+- Documented the registry-backed slash-command matrix and added drift coverage for canonical parser commands versus intentional hidden compatibility aliases.
+- Gated built-in remote slash execution with command-registry CLI availability metadata so interactive-only commands are rejected consistently.
+- Added explicit built-in remote slash policy for confirmation-required commands while preserving remote logout compatibility.
+- Kept agent/tool `context_status` calls local to their tool card so they no longer enqueue the full `/context` palette into the transcript after assistant turns.
+- Persisted interactive `/think <level>` changes to the project profile and restored explicit thinking preferences after slim/full posture startup defaults.
+- Restored the full idle editor top-line engine block so it shows provider, tier, and thinking level beside the short model label.
+- Right-aligned slim tool-row detail affordances through the shared semantic inline renderer, including `read`/tool rows with crowded detail text.
+- Summarized `/context status` tool rows from the palette summary instead of repeating the `Context` block title at the end of the row.
+- Accounted for the skills command matrix by parsing `/skills create --project|--user` and `/skills import [--project|--user] <path>`, then routing both through runtime prompts instead of falling into usage text; import prompts now escape backticks in rendered path text.
+- Mapped bare `/context` to the status command so the matrix behavior matches the `/model`, `/skills`, and other view-command families.
+- Routed palette-shaped slash-command notifications for context, thinking, skills, and prompt list into the command panel instead of treating them as transcript system messages.
+- Routed `/context status` slash output to the command panel instead of appending the palette markdown as a plaintext system block at the end of the transcript.
+- Kept expanded `context_status` tool cards compact by suppressing the full palette markdown result body after the summary row.
+- Preserved slim compact-row child indentation across wrapped reasoning/tool continuation lines so multi-line details stay visually nested.
+- Made `/version` render multiline build details so it opens in the command-output panel instead of disappearing as a short toast, and documented `/q` and `/quit` alongside `/exit` in the slash palette.
+- Clamped slim reasoning and memory/tool segment rows to the visible terminal width so long summaries cannot bleed past the right edge.
+- Made `/settings` open the persistent settings page directly without also rendering a command-output panel, and let Ctrl+C close that page like Esc.
+- Removed mouse copyability from the preferences/settings menu and profile persistence while preserving `/mouse` and Ctrl+Shift+T as transient app-mouse versus terminal-selection controls.
+- Removed the obsolete hardcoded auth-based model selector scaffold in favor of the existing catalog-backed model selector path.
+- Cleared Clippy warnings that blocked `just lint`, including derivable defaults, single-character string pushes, manual contains checks, collapsible conditionals, bool assert comparisons, and explicit allowances for intentionally broad dispatcher signatures.
+- Documented that bash permission mediation is static/advisory for common shell forms and that hard filesystem containment belongs to the sandbox layer.
+- Guarded auth.json writes and logout mutations in test builds so credential mutation paths fail fast unless `OMEGON_AUTH_JSON_PATH` points at an explicit fixture, preventing test-suite runs from mutating the operator's real `~/.config/omegon/auth.json`.
+- Routed bash workspace-boundary hits through the same typed permission mediation as read/write/edit so approved outside-workspace shell writes retry instead of remaining bash-local blocks.
+- Made outside-workspace permission prompts wait for an explicit operator allow/deny decision instead of timing out as a denial after 120 seconds; explicit run cancellation still unblocks the wait as a denial/cancelled decision, and `--dangerously-bypass-permissions` still bypasses the prompt before it is raised.
+- Unified provider credential reads through canonical auth.json keys so OpenAI Codex OAuth aliases resolve the persisted `openai-codex` grant instead of forcing reauthentication after rebuilds.
+- Isolated the voice bridge extension fixture from ambient Kubernetes substrate environment so full-suite runs do not reject the native test extension.
+- Avoid caching Pkl binary availability so env-mutating tests or runtime PATH changes cannot poison agent manifest loading for the rest of the process.
+- `omegon --which` now reports checkout `HEAD` freshness for launcher-selected checkout/channel binaries and suggests `cd <root> && just link` when a local build is stale.
+- Replaced active ACP binary-linking guidance that recommended direct `~/.local/bin` symlinks with the stable launcher/channel workflow.
+- **Startup provider credential race** — interactive launch now performs a refresh/adoption pass before emitting a missing or expired credential warning for the selected provider. This prevents a just-saved `openai-codex` OAuth entry from being reported as absent on the next rebuilt launch.
+- **Slim tool row affordance alignment** — completed and live slim tool rows now reuse the shared inline row renderer so `⌃O details` stays right-aligned consistently instead of drifting in the legacy compact path.
+- **Selected segment focus rail** — selected conversation segments now use a plain vertical focus rail instead of repeated diamond glyphs that could collide with narrow terminal content.
+- **Auth store credential preservation** — provider credential writes now fail before touching disk if an update would remove unrelated provider entries, including existing `openai-codex` OAuth credentials.
 - Cleaned `/context` and `/think` command-palette metadata so context actions are not duplicated and thinking suggestions match supported levels.
 - Selected conversation segment chrome now renders through an explicit frame component with selection-aware measurement, reserving a gutter instead of overwriting or clipping content.
 - Leaving focus mode now clears focus-owned segment detail panes so tool detail panels do not remain pinned in the normal Slim layout.
@@ -584,50 +576,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Adopt valid external provider credentials during startup env hydration when Omegon auth storage is missing or expired, preventing rebuilt sessions from falling back to login-only mode.
 - Prefer refreshable persisted OAuth credentials over hydrated OAuth env vars so stale `CHATGPT_OAUTH_TOKEN` session values cannot shadow `auth.json` refresh for OpenAI/Codex.
 - The TUI footer/model card now renders the model actually served by the runtime bridge when startup installed a fallback bridge (selected provider had no credentials), with a warning line naming the unavailable operator-selected model. Previously the footer showed the profile-selected model (e.g. `gpt-5.5`) even while every request was being served by the fallback provider, making it look like the wrong provider was active.
-
-### Fixed
-
 - Treat malformed provider entries in `auth.json` as unreadable credentials instead of missing credentials during startup route probing, so OpenAI/Codex relaunch failures no longer misreport a valid-but-unparseable auth store as needing `/login`.
-
-## [0.27.0] - 2026-06-11
-
-0.27.0 is a hardening and surface-coherence line. It makes provider/auth routing explicit instead of implicit, gives operators truthful TUI status when credentials or fallbacks are involved, expands the backend capability substrate for future console clients, and continues extracting lifecycle/TUI surfaces behind shared semantic boundaries.
-
-### Added
-
-- Add a provider route controller path for startup, login, model-tier switches, offline model switches, and runtime turn configuration so route state is explicit instead of inferred from whichever bridge happens to be installed.
-- Publish provider route changes as structured events and persist provider route warnings in the TUI footer so unavailable credentials, fallback routing, and disconnected states remain visible after the triggering operation.
-- Include provider route state in `/auth status`, including the selected route, served bridge, credential diagnostics, and remediation guidance.
-- Add explicit startup-route, route-login terminal outcome, and login-lifecycle regression coverage for connected, fallback, disconnected, relogin, and failed-login paths.
-- Add a read-only capability inventory substrate and ACP `_capabilities/inventory` surface for installed extensions, Armory assets, catalog agents, assistant profiles, capability graphs, trust summaries, secret readiness, assistant launch readiness, assistant-list projections, and assistant run read models.
-- Add assistant run read surfaces and terminal-state compatibility so the non-interactive run contract uses `completed` while still accepting legacy `succeeded`.
-- Add metadata-only backend endpoint registry entries for ACP/runtime/lifecycle/provider/extension/secret/package/plan/task surfaces, including provider retry/failure and turn-cancelled telemetry contracts.
-- Add richer cleave/delegate progress visibility, injected-child execution tests, timeout/cancellation coverage, and Workbench integration for active lifecycle workstreams.
-- Add headless ACP lifecycle read surfaces for lifecycle snapshots and design-node list/get/ready/blocked/frontier projections.
-- Add `/copy answer` plus focused `/help copy` and `/help mouse` guidance for normal-mode answer copy, transcript scroll, and mouse passthrough.
-- Add affected-crate validation tooling (`just affected`, `just test-changed`, `just check-changed`, `just clippy-changed`, `just test-commit`) plus `just source-clean` and source-vs-agent-state dirty classification for safer local commits.
-- Add provider-drift tooling with `just upstream-provider-check`, Anthropic public-model drift checks, Claude Fable 5 / limited-access Mythos 5 registry entries, and adaptive-thinking metadata derived from the model registry.
-- Add lifecycle/design documentation and an assess-time assumption prompt so design reviews explicitly ask what unstated assumptions should be recorded as `[assumption]` questions.
-- Add Codebase Mind metadata and design documentation for durable structural repository memory.
-
-### Changed
-
-- Interactive startup no longer silently falls back to `automation_safe_model()` when the selected provider is unavailable. Fallback is now explicit and opt-in through profile `fallbackProviders = ["provider-id"]`; otherwise Omegon enters a disconnected state with remediation guidance.
-- Import discovered external provider credentials into Omegon auth storage during startup hydration, adopt valid external credentials when internal auth storage is missing or expired, and warn visibly when profile-model credentials are unavailable.
-- Keep the selected provider/model distinct from the served bridge/model throughout fallback routing, turn configuration, active-model tracking, footer projection, and session-log emission.
-- Rename the TUI Plan Dock to the Workbench and surface active cleave/delegate/lifecycle work there with plan status glyphs (`●`/`◐`/`⊘`/`○`) in Slim mode.
-- Slim the TUI engine footer into a compact model/status sidecar and keep lifecycle, engine, inference, tools, and Workbench telemetry in separate rows/surfaces instead of competing for one footer block.
-- Replace the old full-dashboard tree renderer with a thin read-only project lifecycle strip above the footer/tooling area.
-- Extract TUI conversation, footer, dashboard, editor, instrument, layout, tool-card, segment, permission, plan, extension-overlay, focus-view, and tab-bar rendering behind semantic projection/component boundaries shared with future ACP surfaces.
-- Add command registry availability/safety metadata, including CLI/ACP confirmation gates and `--dangerously-bypass-permissions` bypass support.
-- Preserve queued prompt dispatch mode at queue time so delayed prompts keep their original queue semantics.
-- Rename context classes from Squad/Maniple/Clan/Legion to Compact/Standard/Extended/Massive while retaining legacy aliases.
-- Route design-tree and OpenSpec lifecycle mutations through named lifecycle services for node creation, status, questions, research, decisions, links, implementation notes, branch, metadata, archive, implement scaffolding, query policy, FSM sync, and archive recovery.
-- Split `omegon-codescan` language-specific scanner logic into bounded modules, add Java/Kotlin/C# discovery, and attach extraction language/strategy/confidence metadata to code chunks.
-- Clarify trunk/release policy: `main` owns nightly/trunk work, `release/X.Y` branches are internal stabilization branches, and hardening fixes merge forward.
-
-### Fixed
-
 - Accept-loop OAuth callback listeners for Anthropic, OpenAI/Codex, and Antigravity logins so speculative browser preconnections, favicon requests, and stale login-tab redirects no longer consume the one request the login flow was waiting for.
 - Report route credential diagnostics and route interactive fallback calls with the fallback bridge model while preserving the operator-selected profile model.
 - Render the actual served runtime bridge model in the TUI footer/model card when fallback routing is active, with a warning naming the unavailable selected model.
