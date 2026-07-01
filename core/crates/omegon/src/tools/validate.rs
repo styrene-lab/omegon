@@ -245,35 +245,43 @@ const EMBEDDED_VALIDATORS: &[EmbeddedValidatorKind] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DomainValidatorKind {
     ModelRegistry,
+    OpenApiContract,
 }
 
 impl DomainValidatorKind {
     fn id(self) -> &'static str {
         match self {
             Self::ModelRegistry => "core.model-registry",
+            Self::OpenApiContract => "core.openapi-contract",
         }
     }
 
     fn label(self) -> &'static str {
         match self {
             Self::ModelRegistry => "Model registry",
+            Self::OpenApiContract => "OpenAPI contract",
         }
     }
 
     fn include(self) -> Vec<&'static str> {
         match self {
             Self::ModelRegistry => vec!["data/model-registry.json"],
+            Self::OpenApiContract => vec!["**/*.openapi.yaml", "**/*.openapi.yml"],
         }
     }
 
     fn runner_summary(self) -> &'static str {
         match self {
             Self::ModelRegistry => "embedded model registry contract validator",
+            Self::OpenApiContract => "embedded OpenAPI contract validator",
         }
     }
 }
 
-const DOMAIN_VALIDATORS: &[DomainValidatorKind] = &[DomainValidatorKind::ModelRegistry];
+const DOMAIN_VALIDATORS: &[DomainValidatorKind] = &[
+    DomainValidatorKind::ModelRegistry,
+    DomainValidatorKind::OpenApiContract,
+];
 
 #[derive(Debug, Clone)]
 struct BuiltinValidatorInventory {
@@ -819,6 +827,8 @@ fn domain_validator_for_file(path: &Path, cwd: &Path) -> Option<DomainValidatorK
         || path.to_string_lossy().ends_with("data/model-registry.json")
     {
         Some(DomainValidatorKind::ModelRegistry)
+    } else if is_openapi_contract_path(path) {
+        Some(DomainValidatorKind::OpenApiContract)
     } else {
         None
     }
@@ -852,6 +862,203 @@ fn validate_domain_content(
 ) -> std::result::Result<(), String> {
     match kind {
         DomainValidatorKind::ModelRegistry => validate_model_registry_content(path, content),
+        DomainValidatorKind::OpenApiContract => validate_openapi_contract_content(path, content),
+    }
+}
+
+fn is_openapi_contract_path(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    name.ends_with(".openapi.yaml") || name.ends_with(".openapi.yml")
+}
+
+fn validate_openapi_contract_content(
+    path: &Path,
+    content: &str,
+) -> std::result::Result<(), String> {
+    let spec = serde_yaml::from_str::<serde_json::Value>(content)
+        .map_err(|error| format!("{}: YAML did not parse: {error}", path.display()))?;
+    let mut errors = Vec::new();
+    let mut err = |message: String| errors.push(format!("{}: {message}", path.display()));
+
+    match spec.get("openapi").and_then(serde_json::Value::as_str) {
+        Some(version) if version.starts_with("3.") => {}
+        Some(version) => err(format!(
+            "unsupported openapi version {version:?} (expected 3.x)"
+        )),
+        None => err("missing `openapi` version string".to_string()),
+    }
+
+    for field in ["title", "version"] {
+        let present = spec
+            .pointer(&format!("/info/{field}"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty());
+        if !present {
+            err(format!("missing or empty `info.{field}`"));
+        }
+    }
+
+    let Some(paths) = spec.get("paths").and_then(serde_json::Value::as_object) else {
+        err("missing `paths` object".to_string());
+        return Err(errors.join("\n"));
+    };
+    if paths.is_empty() {
+        err("`paths` is empty".to_string());
+    }
+
+    let mut seen_op_ids: HashMap<String, String> = HashMap::new();
+    for (route, item) in paths {
+        let Some(item_obj) = item.as_object() else {
+            err(format!("path {route:?} is not an object"));
+            continue;
+        };
+        let template_params = openapi_path_template_params(route);
+        let path_level_params = openapi_required_path_params(item.get("parameters"));
+        for method in OPENAPI_HTTP_METHODS {
+            let Some(op) = item_obj.get(*method) else {
+                continue;
+            };
+            match op.get("responses").and_then(serde_json::Value::as_object) {
+                Some(responses) if !responses.is_empty() => {}
+                _ => err(format!(
+                    "{} {route}: operation has no responses",
+                    method.to_uppercase()
+                )),
+            }
+            match op.get("operationId").and_then(serde_json::Value::as_str) {
+                Some(id) if !id.trim().is_empty() => {
+                    if let Some(previous) = seen_op_ids
+                        .insert(id.to_string(), format!("{} {route}", method.to_uppercase()))
+                    {
+                        err(format!(
+                            "duplicate operationId {id:?} ({} {route} and {previous})",
+                            method.to_uppercase()
+                        ));
+                    }
+                }
+                _ => err(format!(
+                    "{} {route}: missing operationId",
+                    method.to_uppercase()
+                )),
+            }
+            let op_params = openapi_required_path_params(op.get("parameters"));
+            for template_param in &template_params {
+                let declared = op_params.contains(template_param)
+                    || path_level_params.contains(template_param);
+                if !declared {
+                    err(format!(
+                        "{} {route}: path template param {{{template_param}}} has no `required: true` path parameter",
+                        method.to_uppercase()
+                    ));
+                }
+            }
+        }
+    }
+
+    let mut pointer = String::new();
+    let mut ref_errors = Vec::new();
+    openapi_walk_json(&spec, &mut pointer, &mut |where_at, node| {
+        if let Some(serde_json::Value::String(reference)) = node.get("$ref") {
+            if !reference.starts_with('#') {
+                ref_errors.push(format!("non-local $ref {reference:?} at {where_at}"));
+            } else if !openapi_ref_resolves(&spec, reference) {
+                ref_errors.push(format!("dangling $ref {reference:?} at {where_at}"));
+            }
+        }
+    });
+    for ref_error in ref_errors {
+        err(ref_error);
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
+}
+
+const OPENAPI_HTTP_METHODS: &[&str] = &[
+    "get", "put", "post", "delete", "options", "head", "patch", "trace",
+];
+
+fn openapi_path_template_params(path: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut rest = path;
+    while let Some(open) = rest.find('{') {
+        if let Some(close) = rest[open..].find('}') {
+            let name = &rest[open + 1..open + close];
+            if !name.is_empty() {
+                params.push(name.to_string());
+            }
+            rest = &rest[open + close + 1..];
+        } else {
+            break;
+        }
+    }
+    params
+}
+
+fn openapi_required_path_params(params: Option<&serde_json::Value>) -> Vec<String> {
+    let Some(params) = params.and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    params
+        .iter()
+        .filter(|param| param.get("in").and_then(serde_json::Value::as_str) == Some("path"))
+        .filter(|param| param.get("required").and_then(serde_json::Value::as_bool) == Some(true))
+        .filter_map(|param| {
+            param
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn openapi_walk_json<'a>(
+    node: &'a serde_json::Value,
+    pointer: &mut String,
+    f: &mut impl FnMut(&str, &'a serde_json::Value),
+) {
+    f(pointer, node);
+    match node {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                let len = pointer.len();
+                pointer.push('/');
+                pointer.push_str(&openapi_escape_json_pointer_token(key));
+                openapi_walk_json(value, pointer, f);
+                pointer.truncate(len);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, value) in items.iter().enumerate() {
+                let len = pointer.len();
+                pointer.push('/');
+                pointer.push_str(&index.to_string());
+                openapi_walk_json(value, pointer, f);
+                pointer.truncate(len);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn openapi_escape_json_pointer_token(token: &str) -> String {
+    token.replace('~', "~0").replace('/', "~1")
+}
+
+fn openapi_ref_resolves(root: &serde_json::Value, reference: &str) -> bool {
+    let Some(pointer) = reference.strip_prefix('#') else {
+        return false;
+    };
+    if pointer.is_empty() {
+        true
+    } else {
+        root.pointer(pointer).is_some()
     }
 }
 
@@ -2583,5 +2790,136 @@ mod tests {
             message.contains("duplicate model id `claude-fable-5` for provider `anthropic`"),
             "{message}"
         );
+    }
+    #[tokio::test]
+    async fn openapi_domain_validator_passes_valid_contract() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("service.openapi.yaml");
+        std::fs::write(
+            &path,
+            r##"
+openapi: 3.1.0
+info:
+  title: Service API
+  version: 1.0.0
+paths:
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+components:
+  schemas:
+    Widget:
+      type: object
+"##,
+        )
+        .unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("embedded OpenAPI contract validator"),
+            "{message}"
+        );
+        assert!(message.contains("✓ passed"), "{message}");
+        let plan = result.details["validation_plan"].as_array().unwrap();
+        assert!(
+            plan.iter()
+                .any(|entry| entry["id"] == "core.openapi-contract" && entry["kind"] == "domain"),
+            "{plan:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn openapi_domain_validator_rejects_dangling_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("service.openapi.yaml");
+        std::fs::write(
+            &path,
+            r##"
+openapi: 3.1.0
+info:
+  title: Service API
+  version: 1.0.0
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Missing'
+"##,
+        )
+        .unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(message.contains("dangling $ref"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn openapi_domain_validator_rejects_missing_path_parameters() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("service.openapi.yaml");
+        std::fs::write(
+            &path,
+            r##"
+openapi: 3.1.0
+info:
+  title: Service API
+  version: 1.0.0
+paths:
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      responses:
+        '200':
+          description: ok
+"##,
+        )
+        .unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(message.contains("path template param {id}"), "{message}");
     }
 }
