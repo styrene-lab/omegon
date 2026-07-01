@@ -4446,7 +4446,9 @@ pub async fn secrets_delete_response(
     match secrets.delete_recipe(name) {
         Ok(()) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("✓ Secret '{name}' deleted.")),
+            output: Some(format!(
+                "✓ Secret '{name}' local binding cleared. Declared capability requirements remain visible."
+            )),
         },
         Err(e) => SlashCommandResponse {
             accepted: false,
@@ -4702,6 +4704,23 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn secrets_delete_response_says_binding_cleared() {
+        let tmp = tempfile::tempdir().unwrap();
+        let secrets = omegon_secrets::SecretsManager::new(tmp.path()).unwrap();
+        secrets
+            .set_recipe("GITHUB_TOKEN", "env:GITHUB_TOKEN")
+            .unwrap();
+
+        let response = secrets_delete_response(&secrets, "GITHUB_TOKEN").await;
+
+        assert!(response.accepted);
+        let output = response.output.unwrap_or_default();
+        assert!(output.contains("local binding cleared"), "{output}");
+        assert!(output.contains("requirements remain visible"), "{output}");
+        assert!(secrets.list_recipes().is_empty());
+    }
 
     #[test]
     fn context_status_projection_uses_palette_instead_of_dump() {
