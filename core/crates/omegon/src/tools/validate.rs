@@ -242,6 +242,39 @@ const EMBEDDED_VALIDATORS: &[EmbeddedValidatorKind] = &[
     EmbeddedValidatorKind::Markdown,
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DomainValidatorKind {
+    ModelRegistry,
+}
+
+impl DomainValidatorKind {
+    fn id(self) -> &'static str {
+        match self {
+            Self::ModelRegistry => "core.model-registry",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::ModelRegistry => "Model registry",
+        }
+    }
+
+    fn include(self) -> Vec<&'static str> {
+        match self {
+            Self::ModelRegistry => vec!["data/model-registry.json"],
+        }
+    }
+
+    fn runner_summary(self) -> &'static str {
+        match self {
+            Self::ModelRegistry => "embedded model registry contract validator",
+        }
+    }
+}
+
+const DOMAIN_VALIDATORS: &[DomainValidatorKind] = &[DomainValidatorKind::ModelRegistry];
+
 #[derive(Debug, Clone)]
 struct BuiltinValidatorInventory {
     id: String,
@@ -287,6 +320,22 @@ fn builtin_validator_inventory(cwd: &Path) -> Vec<BuiltinValidatorInventory> {
             policy_summary: "embedded, read-only, no-network, no-mutation",
         })
         .collect::<Vec<_>>();
+
+    inventory.extend(
+        DOMAIN_VALIDATORS
+            .iter()
+            .map(|validator| BuiltinValidatorInventory {
+                id: validator.id().to_string(),
+                label: validator.label().to_string(),
+                source: "builtin-domain",
+                enabled: true,
+                mode: "supplement",
+                include: validator.include(),
+                levels: vec!["quick", "standard", "full"],
+                runner_summary: validator.runner_summary().to_string(),
+                policy_summary: "embedded, read-only, no-network, no-mutation",
+            }),
+    );
 
     inventory.extend(LANGUAGE_VALIDATORS.iter().map(|validator| {
         let config = validator.config();
@@ -571,6 +620,16 @@ fn builtin_replaced_by_operator(
     })
 }
 
+fn domain_replaced_by_operator(
+    kind: DomainValidatorKind,
+    validators: &[OperatorValidator],
+) -> bool {
+    validators.iter().any(|validator| {
+        validator.mode == OperatorValidatorMode::Replace
+            && validator.replaces.iter().any(|id| id == kind.id())
+    })
+}
+
 fn language_replaced_by_operator(kind: ValidatorKind, validators: &[OperatorValidator]) -> bool {
     validators.iter().any(|validator| {
         validator.mode == OperatorValidatorMode::Replace
@@ -753,6 +812,187 @@ fn operator_validator_glob_matches(pattern: &str, path: &Path) -> bool {
     normalized_path.ends_with(&normalized_pattern) || file_name == normalized_pattern
 }
 
+fn domain_validator_for_file(path: &Path, cwd: &Path) -> Option<DomainValidatorKind> {
+    let relative = path.strip_prefix(cwd).unwrap_or(path);
+    let normalized = relative.to_string_lossy().replace('\\', "/");
+    if normalized == "data/model-registry.json"
+        || path.to_string_lossy().ends_with("data/model-registry.json")
+    {
+        Some(DomainValidatorKind::ModelRegistry)
+    } else {
+        None
+    }
+}
+
+async fn validate_domain_file(file_path: &Path, kind: DomainValidatorKind) -> String {
+    let result = match std::fs::read_to_string(file_path) {
+        Ok(content) => validate_domain_content(file_path, kind, &content),
+        Err(error) => Err(format!("failed to read file: {error}")),
+    };
+    match result {
+        Ok(()) => format!(
+            "Domain validation (`{}`) for {}: ✓ passed",
+            kind.runner_summary(),
+            file_path.display()
+        ),
+        Err(error) => format!(
+            "Domain validation (`{}`) for {}: ✗ {} error(s)\n{}",
+            kind.runner_summary(),
+            file_path.display(),
+            count_errors(&error),
+            truncate_validation(&error, 500)
+        ),
+    }
+}
+
+fn validate_domain_content(
+    path: &Path,
+    kind: DomainValidatorKind,
+    content: &str,
+) -> std::result::Result<(), String> {
+    match kind {
+        DomainValidatorKind::ModelRegistry => validate_model_registry_content(path, content),
+    }
+}
+
+fn validate_model_registry_content(path: &Path, content: &str) -> std::result::Result<(), String> {
+    let value = serde_json::from_str::<serde_json::Value>(content)
+        .map_err(|error| format!("{}: invalid JSON: {error}", path.display()))?;
+    let mut errors = Vec::new();
+    let Some(models) = value.get("models").and_then(|models| models.as_array()) else {
+        return Err(format!("{}: missing models array", path.display()));
+    };
+    let mut by_provider: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
+    for (idx, model) in models.iter().enumerate() {
+        let label = format!("{}: models[{idx}]", path.display());
+        let provider =
+            required_json_string(model, "provider", &label, &mut errors).unwrap_or_default();
+        let id = required_json_string(model, "id", &label, &mut errors).unwrap_or_default();
+        required_json_string(model, "name", &label, &mut errors);
+        required_json_u64(model, "contextInput", &label, &mut errors);
+        required_json_u64(model, "contextOutput", &label, &mut errors);
+        if let Some(capabilities) = model.get("capabilities") {
+            if !capabilities
+                .as_array()
+                .is_some_and(|items| items.iter().all(|item| item.as_str().is_some()))
+            {
+                errors.push(format!("{label}: capabilities must be an array of strings"));
+            }
+        } else {
+            errors.push(format!("{label}: missing capabilities"));
+        }
+        if !provider.is_empty() && !id.is_empty() {
+            let ids = by_provider.entry(provider.clone()).or_default();
+            if !ids.insert(id.clone()) {
+                errors.push(format!(
+                    "{}: duplicate model id `{}` for provider `{}`",
+                    path.display(),
+                    id,
+                    provider
+                ));
+            }
+        }
+    }
+
+    validate_model_reference_map(path, &value, "defaults", &by_provider, &mut errors);
+    if let Some(grades) = value.get("grades").and_then(|grades| grades.as_object()) {
+        for (grade, refs) in grades {
+            validate_model_reference_object(
+                path,
+                refs,
+                &format!("grades.{grade}"),
+                &by_provider,
+                &mut errors,
+            );
+        }
+    } else {
+        errors.push(format!("{}: missing grades object", path.display()));
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
+}
+
+fn required_json_string(
+    value: &serde_json::Value,
+    field: &str,
+    label: &str,
+    errors: &mut Vec<String>,
+) -> Option<String> {
+    match value.get(field).and_then(|field| field.as_str()) {
+        Some(text) if !text.trim().is_empty() => Some(text.to_string()),
+        _ => {
+            errors.push(format!("{label}: missing or empty string field `{field}`"));
+            None
+        }
+    }
+}
+
+fn required_json_u64(
+    value: &serde_json::Value,
+    field: &str,
+    label: &str,
+    errors: &mut Vec<String>,
+) -> Option<u64> {
+    match value.get(field).and_then(|field| field.as_u64()) {
+        Some(number) if number > 0 => Some(number),
+        _ => {
+            errors.push(format!(
+                "{label}: missing or non-positive numeric field `{field}`"
+            ));
+            None
+        }
+    }
+}
+
+fn validate_model_reference_map(
+    path: &Path,
+    value: &serde_json::Value,
+    field: &str,
+    by_provider: &HashMap<String, std::collections::HashSet<String>>,
+    errors: &mut Vec<String>,
+) {
+    if let Some(refs) = value.get(field) {
+        validate_model_reference_object(path, refs, field, by_provider, errors);
+    } else {
+        errors.push(format!("{}: missing {field} object", path.display()));
+    }
+}
+
+fn validate_model_reference_object(
+    path: &Path,
+    refs: &serde_json::Value,
+    label: &str,
+    by_provider: &HashMap<String, std::collections::HashSet<String>>,
+    errors: &mut Vec<String>,
+) {
+    let Some(object) = refs.as_object() else {
+        errors.push(format!("{}: {label} must be an object", path.display()));
+        return;
+    };
+    for (provider, model_id) in object {
+        let Some(model_id) = model_id.as_str() else {
+            errors.push(format!(
+                "{}: {label}.{provider} must be a string",
+                path.display()
+            ));
+            continue;
+        };
+        let Some(models) = by_provider.get(provider) else {
+            continue;
+        };
+        if !models.contains(model_id) {
+            errors.push(format!(
+                "{}: {label}.{provider} references unknown model `{model_id}`",
+                path.display()
+            ));
+        }
+    }
+}
+
 fn embedded_validator_for_file(path: &Path) -> Option<EmbeddedValidatorKind> {
     match path
         .extension()
@@ -932,6 +1172,41 @@ fn validation_plan_entries(
         });
     }
 
+    for kind in DOMAIN_VALIDATORS {
+        let matched_paths = paths
+            .iter()
+            .filter(|path| domain_validator_for_file(path, cwd) == Some(*kind))
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        if matched_paths.is_empty() {
+            continue;
+        }
+        let replaced_by = operator_replacing_builtin(kind.id(), operator_validators)
+            .map(|validator| validator.id.clone());
+        entries.push(ValidationPlanEntry {
+            id: kind.id().to_string(),
+            label: kind.label().to_string(),
+            kind: "domain",
+            source: "builtin-domain",
+            mode: if replaced_by.is_some() {
+                "replaced"
+            } else {
+                "supplement"
+            },
+            status: if replaced_by.is_some() {
+                "replaced"
+            } else {
+                "planned"
+            },
+            path_count: matched_paths.len(),
+            paths: matched_paths,
+            runner_summary: kind.runner_summary().to_string(),
+            replaces: Vec::new(),
+            replaced_by,
+            note: None,
+        });
+    }
+
     let discovered = discover_validators(cwd);
     for kind in [
         ValidatorKind::Rust,
@@ -1073,6 +1348,14 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
     let mut missing_validator_paths = Vec::new();
     let mut language_plan: HashMap<ValidatorKind, Vec<PathBuf>> = HashMap::new();
     for path in &unique_paths {
+        if let Some(kind) = domain_validator_for_file(path, cwd) {
+            if !domain_replaced_by_operator(kind, &operator_validators) {
+                validation_results.push(validate_domain_file(path, kind).await);
+                validated_paths.push(path.display().to_string());
+            }
+            continue;
+        }
+
         if let Some(kind) = embedded_validator_for_file(path) {
             if !builtin_replaced_by_operator(kind, &operator_validators) {
                 validation_results.push(validate_embedded_file(path, kind).await);
@@ -1137,7 +1420,7 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
     if validation_results.is_empty() {
         let mut message =
             "Validation skipped: no applicable validator was available for the supplied path set.\n\
-Supported built-in types: JSON, TOML, YAML, Markdown, Rust, TypeScript, Python."
+Supported built-in types: JSON, TOML, YAML, Markdown, model registry, Rust, TypeScript, Python."
                 .to_string();
         if !unsupported_paths.is_empty() {
             message.push_str("\nUnsupported paths:\n");
@@ -2163,5 +2446,142 @@ mod tests {
         assert_eq!(result.details["validation_plan"][0]["kind"], "artifact");
         assert_eq!(result.details["validation_plan"][0]["source"], "builtin");
         assert_eq!(result.details["validation_plan"][0]["path_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn model_registry_domain_validator_passes_valid_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let path = data_dir.join("model-registry.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "models": [{
+                "id": "claude-fable-5",
+                "provider": "anthropic",
+                "name": "Claude Fable 5",
+                "contextInput": 1000000,
+                "contextOutput": 65536,
+                "capabilities": ["reasoning", "coding"]
+              }],
+              "defaults": {"anthropic": "claude-fable-5"},
+              "grades": {"S": {"anthropic": "claude-fable-5"}}
+            }"#,
+        )
+        .unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("Domain validation (`embedded model registry contract validator`)"),
+            "{message}"
+        );
+        assert!(message.contains("✓ passed"), "{message}");
+        let plan = result.details["validation_plan"].as_array().unwrap();
+        assert!(
+            plan.iter()
+                .any(|entry| { entry["id"] == "core.model-registry" && entry["kind"] == "domain" })
+        );
+    }
+
+    #[tokio::test]
+    async fn model_registry_domain_validator_rejects_unknown_references() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let path = data_dir.join("model-registry.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "models": [{
+                "id": "claude-fable-5",
+                "provider": "anthropic",
+                "name": "Claude Fable 5",
+                "contextInput": 1000000,
+                "contextOutput": 65536,
+                "capabilities": ["reasoning", "coding"]
+              }],
+              "defaults": {"anthropic": "missing-model"},
+              "grades": {"S": {"anthropic": "also-missing"}}
+            }"#,
+        )
+        .unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("references unknown model `missing-model`"),
+            "{message}"
+        );
+        assert!(
+            message.contains("references unknown model `also-missing`"),
+            "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn model_registry_domain_validator_rejects_duplicate_provider_model_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let path = data_dir.join("model-registry.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "models": [
+                {
+                  "id": "claude-fable-5",
+                  "provider": "anthropic",
+                  "name": "Claude Fable 5",
+                  "contextInput": 1000000,
+                  "contextOutput": 65536,
+                  "capabilities": ["reasoning"]
+                },
+                {
+                  "id": "claude-fable-5",
+                  "provider": "anthropic",
+                  "name": "Claude Fable 5 Duplicate",
+                  "contextInput": 1000000,
+                  "contextOutput": 65536,
+                  "capabilities": ["coding"]
+                }
+              ],
+              "defaults": {"anthropic": "claude-fable-5"},
+              "grades": {"S": {"anthropic": "claude-fable-5"}}
+            }"#,
+        )
+        .unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("duplicate model id `claude-fable-5` for provider `anthropic`"),
+            "{message}"
+        );
     }
 }

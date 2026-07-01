@@ -50,6 +50,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 - Documented the validator capability UX plan, including `/validate` Overview/Active/Available/Overrides/Runs/Settings tabs, Armory/community validator trust lifecycle, explain output, backend DTOs, and phased implementation plan.
+- Added a self-contained `core.model-registry` domain validator for `data/model-registry.json` that checks required model fields, duplicate provider/model ids, and default/grade references.
 - Structured `validate` plan details as DTO-style entries with validator id, kind, source, mode, status, paths, runner summary, and replacement metadata so UIs no longer need to parse prose.
 - Coalesced `validate` toolchain adapter runs by language so multiple Rust, TypeScript, or Python paths trigger one project-level validator run per language instead of duplicate command executions.
 - Made `.omegon/validators.toml` parse/schema problems fail `validate` loudly as validation configuration errors instead of silently ignoring broken operator validator policy.
