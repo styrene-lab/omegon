@@ -46,6 +46,7 @@ pub mod code_act_sandbox;
 mod codex_config;
 mod command_registry;
 mod context;
+mod control;
 mod control_actions;
 mod control_runtime;
 mod control_tls;
