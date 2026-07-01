@@ -84,7 +84,21 @@ target/
 # Flynt local/generated state
 .flynt/local/
 .flynt/runtime/
-.omegon/
+# Omegon local runtime state (tracked release state like milestones.json,
+# project-rules.toml, agents/, evidence/ must NOT be blanket-ignored —
+# the release recipe stages .omegon/milestones.json)
+.omegon/runtime/
+.omegon/history/
+.omegon/audit-log*.jsonl
+.omegon/agent-journal.md
+.omegon/ipc.sock
+.omegon/codescan.db
+.omegon/delegate-prompts/
+.omegon/lifecycle/
+.omegon/skills/
+.omegon/profile.json.lock
+# Test-generated .omegon state under crate dirs
+core/crates/**/.omegon/
 ai/
 drawings/*.svg
 .DS_Store
