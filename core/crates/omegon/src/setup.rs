@@ -1520,27 +1520,28 @@ impl AgentSetup {
 /// the wrong tree.
 pub fn find_project_root(cwd: &Path) -> PathBuf {
     let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
-    if has_hard_project_marker(&cwd) {
-        return cwd;
-    }
-
     let mut dir = cwd.clone();
-    let mut nearest_marker = if has_explicit_project_marker(&cwd) {
+    let mut nearest_soft_marker = if has_soft_project_marker(&cwd) {
         Some(cwd.clone())
     } else {
         None
     };
+
     loop {
+        if has_non_git_hard_project_marker(&dir) {
+            return dir;
+        }
+
         let git_path = dir.join(".git");
         if git_path.is_dir() {
             if is_home_ancestor_repo(&dir, &cwd) {
-                return nearest_marker.unwrap_or(cwd);
+                return nearest_soft_marker.unwrap_or(cwd);
             }
             return dir;
         }
         if git_path.is_file() {
             if is_home_ancestor_repo(&dir, &cwd) {
-                return nearest_marker.unwrap_or(cwd);
+                return nearest_soft_marker.unwrap_or(cwd);
             }
             if let Ok(content) = std::fs::read_to_string(&git_path)
                 && let Some(gitdir) = content.strip_prefix("gitdir: ")
@@ -1561,36 +1562,35 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
             }
             return dir;
         }
-        if nearest_marker.is_none() && has_explicit_project_marker(&dir) {
-            nearest_marker = Some(dir.clone());
+        if nearest_soft_marker.is_none() && has_soft_project_marker(&dir) {
+            nearest_soft_marker = Some(dir.clone());
         }
         if !dir.pop() {
             break;
         }
     }
-    nearest_marker.unwrap_or(cwd)
+    nearest_soft_marker.unwrap_or(cwd)
 }
 
 pub fn git_ceiling_directory(cwd: &Path) -> Option<PathBuf> {
     find_project_root(cwd).parent().map(Path::to_path_buf)
 }
 
-fn has_explicit_project_marker(dir: &Path) -> bool {
-    has_hard_project_marker(dir)
-        || [
-            "Cargo.toml",
-            "package.json",
-            "pyproject.toml",
-            "go.mod",
-            "Justfile",
-            "justfile",
-        ]
-        .iter()
-        .any(|marker| dir.join(marker).exists())
+fn has_soft_project_marker(dir: &Path) -> bool {
+    [
+        "Cargo.toml",
+        "package.json",
+        "pyproject.toml",
+        "go.mod",
+        "Justfile",
+        "justfile",
+    ]
+    .iter()
+    .any(|marker| dir.join(marker).exists())
 }
 
-fn has_hard_project_marker(dir: &Path) -> bool {
-    [".git", ".jj", ".codex", "AGENTS.md"]
+fn has_non_git_hard_project_marker(dir: &Path) -> bool {
+    [".jj", ".codex", "AGENTS.md"]
         .iter()
         .any(|marker| dir.join(marker).exists())
 }
