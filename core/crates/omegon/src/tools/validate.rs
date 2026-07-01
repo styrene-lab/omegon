@@ -841,6 +841,89 @@ impl ValidationLevel {
     }
 }
 
+fn validation_plan_summary(
+    paths: &[PathBuf],
+    language_plan: &HashMap<ValidatorKind, Vec<PathBuf>>,
+    operator_validators: &[OperatorValidator],
+    cwd: &Path,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for kind in EMBEDDED_VALIDATORS {
+        let matched = paths
+            .iter()
+            .filter(|path| embedded_validator_for_file(path) == Some(*kind))
+            .count();
+        if matched == 0 {
+            continue;
+        }
+        if builtin_replaced_by_operator(*kind, operator_validators) {
+            lines.push(format!(
+                "{}: replaced by operator override for {} path(s)",
+                kind.id(),
+                matched
+            ));
+        } else {
+            lines.push(format!(
+                "{}: embedded validator for {} path(s)",
+                kind.id(),
+                matched
+            ));
+        }
+    }
+
+    let discovered = discover_validators(cwd);
+    for kind in [
+        ValidatorKind::Rust,
+        ValidatorKind::TypeScript,
+        ValidatorKind::Python,
+    ] {
+        let Some(matched_paths) = language_plan.get(&kind) else {
+            continue;
+        };
+        if language_replaced_by_operator(kind, operator_validators) {
+            lines.push(format!(
+                "{}: replaced by operator override for {} path(s)",
+                kind.id(),
+                matched_paths.len()
+            ));
+        } else if let Some(config) = discovered.get(&kind) {
+            lines.push(format!(
+                "{}: toolchain adapter `{}` for {} path(s)",
+                kind.id(),
+                format_command(config.command, &config.args),
+                matched_paths.len()
+            ));
+        } else {
+            lines.push(format!(
+                "{}: unavailable; missing {} for {} path(s)",
+                kind.id(),
+                kind.expected_config(),
+                matched_paths.len()
+            ));
+        }
+    }
+
+    for validator in operator_validators {
+        let matched = paths
+            .iter()
+            .filter(|path| validator.matches_path(path))
+            .count();
+        if matched == 0 {
+            continue;
+        }
+        lines.push(format!(
+            "{}: operator {} validator for {} path(s)",
+            validator.id,
+            match validator.mode {
+                OperatorValidatorMode::Supplement => "supplement",
+                OperatorValidatorMode::Replace => "replacement",
+            },
+            matched
+        ));
+    }
+    lines
+}
+
 /// Run validation for the supplied paths and return a structured tool result.
 pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> Result<ToolResult> {
     if paths.is_empty() {
@@ -950,6 +1033,8 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
     let operator_validation_results =
         run_operator_validators(&operator_validators, &unique_paths, cwd).await;
     validation_results.extend(operator_validation_results.iter().cloned());
+    let validation_plan =
+        validation_plan_summary(&unique_paths, &language_plan, &operator_validators, cwd);
 
     if validation_results.is_empty() {
         let mut message =
@@ -998,6 +1083,7 @@ Supported built-in types: JSON, TOML, YAML, Markdown, Rust, TypeScript, Python."
                 "builtin_validators_run": 0,
                 "operator_validators_run": operator_validation_results.len(),
                 "operator_validators": operator_validator_inventory(&operator_validators),
+            "validation_plan": validation_plan,
             "validator_inventory": {
                 "builtins": builtin_inventory,
                 "operators": operator_inventory,
@@ -1014,6 +1100,13 @@ Supported built-in types: JSON, TOML, YAML, Markdown, Rust, TypeScript, Python."
         validation_results.len(),
         validation_results.join("\n")
     );
+
+    if !validation_plan.is_empty() {
+        output.push_str("\n\nValidation plan:\n");
+        for step in &validation_plan {
+            output.push_str(&format!("  - {step}\n"));
+        }
+    }
 
     if !operator_validators.is_empty() {
         output.push_str("\n\nMatched operator validator override(s):\n");
@@ -1045,6 +1138,7 @@ Supported built-in types: JSON, TOML, YAML, Markdown, Rust, TypeScript, Python."
             "builtin_validators_run": validation_results.len().saturating_sub(operator_validation_results.len()),
             "operator_validators_run": operator_validation_results.len(),
             "operator_validators": operator_validator_inventory(&operator_validators),
+            "validation_plan": validation_plan,
             "validator_inventory": {
                 "builtins": builtin_inventory,
                 "operators": operator_inventory,
@@ -1942,5 +2036,32 @@ mod tests {
         assert!(message.contains("for 2 Rust path(s)"), "{message}");
         assert_eq!(result.details["validators_run"], 1);
         assert_eq!(result.details["builtin_validators_run"], 1);
+    }
+
+    #[tokio::test]
+    async fn validation_output_includes_plan_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{\"ok\": true}\n").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(message.contains("Validation plan:"), "{message}");
+        assert!(
+            message.contains("core.json: embedded validator for 1 path(s)"),
+            "{message}"
+        );
+        assert_eq!(
+            result.details["validation_plan"][0],
+            "core.json: embedded validator for 1 path(s)"
+        );
     }
 }
