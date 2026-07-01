@@ -50,6 +50,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 - Documented the validator capability UX plan, including `/validate` Overview/Active/Available/Overrides/Runs/Settings tabs, Armory/community validator trust lifecycle, explain output, backend DTOs, and phased implementation plan.
+- Made `.omegon/validators.toml` parse/schema problems fail `validate` loudly as validation configuration errors instead of silently ignoring broken operator validator policy.
 - Added self-contained embedded `validate` checks for JSON, TOML, YAML, and Markdown hygiene so common artifact validation no longer depends on external tools, and wired operator `mode = "replace"` to suppress named built-ins such as `core.markdown-basic`.
 - Hardened `validate`'s built-in process execution to run validator programs directly with fixed argument vectors instead of shell interpolation.
 - Split the built-in `validate` tool checks into bounded Rust, TypeScript, and Python validator implementations behind a shared validator trait, preparing the surface for extension-backed validators.

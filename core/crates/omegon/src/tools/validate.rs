@@ -453,6 +453,32 @@ impl OperatorValidator {
         format!("{} ({})", self.id, self.source.display())
     }
 
+    fn config_errors(&self, index: usize) -> Vec<String> {
+        let mut errors = Vec::new();
+        let label = if self.id.trim().is_empty() {
+            format!("validators[{index}]")
+        } else {
+            format!("validator `{}`", self.id)
+        };
+        if self.id.trim().is_empty() {
+            errors.push(format!("{label}: id must not be empty"));
+        }
+        if self.runner.program.trim().is_empty() {
+            errors.push(format!("{label}: runner.program must not be empty"));
+        }
+        if self.policy.timeout_secs == 0 {
+            errors.push(format!(
+                "{label}: policy.timeout_secs must be greater than 0"
+            ));
+        }
+        if self.mode == OperatorValidatorMode::Replace && self.replaces.is_empty() {
+            errors.push(format!(
+                "{label}: mode = \"replace\" requires at least one replaces entry"
+            ));
+        }
+        errors
+    }
+
     fn inventory_json(&self) -> serde_json::Value {
         let mode = match self.mode {
             OperatorValidatorMode::Supplement => "supplement",
@@ -493,18 +519,35 @@ fn discover_operator_validators(
     cwd: &Path,
     paths: &[PathBuf],
     level: ValidationLevel,
-) -> Vec<OperatorValidator> {
+) -> (Vec<OperatorValidator>, Vec<String>) {
     let config_path = cwd.join(".omegon").join("validators.toml");
     let Ok(raw) = std::fs::read_to_string(&config_path) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
-    let Ok(mut config) = toml::from_str::<OperatorValidatorConfig>(&raw) else {
-        return Vec::new();
+    let mut config = match toml::from_str::<OperatorValidatorConfig>(&raw) {
+        Ok(config) => config,
+        Err(error) => {
+            return (
+                Vec::new(),
+                vec![format!(
+                    "{}: invalid validator config: {error}",
+                    config_path.display()
+                )],
+            );
+        }
     };
-    let _version = config.version;
+    let mut errors = Vec::new();
+    if config.version > 1 {
+        errors.push(format!(
+            "{}: unsupported validator config version {}; expected version 1",
+            config_path.display(),
+            config.version
+        ));
+    }
     let mut validators = Vec::new();
-    for mut validator in config.validators.drain(..) {
+    for (index, mut validator) in config.validators.drain(..).enumerate() {
         validator.source = config_path.clone();
+        errors.extend(validator.config_errors(index));
         if validator.matches_level(level) && paths.iter().any(|path| validator.matches_path(path)) {
             validators.push(validator);
         }
@@ -515,7 +558,7 @@ fn discover_operator_validators(
             .cmp(&left.priority)
             .then_with(|| left.id.cmp(&right.id))
     });
-    validators
+    (validators, errors)
 }
 
 fn builtin_replaced_by_operator(
@@ -811,7 +854,37 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
         }
     }
 
-    let operator_validators = discover_operator_validators(cwd, &unique_paths, level);
+    let (operator_validators, operator_config_errors) =
+        discover_operator_validators(cwd, &unique_paths, level);
+    if !operator_config_errors.is_empty() {
+        let mut message = "Validation configuration error(s):
+"
+        .to_string();
+        for error in &operator_config_errors {
+            message.push_str(&format!(
+                "  - {error}
+"
+            ));
+        }
+        return Ok(ToolResult {
+            content: vec![ContentBlock::Text {
+                text: message.trim_end().to_string(),
+            }],
+            details: serde_json::json!({
+                "paths": Vec::<String>::new(),
+                "level": match level {
+                    ValidationLevel::Quick => "quick",
+                    ValidationLevel::Standard => "standard",
+                    ValidationLevel::Full => "full",
+                },
+                "validators_run": 0,
+                "builtin_validators_run": 0,
+                "operator_validators_run": 0,
+                "operator_config_errors": operator_config_errors,
+                "validation_skipped": true,
+            }),
+        });
+    }
 
     let mut validation_results = Vec::new();
     let mut validated_paths = Vec::new();
@@ -1715,5 +1788,107 @@ mod tests {
         assert!(message.contains("trailing whitespace"), "{message}");
         assert_eq!(result.details["validators_run"], 1);
         assert_eq!(result.details["builtin_validators_run"], 1);
+    }
+
+    #[tokio::test]
+    async fn malformed_operator_validator_config_blocks_validation() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".omegon")).unwrap();
+        std::fs::write(
+            dir.path().join(".omegon/validators.toml"),
+            "[[validators]\n",
+        )
+        .unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{}").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("Validation configuration error(s):"),
+            "{message}"
+        );
+        assert!(message.contains("invalid validator config"), "{message}");
+        assert_eq!(result.details["validators_run"], 0);
+        assert_eq!(result.details["validation_skipped"], true);
+        assert_eq!(
+            result.details["operator_config_errors"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_operator_validator_fields_block_validation() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".omegon")).unwrap();
+        std::fs::write(
+            dir.path().join(".omegon/validators.toml"),
+            r#"
+            version = 1
+
+            [[validators]]
+            id = ""
+            include = ["**/*.json"]
+            mode = "replace"
+
+            [validators.runner]
+            kind = "process"
+            program = ""
+            path_arg_mode = "append"
+
+            [validators.policy]
+            timeout_secs = 0
+        "#,
+        )
+        .unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{}").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("Validation configuration error(s):"),
+            "{message}"
+        );
+        assert!(message.contains("id must not be empty"), "{message}");
+        assert!(
+            message.contains("runner.program must not be empty"),
+            "{message}"
+        );
+        assert!(
+            message.contains("policy.timeout_secs must be greater than 0"),
+            "{message}"
+        );
+        assert!(
+            message.contains("mode = \"replace\" requires at least one replaces entry"),
+            "{message}"
+        );
+        assert_eq!(result.details["validators_run"], 0);
+        assert_eq!(
+            result.details["operator_config_errors"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
     }
 }
