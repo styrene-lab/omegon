@@ -30,28 +30,146 @@ enum ValidatorKind {
 }
 
 impl ValidatorKind {
-    fn label(self) -> &'static str {
+    fn spec(self) -> &'static dyn LanguageValidator {
         match self {
-            Self::Rust => "Rust",
-            Self::TypeScript => "TypeScript",
-            Self::Python => "Python",
+            Self::Rust => &RustValidator,
+            Self::TypeScript => &TypeScriptValidator,
+            Self::Python => &PythonValidator,
         }
     }
 
+    fn label(self) -> &'static str {
+        self.spec().label()
+    }
+
     fn expected_config(self) -> &'static str {
-        match self {
-            Self::Rust => "Cargo.toml",
-            Self::TypeScript => "tsconfig.json",
-            Self::Python => "pyproject.toml",
-        }
+        self.spec().expected_config()
     }
 }
 
 #[derive(Debug, Clone)]
 struct ValidatorConfig {
-    command: String,
-    args: Vec<String>,
+    command: &'static str,
+    args: Vec<&'static str>,
 }
+
+trait LanguageValidator: Sync {
+    fn kind(&self) -> ValidatorKind;
+    fn label(&self) -> &'static str;
+    fn expected_config(&self) -> &'static str;
+    fn config_name(&self) -> &'static str;
+    fn config(&self) -> ValidatorConfig;
+    fn extract_error_summary(&self, stdout: &str, stderr: &str) -> String;
+}
+
+struct RustValidator;
+struct TypeScriptValidator;
+struct PythonValidator;
+
+impl LanguageValidator for RustValidator {
+    fn kind(&self) -> ValidatorKind {
+        ValidatorKind::Rust
+    }
+
+    fn label(&self) -> &'static str {
+        "Rust"
+    }
+
+    fn expected_config(&self) -> &'static str {
+        "Cargo.toml"
+    }
+
+    fn config_name(&self) -> &'static str {
+        "Cargo.toml"
+    }
+
+    fn config(&self) -> ValidatorConfig {
+        ValidatorConfig {
+            command: "cargo",
+            args: vec!["check", "--message-format=short"],
+        }
+    }
+
+    fn extract_error_summary(&self, stdout: &str, stderr: &str) -> String {
+        // cargo check --message-format=short outputs "file:line:col: error[E0xxx]: msg"
+        format!("{stdout}\n{stderr}")
+            .lines()
+            .filter(|l| l.contains("error") || l.contains("warning"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+impl LanguageValidator for TypeScriptValidator {
+    fn kind(&self) -> ValidatorKind {
+        ValidatorKind::TypeScript
+    }
+
+    fn label(&self) -> &'static str {
+        "TypeScript"
+    }
+
+    fn expected_config(&self) -> &'static str {
+        "tsconfig.json"
+    }
+
+    fn config_name(&self) -> &'static str {
+        "tsconfig.json"
+    }
+
+    fn config(&self) -> ValidatorConfig {
+        ValidatorConfig {
+            command: "npx",
+            args: vec!["tsc", "--noEmit", "--pretty"],
+        }
+    }
+
+    fn extract_error_summary(&self, stdout: &str, stderr: &str) -> String {
+        // tsc outputs "file(line,col): error TSxxxx: msg"
+        format!("{stdout}\n{stderr}")
+            .lines()
+            .filter(|l| l.contains("error TS") || l.contains(": error"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+impl LanguageValidator for PythonValidator {
+    fn kind(&self) -> ValidatorKind {
+        ValidatorKind::Python
+    }
+
+    fn label(&self) -> &'static str {
+        "Python"
+    }
+
+    fn expected_config(&self) -> &'static str {
+        "pyproject.toml"
+    }
+
+    fn config_name(&self) -> &'static str {
+        "pyproject.toml"
+    }
+
+    fn config(&self) -> ValidatorConfig {
+        ValidatorConfig {
+            command: "ruff",
+            args: vec!["check", "--quiet"],
+        }
+    }
+
+    fn extract_error_summary(&self, stdout: &str, stderr: &str) -> String {
+        // ruff outputs "file:line:col: EXXX msg"
+        format!("{stdout}\n{stderr}")
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with("Found") && !l.starts_with("All checks"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+const LANGUAGE_VALIDATORS: &[&dyn LanguageValidator] =
+    &[&RustValidator, &TypeScriptValidator, &PythonValidator];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationLevel {
@@ -483,38 +601,10 @@ fn discover_validators(cwd: &Path) -> HashMap<ValidatorKind, ValidatorConfig> {
     // Discover fresh
     let mut validators = HashMap::new();
 
-    // Rust: look for Cargo.toml
-    if find_upward(cwd, "Cargo.toml").is_some() {
-        validators.insert(
-            ValidatorKind::Rust,
-            ValidatorConfig {
-                command: "cargo".into(),
-                args: vec!["check".into(), "--message-format=short".into()],
-            },
-        );
-    }
-
-    // TypeScript: look for tsconfig.json
-    if find_upward(cwd, "tsconfig.json").is_some() {
-        validators.insert(
-            ValidatorKind::TypeScript,
-            ValidatorConfig {
-                command: "npx".into(),
-                args: vec!["tsc".into(), "--noEmit".into(), "--pretty".into()],
-            },
-        );
-    }
-
-    // Python: look for pyproject.toml with mypy or ruff
-    if find_upward(cwd, "pyproject.toml").is_some() {
-        // Prefer ruff (fast) over mypy (slow)
-        validators.insert(
-            ValidatorKind::Python,
-            ValidatorConfig {
-                command: "ruff".into(),
-                args: vec!["check".into(), "--quiet".into()],
-            },
-        );
+    for validator in LANGUAGE_VALIDATORS {
+        if find_upward(cwd, validator.config_name()).is_some() {
+            validators.insert(validator.kind(), validator.config());
+        }
     }
 
     *guard = Some((cwd.to_path_buf(), validators.clone()));
@@ -535,36 +625,7 @@ fn find_upward(start: &Path, name: &str) -> Option<std::path::PathBuf> {
 
 /// Extract error-relevant lines from validator output.
 fn extract_error_summary(stdout: &str, stderr: &str, kind: &ValidatorKind) -> String {
-    let combined = format!("{stdout}\n{stderr}");
-
-    match kind {
-        ValidatorKind::Rust => {
-            // cargo check --message-format=short outputs "file:line:col: error[E0xxx]: msg"
-            combined
-                .lines()
-                .filter(|l| l.contains("error") || l.contains("warning"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
-        ValidatorKind::TypeScript => {
-            // tsc outputs "file(line,col): error TSxxxx: msg"
-            combined
-                .lines()
-                .filter(|l| l.contains("error TS") || l.contains(": error"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
-        ValidatorKind::Python => {
-            // ruff outputs "file:line:col: EXXX msg"
-            combined
-                .lines()
-                .filter(|l| {
-                    !l.is_empty() && !l.starts_with("Found") && !l.starts_with("All checks")
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
-    }
+    kind.spec().extract_error_summary(stdout, stderr)
 }
 
 /// Count approximate number of errors from summary text.
