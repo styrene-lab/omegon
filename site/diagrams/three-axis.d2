@@ -8,7 +8,7 @@ title: Three-Axis Routing Model {
   }
 }
 
-capability: Capability Tier {
+grade: Model Grade Intent {
   style: {
     fill: "#06080e"
     stroke: "#2ab4c8"
@@ -16,20 +16,17 @@ capability: Capability Tier {
     border-radius: 8
   }
 
-  local: local {
+  f: F/D fast + cheap {
     style: { fill: "#0e2a40"; stroke: "#344858"; font-color: "#c4d8e4"; border-radius: 6 }
   }
-  retribution: retribution {
+  cb: C/B routine coding {
     style: { fill: "#1a3a5a"; stroke: "#1a8898"; font-color: "#c4d8e4"; border-radius: 6 }
   }
-  victory: victory {
-    style: { fill: "#1a4a6e"; stroke: "#2ab4c8"; font-color: "#c4d8e4"; border-radius: 6 }
-  }
-  gloriana: gloriana {
+  as: A/S frontier reasoning {
     style: { fill: "#1a4a6e"; stroke: "#6ecad8"; font-color: "#c4d8e4"; border-radius: 6 }
   }
 
-  local -> retribution -> victory -> gloriana {
+  f -> cb -> as {
     style: { stroke: "#344858" }
   }
 }
@@ -86,11 +83,11 @@ context: Context Class {
   }
 }
 
-routing: Routing Engine {
+routing: Route Controller {
   style: { fill: "#1a4a6e"; stroke: "#2ab4c8"; font-color: "#c4d8e4"; border-radius: 8 }
 }
 
-capability -> routing: tier {
+grade -> routing: grade {
   style: { stroke: "#2ab4c8"; font-color: "#c4d8e4" }
 }
 thinking -> routing: budget {

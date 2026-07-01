@@ -4,7 +4,7 @@ operator: Operator {
   style: { fill: "#0e2e20"; stroke: "#1ab878"; font-color: "#c4d8e4"; border-radius: 8 }
 }
 
-routing: Routing Engine {
+routing: Route Controller {
   style: { fill: "#1a4a6e"; stroke: "#2ab4c8"; font-color: "#c4d8e4"; border-radius: 8 }
 }
 
@@ -45,7 +45,7 @@ providers: Providers {
   }
 }
 
-operator -> routing: /model, /think, set_model_tier {
+operator -> routing: /model, /model grade, /think {
   style: { stroke: "#1ab878"; font-color: "#c4d8e4" }
 }
 
