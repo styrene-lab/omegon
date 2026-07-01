@@ -50,7 +50,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
 
 ### Added
-- Added `/variables` and `/vars` as the MVP non-secret session configuration surface, with list/status, set, get, and delete/remove/rm command plumbing plus plain-value control readouts; secret-like names are rejected and directed to `/secrets`.
+- Added `/variables` and `/vars` as the MVP non-secret session configuration surface, with list/status, set, get, and delete/remove/rm command plumbing plus plain-value control readouts; secret-like names are flagged with `/secrets` guidance without blocking operator-defined variables.
 - Added design notes for the `/variables` non-secret runtime configuration surface, including second- and third-order effects around OCI deployment, process injection, trust boundaries, and project portability.
 - Documented the validator capability UX plan, including `/validate` Overview/Active/Available/Overrides/Runs/Settings tabs, Armory/community validator trust lifecycle, explain output, backend DTOs, and phased implementation plan.
 - Updated model-budget grade resolution tests for the Anthropic B-grade default moving to Claude Sonnet 5.

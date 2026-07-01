@@ -4386,7 +4386,12 @@ pub async fn variables_view_response() -> SlashCommandResponse {
     } else {
         out.push_str(&format!("⚙ Variables ({}) — session scope\n\n", vars.len()));
         for (name, value) in vars.iter() {
-            out.push_str(&format!("  {name:<24} {value}\n"));
+            let warning = if variable_name_looks_secret(name) {
+                "  ⚠ name looks sensitive; consider /secrets"
+            } else {
+                ""
+            };
+            out.push_str(&format!("  {name:<24} {value}{warning}\n"));
         }
     }
     out.push_str("\nVariables are non-secret runtime config and may be displayed. Use /secrets for sensitive values.\n");
@@ -4408,14 +4413,14 @@ pub async fn variables_set_response(name: &str, value: &str) -> SlashCommandResp
             )),
         };
     }
-    if variable_name_looks_secret(name) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!(
-                "Refusing to store likely secret '{name}' as a printable variable. Use /secrets set {name} for sensitive values."
-            )),
-        };
-    }
+    let warning = if variable_name_looks_secret(name) {
+        format!(
+            "
+⚠ Variable name '{name}' looks sensitive. /variables values are printable; use /secrets set {name} for credentials."
+        )
+    } else {
+        String::new()
+    };
     session_variables()
         .lock()
         .expect("variables lock")
@@ -4423,7 +4428,7 @@ pub async fn variables_set_response(name: &str, value: &str) -> SlashCommandResp
     SlashCommandResponse {
         accepted: true,
         output: Some(format!(
-            "✓ Variable {name} set in session scope.\n  Value: {value}"
+            "✓ Variable {name} set in session scope.\n  Value: {value}{warning}"
         )),
     }
 }
@@ -4431,10 +4436,19 @@ pub async fn variables_set_response(name: &str, value: &str) -> SlashCommandResp
 pub async fn variables_get_response(name: &str) -> SlashCommandResponse {
     let vars = session_variables().lock().expect("variables lock");
     match vars.get(name) {
-        Some(value) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!("{name}={value}\n(scope: session)")),
-        },
+        Some(value) => {
+            let warning = if variable_name_looks_secret(name) {
+                format!(
+                    "\n⚠ '{name}' looks sensitive. Variables are printable; credentials belong in /secrets."
+                )
+            } else {
+                String::new()
+            };
+            SlashCommandResponse {
+                accepted: true,
+                output: Some(format!("{name}={value}\n(scope: session){warning}")),
+            }
+        }
         None => SlashCommandResponse {
             accepted: false,
             output: Some(format!("Variable '{name}' not found. Use /variables list.")),
@@ -5501,12 +5515,23 @@ mod variables_tests {
     }
 
     #[tokio::test]
-    async fn variables_reject_secret_like_names() {
-        let response = variables_set_response("API_TOKEN", "value").await;
-        assert!(!response.accepted);
-        let output = response.output.unwrap();
-        assert!(output.contains("likely secret"));
-        assert!(output.contains("/secrets set API_TOKEN"));
+    async fn variables_warn_on_secret_like_names() {
+        let name = format!("API_TOKEN_{}", std::process::id());
+        let set = variables_set_response(&name, "value").await;
+        assert!(set.accepted);
+        let output = set.output.unwrap();
+        assert!(output.contains("looks sensitive"));
+        assert!(output.contains(&format!("/secrets set {name}")));
+
+        let get = variables_get_response(&name).await;
+        assert!(get.accepted);
+        let output = get.output.unwrap();
+        assert!(output.contains("Variables are printable"));
+
+        let list = variables_view_response().await.output.unwrap();
+        assert!(list.contains(&name));
+        assert!(list.contains("name looks sensitive"));
+        variables_delete_response(&name).await;
     }
 
     #[tokio::test]
