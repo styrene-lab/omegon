@@ -4363,6 +4363,21 @@ fn valid_variable_name(name: &str) -> bool {
         && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
 }
 
+fn variable_name_looks_secret(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    [
+        "SECRET",
+        "TOKEN",
+        "PASSWORD",
+        "PASS",
+        "API_KEY",
+        "PRIVATE_KEY",
+        "CREDENTIAL",
+    ]
+    .iter()
+    .any(|needle| upper.contains(needle))
+}
+
 pub async fn variables_view_response() -> SlashCommandResponse {
     let vars = session_variables().lock().expect("variables lock");
     let mut out = String::new();
@@ -4390,6 +4405,14 @@ pub async fn variables_set_response(name: &str, value: &str) -> SlashCommandResp
             accepted: false,
             output: Some(format!(
                 "Invalid variable name '{name}'. Use shell-style names like PROJECT_ENV."
+            )),
+        };
+    }
+    if variable_name_looks_secret(name) {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Refusing to store likely secret '{name}' as a printable variable. Use /secrets set {name} for sensitive values."
             )),
         };
     }
@@ -5475,6 +5498,15 @@ mod variables_tests {
         let delete = variables_delete_response(&name).await;
         assert!(delete.accepted);
         assert!(!variables_get_response(&name).await.accepted);
+    }
+
+    #[tokio::test]
+    async fn variables_reject_secret_like_names() {
+        let response = variables_set_response("API_TOKEN", "value").await;
+        assert!(!response.accepted);
+        let output = response.output.unwrap();
+        assert!(output.contains("likely secret"));
+        assert!(output.contains("/secrets set API_TOKEN"));
     }
 
     #[tokio::test]
