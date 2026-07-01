@@ -500,6 +500,16 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
         "primary local desktop handoff — show status or open Auspex",
         &["status", "open"],
     ),
+    BuiltinCommandSpec::cli_acp_state_changing(
+        "variables",
+        "manage non-secret runtime configuration variables",
+        &["list", "status", "set", "get", "delete", "remove", "rm"],
+    ),
+    BuiltinCommandSpec::cli_acp_state_changing(
+        "vars",
+        "alias for /variables",
+        &["list", "status", "set", "get", "delete", "remove", "rm"],
+    ),
     BuiltinCommandSpec::acp_destructive(
         "secrets",
         "manage stored secrets",

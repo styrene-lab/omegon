@@ -812,6 +812,13 @@ pub enum CanonicalSlashCommand {
     },
     SecretsGet(String),
     SecretsDelete(String),
+    VariablesView,
+    VariablesSet {
+        name: String,
+        value: String,
+    },
+    VariablesGet(String),
+    VariablesDelete(String),
     VaultStatus,
     VaultConfigure,
     VaultInitPolicy,
@@ -1321,6 +1328,28 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                     .then(|| CanonicalSlashCommand::PluginUpdate(Some(name.to_string())))
             } else {
                 None
+            }
+        }
+
+        "variables" | "vars" => {
+            let parts: Vec<&str> = args.splitn(3, ' ').collect();
+            match parts.first().copied().unwrap_or("") {
+                "" | "list" | "status" => Some(CanonicalSlashCommand::VariablesView),
+                "set" if parts.len() >= 3 && !parts[1].trim().is_empty() => {
+                    Some(CanonicalSlashCommand::VariablesSet {
+                        name: parts[1].trim().to_string(),
+                        value: parts[2].trim().to_string(),
+                    })
+                }
+                "get" if parts.len() >= 2 && !parts[1].trim().is_empty() => Some(
+                    CanonicalSlashCommand::VariablesGet(parts[1].trim().to_string()),
+                ),
+                "delete" | "remove" | "rm" if parts.len() >= 2 && !parts[1].trim().is_empty() => {
+                    Some(CanonicalSlashCommand::VariablesDelete(
+                        parts[1].trim().to_string(),
+                    ))
+                }
+                _ => None,
             }
         }
         "secrets" => {
@@ -5314,6 +5343,27 @@ warning: {warning}"
             .collect();
         self.selector = Some(selector::Selector::new("Set Secret — pick a name", options));
         self.selector_kind = Some(SelectorKind::SecretName);
+    }
+
+    /// Handle /variables — non-secret runtime configuration.
+    fn handle_variables(&mut self, args: &str, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
+        if let Some(command) = canonical_slash_command("variables", args) {
+            if let Some(request) = crate::control_runtime::control_request_from_slash(&command) {
+                let _ = tx.try_send(TuiCommand::ExecuteControl {
+                    request,
+                    respond_to: None,
+                });
+                SlashResult::Handled
+            } else {
+                SlashResult::Display(
+                    "Usage: /variables [list|status|set <name> <value>|get <name>|delete|remove|rm <name>]".into(),
+                )
+            }
+        } else {
+            SlashResult::Display(
+                "Usage: /variables [list|status|set <name> <value>|get <name>|delete|remove|rm <name>]".into(),
+            )
+        }
     }
 
     /// Handle /secrets — interactive secret management.
@@ -9538,6 +9588,8 @@ Scroll transcript:
             "milestone" => self.handle_milestone(args),
 
             "demo" => self.handle_tutorial(args, tx),
+
+            "variables" | "vars" => self.handle_variables(args, tx),
 
             "secrets" => self.handle_secrets(args, tx),
 

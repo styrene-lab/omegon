@@ -213,6 +213,17 @@ pub enum ControlRequest {
     SecretsDelete {
         name: String,
     },
+    VariablesView,
+    VariablesSet {
+        name: String,
+        value: String,
+    },
+    VariablesGet {
+        name: String,
+    },
+    VariablesDelete {
+        name: String,
+    },
     VaultStatus,
     VaultUnseal,
     VaultLogin,
@@ -464,6 +475,19 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::SecretsDelete(name) => {
             ControlRequest::SecretsDelete { name: name.clone() }
         }
+        crate::tui::CanonicalSlashCommand::VariablesView => ControlRequest::VariablesView,
+        crate::tui::CanonicalSlashCommand::VariablesSet { name, value } => {
+            ControlRequest::VariablesSet {
+                name: name.clone(),
+                value: value.clone(),
+            }
+        }
+        crate::tui::CanonicalSlashCommand::VariablesGet(name) => {
+            ControlRequest::VariablesGet { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::VariablesDelete(name) => {
+            ControlRequest::VariablesDelete { name: name.clone() }
+        }
         crate::tui::CanonicalSlashCommand::VaultStatus => ControlRequest::VaultStatus,
         crate::tui::CanonicalSlashCommand::VaultConfigure => ControlRequest::VaultConfigure,
         crate::tui::CanonicalSlashCommand::VaultInitPolicy => ControlRequest::VaultInitPolicy,
@@ -535,6 +559,10 @@ async fn try_stateless_control(
         ControlRequest::SecretsDelete { name } => {
             secrets_delete_response(secrets.as_ref(), name).await
         }
+        ControlRequest::VariablesView => variables_view_response().await,
+        ControlRequest::VariablesSet { name, value } => variables_set_response(name, value).await,
+        ControlRequest::VariablesGet { name } => variables_get_response(name).await,
+        ControlRequest::VariablesDelete { name } => variables_delete_response(name).await,
         ControlRequest::VaultUnseal => vault_unseal_response().await,
         ControlRequest::VaultLogin => vault_login_response().await,
         ControlRequest::VaultConfigure => vault_configure_response().await,
@@ -4321,6 +4349,92 @@ pub async fn catalog_remove_response(id: &str) -> SlashCommandResponse {
     }
 }
 
+static SESSION_VARIABLES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::BTreeMap<String, String>>,
+> = std::sync::OnceLock::new();
+
+fn session_variables() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, String>> {
+    SESSION_VARIABLES.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+}
+
+fn valid_variable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+}
+
+pub async fn variables_view_response() -> SlashCommandResponse {
+    let vars = session_variables().lock().expect("variables lock");
+    let mut out = String::new();
+    if vars.is_empty() {
+        out.push_str("No session variables set.\n");
+    } else {
+        out.push_str(&format!("⚙ Variables ({}) — session scope\n\n", vars.len()));
+        for (name, value) in vars.iter() {
+            out.push_str(&format!("  {name:<24} {value}\n"));
+        }
+    }
+    out.push_str("\nVariables are non-secret runtime config and may be displayed. Use /secrets for sensitive values.\n");
+    out.push_str(
+        "Commands:\n  /variables set NAME VALUE\n  /variables get NAME\n  /variables delete NAME",
+    );
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(out),
+    }
+}
+
+pub async fn variables_set_response(name: &str, value: &str) -> SlashCommandResponse {
+    if !valid_variable_name(name) {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Invalid variable name '{name}'. Use shell-style names like PROJECT_ENV."
+            )),
+        };
+    }
+    session_variables()
+        .lock()
+        .expect("variables lock")
+        .insert(name.to_string(), value.to_string());
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(format!(
+            "✓ Variable {name} set in session scope.\n  Value: {value}"
+        )),
+    }
+}
+
+pub async fn variables_get_response(name: &str) -> SlashCommandResponse {
+    let vars = session_variables().lock().expect("variables lock");
+    match vars.get(name) {
+        Some(value) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!("{name}={value}\n(scope: session)")),
+        },
+        None => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Variable '{name}' not found. Use /variables list.")),
+        },
+    }
+}
+
+pub async fn variables_delete_response(name: &str) -> SlashCommandResponse {
+    let removed = session_variables()
+        .lock()
+        .expect("variables lock")
+        .remove(name)
+        .is_some();
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(if removed {
+            format!("✓ Variable '{name}' deleted from session scope.")
+        } else {
+            format!("Variable '{name}' was not set.")
+        }),
+    }
+}
+
 pub async fn secrets_view_response(
     secrets: &omegon_secrets::SecretsManager,
 ) -> SlashCommandResponse {
@@ -5334,5 +5448,39 @@ mod context_compaction_tests {
             }
             other => panic!("unexpected second event: {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod variables_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn variables_session_crud_displays_plain_values() {
+        let name = format!("OMEGON_TEST_VAR_{}", std::process::id());
+        let set = variables_set_response(&name, "staging").await;
+        assert!(set.accepted);
+        assert!(set.output.unwrap().contains("staging"));
+
+        let get = variables_get_response(&name).await;
+        assert!(get.accepted);
+        assert!(get.output.unwrap().contains(&format!("{name}=staging")));
+
+        let list = variables_view_response().await;
+        let output = list.output.unwrap();
+        assert!(output.contains(&name));
+        assert!(output.contains("staging"));
+        assert!(output.contains("non-secret"));
+
+        let delete = variables_delete_response(&name).await;
+        assert!(delete.accepted);
+        assert!(!variables_get_response(&name).await.accepted);
+    }
+
+    #[tokio::test]
+    async fn variables_reject_invalid_names() {
+        let response = variables_set_response("1BAD", "value").await;
+        assert!(!response.accepted);
+        assert!(response.output.unwrap().contains("Invalid variable name"));
     }
 }

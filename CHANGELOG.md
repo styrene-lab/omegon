@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Fixed
+- Rebuilt and relinked the development install as `0.27.0-rc.4`.
 - Rebuilt and relinked the development install as `0.27.0-rc.3`.
 - Fixed `/model list` in the TUI to open the interactive model selector instead of dumping the available-models text readout into the terminal, and closed parent structured menus when launching selector rows so arrow keys move the selector instead of the underlying menu.
 - Hardened shared `/extension` and `/runtime` menu actions: refresh/update require confirmed menu activation, and extension search now primes `/extension search ` for an explicit query instead of executing a query-less menu command.
@@ -49,6 +50,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
 
 ### Added
+- Added `/variables` and `/vars` as the MVP non-secret session configuration surface, with list/status, set, get, and delete/remove/rm command plumbing plus plain-value control readouts.
+- Added design notes for the `/variables` non-secret runtime configuration surface, including second- and third-order effects around OCI deployment, process injection, trust boundaries, and project portability.
 - Documented the validator capability UX plan, including `/validate` Overview/Active/Available/Overrides/Runs/Settings tabs, Armory/community validator trust lifecycle, explain output, backend DTOs, and phased implementation plan.
 - Updated model-budget grade resolution tests for the Anthropic B-grade default moving to Claude Sonnet 5.
 - Added a self-contained `core.skill-manifest` domain validator for `skills/**/SKILL.md`, covering YAML/TOML frontmatter parsing, required `name`/`description`, and optional skill metadata field shapes.

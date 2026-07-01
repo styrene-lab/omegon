@@ -8661,3 +8661,64 @@ fn legacy_model_tier_slash_commands_are_unknown() {
         }
     }
 }
+
+#[test]
+fn slash_variables_set_get_delete_queue_control_requests() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    assert!(matches!(
+        app.handle_slash_command("/variables set PROJECT_ENV staging", &tx),
+        SlashResult::Handled
+    ));
+    match rx.try_recv().expect("set request") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::VariablesSet { name, value },
+            ..
+        } => {
+            assert_eq!(name, "PROJECT_ENV");
+            assert_eq!(value, "staging");
+        }
+        other => panic!("expected variables set request, got {other:?}"),
+    }
+
+    assert!(matches!(
+        app.handle_slash_command("/variables get PROJECT_ENV", &tx),
+        SlashResult::Handled
+    ));
+    match rx.try_recv().expect("get request") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::VariablesGet { name },
+            ..
+        } => assert_eq!(name, "PROJECT_ENV"),
+        other => panic!("expected variables get request, got {other:?}"),
+    }
+
+    assert!(matches!(
+        app.handle_slash_command("/variables delete PROJECT_ENV", &tx),
+        SlashResult::Handled
+    ));
+    match rx.try_recv().expect("delete request") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::VariablesDelete { name },
+            ..
+        } => assert_eq!(name, "PROJECT_ENV"),
+        other => panic!("expected variables delete request, got {other:?}"),
+    }
+}
+
+#[test]
+fn variables_command_is_advertised() {
+    let variables = crate::command_registry::BUILTIN_COMMANDS
+        .iter()
+        .find(|entry| entry.name == "variables")
+        .expect("variables command advertised");
+    for subcommand in ["list", "status", "set", "get", "delete", "remove", "rm"] {
+        assert!(variables.subcommands.contains(&subcommand));
+    }
+    let alias = crate::command_registry::BUILTIN_COMMANDS
+        .iter()
+        .find(|entry| entry.name == "vars")
+        .expect("vars alias advertised");
+    assert!(alias.subcommands.contains(&"set"));
+}
