@@ -4608,6 +4608,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn secret_response_functions_stay_in_control_secrets_module() {
+        let source = include_str!("control_runtime.rs");
+        for suffix in [
+            "view_response",
+            "set_response",
+            "get_response",
+            "delete_response",
+        ] {
+            let forbidden = format!("pub async fn secrets_{suffix}");
+            assert!(
+                !source.contains(&forbidden),
+                "secret response ownership belongs in control/secrets.rs, not control_runtime.rs: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
     fn context_status_projection_uses_palette_instead_of_dump() {
         let rendered = context_status_projection(
             23_271,
