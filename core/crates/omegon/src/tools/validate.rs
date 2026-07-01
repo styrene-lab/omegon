@@ -890,6 +890,7 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
     let mut validated_paths = Vec::new();
     let mut unsupported_paths = Vec::new();
     let mut missing_validator_paths = Vec::new();
+    let mut language_plan: HashMap<ValidatorKind, Vec<PathBuf>> = HashMap::new();
     for path in &unique_paths {
         if let Some(kind) = embedded_validator_for_file(path) {
             if !builtin_replaced_by_operator(kind, &operator_validators) {
@@ -915,20 +916,33 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
             continue;
         }
 
-        let validators = discover_validators(cwd);
+        language_plan.entry(kind).or_default().push(path.clone());
+    }
+
+    let validators = discover_validators(cwd);
+    for kind in [
+        ValidatorKind::Rust,
+        ValidatorKind::TypeScript,
+        ValidatorKind::Python,
+    ] {
+        let Some(paths) = language_plan.get(&kind) else {
+            continue;
+        };
         let Some(config) = validators.get(&kind).cloned() else {
-            missing_validator_paths.push(format!(
-                "{} ({}, no {} found from {})",
-                path.display(),
-                kind.label(),
-                kind.expected_config(),
-                cwd.display()
-            ));
+            for path in paths {
+                missing_validator_paths.push(format!(
+                    "{} ({}, no {} found from {})",
+                    path.display(),
+                    kind.label(),
+                    kind.expected_config(),
+                    cwd.display()
+                ));
+            }
             continue;
         };
 
-        validation_results.push(validate_file(path, kind, config, cwd).await);
-        validated_paths.push(path.display().to_string());
+        validation_results.push(validate_language_paths(kind, paths, config, cwd).await);
+        validated_paths.extend(paths.iter().map(|path| path.display().to_string()));
     }
 
     let builtin_inventory = builtin_validator_inventory_json(cwd);
@@ -1039,10 +1053,10 @@ Supported built-in types: JSON, TOML, YAML, Markdown, Rust, TypeScript, Python."
     })
 }
 
-/// Run validation for a single file path.
-async fn validate_file(
-    file_path: &Path,
+/// Run validation once for all changed paths covered by one language toolchain.
+async fn validate_language_paths(
     kind: ValidatorKind,
+    paths: &[PathBuf],
     config: ValidatorConfig,
     cwd: &Path,
 ) -> String {
@@ -1064,17 +1078,19 @@ async fn validate_file(
 
             if exit_code == 0 {
                 format!(
-                    "Validation (`{}`) for {}: ✓ passed",
+                    "Validation (`{}`) for {} {} path(s): ✓ passed",
                     format_command(config.command, &config.args),
-                    file_path.display()
+                    paths.len(),
+                    kind.label()
                 )
             } else {
                 // Extract just the error lines, not the full output
                 let errors = extract_error_summary(&stdout, &stderr, &kind);
                 format!(
-                    "Validation (`{}`) for {}: ✗ {} error(s)\n{}",
+                    "Validation (`{}`) for {} {} path(s): ✗ {} error(s)\n{}",
                     format_command(config.command, &config.args),
-                    file_path.display(),
+                    paths.len(),
+                    kind.label(),
                     count_errors(&errors),
                     truncate_validation(&errors, 500),
                 )
@@ -1083,9 +1099,10 @@ async fn validate_file(
         Ok(Err(e)) => {
             tracing::debug!("Validation command failed to execute: {e}");
             format!(
-                "Validation (`{}`) for {}: failed to execute: {e}",
+                "Validation (`{}`) for {} {} path(s): failed to execute: {e}",
                 format_command(config.command, &config.args),
-                file_path.display()
+                paths.len(),
+                kind.label()
             )
         }
         Err(_) => {
@@ -1095,9 +1112,10 @@ async fn validate_file(
                 format_command(config.command, &config.args)
             );
             format!(
-                "Validation (`{}`) for {}: ⏱ timed out after {}s",
+                "Validation (`{}`) for {} {} path(s): ⏱ timed out after {}s",
                 format_command(config.command, &config.args),
-                file_path.display(),
+                paths.len(),
+                kind.label(),
                 VALIDATION_TIMEOUT_SECS
             )
         }
@@ -1890,5 +1908,39 @@ mod tests {
                 .len(),
             4
         );
+    }
+
+    #[tokio::test]
+    async fn language_validator_coalesces_same_kind_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let path_one = src_dir.join("lib.rs");
+        let path_two = src_dir.join("main.rs");
+        std::fs::write(&path_one, "pub fn demo() {}\n").unwrap();
+        std::fs::write(&path_two, "fn main() {}\n").unwrap();
+
+        let result = execute(
+            &[path_one.clone(), path_two.clone()],
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("Validated 2 path(s) with 1 applicable validator run(s)"),
+            "{message}"
+        );
+        assert!(message.contains("for 2 Rust path(s)"), "{message}");
+        assert_eq!(result.details["validators_run"], 1);
+        assert_eq!(result.details["builtin_validators_run"], 1);
     }
 }
