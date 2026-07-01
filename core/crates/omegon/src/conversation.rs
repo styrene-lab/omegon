@@ -1493,6 +1493,26 @@ impl ConversationState {
             "write" => {
                 format!("[write{ctx_suffix}: {text}]")
             }
+            "secret_set" => {
+                format!("[secret_set{ctx_suffix}: stored secret metadata; value redacted]")
+            }
+            "secret_list" => {
+                format!("[secret_list{ctx_suffix}: metadata only; values not resolved]")
+            }
+            "secret_delete" => {
+                format!("[secret_delete{ctx_suffix}: deleted secret metadata]")
+            }
+            "variable_set" => {
+                format!(
+                    "[variable_set{ctx_suffix}: session variable set; printable value may appear in result]"
+                )
+            }
+            "variable_list" => {
+                format!("[variable_list{ctx_suffix}: values are printable runtime config]")
+            }
+            "variable_delete" => {
+                format!("[variable_delete{ctx_suffix}: deleted session variable]")
+            }
             "web_search" => {
                 let lines = text.lines().count();
                 format!("[web_search{ctx_suffix}: {lines} lines of results]")
@@ -4317,5 +4337,54 @@ mod tests {
     fn empty_work_plan_not_complete() {
         let intent = IntentDocument::default();
         assert!(!intent.work_plan_complete());
+    }
+    #[test]
+    fn secret_tool_results_decay_as_redacted_metadata() {
+        let mut conv = ConversationState::new();
+        conv.decay_window = 0;
+        push_matching_assistant(&mut conv, "secret-call");
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "secret-call".into(),
+            tool_name: "secret_set".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "Stored secret 'API_TOKEN' for harness use.".into(),
+            }],
+            is_error: false,
+            args_summary: Some("name: API_TOKEN".into()),
+        });
+        conv.intent.stats.turns = 1;
+
+        let view = conv.build_llm_view();
+        let LlmMessage::ToolResult { content, .. } = &view[1] else {
+            panic!("expected tool result");
+        };
+        assert!(content.contains("secret_set"), "{content}");
+        assert!(content.contains("value redacted"), "{content}");
+        assert!(!content.contains("secret-value"), "{content}");
+    }
+
+    #[test]
+    fn variable_tool_results_decay_as_printable_runtime_config() {
+        let mut conv = ConversationState::new();
+        conv.decay_window = 0;
+        push_matching_assistant(&mut conv, "variable-call");
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "variable-call".into(),
+            tool_name: "variable_set".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "✓ Variable PROJECT_ENV set in session scope.\n  Value: staging".into(),
+            }],
+            is_error: false,
+            args_summary: Some("name: PROJECT_ENV".into()),
+        });
+        conv.intent.stats.turns = 1;
+
+        let view = conv.build_llm_view();
+        let LlmMessage::ToolResult { content, .. } = &view[1] else {
+            panic!("expected tool result");
+        };
+        assert!(content.contains("variable_set"), "{content}");
+        assert!(content.contains("session variable"), "{content}");
+        assert!(content.contains("printable"), "{content}");
     }
 }
