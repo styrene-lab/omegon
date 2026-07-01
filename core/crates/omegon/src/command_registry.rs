@@ -367,8 +367,16 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
             "status", "list", "set", "approve", "execute", "advance", "skip", "clear",
         ],
     ),
-    BuiltinCommandSpec::cli_read_only("sessions", "open saved sessions menu", &["list", "all", "resume"]),
-    BuiltinCommandSpec::cli_read_only("memory", "open memory overview menu", &["status", "overview"]),
+    BuiltinCommandSpec::cli_read_only(
+        "sessions",
+        "open saved sessions menu",
+        &["list", "all", "resume"],
+    ),
+    BuiltinCommandSpec::cli_read_only(
+        "memory",
+        "open memory overview menu",
+        &["status", "overview"],
+    ),
     BuiltinCommandSpec::state_changing("settings", "open settings menu", &[]),
     BuiltinCommandSpec::cli_acp_state_changing(
         "skills",

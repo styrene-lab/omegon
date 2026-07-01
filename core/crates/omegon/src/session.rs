@@ -61,18 +61,37 @@ pub fn allocate_session_id() -> String {
 
 pub fn friendly_session_name_for_id(session_id: &str) -> String {
     const ADJECTIVES: &[&str] = &[
-        "amber", "brave", "calm", "clear", "cobalt", "daring", "eager", "ember",
-        "frost", "gentle", "hidden", "keen", "lunar", "patient", "quiet", "rapid",
-        "silver", "steady", "tidal", "vivid", "wise", "zealous",
+        "amber", "brave", "calm", "clear", "cobalt", "daring", "eager", "ember", "frost", "gentle",
+        "hidden", "keen", "lunar", "patient", "quiet", "rapid", "silver", "steady", "tidal",
+        "vivid", "wise", "zealous",
     ];
     const NOUNS: &[&str] = &[
-        "anchor", "basilisk", "beacon", "cedar", "cipher", "comet", "forge", "harbor",
-        "keel", "lantern", "machinist", "meridian", "otter", "raven", "signal",
-        "sparrow", "warden", "waypoint", "willow", "wyrm",
+        "anchor",
+        "basilisk",
+        "beacon",
+        "cedar",
+        "cipher",
+        "comet",
+        "forge",
+        "harbor",
+        "keel",
+        "lantern",
+        "machinist",
+        "meridian",
+        "otter",
+        "raven",
+        "signal",
+        "sparrow",
+        "warden",
+        "waypoint",
+        "willow",
+        "wyrm",
     ];
-    let hash = session_id.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-    });
+    let hash = session_id
+        .bytes()
+        .fold(0xcbf29ce484222325u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        });
     let adjective = ADJECTIVES[(hash as usize) % ADJECTIVES.len()];
     let noun = NOUNS[((hash >> 16) as usize) % NOUNS.len()];
     format!("{adjective}_{noun}")
@@ -88,10 +107,11 @@ pub fn is_canonical_session_id(id: &str) -> bool {
         && timestamp.as_bytes().get(10) == Some(&b'T')
         && timestamp.as_bytes().get(13) == Some(&b'-')
         && timestamp.as_bytes().get(16) == Some(&b'-')
-        && timestamp
-            .bytes()
-            .enumerate()
-            .all(|(idx, byte)| matches!(idx, 4 | 7 | 13 | 16) && byte == b'-' || idx == 10 && byte == b'T' || byte.is_ascii_digit())
+        && timestamp.bytes().enumerate().all(|(idx, byte)| {
+            matches!(idx, 4 | 7 | 13 | 16) && byte == b'-'
+                || idx == 10 && byte == b'T'
+                || byte.is_ascii_digit()
+        })
         && suffix.len() == 8
         && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -147,7 +167,9 @@ pub fn save_session(
     // When starting fresh, generate a new timestamped ID.
     let session_id = match resume_id {
         Some(id) if is_canonical_session_id(id) => id.to_string(),
-        Some(id) => anyhow::bail!("Invalid session id '{id}'; sessions must use Omegon canonical ids"),
+        Some(id) => {
+            anyhow::bail!("Invalid session id '{id}'; sessions must use Omegon canonical ids")
+        }
         None => allocate_session_id(),
     };
     let filename = format!("{session_id}.json");
@@ -249,7 +271,9 @@ pub fn list_sessions(cwd: &Path) -> Vec<SessionEntry> {
             continue;
         }
         let expected_filename = format!("{}.json", meta.session_id);
-        if session_path.file_name().and_then(|name| name.to_str()) != Some(expected_filename.as_str()) {
+        if session_path.file_name().and_then(|name| name.to_str())
+            != Some(expected_filename.as_str())
+        {
             continue;
         }
 
@@ -451,7 +475,9 @@ mod tests {
                 continue;
             }
             let expected_filename = format!("{}.json", meta.session_id);
-            if session_path.file_name().and_then(|name| name.to_str()) != Some(expected_filename.as_str()) {
+            if session_path.file_name().and_then(|name| name.to_str())
+                != Some(expected_filename.as_str())
+            {
                 continue;
             }
             entries.push(SessionEntry {

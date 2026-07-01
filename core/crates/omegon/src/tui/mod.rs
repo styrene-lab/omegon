@@ -28,12 +28,12 @@ pub mod image;
 pub mod inline_render;
 pub mod instruments;
 pub mod layout_projection;
+pub(crate) mod menu_surface;
 pub mod model_catalog;
 pub mod permission_lane;
 pub mod segment_components;
 pub mod segment_detail;
 pub mod segments;
-pub(crate) mod menu_surface;
 pub mod selector;
 pub(crate) mod settings_menu;
 pub mod spinner;
@@ -824,7 +824,9 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
     let args = args.trim();
     match cmd {
         "model" if args.is_empty() || args == "route" => None,
-        "model" if matches!(args, "list" | "providers" | "status" | "view") => Some(CanonicalSlashCommand::ModelList),
+        "model" if matches!(args, "list" | "providers" | "status" | "view") => {
+            Some(CanonicalSlashCommand::ModelList)
+        }
         "model" if args == "unpin" => Some(CanonicalSlashCommand::ModelUnpin),
         "model" if let Some(policy) = args.strip_prefix("policy ") => {
             let policy = policy.trim();
@@ -2439,7 +2441,14 @@ impl App {
         let current = self
             .active_menu
             .as_ref()
-            .and_then(|menu| menu.projection.tabs.iter().flat_map(|tab| tab.groups.iter()).flat_map(|group| group.rows.iter()).find(|row| row.id == "model.grade"))
+            .and_then(|menu| {
+                menu.projection
+                    .tabs
+                    .iter()
+                    .flat_map(|tab| tab.groups.iter())
+                    .flat_map(|group| group.rows.iter())
+                    .find(|row| row.id == "model.grade")
+            })
             .and_then(|row| row.value.as_deref())
             .unwrap_or("B");
         self.selector = Some(selector::Selector::new(
@@ -2453,7 +2462,14 @@ impl App {
         let current = self
             .active_menu
             .as_ref()
-            .and_then(|menu| menu.projection.tabs.iter().flat_map(|tab| tab.groups.iter()).flat_map(|group| group.rows.iter()).find(|row| row.id == "model.provider"))
+            .and_then(|menu| {
+                menu.projection
+                    .tabs
+                    .iter()
+                    .flat_map(|tab| tab.groups.iter())
+                    .flat_map(|group| group.rows.iter())
+                    .find(|row| row.id == "model.provider")
+            })
             .and_then(|row| row.value.as_deref())
             .unwrap_or("auto");
         self.selector = Some(selector::Selector::new(
@@ -2467,7 +2483,14 @@ impl App {
         let current = self
             .active_menu
             .as_ref()
-            .and_then(|menu| menu.projection.tabs.iter().flat_map(|tab| tab.groups.iter()).flat_map(|group| group.rows.iter()).find(|row| row.id == "model.policy"))
+            .and_then(|menu| {
+                menu.projection
+                    .tabs
+                    .iter()
+                    .flat_map(|tab| tab.groups.iter())
+                    .flat_map(|group| group.rows.iter())
+                    .find(|row| row.id == "model.policy")
+            })
             .and_then(|row| row.value.as_deref())
             .unwrap_or("minimum");
         self.selector = Some(selector::Selector::new(
@@ -2672,7 +2695,10 @@ impl App {
     }
 
     fn ui_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
-        use crate::surfaces::menu::{MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection, MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection};
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
+        };
         let surfaces = self.ui_surfaces;
         let mut menu = MenuProjection::new("ui", "UI");
         menu.summary = Some(format!(
@@ -2686,13 +2712,15 @@ impl App {
         menu.footer = Some("↑/↓ navigate · / filter · Enter run · l lean · f full · Esc close · /ui status for text readout".into());
         menu.actions = vec![
             {
-                let mut action = MenuActionProjection::command("ui.global.lean", "Lean", "/ui lean");
+                let mut action =
+                    MenuActionProjection::command("ui.global.lean", "Lean", "/ui lean");
                 action.key = Some("l".into());
                 action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
                 action
             },
             {
-                let mut action = MenuActionProjection::command("ui.global.full", "Full", "/ui full");
+                let mut action =
+                    MenuActionProjection::command("ui.global.full", "Full", "/ui full");
                 action.key = Some("f".into());
                 action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
                 action
@@ -2704,9 +2732,24 @@ impl App {
             description: format!("Toggle the {label} surface."),
             value: Some(if enabled { "on" } else { "off" }.into()),
             kind: MenuRowKind::Action,
-            badges: vec![MenuBadgeProjection { label: if enabled { "on".into() } else { "off".into() }, tone: if enabled { MenuBadgeTone::Success } else { MenuBadgeTone::Neutral } }],
+            badges: vec![MenuBadgeProjection {
+                label: if enabled { "on".into() } else { "off".into() },
+                tone: if enabled {
+                    MenuBadgeTone::Success
+                } else {
+                    MenuBadgeTone::Neutral
+                },
+            }],
             metadata: vec![command.into()],
-            primary_action: Some({ let mut action = MenuActionProjection::command(format!("ui.surface.{id}.toggle"), "Toggle", command); action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
+            primary_action: Some({
+                let mut action = MenuActionProjection::command(
+                    format!("ui.surface.{id}.toggle"),
+                    "Toggle",
+                    command,
+                );
+                action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                action
+            }),
             actions: vec![],
             safety: None,
             availability: None,
@@ -2724,12 +2767,49 @@ impl App {
                             id: "ui.preset.lean".into(),
                             label: "Lean preset".into(),
                             description: "Conversation + activity, no dashboard chrome.".into(),
-                            value: Some(if surfaces.preset_name() == "lean" { "active" } else { "" }.into()),
+                            value: Some(
+                                if surfaces.preset_name() == "lean" {
+                                    "active"
+                                } else {
+                                    ""
+                                }
+                                .into(),
+                            ),
                             kind: MenuRowKind::Action,
-                            badges: vec![MenuBadgeProjection { label: if surfaces.preset_name() == "lean" { "active".into() } else { "preset".into() }, tone: if surfaces.preset_name() == "lean" { MenuBadgeTone::Success } else { MenuBadgeTone::Info } }],
+                            badges: vec![MenuBadgeProjection {
+                                label: if surfaces.preset_name() == "lean" {
+                                    "active".into()
+                                } else {
+                                    "preset".into()
+                                },
+                                tone: if surfaces.preset_name() == "lean" {
+                                    MenuBadgeTone::Success
+                                } else {
+                                    MenuBadgeTone::Info
+                                },
+                            }],
                             metadata: vec!["/ui lean".into()],
-                            primary_action: Some({ let mut action = MenuActionProjection::command("ui.preset.lean.primary", "Lean", "/ui lean"); action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
-                            actions: vec![{ let mut action = MenuActionProjection::command("ui.preset.lean.action", "Lean", "/ui lean"); action.key = Some("l".into()); action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }],
+                            primary_action: Some({
+                                let mut action = MenuActionProjection::command(
+                                    "ui.preset.lean.primary",
+                                    "Lean",
+                                    "/ui lean",
+                                );
+                                action.close_policy =
+                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                action
+                            }),
+                            actions: vec![{
+                                let mut action = MenuActionProjection::command(
+                                    "ui.preset.lean.action",
+                                    "Lean",
+                                    "/ui lean",
+                                );
+                                action.key = Some("l".into());
+                                action.close_policy =
+                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                action
+                            }],
                             safety: None,
                             availability: None,
                         },
@@ -2737,12 +2817,49 @@ impl App {
                             id: "ui.preset.full".into(),
                             label: "Full preset".into(),
                             description: "Dashboard, instruments, footer, and activity.".into(),
-                            value: Some(if surfaces.preset_name() == "full" { "active" } else { "" }.into()),
+                            value: Some(
+                                if surfaces.preset_name() == "full" {
+                                    "active"
+                                } else {
+                                    ""
+                                }
+                                .into(),
+                            ),
                             kind: MenuRowKind::Action,
-                            badges: vec![MenuBadgeProjection { label: if surfaces.preset_name() == "full" { "active".into() } else { "preset".into() }, tone: if surfaces.preset_name() == "full" { MenuBadgeTone::Success } else { MenuBadgeTone::Info } }],
+                            badges: vec![MenuBadgeProjection {
+                                label: if surfaces.preset_name() == "full" {
+                                    "active".into()
+                                } else {
+                                    "preset".into()
+                                },
+                                tone: if surfaces.preset_name() == "full" {
+                                    MenuBadgeTone::Success
+                                } else {
+                                    MenuBadgeTone::Info
+                                },
+                            }],
                             metadata: vec!["/ui full".into()],
-                            primary_action: Some({ let mut action = MenuActionProjection::command("ui.preset.full.primary", "Full", "/ui full"); action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
-                            actions: vec![{ let mut action = MenuActionProjection::command("ui.preset.full.action", "Full", "/ui full"); action.key = Some("f".into()); action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }],
+                            primary_action: Some({
+                                let mut action = MenuActionProjection::command(
+                                    "ui.preset.full.primary",
+                                    "Full",
+                                    "/ui full",
+                                );
+                                action.close_policy =
+                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                action
+                            }),
+                            actions: vec![{
+                                let mut action = MenuActionProjection::command(
+                                    "ui.preset.full.action",
+                                    "Full",
+                                    "/ui full",
+                                );
+                                action.key = Some("f".into());
+                                action.close_policy =
+                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                action
+                            }],
                             safety: None,
                             availability: None,
                         },
@@ -2753,19 +2870,41 @@ impl App {
                     label: "Surfaces".into(),
                     description: Some("Toggle individual TUI surfaces.".into()),
                     rows: vec![
-                        surface_row("dashboard", "Dashboard", surfaces.dashboard, "/ui toggle dashboard"),
-                        surface_row("instruments", "Instruments", surfaces.instruments, "/ui toggle instruments"),
+                        surface_row(
+                            "dashboard",
+                            "Dashboard",
+                            surfaces.dashboard,
+                            "/ui toggle dashboard",
+                        ),
+                        surface_row(
+                            "instruments",
+                            "Instruments",
+                            surfaces.instruments,
+                            "/ui toggle instruments",
+                        ),
                         surface_row("footer", "Footer", surfaces.footer, "/ui toggle footer"),
-                        surface_row("activity", "Activity", surfaces.activity, "/ui toggle activity"),
+                        surface_row(
+                            "activity",
+                            "Activity",
+                            surfaces.activity,
+                            "/ui toggle activity",
+                        ),
                         MenuRowProjection {
                             id: "ui.detail".into(),
                             label: "Tool output detail".into(),
                             description: "Adjust tool output density/detail level.".into(),
                             value: Some(self.settings().tool_detail.as_str().into()),
                             kind: MenuRowKind::Action,
-                            badges: vec![MenuBadgeProjection { label: "density".into(), tone: MenuBadgeTone::Neutral }],
+                            badges: vec![MenuBadgeProjection {
+                                label: "density".into(),
+                                tone: MenuBadgeTone::Neutral,
+                            }],
                             metadata: vec!["/ui detail".into(), "/detail".into()],
-                            primary_action: Some(MenuActionProjection::command("ui.detail.primary", "Detail", "/ui detail")),
+                            primary_action: Some(MenuActionProjection::command(
+                                "ui.detail.primary",
+                                "Detail",
+                                "/ui detail",
+                            )),
                             actions: vec![],
                             safety: None,
                             availability: None,
@@ -2782,13 +2921,24 @@ impl App {
     }
 
     fn context_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
-        use crate::surfaces::menu::{MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection, MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection};
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
+        };
         let settings = self.settings();
-        let requested = settings.requested_context_class.map(|class| class.label().to_string()).unwrap_or_else(|| "track model".to_string());
+        let requested = settings
+            .requested_context_class
+            .map(|class| class.label().to_string())
+            .unwrap_or_else(|| "track model".to_string());
         let actual = settings.context_class.label().to_string();
         let mut menu = MenuProjection::new("context", "Context");
-        menu.summary = Some(format!("Context policy and working-set controls. Requested: {requested}; model capacity: {actual}."));
-        menu.footer = Some("↑/↓ navigate · / filter · Enter run/edit · c compact · n new context · Esc close".into());
+        menu.summary = Some(format!(
+            "Context policy and working-set controls. Requested: {requested}; model capacity: {actual}."
+        ));
+        menu.footer = Some(
+            "↑/↓ navigate · / filter · Enter run/edit · c compact · n new context · Esc close"
+                .into(),
+        );
         menu.tabs = vec![MenuTabProjection {
             id: "context".into(),
             label: "Context".into(),
@@ -2860,7 +3010,10 @@ impl App {
     }
 
     fn secrets_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
-        use crate::surfaces::menu::{MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection, MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection};
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
+        };
         let mut menu = MenuProjection::new("secrets", "Secrets");
         menu.summary = Some("Secret configuration surface. Values are never displayed; setting plaintext secrets always uses hidden input.".into());
         menu.footer = Some("↑/↓ navigate · Enter prepare action · / filter · Esc close · /secrets status for text readout".into());
@@ -2954,7 +3107,9 @@ impl App {
 
     fn secret_readiness_rows(&self) -> Vec<crate::surfaces::menu::MenuRowProjection> {
         use crate::capabilities::secrets::SecretReadinessStatus;
-        use crate::surfaces::menu::{MenuBadgeProjection, MenuBadgeTone, MenuRowKind, MenuRowProjection};
+        use crate::surfaces::menu::{
+            MenuBadgeProjection, MenuBadgeTone, MenuRowKind, MenuRowProjection,
+        };
 
         let Some(snapshot) = self.secret_readiness.as_ref() else {
             return vec![MenuRowProjection {
@@ -2988,44 +3143,59 @@ impl App {
             }];
         }
 
-        snapshot.secrets.iter().map(|secret| {
-            let (status_label, status_tone) = match secret.status {
-                SecretReadinessStatus::Warmed => ("warmed", MenuBadgeTone::Success),
-                SecretReadinessStatus::Configured => ("configured", MenuBadgeTone::Info),
-                SecretReadinessStatus::Deferred => ("deferred", MenuBadgeTone::Warning),
-                SecretReadinessStatus::Missing => ("missing", MenuBadgeTone::Danger),
-            };
-            let mut badges = vec![MenuBadgeProjection { label: status_label.into(), tone: status_tone }];
-            if secret.required {
-                badges.push(MenuBadgeProjection { label: "required".into(), tone: MenuBadgeTone::Danger });
-            }
-            if secret.optional {
-                badges.push(MenuBadgeProjection { label: "optional".into(), tone: MenuBadgeTone::Neutral });
-            }
-            let mut metadata = vec!["value redacted".into()];
-            if let Some(kind) = secret.recipe_kind.as_deref() {
-                metadata.push(format!("recipe: {kind}"));
-            }
-            if secret.warmed {
-                metadata.push("session: warmed".into());
-            }
-            for consumer in &secret.consumers {
-                metadata.push(format!("consumer: {:?}:{}", consumer.kind, consumer.id));
-            }
-            MenuRowProjection {
-                id: format!("secrets.inventory.{}", secret.name),
-                label: secret.name.clone(),
-                description: "Secret readiness metadata only; value is never resolved or displayed.".into(),
-                value: Some(status_label.into()),
-                kind: MenuRowKind::Object,
-                badges,
-                metadata,
-                primary_action: None,
-                actions: vec![],
-                safety: None,
-                availability: None,
-            }
-        }).collect()
+        snapshot
+            .secrets
+            .iter()
+            .map(|secret| {
+                let (status_label, status_tone) = match secret.status {
+                    SecretReadinessStatus::Warmed => ("warmed", MenuBadgeTone::Success),
+                    SecretReadinessStatus::Configured => ("configured", MenuBadgeTone::Info),
+                    SecretReadinessStatus::Deferred => ("deferred", MenuBadgeTone::Warning),
+                    SecretReadinessStatus::Missing => ("missing", MenuBadgeTone::Danger),
+                };
+                let mut badges = vec![MenuBadgeProjection {
+                    label: status_label.into(),
+                    tone: status_tone,
+                }];
+                if secret.required {
+                    badges.push(MenuBadgeProjection {
+                        label: "required".into(),
+                        tone: MenuBadgeTone::Danger,
+                    });
+                }
+                if secret.optional {
+                    badges.push(MenuBadgeProjection {
+                        label: "optional".into(),
+                        tone: MenuBadgeTone::Neutral,
+                    });
+                }
+                let mut metadata = vec!["value redacted".into()];
+                if let Some(kind) = secret.recipe_kind.as_deref() {
+                    metadata.push(format!("recipe: {kind}"));
+                }
+                if secret.warmed {
+                    metadata.push("session: warmed".into());
+                }
+                for consumer in &secret.consumers {
+                    metadata.push(format!("consumer: {:?}:{}", consumer.kind, consumer.id));
+                }
+                MenuRowProjection {
+                    id: format!("secrets.inventory.{}", secret.name),
+                    label: secret.name.clone(),
+                    description:
+                        "Secret readiness metadata only; value is never resolved or displayed."
+                            .into(),
+                    value: Some(status_label.into()),
+                    kind: MenuRowKind::Object,
+                    badges,
+                    metadata,
+                    primary_action: None,
+                    actions: vec![],
+                    safety: None,
+                    availability: None,
+                }
+            })
+            .collect()
     }
 
     fn open_secrets_menu(&mut self) {
@@ -3050,7 +3220,10 @@ impl App {
                 description: "Sessions are saved when an interactive session exits.".into(),
                 value: None,
                 kind: MenuRowKind::Object,
-                badges: vec![MenuBadgeProjection { label: "empty".into(), tone: MenuBadgeTone::Neutral }],
+                badges: vec![MenuBadgeProjection {
+                    label: "empty".into(),
+                    tone: MenuBadgeTone::Neutral,
+                }],
                 metadata: vec!["/sessions list".into()],
                 primary_action: None,
                 actions: vec![],
@@ -3069,14 +3242,23 @@ impl App {
                         label: crate::session::session_display_name(&entry.meta),
                         description: format!(
                             "{} · {} · {} turns · {} tool calls",
-                            description, entry.meta.created_at, entry.meta.turns, entry.meta.tool_calls
+                            description,
+                            entry.meta.created_at,
+                            entry.meta.turns,
+                            entry.meta.tool_calls
                         ),
                         value: Some(id.clone()),
                         kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "resume".into(), tone: MenuBadgeTone::Info }],
+                        badges: vec![MenuBadgeProjection {
+                            label: "resume".into(),
+                            tone: MenuBadgeTone::Info,
+                        }],
                         metadata: vec![
                             format!("id: {id}"),
-                            format!("name: {}", crate::session::session_display_name(&entry.meta)),
+                            format!(
+                                "name: {}",
+                                crate::session::session_display_name(&entry.meta)
+                            ),
                             command.clone(),
                             entry.path.display().to_string(),
                         ],
@@ -3151,170 +3333,252 @@ impl App {
             self.footer_data.memory_tokens_est
         ));
         menu.footer = Some("↑/↓ navigate · / filter · Enter status readout · Esc close".into());
-        menu.tabs = vec![MenuTabProjection {
-            id: "overview".into(),
-            label: "Overview".into(),
-            groups: vec![MenuGroupProjection {
-                id: "memory.facts".into(),
-                label: "Memory facts".into(),
-                description: Some("Read-only memory counters currently injected into this session.".into()),
-                rows: vec![
-                    MenuRowProjection {
-                        id: "memory.status".into(),
-                        label: "Memory overview".into(),
-                        description: "Show the full text memory overview.".into(),
-                        value: Some(format!("{} total facts", self.footer_data.total_facts)),
-                        kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
-                        metadata: vec!["/memory status".into(), "/memory overview".into()],
-                        primary_action: Some(MenuActionProjection::command("memory.status.primary", "Status", "/memory status")),
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "memory.injected".into(),
-                        label: "Injected facts".into(),
-                        description: "Facts currently injected into the prompt context.".into(),
-                        value: Some(self.footer_data.injected_facts.to_string()),
-                        kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "context".into(), tone: MenuBadgeTone::Info }],
-                        metadata: vec![format!("estimate: ~{} tokens", self.footer_data.memory_tokens_est)],
-                        primary_action: None,
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "memory.working_set".into(),
-                        label: "Working-set facts".into(),
-                        description: "Facts pinned or selected for active working memory.".into(),
-                        value: Some(self.footer_data.working_memory.to_string()),
-                        kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "working".into(), tone: MenuBadgeTone::Info }],
-                        metadata: vec![],
-                        primary_action: None,
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "memory.project".into(),
-                        label: "Project facts".into(),
-                        description: "Durable project memory facts available to this session.".into(),
-                        value: Some(memory.project_facts.to_string()),
-                        kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "project".into(), tone: MenuBadgeTone::Neutral }],
-                        metadata: vec![],
-                        primary_action: None,
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "memory.persona".into(),
-                        label: "Persona facts".into(),
-                        description: "Persona mind facts available to this session.".into(),
-                        value: Some(memory.persona_facts.to_string()),
-                        kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "persona".into(), tone: MenuBadgeTone::Neutral }],
-                        metadata: vec![format!("active persona: {}", memory.active_persona_mind.clone().unwrap_or_else(|| "none".into()))],
-                        primary_action: None,
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "memory.episodes".into(),
-                        label: "Episodes".into(),
-                        description: "Session episode narratives available for recall.".into(),
-                        value: Some(memory.episodes.to_string()),
-                        kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "episodes".into(), tone: MenuBadgeTone::Neutral }],
-                        metadata: vec![],
-                        primary_action: None,
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                ],
-            }],
-        }, MenuTabProjection {
-            id: "actions".into(),
-            label: "Actions".into(),
-            groups: vec![MenuGroupProjection {
-                id: "memory.actions".into(),
-                label: "Memory actions".into(),
-                description: Some("Prepare memory tool commands without hiding the current overview.".into()),
-                rows: vec![
-                    MenuRowProjection {
-                        id: "memory.recall".into(),
-                        label: "Recall memory".into(),
-                        description: "Prime a memory recall query.".into(),
-                        value: None,
-                        kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "query".into(), tone: MenuBadgeTone::Info }],
-                        metadata: vec!["/memory recall <query>".into()],
-                        primary_action: Some(MenuActionProjection::prime_editor("memory.recall.primary", "Recall", "/memory recall ", "Type a memory recall query, then press Enter")),
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "memory.list".into(),
-                        label: "List memory".into(),
-                        description: "List available memory facts.".into(),
-                        value: None,
-                        kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
-                        metadata: vec!["/memory list".into()],
-                        primary_action: Some(MenuActionProjection::command("memory.list.primary", "List", "/memory list")),
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "memory.focus".into(),
-                        label: "Focus memory".into(),
-                        description: "Prime a memory focus command.".into(),
-                        value: None,
-                        kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "pin".into(), tone: MenuBadgeTone::Info }],
-                        metadata: vec!["/memory focus <topic>".into()],
-                        primary_action: Some(MenuActionProjection::prime_editor("memory.focus.primary", "Focus", "/memory focus ", "Type a memory topic to focus, then press Enter")),
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "memory.release".into(),
-                        label: "Release memory".into(),
-                        description: "Prime a memory release command.".into(),
-                        value: None,
-                        kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "unpin".into(), tone: MenuBadgeTone::Warning }],
-                        metadata: vec!["/memory release <topic>".into()],
-                        primary_action: Some(MenuActionProjection::prime_editor("memory.release.primary", "Release", "/memory release ", "Type a memory topic to release, then press Enter")),
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "memory.compact".into(),
-                        label: "Compact memory".into(),
-                        description: "Compact durable memory context.".into(),
-                        value: None,
-                        kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Warning }],
-                        metadata: vec!["/memory compact".into()],
-                        primary_action: Some({ let mut action = MenuActionProjection::command("memory.compact.primary", "Compact", "/memory compact"); action.requires_confirmation = true; action }),
-                        actions: vec![],
-                        safety: None,
-                        availability: None,
-                    },
-                ],
-            }],
-        }];
+        menu.tabs = vec![
+            MenuTabProjection {
+                id: "overview".into(),
+                label: "Overview".into(),
+                groups: vec![MenuGroupProjection {
+                    id: "memory.facts".into(),
+                    label: "Memory facts".into(),
+                    description: Some(
+                        "Read-only memory counters currently injected into this session.".into(),
+                    ),
+                    rows: vec![
+                        MenuRowProjection {
+                            id: "memory.status".into(),
+                            label: "Memory overview".into(),
+                            description: "Show the full text memory overview.".into(),
+                            value: Some(format!("{} total facts", self.footer_data.total_facts)),
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: "read".into(),
+                                tone: MenuBadgeTone::Neutral,
+                            }],
+                            metadata: vec!["/memory status".into(), "/memory overview".into()],
+                            primary_action: Some(MenuActionProjection::command(
+                                "memory.status.primary",
+                                "Status",
+                                "/memory status",
+                            )),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "memory.injected".into(),
+                            label: "Injected facts".into(),
+                            description: "Facts currently injected into the prompt context.".into(),
+                            value: Some(self.footer_data.injected_facts.to_string()),
+                            kind: MenuRowKind::Object,
+                            badges: vec![MenuBadgeProjection {
+                                label: "context".into(),
+                                tone: MenuBadgeTone::Info,
+                            }],
+                            metadata: vec![format!(
+                                "estimate: ~{} tokens",
+                                self.footer_data.memory_tokens_est
+                            )],
+                            primary_action: None,
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "memory.working_set".into(),
+                            label: "Working-set facts".into(),
+                            description: "Facts pinned or selected for active working memory."
+                                .into(),
+                            value: Some(self.footer_data.working_memory.to_string()),
+                            kind: MenuRowKind::Object,
+                            badges: vec![MenuBadgeProjection {
+                                label: "working".into(),
+                                tone: MenuBadgeTone::Info,
+                            }],
+                            metadata: vec![],
+                            primary_action: None,
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "memory.project".into(),
+                            label: "Project facts".into(),
+                            description: "Durable project memory facts available to this session."
+                                .into(),
+                            value: Some(memory.project_facts.to_string()),
+                            kind: MenuRowKind::Object,
+                            badges: vec![MenuBadgeProjection {
+                                label: "project".into(),
+                                tone: MenuBadgeTone::Neutral,
+                            }],
+                            metadata: vec![],
+                            primary_action: None,
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "memory.persona".into(),
+                            label: "Persona facts".into(),
+                            description: "Persona mind facts available to this session.".into(),
+                            value: Some(memory.persona_facts.to_string()),
+                            kind: MenuRowKind::Object,
+                            badges: vec![MenuBadgeProjection {
+                                label: "persona".into(),
+                                tone: MenuBadgeTone::Neutral,
+                            }],
+                            metadata: vec![format!(
+                                "active persona: {}",
+                                memory
+                                    .active_persona_mind
+                                    .clone()
+                                    .unwrap_or_else(|| "none".into())
+                            )],
+                            primary_action: None,
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "memory.episodes".into(),
+                            label: "Episodes".into(),
+                            description: "Session episode narratives available for recall.".into(),
+                            value: Some(memory.episodes.to_string()),
+                            kind: MenuRowKind::Object,
+                            badges: vec![MenuBadgeProjection {
+                                label: "episodes".into(),
+                                tone: MenuBadgeTone::Neutral,
+                            }],
+                            metadata: vec![],
+                            primary_action: None,
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                    ],
+                }],
+            },
+            MenuTabProjection {
+                id: "actions".into(),
+                label: "Actions".into(),
+                groups: vec![MenuGroupProjection {
+                    id: "memory.actions".into(),
+                    label: "Memory actions".into(),
+                    description: Some(
+                        "Prepare memory tool commands without hiding the current overview.".into(),
+                    ),
+                    rows: vec![
+                        MenuRowProjection {
+                            id: "memory.recall".into(),
+                            label: "Recall memory".into(),
+                            description: "Prime a memory recall query.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: "query".into(),
+                                tone: MenuBadgeTone::Info,
+                            }],
+                            metadata: vec!["/memory recall <query>".into()],
+                            primary_action: Some(MenuActionProjection::prime_editor(
+                                "memory.recall.primary",
+                                "Recall",
+                                "/memory recall ",
+                                "Type a memory recall query, then press Enter",
+                            )),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "memory.list".into(),
+                            label: "List memory".into(),
+                            description: "List available memory facts.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: "read".into(),
+                                tone: MenuBadgeTone::Neutral,
+                            }],
+                            metadata: vec!["/memory list".into()],
+                            primary_action: Some(MenuActionProjection::command(
+                                "memory.list.primary",
+                                "List",
+                                "/memory list",
+                            )),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "memory.focus".into(),
+                            label: "Focus memory".into(),
+                            description: "Prime a memory focus command.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: "pin".into(),
+                                tone: MenuBadgeTone::Info,
+                            }],
+                            metadata: vec!["/memory focus <topic>".into()],
+                            primary_action: Some(MenuActionProjection::prime_editor(
+                                "memory.focus.primary",
+                                "Focus",
+                                "/memory focus ",
+                                "Type a memory topic to focus, then press Enter",
+                            )),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "memory.release".into(),
+                            label: "Release memory".into(),
+                            description: "Prime a memory release command.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: "unpin".into(),
+                                tone: MenuBadgeTone::Warning,
+                            }],
+                            metadata: vec!["/memory release <topic>".into()],
+                            primary_action: Some(MenuActionProjection::prime_editor(
+                                "memory.release.primary",
+                                "Release",
+                                "/memory release ",
+                                "Type a memory topic to release, then press Enter",
+                            )),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "memory.compact".into(),
+                            label: "Compact memory".into(),
+                            description: "Compact durable memory context.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: "mutates".into(),
+                                tone: MenuBadgeTone::Warning,
+                            }],
+                            metadata: vec!["/memory compact".into()],
+                            primary_action: Some({
+                                let mut action = MenuActionProjection::command(
+                                    "memory.compact.primary",
+                                    "Compact",
+                                    "/memory compact",
+                                );
+                                action.requires_confirmation = true;
+                                action
+                            }),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                    ],
+                }],
+            },
+        ];
         menu
     }
 
@@ -3416,7 +3680,10 @@ impl App {
     }
 
     fn profile_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
-        use crate::surfaces::menu::{MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection, MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection};
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
+        };
         let settings = self.settings();
         let loaded_profile = crate::settings::Profile::load_with_source(self.cwd());
         let drift = crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
@@ -3425,9 +3692,15 @@ impl App {
             &settings,
         );
         let source_line = settings_profile_source_line(&drift.source);
-        let drift_value = if drift.changed_count > 0 { format!("Δ{}", drift.changed_count) } else { "clean".into() };
+        let drift_value = if drift.changed_count > 0 {
+            format!("Δ{}", drift.changed_count)
+        } else {
+            "clean".into()
+        };
         let mut menu = MenuProjection::new("profile", "Profile");
-        menu.summary = Some(format!("Persisted profile controls. {source_line}; runtime drift: {drift_value}."));
+        menu.summary = Some(format!(
+            "Persisted profile controls. {source_line}; runtime drift: {drift_value}."
+        ));
         menu.footer = Some("↑/↓ navigate · / filter · Enter run · s save · explicit /profile apply to apply · Esc close".into());
         menu.tabs = vec![MenuTabProjection {
             id: "profile".into(),
@@ -3435,7 +3708,9 @@ impl App {
             groups: vec![MenuGroupProjection {
                 id: "profile.controls".into(),
                 label: "Profile controls".into(),
-                description: Some("Inspect, save, apply, and export persisted runtime profile state.".into()),
+                description: Some(
+                    "Inspect, save, apply, and export persisted runtime profile state.".into(),
+                ),
                 rows: vec![
                     MenuRowProjection {
                         id: "profile.status".into(),
@@ -3443,9 +3718,16 @@ impl App {
                         description: source_line.clone(),
                         value: Some(drift_value.clone()),
                         kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "status".into(), tone: MenuBadgeTone::Info }],
+                        badges: vec![MenuBadgeProjection {
+                            label: "status".into(),
+                            tone: MenuBadgeTone::Info,
+                        }],
                         metadata: vec!["/profile view".into(), source_line.clone()],
-                        primary_action: Some(MenuActionProjection::command("profile.status.primary", "View", "/profile view")),
+                        primary_action: Some(MenuActionProjection::command(
+                            "profile.status.primary",
+                            "View",
+                            "/profile view",
+                        )),
                         actions: vec![],
                         safety: None,
                         availability: None,
@@ -3453,25 +3735,53 @@ impl App {
                     MenuRowProjection {
                         id: "profile.save".into(),
                         label: "Save active profile".into(),
-                        description: "Capture current runtime settings to the active profile source.".into(),
+                        description:
+                            "Capture current runtime settings to the active profile source.".into(),
                         value: None,
                         kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "writes".into(), tone: MenuBadgeTone::Warning }],
+                        badges: vec![MenuBadgeProjection {
+                            label: "writes".into(),
+                            tone: MenuBadgeTone::Warning,
+                        }],
                         metadata: vec!["/profile save".into()],
-                        primary_action: Some(MenuActionProjection::command("profile.save.primary", "Save", "/profile save")),
-                        actions: vec![{ let mut action = MenuActionProjection::command("profile.save.action", "Save", "/profile save"); action.key = Some("s".into()); action }],
+                        primary_action: Some(MenuActionProjection::command(
+                            "profile.save.primary",
+                            "Save",
+                            "/profile save",
+                        )),
+                        actions: vec![{
+                            let mut action = MenuActionProjection::command(
+                                "profile.save.action",
+                                "Save",
+                                "/profile save",
+                            );
+                            action.key = Some("s".into());
+                            action
+                        }],
                         safety: None,
                         availability: None,
                     },
                     MenuRowProjection {
                         id: "profile.apply".into(),
                         label: "Apply persisted profile".into(),
-                        description: "Apply persisted profile defaults to current runtime settings.".into(),
+                        description:
+                            "Apply persisted profile defaults to current runtime settings.".into(),
                         value: None,
                         kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Warning }],
+                        badges: vec![MenuBadgeProjection {
+                            label: "mutates".into(),
+                            tone: MenuBadgeTone::Warning,
+                        }],
                         metadata: vec!["/profile apply".into()],
-                        primary_action: Some({ let mut action = MenuActionProjection::command("profile.apply.primary", "Apply", "/profile apply"); action.requires_confirmation = true; action }),
+                        primary_action: Some({
+                            let mut action = MenuActionProjection::command(
+                                "profile.apply.primary",
+                                "Apply",
+                                "/profile apply",
+                            );
+                            action.requires_confirmation = true;
+                            action
+                        }),
                         actions: vec![],
                         safety: None,
                         availability: None,
@@ -3479,12 +3789,20 @@ impl App {
                     MenuRowProjection {
                         id: "profile.save_project".into(),
                         label: "Save project profile".into(),
-                        description: "Capture current runtime settings to .omegon/profile.json.".into(),
+                        description: "Capture current runtime settings to .omegon/profile.json."
+                            .into(),
                         value: None,
                         kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "writes".into(), tone: MenuBadgeTone::Warning }],
+                        badges: vec![MenuBadgeProjection {
+                            label: "writes".into(),
+                            tone: MenuBadgeTone::Warning,
+                        }],
                         metadata: vec!["/profile save --project".into()],
-                        primary_action: Some(MenuActionProjection::command("profile.save_project.primary", "Save project", "/profile save --project")),
+                        primary_action: Some(MenuActionProjection::command(
+                            "profile.save_project.primary",
+                            "Save project",
+                            "/profile save --project",
+                        )),
                         actions: vec![],
                         safety: None,
                         availability: None,
@@ -3495,9 +3813,16 @@ impl App {
                         description: "Capture current runtime settings to the user profile.".into(),
                         value: None,
                         kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "writes".into(), tone: MenuBadgeTone::Warning }],
+                        badges: vec![MenuBadgeProjection {
+                            label: "writes".into(),
+                            tone: MenuBadgeTone::Warning,
+                        }],
                         metadata: vec!["/profile save --user".into()],
-                        primary_action: Some(MenuActionProjection::command("profile.save_user.primary", "Save user", "/profile save --user")),
+                        primary_action: Some(MenuActionProjection::command(
+                            "profile.save_user.primary",
+                            "Save user",
+                            "/profile save --user",
+                        )),
                         actions: vec![],
                         safety: None,
                         availability: None,
@@ -3508,9 +3833,16 @@ impl App {
                         description: "Render the current runtime profile as a text readout.".into(),
                         value: None,
                         kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
+                        badges: vec![MenuBadgeProjection {
+                            label: "read".into(),
+                            tone: MenuBadgeTone::Neutral,
+                        }],
                         metadata: vec!["/profile export".into()],
-                        primary_action: Some(MenuActionProjection::command("profile.export.primary", "Export", "/profile export")),
+                        primary_action: Some(MenuActionProjection::command(
+                            "profile.export.primary",
+                            "Export",
+                            "/profile export",
+                        )),
                         actions: vec![],
                         safety: None,
                         availability: None,
@@ -3546,18 +3878,17 @@ impl App {
             MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
             MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
         };
-        use crate::surfaces::settings::{
-            SettingsEditorProjection, SettingsStatusProjection,
-        };
+        use crate::surfaces::settings::{SettingsEditorProjection, SettingsStatusProjection};
 
         let settings = self.settings_projection();
         let settings_snapshot = self.settings();
         let loaded_profile = crate::settings::Profile::load_with_source(self.cwd());
-        let profile_drift = crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
-            &loaded_profile.profile,
-            loaded_profile.source,
-            &settings_snapshot,
-        );
+        let profile_drift =
+            crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
+                &loaded_profile.profile,
+                loaded_profile.source,
+                &settings_snapshot,
+            );
         let profile_source_line = settings_profile_source_line(&profile_drift.source);
         let drift_line = if profile_drift.changed_count > 0 {
             format!(
@@ -3600,7 +3931,8 @@ impl App {
                                 SettingsEditorProjection::Action => "action",
                                 SettingsEditorProjection::ReadOnly => "read only",
                             };
-                            let mut metadata = vec![row.persistence.label().to_string(), editor.to_string()];
+                            let mut metadata =
+                                vec![row.persistence.label().to_string(), editor.to_string()];
                             if let Some(profile) = row.profile {
                                 metadata.push(format!("profile: {}", profile.profile_value));
                             }
@@ -3611,7 +3943,10 @@ impl App {
                                 description: row.description,
                                 value: Some(row.value),
                                 kind: MenuRowKind::Object,
-                                badges: vec![MenuBadgeProjection { label: format!("{:?}", row.status).to_lowercase(), tone }],
+                                badges: vec![MenuBadgeProjection {
+                                    label: format!("{:?}", row.status).to_lowercase(),
+                                    tone,
+                                }],
                                 metadata,
                                 primary_action: Some(MenuActionProjection::open_settings_row(
                                     format!("settings.{row_id}.open"),
@@ -3629,12 +3964,17 @@ impl App {
             .collect();
         menu.actions = vec![
             {
-                let mut action = MenuActionProjection::command("settings.save", "Save profile", "/profile save");
+                let mut action =
+                    MenuActionProjection::command("settings.save", "Save profile", "/profile save");
                 action.key = Some("s".into());
                 action
             },
             {
-                let mut action = MenuActionProjection::command("settings.apply", "Apply profile", "/profile apply");
+                let mut action = MenuActionProjection::command(
+                    "settings.apply",
+                    "Apply profile",
+                    "/profile apply",
+                );
                 action.key = Some("a".into());
                 action
             },
@@ -3711,7 +4051,8 @@ impl App {
                 if let Some(target_row_id) = action.target_row_id
                     && let Some(menu) = self.active_menu.as_mut()
                 {
-                    menu.state.select_row_by_id(&menu.projection, &target_row_id);
+                    menu.state
+                        .select_row_by_id(&menu.projection, &target_row_id);
                 }
                 SlashResult::Handled
             }
@@ -3755,10 +4096,16 @@ impl App {
             }
             crate::surfaces::menu::MenuActionDisposition::RunCommand => {
                 if let Some(command) = action.command {
-                    let menu_id = self.active_menu.as_ref().map(|menu| menu.projection.id.clone());
+                    let menu_id = self
+                        .active_menu
+                        .as_ref()
+                        .map(|menu| menu.projection.id.clone());
                     let result = self.execute_active_menu_command(command, tx);
                     if matches!(result, SlashResult::Handled)
-                        && matches!(action.close_policy, crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu)
+                        && matches!(
+                            action.close_policy,
+                            crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu
+                        )
                         && let Some(menu_id) = menu_id.as_deref()
                         && self.rebuild_active_menu(menu_id)
                     {
@@ -3809,11 +4156,13 @@ impl App {
         }
     }
 
-
-
-    fn provider_status_rows(&self, row_prefix: &str) -> Vec<crate::surfaces::menu::MenuRowProjection> {
+    fn provider_status_rows(
+        &self,
+        row_prefix: &str,
+    ) -> Vec<crate::surfaces::menu::MenuRowProjection> {
         use crate::surfaces::menu::{
-            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuRowKind, MenuRowProjection,
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuRowKind,
+            MenuRowProjection,
         };
         let provider_ids = [
             "anthropic",
@@ -3832,12 +4181,17 @@ impl App {
         let serving_provider = self
             .route_serving_model
             .as_deref()
-            .or_else(|| (!self.footer_data.model_id.is_empty()).then_some(self.footer_data.model_id.as_str()))
+            .or_else(|| {
+                (!self.footer_data.model_id.is_empty())
+                    .then_some(self.footer_data.model_id.as_str())
+            })
             .map(crate::providers::infer_provider_id);
         provider_ids
             .into_iter()
             .map(|provider| {
-                let status = crate::surfaces::menu::ProviderStatusProjection::from_credential_probe(provider);
+                let status = crate::surfaces::menu::ProviderStatusProjection::from_credential_probe(
+                    provider,
+                );
                 let login_command = status
                     .remediation_command
                     .clone()
@@ -3853,16 +4207,27 @@ impl App {
                     format!("provider: {}", status.provider_id),
                 ];
                 if selected_provider.as_deref() == Some(provider) {
-                    badges.push(MenuBadgeProjection { label: "selected".into(), tone: MenuBadgeTone::Info });
+                    badges.push(MenuBadgeProjection {
+                        label: "selected".into(),
+                        tone: MenuBadgeTone::Info,
+                    });
                     metadata.push("route: selected".into());
                 }
                 if serving_provider.as_deref() == Some(provider) {
-                    badges.push(MenuBadgeProjection { label: "serving".into(), tone: MenuBadgeTone::Success });
+                    badges.push(MenuBadgeProjection {
+                        label: "serving".into(),
+                        tone: MenuBadgeTone::Success,
+                    });
                     metadata.push("route: serving".into());
                     if self.route_state.as_deref() == Some("fallback")
-                        && selected_provider.as_deref().is_some_and(|selected| selected != provider)
+                        && selected_provider
+                            .as_deref()
+                            .is_some_and(|selected| selected != provider)
                     {
-                        badges.push(MenuBadgeProjection { label: "fallback".into(), tone: MenuBadgeTone::Warning });
+                        badges.push(MenuBadgeProjection {
+                            label: "fallback".into(),
+                            tone: MenuBadgeTone::Warning,
+                        });
                         metadata.push("route: fallback serving".into());
                     }
                 }
@@ -3910,10 +4275,16 @@ impl App {
         use crate::surfaces::menu::{MenuGroupProjection, MenuProjection, MenuTabProjection};
         let mut menu = MenuProjection::new("auth", "Authentication");
         let mut summary = "Provider authentication status. Enter logs into the selected provider; l login; o logout; / filters providers.".to_string();
-        if self.route_state.is_some() || self.route_selected_model.is_some() || self.route_serving_model.is_some() || self.footer_data.route_warning.is_some() {
+        if self.route_state.is_some()
+            || self.route_selected_model.is_some()
+            || self.route_serving_model.is_some()
+            || self.footer_data.route_warning.is_some()
+        {
             let route_state = self.route_state.as_deref().unwrap_or("unknown");
-            summary.push_str(&format!("
-route: {route_state}"));
+            summary.push_str(&format!(
+                "
+route: {route_state}"
+            ));
             if let Some(selected) = self.route_selected_model.as_deref() {
                 summary.push_str(&format!(" · selected: {selected}"));
             }
@@ -3921,8 +4292,10 @@ route: {route_state}"));
                 summary.push_str(&format!(" · serving: {serving}"));
             }
             if let Some(warning) = self.footer_data.route_warning.as_deref() {
-                summary.push_str(&format!("
-warning: {warning}"));
+                summary.push_str(&format!(
+                    "
+warning: {warning}"
+                ));
             }
         }
         menu.summary = Some(summary);
@@ -3972,112 +4345,215 @@ warning: {warning}"));
         let mut summary = format!(
             "Configured model: {selected_model}. Enter opens the provider/model selector; use row actions to route intent."
         );
-        if self.route_state.is_some() || self.route_selected_model.is_some() || self.route_serving_model.is_some() || self.footer_data.route_warning.is_some() {
+        if self.route_state.is_some()
+            || self.route_selected_model.is_some()
+            || self.route_serving_model.is_some()
+            || self.footer_data.route_warning.is_some()
+        {
             let route_state = self.route_state.as_deref().unwrap_or("unknown");
-            let selected = self.route_selected_model.as_deref().unwrap_or(&selected_model);
-            let serving = self.route_serving_model.as_deref().unwrap_or(&self.footer_data.model_id);
-            summary.push_str(&format!("
-route: {route_state} · selected: {selected}"));
+            let selected = self
+                .route_selected_model
+                .as_deref()
+                .unwrap_or(&selected_model);
+            let serving = self
+                .route_serving_model
+                .as_deref()
+                .unwrap_or(&self.footer_data.model_id);
+            summary.push_str(&format!(
+                "
+route: {route_state} · selected: {selected}"
+            ));
             if !serving.is_empty() {
                 summary.push_str(&format!(" · serving: {serving}"));
             }
             if let Some(warning) = self.footer_data.route_warning.as_deref() {
-                summary.push_str(&format!("
-warning: {warning}"));
+                summary.push_str(&format!(
+                    "
+warning: {warning}"
+                ));
             }
         }
         menu.summary = Some(summary);
         menu.footer = Some("↑/↓ navigate · Enter choose model · g grade · p provider · o policy · u unpin · / filter · Esc close".into());
         let provider_rows = self.provider_status_rows("provider");
-        menu.tabs = vec![MenuTabProjection {
-            id: "routing".into(),
-            label: "Routing".into(),
-            groups: vec![MenuGroupProjection {
-                id: "model.routing".into(),
+        menu.tabs = vec![
+            MenuTabProjection {
+                id: "routing".into(),
                 label: "Routing".into(),
-                description: Some("Model routing intents and exact pin controls.".into()),
-                rows: vec![
-                    MenuRowProjection {
-                        id: "model.current".into(),
-                        label: "Current model".into(),
-                        description: "Open the model selector to choose an exact provider:model route.".into(),
-                        value: Some(selected_model),
-                        kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "active".into(), tone: MenuBadgeTone::Success }],
-                        metadata: vec!["selector".into(), "exact model".into()],
-                        primary_action: Some(MenuActionProjection::open_selector("model.current.select", "Choose model", "model.current")),
-                        actions: vec![
-                            { let mut action = MenuActionProjection::focus_row("model.current.grade", "Grade row", "model.grade"); action.key = Some("g".into()); action },
-                            { let mut action = MenuActionProjection::focus_row("model.current.provider", "Provider row", "model.provider"); action.key = Some("p".into()); action },
-                            { let mut action = MenuActionProjection::focus_row("model.current.policy", "Policy row", "model.policy"); action.key = Some("o".into()); action },
-                        ],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "model.grade".into(),
-                        label: "Model grade".into(),
-                        description: "Set model quality intent: F, D, C, B, A, or S.".into(),
-                        value: Some(grade_value),
-                        kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "intent".into(), tone: MenuBadgeTone::Info }],
-                        metadata: vec!["/model grade <F|D|C|B|A|S>".into()],
-                        primary_action: None,
-                        actions: vec![{ let mut action = MenuActionProjection::focus_row("model.grade.action", "Choose grade", "model.grade"); action.key = Some("g".into()); action }],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "model.provider".into(),
-                        label: "Provider intent".into(),
-                        description: "Set provider intent: auto, local, upstream, or endpoint.".into(),
-                        value: Some(provider_value),
-                        kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "intent".into(), tone: MenuBadgeTone::Info }],
-                        metadata: vec!["/model provider <auto|local|upstream|endpoint>".into()],
-                        primary_action: None,
-                        actions: vec![{ let mut action = MenuActionProjection::focus_row("model.provider.action", "Choose provider", "model.provider"); action.key = Some("p".into()); action }],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "model.policy".into(),
-                        label: "Routing policy".into(),
-                        description: "Set routing policy: exact, minimum, or nearest.".into(),
-                        value: Some(policy_value),
-                        kind: MenuRowKind::Object,
-                        badges: vec![MenuBadgeProjection { label: "policy".into(), tone: MenuBadgeTone::Neutral }],
-                        metadata: vec!["/model policy <exact|minimum|nearest>".into()],
-                        primary_action: None,
-                        actions: vec![{ let mut action = MenuActionProjection::focus_row("model.policy.action", "Choose policy", "model.policy"); action.key = Some("o".into()); action }],
-                        safety: None,
-                        availability: None,
-                    },
-                    MenuRowProjection {
-                        id: "model.unpin".into(),
-                        label: "Clear exact pin".into(),
-                        description: "Clear the exact model pin and route by current intent.".into(),
-                        value: None,
-                        kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection { label: "action".into(), tone: MenuBadgeTone::Warning }],
-                        metadata: vec!["/model unpin".into()],
-                        primary_action: Some(MenuActionProjection::command("model.unpin.primary", "Unpin", "/model unpin")),
-                        actions: vec![{ let mut action = MenuActionProjection::command("model.unpin.action", "Unpin", "/model unpin"); action.key = Some("u".into()); action }],
-                        safety: None,
-                        availability: None,
-                    },
-                ],
-            }],
-        }, MenuTabProjection {
-            id: "providers".into(),
-            label: "Providers".into(),
-            groups: vec![MenuGroupProjection {
-                id: "model.providers".into(),
-                label: "Provider status".into(),
-                description: Some("Credential probe status and login actions for common model providers.".into()),
-                rows: provider_rows,
-            }],
-        }];
+                groups: vec![MenuGroupProjection {
+                    id: "model.routing".into(),
+                    label: "Routing".into(),
+                    description: Some("Model routing intents and exact pin controls.".into()),
+                    rows: vec![
+                        MenuRowProjection {
+                            id: "model.current".into(),
+                            label: "Current model".into(),
+                            description:
+                                "Open the model selector to choose an exact provider:model route."
+                                    .into(),
+                            value: Some(selected_model),
+                            kind: MenuRowKind::Object,
+                            badges: vec![MenuBadgeProjection {
+                                label: "active".into(),
+                                tone: MenuBadgeTone::Success,
+                            }],
+                            metadata: vec!["selector".into(), "exact model".into()],
+                            primary_action: Some(MenuActionProjection::open_selector(
+                                "model.current.select",
+                                "Choose model",
+                                "model.current",
+                            )),
+                            actions: vec![
+                                {
+                                    let mut action = MenuActionProjection::focus_row(
+                                        "model.current.grade",
+                                        "Grade row",
+                                        "model.grade",
+                                    );
+                                    action.key = Some("g".into());
+                                    action
+                                },
+                                {
+                                    let mut action = MenuActionProjection::focus_row(
+                                        "model.current.provider",
+                                        "Provider row",
+                                        "model.provider",
+                                    );
+                                    action.key = Some("p".into());
+                                    action
+                                },
+                                {
+                                    let mut action = MenuActionProjection::focus_row(
+                                        "model.current.policy",
+                                        "Policy row",
+                                        "model.policy",
+                                    );
+                                    action.key = Some("o".into());
+                                    action
+                                },
+                            ],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "model.grade".into(),
+                            label: "Model grade".into(),
+                            description: "Set model quality intent: F, D, C, B, A, or S.".into(),
+                            value: Some(grade_value),
+                            kind: MenuRowKind::Object,
+                            badges: vec![MenuBadgeProjection {
+                                label: "intent".into(),
+                                tone: MenuBadgeTone::Info,
+                            }],
+                            metadata: vec!["/model grade <F|D|C|B|A|S>".into()],
+                            primary_action: None,
+                            actions: vec![{
+                                let mut action = MenuActionProjection::focus_row(
+                                    "model.grade.action",
+                                    "Choose grade",
+                                    "model.grade",
+                                );
+                                action.key = Some("g".into());
+                                action
+                            }],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "model.provider".into(),
+                            label: "Provider intent".into(),
+                            description: "Set provider intent: auto, local, upstream, or endpoint."
+                                .into(),
+                            value: Some(provider_value),
+                            kind: MenuRowKind::Object,
+                            badges: vec![MenuBadgeProjection {
+                                label: "intent".into(),
+                                tone: MenuBadgeTone::Info,
+                            }],
+                            metadata: vec!["/model provider <auto|local|upstream|endpoint>".into()],
+                            primary_action: None,
+                            actions: vec![{
+                                let mut action = MenuActionProjection::focus_row(
+                                    "model.provider.action",
+                                    "Choose provider",
+                                    "model.provider",
+                                );
+                                action.key = Some("p".into());
+                                action
+                            }],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "model.policy".into(),
+                            label: "Routing policy".into(),
+                            description: "Set routing policy: exact, minimum, or nearest.".into(),
+                            value: Some(policy_value),
+                            kind: MenuRowKind::Object,
+                            badges: vec![MenuBadgeProjection {
+                                label: "policy".into(),
+                                tone: MenuBadgeTone::Neutral,
+                            }],
+                            metadata: vec!["/model policy <exact|minimum|nearest>".into()],
+                            primary_action: None,
+                            actions: vec![{
+                                let mut action = MenuActionProjection::focus_row(
+                                    "model.policy.action",
+                                    "Choose policy",
+                                    "model.policy",
+                                );
+                                action.key = Some("o".into());
+                                action
+                            }],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "model.unpin".into(),
+                            label: "Clear exact pin".into(),
+                            description: "Clear the exact model pin and route by current intent."
+                                .into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: "action".into(),
+                                tone: MenuBadgeTone::Warning,
+                            }],
+                            metadata: vec!["/model unpin".into()],
+                            primary_action: Some(MenuActionProjection::command(
+                                "model.unpin.primary",
+                                "Unpin",
+                                "/model unpin",
+                            )),
+                            actions: vec![{
+                                let mut action = MenuActionProjection::command(
+                                    "model.unpin.action",
+                                    "Unpin",
+                                    "/model unpin",
+                                );
+                                action.key = Some("u".into());
+                                action
+                            }],
+                            safety: None,
+                            availability: None,
+                        },
+                    ],
+                }],
+            },
+            MenuTabProjection {
+                id: "providers".into(),
+                label: "Providers".into(),
+                groups: vec![MenuGroupProjection {
+                    id: "model.providers".into(),
+                    label: "Provider status".into(),
+                    description: Some(
+                        "Credential probe status and login actions for common model providers."
+                            .into(),
+                    ),
+                    rows: provider_rows,
+                }],
+            },
+        ];
         self.open_menu_projection(menu);
     }
 
@@ -4870,7 +5346,8 @@ warning: {warning}"));
                     || value.starts_with("vault:");
                 if recipe_like {
                     if let Some(command) = canonical_slash_command("secrets", args)
-                        && let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                        && let Some(request) =
+                            crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
                             request,
@@ -4878,7 +5355,9 @@ warning: {warning}"));
                         });
                         SlashResult::Handled
                     } else {
-                        SlashResult::Display("Usage: /secrets set <name> <env:VAR|cmd:COMMAND|vault:PATH>".into())
+                        SlashResult::Display(
+                            "Usage: /secrets set <name> <env:VAR|cmd:COMMAND|vault:PATH>".into(),
+                        )
                     }
                 } else {
                     self.editor.start_secret_input(name);
@@ -7544,7 +8023,10 @@ warning: {warning}"));
     }
 
     fn close_command_panel_stack(&mut self) {
-        let return_target = self.command_panel.as_ref().and_then(|panel| panel.return_target);
+        let return_target = self
+            .command_panel
+            .as_ref()
+            .and_then(|panel| panel.return_target);
         self.command_panel = None;
         match return_target {
             Some(CommandPanelReturnTarget::Menu) => self.active_menu = None,
@@ -11728,9 +12210,11 @@ pub async fn run_tui(
                                 }
                             }
                             KeyCode::Char(ch)
-                                if app.active_menu.as_ref().is_some_and(|menu| {
-                                    menu.state.mode == MenuMode::Search
-                                }) && !key.modifiers.contains(KeyModifiers::CONTROL)
+                                if app
+                                    .active_menu
+                                    .as_ref()
+                                    .is_some_and(|menu| menu.state.mode == MenuMode::Search)
+                                    && !key.modifiers.contains(KeyModifiers::CONTROL)
                                     && !key.modifiers.contains(KeyModifiers::ALT) =>
                             {
                                 if let Some(menu) = app.active_menu.as_mut() {
@@ -11738,28 +12222,37 @@ pub async fn run_tui(
                                 }
                             }
                             KeyCode::Backspace
-                                if app.active_menu.as_ref().is_some_and(|menu| {
-                                    menu.state.mode == MenuMode::Search
-                                }) =>
+                                if app
+                                    .active_menu
+                                    .as_ref()
+                                    .is_some_and(|menu| menu.state.mode == MenuMode::Search) =>
                             {
                                 if let Some(menu) = app.active_menu.as_mut() {
                                     menu.state.pop_filter_char(&menu.projection);
                                 }
                             }
                             KeyCode::Char('s') | KeyCode::Char('S')
-                                if app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "settings") =>
+                                if app
+                                    .active_menu
+                                    .as_ref()
+                                    .is_some_and(|menu| menu.projection.id == "settings") =>
                             {
                                 app.queue_settings_profile_save(&command_tx);
                             }
                             KeyCode::Char('a') | KeyCode::Char('A')
-                                if app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "settings") =>
+                                if app
+                                    .active_menu
+                                    .as_ref()
+                                    .is_some_and(|menu| menu.projection.id == "settings") =>
                             {
                                 app.queue_settings_profile_apply(&command_tx);
                             }
                             KeyCode::Char(ch)
-                                if app.active_menu.as_ref().is_some_and(|menu| {
-                                    menu.state.mode != MenuMode::Search
-                                }) && !key.modifiers.contains(KeyModifiers::CONTROL)
+                                if app
+                                    .active_menu
+                                    .as_ref()
+                                    .is_some_and(|menu| menu.state.mode != MenuMode::Search)
+                                    && !key.modifiers.contains(KeyModifiers::CONTROL)
                                     && !key.modifiers.contains(KeyModifiers::ALT) =>
                             {
                                 let action = app.active_menu.as_ref().and_then(|menu| {
@@ -11775,10 +12268,9 @@ pub async fn run_tui(
                                 }
                             }
                             KeyCode::Enter => {
-                                let action = app
-                                    .active_menu
-                                    .as_ref()
-                                    .and_then(|menu| menu.state.selected_primary_action(&menu.projection));
+                                let action = app.active_menu.as_ref().and_then(|menu| {
+                                    menu.state.selected_primary_action(&menu.projection)
+                                });
                                 if let Some(action) = action
                                     && matches!(
                                         app.execute_active_menu_action(action, &command_tx),

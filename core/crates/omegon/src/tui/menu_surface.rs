@@ -5,16 +5,14 @@
 //! still small enough to remain keyboard-first.
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
-    Frame,
 };
 
-use crate::surfaces::menu::{
-    MenuBadgeTone, MenuProjection, MenuRowKind, MenuRowProjection,
-};
+use crate::surfaces::menu::{MenuBadgeTone, MenuProjection, MenuRowKind, MenuRowProjection};
 use crate::tui::{command_surfaces, theme::Theme};
 
 #[cfg(test)]
@@ -79,7 +77,10 @@ pub(crate) fn render_menu_surface(
 ) {
     let popup = command_surfaces::command_modal_area(area);
     frame.render_widget(Clear, popup);
-    frame.render_widget(menu_paragraph(theme, projection, state, popup.height), popup);
+    frame.render_widget(
+        menu_paragraph(theme, projection, state, popup.height),
+        popup,
+    );
 }
 
 fn menu_paragraph<'a>(
@@ -110,11 +111,20 @@ fn menu_lines<'a>(
     let mut lines = Vec::new();
     lines.push(Line::from(Span::styled(
         projection.title.clone(),
-        Style::default().fg(theme.accent()).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme.accent())
+            .add_modifier(Modifier::BOLD),
     )));
-    if let Some(summary) = projection.summary.as_deref().filter(|summary| !summary.is_empty()) {
+    if let Some(summary) = projection
+        .summary
+        .as_deref()
+        .filter(|summary| !summary.is_empty())
+    {
         for line in summary.lines() {
-            lines.push(Line::from(Span::styled(line.to_string(), Style::default().fg(theme.muted()))));
+            lines.push(Line::from(Span::styled(
+                line.to_string(),
+                Style::default().fg(theme.muted()),
+            )));
         }
     }
 
@@ -125,7 +135,9 @@ fn menu_lines<'a>(
                 .iter()
                 .flat_map(|tab| {
                     let style = if tab.id == state.active_tab {
-                        Style::default().fg(theme.accent_bright()).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(theme.accent_bright())
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(theme.muted())
                     };
@@ -184,7 +196,9 @@ fn menu_lines<'a>(
                 previous_group = Some(visible.group_id);
                 lines.push(Line::from(Span::styled(
                     visible.group_label.to_string(),
-                    Style::default().fg(theme.muted()).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.muted())
+                        .add_modifier(Modifier::BOLD),
                 )));
             }
             lines.push(menu_row_line(theme, visible.row, idx == state.selected_row));
@@ -208,7 +222,10 @@ fn menu_lines<'a>(
         MenuMode::Search => "type to filter · Backspace edit · Esc browse · Enter run",
         MenuMode::Browse => "↑/↓ navigate · Tab category · / search · Enter run · Esc close",
     });
-    lines.push(Line::from(Span::styled(footer.to_string(), Style::default().fg(theme.dim()))));
+    lines.push(Line::from(Span::styled(
+        footer.to_string(),
+        Style::default().fg(theme.dim()),
+    )));
     lines
 }
 
@@ -217,14 +234,19 @@ fn menu_row_line<'a>(theme: &dyn Theme, row: &'a MenuRowProjection, selected: bo
     let label_style = match row.kind {
         MenuRowKind::Action => Style::default().fg(theme.fg()).add_modifier(Modifier::BOLD),
         MenuRowKind::Object => Style::default().fg(theme.fg()),
-        MenuRowKind::Heading => Style::default().fg(theme.accent_bright()).add_modifier(Modifier::BOLD),
+        MenuRowKind::Heading => Style::default()
+            .fg(theme.accent_bright())
+            .add_modifier(Modifier::BOLD),
     };
     let mut spans = vec![
         Span::styled(format!("{marker} "), Style::default().fg(theme.accent())),
         Span::styled(row.label.clone(), label_style),
     ];
     if let Some(value) = row.value.as_deref().filter(|value| !value.is_empty()) {
-        spans.push(Span::styled(format!("  {value}"), Style::default().fg(theme.accent_bright())));
+        spans.push(Span::styled(
+            format!("  {value}"),
+            Style::default().fg(theme.accent_bright()),
+        ));
     }
     for badge in &row.badges {
         spans.push(Span::raw("  "));
@@ -288,7 +310,9 @@ impl MenuState {
         &self,
         projection: &'a MenuProjection,
     ) -> Option<VisibleMenuRow<'a>> {
-        self.visible_rows(projection).get(self.selected_row).cloned()
+        self.visible_rows(projection)
+            .get(self.selected_row)
+            .cloned()
     }
 
     pub(crate) fn selected_primary_action(
@@ -324,7 +348,8 @@ impl MenuState {
         projection: &MenuProjection,
         key: char,
     ) -> Option<String> {
-        self.selected_action_for_key(projection, key).and_then(|action| action.command)
+        self.selected_action_for_key(projection, key)
+            .and_then(|action| action.command)
     }
 
     pub(crate) fn row_target_for_action_key(
@@ -452,9 +477,20 @@ fn row_matches_filter(row: &MenuRowProjection, filter: &str) -> bool {
     row.id.to_lowercase().contains(filter)
         || row.label.to_lowercase().contains(filter)
         || row.description.to_lowercase().contains(filter)
-        || row.value.as_deref().unwrap_or_default().to_lowercase().contains(filter)
-        || row.metadata.iter().any(|item| item.to_lowercase().contains(filter))
-        || row.badges.iter().any(|badge| badge.label.to_lowercase().contains(filter))
+        || row
+            .value
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains(filter)
+        || row
+            .metadata
+            .iter()
+            .any(|item| item.to_lowercase().contains(filter))
+        || row
+            .badges
+            .iter()
+            .any(|badge| badge.label.to_lowercase().contains(filter))
 }
 
 #[cfg(test)]
@@ -574,7 +610,10 @@ mod tests {
         let mut state = MenuState::new(&projection);
         state.move_down(&projection);
 
-        assert_eq!(state.selected_command(&projection).as_deref(), Some("/skills get python"));
+        assert_eq!(
+            state.selected_command(&projection).as_deref(),
+            Some("/skills get python")
+        );
     }
 
     #[test]
@@ -589,7 +628,10 @@ mod tests {
 
         assert_eq!(action.label, "Install");
         assert_eq!(action.command.as_deref(), Some("/skills install Python"));
-        assert_eq!(action.disposition, crate::surfaces::menu::MenuActionDisposition::RunCommand);
+        assert_eq!(
+            action.disposition,
+            crate::surfaces::menu::MenuActionDisposition::RunCommand
+        );
     }
 
     #[test]
@@ -599,10 +641,15 @@ mod tests {
         state.move_down(&projection);
 
         assert_eq!(
-            state.selected_action_command_for_key(&projection, 'I').as_deref(),
+            state
+                .selected_action_command_for_key(&projection, 'I')
+                .as_deref(),
             Some("/skills install Python")
         );
-        assert_eq!(state.selected_action_command_for_key(&projection, 'x'), None);
+        assert_eq!(
+            state.selected_action_command_for_key(&projection, 'x'),
+            None
+        );
     }
 
     #[test]
@@ -617,17 +664,24 @@ mod tests {
     fn rendered_lines_include_ux_chrome_badges_and_more_indicators() {
         let mut projection = projection();
         projection.summary = Some("summary".into());
-        projection.tabs[0].groups[0].rows[0].badges.push(MenuBadgeProjection {
-            label: "project".into(),
-            tone: MenuBadgeTone::Info,
-        });
+        projection.tabs[0].groups[0].rows[0]
+            .badges
+            .push(MenuBadgeProjection {
+                label: "project".into(),
+                tone: MenuBadgeTone::Info,
+            });
         let mut state = MenuState::new(&projection);
         state.selected_row = 1;
 
         let theme = Alpharius;
         let text = menu_lines(&theme, &projection, &state, 8)
             .into_iter()
-            .map(|line| line.spans.into_iter().map(|span| span.content.into_owned()).collect::<String>())
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n");
 

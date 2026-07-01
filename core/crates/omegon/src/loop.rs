@@ -2502,10 +2502,7 @@ async fn consume_llm_stream(
                 // dies on the next timeout (now evaluated in the ambiguous
                 // phase), and any resumed delta flips the phase back to active.
                 if let Some(rearmed) = rearm_idle_phase(phase) {
-                    stream_idle_phase.store(
-                        rearmed as u8,
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
+                    stream_idle_phase.store(rearmed as u8, std::sync::atomic::Ordering::Relaxed);
                     let idle_secs = idle_timeout().as_secs();
                     tracing::debug!(
                         provider,

@@ -3569,10 +3569,18 @@ pub(crate) fn skills_menu_projection(
                     MenuBadgeProjection {
                         label: skill_state_label(entry).to_string(),
                         tone: match skill_state_tone(entry) {
-                            crate::surfaces::palette::PaletteBadgeTone::Neutral => MenuBadgeTone::Neutral,
-                            crate::surfaces::palette::PaletteBadgeTone::Success => MenuBadgeTone::Success,
-                            crate::surfaces::palette::PaletteBadgeTone::Warning => MenuBadgeTone::Warning,
-                            crate::surfaces::palette::PaletteBadgeTone::Danger => MenuBadgeTone::Danger,
+                            crate::surfaces::palette::PaletteBadgeTone::Neutral => {
+                                MenuBadgeTone::Neutral
+                            }
+                            crate::surfaces::palette::PaletteBadgeTone::Success => {
+                                MenuBadgeTone::Success
+                            }
+                            crate::surfaces::palette::PaletteBadgeTone::Warning => {
+                                MenuBadgeTone::Warning
+                            }
+                            crate::surfaces::palette::PaletteBadgeTone::Danger => {
+                                MenuBadgeTone::Danger
+                            }
                             crate::surfaces::palette::PaletteBadgeTone::Info => MenuBadgeTone::Info,
                         },
                     },

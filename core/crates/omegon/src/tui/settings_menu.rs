@@ -300,7 +300,6 @@ pub(crate) fn max_turns_selector_options(current: u32) -> Vec<selector::SelectOp
         .collect()
 }
 
-
 pub(crate) fn model_grade_selector_options(current: &str) -> Vec<selector::SelectOption> {
     ["F", "D", "C", "B", "A", "S"]
         .into_iter()
@@ -321,15 +320,47 @@ pub(crate) fn model_grade_selector_options(current: &str) -> Vec<selector::Selec
 
 pub(crate) fn model_provider_selector_options(current: &str) -> Vec<selector::SelectOption> {
     [
-        ("auto", "Auto", "Let the route controller choose a policy-compliant provider"),
+        (
+            "auto",
+            "Auto",
+            "Let the route controller choose a policy-compliant provider",
+        ),
         ("local", "Local", "Prefer local providers such as Ollama"),
-        ("upstream", "Upstream", "Avoid local providers and use hosted upstream providers"),
-        ("anthropic", "Anthropic", "Route specifically to Anthropic when available"),
-        ("openai-codex", "OpenAI Codex", "Route specifically to OpenAI Codex when available"),
-        ("openai", "OpenAI", "Route specifically to OpenAI API when available"),
-        ("openrouter", "OpenRouter", "Route specifically to OpenRouter when available"),
-        ("google", "Google Gemini", "Route specifically to Google Gemini when available"),
-        ("ollama", "Ollama", "Route specifically to local Ollama when available"),
+        (
+            "upstream",
+            "Upstream",
+            "Avoid local providers and use hosted upstream providers",
+        ),
+        (
+            "anthropic",
+            "Anthropic",
+            "Route specifically to Anthropic when available",
+        ),
+        (
+            "openai-codex",
+            "OpenAI Codex",
+            "Route specifically to OpenAI Codex when available",
+        ),
+        (
+            "openai",
+            "OpenAI",
+            "Route specifically to OpenAI API when available",
+        ),
+        (
+            "openrouter",
+            "OpenRouter",
+            "Route specifically to OpenRouter when available",
+        ),
+        (
+            "google",
+            "Google Gemini",
+            "Route specifically to Google Gemini when available",
+        ),
+        (
+            "ollama",
+            "Ollama",
+            "Route specifically to local Ollama when available",
+        ),
     ]
     .into_iter()
     .map(|(value, label, description)| selector::SelectOption {
@@ -345,7 +376,11 @@ pub(crate) fn model_policy_selector_options(current: &str) -> Vec<selector::Sele
     [
         ("exact", "Exact", "Require the requested grade exactly"),
         ("minimum", "Minimum", "Allow the requested grade or better"),
-        ("nearest", "Nearest", "Allow nearest policy-compliant fallback"),
+        (
+            "nearest",
+            "Nearest",
+            "Allow nearest policy-compliant fallback",
+        ),
     ]
     .into_iter()
     .map(|(value, label, description)| selector::SelectOption {
@@ -725,5 +760,4 @@ mod tests {
         );
         assert_eq!(outcome.message(), "Unknown density: nope");
     }
-
 }

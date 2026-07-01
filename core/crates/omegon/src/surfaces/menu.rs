@@ -104,7 +104,6 @@ pub struct MenuActionProjection {
     pub requires_confirmation: bool,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderStatusProjection {
     pub provider_id: String,
@@ -174,10 +173,13 @@ impl MenuProjection {
         }
     }
 
-
     pub fn render_markdown(&self) -> String {
         let mut out = format!("## {}\n", self.title);
-        if let Some(summary) = self.summary.as_deref().filter(|summary| !summary.is_empty()) {
+        if let Some(summary) = self
+            .summary
+            .as_deref()
+            .filter(|summary| !summary.is_empty())
+        {
             out.push_str("\n");
             out.push_str(summary);
             out.push_str("\n");
@@ -193,7 +195,11 @@ impl MenuProjection {
                 out.push_str("\n### ");
                 out.push_str(&group.label);
                 out.push_str("\n");
-                if let Some(description) = group.description.as_deref().filter(|value| !value.is_empty()) {
+                if let Some(description) = group
+                    .description
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                {
                     out.push_str(description);
                     out.push_str("\n");
                 }
@@ -212,7 +218,11 @@ impl MenuProjection {
                         out.push_str(" · ");
                         out.push_str(&extras.join(" · "));
                     }
-                    if let Some(command) = row.primary_action.as_ref().and_then(|action| action.command.as_deref()) {
+                    if let Some(command) = row
+                        .primary_action
+                        .as_ref()
+                        .and_then(|action| action.command.as_deref())
+                    {
                         out.push_str(" · Enter: `");
                         out.push_str(command);
                         out.push('`');
@@ -259,7 +269,11 @@ impl MenuProjection {
                     let group_label = group.title;
                     group.rows.into_iter().map(move |row| {
                         let primary_action = row.command.as_ref().map(|command| {
-                            MenuActionProjection::command(row.id.clone(), row.label.clone(), command.clone())
+                            MenuActionProjection::command(
+                                row.id.clone(),
+                                row.label.clone(),
+                                command.clone(),
+                            )
                         });
                         MenuRowProjection {
                             id: row.id,
@@ -267,8 +281,16 @@ impl MenuProjection {
                             description: row.description,
                             value: None,
                             kind: MenuRowKind::from(row.kind),
-                            badges: row.badges.into_iter().map(MenuBadgeProjection::from).collect(),
-                            metadata: row.metadata.into_iter().chain(std::iter::once(group_label.clone())).collect(),
+                            badges: row
+                                .badges
+                                .into_iter()
+                                .map(MenuBadgeProjection::from)
+                                .collect(),
+                            metadata: row
+                                .metadata
+                                .into_iter()
+                                .chain(std::iter::once(group_label.clone()))
+                                .collect(),
                             primary_action,
                             actions: Vec::new(),
                             safety: None,
@@ -292,7 +314,11 @@ impl MenuProjection {
         }
     }
 
-    pub fn from_command_menu(id: impl Into<String>, title: impl Into<String>, menu: CommandMenuProjection) -> Self {
+    pub fn from_command_menu(
+        id: impl Into<String>,
+        title: impl Into<String>,
+        menu: CommandMenuProjection,
+    ) -> Self {
         let rows = menu
             .rows
             .into_iter()
@@ -358,7 +384,11 @@ impl MenuProjection {
 }
 
 impl MenuActionProjection {
-    pub fn command(id: impl Into<String>, label: impl Into<String>, command: impl Into<String>) -> Self {
+    pub fn command(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        command: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             label: label.into(),
@@ -373,7 +403,11 @@ impl MenuActionProjection {
         }
     }
 
-    pub fn focus_row(id: impl Into<String>, label: impl Into<String>, target_row_id: impl Into<String>) -> Self {
+    pub fn focus_row(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        target_row_id: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             label: label.into(),
@@ -408,7 +442,11 @@ impl MenuActionProjection {
         }
     }
 
-    pub fn open_selector(id: impl Into<String>, label: impl Into<String>, selector_id: impl Into<String>) -> Self {
+    pub fn open_selector(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        selector_id: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             label: label.into(),
@@ -423,7 +461,11 @@ impl MenuActionProjection {
         }
     }
 
-    pub fn open_settings_row(id: impl Into<String>, label: impl Into<String>, row_id: impl Into<String>) -> Self {
+    pub fn open_settings_row(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        row_id: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             label: label.into(),
@@ -437,7 +479,6 @@ impl MenuActionProjection {
             requires_confirmation: false,
         }
     }
-
 }
 
 impl From<PaletteRowKind> for MenuRowKind {
@@ -464,7 +505,10 @@ impl From<PaletteBadgeTone> for MenuBadgeTone {
 
 impl From<PaletteBadgeProjection> for MenuBadgeProjection {
     fn from(value: PaletteBadgeProjection) -> Self {
-        Self { label: value.label, tone: value.tone.into() }
+        Self {
+            label: value.label,
+            tone: value.tone.into(),
+        }
     }
 }
 
@@ -514,7 +558,10 @@ mod tests {
         assert_eq!(menu.title, "Skills");
         assert_eq!(menu.summary.as_deref(), Some("summary"));
         assert_eq!(row.label, "rust");
-        assert_eq!(row.primary_action.as_ref().unwrap().command.as_deref(), Some("/skills get rust"));
+        assert_eq!(
+            row.primary_action.as_ref().unwrap().command.as_deref(),
+            Some("/skills get rust")
+        );
         assert_eq!(row.badges[0].label, "project");
         assert!(row.metadata.contains(&"activation=project".to_string()));
         assert!(row.metadata.contains(&"Installed".to_string()));
@@ -553,10 +600,16 @@ mod tests {
         assert_eq!(row.id, "help");
         assert_eq!(row.label, "/help");
         assert_eq!(row.value.as_deref(), Some("help"));
-        assert_eq!(row.primary_action.as_ref().unwrap().command.as_deref(), Some("/help"));
+        assert_eq!(
+            row.primary_action.as_ref().unwrap().command.as_deref(),
+            Some("/help")
+        );
         assert_eq!(row.actions.len(), 2);
         assert_eq!(row.actions[0].command.as_deref(), Some("help skills"));
-        assert_eq!(row.safety.unwrap().class, omegon_traits::CommandSafetyClass::ReadOnly);
+        assert_eq!(
+            row.safety.unwrap().class,
+            omegon_traits::CommandSafetyClass::ReadOnly
+        );
         assert!(row.availability.unwrap().cli);
         assert!(row.availability.unwrap().acp);
         assert!(row.metadata.contains(&"registry".to_string()));

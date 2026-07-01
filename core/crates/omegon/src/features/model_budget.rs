@@ -437,10 +437,14 @@ mod tests {
     }
 
     #[test]
-    fn resolve_preserves_current_model_version() {
-        // If already on a B-grade Anthropic model, switching to B should keep it
+    fn resolve_preserves_current_grade_default() {
+        // If already on the B-grade Anthropic default, switching to B should keep it.
+        let model = ModelGrade::B.resolve_model("anthropic", "claude-sonnet-5");
+        assert_eq!(model, "claude-sonnet-5", "should preserve exact default");
+
+        // If on an older B-grade Anthropic model, switching to B should move to the current default.
         let model = ModelGrade::B.resolve_model("anthropic", "claude-sonnet-4-6");
-        assert_eq!(model, "claude-sonnet-4-6", "should preserve exact version");
+        assert_eq!(model, "claude-sonnet-5");
 
         // If on a different grade band, should switch to the S-grade default.
         let model = ModelGrade::S.resolve_model("anthropic", "claude-sonnet-4-6");

@@ -2732,7 +2732,6 @@ fn usage_slash_responses_still_use_command_panel() {
     assert_eq!(panel.body, response);
 }
 
-
 #[test]
 fn active_menu_display_commands_open_returnable_command_panel() {
     let mut app = test_app();
@@ -2742,14 +2741,19 @@ fn active_menu_display_commands_open_returnable_command_panel() {
     let result = app.execute_active_menu_command("/version".to_string(), &tx);
 
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.active_menu.is_some(), "menu remains underneath output panel");
+    assert!(
+        app.active_menu.is_some(),
+        "menu remains underneath output panel"
+    );
     assert!(app.conversation.segments().is_empty());
     let panel = app.command_panel.as_ref().expect("command output panel");
     assert_eq!(panel.source.as_deref(), Some("/version"));
-    assert_eq!(panel.return_target.map(|target| target.label()), Some("menu"));
+    assert_eq!(
+        panel.return_target.map(|target| target.label()),
+        Some("menu")
+    );
     assert!(panel.body.starts_with("Version\n"));
 }
-
 
 #[test]
 fn returnable_command_panel_escape_preserves_underlying_menu() {
@@ -2774,7 +2778,10 @@ fn returnable_command_panel_stack_close_clears_menu_target() {
     app.close_command_panel_stack();
 
     assert!(app.command_panel.is_none());
-    assert!(app.active_menu.is_none(), "q should close the whole menu output stack");
+    assert!(
+        app.active_menu.is_none(),
+        "q should close the whole menu output stack"
+    );
 }
 
 #[test]
@@ -2912,7 +2919,12 @@ fn slash_ui_opens_shared_menu() {
     assert!(matches!(result, SlashResult::Handled));
     let menu = app.active_menu.as_ref().expect("ui menu");
     assert_eq!(menu.projection.id, "ui");
-    assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id == "ui.surface.dashboard"));
+    assert!(
+        menu.state
+            .visible_rows(&menu.projection)
+            .iter()
+            .any(|row| row.row.id == "ui.surface.dashboard")
+    );
 }
 
 #[test]
@@ -2922,7 +2934,11 @@ fn slash_ui_surfaces_opens_shared_menu() {
     let result = app.handle_slash_command("/ui surfaces", &tx);
 
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "ui"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "ui")
+    );
 }
 
 #[test]
@@ -2946,7 +2962,10 @@ fn ui_menu_toggle_refreshes_menu_state() {
     app.open_ui_menu();
     {
         let menu = app.active_menu.as_mut().expect("ui menu");
-        assert!(menu.state.select_row_by_id(&menu.projection, "ui.surface.dashboard"));
+        assert!(
+            menu.state
+                .select_row_by_id(&menu.projection, "ui.surface.dashboard")
+        );
     }
     let action = app
         .active_menu
@@ -2954,7 +2973,10 @@ fn ui_menu_toggle_refreshes_menu_state() {
         .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
         .expect("dashboard toggle");
 
-    assert!(matches!(app.execute_active_menu_action(action, &tx), SlashResult::Handled));
+    assert!(matches!(
+        app.execute_active_menu_action(action, &tx),
+        SlashResult::Handled
+    ));
 
     let menu = app.active_menu.as_ref().expect("ui menu refreshed");
     let row = menu
@@ -2979,7 +3001,10 @@ fn ui_menu_preset_hotkey_refreshes_menu_state() {
         .expect("global full action");
 
     assert_eq!(action.command.as_deref(), Some("/ui full"));
-    assert!(matches!(app.execute_active_menu_action(action, &tx), SlashResult::Handled));
+    assert!(matches!(
+        app.execute_active_menu_action(action, &tx),
+        SlashResult::Handled
+    ));
 
     let menu = app.active_menu.as_ref().expect("ui menu refreshed");
     let row = menu
@@ -2996,7 +3021,10 @@ fn ui_menu_toggle_rows_use_shared_commands() {
     let mut app = test_app();
     app.open_ui_menu();
     let menu = app.active_menu.as_mut().expect("ui menu");
-    assert!(menu.state.select_row_by_id(&menu.projection, "ui.surface.dashboard"));
+    assert!(
+        menu.state
+            .select_row_by_id(&menu.projection, "ui.surface.dashboard")
+    );
 
     assert_eq!(
         menu.state.selected_command(&menu.projection).as_deref(),
@@ -3016,7 +3044,12 @@ fn slash_help_opens_command_inventory_menu() {
     let rows = menu.state.visible_rows(&menu.projection);
     assert!(rows.iter().any(|row| row.row.label == "/ui"));
     assert!(rows.iter().any(|row| row.row.label == "/stats"));
-    assert!(menu.projection.summary.as_deref().is_some_and(|summary| summary.contains("Slash command inventory")));
+    assert!(
+        menu.projection
+            .summary
+            .as_deref()
+            .is_some_and(|summary| summary.contains("Slash command inventory"))
+    );
 }
 
 #[test]
@@ -3502,7 +3535,11 @@ fn slash_context_no_args_opens_menu() {
     let result = app.handle_slash_command("/context", &tx);
     assert!(matches!(result, SlashResult::Handled));
     assert!(app.selector.is_none());
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "context"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "context")
+    );
 }
 
 #[test]
@@ -3747,7 +3784,10 @@ fn slash_sessions_all_preserves_text_readout() {
 
     assert!(matches!(result, SlashResult::Handled));
     assert!(app.active_menu.is_none());
-    assert!(matches!(rx.try_recv().expect("list sessions"), TuiCommand::ListSessions { .. }));
+    assert!(matches!(
+        rx.try_recv().expect("list sessions"),
+        TuiCommand::ListSessions { .. }
+    ));
 }
 
 #[test]
@@ -3759,7 +3799,10 @@ fn slash_sessions_list_preserves_text_readout() {
 
     assert!(matches!(result, SlashResult::Handled));
     assert!(app.active_menu.is_none());
-    assert!(matches!(rx.try_recv().expect("list sessions"), TuiCommand::ListSessions { .. }));
+    assert!(matches!(
+        rx.try_recv().expect("list sessions"),
+        TuiCommand::ListSessions { .. }
+    ));
 }
 
 #[test]
@@ -3800,7 +3843,10 @@ fn sessions_menu_rows_resume_by_session_id() {
     assert_eq!(row.row.label, "quiet_anchor");
     assert!(row.row.description.contains("Resume target"));
     assert_eq!(
-        row.row.primary_action.as_ref().and_then(|action| action.command.as_deref()),
+        row.row
+            .primary_action
+            .as_ref()
+            .and_then(|action| action.command.as_deref()),
         Some("/sessions resume 2026-01-02T03-04-05_deadbeef")
     );
 }
@@ -3831,7 +3877,12 @@ fn slash_auth_no_args_opens_provider_menu() {
     assert!(matches!(result, SlashResult::Handled));
     let menu = app.active_menu.as_ref().expect("auth menu");
     assert_eq!(menu.projection.id, "auth");
-    assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id.starts_with("auth.provider.")));
+    assert!(
+        menu.state
+            .visible_rows(&menu.projection)
+            .iter()
+            .any(|row| row.row.id.starts_with("auth.provider."))
+    );
 }
 
 #[test]
@@ -3862,11 +3913,13 @@ fn slash_login_provider_opens_hidden_secret_input_for_api_key_provider() {
     let result = app.handle_slash_command("/login openai", &tx);
 
     assert!(matches!(result, SlashResult::Display(_)));
-    assert!(matches!(app.editor.mode(), super::editor::EditorMode::SecretInput { .. }));
+    assert!(matches!(
+        app.editor.mode(),
+        super::editor::EditorMode::SecretInput { .. }
+    ));
     assert!(app.active_menu.is_none());
     assert!(app.command_panel.is_none());
 }
-
 
 #[test]
 fn model_menu_current_row_closes_menu_before_opening_selector() {
@@ -3874,7 +3927,10 @@ fn model_menu_current_row_closes_menu_before_opening_selector() {
     app.open_model_menu();
     {
         let menu = app.active_menu.as_mut().expect("model menu");
-        assert!(menu.state.select_row_by_id(&menu.projection, "model.current"));
+        assert!(
+            menu.state
+                .select_row_by_id(&menu.projection, "model.current")
+        );
     }
     let action = app
         .active_menu
@@ -3886,7 +3942,10 @@ fn model_menu_current_row_closes_menu_before_opening_selector() {
         app.execute_active_menu_action(action, &test_tx()),
         SlashResult::Handled
     ));
-    assert!(app.active_menu.is_none(), "selector must receive arrow keys");
+    assert!(
+        app.active_menu.is_none(),
+        "selector must receive arrow keys"
+    );
     assert!(app.selector.is_some(), "model selector should be open");
     assert!(matches!(app.selector_kind, Some(SelectorKind::Model)));
 }
@@ -3899,7 +3958,10 @@ fn slash_model_list_opens_model_selector_instead_of_text_dump() {
     let result = app.handle_slash_command("/model list", &tx);
 
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.selector.is_some(), "/model list should open interactive selector");
+    assert!(
+        app.selector.is_some(),
+        "/model list should open interactive selector"
+    );
     assert!(matches!(app.selector_kind, Some(SelectorKind::Model)));
 }
 
@@ -3948,9 +4010,16 @@ fn memory_menu_argument_rows_prime_editor() {
     {
         let menu = app.active_menu.as_mut().expect("memory menu");
         menu.state.active_tab = "actions".into();
-        assert!(menu.state.select_row_by_id(&menu.projection, "memory.focus"));
+        assert!(
+            menu.state
+                .select_row_by_id(&menu.projection, "memory.focus")
+        );
     }
-    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection)).expect("focus action");
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_action(&menu.projection))
+        .expect("focus action");
 
     app.execute_active_menu_action(action, &test_tx());
 
@@ -3964,9 +4033,15 @@ fn memory_menu_compact_requires_confirmation() {
     app.open_memory_menu();
     let menu = app.active_menu.as_mut().expect("memory menu");
     menu.state.active_tab = "actions".into();
-    assert!(menu.state.select_row_by_id(&menu.projection, "memory.compact"));
+    assert!(
+        menu.state
+            .select_row_by_id(&menu.projection, "memory.compact")
+    );
 
-    let action = menu.state.selected_action(&menu.projection).expect("compact action");
+    let action = menu
+        .state
+        .selected_action(&menu.projection)
+        .expect("compact action");
 
     assert_eq!(action.command.as_deref(), Some("/memory compact"));
     assert!(action.requires_confirmation);
@@ -3990,11 +4065,23 @@ fn slash_memory_opens_shared_menu() {
     assert!(matches!(result, SlashResult::Handled));
     let menu = app.active_menu.as_ref().expect("memory menu");
     assert_eq!(menu.projection.id, "memory");
-    assert!(menu.projection.summary.as_deref().is_some_and(|summary| summary.contains("Injected: 3")));
+    assert!(
+        menu.projection
+            .summary
+            .as_deref()
+            .is_some_and(|summary| summary.contains("Injected: 3"))
+    );
     let rows = menu.state.visible_rows(&menu.projection);
-    assert!(rows.iter().any(|row| row.row.id == "memory.injected" && row.row.value.as_deref() == Some("3")));
-    assert!(rows.iter().any(|row| row.row.id == "memory.working_set" && row.row.label == "Working-set facts"));
-    assert!(rows.iter().any(|row| row.row.id == "memory.persona" && row.row.metadata.iter().any(|m| m.contains("Engineer"))));
+    assert!(
+        rows.iter()
+            .any(|row| row.row.id == "memory.injected" && row.row.value.as_deref() == Some("3"))
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.row.id == "memory.working_set" && row.row.label == "Working-set facts")
+    );
+    assert!(rows.iter().any(|row| row.row.id == "memory.persona"
+        && row.row.metadata.iter().any(|m| m.contains("Engineer"))));
 }
 
 #[test]
@@ -4013,12 +4100,27 @@ fn slash_memory_status_preserves_text_readout() {
     let result = app.handle_slash_command("/memory status", &tx);
 
     if let SlashResult::Display(text) = result {
-        assert!(text.contains("Memory Overview"), "should show titled memory view: {text}");
-        assert!(text.contains("Injected"), "should show injected facts: {text}");
-        assert!(text.contains("Project facts"), "should show harness memory breakdown: {text}");
-        assert!(text.contains("Engineer"), "should show active persona memory: {text}");
+        assert!(
+            text.contains("Memory Overview"),
+            "should show titled memory view: {text}"
+        );
+        assert!(
+            text.contains("Injected"),
+            "should show injected facts: {text}"
+        );
+        assert!(
+            text.contains("Project facts"),
+            "should show harness memory breakdown: {text}"
+        );
+        assert!(
+            text.contains("Engineer"),
+            "should show active persona memory: {text}"
+        );
     } else {
-        panic!("expected Display result, got {:?}", std::mem::discriminant(&result));
+        panic!(
+            "expected Display result, got {:?}",
+            std::mem::discriminant(&result)
+        );
     }
 }
 
@@ -4774,16 +4876,19 @@ fn slash_skills_opens_structured_menu() {
 
     let menu = app.active_menu.as_ref().expect("skills menu opened");
     assert_eq!(menu.projection.id, "skills");
-    assert!(menu
-        .state
-        .visible_rows(&menu.projection)
-        .iter()
-        .any(|row| row.row.label == "code-act"));
-    assert!(!menu
-        .state
-        .visible_rows(&menu.projection)
-        .iter()
-        .any(|row| row.row.label.contains("/skills get")));
+    assert!(
+        menu.state
+            .visible_rows(&menu.projection)
+            .iter()
+            .any(|row| row.row.label == "code-act")
+    );
+    assert!(
+        !menu
+            .state
+            .visible_rows(&menu.projection)
+            .iter()
+            .any(|row| row.row.label.contains("/skills get"))
+    );
 }
 
 #[test]
@@ -4799,16 +4904,26 @@ fn slash_skills_menu_lists_skills_before_actions() {
     assert!(rows.len() > 2, "expected skill inventory plus actions");
     assert_eq!(rows[0].group_id, "skills");
     assert_ne!(rows[0].row.kind, crate::surfaces::menu::MenuRowKind::Action);
-    assert!(rows
-        .iter()
-        .any(|row| row.group_id == "actions" && row.row.id == "skills.reload"));
+    assert!(
+        rows.iter()
+            .any(|row| row.group_id == "actions" && row.row.id == "skills.reload")
+    );
 }
 
 #[test]
 fn slash_skills_help_keeps_command_syntax_out_of_inventory() {
-    assert_eq!(canonical_slash_command("skills", "--help"), Some(CanonicalSlashCommand::SkillsHelp));
-    assert_eq!(canonical_slash_command("skills", "-h"), Some(CanonicalSlashCommand::SkillsHelp));
-    assert_eq!(canonical_slash_command("skills", "help"), Some(CanonicalSlashCommand::SkillsHelp));
+    assert_eq!(
+        canonical_slash_command("skills", "--help"),
+        Some(CanonicalSlashCommand::SkillsHelp)
+    );
+    assert_eq!(
+        canonical_slash_command("skills", "-h"),
+        Some(CanonicalSlashCommand::SkillsHelp)
+    );
+    assert_eq!(
+        canonical_slash_command("skills", "help"),
+        Some(CanonicalSlashCommand::SkillsHelp)
+    );
 }
 
 #[test]
@@ -4843,11 +4958,29 @@ fn slash_skills_menu_rows_have_operator_expected_labels_and_values() {
         .find(|row| row.row.label == "code-act")
         .expect("code-act skill row");
     assert_eq!(
-        code_act.row.primary_action.as_ref().unwrap().command.as_deref(),
+        code_act
+            .row
+            .primary_action
+            .as_ref()
+            .unwrap()
+            .command
+            .as_deref(),
         Some("/skills get code-act")
     );
-    assert!(code_act.row.value.as_deref().is_some_and(|value| value.contains("Enter: inspect")));
-    assert!(code_act.row.value.as_deref().is_some_and(|value| value.contains("i: install")));
+    assert!(
+        code_act
+            .row
+            .value
+            .as_deref()
+            .is_some_and(|value| value.contains("Enter: inspect"))
+    );
+    assert!(
+        code_act
+            .row
+            .value
+            .as_deref()
+            .is_some_and(|value| value.contains("i: install"))
+    );
 }
 
 #[test]
@@ -4877,23 +5010,25 @@ fn slash_help_command_registry_converts_to_menu_projection() {
         Vec::new(),
         &[],
     );
-    let projection = crate::surfaces::menu::MenuProjection::from_command_menu(
-        "commands",
-        "Commands",
-        menu,
-    );
+    let projection =
+        crate::surfaces::menu::MenuProjection::from_command_menu("commands", "Commands", menu);
 
-    let row = projection.tabs[0]
-        .groups[0]
+    let row = projection.tabs[0].groups[0]
         .rows
         .iter()
         .find(|row| row.id == "help")
         .expect("help row");
-    assert_eq!(row.primary_action.as_ref().unwrap().command.as_deref(), Some("/help"));
+    assert_eq!(
+        row.primary_action.as_ref().unwrap().command.as_deref(),
+        Some("/help")
+    );
     assert!(row.availability.unwrap().tui);
     assert!(row.availability.unwrap().cli);
     assert!(row.availability.unwrap().acp);
-    assert_eq!(row.safety.unwrap().class, omegon_traits::CommandSafetyClass::ReadOnly);
+    assert_eq!(
+        row.safety.unwrap().class,
+        omegon_traits::CommandSafetyClass::ReadOnly
+    );
 }
 
 #[test]
@@ -4976,7 +5111,11 @@ fn slash_extension_opens_runtime_menu() {
     let result = app.handle_slash_command("/extension", &tx);
 
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "extension-runtime"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "extension-runtime")
+    );
 }
 
 #[test]
@@ -4987,7 +5126,11 @@ fn slash_ext_opens_runtime_menu() {
     let result = app.handle_slash_command("/ext", &tx);
 
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "extension-runtime"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "extension-runtime")
+    );
 }
 
 #[test]
@@ -4998,7 +5141,11 @@ fn slash_runtime_opens_runtime_menu() {
     let result = app.handle_slash_command("/runtime", &tx);
 
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "extension-runtime"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "extension-runtime")
+    );
 }
 
 #[test]
@@ -5037,19 +5184,36 @@ fn runtime_refresh_menu_action_requires_confirmation() {
     app.open_extension_runtime_menu();
     {
         let menu = app.active_menu.as_mut().expect("runtime menu");
-        assert!(menu.state.select_row_by_id(&menu.projection, "runtime.refresh"));
+        assert!(
+            menu.state
+                .select_row_by_id(&menu.projection, "runtime.refresh")
+        );
     }
-    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_primary_action(&menu.projection)).expect("runtime refresh action");
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
+        .expect("runtime refresh action");
 
     let first = app.execute_active_menu_action(action.clone(), &tx);
     assert!(matches!(first, SlashResult::Handled));
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "extension-runtime"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "extension-runtime")
+    );
     assert!(app.command_panel.is_none());
-    assert_eq!(app.pending_menu_confirmation.as_deref(), Some("runtime.refresh.primary"));
+    assert_eq!(
+        app.pending_menu_confirmation.as_deref(),
+        Some("runtime.refresh.primary")
+    );
 
     let second = app.execute_active_menu_action(action, &tx);
     assert!(matches!(second, SlashResult::Handled));
-    assert!(app.command_panel.is_some(), "confirmed refresh should show output panel");
+    assert!(
+        app.command_panel.is_some(),
+        "confirmed refresh should show output panel"
+    );
 }
 
 #[test]
@@ -5059,15 +5223,29 @@ fn extension_update_menu_action_requires_confirmation() {
     app.open_extension_runtime_menu();
     {
         let menu = app.active_menu.as_mut().expect("runtime menu");
-        assert!(menu.state.select_row_by_id(&menu.projection, "extension.update"));
+        assert!(
+            menu.state
+                .select_row_by_id(&menu.projection, "extension.update")
+        );
     }
-    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_primary_action(&menu.projection)).expect("extension update action");
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
+        .expect("extension update action");
 
     let first = app.execute_active_menu_action(action.clone(), &tx);
     assert!(matches!(first, SlashResult::Handled));
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "extension-runtime"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "extension-runtime")
+    );
     assert!(app.command_panel.is_none());
-    assert_eq!(app.pending_menu_confirmation.as_deref(), Some("extension.update.primary"));
+    assert_eq!(
+        app.pending_menu_confirmation.as_deref(),
+        Some("extension.update.primary")
+    );
 }
 
 #[test]
@@ -5076,13 +5254,21 @@ fn extension_search_menu_row_primes_editor_for_query() {
     app.open_extension_runtime_menu();
     {
         let menu = app.active_menu.as_mut().expect("runtime menu");
-        assert!(menu.state.select_row_by_id(&menu.projection, "extension.search"));
+        assert!(
+            menu.state
+                .select_row_by_id(&menu.projection, "extension.search")
+        );
     }
 
-    let action = app.active_menu.as_ref()
+    let action = app
+        .active_menu
+        .as_ref()
         .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
         .expect("extension search action");
-    assert!(matches!(app.execute_active_menu_action(action, &test_tx()), SlashResult::Handled));
+    assert!(matches!(
+        app.execute_active_menu_action(action, &test_tx()),
+        SlashResult::Handled
+    ));
     assert_eq!(app.editor.render_text(), "/extension search ");
     assert!(app.active_menu.is_none());
 }
@@ -5092,12 +5278,19 @@ fn extension_refresh_aliases_execute_runtime_refresh() {
     let mut app = test_app();
     let tx = test_tx();
 
-    for command in ["/extension refresh", "/extension reload", "/extension restart"] {
+    for command in [
+        "/extension refresh",
+        "/extension reload",
+        "/extension restart",
+    ] {
         let result = app.handle_slash_command(command, &tx);
         let SlashResult::Display(message) = result else {
             panic!("{command} should display refresh output");
         };
-        assert!(message.contains("Runtime substrate refresh"), "{command}: {message}");
+        assert!(
+            message.contains("Runtime substrate refresh"),
+            "{command}: {message}"
+        );
     }
 }
 
@@ -5189,7 +5382,11 @@ fn secrets_menu_separates_inventory_from_actions() {
     assert_eq!(menu.projection.tabs[1].id, "actions");
     let inventory_rows = &menu.projection.tabs[0].groups[0].rows;
     assert_eq!(inventory_rows[0].id, "secrets.inventory.unavailable");
-    assert!(inventory_rows[0].label.contains("No secret readiness snapshot"));
+    assert!(
+        inventory_rows[0]
+            .label
+            .contains("No secret readiness snapshot")
+    );
     assert!(inventory_rows[0].primary_action.is_none());
 }
 
@@ -5201,12 +5398,26 @@ fn secrets_menu_actions_tab_contains_prime_editor_rows() {
     menu.state.active_tab = "actions".into();
 
     let rows: Vec<_> = menu.state.visible_rows(&menu.projection);
-    for id in ["secrets.set", "secrets.recipe", "secrets.get", "secrets.delete"] {
+    for id in [
+        "secrets.set",
+        "secrets.recipe",
+        "secrets.get",
+        "secrets.delete",
+    ] {
         let row = rows.iter().find(|row| row.row.id == id).expect(id);
         let action = row.row.primary_action.as_ref().expect("prime action");
-        assert_eq!(action.disposition, crate::surfaces::menu::MenuActionDisposition::PrimeEditor);
+        assert_eq!(
+            action.disposition,
+            crate::surfaces::menu::MenuActionDisposition::PrimeEditor
+        );
         assert!(action.command.is_none());
-        assert!(action.editor_text.as_deref().unwrap_or_default().starts_with("/secrets "));
+        assert!(
+            action
+                .editor_text
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with("/secrets ")
+        );
     }
 }
 
@@ -5218,14 +5429,23 @@ fn slash_secrets_opens_shared_menu() {
     let result = app.handle_slash_command("/secrets", &tx);
     assert!(matches!(result, SlashResult::Handled));
 
-    assert!(rx.try_recv().is_err(), "/secrets should not queue control work");
+    assert!(
+        rx.try_recv().is_err(),
+        "/secrets should not queue control work"
+    );
     assert!(app.selector.is_none());
     let menu = app.active_menu.as_ref().expect("secrets menu");
     assert_eq!(menu.projection.id, "secrets");
     assert_eq!(menu.state.active_tab, "inventory");
     let rows = menu.state.visible_rows(&menu.projection);
-    assert!(rows.iter().any(|row| row.row.id == "secrets.inventory.unavailable"));
-    assert!(rows.iter().all(|row| !row.row.metadata.iter().any(|m| m.contains("super-secret"))));
+    assert!(
+        rows.iter()
+            .any(|row| row.row.id == "secrets.inventory.unavailable")
+    );
+    assert!(
+        rows.iter()
+            .all(|row| !row.row.metadata.iter().any(|m| m.contains("super-secret")))
+    );
     let menu = app.active_menu.as_mut().expect("secrets menu");
     menu.state.active_tab = "actions".into();
     let rows = menu.state.visible_rows(&menu.projection);
@@ -5240,10 +5460,19 @@ fn secrets_menu_status_row_enqueues_execute_control() {
     app.handle_slash_command("/secrets", &tx);
     let menu = app.active_menu.as_mut().expect("secrets menu");
     menu.state.active_tab = "actions".into();
-    assert!(menu.state.select_row_by_id(&menu.projection, "secrets.status"));
-    let command = menu.state.selected_command(&menu.projection).expect("status command");
+    assert!(
+        menu.state
+            .select_row_by_id(&menu.projection, "secrets.status")
+    );
+    let command = menu
+        .state
+        .selected_command(&menu.projection)
+        .expect("status command");
 
-    assert!(matches!(app.execute_active_menu_command(command, &tx), SlashResult::Handled));
+    assert!(matches!(
+        app.execute_active_menu_command(command, &tx),
+        SlashResult::Handled
+    ));
     match rx.try_recv().expect("queued command") {
         TuiCommand::ExecuteControl {
             request: crate::control_runtime::ControlRequest::SecretsView,
@@ -5275,8 +5504,7 @@ fn secrets_menu_template_rows_prime_editor_without_control_request() {
             .active_menu
             .as_ref()
             .and_then(|menu| {
-                menu
-                    .state
+                menu.state
                     .selected_row(&menu.projection)
                     .and_then(|row| row.row.primary_action.clone())
             })
@@ -5287,7 +5515,10 @@ fn secrets_menu_template_rows_prime_editor_without_control_request() {
         ));
         assert_eq!(app.editor.render_text(), expected);
         assert!(app.active_menu.is_none(), "{row_id} should close the menu");
-        assert!(rx.try_recv().is_err(), "{row_id} should not queue control work");
+        assert!(
+            rx.try_recv().is_err(),
+            "{row_id} should not queue control work"
+        );
     }
 }
 
@@ -5300,7 +5531,11 @@ fn slash_secrets_configure_opens_shared_menu() {
 
     assert!(matches!(result, SlashResult::Handled));
     assert!(app.selector.is_none());
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "secrets"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "secrets")
+    );
 }
 
 #[test]
@@ -5421,7 +5656,11 @@ fn slash_secrets_set_without_value_opens_menu() {
     let result = app.handle_slash_command("/secrets set", &tx);
     assert!(matches!(result, SlashResult::Handled));
     assert!(app.selector.is_none(), "expected shared menu, not selector");
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "secrets"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "secrets")
+    );
 }
 
 #[test]
@@ -6312,7 +6551,11 @@ fn slash_prefix_matching_unique() {
         matches!(result, SlashResult::Handled),
         "/hel should prefix-match /help and open the command menu"
     );
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "commands"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "commands")
+    );
 }
 
 #[test]
@@ -7426,7 +7669,6 @@ fn palette_system_notification_matrix_accounts_for_palette_slash_outputs() {
     }
 }
 
-
 #[test]
 fn slash_context_opens_context_menu() {
     let mut app = test_app();
@@ -7437,7 +7679,12 @@ fn slash_context_opens_context_menu() {
     assert!(matches!(result, SlashResult::Handled));
     let menu = app.active_menu.as_ref().expect("context menu");
     assert_eq!(menu.projection.id, "context");
-    assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id == "context.class"));
+    assert!(
+        menu.state
+            .visible_rows(&menu.projection)
+            .iter()
+            .any(|row| row.row.id == "context.class")
+    );
 }
 
 #[test]
@@ -7457,7 +7704,12 @@ fn context_menu_class_row_opens_existing_selector() {
 
     assert_eq!(app.selector_kind, Some(SelectorKind::ContextClass));
     let selector = app.selector.as_ref().expect("context selector");
-    assert!(selector.options.iter().any(|option| option.label.contains("Massive")));
+    assert!(
+        selector
+            .options
+            .iter()
+            .any(|option| option.label.contains("Massive"))
+    );
 }
 
 #[test]
@@ -7465,11 +7717,22 @@ fn context_menu_clear_requires_explicit_command() {
     let mut app = test_app();
     app.open_context_menu();
     let menu = app.active_menu.as_mut().expect("context menu");
-    assert!(menu.state.select_row_by_id(&menu.projection, "context.clear"));
+    assert!(
+        menu.state
+            .select_row_by_id(&menu.projection, "context.clear")
+    );
 
     assert_eq!(menu.state.selected_command(&menu.projection), None);
-    let row = menu.state.selected_row(&menu.projection).expect("clear row");
-    assert!(row.row.metadata.iter().any(|value| value.contains("/context clear")));
+    let row = menu
+        .state
+        .selected_row(&menu.projection)
+        .expect("clear row");
+    assert!(
+        row.row
+            .metadata
+            .iter()
+            .any(|value| value.contains("/context clear"))
+    );
 }
 
 #[test]
@@ -7479,7 +7742,10 @@ fn context_menu_compact_action_uses_shared_command_path() {
     app.open_context_menu();
     app.active_menu.as_mut().unwrap().state.selected_row = 2;
 
-    let command = app.active_menu.as_ref().and_then(|menu| menu.state.selected_command(&menu.projection));
+    let command = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_command(&menu.projection));
 
     assert_eq!(command.as_deref(), Some("/context compact"));
     assert!(matches!(
@@ -7591,8 +7857,18 @@ fn slash_profile_opens_profile_menu() {
     assert!(matches!(result, SlashResult::Handled));
     let menu = app.active_menu.as_ref().expect("profile menu");
     assert_eq!(menu.projection.id, "profile");
-    assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id == "profile.save"));
-    assert!(menu.projection.summary.as_deref().is_some_and(|summary| summary.contains("runtime drift")));
+    assert!(
+        menu.state
+            .visible_rows(&menu.projection)
+            .iter()
+            .any(|row| row.row.id == "profile.save")
+    );
+    assert!(
+        menu.projection
+            .summary
+            .as_deref()
+            .is_some_and(|summary| summary.contains("runtime drift"))
+    );
 }
 
 #[test]
@@ -7602,7 +7878,10 @@ fn menu_action_confirmation_requires_second_activation() {
     app.open_profile_menu();
     {
         let menu = app.active_menu.as_mut().expect("profile menu");
-        assert!(menu.state.select_row_by_id(&menu.projection, "profile.apply"));
+        assert!(
+            menu.state
+                .select_row_by_id(&menu.projection, "profile.apply")
+        );
     }
     let action = app
         .active_menu
@@ -7610,13 +7889,28 @@ fn menu_action_confirmation_requires_second_activation() {
         .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
         .expect("apply action");
 
-    assert!(matches!(app.execute_active_menu_action(action.clone(), &tx), SlashResult::Handled));
-    assert_eq!(app.pending_menu_confirmation.as_deref(), Some("profile.apply.primary"));
-    assert!(app.active_menu.is_some(), "first activation should keep menu open");
+    assert!(matches!(
+        app.execute_active_menu_action(action.clone(), &tx),
+        SlashResult::Handled
+    ));
+    assert_eq!(
+        app.pending_menu_confirmation.as_deref(),
+        Some("profile.apply.primary")
+    );
+    assert!(
+        app.active_menu.is_some(),
+        "first activation should keep menu open"
+    );
 
-    assert!(matches!(app.execute_active_menu_action(action, &tx), SlashResult::Handled));
+    assert!(matches!(
+        app.execute_active_menu_action(action, &tx),
+        SlashResult::Handled
+    ));
     assert_eq!(app.pending_menu_confirmation, None);
-    assert!(app.active_menu.is_none(), "confirmed command should use normal handled close policy");
+    assert!(
+        app.active_menu.is_none(),
+        "confirmed command should use normal handled close policy"
+    );
 }
 
 #[test]
@@ -7625,9 +7919,16 @@ fn non_confirming_menu_action_clears_pending_confirmation() {
     let tx = test_tx();
     app.open_profile_menu();
     app.pending_menu_confirmation = Some("profile.apply.primary".into());
-    let action = crate::surfaces::menu::MenuActionProjection::command("profile.view.test", "View", "/profile view");
+    let action = crate::surfaces::menu::MenuActionProjection::command(
+        "profile.view.test",
+        "View",
+        "/profile view",
+    );
 
-    assert!(matches!(app.execute_active_menu_action(action, &tx), SlashResult::Handled));
+    assert!(matches!(
+        app.execute_active_menu_action(action, &tx),
+        SlashResult::Handled
+    ));
 
     assert_eq!(app.pending_menu_confirmation, None);
 }
@@ -7638,20 +7939,36 @@ fn profile_menu_save_and_apply_hotkeys_use_shared_rows() {
     app.open_profile_menu();
     {
         let menu = app.active_menu.as_mut().expect("profile menu");
-        assert!(menu.state.select_row_by_id(&menu.projection, "profile.save"));
+        assert!(
+            menu.state
+                .select_row_by_id(&menu.projection, "profile.save")
+        );
     }
     let menu = app.active_menu.as_ref().expect("profile menu");
     assert_eq!(
-        menu.state.selected_action_command_for_key(&menu.projection, 's').as_deref(),
+        menu.state
+            .selected_action_command_for_key(&menu.projection, 's')
+            .as_deref(),
         Some("/profile save")
     );
     {
         let menu = app.active_menu.as_mut().expect("profile menu");
-        assert!(menu.state.select_row_by_id(&menu.projection, "profile.apply"));
+        assert!(
+            menu.state
+                .select_row_by_id(&menu.projection, "profile.apply")
+        );
     }
     let menu = app.active_menu.as_ref().expect("profile menu");
-    assert_eq!(menu.state.selected_action_command_for_key(&menu.projection, 'a'), None);
-    assert_eq!(menu.state.selected_action_command_for_key(&menu.projection, 'a'), None);
+    assert_eq!(
+        menu.state
+            .selected_action_command_for_key(&menu.projection, 'a'),
+        None
+    );
+    assert_eq!(
+        menu.state
+            .selected_action_command_for_key(&menu.projection, 'a'),
+        None
+    );
     assert_eq!(
         menu.state.selected_command(&menu.projection).as_deref(),
         Some("/profile apply")
@@ -7663,9 +7980,16 @@ fn profile_apply_is_selectable_without_hotkey() {
     let mut app = test_app();
     app.open_profile_menu();
     let menu = app.active_menu.as_mut().expect("profile menu");
-    assert!(menu.state.select_row_by_id(&menu.projection, "profile.apply"));
+    assert!(
+        menu.state
+            .select_row_by_id(&menu.projection, "profile.apply")
+    );
 
-    assert_eq!(menu.state.selected_action_command_for_key(&menu.projection, 'a'), None);
+    assert_eq!(
+        menu.state
+            .selected_action_command_for_key(&menu.projection, 'a'),
+        None
+    );
     assert_eq!(
         menu.state.selected_command(&menu.projection).as_deref(),
         Some("/profile apply")
@@ -7735,8 +8059,14 @@ fn settings_menu_opens_choice_rows_from_projection_metadata() {
 
     app.open_settings_menu();
     app.active_menu.as_mut().unwrap().state.selected_row = 1;
-    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection));
-    assert!(action.is_some(), "settings row should expose a typed action");
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_action(&menu.projection));
+    assert!(
+        action.is_some(),
+        "settings row should expose a typed action"
+    );
     app.execute_active_menu_action(action.unwrap(), &test_tx());
 
     assert_eq!(app.selector_kind, Some(SelectorKind::ThinkingLevel));
@@ -7821,7 +8151,10 @@ fn settings_menu_choice_row_closes_menu_before_opening_selector() {
     app.open_settings_menu();
     {
         let menu = app.active_menu.as_mut().expect("settings menu");
-        assert!(menu.state.select_row_by_id(&menu.projection, "runtime.thinking"));
+        assert!(
+            menu.state
+                .select_row_by_id(&menu.projection, "runtime.thinking")
+        );
     }
     let action = app
         .active_menu
@@ -7833,9 +8166,18 @@ fn settings_menu_choice_row_closes_menu_before_opening_selector() {
         app.execute_active_menu_action(action, &test_tx()),
         SlashResult::Handled
     ));
-    assert!(app.active_menu.is_none(), "selector must receive arrow keys");
-    assert!(app.selector.is_some(), "settings choice selector should be open");
-    assert!(matches!(app.selector_kind, Some(SelectorKind::ThinkingLevel)));
+    assert!(
+        app.active_menu.is_none(),
+        "selector must receive arrow keys"
+    );
+    assert!(
+        app.selector.is_some(),
+        "settings choice selector should be open"
+    );
+    assert!(matches!(
+        app.selector_kind,
+        Some(SelectorKind::ThinkingLevel)
+    ));
 }
 
 #[test]
@@ -7845,10 +8187,19 @@ fn settings_menu_max_turns_row_queues_existing_control_request() {
 
     app.open_settings_menu();
     app.active_menu.as_mut().unwrap().state.selected_row = 3;
-    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection));
-    assert!(action.is_some(), "max turns row should expose a typed action");
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_action(&menu.projection));
+    assert!(
+        action.is_some(),
+        "max turns row should expose a typed action"
+    );
     app.execute_active_menu_action(action.unwrap(), &tx);
-    assert!(app.active_menu.is_none(), "selector must receive arrow keys");
+    assert!(
+        app.active_menu.is_none(),
+        "selector must receive arrow keys"
+    );
     assert!(app.selector.is_some(), "max turns selector should be open");
     app.selector.as_mut().unwrap().cursor = 4;
     let message = app.confirm_selector(&tx).expect("max turns message");
@@ -7873,8 +8224,14 @@ fn settings_menu_auto_update_row_toggles_persisted_setting() {
         menu.state.active_tab = "updates".into();
         menu.state.selected_row = 1;
     }
-    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection));
-    assert!(action.is_some(), "auto-update row should expose a typed action");
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_action(&menu.projection));
+    assert!(
+        action.is_some(),
+        "auto-update row should expose a typed action"
+    );
     app.execute_active_menu_action(action.unwrap(), &test_tx());
 
     assert!(app.settings().auto_update);
@@ -7891,14 +8248,15 @@ fn settings_menu_sandbox_row_disables_persisted_setting() {
         menu.state.active_tab = "workspace".into();
         menu.state.selected_row = 1;
     }
-    let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection));
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_action(&menu.projection));
     assert!(action.is_some(), "sandbox row should expose a typed action");
     app.execute_active_menu_action(action.unwrap(), &test_tx());
 
     assert!(!app.settings().sandbox);
 }
-
-
 
 #[test]
 fn menu_login_secret_input_closes_menu_without_output_panel() {
@@ -7909,10 +8267,17 @@ fn menu_login_secret_input_closes_menu_without_output_panel() {
     let result = app.execute_active_menu_command("/login openai".to_string(), &tx);
 
     assert!(matches!(result, SlashResult::Handled));
-    assert!(matches!(app.editor.mode(), super::editor::EditorMode::SecretInput { .. }));
+    assert!(matches!(
+        app.editor.mode(),
+        super::editor::EditorMode::SecretInput { .. }
+    ));
     assert!(app.active_menu.is_none());
     assert!(app.command_panel.is_none());
-    assert!(app.operator_events.iter().any(|event| event.message.contains("Paste") || event.message.contains("API key")));
+    assert!(
+        app.operator_events
+            .iter()
+            .any(|event| event.message.contains("Paste") || event.message.contains("API key"))
+    );
 }
 
 #[test]
@@ -7938,8 +8303,14 @@ fn secrets_set_direct_value_uses_hidden_input_instead_of_control_request() {
     let result = app.handle_slash_command("/secrets set API_TOKEN super-secret-value", &tx);
 
     assert!(matches!(result, SlashResult::Display(_)));
-    assert!(matches!(app.editor.mode(), super::editor::EditorMode::SecretInput { .. }));
-    assert!(rx.try_recv().is_err(), "direct value must not be queued as a control request");
+    assert!(matches!(
+        app.editor.mode(),
+        super::editor::EditorMode::SecretInput { .. }
+    ));
+    assert!(
+        rx.try_recv().is_err(),
+        "direct value must not be queued as a control request"
+    );
 }
 
 #[test]
@@ -7951,7 +8322,10 @@ fn secrets_set_recipe_still_queues_control_request() {
 
     assert!(matches!(result, SlashResult::Handled));
     match rx.try_recv().expect("control request") {
-        TuiCommand::ExecuteControl { request: crate::control_runtime::ControlRequest::SecretsSet { name, value }, .. } => {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::SecretsSet { name, value },
+            ..
+        } => {
             assert_eq!(name, "API_TOKEN");
             assert_eq!(value, "env:API_TOKEN");
         }
@@ -7970,8 +8344,14 @@ fn slash_auth_opens_provider_auth_menu() {
     let menu = app.active_menu.as_ref().expect("auth menu");
     assert_eq!(menu.projection.id, "auth");
     let rows = menu.state.visible_rows(&menu.projection);
-    assert!(rows.iter().any(|row| row.row.id == "auth.provider.anthropic"));
-    assert!(rows.iter().any(|row| row.row.metadata.iter().any(|m| m == "/login openai")));
+    assert!(
+        rows.iter()
+            .any(|row| row.row.id == "auth.provider.anthropic")
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.row.metadata.iter().any(|m| m == "/login openai"))
+    );
 }
 
 #[test]
@@ -7982,7 +8362,11 @@ fn bare_login_opens_provider_auth_menu() {
     let result = app.handle_slash_command("/login", &tx);
 
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.active_menu.as_ref().is_some_and(|menu| menu.projection.id == "auth"));
+    assert!(
+        app.active_menu
+            .as_ref()
+            .is_some_and(|menu| menu.projection.id == "auth")
+    );
 }
 
 #[test]
@@ -8019,8 +8403,6 @@ fn model_and_auth_provider_rows_share_login_metadata() {
     assert_eq!(auth_row.description, model_row.description);
 }
 
-
-
 #[test]
 fn provider_rows_mark_settings_model_as_selected_before_route_event() {
     let mut app = test_app();
@@ -8028,7 +8410,10 @@ fn provider_rows_mark_settings_model_as_selected_before_route_event() {
     app.update_settings(|settings| settings.model = "openai:gpt-4.1".into());
 
     let rows = app.provider_status_rows("provider");
-    let openai = rows.iter().find(|row| row.id == "provider.openai").expect("openai row");
+    let openai = rows
+        .iter()
+        .find(|row| row.id == "provider.openai")
+        .expect("openai row");
 
     assert!(openai.badges.iter().any(|badge| badge.label == "selected"));
     assert!(openai.metadata.iter().any(|item| item == "route: selected"));
@@ -8042,11 +8427,29 @@ fn provider_rows_mark_fallback_serving_provider() {
     app.route_serving_model = Some("anthropic:claude-sonnet-4-6".into());
 
     let rows = app.provider_status_rows("provider");
-    let anthropic = rows.iter().find(|row| row.id == "provider.anthropic").expect("anthropic row");
+    let anthropic = rows
+        .iter()
+        .find(|row| row.id == "provider.anthropic")
+        .expect("anthropic row");
 
-    assert!(anthropic.badges.iter().any(|badge| badge.label == "serving"));
-    assert!(anthropic.badges.iter().any(|badge| badge.label == "fallback"));
-    assert!(anthropic.metadata.iter().any(|item| item == "route: fallback serving"));
+    assert!(
+        anthropic
+            .badges
+            .iter()
+            .any(|badge| badge.label == "serving")
+    );
+    assert!(
+        anthropic
+            .badges
+            .iter()
+            .any(|badge| badge.label == "fallback")
+    );
+    assert!(
+        anthropic
+            .metadata
+            .iter()
+            .any(|item| item == "route: fallback serving")
+    );
 }
 
 #[test]
@@ -8059,11 +8462,24 @@ fn auth_menu_summary_includes_route_state_and_warning() {
 
     app.open_auth_menu();
 
-    let summary = app.active_menu.as_ref().and_then(|menu| menu.projection.summary.as_deref()).expect("summary");
+    let summary = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.projection.summary.as_deref())
+        .expect("summary");
     assert!(summary.contains("route: fallback"), "{summary}");
-    assert!(summary.contains("selected: openai-codex:gpt-5.4"), "{summary}");
-    assert!(summary.contains("serving: anthropic:claude-sonnet-4-6"), "{summary}");
-    assert!(summary.contains("selected provider unavailable"), "{summary}");
+    assert!(
+        summary.contains("selected: openai-codex:gpt-5.4"),
+        "{summary}"
+    );
+    assert!(
+        summary.contains("serving: anthropic:claude-sonnet-4-6"),
+        "{summary}"
+    );
+    assert!(
+        summary.contains("selected provider unavailable"),
+        "{summary}"
+    );
 }
 
 #[test]
@@ -8072,7 +8488,11 @@ fn model_menu_summary_uses_configured_model_label() {
 
     app.open_model_menu();
 
-    let summary = app.active_menu.as_ref().and_then(|menu| menu.projection.summary.as_deref()).expect("summary");
+    let summary = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.projection.summary.as_deref())
+        .expect("summary");
     assert!(summary.contains("Configured model:"), "{summary}");
     assert!(!summary.contains("Current model:"), "{summary}");
 }
@@ -8084,13 +8504,29 @@ fn provider_rows_mark_selected_and_serving_route_roles() {
     app.route_serving_model = Some("anthropic:claude-sonnet-4-6".into());
 
     let rows = app.provider_status_rows("provider");
-    let openai = rows.iter().find(|row| row.id == "provider.openai-codex").expect("openai-codex row");
-    let anthropic = rows.iter().find(|row| row.id == "provider.anthropic").expect("anthropic row");
+    let openai = rows
+        .iter()
+        .find(|row| row.id == "provider.openai-codex")
+        .expect("openai-codex row");
+    let anthropic = rows
+        .iter()
+        .find(|row| row.id == "provider.anthropic")
+        .expect("anthropic row");
 
     assert!(openai.badges.iter().any(|badge| badge.label == "selected"));
     assert!(openai.metadata.iter().any(|item| item == "route: selected"));
-    assert!(anthropic.badges.iter().any(|badge| badge.label == "serving"));
-    assert!(anthropic.metadata.iter().any(|item| item == "route: serving"));
+    assert!(
+        anthropic
+            .badges
+            .iter()
+            .any(|badge| badge.label == "serving")
+    );
+    assert!(
+        anthropic
+            .metadata
+            .iter()
+            .any(|item| item == "route: serving")
+    );
 }
 
 #[test]
@@ -8103,11 +8539,24 @@ fn model_menu_summary_includes_route_state_and_warning() {
 
     app.open_model_menu();
 
-    let summary = app.active_menu.as_ref().and_then(|menu| menu.projection.summary.as_deref()).expect("summary");
+    let summary = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.projection.summary.as_deref())
+        .expect("summary");
     assert!(summary.contains("route: fallback"), "{summary}");
-    assert!(summary.contains("selected: openai-codex:gpt-5.4"), "{summary}");
-    assert!(summary.contains("serving: anthropic:claude-sonnet-4-6"), "{summary}");
-    assert!(summary.contains("selected provider unavailable"), "{summary}");
+    assert!(
+        summary.contains("selected: openai-codex:gpt-5.4"),
+        "{summary}"
+    );
+    assert!(
+        summary.contains("serving: anthropic:claude-sonnet-4-6"),
+        "{summary}"
+    );
+    assert!(
+        summary.contains("selected provider unavailable"),
+        "{summary}"
+    );
 }
 
 #[test]
@@ -8120,9 +8569,13 @@ fn slash_model_opens_model_menu() {
     assert!(matches!(result, SlashResult::Handled));
     let menu = app.active_menu.as_ref().expect("model menu");
     assert_eq!(menu.projection.id, "model");
-    assert!(menu.state.visible_rows(&menu.projection).iter().any(|row| row.row.id == "model.current"));
+    assert!(
+        menu.state
+            .visible_rows(&menu.projection)
+            .iter()
+            .any(|row| row.row.id == "model.current")
+    );
 }
-
 
 #[test]
 fn slash_model_providers_opens_provider_status_tab() {
@@ -8137,7 +8590,12 @@ fn slash_model_providers_opens_provider_status_tab() {
     assert_eq!(menu.state.active_tab, "providers");
     let rows = menu.state.visible_rows(&menu.projection);
     assert!(rows.iter().any(|row| row.row.id.starts_with("provider.")));
-    assert!(rows.iter().any(|row| row.row.metadata.iter().any(|item| item.starts_with("/login "))));
+    assert!(rows.iter().any(|row| {
+        row.row
+            .metadata
+            .iter()
+            .any(|item| item.starts_with("/login "))
+    }));
 }
 
 #[test]
@@ -8153,17 +8611,16 @@ fn model_menu_action_keys_select_intent_rows() {
     assert_eq!(target, "model.grade");
     assert!(menu.state.select_row_by_id(&menu.projection, &target));
     assert_eq!(
-        menu.state.selected_row(&menu.projection).map(|row| row.row.id.as_str()),
+        menu.state
+            .selected_row(&menu.projection)
+            .map(|row| row.row.id.as_str()),
         Some("model.grade")
     );
 }
 
 #[test]
 fn model_grade_slash_command_parses_and_rejects_local_grade() {
-    assert_eq!(
-        crate::tui::canonical_slash_command("model", "route"),
-        None
-    );
+    assert_eq!(crate::tui::canonical_slash_command("model", "route"), None);
     assert_eq!(
         crate::tui::canonical_slash_command("model", "providers"),
         Some(crate::tui::CanonicalSlashCommand::ModelList)

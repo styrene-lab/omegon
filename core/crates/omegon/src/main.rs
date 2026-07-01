@@ -9995,7 +9995,10 @@ mod tests {
         assert!(response.accepted);
         let output = response.output.unwrap();
         assert!(output.contains("Usage: /skills"), "got: {output}");
-        assert!(output.contains("/skills opens the active skills inventory menu"), "got: {output}");
+        assert!(
+            output.contains("/skills opens the active skills inventory menu"),
+            "got: {output}"
+        );
     }
 
     #[test]
@@ -10028,7 +10031,10 @@ mod tests {
 
         assert!(!response.accepted);
         assert!(
-            response.output.unwrap().contains("requires interactive confirmation")
+            response
+                .output
+                .unwrap()
+                .contains("requires interactive confirmation")
         );
     }
 
@@ -10062,7 +10068,10 @@ mod tests {
 
         assert!(!response.accepted);
         assert!(
-            response.output.unwrap().contains("interactive-only or unavailable")
+            response
+                .output
+                .unwrap()
+                .contains("interactive-only or unavailable")
         );
     }
 
