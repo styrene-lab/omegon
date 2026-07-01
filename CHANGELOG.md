@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added guided CRUD affordances to `/variables` and `/secrets` structured menus, including variable update actions, common variable templates, recipe-specific secret rows, and per-secret clear/replace actions that never display secret values.
 
 ### Fixed
+- Rebuilt and relinked the development install as `0.27.0-rc.6`.
 - Rebuilt and relinked the development install as `0.27.0-rc.5`.
 - Rebuilt and relinked the development install as `0.27.0-rc.4`.
 - Rebuilt and relinked the development install as `0.27.0-rc.3`.
