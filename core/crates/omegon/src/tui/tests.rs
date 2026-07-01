@@ -3856,11 +3856,15 @@ fn slash_auth_login_redirects_to_top_level_login() {
 }
 
 #[test]
-fn slash_login_provider_dispatches_to_runtime() {
+fn slash_login_provider_opens_hidden_secret_input_for_api_key_provider() {
     let mut app = test_app();
     let tx = test_tx();
     let result = app.handle_slash_command("/login openai", &tx);
-    assert!(matches!(result, SlashResult::Handled));
+
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(matches!(app.editor.mode(), super::editor::EditorMode::SecretInput { .. }));
+    assert!(app.active_menu.is_none());
+    assert!(app.command_panel.is_none());
 }
 
 #[test]
@@ -4783,7 +4787,7 @@ fn slash_skills_help_displays_meta_use_without_opening_inventory() {
 
     assert!(text.contains("Usage: /skills"));
     assert!(text.contains("/skills opens the active skills inventory menu"));
-    assert!(text.contains("Menu keys:"));
+    assert!(text.contains("/skills get <name>"));
     assert!(text.contains("/skills get <name>"));
     assert!(app.active_menu.is_none());
 }
@@ -5148,8 +5152,8 @@ fn secrets_menu_separates_inventory_from_actions() {
     assert_eq!(menu.projection.tabs[0].id, "inventory");
     assert_eq!(menu.projection.tabs[1].id, "actions");
     let inventory_rows = &menu.projection.tabs[0].groups[0].rows;
-    assert_eq!(inventory_rows[0].id, "secrets.inventory.empty");
-    assert!(inventory_rows[0].description.contains("No extension/agent secret inventory"));
+    assert_eq!(inventory_rows[0].id, "secrets.inventory.unavailable");
+    assert!(inventory_rows[0].label.contains("No secret readiness snapshot"));
     assert!(inventory_rows[0].primary_action.is_none());
 }
 
@@ -5184,7 +5188,7 @@ fn slash_secrets_opens_shared_menu() {
     assert_eq!(menu.projection.id, "secrets");
     assert_eq!(menu.state.active_tab, "inventory");
     let rows = menu.state.visible_rows(&menu.projection);
-    assert!(rows.iter().any(|row| row.row.id == "secrets.inventory.empty"));
+    assert!(rows.iter().any(|row| row.row.id == "secrets.inventory.unavailable"));
     assert!(rows.iter().all(|row| !row.row.metadata.iter().any(|m| m.contains("super-secret"))));
     let menu = app.active_menu.as_mut().expect("secrets menu");
     menu.state.active_tab = "actions".into();
@@ -8073,7 +8077,7 @@ fn slash_model_providers_opens_provider_status_tab() {
     assert_eq!(menu.state.active_tab, "providers");
     let rows = menu.state.visible_rows(&menu.projection);
     assert!(rows.iter().any(|row| row.row.id.starts_with("provider.")));
-    assert!(rows.iter().any(|row| row.row.metadata.iter().any(|item| item.starts_with("/auth login "))));
+    assert!(rows.iter().any(|row| row.row.metadata.iter().any(|item| item.starts_with("/login "))));
 }
 
 #[test]
