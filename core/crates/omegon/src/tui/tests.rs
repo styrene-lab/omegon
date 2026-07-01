@@ -8669,24 +8669,22 @@ fn legacy_model_tier_slash_commands_are_unknown() {
 #[test]
 fn variables_menu_inventory_rows_offer_update_and_delete() {
     let mut app = test_app();
-    tokio::runtime::Runtime::new().unwrap().block_on(
-        crate::control::variables::variables_set_response("PROJECT_ENV", "staging"),
-    );
+    let name = format!("PROJECT_ENV_MENU_TEST_{}", std::process::id());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(crate::control::variables::variables_set_response(
+        &name, "staging",
+    ));
     app.open_variables_menu();
 
     let menu = app.active_menu.as_ref().expect("variables menu");
+    let row_id = format!("variables.inventory.{name}");
     let row = menu
         .projection
         .tabs
         .iter()
         .find(|tab| tab.id == "inventory")
-        .and_then(|tab| {
-            tab.groups[0]
-                .rows
-                .iter()
-                .find(|row| row.id == "variables.inventory.PROJECT_ENV")
-        })
-        .expect("PROJECT_ENV inventory row");
+        .and_then(|tab| tab.groups[0].rows.iter().find(|row| row.id == row_id))
+        .expect("variable inventory row");
 
     let update = row
         .actions
@@ -8695,7 +8693,7 @@ fn variables_menu_inventory_rows_offer_update_and_delete() {
         .expect("update action");
     assert_eq!(
         update.editor_text.as_deref(),
-        Some("/variables set PROJECT_ENV ")
+        Some(format!("/variables set {name} ").as_str())
     );
 
     let delete = row
@@ -8705,8 +8703,9 @@ fn variables_menu_inventory_rows_offer_update_and_delete() {
         .expect("delete action");
     assert_eq!(
         delete.editor_text.as_deref(),
-        Some("/variables delete PROJECT_ENV")
+        Some(format!("/variables delete {name}").as_str())
     );
+    runtime.block_on(crate::control::variables::variables_delete_response(&name));
 }
 
 #[test]

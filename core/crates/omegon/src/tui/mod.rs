@@ -3335,7 +3335,7 @@ impl App {
                     },
                     MenuRowProjection {
                         id: "secrets.delete".into(),
-                        label: "Delete secret".into(),
+                        label: "Clear secret binding".into(),
                         description: "Prepare /secrets delete NAME. This clears the local configured value or recipe binding; declared capability requirements remain visible.".into(),
                         value: None,
                         kind: MenuRowKind::Action,
