@@ -1,8 +1,0 @@
-{
-  "lastUsedModel": {
-    "provider": "anthropic",
-    "modelId": "claude-sonnet-4-6"
-  },
-  "thinkingLevel": "medium",
-  "maxTurns": 50
-}
