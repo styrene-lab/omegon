@@ -32,7 +32,7 @@ const downloadLabel = stats.downloadMB ? `~${stats.downloadMB}MB` : "a single";
   <h2>Three-Axis Routing Model</h2>
   <p>
     Omegon organizes inference along three independent axes, giving operators
-    fine-grained control over capability, cost, and context:
+    fine-grained control over model capability, reasoning budget, and context:
   </p>
   <table>
     <thead>
@@ -40,8 +40,8 @@ const downloadLabel = stats.downloadMB ? `~${stats.downloadMB}MB` : "a single";
     </thead>
     <tbody>
       <tr>
-        <td><strong>Capability Tier</strong></td>
-        <td>local → retribution → victory → gloriana</td>
+        <td><strong>Model Grade Intent</strong></td>
+        <td>F → D → C → B → A → S (provider-neutral model grades)</td>
         <td>Which model family to use</td>
       </tr>
       <tr>
@@ -56,7 +56,7 @@ const downloadLabel = stats.downloadMB ? `~${stats.downloadMB}MB` : "a single";
       </tr>
     </tbody>
   </table>
-  <!-- DIAGRAM:three-axis-overview | 3D matrix or cube showing Capability Tier x Thinking Level x Context Class as independent axes, with example configurations plotted (e.g. gloriana+high+legion vs retribution+off+squad) -->
+  <!-- DIAGRAM:three-axis-overview | 3D matrix or cube showing Model Grade Intent x Thinking Level x Context Class as independent axes, with example configurations plotted (e.g. grade S + high + legion vs grade D + off + squad) -->
   <p>
     The agent adjusts these axes autonomously based on task complexity, or operators
     can override with <code>/model</code>, <code>/think</code>, and <code>/context</code>.

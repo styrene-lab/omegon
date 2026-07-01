@@ -1,8 +1,8 @@
 {
-  "crateCount": 7,
-  "downloadMB": 15,
-  "releaseTag": "v0.26.16",
-  "providerCount": 14,
+  "crateCount": 9,
+  "downloadMB": 16,
+  "releaseTag": "v0.27.0",
+  "providerCount": 15,
   "providerNames": [
     "Anthropic/Claude",
     "OpenAI API",
@@ -16,6 +16,7 @@
     "Google Antigravity",
     "OpenCode Go",
     "Perplexity AI",
+    "DwarfStar Local",
     "Ollama (Local)",
     "Ollama Cloud"
   ],
@@ -32,11 +33,12 @@
     "google-antigravity",
     "opencode-go",
     "perplexity",
+    "dwarfstar",
     "ollama",
     "ollama-cloud"
   ],
-  "toolFiles": 22,
+  "toolFiles": 23,
   "skillCount": 10,
   "searchProviderCount": 3,
-  "collectedAt": "2026-06-13T01:51:13.773Z"
+  "collectedAt": "2026-07-01T23:21:52.271Z"
 }

@@ -11,7 +11,7 @@ import Docs from "../../layouts/Docs.astro";
     <li><strong>Editor</strong> (bottom) — wrapped multiline input with history and slash-command palette</li>
     <li><strong>Status footer</strong> (bottom bar) — ambient runtime telemetry. Expands into a unified console when deeper instrumentation is active.</li>
   </ul>
-  <!-- DIAGRAM:tui-layout | Annotated wireframe: conversation view (scrollable center), multiline editor (bottom), status footer (bottom bar with provider/model/tier/context/memory fields). Label each region and key telemetry indicators -->
+  <!-- DIAGRAM:tui-layout | Annotated wireframe: conversation view (scrollable center), multiline editor (bottom), status footer (bottom bar with provider/model/grade/context/memory fields). Label each region and key telemetry indicators -->
 
   <h2>Segments</h2>
   <p>
@@ -33,9 +33,9 @@ import Docs from "../../layouts/Docs.astro";
   <p>
     Assistant responses carry a dim metadata header stamped at creation time, for example:
   </p>
-  <pre><code>gpt-5.4 · openai-codex · victory · think:medium</code></pre>
+  <pre><code>gpt-5.4 · openai-codex · grade B · think:medium</code></pre>
   <p>
-    Fields include model ID, provider, capability tier, thinking level, and other runtime details.
+    Fields include model ID, provider, model grade intent, thinking level, and other runtime details.
   </p>
 
   <h2>Tool cards</h2>
@@ -66,7 +66,7 @@ import Docs from "../../layouts/Docs.astro";
   </p>
   <ul>
     <li><strong>Context</strong> — context class, fill percentage, and token-aware usage display</li>
-    <li><strong>Engine</strong> — provider identity, selected model, tier, state, session totals, and optional limit telemetry</li>
+    <li><strong>Engine</strong> — provider identity, selected model, grade, state, session totals, and optional limit telemetry</li>
     <li><strong>Memory</strong> — durable fact counts and working-memory activity</li>
     <li><strong>System</strong> — runtime health, versions, and related state</li>
   </ul>
@@ -76,7 +76,7 @@ import Docs from "../../layouts/Docs.astro";
   <ul>
     <li><strong>provider</strong> = concrete runtime backend identity, such as <code>OpenAI/Codex</code>, <code>Anthropic/Claude</code>, or <code>Ollama Cloud</code></li>
     <li><strong>model</strong> = selected runtime model</li>
-    <li><strong>tier / state / session</strong> = runtime posture and current session runway</li>
+    <li><strong>grade / state / session</strong> = runtime posture and current session runway</li>
     <li><strong>limit</strong> = upstream quota or bucket telemetry, when the provider exposes it</li>
   </ul>
   <p>

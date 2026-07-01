@@ -3,13 +3,13 @@ import Docs from "../../../layouts/Docs.astro";
 ---
 <Docs title="Routing Policy" description="How omegon selects models, evaluates downgrades, and manages provider failover.">
   <h1>Routing Policy</h1>
-  <p>Omegon's routing layer selects concrete provider/model combinations for each inference request based on three constraints: capability tier, thinking level, and context class.</p>
+  <p>Omegon's routing layer selects concrete provider/model combinations for each inference request based on three constraints: model grade intent, thinking level, and context class.</p>
 
-  <!-- DIAGRAM:routing-flowchart | Flowchart: request arrives with (tier, thinking, context) → filter authenticated providers → match tier → check context floor → apply cooldown → score candidates → select. Show filter-out at each stage -->
+  <!-- DIAGRAM:routing-flowchart | Flowchart: request arrives with (grade intent, thinking, context) → filter authenticated providers → match grade → check context floor → apply cooldown → score candidates → select. Show filter-out at each stage -->
   <h2>Selection Flow</h2>
   <ol>
     <li><strong>Filter to authenticated providers</strong> — only models with configured API keys or active OAuth sessions are considered</li>
-    <li><strong>Match capability tier</strong> — filter to models that satisfy the requested tier (higher tiers can serve lower requests)</li>
+    <li><strong>Match model grade intent</strong> — filter to models that satisfy the requested grade (higher grades can serve lower requests)</li>
     <li><strong>Check context floor</strong> — exclude models whose context ceiling is below the session's required minimum</li>
     <li><strong>Apply provider preference</strong> — order by the operator's provider preference (default: Anthropic first)</li>
     <li><strong>Check cooldowns</strong> — exclude providers/models that are in a cooldown period from recent failures</li>
@@ -24,7 +24,7 @@ import Docs from "../../../layouts/Docs.astro";
       <tr><td><strong>Compatible</strong></td><td>Auto-reroute (silent)</td><td>Legion → Clan (1 class, within floor)</td></tr>
       <tr><td><strong>Compatible with Compaction</strong></td><td>Auto-compact if safe</td><td>Floor bridgeable, no pin crossed</td></tr>
       <tr><td><strong>Degrading</strong></td><td>Operator confirmation required</td><td>Legion → Squad (3-class drop)</td></tr>
-      <tr><td><strong>Ineligible</strong></td><td>Excluded from candidates</td><td>Tier mismatch, thinking constraint</td></tr>
+      <tr><td><strong>Ineligible</strong></td><td>Excluded from candidates</td><td>Grade mismatch, thinking constraint</td></tr>
     </tbody>
   </table>
 

@@ -2,31 +2,37 @@
 import Docs from "../../layouts/Docs.astro";
 ---
 
-<Docs title="Three-Axis Model" description="Capability tier, thinking level, and context class — three orthogonal axes for inference control.">
+<Docs title="Three-Axis Model" description="Model grade intent, thinking level, and context class — three orthogonal axes for inference control.">
   <h1>Three-Axis Model</h1>
   <p>
-    Omegon organizes inference along three independent axes. The agent adjusts these
-    autonomously based on task complexity, or operators can override explicitly. This
-    gives fine-grained control over capability, cost, and context without coupling them.
+    Omegon 0.27 separates the operator's <strong>model route</strong> from provider-neutral
+    <strong>model grade intent</strong>, <strong>thinking level</strong>, and <strong>context class</strong>.
+    The concrete provider/model can change as credentials, fallbacks, or policy require, while the
+    visible route state keeps the operator honest about what is selected and what is actually serving turns.
   </p>
-  <img src="/diagrams/three-axis.svg" alt="Three-axis routing model: capability tier, thinking level, and context class feed into the routing engine" class="diagram" />
+  <img src="/diagrams/three-axis.svg" alt="Three-axis routing model: model grade intent, thinking level, and context class feed into the routing engine" class="diagram" />
 
-  <h2>Axis 1: Capability Tier</h2>
-  <p>Controls which model family is used. The agent switches tiers with <code>set_model_tier</code>.</p>
+  <h2>Axis 1: Model grade intent</h2>
+  <p>
+    Grades are provider-neutral capability bands. They are not legacy slash aliases and they are not local
+    endpoint names. Use <code>/model grade &lt;F|D|C|B|A|S&gt;</code> to express desired capability, or
+    <code>/model &lt;provider:model&gt;</code> to pin an exact route.
+  </p>
   <table>
-    <thead><tr><th>Tier</th><th>Use Case</th><th>Typical Models</th></tr></thead>
+    <thead><tr><th>Grade</th><th>Use Case</th><th>Typical Examples</th></tr></thead>
     <tbody>
-      <tr><td><strong>local</strong></td><td>On-device, zero API cost</td><td>Ollama (qwen3, devstral, llama)</td></tr>
-      <tr><td><strong>retribution</strong></td><td>Simple lookups, boilerplate</td><td>Claude Haiku, GPT-4o-mini, Groq</td></tr>
-      <tr><td><strong>victory</strong></td><td>Routine coding, execution</td><td>Claude Sonnet, GPT-4o, Codestral</td></tr>
-      <tr><td><strong>gloriana</strong></td><td>Architecture, deep reasoning</td><td>Claude Opus, o1-pro</td></tr>
+      <tr><td><strong>F/D</strong></td><td>Cheap, fast, simple lookups and boilerplate</td><td>small hosted models, fast local models</td></tr>
+      <tr><td><strong>C/B</strong></td><td>Routine coding, execution, review, and general development</td><td>Sonnet/Codex-class routes, strong local models</td></tr>
+      <tr><td><strong>A/S</strong></td><td>Architecture, deep debugging, high-stakes reasoning</td><td>frontier reasoning and highest-grade provider routes</td></tr>
     </tbody>
   </table>
-  <pre><code>/model                   # Opens selector with all available models
-set_model_tier(victory)  # Agent self-selects (automatic)</code></pre>
+  <pre><code>/model                   # Opens selector with available models
+/model grade B           # Request a B-grade route, provider auto
+/model provider local    # Restrict routing to local endpoints
+/model policy minimum    # Allow requested grade or better</code></pre>
 
   <h2>Axis 2: Thinking Level</h2>
-  <p>Controls extended reasoning budget — how many tokens the model spends "thinking" before responding.</p>
+  <p>Controls extended reasoning budget — how much reasoning effort capable providers spend before responding.</p>
   <table>
     <thead><tr><th>Level</th><th>Use Case</th></tr></thead>
     <tbody>
@@ -56,39 +62,25 @@ set_model_tier(victory)  # Agent self-selects (automatic)</code></pre>
 
   <h2>Orthogonality</h2>
   <p>
-    The three axes are independent. You can run <code>gloriana + off + squad</code> (powerful model,
-    no thinking, small window) or <code>retribution + high + legion</code> (cheap model, deep reasoning,
-    huge context). The agent tunes these combinations based on what it's doing:
+    The axes are independent. You can request <code>grade S + off + squad</code> (frontier model,
+    no extra thinking, small window) or <code>grade D + high + legion</code> (cheap model, deep reasoning,
+    huge context). The route controller preserves those intents without pretending they are the same thing.
   </p>
   <ul>
-    <li>Simple file read → <code>victory + off</code></li>
-    <li>Architecture decision → <code>gloriana + high</code></li>
-    <li>Boilerplate generation → <code>retribution + minimal</code></li>
-    <li>Large codebase audit → <code>victory + medium + legion</code></li>
+    <li>Simple file read → <code>grade D + off</code></li>
+    <li>Architecture decision → <code>grade S + high</code></li>
+    <li>Boilerplate generation → <code>grade C + minimal</code></li>
+    <li>Large codebase audit → <code>grade B + medium + legion</code></li>
   </ul>
 
-  <h2>Provider Matrix</h2>
+  <h2>Provider routing</h2>
   <p>
-    Which providers serve which tiers depends on available credentials and model capabilities:
+    Provider availability depends on configured credentials, endpoint health, and policy. Use
+    <code>/model route</code> to inspect selected-vs-served route state, <code>/auth status</code> for credential
+    diagnostics, and <code>/model providers</code> for the provider inventory. Local endpoints are selected with
+    <code>/model provider local</code>; they are not a legacy grade.
   </p>
-  <table>
-    <thead><tr><th>Provider</th><th>local</th><th>retribution</th><th>victory</th><th>gloriana</th></tr></thead>
-    <tbody>
-      <tr><td>Anthropic</td><td>—</td><td>Haiku</td><td>Sonnet</td><td>Opus</td></tr>
-      <tr><td>OpenAI</td><td>—</td><td>4o-mini</td><td>4o / o3</td><td>o1-pro</td></tr>
-      <tr><td>Codex</td><td>—</td><td>—</td><td>codex-mini</td><td>—</td></tr>
-      <tr><td>OpenRouter</td><td>—</td><td>varies</td><td>varies</td><td>varies</td></tr>
-      <tr><td>Groq</td><td>—</td><td>✓</td><td>✓</td><td>—</td></tr>
-      <tr><td>xAI</td><td>—</td><td>—</td><td>Grok</td><td>—</td></tr>
-      <tr><td>Mistral</td><td>—</td><td>—</td><td>Codestral</td><td>—</td></tr>
-      <tr><td>Cerebras</td><td>—</td><td>✓</td><td>—</td><td>—</td></tr>
-      <tr><td>Google Gemini</td><td>—</td><td>Flash</td><td>Pro</td><td>—</td></tr>
-      <tr><td>Google Antigravity</td><td>—</td><td>Flash</td><td>Pro</td><td>—</td></tr>
-      <tr><td>Ollama</td><td>✓</td><td>—</td><td>—</td><td>—</td></tr>
-    </tbody>
-  </table>
   <p>
-    The routing engine (<code>routing.rs</code>) scores available providers against the requested
-    tier and selects the best match. See <a href="/docs/providers">Providers</a> for details.
+    See <a href="/docs/providers">Providers</a> for the authentication and fallback boundaries.
   </p>
 </Docs>

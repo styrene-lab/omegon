@@ -37,7 +37,7 @@ import Docs from "../../layouts/Docs.astro";
       <tr><td>No dependency ordering</td><td>Children declare <code>depends_on</code> relationships. The orchestrator dispatches in dependency waves — a child won't start until its dependencies complete.</td></tr>
       <tr><td>No merge strategy</td><td>Git merge with per-file conflict detection. Conflicts are never bulk-resolved — each conflicted file is reviewed individually.</td></tr>
       <tr><td>No post-merge verification</td><td>Adversarial review checks each child's output for bugs, security issues, and spec compliance. Churn detection bails if the same issues keep reappearing.</td></tr>
-      <tr><td>Single provider</td><td>Each child can route to a different provider. The orchestrator uses the routing engine to assign providers based on capability tier and availability.</td></tr>
+      <tr><td>Single provider</td><td>Each child can route to a different provider. The orchestrator uses the routing engine to assign providers based on model grade intent and availability.</td></tr>
       <tr><td>Implicit parallelism</td><td>Explicit plan: labels, descriptions, file scopes, dependencies, max parallelism (default 4). The operator sees and approves the plan before execution.</td></tr>
       <tr><td>Results lost on error</td><td>Each child's branch persists in the worktree. If a child fails, its partial work is preserved. The operator can inspect, fix, and re-merge manually.</td></tr>
     </tbody>
@@ -91,7 +91,7 @@ import Docs from "../../layouts/Docs.astro";
     <li><strong>File scope enforcement</strong> — the plan declares which files each child is allowed to touch. If two children need the same file, the plan must either merge them into one child or declare a dependency.</li>
     <li><strong>Dependency waves</strong> — children with <code>depends_on</code> relationships are dispatched in waves. A child in wave 2 doesn't start until all its dependencies in wave 1 have completed and merged.</li>
     <li><strong>Submodule support</strong> — worktrees automatically initialize git submodules so children can access vendored dependencies.</li>
-    <li><strong>Per-child provider routing</strong> — each child can be assigned to a different inference provider. The orchestrator routes based on capability tier and provider availability, so children can use cheaper providers for simple tasks.</li>
+    <li><strong>Per-child provider routing</strong> — each child can be assigned to a different inference provider. The orchestrator routes based on model grade intent and provider availability, so children can use cheaper providers for simple tasks.</li>
   </ul>
 
   <h2>Adversarial Review</h2>

@@ -49,11 +49,11 @@ import Docs from "../../layouts/Docs.astro";
   <h2>Spec Format</h2>
   <pre><code>## Scenario: Provider routing selects best match
 
-Given a routing request for tier "victory"
-And providers [anthropic, openai, ollama] are available
-When the routing engine scores providers
-Then anthropic is selected (highest capability match)
-And ollama is ranked last (local tier only)</code></pre>
+Given a routing request for grade "B"
+And providers [anthropic, openai-codex, ollama] are available
+When the route controller scores providers
+Then the selected route preserves the requested grade intent
+And the served bridge reports the authenticated provider/model that actually handles turns</code></pre>
 
   <h2>Directory Structure</h2>
   <pre><code>openspec/
