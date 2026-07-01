@@ -58,19 +58,22 @@ The branch predates ~664 commits of stabilization including the rc.3–rc.6 hard
 
 `.omegon/milestones.json` contains no `0.27.0` milestone. `just release` calls `milestone-update.sh release $VERSION` as part of the cut, and the rc bumps that produced rc.3–rc.6 were evidently made without milestone tracking. Additionally three stale milestones were never closed: `0.15.12` (open), `0.18.4` (rc), `0.24.0` (open).
 
-## Non-blocking findings (decide-or-defer)
+## Non-blocking findings — all resolved 2026-07-01
 
-### D1. `release/0.27-ui-polish` orphaned commits
+### D1. `release/0.27-ui-polish` orphaned commits — RESOLVED: closed via `-s ours` merge
 
-Six TUI commits (fixes + one feature) exist only on that branch. Decision needed: merge to main before the re-cut, or explicitly abandon. Silently dropping fix commits is the worst outcome.
+Operator chose "merge." Investigation showed all six commits were already accounted for on main: `f9222df5` (inline row affordances) re-implemented via `d2f76f99` and evolved; `ead0f34b` (engine_flex_row) and `6599d34b` (login remediation footer) ported verbatim with tests; `9e359cf2` covered a direction main deliberately reverted (`99af11fe`); `4ea28ffa`/`6220dc33` targeted `slim_plan.rs`, deleted by the workbench promotion (`c80b26b7`). A content merge would have reintroduced reverted UI, so the branch was closed with `git merge -s ours` — history joined, tree byte-identical, full disposition in the merge commit message.
 
-### D2. Four completed OpenSpec changes unarchived
+### D2. Four completed OpenSpec changes — RESOLVED: verified and archived
 
-`knowledge-quadrant-lifecycle` (8/8), `plan-refinement` (44/44), `provider-route-state-machine` (47/47), `splash-systems-integration` (29/29) are all task-complete but not archived to baseline. Per the OpenSpec lifecycle these should be verified (`/assess spec`) and archived before the release closes them out implicitly.
+All four archived to baseline on 2026-07-01 after verification (note: `openspec_manage(archive)` moves the change to `openspec/archive/` with its specs; consistent with all 86 prior archives, no automatic `openspec/baseline/` merge occurs — the archived spec files remain the durable record):
+- `provider-route-state-machine` — key falsifiable scenarios map to named regression tests (`legacy_model_tier_slash_commands_are_unknown`, `legacy_tier_commands_are_not_handled`, footer route-warning/login-remediation tests, 31 tests in route.rs).
+- `plan-refinement` — existing spec at `specs/lifecycle/work-plan-threading.md` was invisible to the lifecycle FSM (nested domains not detected); flattened to `specs/work-plan-threading.md` and registered.
+- `knowledge-quadrant-lifecycle` and `splash-systems-integration` — had no specs; retroactive delta specs written (`design-readiness`, `startup-probes`) and verified against implementation (`readiness_score`/`assumption_count` in lifecycle/types.rs with rejected-decision exclusion; `receive_probe`/`ready_to_dismiss`/`classify_tier` with 12 tests in startup.rs and 14 in splash.rs).
 
-### D3. `styrene-identity-secrets` at 5/9 tasks
+### D3. `styrene-identity-secrets` — RESOLVED: remainder formally deferred
 
-Remaining tasks (2.3, 2.4, 3.1, 3.2) are the feature-gated Styrene Identity backend and mesh-lookup work — documented as future scope in store.rs. Decision needed: formally defer to post-0.27.0 (split the change or annotate tasks.md) rather than leaving the change ambiguously half-open across a release boundary.
+Identity-backend and mesh-lookup groups restructured into explicit "Deferred to post-0.27.0" task groups with deferral rationale (blocked on RNS identity stack). The change stays open at 5/9 but is documented as non-gating for the 0.27.0 cut.
 
 ### D4. `omega-daemon-runtime-v1` is proposal-only
 
@@ -85,13 +88,13 @@ Category headings repeat (`### Added` ×3, `### Fixed` ×5, `### Changed` ×6) f
 - **Full workspace test suite: PASS.** `just test-rust` (`cargo test --workspace`) run on `2f24e82d`, 2026-07-01. Direct evidence covers the final stage (all doctest targets ok); since cargo test is fail-fast across targets, reaching doctests implies all preceding test binaries passed. 3,957 tests enumerated across the workspace.
 - Release warning gate (`RUSTFLAGS="-D warnings" cargo check`) not independently re-run — it exceeded the tool timeout while the test build held the target-dir lock. Low risk (preflight runs it as part of the cut) but should be confirmed on the release branch.
 
-## Recommended sequence (draft, pending operator decisions)
+## Recommended sequence (remaining)
 
-1. Decide D1 (ui-polish commits): merge or abandon.
+1. ~~Decide D1 (ui-polish commits)~~ — done: closed via `-s ours` merge.
 2. Reconcile CHANGELOG: fold `[Unreleased]` into a corrected, normalized `[0.27.0]` section with the actual release date; fix B1/D5 together.
-3. Archive the four completed OpenSpec changes (D2); formally defer styrene-identity-secrets remainder (D3).
+3. ~~Archive completed OpenSpec changes (D2); defer styrene-identity-secrets remainder (D3)~~ — done 2026-07-01.
 4. Create the 0.27.0 milestone entry; close/annotate stale milestones (B4).
-5. Push the 27 unpushed main commits.
+5. Push the unpushed main commits.
 6. Re-cut `release/0.27` from main (`just branch-release` — fast-forward is clean since the branch has 0 unique commits), set role=release, promote rc.6 → 0.27.0 there.
 7. `just preflight` + `just release` on the release branch; `just merge-release-forward` after tagging.
 

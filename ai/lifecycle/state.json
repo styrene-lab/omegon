@@ -1253,14 +1253,18 @@
     {
       "name": "knowledge-quadrant-lifecycle",
       "title": "knowledge-quadrant-lifecycle",
-      "state": "proposed",
+      "state": "archived",
       "bound_node": null,
-      "specs": [],
-      "test_files": [],
+      "specs": [
+        "design-readiness"
+      ],
+      "test_files": [
+        "core/crates/omegon/src/lifecycle/types.rs"
+      ],
       "tasks_total": 8,
-      "tasks_done": 0,
+      "tasks_done": 8,
       "created_at": "2026-05-21T20:14:08Z",
-      "updated_at": "2026-05-30T01:57:39Z"
+      "updated_at": "2026-07-01T21:07:28Z"
     },
     {
       "name": "omega-daemon-runtime-v1",
@@ -1280,14 +1284,18 @@
     {
       "name": "splash-systems-integration",
       "title": "splash-systems-integration",
-      "state": "proposed",
+      "state": "archived",
       "bound_node": null,
-      "specs": [],
-      "test_files": [],
+      "specs": [
+        "startup-probes"
+      ],
+      "test_files": [
+        "core/crates/omegon/src/tui/splash.rs"
+      ],
       "tasks_total": 29,
-      "tasks_done": 0,
+      "tasks_done": 29,
       "created_at": "2026-05-21T20:14:08Z",
-      "updated_at": "2026-05-30T01:57:39Z"
+      "updated_at": "2026-07-01T21:07:28Z"
     },
     {
       "name": "styrene-identity-secrets",
@@ -1296,10 +1304,10 @@
       "bound_node": null,
       "specs": [],
       "test_files": [],
-      "tasks_total": 3,
-      "tasks_done": 0,
+      "tasks_total": 9,
+      "tasks_done": 5,
       "created_at": "2026-05-21T20:14:08Z",
-      "updated_at": "2026-05-30T01:57:39Z"
+      "updated_at": "2026-07-01T21:08:00Z"
     },
     {
       "name": "host-actions-core-runtime",
@@ -1364,14 +1372,18 @@
     {
       "name": "plan-refinement",
       "title": "plan-refinement",
-      "state": "proposed",
+      "state": "archived",
       "bound_node": null,
-      "specs": [],
-      "test_files": [],
-      "tasks_total": 38,
-      "tasks_done": 13,
+      "specs": [
+        "work-plan-threading"
+      ],
+      "test_files": [
+        "core/crates/omegon/src/plan.rs"
+      ],
+      "tasks_total": 44,
+      "tasks_done": 44,
       "created_at": "2026-05-25T21:24:32Z",
-      "updated_at": "2026-05-30T01:57:39Z"
+      "updated_at": "2026-07-01T21:01:47Z"
     },
     {
       "name": "acp-hostaction-approval",
@@ -1408,6 +1420,23 @@
       "tasks_done": 6,
       "created_at": "2026-05-27T12:08:51Z",
       "updated_at": "2026-05-27T18:12:46Z"
+    },
+    {
+      "name": "provider-route-state-machine",
+      "title": "provider-route-state-machine",
+      "state": "archived",
+      "bound_node": null,
+      "specs": [
+        "provider-route",
+        "provider-route/login"
+      ],
+      "test_files": [
+        "core/crates/omegon/src/route.rs"
+      ],
+      "tasks_total": 47,
+      "tasks_done": 47,
+      "created_at": "2026-07-01T20:58:43Z",
+      "updated_at": "2026-07-01T20:59:19Z"
     }
   ],
   "milestones": [],
@@ -3245,6 +3274,231 @@
       "entity_id": "bundled-armory-local-skill-posture",
       "from_state": "(new)",
       "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T20:58:43Z",
+      "entity_type": "change",
+      "entity_id": "provider-route-state-machine",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T20:58:43Z",
+      "entity_type": "change",
+      "entity_id": "provider-route-state-machine",
+      "from_state": "proposed",
+      "to_state": "specced",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T20:58:43Z",
+      "entity_type": "change",
+      "entity_id": "provider-route-state-machine",
+      "from_state": "specced",
+      "to_state": "planned",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T20:58:57Z",
+      "entity_type": "change",
+      "entity_id": "provider-route-state-machine",
+      "from_state": "planned",
+      "to_state": "testing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T20:58:57Z",
+      "entity_type": "change",
+      "entity_id": "provider-route-state-machine",
+      "from_state": "testing",
+      "to_state": "implementing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T20:59:16Z",
+      "entity_type": "change",
+      "entity_id": "provider-route-state-machine",
+      "from_state": "implementing",
+      "to_state": "verifying",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T20:59:19Z",
+      "entity_type": "change",
+      "entity_id": "provider-route-state-machine",
+      "from_state": "verifying",
+      "to_state": "archived",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:01:34Z",
+      "entity_type": "change",
+      "entity_id": "plan-refinement",
+      "from_state": "proposed",
+      "to_state": "specced",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:01:34Z",
+      "entity_type": "change",
+      "entity_id": "plan-refinement",
+      "from_state": "specced",
+      "to_state": "planned",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:01:39Z",
+      "entity_type": "change",
+      "entity_id": "plan-refinement",
+      "from_state": "planned",
+      "to_state": "testing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:01:39Z",
+      "entity_type": "change",
+      "entity_id": "plan-refinement",
+      "from_state": "testing",
+      "to_state": "implementing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:01:42Z",
+      "entity_type": "change",
+      "entity_id": "plan-refinement",
+      "from_state": "implementing",
+      "to_state": "verifying",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:01:47Z",
+      "entity_type": "change",
+      "entity_id": "plan-refinement",
+      "from_state": "verifying",
+      "to_state": "archived",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:02:20Z",
+      "entity_type": "change",
+      "entity_id": "knowledge-quadrant-lifecycle",
+      "from_state": "proposed",
+      "to_state": "specced",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:02:20Z",
+      "entity_type": "change",
+      "entity_id": "knowledge-quadrant-lifecycle",
+      "from_state": "specced",
+      "to_state": "planned",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:02:20Z",
+      "entity_type": "change",
+      "entity_id": "splash-systems-integration",
+      "from_state": "proposed",
+      "to_state": "specced",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:02:20Z",
+      "entity_type": "change",
+      "entity_id": "splash-systems-integration",
+      "from_state": "specced",
+      "to_state": "planned",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:07:13Z",
+      "entity_type": "change",
+      "entity_id": "knowledge-quadrant-lifecycle",
+      "from_state": "planned",
+      "to_state": "testing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:07:13Z",
+      "entity_type": "change",
+      "entity_id": "knowledge-quadrant-lifecycle",
+      "from_state": "testing",
+      "to_state": "implementing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:07:13Z",
+      "entity_type": "change",
+      "entity_id": "splash-systems-integration",
+      "from_state": "planned",
+      "to_state": "testing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:07:13Z",
+      "entity_type": "change",
+      "entity_id": "splash-systems-integration",
+      "from_state": "testing",
+      "to_state": "implementing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:07:23Z",
+      "entity_type": "change",
+      "entity_id": "knowledge-quadrant-lifecycle",
+      "from_state": "implementing",
+      "to_state": "verifying",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:07:23Z",
+      "entity_type": "change",
+      "entity_id": "splash-systems-integration",
+      "from_state": "implementing",
+      "to_state": "verifying",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:07:28Z",
+      "entity_type": "change",
+      "entity_id": "knowledge-quadrant-lifecycle",
+      "from_state": "verifying",
+      "to_state": "archived",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-01T21:07:28Z",
+      "entity_type": "change",
+      "entity_id": "splash-systems-integration",
+      "from_state": "verifying",
+      "to_state": "archived",
       "reason": null,
       "forced": false
     }
