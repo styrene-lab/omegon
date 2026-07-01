@@ -49,6 +49,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
 
 ### Added
+- Documented the validator capability UX plan, including `/validate` Overview/Active/Available/Overrides/Runs/Settings tabs, Armory/community validator trust lifecycle, explain output, backend DTOs, and phased implementation plan.
+- Added self-contained embedded `validate` checks for JSON, TOML, YAML, and Markdown hygiene so common artifact validation no longer depends on external tools, and wired operator `mode = "replace"` to suppress named built-ins such as `core.markdown-basic`.
+- Hardened `validate`'s built-in process execution to run validator programs directly with fixed argument vectors instead of shell interpolation.
 - Split the built-in `validate` tool checks into bounded Rust, TypeScript, and Python validator implementations behind a shared validator trait, preparing the surface for extension-backed validators.
 - Added Anthropic Claude Sonnet 5 to the model registry and promoted it as the Anthropic B-grade balanced route while keeping Claude Fable 5 as the S-grade/default route.
 - Added an Actions tab to the shared `/memory` menu with recall/list/focus/release/compact rows; argument-taking actions prime the editor and memory compaction requires confirmation.

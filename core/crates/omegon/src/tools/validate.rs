@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use omegon_traits::{ContentBlock, ToolResult};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -38,6 +39,10 @@ impl ValidatorKind {
         }
     }
 
+    fn id(self) -> &'static str {
+        self.spec().id()
+    }
+
     fn label(self) -> &'static str {
         self.spec().label()
     }
@@ -55,6 +60,7 @@ struct ValidatorConfig {
 
 trait LanguageValidator: Sync {
     fn kind(&self) -> ValidatorKind;
+    fn id(&self) -> &'static str;
     fn label(&self) -> &'static str;
     fn expected_config(&self) -> &'static str;
     fn config_name(&self) -> &'static str;
@@ -69,6 +75,10 @@ struct PythonValidator;
 impl LanguageValidator for RustValidator {
     fn kind(&self) -> ValidatorKind {
         ValidatorKind::Rust
+    }
+
+    fn id(&self) -> &'static str {
+        "language.rust"
     }
 
     fn label(&self) -> &'static str {
@@ -105,6 +115,10 @@ impl LanguageValidator for TypeScriptValidator {
         ValidatorKind::TypeScript
     }
 
+    fn id(&self) -> &'static str {
+        "language.typescript"
+    }
+
     fn label(&self) -> &'static str {
         "TypeScript"
     }
@@ -137,6 +151,10 @@ impl LanguageValidator for TypeScriptValidator {
 impl LanguageValidator for PythonValidator {
     fn kind(&self) -> ValidatorKind {
         ValidatorKind::Python
+    }
+
+    fn id(&self) -> &'static str {
+        "language.python"
     }
 
     fn label(&self) -> &'static str {
@@ -172,6 +190,598 @@ const LANGUAGE_VALIDATORS: &[&dyn LanguageValidator] =
     &[&RustValidator, &TypeScriptValidator, &PythonValidator];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmbeddedValidatorKind {
+    Json,
+    Toml,
+    Yaml,
+    Markdown,
+}
+
+impl EmbeddedValidatorKind {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Json => "core.json",
+            Self::Toml => "core.toml",
+            Self::Yaml => "core.yaml",
+            Self::Markdown => "core.markdown-basic",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Json => "JSON",
+            Self::Toml => "TOML",
+            Self::Yaml => "YAML",
+            Self::Markdown => "Markdown hygiene",
+        }
+    }
+
+    fn include(self) -> Vec<&'static str> {
+        match self {
+            Self::Json => vec!["**/*.json"],
+            Self::Toml => vec!["**/*.toml"],
+            Self::Yaml => vec!["**/*.yaml", "**/*.yml"],
+            Self::Markdown => vec!["**/*.md", "**/*.mdx", "**/*.markdown"],
+        }
+    }
+
+    fn runner_summary(self) -> &'static str {
+        match self {
+            Self::Json => "embedded serde_json parser",
+            Self::Toml => "embedded toml parser",
+            Self::Yaml => "embedded serde_yaml parser",
+            Self::Markdown => "embedded UTF-8/trailing-whitespace hygiene",
+        }
+    }
+}
+
+const EMBEDDED_VALIDATORS: &[EmbeddedValidatorKind] = &[
+    EmbeddedValidatorKind::Json,
+    EmbeddedValidatorKind::Toml,
+    EmbeddedValidatorKind::Yaml,
+    EmbeddedValidatorKind::Markdown,
+];
+
+#[derive(Debug, Clone)]
+struct BuiltinValidatorInventory {
+    id: String,
+    label: String,
+    source: &'static str,
+    enabled: bool,
+    mode: &'static str,
+    include: Vec<&'static str>,
+    levels: Vec<&'static str>,
+    runner_summary: String,
+    policy_summary: &'static str,
+}
+
+impl BuiltinValidatorInventory {
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "label": self.label,
+            "source": self.source,
+            "enabled": self.enabled,
+            "mode": self.mode,
+            "include": self.include,
+            "levels": self.levels,
+            "runner_summary": self.runner_summary,
+            "policy_summary": self.policy_summary,
+        })
+    }
+}
+
+fn builtin_validator_inventory(cwd: &Path) -> Vec<BuiltinValidatorInventory> {
+    let discovered = discover_validators(cwd);
+    let mut inventory = EMBEDDED_VALIDATORS
+        .iter()
+        .map(|validator| BuiltinValidatorInventory {
+            id: validator.id().to_string(),
+            label: validator.label().to_string(),
+            source: "builtin",
+            enabled: true,
+            mode: "supplement",
+            include: validator.include(),
+            levels: vec!["quick", "standard", "full"],
+            runner_summary: validator.runner_summary().to_string(),
+            policy_summary: "embedded, read-only, no-network, no-mutation",
+        })
+        .collect::<Vec<_>>();
+
+    inventory.extend(LANGUAGE_VALIDATORS.iter().map(|validator| {
+        let config = validator.config();
+        BuiltinValidatorInventory {
+            id: validator.id().to_string(),
+            label: validator.label().to_string(),
+            source: "builtin-toolchain",
+            enabled: discovered.contains_key(&validator.kind()),
+            mode: "supplement",
+            include: match validator.kind() {
+                ValidatorKind::Rust => vec!["**/*.rs"],
+                ValidatorKind::TypeScript => vec![
+                    "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mts", "**/*.cts",
+                ],
+                ValidatorKind::Python => vec!["**/*.py"],
+            },
+            levels: vec!["quick", "standard", "full"],
+            runner_summary: format_command(config.command, &config.args),
+            policy_summary: "external toolchain, read-only, no-network, no-mutation",
+        }
+    }));
+    inventory
+}
+
+fn builtin_validator_inventory_json(cwd: &Path) -> Vec<serde_json::Value> {
+    builtin_validator_inventory(cwd)
+        .iter()
+        .map(BuiltinValidatorInventory::to_json)
+        .collect()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OperatorValidatorConfig {
+    #[serde(default)]
+    version: u32,
+    #[serde(default)]
+    validators: Vec<OperatorValidator>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OperatorValidator {
+    id: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    include: Vec<String>,
+    #[serde(default)]
+    exclude: Vec<String>,
+    #[serde(default)]
+    levels: Vec<String>,
+    #[serde(default = "default_operator_validator_mode")]
+    mode: OperatorValidatorMode,
+    #[serde(default)]
+    replaces: Vec<String>,
+    #[serde(default)]
+    priority: i32,
+    runner: OperatorValidatorRunner,
+    #[serde(default)]
+    policy: OperatorValidatorPolicy,
+    #[serde(skip)]
+    source: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum OperatorValidatorMode {
+    Supplement,
+    Replace,
+}
+
+fn default_operator_validator_mode() -> OperatorValidatorMode {
+    OperatorValidatorMode::Supplement
+}
+
+impl Default for OperatorValidatorMode {
+    fn default() -> Self {
+        default_operator_validator_mode()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OperatorValidatorRunner {
+    kind: OperatorValidatorRunnerKind,
+    program: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    path_arg_mode: OperatorPathArgMode,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum OperatorValidatorRunnerKind {
+    Process,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum OperatorPathArgMode {
+    Append,
+    None,
+}
+
+impl Default for OperatorPathArgMode {
+    fn default() -> Self {
+        Self::Append
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OperatorValidatorPolicy {
+    #[serde(default = "default_true")]
+    read_only: bool,
+    #[serde(default)]
+    network: bool,
+    #[serde(default)]
+    mutates: bool,
+    #[serde(default = "default_operator_timeout_secs")]
+    timeout_secs: u64,
+}
+
+impl Default for OperatorValidatorPolicy {
+    fn default() -> Self {
+        Self {
+            read_only: true,
+            network: false,
+            mutates: false,
+            timeout_secs: default_operator_timeout_secs(),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_operator_timeout_secs() -> u64 {
+    VALIDATION_TIMEOUT_SECS
+}
+
+impl OperatorValidator {
+    fn matches_level(&self, level: ValidationLevel) -> bool {
+        self.levels.is_empty()
+            || self
+                .levels
+                .iter()
+                .any(|candidate| ValidationLevel::parse(candidate) == level)
+    }
+
+    fn matches_path(&self, path: &Path) -> bool {
+        let included = self.include.is_empty()
+            || self
+                .include
+                .iter()
+                .any(|pattern| operator_validator_glob_matches(pattern, path));
+        let excluded = self
+            .exclude
+            .iter()
+            .any(|pattern| operator_validator_glob_matches(pattern, path));
+        included && !excluded
+    }
+
+    fn provenance(&self) -> String {
+        format!("{} ({})", self.id, self.source.display())
+    }
+
+    fn inventory_json(&self) -> serde_json::Value {
+        let mode = match self.mode {
+            OperatorValidatorMode::Supplement => "supplement",
+            OperatorValidatorMode::Replace => "replace",
+        };
+        let policy = format!(
+            "read_only={}, network={}, mutates={}, timeout_secs={}",
+            self.policy.read_only,
+            self.policy.network,
+            self.policy.mutates,
+            self.policy.timeout_secs
+        );
+        serde_json::json!({
+            "id": self.id,
+            "label": self.description.as_deref().unwrap_or(&self.id),
+            "source": "project",
+            "source_path": self.source,
+            "enabled": true,
+            "mode": mode,
+            "replaces": self.replaces,
+            "include": self.include,
+            "exclude": self.exclude,
+            "levels": self.levels,
+            "runner_summary": format_dynamic_command(&self.runner.program, &self.runner.args),
+            "policy_summary": policy,
+        })
+    }
+}
+
+fn operator_validator_inventory_json(validators: &[OperatorValidator]) -> Vec<serde_json::Value> {
+    validators
+        .iter()
+        .map(OperatorValidator::inventory_json)
+        .collect()
+}
+
+fn discover_operator_validators(
+    cwd: &Path,
+    paths: &[PathBuf],
+    level: ValidationLevel,
+) -> Vec<OperatorValidator> {
+    let config_path = cwd.join(".omegon").join("validators.toml");
+    let Ok(raw) = std::fs::read_to_string(&config_path) else {
+        return Vec::new();
+    };
+    let Ok(mut config) = toml::from_str::<OperatorValidatorConfig>(&raw) else {
+        return Vec::new();
+    };
+    let _version = config.version;
+    let mut validators = Vec::new();
+    for mut validator in config.validators.drain(..) {
+        validator.source = config_path.clone();
+        if validator.matches_level(level) && paths.iter().any(|path| validator.matches_path(path)) {
+            validators.push(validator);
+        }
+    }
+    validators.sort_by(|left, right| {
+        right
+            .priority
+            .cmp(&left.priority)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    validators
+}
+
+fn builtin_replaced_by_operator(
+    kind: EmbeddedValidatorKind,
+    validators: &[OperatorValidator],
+) -> bool {
+    validators.iter().any(|validator| {
+        validator.mode == OperatorValidatorMode::Replace
+            && validator.replaces.iter().any(|id| id == kind.id())
+    })
+}
+
+fn language_replaced_by_operator(kind: ValidatorKind, validators: &[OperatorValidator]) -> bool {
+    validators.iter().any(|validator| {
+        validator.mode == OperatorValidatorMode::Replace
+            && validator.replaces.iter().any(|id| id == kind.id())
+    })
+}
+
+fn operator_validator_inventory(validators: &[OperatorValidator]) -> Vec<String> {
+    validators
+        .iter()
+        .map(|validator| {
+            let mode = match validator.mode {
+                OperatorValidatorMode::Supplement => "supplement",
+                OperatorValidatorMode::Replace => "replace",
+            };
+            let replacement = if validator.replaces.is_empty() {
+                String::new()
+            } else {
+                format!("; replaces {}", validator.replaces.join(", "))
+            };
+            let description = validator
+                .description
+                .as_deref()
+                .filter(|description| !description.trim().is_empty())
+                .map(|description| format!(" — {description}"))
+                .unwrap_or_default();
+            format!(
+                "{} [{mode}{replacement}] via {} {}{}",
+                validator.provenance(),
+                validator.runner.program,
+                validator.runner.args.join(" "),
+                description
+            )
+        })
+        .collect()
+}
+
+fn operator_validator_paths<'a>(
+    validator: &OperatorValidator,
+    paths: &'a [PathBuf],
+) -> Vec<&'a PathBuf> {
+    paths
+        .iter()
+        .filter(|path| validator.matches_path(path))
+        .collect()
+}
+
+fn operator_validator_command(validator: &OperatorValidator, paths: &[&PathBuf]) -> Vec<String> {
+    let mut args = validator.runner.args.clone();
+    if validator.runner.path_arg_mode == OperatorPathArgMode::Append {
+        args.extend(paths.iter().map(|path| path.display().to_string()));
+    }
+    args
+}
+
+fn format_dynamic_command(command: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        command.to_string()
+    } else {
+        format!("{} {}", command, args.join(" "))
+    }
+}
+
+async fn run_operator_validator(
+    validator: &OperatorValidator,
+    paths: &[PathBuf],
+    cwd: &Path,
+) -> String {
+    let matched_paths = operator_validator_paths(validator, paths);
+    if matched_paths.is_empty() {
+        return format!(
+            "Operator validator `{}`: skipped; no matched paths remained",
+            validator.id
+        );
+    }
+    if validator.runner.kind != OperatorValidatorRunnerKind::Process {
+        return format!(
+            "Operator validator `{}`: skipped; unsupported runner kind",
+            validator.id
+        );
+    }
+    if validator.policy.network || validator.policy.mutates || !validator.policy.read_only {
+        return format!(
+            "Operator validator `{}`: skipped; policy requires network/mutation/non-read-only access",
+            validator.id
+        );
+    }
+
+    let args = operator_validator_command(validator, &matched_paths);
+    let rendered = format_dynamic_command(&validator.runner.program, &args);
+    let child = Command::new(&validator.runner.program)
+        .args(&args)
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .output();
+    let timeout_secs = validator.policy.timeout_secs.max(1);
+    let result = tokio::time::timeout(Duration::from_secs(timeout_secs), child).await;
+
+    match result {
+        Ok(Ok(output)) if output.status.success() => format!(
+            "Operator validator `{}` (`{rendered}`): ✓ passed for {} path(s)",
+            validator.id,
+            matched_paths.len()
+        ),
+        Ok(Ok(output)) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let combined = format!(
+                "{stdout}
+{stderr}"
+            );
+            let summary = truncate_validation(combined.trim(), 700);
+            format!(
+                "Operator validator `{}` (`{rendered}`): ✗ failed for {} path(s)
+{}",
+                validator.id,
+                matched_paths.len(),
+                summary
+            )
+        }
+        Ok(Err(e)) => format!(
+            "Operator validator `{}` (`{rendered}`): failed to execute: {e}",
+            validator.id
+        ),
+        Err(_) => format!(
+            "Operator validator `{}` (`{rendered}`): ⏱ timed out after {timeout_secs}s",
+            validator.id
+        ),
+    }
+}
+
+async fn run_operator_validators(
+    validators: &[OperatorValidator],
+    paths: &[PathBuf],
+    cwd: &Path,
+) -> Vec<String> {
+    let mut results = Vec::new();
+    for validator in validators {
+        results.push(run_operator_validator(validator, paths, cwd).await);
+    }
+    results
+}
+
+fn operator_validator_glob_matches(pattern: &str, path: &Path) -> bool {
+    let normalized_pattern = pattern.replace('\\', "/");
+    let normalized_path = path.to_string_lossy().replace('\\', "/");
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+
+    if let Some(suffix) = normalized_pattern.strip_prefix("**/*") {
+        return normalized_path.ends_with(suffix);
+    }
+    if let Some(suffix) = normalized_pattern.strip_prefix("**/") {
+        return normalized_path.ends_with(suffix) || file_name == suffix;
+    }
+    if normalized_pattern.contains('*') {
+        let parts = normalized_pattern.split('*').collect::<Vec<_>>();
+        let mut remainder = normalized_path.as_str();
+        for (idx, part) in parts.iter().enumerate() {
+            if part.is_empty() {
+                continue;
+            }
+            if idx == 0 && !remainder.starts_with(part) {
+                return false;
+            }
+            let Some(found) = remainder.find(part) else {
+                return false;
+            };
+            remainder = &remainder[found + part.len()..];
+        }
+        return normalized_pattern.ends_with('*')
+            || parts
+                .last()
+                .is_some_and(|part| remainder.is_empty() || normalized_path.ends_with(part));
+    }
+    normalized_path.ends_with(&normalized_pattern) || file_name == normalized_pattern
+}
+
+fn embedded_validator_for_file(path: &Path) -> Option<EmbeddedValidatorKind> {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+    {
+        Some(ext) if ext == "json" => Some(EmbeddedValidatorKind::Json),
+        Some(ext) if ext == "toml" => Some(EmbeddedValidatorKind::Toml),
+        Some(ext) if ext == "yaml" || ext == "yml" => Some(EmbeddedValidatorKind::Yaml),
+        Some(ext) if ext == "md" || ext == "mdx" || ext == "markdown" => {
+            Some(EmbeddedValidatorKind::Markdown)
+        }
+        _ => None,
+    }
+}
+
+async fn validate_embedded_file(file_path: &Path, kind: EmbeddedValidatorKind) -> String {
+    let result = match std::fs::read_to_string(file_path) {
+        Ok(content) => validate_embedded_content(file_path, kind, &content),
+        Err(error) => Err(format!("failed to read file: {error}")),
+    };
+    match result {
+        Ok(()) => format!(
+            "Embedded validation (`{}`) for {}: ✓ passed",
+            kind.runner_summary(),
+            file_path.display()
+        ),
+        Err(error) => format!(
+            "Embedded validation (`{}`) for {}: ✗ 1 error(s)\n{}",
+            kind.runner_summary(),
+            file_path.display(),
+            truncate_validation(&error, 500)
+        ),
+    }
+}
+
+fn validate_embedded_content(
+    path: &Path,
+    kind: EmbeddedValidatorKind,
+    content: &str,
+) -> std::result::Result<(), String> {
+    match kind {
+        EmbeddedValidatorKind::Json => serde_json::from_str::<serde_json::Value>(content)
+            .map(|_| ())
+            .map_err(|error| format!("{}: invalid JSON: {error}", path.display())),
+        EmbeddedValidatorKind::Toml => toml::from_str::<toml::Value>(content)
+            .map(|_| ())
+            .map_err(|error| format!("{}: invalid TOML: {error}", path.display())),
+        EmbeddedValidatorKind::Yaml => serde_yaml::from_str::<serde_yaml::Value>(content)
+            .map(|_| ())
+            .map_err(|error| format!("{}: invalid YAML: {error}", path.display())),
+        EmbeddedValidatorKind::Markdown => validate_markdown_hygiene(path, content),
+    }
+}
+
+fn validate_markdown_hygiene(path: &Path, content: &str) -> std::result::Result<(), String> {
+    if content.contains('\0') {
+        return Err(format!("{}: contains NUL byte", path.display()));
+    }
+    for (idx, line) in content.lines().enumerate() {
+        if line.ends_with(' ') || line.ends_with('\t') {
+            return Err(format!(
+                "{}:{}: trailing whitespace",
+                path.display(),
+                idx + 1
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationLevel {
     Quick,
     Standard,
@@ -201,11 +811,21 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
         }
     }
 
+    let operator_validators = discover_operator_validators(cwd, &unique_paths, level);
+
     let mut validation_results = Vec::new();
     let mut validated_paths = Vec::new();
     let mut unsupported_paths = Vec::new();
     let mut missing_validator_paths = Vec::new();
     for path in &unique_paths {
+        if let Some(kind) = embedded_validator_for_file(path) {
+            if !builtin_replaced_by_operator(kind, &operator_validators) {
+                validation_results.push(validate_embedded_file(path, kind).await);
+                validated_paths.push(path.display().to_string());
+            }
+            continue;
+        }
+
         let Some(kind) = validator_for_file(path) else {
             unsupported_paths.push(format!(
                 "{} (extension: {})",
@@ -217,6 +837,10 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
             ));
             continue;
         };
+
+        if language_replaced_by_operator(kind, &operator_validators) {
+            continue;
+        }
 
         let validators = discover_validators(cwd);
         let Some(config) = validators.get(&kind).cloned() else {
@@ -234,10 +858,16 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
         validated_paths.push(path.display().to_string());
     }
 
+    let builtin_inventory = builtin_validator_inventory_json(cwd);
+    let operator_inventory = operator_validator_inventory_json(&operator_validators);
+    let operator_validation_results =
+        run_operator_validators(&operator_validators, &unique_paths, cwd).await;
+    validation_results.extend(operator_validation_results.iter().cloned());
+
     if validation_results.is_empty() {
         let mut message =
             "Validation skipped: no applicable validator was available for the supplied path set.\n\
-Supported built-in source types: Rust, TypeScript, Python."
+Supported built-in types: JSON, TOML, YAML, Markdown, Rust, TypeScript, Python."
                 .to_string();
         if !unsupported_paths.is_empty() {
             message.push_str("\nUnsupported paths:\n");
@@ -249,6 +879,12 @@ Supported built-in source types: Rust, TypeScript, Python."
             message.push_str("Supported paths without a discovered project validator:\n");
             for path in &missing_validator_paths {
                 message.push_str(&format!("  - {path}\n"));
+            }
+        }
+        if !operator_validators.is_empty() {
+            message.push_str("\nMatched operator validator override(s):\n");
+            for validator in operator_validator_inventory(&operator_validators) {
+                message.push_str(&format!("  - {validator}\n"));
             }
         }
         message.push_str("\nRecommended next step:\n");
@@ -272,6 +908,13 @@ Supported built-in source types: Rust, TypeScript, Python."
                     ValidationLevel::Full => "full",
                 },
                 "validators_run": 0,
+                "builtin_validators_run": 0,
+                "operator_validators_run": operator_validation_results.len(),
+                "operator_validators": operator_validator_inventory(&operator_validators),
+            "validator_inventory": {
+                "builtins": builtin_inventory,
+                "operators": operator_inventory,
+            },
                 "validation_skipped": true,
                 "recommendation": "Do not retry validate for this same path set in this session unless a project validator is added; run a project-specific command or validator plugin instead.",
             }),
@@ -284,6 +927,13 @@ Supported built-in source types: Rust, TypeScript, Python."
         validation_results.len(),
         validation_results.join("\n")
     );
+
+    if !operator_validators.is_empty() {
+        output.push_str("\n\nMatched operator validator override(s):\n");
+        for validator in operator_validator_inventory(&operator_validators) {
+            output.push_str(&format!("  - {validator}\n"));
+        }
+    }
 
     if level == ValidationLevel::Full
         && let Some(test_result) =
@@ -305,6 +955,13 @@ Supported built-in source types: Rust, TypeScript, Python."
                 ValidationLevel::Full => "full",
             },
             "validators_run": validation_results.len(),
+            "builtin_validators_run": validation_results.len().saturating_sub(operator_validation_results.len()),
+            "operator_validators_run": operator_validation_results.len(),
+            "operator_validators": operator_validator_inventory(&operator_validators),
+            "validator_inventory": {
+                "builtins": builtin_inventory,
+                "operators": operator_inventory,
+            },
         }),
     })
 }
@@ -316,11 +973,8 @@ async fn validate_file(
     config: ValidatorConfig,
     cwd: &Path,
 ) -> String {
-    let child = Command::new("bash")
-        .args([
-            "-c",
-            &format!("{} {}", config.command, config.args.join(" ")),
-        ])
+    let child = Command::new(config.command)
+        .args(&config.args)
         .current_dir(cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -338,7 +992,7 @@ async fn validate_file(
             if exit_code == 0 {
                 format!(
                     "Validation (`{}`) for {}: ✓ passed",
-                    config.command,
+                    format_command(config.command, &config.args),
                     file_path.display()
                 )
             } else {
@@ -346,7 +1000,7 @@ async fn validate_file(
                 let errors = extract_error_summary(&stdout, &stderr, &kind);
                 format!(
                     "Validation (`{}`) for {}: ✗ {} error(s)\n{}",
-                    config.command,
+                    format_command(config.command, &config.args),
                     file_path.display(),
                     count_errors(&errors),
                     truncate_validation(&errors, 500),
@@ -357,7 +1011,7 @@ async fn validate_file(
             tracing::debug!("Validation command failed to execute: {e}");
             format!(
                 "Validation (`{}`) for {}: failed to execute: {e}",
-                config.command,
+                format_command(config.command, &config.args),
                 file_path.display()
             )
         }
@@ -365,15 +1019,23 @@ async fn validate_file(
             tracing::warn!(
                 "Validation timed out after {}s for `{}`",
                 VALIDATION_TIMEOUT_SECS,
-                config.command
+                format_command(config.command, &config.args)
             );
             format!(
                 "Validation (`{}`) for {}: ⏱ timed out after {}s",
-                config.command,
+                format_command(config.command, &config.args),
                 file_path.display(),
                 VALIDATION_TIMEOUT_SECS
             )
         }
+    }
+}
+
+fn format_command(command: &str, args: &[&str]) -> String {
+    if args.is_empty() {
+        command.to_string()
+    } else {
+        format!("{} {}", command, args.join(" "))
     }
 }
 
@@ -411,18 +1073,19 @@ pub async fn run_affected_tests(cwd: &Path, files: &[&PathBuf]) -> Option<String
         return None;
     }
 
-    let cmd = if find_upward(cwd, "Cargo.toml").is_some() {
-        Some("cargo test".to_string())
+    let test_command = if find_upward(cwd, "Cargo.toml").is_some() {
+        Some(("cargo", vec!["test"]))
     } else if find_upward(cwd, "package.json").is_some() {
-        Some("npm test".to_string())
+        Some(("npm", vec!["test"]))
     } else if find_upward(cwd, "pyproject.toml").is_some() {
-        Some("pytest".to_string())
+        Some(("pytest", vec![]))
     } else {
         None
     }?;
+    let cmd = format_command(test_command.0, &test_command.1);
 
-    let child = Command::new("bash")
-        .args(["-c", &cmd])
+    let child = Command::new(test_command.0)
+        .args(&test_command.1)
         .current_dir(cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -712,8 +1375,8 @@ mod tests {
     #[tokio::test]
     async fn validate_reports_unsupported_paths() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("README.md");
-        std::fs::write(&path, "# docs").unwrap();
+        let path = dir.path().join("notes.rst");
+        std::fs::write(&path, "docs").unwrap();
 
         let result = execute(
             std::slice::from_ref(&path),
@@ -727,8 +1390,8 @@ mod tests {
         };
         assert!(message.contains("Validation skipped"));
         assert!(message.contains("Unsupported paths"));
-        assert!(message.contains("README.md"));
-        assert!(message.contains("extension: md"));
+        assert!(message.contains("notes.rst"));
+        assert!(message.contains("extension: rst"));
         assert!(message.contains("Recommended next step"));
         assert!(message.contains("git diff --check"));
         assert!(message.contains("Armory validator plugin"));
@@ -761,12 +1424,12 @@ mod tests {
             [[validators]]
             name = "markdown"
             tool = "validate_docs"
-            extensions = ["md"]
+            extensions = ["rst"]
         "#,
         )
         .unwrap();
-        let path = dir.path().join("README.md");
-        std::fs::write(&path, "# docs").unwrap();
+        let path = dir.path().join("README.rst");
+        std::fs::write(&path, "docs").unwrap();
 
         let result = execute(
             std::slice::from_ref(&path),
@@ -782,7 +1445,7 @@ mod tests {
             message.contains("Installed Armory validator `validate_docs` from `Docs Validator`"),
             "{message}"
         );
-        assert!(message.contains("handles .md"), "{message}");
+        assert!(message.contains("handles .rst"), "{message}");
     }
 
     #[tokio::test]
@@ -808,5 +1471,249 @@ mod tests {
         assert!(message.contains("repo-specific validation command"));
         assert_eq!(result.details["validators_run"], 0);
         assert_eq!(result.details["validation_skipped"], true);
+    }
+    #[tokio::test]
+    async fn validate_reports_matching_operator_override() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".omegon")).unwrap();
+        std::fs::write(
+            dir.path().join(".omegon/validators.toml"),
+            r#"
+            version = 1
+
+            [[validators]]
+            id = "project.docs"
+            description = "Project docs policy"
+            include = ["**/*.md"]
+            levels = ["standard"]
+            mode = "replace"
+            replaces = ["core.markdown-basic"]
+            priority = 50
+
+            [validators.runner]
+            kind = "process"
+            program = "markdownlint"
+            args = ["--config", ".markdownlint.json"]
+            path_arg_mode = "append"
+        "#,
+        )
+        .unwrap();
+        let path = dir.path().join("README.md");
+        std::fs::write(&path, "# docs").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("Matched operator validator override(s)"),
+            "{message}"
+        );
+        assert!(message.contains("project.docs"), "{message}");
+        assert!(
+            message.contains("replace; replaces core.markdown-basic"),
+            "{message}"
+        );
+        assert!(
+            message.contains("markdownlint --config .markdownlint.json"),
+            "{message}"
+        );
+        assert_eq!(
+            result.details["operator_validators"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    #[tokio::test]
+    async fn validate_runs_operator_override_and_surfaces_result() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".omegon")).unwrap();
+        std::fs::write(
+            dir.path().join(".omegon/validators.toml"),
+            r#"
+            version = 1
+
+            [[validators]]
+            id = "project.docs"
+            include = ["**/*.md"]
+            levels = ["standard"]
+
+            [validators.runner]
+            kind = "process"
+            program = "/bin/echo"
+            args = ["docs-ok"]
+            path_arg_mode = "append"
+
+            [validators.policy]
+            read_only = true
+            network = false
+            mutates = false
+            timeout_secs = 5
+        "#,
+        )
+        .unwrap();
+        let path = dir.path().join("README.md");
+        std::fs::write(&path, "# docs").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("Validated 1 path(s) with 2 applicable validator run(s)"),
+            "{message}"
+        );
+        assert!(
+            message.contains("Operator validator `project.docs`"),
+            "{message}"
+        );
+        assert!(message.contains("/bin/echo docs-ok"), "{message}");
+        assert!(message.contains("✓ passed"), "{message}");
+        assert_eq!(result.details["validators_run"], 2);
+        assert_eq!(result.details["builtin_validators_run"], 1);
+        assert_eq!(result.details["operator_validators_run"], 1);
+    }
+
+    #[tokio::test]
+    async fn operator_replace_suppresses_named_embedded_builtin() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".omegon")).unwrap();
+        std::fs::write(
+            dir.path().join(".omegon/validators.toml"),
+            r#"
+            version = 1
+
+            [[validators]]
+            id = "project.docs"
+            include = ["**/*.md"]
+            levels = ["standard"]
+            mode = "replace"
+            replaces = ["core.markdown-basic"]
+
+            [validators.runner]
+            kind = "process"
+            program = "/bin/echo"
+            args = ["docs-ok"]
+            path_arg_mode = "append"
+        "#,
+        )
+        .unwrap();
+        let path = dir.path().join("README.md");
+        std::fs::write(&path, "# docs").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("Validated 1 path(s) with 1 applicable validator run(s)"),
+            "{message}"
+        );
+        assert!(
+            message.contains("Operator validator `project.docs`"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("embedded UTF-8/trailing-whitespace hygiene"),
+            "{message}"
+        );
+        assert_eq!(result.details["validators_run"], 1);
+        assert_eq!(result.details["builtin_validators_run"], 0);
+        assert_eq!(result.details["operator_validators_run"], 1);
+    }
+
+    #[tokio::test]
+    async fn embedded_json_validator_reports_parse_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model-registry.json");
+        std::fs::write(&path, "{ invalid json").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("Embedded validation (`embedded serde_json parser`)"),
+            "{message}"
+        );
+        assert!(message.contains("invalid JSON"), "{message}");
+        assert_eq!(result.details["validators_run"], 1);
+        assert_eq!(result.details["builtin_validators_run"], 1);
+    }
+
+    #[tokio::test]
+    async fn embedded_toml_and_yaml_validators_pass_valid_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let toml_path = dir.path().join("config.toml");
+        let yaml_path = dir.path().join("workflow.yaml");
+        std::fs::write(&toml_path, "[package]\nname = \"demo\"\n").unwrap();
+        std::fs::write(&yaml_path, "name: demo\nsteps:\n  - run: test\n").unwrap();
+
+        let result = execute(
+            &[toml_path.clone(), yaml_path.clone()],
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(message.contains("embedded toml parser"), "{message}");
+        assert!(message.contains("embedded serde_yaml parser"), "{message}");
+        assert!(message.contains("✓ passed"), "{message}");
+        assert_eq!(result.details["validators_run"], 2);
+        assert_eq!(result.details["builtin_validators_run"], 2);
+    }
+
+    #[tokio::test]
+    async fn embedded_markdown_validator_reports_trailing_whitespace() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("README.md");
+        std::fs::write(&path, "# docs  \n").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("embedded UTF-8/trailing-whitespace hygiene"),
+            "{message}"
+        );
+        assert!(message.contains("trailing whitespace"), "{message}");
+        assert_eq!(result.details["validators_run"], 1);
+        assert_eq!(result.details["builtin_validators_run"], 1);
     }
 }
