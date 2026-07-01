@@ -3038,6 +3038,164 @@ impl App {
         self.open_menu_projection(self.context_menu_projection());
     }
 
+    fn variables_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
+        };
+
+        let mut menu = MenuProjection::new("variables", "Variables");
+        menu.summary = Some("Session-scoped runtime configuration. Values are printable by design; put credentials in /secrets instead.".into());
+        menu.footer = Some("↑/↓ navigate · Enter run/prepare action · / filter · Esc close · /variables status for text readout".into());
+
+        let snapshot = crate::control::variables::variables_snapshot();
+        let variable_rows = if snapshot.is_empty() {
+            vec![MenuRowProjection {
+                id: "variables.inventory.empty".into(),
+                label: "No session variables set".into(),
+                description: "Use Actions to set printable runtime config for this session.".into(),
+                value: None,
+                kind: MenuRowKind::Object,
+                badges: vec![MenuBadgeProjection {
+                    label: "empty".into(),
+                    tone: MenuBadgeTone::Neutral,
+                }],
+                metadata: vec!["session scope".into(), "printable".into()],
+                primary_action: None,
+                actions: Vec::new(),
+                safety: None,
+                availability: None,
+            }]
+        } else {
+            snapshot
+                .into_iter()
+                .map(|(name, value)| {
+                    let sensitive_hint =
+                        crate::control::variables::variable_name_has_sensitive_hint(&name);
+                    let mut badges = vec![MenuBadgeProjection {
+                        label: "session".into(),
+                        tone: MenuBadgeTone::Info,
+                    }];
+                    if sensitive_hint {
+                        badges.push(MenuBadgeProjection {
+                            label: "sensitive?".into(),
+                            tone: MenuBadgeTone::Warning,
+                        });
+                    }
+                    let mut metadata = vec!["value visible".into(), "scope: session".into()];
+                    if sensitive_hint {
+                        metadata.push("consider /secrets".into());
+                    }
+                    MenuRowProjection {
+                        id: format!("variables.inventory.{name}"),
+                        label: name.clone(),
+                        description: if sensitive_hint {
+                            "Printable variable name looks sensitive; use /secrets for credentials."
+                                .into()
+                        } else {
+                            "Printable session variable.".into()
+                        },
+                        value: Some(value),
+                        kind: MenuRowKind::Object,
+                        badges,
+                        metadata,
+                        primary_action: Some(MenuActionProjection::command(
+                            format!("variables.get.{name}"),
+                            "Get",
+                            format!("/variables get {name}"),
+                        )),
+                        actions: vec![MenuActionProjection::prime_editor(
+                            format!("variables.delete.{name}"),
+                            "Delete",
+                            format!("/variables delete {name}"),
+                            "Press Enter to delete this variable from the session",
+                        )],
+                        safety: None,
+                        availability: None,
+                    }
+                })
+                .collect()
+        };
+
+        menu.tabs = vec![MenuTabProjection {
+            id: "inventory".into(),
+            label: "Inventory".into(),
+            groups: vec![MenuGroupProjection {
+                id: "variables.inventory".into(),
+                label: "Session variables".into(),
+                description: Some("Printable runtime config currently available to Omegon-managed process launches.".into()),
+                rows: variable_rows,
+            }],
+        }, MenuTabProjection {
+            id: "actions".into(),
+            label: "Actions".into(),
+            groups: vec![MenuGroupProjection {
+                id: "variables.actions".into(),
+                label: "Variable actions".into(),
+                description: Some("Prepare variable commands. Values entered here are not secret and may be displayed.".into()),
+                rows: vec![
+                    MenuRowProjection {
+                        id: "variables.status".into(),
+                        label: "List variables".into(),
+                        description: "Show printable session variables and values.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Success }],
+                        metadata: vec!["/variables status".into(), "values visible".into()],
+                        primary_action: Some(MenuActionProjection::command("variables.status.primary", "List", "/variables status")),
+                        actions: Vec::new(),
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "variables.set".into(),
+                        label: "Set variable".into(),
+                        description: "Prepare /variables set NAME VALUE for printable runtime config.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "printable".into(), tone: MenuBadgeTone::Warning }],
+                        metadata: vec!["/variables set NAME VALUE".into(), "not for secrets".into()],
+                        primary_action: Some(MenuActionProjection::prime_editor("variables.set.prepare", "Prepare", "/variables set ", "Type NAME VALUE; use /secrets for credentials")),
+                        actions: Vec::new(),
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "variables.get".into(),
+                        label: "Get variable".into(),
+                        description: "Prepare /variables get NAME.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Success }],
+                        metadata: vec!["/variables get NAME".into()],
+                        primary_action: Some(MenuActionProjection::prime_editor("variables.get.prepare", "Prepare", "/variables get ", "Type variable name to print")),
+                        actions: Vec::new(),
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "variables.delete".into(),
+                        label: "Delete variable".into(),
+                        description: "Prepare /variables delete NAME.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Danger }],
+                        metadata: vec!["/variables delete NAME".into(), "session only".into()],
+                        primary_action: Some(MenuActionProjection::prime_editor("variables.delete.prepare", "Prepare", "/variables delete ", "Type the exact variable name to delete")),
+                        actions: Vec::new(),
+                        safety: None,
+                        availability: None,
+                    },
+                ],
+            }],
+        }];
+        menu
+    }
+
+    fn open_variables_menu(&mut self) {
+        self.open_menu_projection(self.variables_menu_projection());
+    }
+
     fn secrets_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
         use crate::surfaces::menu::{
             MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
@@ -5347,6 +5505,10 @@ warning: {warning}"
 
     /// Handle /variables — non-secret runtime configuration.
     fn handle_variables(&mut self, args: &str, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
+        if args.trim().is_empty() {
+            self.open_variables_menu();
+            return SlashResult::Handled;
+        }
         if let Some(command) = canonical_slash_command("variables", args) {
             if let Some(request) = crate::control_runtime::control_request_from_slash(&command) {
                 let _ = tx.try_send(TuiCommand::ExecuteControl {

@@ -502,6 +502,10 @@ impl AgentSetup {
                 secrets.clone(),
             )),
         )));
+        bus.register(Box::new(features::adapter::ToolAdapter::new(
+            "variable-tools",
+            Box::new(tools::variable_tools::VariableToolsProvider),
+        )));
 
         let openapi_configs = tools::openapi_config::load_openapi_configs(&project_root);
         if !openapi_configs.is_empty() {

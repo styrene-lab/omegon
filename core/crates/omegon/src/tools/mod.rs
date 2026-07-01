@@ -2140,3 +2140,5 @@ open_questions:
         assert!(b2.is_inside_boundary(Path::new("/opt/shared/file.txt")));
     }
 }
+
+pub mod variable_tools;

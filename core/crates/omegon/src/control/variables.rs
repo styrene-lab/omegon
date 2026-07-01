@@ -29,6 +29,19 @@ fn variable_name_looks_secret(name: &str) -> bool {
     .any(|needle| upper.contains(needle))
 }
 
+pub fn variables_snapshot() -> Vec<(String, String)> {
+    session_variables()
+        .lock()
+        .expect("variables lock")
+        .iter()
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
+pub fn variable_name_has_sensitive_hint(name: &str) -> bool {
+    variable_name_looks_secret(name)
+}
+
 pub async fn variables_view_response() -> SlashCommandResponse {
     let vars = session_variables().lock().expect("variables lock");
     let mut out = String::new();

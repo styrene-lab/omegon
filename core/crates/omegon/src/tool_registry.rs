@@ -163,6 +163,13 @@ pub mod secrets {
     pub const SECRET_DELETE: &str = "secret_delete";
 }
 
+/// Printable session variable management — owned by `tools::variable_tools::VariableToolsProvider`
+pub mod variables {
+    pub const VARIABLE_SET: &str = "variable_set";
+    pub const VARIABLE_LIST: &str = "variable_list";
+    pub const VARIABLE_DELETE: &str = "variable_delete";
+}
+
 /// Mutation (evolutionary skill/diagnostic creation) — owned by `features::mutation`
 pub mod mutation {
     pub const MUTATION_REVIEW: &str = "mutation_review";
@@ -189,7 +196,7 @@ pub mod loop_jobs {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 79;
+pub const TOOL_COUNT: usize = 82;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -283,6 +290,10 @@ pub fn all_static_names() -> Vec<&'static str> {
         secrets::SECRET_SET,
         secrets::SECRET_LIST,
         secrets::SECRET_DELETE,
+        // variables (3)
+        variables::VARIABLE_SET,
+        variables::VARIABLE_LIST,
+        variables::VARIABLE_DELETE,
         // mutation (4)
         mutation::MUTATION_REVIEW,
         mutation::MUTATION_ACCEPT,
@@ -294,7 +305,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         loop_jobs::LOOP_STATUS,
         loop_jobs::LOOP_STOP,
     ]
-    // Total: 79
+    // Total: 82
 }
 
 #[cfg(test)]
