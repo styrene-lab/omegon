@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "lastReviewed": "2026-06-11",
+  "lastReviewed": "2026-07-01",
   "_comment_inference": [
     "Inference defaults for dynamically discovered models (Ollama Cloud, local Ollama).",
     "When a model is not in the 'models' array, these heuristics are used.",
@@ -77,7 +77,7 @@
       "xai": "grok-4-0709"
     },
     "B": {
-      "anthropic": "claude-sonnet-4-6",
+      "anthropic": "claude-sonnet-5",
       "openai": "gpt-5.4",
       "openai-codex": "gpt-5.4",
       "google": "gemini-2.5-flash",
@@ -588,6 +588,20 @@
       ],
       "recommended": false,
       "description": "Previous Opus release retained for compatibility; not recommended for new sessions now that Opus 4.8 is available",
+      "supportsReasoning": true
+    },
+    {
+      "id": "claude-sonnet-5",
+      "provider": "anthropic",
+      "name": "Claude Sonnet 5",
+      "contextInput": 1000000,
+      "contextOutput": 65536,
+      "capabilities": [
+        "reasoning",
+        "coding",
+        "vision"
+      ],
+      "description": "Latest Sonnet 5 balanced performance profile for reasoning, coding, and vision",
       "supportsReasoning": true
     },
     {

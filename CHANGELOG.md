@@ -49,6 +49,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Compressed slim activity rows to their rendered content height so completed one-line tool activity no longer leaves blank Workbench rows.
 
 ### Added
+- Added Anthropic Claude Sonnet 5 to the model registry and promoted it as the Anthropic B-grade balanced route while keeping Claude Fable 5 as the S-grade/default route.
 - Added an Actions tab to the shared `/memory` menu with recall/list/focus/release/compact rows; argument-taking actions prime the editor and memory compaction requires confirmation.
 - Added refreshable menu action close policies and menu-level action hotkeys so `/ui` toggles and lean/full shortcuts update the active menu in place.
 - Added typed menu action dispositions for run-command versus focus-row actions, and routed TUI menu dispatch through the typed action substrate while retaining compatibility helpers.
