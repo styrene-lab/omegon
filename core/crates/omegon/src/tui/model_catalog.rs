@@ -255,6 +255,42 @@ impl ModelCatalog {
             }
         }
 
+        // In unauthenticated CI / first-run environments, no provider keys and no
+        // Ollama daemon may be present. Keep the selector usable and tests
+        // deterministic by exposing the registry-backed default provider as
+        // unavailable options instead of returning an empty catalog.
+        if providers.is_empty() {
+            let models: Vec<ModelInfo> = reg
+                .models_for_provider("anthropic")
+                .into_iter()
+                .map(|m| ModelInfo {
+                    id: format!("anthropic:{}", m.id),
+                    name: m.name.clone(),
+                    provider: "Anthropic".to_string(),
+                    context_input: m.context_input,
+                    context_output: m.context_output,
+                    capabilities: m
+                        .capabilities
+                        .iter()
+                        .filter_map(|c| match c.as_str() {
+                            "reasoning" => Some(Capability::Reasoning),
+                            "coding" => Some(Capability::Coding),
+                            "vision" => Some(Capability::Vision),
+                            "fast" => Some(Capability::Fast),
+                            "instruction" => Some(Capability::Instruction),
+                            "multilingual" => Some(Capability::Multilingual),
+                            _ => None,
+                        })
+                        .collect(),
+                    description: m.description.clone(),
+                    available: false,
+                })
+                .collect();
+            if !models.is_empty() {
+                providers.insert("Anthropic".to_string(), models);
+            }
+        }
+
         ModelCatalog { providers }
     }
 

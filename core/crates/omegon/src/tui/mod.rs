@@ -1940,7 +1940,9 @@ mod workspace_context_tests {
     #[test]
     fn workbench_git_branch_includes_ahead_behind_and_dirty_markers() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(dir.path()).unwrap();
+        let mut init_opts = git2::RepositoryInitOptions::new();
+        init_opts.initial_head("main");
+        let repo = git2::Repository::init_opts(dir.path(), &init_opts).unwrap();
         {
             let mut config = repo.config().unwrap();
             config.set_str("user.name", "Omegon Test").unwrap();

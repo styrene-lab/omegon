@@ -384,6 +384,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Fixed Linux CI failures in the Tests workflow: pin TUI snapshot runs to the Nerd Font glyph profile, make git-branch tests independent of host default branch names, avoid `/tmp` auto-allow false positives in trusted-directory path tests, serialize ACP `OMEGON_HOME` mutation tests, keep the model selector usable without provider credentials, and make settings-menu assertions robust to temp-path wrapping.
 - Fixed the release recipe failing at `git add .omegon/milestones.json`: a blanket `.omegon/` gitignore entry (introduced with the Flynt local-state block) shadowed tracked release state; replaced with granular ignores for runtime/history/audit/test-generated state.
 - Fixed `/model list` in the TUI to open the interactive model selector instead of dumping the available-models text readout into the terminal, and closed parent structured menus when launching selector rows so arrow keys move the selector instead of the underlying menu.
 - Hardened shared `/extension` and `/runtime` menu actions: refresh/update require confirmed menu activation, and extension search now primes `/extension search ` for an explicit query instead of executing a query-less menu command.

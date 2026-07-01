@@ -7835,11 +7835,24 @@ fn settings_menu_renders_profile_source_and_drift_actions() {
     app.open_settings_menu();
     let rendered = render_app_to_string(&mut app, 120, 32);
 
-    assert!(rendered.contains("profile: project"), "{rendered}");
-    assert!(rendered.contains("file:"), "{rendered}");
-    assert!(rendered.contains("runtime drift"), "{rendered}");
-    assert!(rendered.contains("/profile save"), "{rendered}");
-    assert!(rendered.contains("/profile apply"), "{rendered}");
+    // The drift hint line wraps at an environment-dependent column (the
+    // tempdir path length differs across platforms), so phrase assertions
+    // must survive a line break landing mid-phrase. Collapse the render to
+    // a single whitespace-normalized line before asserting.
+    let flat = rendered
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace('│', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(flat.contains("profile: project"), "{rendered}");
+    assert!(flat.contains("file:"), "{rendered}");
+    assert!(flat.contains("runtime drift"), "{rendered}");
+    assert!(flat.contains("/profile save"), "{rendered}");
+    assert!(flat.contains("/profile apply"), "{rendered}");
 }
 
 #[test]
