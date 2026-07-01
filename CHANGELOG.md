@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Fixed
+- Fixed `/model list` in the TUI to open the interactive model selector instead of dumping the available-models text readout into the terminal, and closed parent structured menus when launching selector rows so arrow keys move the selector instead of the underlying menu.
 - Hardened shared `/extension` and `/runtime` menu actions: refresh/update require confirmed menu activation, and extension search now primes `/extension search ` for an explicit query instead of executing a query-less menu command.
 - Kept structured menus open underneath menu-launched command output and rendered those raw slash responses in a returnable, scrollable command panel instead of dumping them into the conversation transcript.
 - Routed `/settings` through the shared structured menu substrate and removed the legacy in-app settings screen render/input state from the TUI app.

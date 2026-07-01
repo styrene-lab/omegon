@@ -3726,6 +3726,8 @@ impl App {
                 SlashResult::Handled
             }
             crate::surfaces::menu::MenuActionDisposition::OpenSelector => {
+                self.active_menu = None;
+                self.pending_menu_confirmation = None;
                 match action.target_row_id.as_deref() {
                     Some("context.class") => self.open_context_selector(),
                     Some("model.current") => self.open_model_selector(),
@@ -4109,14 +4111,24 @@ warning: {warning}"));
                     active: choice.active,
                 })
                 .collect();
+            self.active_menu = None;
+            self.pending_menu_confirmation = None;
             self.selector = Some(selector::Selector::new(&row_label, options));
             self.selector_kind = Some(kind);
             return;
         }
 
         match row_id.as_str() {
-            "runtime.model" => self.open_model_selector(),
-            "runtime.max_turns" => self.open_max_turns_selector(),
+            "runtime.model" => {
+                self.active_menu = None;
+                self.pending_menu_confirmation = None;
+                self.open_model_selector();
+            }
+            "runtime.max_turns" => {
+                self.active_menu = None;
+                self.pending_menu_confirmation = None;
+                self.open_max_turns_selector();
+            }
             "workspace.sandbox" => self.toggle_settings_sandbox(),
             "updates.auto_update" => self.toggle_settings_auto_update(),
             "workspace.trusted_directories" => {
@@ -7790,7 +7802,7 @@ Scroll transcript:
                 } else {
                     match canonical_slash_command("model", args) {
                         Some(CanonicalSlashCommand::ModelList) => {
-                            let _ = tx.try_send(TuiCommand::ModelList { respond_to: None });
+                            self.open_model_selector();
                             SlashResult::Handled
                         }
                         Some(CanonicalSlashCommand::SetModelGrade(grade)) => {

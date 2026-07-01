@@ -3867,6 +3867,42 @@ fn slash_login_provider_opens_hidden_secret_input_for_api_key_provider() {
     assert!(app.command_panel.is_none());
 }
 
+
+#[test]
+fn model_menu_current_row_closes_menu_before_opening_selector() {
+    let mut app = test_app();
+    app.open_model_menu();
+    {
+        let menu = app.active_menu.as_mut().expect("model menu");
+        assert!(menu.state.select_row_by_id(&menu.projection, "model.current"));
+    }
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_action(&menu.projection))
+        .expect("model selector action");
+
+    assert!(matches!(
+        app.execute_active_menu_action(action, &test_tx()),
+        SlashResult::Handled
+    ));
+    assert!(app.active_menu.is_none(), "selector must receive arrow keys");
+    assert!(app.selector.is_some(), "model selector should be open");
+    assert!(matches!(app.selector_kind, Some(SelectorKind::Model)));
+}
+
+#[test]
+fn slash_model_list_opens_model_selector_instead_of_text_dump() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/model list", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.selector.is_some(), "/model list should open interactive selector");
+    assert!(matches!(app.selector_kind, Some(SelectorKind::Model)));
+}
+
 #[test]
 fn slash_logout_without_provider_shows_provider_usage() {
     let mut app = test_app();
@@ -7780,6 +7816,29 @@ fn settings_menu_filter_backspace_clamps_empty_results() {
 }
 
 #[test]
+fn settings_menu_choice_row_closes_menu_before_opening_selector() {
+    let mut app = test_app();
+    app.open_settings_menu();
+    {
+        let menu = app.active_menu.as_mut().expect("settings menu");
+        assert!(menu.state.select_row_by_id(&menu.projection, "runtime.thinking"));
+    }
+    let action = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.state.selected_action(&menu.projection))
+        .expect("thinking selector action");
+
+    assert!(matches!(
+        app.execute_active_menu_action(action, &test_tx()),
+        SlashResult::Handled
+    ));
+    assert!(app.active_menu.is_none(), "selector must receive arrow keys");
+    assert!(app.selector.is_some(), "settings choice selector should be open");
+    assert!(matches!(app.selector_kind, Some(SelectorKind::ThinkingLevel)));
+}
+
+#[test]
 fn settings_menu_max_turns_row_queues_existing_control_request() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
@@ -7789,8 +7848,9 @@ fn settings_menu_max_turns_row_queues_existing_control_request() {
     let action = app.active_menu.as_ref().and_then(|menu| menu.state.selected_action(&menu.projection));
     assert!(action.is_some(), "max turns row should expose a typed action");
     app.execute_active_menu_action(action.unwrap(), &tx);
+    assert!(app.active_menu.is_none(), "selector must receive arrow keys");
+    assert!(app.selector.is_some(), "max turns selector should be open");
     app.selector.as_mut().unwrap().cursor = 4;
-
     let message = app.confirm_selector(&tx).expect("max turns message");
 
     assert_eq!(message, "Max turns → 100");
