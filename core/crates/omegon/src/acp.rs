@@ -4649,6 +4649,7 @@ mod extension_metadata_tests {
         let home = tempfile::tempdir().unwrap();
         let agent = Rc::new(OmegonAcpAgent::new("test-model"));
         *agent.session_cwd.borrow_mut() = Some(home.path().to_path_buf());
+        let _env_guard = crate::test_support::env::lock_async().await;
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe {
             std::env::set_var("OMEGON_HOME", home.path());
@@ -4949,6 +4950,7 @@ optional = ["DUMMY_OPTIONAL"]
         )
         .unwrap();
 
+        let _env_guard = crate::test_support::env::lock_async().await;
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
 
@@ -5015,6 +5017,7 @@ auto_disabled = true
         )
         .unwrap();
 
+        let _env_guard = crate::test_support::env::lock_async().await;
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
 
@@ -5241,6 +5244,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 "#,
         )
         .unwrap();
+        let _env_guard = crate::test_support::env::lock_async().await;
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
 
@@ -5292,6 +5296,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 "#,
         )
         .unwrap();
+        let _env_guard = crate::test_support::env::lock_async().await;
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
 
@@ -5320,6 +5325,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
     async fn capability_assistant_readiness_reports_missing_assistant() {
         let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
+        let _env_guard = crate::test_support::env::lock_async().await;
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
 
@@ -5360,6 +5366,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 "#,
         )
         .unwrap();
+        let _env_guard = crate::test_support::env::lock_async().await;
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
 
@@ -5412,6 +5419,7 @@ required = ["BRAVE_API_KEY"]
         secrets
             .set_recipe("BRAVE_API_KEY", "env:OMEGON_TEST_BRAVE_KEY")
             .unwrap();
+        let _env_guard = crate::test_support::env::lock_async().await;
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
 
@@ -5481,6 +5489,7 @@ required = ["BRAVE_API_KEY"]
             "[plugin]\nid = \"recro-omegon\"\nname = \"recro-omegon\"\ntype = \"skill\"\nversion = \"0.1.0\"\ndescription = \"Recro workflows\"\n",
         )
         .unwrap();
+        let _env_guard = crate::test_support::env::lock_async().await;
         let previous_home = std::env::var_os("OMEGON_HOME");
         unsafe {
             std::env::set_var("OMEGON_HOME", home.path());

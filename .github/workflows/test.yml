@@ -29,6 +29,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run omegon tests
+        env:
+          OMEGON_NERD_FONT: "1"
         run: cargo test -p omegon --bin omegon -- --nocapture
 
   rust-integration:
@@ -40,6 +42,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run omegon integration tests
+        env:
+          OMEGON_NERD_FONT: "1"
         run: cargo test -p omegon --tests -- --nocapture
 
   rust-standalone-crates:

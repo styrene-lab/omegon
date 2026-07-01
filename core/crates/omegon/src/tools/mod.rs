@@ -1852,24 +1852,32 @@ open_questions:
 
     #[test]
     fn trusted_directory_from_settings_allows_writes() {
+        // Paths must live outside std::env::temp_dir(): everything under the
+        // system temp dir is auto-allowed by is_allowed_temp_path (on Linux
+        // temp_dir() IS /tmp, which made /tmp-based probes vacuous/wrong).
+        let home = dirs::home_dir().expect("home dir");
+        let trusted = home.join(format!("omegon-test-trusted-{}", std::process::id()));
+        let untrusted = home.join(format!("omegon-test-untrusted-{}", std::process::id()));
+
         let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
         if let Ok(mut s) = settings.lock() {
-            s.trusted_directories = vec!["/tmp/obsidian-vault".to_string()];
+            s.trusted_directories = vec![trusted.display().to_string()];
         }
-        let tools = CoreTools::new(PathBuf::from("/tmp/workspace")).with_settings(settings);
+        let tools = CoreTools::new(PathBuf::from("/nonexistent-workspace")).with_settings(settings);
 
-        // /tmp/obsidian-vault/file.md should be allowed
+        // Trusted directory should be allowed
         // Create the directory so canonicalize works
-        let _ = std::fs::create_dir_all("/tmp/obsidian-vault");
-        let result = tools.resolve_path("/tmp/obsidian-vault/eval.md");
+        std::fs::create_dir_all(&trusted).unwrap();
+        let result = tools.resolve_path(&trusted.join("eval.md").display().to_string());
+        let _ = std::fs::remove_dir_all(&trusted);
         assert!(
             result.is_ok(),
             "trusted directory should be allowed: {:?}",
             result.unwrap_err()
         );
 
-        // /tmp/other-dir should still be rejected
-        let result = tools.resolve_path("/tmp/other-dir/file.txt");
+        // A non-trusted sibling outside workspace and temp should be rejected
+        let result = tools.resolve_path(&untrusted.join("file.txt").display().to_string());
         assert!(result.is_err());
     }
 
