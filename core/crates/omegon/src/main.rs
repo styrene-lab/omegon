@@ -6281,8 +6281,6 @@ async fn run_interactive_active_turn(
     events_tx: broadcast::Sender<AgentEvent>,
     active: ActiveTurnMeta,
 ) -> InteractiveAgentState {
-    const CANCEL_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
-
     let cancel_keeps_prompt = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut loop_config =
         build_interactive_loop_config(&runtime, &shared_settings, &pending_compact);
@@ -6339,32 +6337,17 @@ async fn run_interactive_active_turn(
         tokio::select! {
             result = &mut run => Some(result),
             _ = cancel.cancelled() => {
+                let keep_prompt = cancel_keeps_prompt.load(std::sync::atomic::Ordering::Relaxed);
+                let disposition = if keep_prompt { "interrupted · kept" } else { "aborted · forgotten" };
                 tracing::warn!(
                     runtime_turn_id = active.runtime_turn_id,
-                    "operator cancellation requested; waiting for agent loop to drain"
+                    "operator cancellation requested; abandoning active turn to recover operator surface"
                 );
                 let _ = events_tx.send(AgentEvent::SystemNotification {
-                    message: "Interrupt requested — waiting up to 10s for the active turn to stop cleanly.".into(),
+                    message: format!("Interrupt requested — recovered the operator surface ({disposition}). The abandoned provider/tool request may finish in the background."),
                 });
-                match tokio::time::timeout(CANCEL_DRAIN_GRACE, &mut run).await {
-                    Ok(result) => Some(result),
-                    Err(_) => {
-                        let keep_prompt = cancel_keeps_prompt.load(std::sync::atomic::Ordering::Relaxed);
-                        let disposition = if keep_prompt { "interrupted · kept" } else { "aborted · forgotten" };
-                        tracing::error!(
-                            runtime_turn_id = active.runtime_turn_id,
-                            "agent loop did not stop after cancellation grace period; forcing TUI recovery"
-                        );
-                        let _ = events_tx.send(AgentEvent::SystemNotification {
-                            message: format!("Interrupted turn did not stop within 10s; recovered the operator surface ({disposition}). The abandoned provider/tool request may finish in the background."),
-                        });
-                        let _ = events_tx.send(AgentEvent::MessageAbort {
-                            reason: Some(disposition.to_string()),
-                        });
-                        let _ = events_tx.send(AgentEvent::AgentEnd);
-                        None
-                    }
-                }
+                let _ = events_tx.send(AgentEvent::AgentEnd);
+                None
             }
         }
     };
