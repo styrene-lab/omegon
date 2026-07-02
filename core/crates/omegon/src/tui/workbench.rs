@@ -1244,7 +1244,8 @@ fn prioritized_operation_child_indices(
             }
         }
     }
-    indices.sort_unstable();
+    // Keep priority order rather than spawn order: constrained Workbench space
+    // should surface active/result-ready delegates before older low-signal rows.
     indices
 }
 
@@ -1394,6 +1395,136 @@ mod tests {
             "{row:?}"
         );
         assert_eq!(row.detail.as_deref(), Some("tasks 1/4"));
+    }
+
+    #[test]
+    fn delegate_completed_worker_projection_uses_done_label() {
+        let child = OperationChildRow {
+            operation_kind: omegon_traits::OperationKind::Delegate,
+            id: "task-2".into(),
+            label: "delegate-2".into(),
+            status: OperationChildStatus::Succeeded,
+            status_label: "completed".into(),
+            last_activity: None,
+            progress: None,
+            result_summary: Some("validated".into()),
+            failure: None,
+            result_viewed: false,
+        };
+
+        let row = WorkerChromeRowProjection::from_operation_child(&child);
+
+        assert_eq!(row.status, "done");
+        assert!(
+            row.detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("result ready")),
+            "unviewed terminal delegate should expose result-ready detail: {row:?}"
+        );
+    }
+
+    #[test]
+    fn constrained_delegate_rows_prefer_active_and_unviewed_terminal_results() {
+        let children = vec![
+            OperationChildRow {
+                operation_kind: omegon_traits::OperationKind::Delegate,
+                id: "old-done".into(),
+                label: "old-done".into(),
+                status: OperationChildStatus::Succeeded,
+                status_label: "completed".into(),
+                result_viewed: true,
+                last_activity: None,
+                progress: None,
+                result_summary: None,
+                failure: None,
+            },
+            OperationChildRow {
+                operation_kind: omegon_traits::OperationKind::Delegate,
+                id: "running".into(),
+                label: "running".into(),
+                status: OperationChildStatus::Running,
+                status_label: "running".into(),
+                result_viewed: true,
+                last_activity: None,
+                progress: None,
+                result_summary: None,
+                failure: None,
+            },
+            OperationChildRow {
+                operation_kind: omegon_traits::OperationKind::Delegate,
+                id: "ready".into(),
+                label: "ready".into(),
+                status: OperationChildStatus::Succeeded,
+                status_label: "completed".into(),
+                result_viewed: false,
+                last_activity: None,
+                progress: None,
+                result_summary: Some("ready".into()),
+                failure: None,
+            },
+            OperationChildRow {
+                operation_kind: omegon_traits::OperationKind::Delegate,
+                id: "queued".into(),
+                label: "queued".into(),
+                status: OperationChildStatus::Queued,
+                status_label: "queued".into(),
+                result_viewed: true,
+                last_activity: None,
+                progress: None,
+                result_summary: None,
+                failure: None,
+            },
+        ];
+
+        let visible = prioritized_operation_child_indices(&children, 3);
+
+        assert_eq!(visible, vec![1, 2]);
+    }
+
+    #[test]
+    fn hidden_delegate_rows_render_hidden_count() {
+        let child = |id: &str| OperationChildRow {
+            operation_kind: omegon_traits::OperationKind::Delegate,
+            id: id.into(),
+            label: id.into(),
+            status: OperationChildStatus::Succeeded,
+            status_label: "completed".into(),
+            result_viewed: true,
+            last_activity: None,
+            progress: None,
+            result_summary: None,
+            failure: None,
+        };
+        let projection = OperationWorkbenchProjection {
+            operation: omegon_traits::OperationRef::delegate("delegate"),
+            running: 0,
+            completed: 3,
+            failed: 0,
+            pending_results: 0,
+            children: vec![child("done-1"), child("done-2"), child("done-3")],
+        };
+        let backend = ratatui::backend::TestBackend::new(80, 3);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_operation_workbench_panel(
+                    frame.area(),
+                    frame,
+                    &super::super::theme::Alpharius,
+                    &projection,
+                );
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let mut rendered = String::new();
+        for y in 0..3 {
+            for x in 0..80 {
+                rendered.push_str(buf[(x, y)].symbol());
+            }
+        }
+
+        assert!(rendered.contains("⋯ 2 hidden"), "{rendered}");
     }
 
     #[test]
