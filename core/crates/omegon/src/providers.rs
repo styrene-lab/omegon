@@ -311,6 +311,9 @@ pub fn infer_provider_id(model_spec: &str) -> String {
     if lower == "local" {
         return "ollama".to_string();
     }
+    if lower == "deepseek-local" {
+        return "dwarfstar".to_string();
+    }
     if lower.starts_with("claude") || matches!(lower.as_str(), "haiku" | "sonnet" | "opus") {
         return "anthropic".to_string();
     }
@@ -388,6 +391,9 @@ pub fn explicit_provider_id(model_spec: &str) -> Option<String> {
 
 fn model_id_from_spec(model_spec: &str) -> &str {
     let trimmed = model_spec.trim();
+    if trimmed.eq_ignore_ascii_case("deepseek-local") {
+        return "deepseek-v4-flash";
+    }
     if let Some((head, tail)) = trimmed.split_once(':')
         && is_known_provider_id(head)
     {
@@ -2839,7 +2845,9 @@ pub fn compat_base_url(provider_id: &str) -> Option<&'static str> {
         "google-antigravity" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
         "huggingface" => Some("https://router.huggingface.co"),
         "ollama" => Some("http://localhost:11434"),
-        "dwarfstar" => Some("http://127.0.0.1:8000/v1"),
+        // OpenAIClient appends the /v1 chat-completions path itself; keep the
+        // DwarfStar base at the server root to avoid double-/v1 endpoints.
+        "dwarfstar" => Some("http://127.0.0.1:8000"),
         _ => None,
     }
 }
@@ -4101,6 +4109,7 @@ mod tests {
         assert_eq!(infer_provider_id("qwen3:30b"), "ollama");
         assert_eq!(infer_provider_id("local:qwen3:30b"), "ollama");
         assert_eq!(infer_provider_id("local"), "ollama");
+        assert_eq!(infer_provider_id("deepseek-local"), "dwarfstar");
         assert_eq!(
             infer_provider_id("ollama-cloud:gpt-oss:120b-cloud"),
             "ollama-cloud"
@@ -5461,6 +5470,11 @@ mod tests {
             "gpt-5.4-mini"
         );
         assert_eq!(model_id_from_spec("ollama:qwen3:32b"), "qwen3:32b");
+        assert_eq!(
+            model_id_from_spec("dwarfstar:deepseek-v4-flash"),
+            "deepseek-v4-flash"
+        );
+        assert_eq!(model_id_from_spec("deepseek-local"), "deepseek-v4-flash");
 
         // Bare model IDs (no known provider prefix) — returned as-is
         assert_eq!(model_id_from_spec("claude-sonnet-4-6"), "claude-sonnet-4-6");

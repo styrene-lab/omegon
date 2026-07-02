@@ -30,6 +30,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+
 - Added guided CRUD affordances to `/variables` and `/secrets` structured menus, including variable update actions, common variable templates, recipe-specific secret rows, and per-secret clear/replace actions that never display secret values.
 - Added `/variables` and `/vars` as the MVP non-secret session configuration surface, with list/status, set, get, and delete/remove/rm command plumbing plus plain-value control readouts; secret-like names are flagged with `/secrets` guidance without blocking operator-defined variables.
 - Added design notes for the `/variables` non-secret runtime configuration surface, including second- and third-order effects around OCI deployment, process injection, trust boundaries, and project portability.
@@ -45,6 +46,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Hardened `validate`'s built-in process execution to run validator programs directly with fixed argument vectors instead of shell interpolation.
 - Split the built-in `validate` tool checks into bounded Rust, TypeScript, and Python validator implementations behind a shared validator trait, preparing the surface for extension-backed validators.
 - Added Anthropic Claude Sonnet 5 to the model registry and promoted it as the Anthropic B-grade balanced route while keeping Claude Fable 5 as the S-grade/default route.
+- Added `scripts/setup-dwarfstar.sh` and `scripts/start-dwarfstar.sh`, opt-in happy-path helpers for cloning/building/downloading and launching a local DwarfStar/ds4 OpenAI-compatible server with RAM guard defaults and Omegon consumption hints.
+
 - Added an Actions tab to the shared `/memory` menu with recall/list/focus/release/compact rows; argument-taking actions prime the editor and memory compaction requires confirmation.
 - Added refreshable menu action close policies and menu-level action hotkeys so `/ui` toggles and lean/full shortcuts update the active menu in place.
 - Added typed menu action dispositions for run-command versus focus-row actions, and routed TUI menu dispatch through the typed action substrate while retaining compatibility helpers.
