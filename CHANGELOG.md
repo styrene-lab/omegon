@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Added semantic branch labels for delegates so Workbench rows can display human-readable labels such as `verify/tests` while preserving `delegate_N` as the stable result handle, and refreshed shared delegate progress immediately on background completion/failure so rows converge to terminal state without waiting for turn-end polling.
+
 ### Fixed
 
 - Restored operator recovery when interrupting wedged turns by abandoning the active turn immediately after cancellation instead of waiting inside the potentially stuck turn path.

@@ -1405,7 +1405,7 @@ mod tests {
         let child = OperationChildRow {
             operation_kind: omegon_traits::OperationKind::Delegate,
             id: "task-2".into(),
-            label: "delegate-2".into(),
+            label: "verify/tests".into(),
             status: OperationChildStatus::Succeeded,
             status_label: "completed".into(),
             last_activity: None,
@@ -1417,6 +1417,7 @@ mod tests {
 
         let row = WorkerChromeRowProjection::from_operation_child(&child);
 
+        assert_eq!(row.label, "verify/tests");
         assert_eq!(row.status, "done");
         assert!(
             row.detail

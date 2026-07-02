@@ -95,6 +95,9 @@ pub enum DelegateTaskStatus {
 #[derive(Debug, Clone)]
 pub struct DelegateTask {
     pub task_id: String,
+    /// Human-readable semantic branch label shown in Workbench rows.
+    /// The task_id remains the stable machine handle for result retrieval.
+    pub label: Option<String>,
     pub agent_name: Option<String>,
     pub task_description: String,
     pub status: DelegateTaskStatus,
@@ -138,6 +141,40 @@ impl DelegateResultStore {
         let id = *next_id;
         *next_id += 1;
         format!("delegate_{}", id)
+    }
+
+    pub(crate) fn generate_display_label(
+        &self,
+        requested: Option<&str>,
+        worker_profile: DelegateWorkerProfile,
+        task: &str,
+        scope: Option<&[String]>,
+    ) -> String {
+        let base = requested
+            .map(normalize_delegate_label)
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| infer_delegate_label(worker_profile, task, scope));
+        self.deduplicate_display_label(base)
+    }
+
+    fn deduplicate_display_label(&self, base: String) -> String {
+        let tasks = self.tasks.lock().unwrap();
+        if !tasks
+            .values()
+            .any(|task| task.label.as_deref() == Some(base.as_str()))
+        {
+            return base;
+        }
+        for suffix in 2.. {
+            let candidate = format!("{base}-{suffix}");
+            if !tasks
+                .values()
+                .any(|task| task.label.as_deref() == Some(candidate.as_str()))
+            {
+                return candidate;
+            }
+        }
+        unreachable!("unbounded delegate label suffix search should return")
     }
 
     pub fn store_task(&self, task: DelegateTask) {
@@ -342,8 +379,9 @@ impl DelegateResultStore {
             progress.children.push(DelegateProgressChild {
                 task_id: task.task_id.clone(),
                 label: task
-                    .agent_name
+                    .label
                     .clone()
+                    .or_else(|| task.agent_name.clone())
                     .unwrap_or_else(|| task.task_id.clone()),
                 status: status.to_string(),
                 result_viewed: task.result_viewed,
@@ -1047,6 +1085,7 @@ If blocked, say the blocker plainly.\n",
     fn spawn_delegate(
         &self,
         task_id: String,
+        label: String,
         agent_name: Option<String>,
         task: String,
         scope: Option<Vec<String>>,
@@ -1057,6 +1096,7 @@ If blocked, say the blocker plainly.\n",
         mind: Option<String>,
         session_model: Option<String>,
         consecutive_failures: Arc<Mutex<u32>>,
+        progress_handle: Arc<Mutex<DelegateProgress>>,
         event_sink: Option<BusRequestSink>,
     ) -> anyhow::Result<()> {
         // Assemble field kit: load persona mind if specified
@@ -1097,6 +1137,7 @@ If blocked, say the blocker plainly.\n",
         let tasks = extract_task_items(&task);
         let task_entry = DelegateTask {
             task_id: task_id.clone(),
+            label: Some(label.clone()),
             agent_name,
             task_description: task.clone(),
             status: DelegateTaskStatus::Running,
@@ -1130,6 +1171,7 @@ If blocked, say the blocker plainly.\n",
         let cwd = self.cwd.clone();
         let parent_model = session_model;
         let fail_counter = consecutive_failures;
+        let progress_handle = progress_handle;
         let sandbox = self.sandbox;
         crate::task_spawn::spawn_best_effort_result("delegate-real-task", async move {
             let runner = DelegateRunner::new(cwd, store.clone(), sandbox);
@@ -1143,11 +1185,14 @@ If blocked, say the blocker plainly.\n",
                         DelegateTaskStatus::Completed { success: true },
                         Some(result.clone()),
                     );
+                    if let Ok(mut handle) = progress_handle.lock() {
+                        *handle = store.progress_snapshot();
+                    }
                     if let Some(sink) = &event_sink {
                         sink.send(BusRequest::EmitAgentEvent {
                             event: Box::new(AgentEvent::SystemNotification {
                                 message: format!(
-                                    "✓ {task_id} completed — result ready: /delegate result {task_id}"
+                                    "✓ {label} completed — result ready: /delegate result {task_id}"
                                 ),
                             }),
                         });
@@ -1170,12 +1215,15 @@ If blocked, say the blocker plainly.\n",
                         },
                         None,
                     );
+                    if let Ok(mut handle) = progress_handle.lock() {
+                        *handle = store.progress_snapshot();
+                    }
                     if let Some(sink) = &event_sink {
                         let first_line = error.lines().next().unwrap_or("delegate failed");
                         sink.send(BusRequest::EmitAgentEvent {
                             event: Box::new(AgentEvent::SystemNotification {
                                 message: format!(
-                                    "✗ {task_id} failed — {first_line}: /delegate result {task_id}"
+                                    "✗ {label} failed — {first_line}: /delegate result {task_id}"
                                 ),
                             }),
                         });
@@ -1494,6 +1542,7 @@ impl Feature for DelegateFeature {
                         },
                         "facts": { "type": "array", "items": {"type": "string"} },
                         "mind": { "type": "string" },
+                        "label": { "type": "string", "description": "Optional human-readable semantic branch label for Workbench display, e.g. verify/tests or scout/workbench-state. The stable task_id remains the result handle." },
                         "background": { "type": "boolean", "default": true }
                     },
                     "required": ["task"]
@@ -1605,6 +1654,10 @@ impl Feature for DelegateFeature {
                 let worker_profile = DelegateWorkerProfile::parse(
                     args.get("worker_profile").and_then(|v| v.as_str()),
                 );
+                let requested_label = args
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 let background = args
                     .get("background")
                     .and_then(|v| v.as_bool())
@@ -1759,11 +1812,18 @@ impl Feature for DelegateFeature {
                 }
 
                 let task_id = self.result_store.generate_task_id();
+                let label = self.result_store.generate_display_label(
+                    requested_label.as_deref(),
+                    worker_profile,
+                    &task,
+                    scope.as_deref(),
+                );
 
                 // Spawn the delegate
                 let parent_model = self.session_model.lock().ok().and_then(|s| s.clone());
                 self.runner.spawn_delegate(
                     task_id.clone(),
+                    label.clone(),
                     agent,
                     task,
                     scope,
@@ -1774,6 +1834,7 @@ impl Feature for DelegateFeature {
                     mind,
                     parent_model,
                     self.consecutive_failures.clone(),
+                    self.progress_handle.clone(),
                     self.event_slot.lock().ok().and_then(|slot| (*slot).clone()),
                 )?;
                 if let Ok(mut handle) = self.progress_handle.lock() {
@@ -1790,10 +1851,11 @@ impl Feature for DelegateFeature {
                     let result_tool_call = delegate_result_tool_call(&task_id);
                     Ok(ToolResult {
                         content: vec![ContentBlock::Text {
-                            text: format_background_delegate_started(&task_id),
+                            text: format_background_delegate_started(&task_id, &label),
                         }],
                         details: json!({
                             "task_id": task_id,
+                            "label": label,
                             "background": true,
                             "status": "running",
                             "result_tool_call": result_tool_call,
@@ -1805,7 +1867,7 @@ impl Feature for DelegateFeature {
                     let result = self.runner.wait_for_result(&task_id, cancel).await?;
                     Ok(ToolResult {
                         content: vec![ContentBlock::Text { text: result }],
-                        details: json!({ "task_id": task_id, "background": false }),
+                        details: json!({ "task_id": task_id, "label": label, "background": false }),
                     })
                 }
             }
@@ -2167,7 +2229,7 @@ No delegate tasks found.
                         // Only notify if completed recently (within last 5 seconds)
                         if completed_at.elapsed().unwrap_or_default().as_secs() < 5 {
                             self.emit_delegate_event(AgentEvent::DecompositionChildCompleted {
-                                label: task.task_id.clone(),
+                                label: task.label.clone().unwrap_or_else(|| task.task_id.clone()),
                                 success,
                                 operation: OperationRef::delegate(task.task_id.clone()),
                             });
@@ -2175,12 +2237,12 @@ No delegate tasks found.
                             let message = if success {
                                 format!(
                                     "✓ Delegate {} completed: {}",
-                                    task.task_id, task.task_description
+                                    task.label.as_deref().unwrap_or(&task.task_id), task.task_description
                                 )
                             } else {
                                 format!(
                                     "✗ Delegate {} failed: {}",
-                                    task.task_id, task.task_description
+                                    task.label.as_deref().unwrap_or(&task.task_id), task.task_description
                                 )
                             };
 
@@ -2284,6 +2346,101 @@ fn enforce_delegate_policy(
     enforce_delegate_policy_with_policy(&policy, worker_profile, task)
 }
 
+
+fn infer_delegate_label(
+    worker_profile: DelegateWorkerProfile,
+    task: &str,
+    scope: Option<&[String]>,
+) -> String {
+    let role = worker_profile.as_str();
+    let target = scope
+        .and_then(delegate_label_target_from_scope)
+        .or_else(|| delegate_label_target_from_task(task))
+        .unwrap_or_else(|| "task".to_string());
+    format!("{role}/{target}")
+}
+
+fn delegate_label_target_from_scope(scope: &[String]) -> Option<String> {
+    scope.iter().find_map(|path| {
+        let stem = std::path::Path::new(path)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .or_else(|| std::path::Path::new(path).file_name().and_then(|name| name.to_str()))?;
+        let label = normalize_label_segment(stem);
+        (!label.is_empty()).then_some(label)
+    })
+}
+
+fn delegate_label_target_from_task(task: &str) -> Option<String> {
+    let lower = task.to_lowercase();
+    let target = if lower.contains("test") || lower.contains("suite") {
+        "tests"
+    } else if lower.contains("workbench") {
+        "workbench-state"
+    } else if lower.contains("delegate") && lower.contains("label") {
+        "delegate-labels"
+    } else if lower.contains("delegate") {
+        "delegate"
+    } else if lower.contains("changelog") {
+        "changelog"
+    } else if lower.contains("release") {
+        "release"
+    } else {
+        let words: Vec<_> = lower
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|word| word.len() > 2 && !DELEGATE_LABEL_STOP_WORDS.contains(word))
+            .take(2)
+            .collect();
+        if words.is_empty() {
+            return None;
+        }
+        return Some(words.join("-"));
+    };
+    Some(target.to_string())
+}
+
+const DELEGATE_LABEL_STOP_WORDS: &[&str] = &[
+    "the", "and", "for", "with", "from", "into", "run", "use", "using", "check", "summarize",
+    "summary", "task", "file", "files", "project", "current", "results", "result",
+];
+
+fn normalize_delegate_label(label: &str) -> String {
+    let normalized = label
+        .split('/')
+        .filter_map(|segment| {
+            let normalized = normalize_label_segment(segment);
+            (!normalized.is_empty()).then_some(normalized)
+        })
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("/");
+    if normalized.contains('/') {
+        normalized
+    } else if normalized.is_empty() {
+        normalized
+    } else {
+        format!("delegate/{normalized}")
+    }
+}
+
+fn normalize_label_segment(segment: &str) -> String {
+    let mut out = String::new();
+    let mut previous_dash = false;
+    for ch in segment.chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            previous_dash = false;
+        } else if !previous_dash && !out.is_empty() {
+            out.push('-');
+            previous_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out.chars().take(32).collect()
+}
+
 fn delegate_result_tool_call(task_id: &str) -> serde_json::Value {
     serde_json::json!({
         "tool": crate::tool_registry::delegate::DELEGATE_RESULT,
@@ -2291,9 +2448,10 @@ fn delegate_result_tool_call(task_id: &str) -> serde_json::Value {
     })
 }
 
-fn format_background_delegate_started(task_id: &str) -> String {
+fn format_background_delegate_started(task_id: &str, label: &str) -> String {
     serde_json::json!({
         "task_id": task_id,
+        "label": label,
         "background": true,
         "status": "running",
         "next_action": delegate_result_tool_call(task_id),
@@ -2395,7 +2553,7 @@ mod tests {
     #[test]
     fn background_delegate_started_includes_machine_result_tool_call() {
         let parsed: serde_json::Value =
-            serde_json::from_str(&format_background_delegate_started("delegate_7")).unwrap();
+            serde_json::from_str(&format_background_delegate_started("delegate_7", "verify/tests")).unwrap();
 
         assert_eq!(parsed["result_tool"], "delegate_result");
         assert_eq!(parsed["status"], "running");
@@ -2639,11 +2797,11 @@ mod tests {
 
     #[test]
     fn background_delegate_started_message_preserves_machine_readable_result() {
-        let rendered = format_background_delegate_started("delegate_42");
+        let rendered = format_background_delegate_started("delegate_42", "verify/tests");
         let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
         assert_eq!(parsed["task_id"], "delegate_42");
         assert_eq!(parsed["background"], true);
-        assert_eq!(parsed["status_hint"], "/subagent status");
+        assert_eq!(parsed["label"], "verify/tests");
         assert_eq!(parsed["result_tool"], "delegate_result");
     }
 
@@ -2664,6 +2822,10 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|v| v.as_str() == Some("patch"))
+        );
+        assert_eq!(
+            delegate_tool.parameters["properties"]["label"]["type"].as_str(),
+            Some("string")
         );
     }
 
@@ -2879,6 +3041,7 @@ This agent runs in write mode and can modify files.
         let store = DelegateResultStore::new();
 
         store.store_task(DelegateTask {
+            label: None,
             task_id: "d_1".into(),
             agent_name: None,
             task_description: "Fix the auth bug".into(),
@@ -2914,6 +3077,7 @@ This agent runs in write mode and can modify files.
 
         // Failed task — not returned
         store.store_task(DelegateTask {
+            label: None,
             task_id: "d_2".into(),
             agent_name: None,
             task_description: "Fix the login bug".into(),
@@ -2981,6 +3145,7 @@ This agent runs in write mode and can modify files.
         let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
         let now = SystemTime::now();
         feature.result_store.store_task(DelegateTask {
+            label: None,
             task_id: "delegate_1".into(),
             agent_name: Some("verify".into()),
             task_description: "Verify cancellation".into(),
@@ -3036,6 +3201,7 @@ This agent runs in write mode and can modify files.
         let store = DelegateResultStore::new();
         let now = SystemTime::now();
         store.store_task(DelegateTask {
+            label: None,
             task_id: "delegate_cancelled".into(),
             agent_name: Some("verify".into()),
             task_description: "Verify cancellation".into(),
@@ -3067,10 +3233,133 @@ This agent runs in write mode and can modify files.
     }
 
     #[test]
+    fn spawn_delegate_completion_updates_shared_progress_handle() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
+        let now = SystemTime::now();
+        feature.result_store.store_task(DelegateTask {
+            label: Some("verify/tests".into()),
+            task_id: "delegate_2".into(),
+            agent_name: None,
+            task_description: "Run tests".into(),
+            status: DelegateTaskStatus::Running,
+            result: None,
+            result_viewed: false,
+            started_at: now,
+            completed_at: None,
+            last_tool: None,
+            last_tool_activity: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+        *feature.progress_handle.lock().unwrap() = feature.result_store.progress_snapshot();
+        assert_eq!(feature.progress_handle.lock().unwrap().running, 1);
+
+        feature.result_store.update_task_status(
+            "delegate_2",
+            DelegateTaskStatus::Completed { success: true },
+            Some("ok".into()),
+        );
+        if let Ok(mut handle) = feature.progress_handle.lock() {
+            *handle = feature.result_store.progress_snapshot();
+        }
+
+        let progress = feature.progress_handle.lock().unwrap().clone();
+        assert_eq!(progress.running, 0);
+        assert_eq!(progress.completed, 1);
+        assert_eq!(progress.pending_results, 1);
+        assert_eq!(progress.children[0].label, "verify/tests");
+        assert_eq!(progress.children[0].status, "completed");
+    }
+
+    #[test]
+    fn delegate_labels_are_generated_normalized_and_deduplicated() {
+        let store = DelegateResultStore::new();
+        let first = store.generate_display_label(
+            None,
+            DelegateWorkerProfile::Verify,
+            "Run the full Rust test suite and summarize failures",
+            None,
+        );
+        assert_eq!(first, "verify/tests");
+        let now = SystemTime::now();
+        store.store_task(DelegateTask {
+            label: Some(first),
+            task_id: "delegate_1".into(),
+            agent_name: None,
+            task_description: "Run tests".into(),
+            status: DelegateTaskStatus::Running,
+            result: None,
+            result_viewed: false,
+            started_at: now,
+            completed_at: None,
+            last_tool: None,
+            last_tool_activity: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+
+        assert_eq!(
+            store.generate_display_label(
+                None,
+                DelegateWorkerProfile::Verify,
+                "Run the test suite again",
+                None,
+            ),
+            "verify/tests-2"
+        );
+        assert_eq!(
+            store.generate_display_label(
+                Some("Review Projection Sync"),
+                DelegateWorkerProfile::Scout,
+                "ignored",
+                None,
+            ),
+            "delegate/review-projection-sync"
+        );
+        assert_eq!(
+            store.generate_display_label(
+                None,
+                DelegateWorkerProfile::Patch,
+                "Fix rendering",
+                Some(&["core/crates/omegon/src/tui/workbench.rs".to_string()]),
+            ),
+            "patch/workbench"
+        );
+    }
+
+    #[test]
+    fn progress_snapshot_prefers_semantic_label_over_agent_name() {
+        let store = DelegateResultStore::new();
+        let now = SystemTime::now();
+        store.store_task(DelegateTask {
+            label: Some("verify/tests".into()),
+            task_id: "delegate_2".into(),
+            agent_name: Some("verify".into()),
+            task_description: "Run checks".into(),
+            status: DelegateTaskStatus::Completed { success: true },
+            result: Some("ok".into()),
+            result_viewed: false,
+            started_at: now,
+            completed_at: Some(now),
+            last_tool: None,
+            last_tool_activity: None,
+            last_turn: None,
+            tasks: Vec::new(),
+        });
+
+        let child = store.progress_snapshot().children.pop().unwrap();
+        assert_eq!(child.task_id, "delegate_2");
+        assert_eq!(child.label, "verify/tests");
+        assert_eq!(child.status, "completed");
+    }
+
+    #[test]
     fn progress_snapshot_exposes_running_completed_and_failed_delegate_state() {
         let store = DelegateResultStore::new();
         let now = SystemTime::now();
         store.store_task(DelegateTask {
+            label: None,
             task_id: "delegate_1".into(),
             agent_name: Some("scout".into()),
             task_description: "- [ ] Inspect files\n- [ ] Report findings".into(),
@@ -3091,6 +3380,7 @@ This agent runs in write mode and can modify files.
             Some(2),
         );
         store.store_task(DelegateTask {
+            label: None,
             task_id: "delegate_2".into(),
             agent_name: Some("verify".into()),
             task_description: "Run checks".into(),
@@ -3105,6 +3395,7 @@ This agent runs in write mode and can modify files.
             tasks: Vec::new(),
         });
         store.store_task(DelegateTask {
+            label: None,
             task_id: "delegate_3".into(),
             agent_name: Some("patch".into()),
             task_description: "Patch bug".into(),
@@ -3268,6 +3559,7 @@ This agent runs in write mode and can modify files.
             .with_child_agent_binary(child)
             .with_timeouts(1, 30);
         store.store_task(DelegateTask {
+            label: None,
             task_id: "delegate_timeout".to_string(),
             task_description: "Do the thing".to_string(),
             agent_name: Some("timeout-worker".to_string()),
@@ -3349,6 +3641,7 @@ exec sleep 10
             .with_child_agent_binary(child)
             .with_timeouts(30, 1);
         store.store_task(DelegateTask {
+            label: None,
             task_id: "delegate_idle_timeout".to_string(),
             task_description: "Do the quiet thing".to_string(),
             agent_name: Some("idle-worker".to_string()),
