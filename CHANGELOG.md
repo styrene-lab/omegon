@@ -21,6 +21,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Restored operator recovery when interrupting wedged turns by abandoning the active turn immediately after cancellation instead of waiting inside the potentially stuck turn path.
 - Hardened delegate result handling so tool-name/agent-name confusion gets corrective guidance, background delegates return machine-readable result tool calls, and empty child output is treated as degraded instead of successful.
 - Aligned delegate Workbench rows with plan-style transition language, prioritizing active and pending-result delegates when the live log area is constrained.
+- Removed slash-command delegate retrieval hints from result surfaces in favor of structured `delegate_result` tool-call guidance.
+- Covered delegate Workbench transition labels and constrained-row priority ordering with focused tests.
 
 ## [0.27.0] - 2026-07-01
 

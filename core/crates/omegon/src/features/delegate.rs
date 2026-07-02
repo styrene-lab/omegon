@@ -1787,11 +1787,18 @@ impl Feature for DelegateFeature {
 
                 if background {
                     // Return task ID for background execution
+                    let result_tool_call = delegate_result_tool_call(&task_id);
                     Ok(ToolResult {
                         content: vec![ContentBlock::Text {
                             text: format_background_delegate_started(&task_id),
                         }],
-                        details: json!({ "task_id": task_id, "background": true }),
+                        details: json!({
+                            "task_id": task_id,
+                            "background": true,
+                            "status": "running",
+                            "result_tool_call": result_tool_call,
+                            "next_action": result_tool_call,
+                        }),
                     })
                 } else {
                     // Wait for completion and return result
@@ -2277,16 +2284,21 @@ fn enforce_delegate_policy(
     enforce_delegate_policy_with_policy(&policy, worker_profile, task)
 }
 
+fn delegate_result_tool_call(task_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "tool": crate::tool_registry::delegate::DELEGATE_RESULT,
+        "arguments": { "task_id": task_id }
+    })
+}
+
 fn format_background_delegate_started(task_id: &str) -> String {
     serde_json::json!({
         "task_id": task_id,
         "background": true,
-        "status_hint": "/subagent status",
-        "result_tool": "delegate_result",
-        "result_tool_call": {
-            "tool": "delegate_result",
-            "arguments": { "task_id": task_id }
-        }
+        "status": "running",
+        "next_action": delegate_result_tool_call(task_id),
+        "result_tool": crate::tool_registry::delegate::DELEGATE_RESULT,
+        "result_tool_call": delegate_result_tool_call(task_id)
     })
     .to_string()
 }
@@ -2294,10 +2306,10 @@ fn format_background_delegate_started(task_id: &str) -> String {
 fn delegate_tool_name_guidance(name: &str) -> Option<String> {
     match name {
         crate::tool_registry::delegate::DELEGATE_RESULT => Some(format!(
-            "{name} is a tool, not a delegate agent. Retrieve results with delegate_result({{\"task_id\": \"delegate_N\"}}) or /delegate result delegate_N."
+            "{name} is a tool, not a delegate agent. Retrieve results by calling the delegate_result tool with {{\"task_id\": \"delegate_N\"}}. Do not pass delegate_result as the delegate agent field."
         )),
         crate::tool_registry::delegate::DELEGATE_STATUS => Some(format!(
-            "{name} is a tool, not a delegate agent. Inspect delegate state with delegate_status({{}}) or /subagent status."
+            "{name} is a tool, not a delegate agent. Inspect delegate state by calling the delegate_status tool with {{}}. Do not pass delegate_status as the delegate agent field."
         )),
         crate::tool_registry::delegate::DELEGATE_CANCEL => Some(format!(
             "{name} is a tool, not a delegate agent. Cancel delegates with delegate_cancel({{\"task_id\": \"delegate_N\"}})."
@@ -2386,10 +2398,16 @@ mod tests {
             serde_json::from_str(&format_background_delegate_started("delegate_7")).unwrap();
 
         assert_eq!(parsed["result_tool"], "delegate_result");
+        assert_eq!(parsed["status"], "running");
+        assert_eq!(parsed["next_action"]["tool"], "delegate_result");
         assert_eq!(parsed["result_tool_call"]["tool"], "delegate_result");
         assert_eq!(
             parsed["result_tool_call"]["arguments"]["task_id"],
             "delegate_7"
+        );
+        assert!(
+            parsed.get("status_hint").is_none(),
+            "slash-command status hints invite tool/agent namespace confusion"
         );
     }
 
@@ -2400,6 +2418,7 @@ mod tests {
         assert!(guidance.contains("tool, not a delegate agent"));
         assert!(guidance.contains("delegate_result"));
         assert!(guidance.contains("task_id"));
+        assert!(!guidance.contains("/delegate result"));
     }
 
     fn delegate_policy_requires_approval_for_patch_worker() {

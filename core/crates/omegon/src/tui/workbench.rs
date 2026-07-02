@@ -1118,7 +1118,10 @@ impl WorkerChromeRowProjection {
                     | OperationChildStatus::Starting
                     | OperationChildStatus::Waiting
             ) {
-            Some(format!("result ready: /delegate result {}", child.id))
+            Some(format!(
+                "result ready: delegate_result {{\"task_id\": \"{}\"}}",
+                child.id
+            ))
         } else {
             None
         };
@@ -1418,8 +1421,9 @@ mod tests {
         assert!(
             row.detail
                 .as_deref()
-                .is_some_and(|detail| detail.contains("result ready")),
-            "unviewed terminal delegate should expose result-ready detail: {row:?}"
+                .is_some_and(|detail| detail
+                    .contains("result ready: delegate_result {\"task_id\": \"task-2\"}")),
+            "unviewed terminal delegate should expose tool-call-shaped result detail: {row:?}"
         );
     }
 
