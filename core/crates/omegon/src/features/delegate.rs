@@ -1025,7 +1025,9 @@ If blocked, say the blocker plainly.\n",
         if status.success() {
             let stdout = stdout_buf.trim().to_string();
             if stdout.is_empty() {
-                Ok("Delegate completed with no stdout.".to_string())
+                Err(anyhow::anyhow!(
+                    "Delegate completed without output; no assessment was produced. Treat this as a degraded delegate result, not approval."
+                ))
             } else {
                 Ok(stdout)
             }
@@ -1680,11 +1682,17 @@ impl Feature for DelegateFeature {
                     task
                 };
 
-                // Validate agent if specified
+                // Validate agent if specified. Catch common tool/agent namespace confusion
+                // before reporting a generic unknown-agent error.
                 if let Some(ref agent_name) = agent
                     && !self.available_agents.iter().any(|a| a.name == *agent_name)
                 {
-                    return Err(anyhow::anyhow!("Unknown agent: {}", agent_name));
+                    if let Some(guidance) = delegate_tool_name_guidance(agent_name) {
+                        return Err(anyhow::anyhow!(guidance));
+                    }
+                    return Err(anyhow::anyhow!(
+                        "Unknown delegate agent: {agent_name}. Use the delegate_result/delegate_status tools directly for result retrieval/status; the delegate agent field only accepts configured agent names."
+                    ));
                 }
 
                 // Dedup: block if an identical task is already running, completed,
@@ -2274,9 +2282,31 @@ fn format_background_delegate_started(task_id: &str) -> String {
         "task_id": task_id,
         "background": true,
         "status_hint": "/subagent status",
-        "result_tool": "delegate_result"
+        "result_tool": "delegate_result",
+        "result_tool_call": {
+            "tool": "delegate_result",
+            "arguments": { "task_id": task_id }
+        }
     })
     .to_string()
+}
+
+fn delegate_tool_name_guidance(name: &str) -> Option<String> {
+    match name {
+        crate::tool_registry::delegate::DELEGATE_RESULT => Some(format!(
+            "{name} is a tool, not a delegate agent. Retrieve results with delegate_result({{\"task_id\": \"delegate_N\"}}) or /delegate result delegate_N."
+        )),
+        crate::tool_registry::delegate::DELEGATE_STATUS => Some(format!(
+            "{name} is a tool, not a delegate agent. Inspect delegate state with delegate_status({{}}) or /subagent status."
+        )),
+        crate::tool_registry::delegate::DELEGATE_CANCEL => Some(format!(
+            "{name} is a tool, not a delegate agent. Cancel delegates with delegate_cancel({{\"task_id\": \"delegate_N\"}})."
+        )),
+        crate::tool_registry::delegate::DELEGATE => Some(format!(
+            "{name} is the delegate launcher tool, not an agent name. Omit agent or choose a configured agent name."
+        )),
+        _ => None,
+    }
 }
 
 fn format_delegate_queue_context(progress: &DelegateProgress) -> String {
@@ -2351,6 +2381,27 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn background_delegate_started_includes_machine_result_tool_call() {
+        let parsed: serde_json::Value =
+            serde_json::from_str(&format_background_delegate_started("delegate_7")).unwrap();
+
+        assert_eq!(parsed["result_tool"], "delegate_result");
+        assert_eq!(parsed["result_tool_call"]["tool"], "delegate_result");
+        assert_eq!(
+            parsed["result_tool_call"]["arguments"]["task_id"],
+            "delegate_7"
+        );
+    }
+
+    #[test]
+    fn delegate_tool_name_guidance_rejects_result_tool_as_agent() {
+        let guidance = delegate_tool_name_guidance("delegate_result").expect("tool-name guidance");
+
+        assert!(guidance.contains("tool, not a delegate agent"));
+        assert!(guidance.contains("delegate_result"));
+        assert!(guidance.contains("task_id"));
+    }
+
     fn delegate_policy_requires_approval_for_patch_worker() {
         let result = enforce_delegate_policy(DelegateWorkerProfile::Patch, "edit the file")
             .expect("patch delegates require approval under conservative autonomy");

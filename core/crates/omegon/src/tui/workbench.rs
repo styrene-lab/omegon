@@ -1073,11 +1073,20 @@ fn render_operation_workbench_panel(
         area.width,
     )];
     let max_rows = area.height.saturating_sub(1) as usize;
-    for child in projection.children.iter().take(max_rows) {
+    let visible = prioritized_operation_child_indices(&projection.children, max_rows);
+    let hidden_count = projection.children.len().saturating_sub(visible.len());
+    for idx in visible {
+        let child = &projection.children[idx];
         let text = operation_worker_chrome_line(child, area.width);
         lines.push(Line::from(Span::styled(
             text,
             operation_worker_status_style(child.status, t, bg),
+        )));
+    }
+    if hidden_count > 0 && lines.len() < area.height as usize {
+        lines.push(Line::from(Span::styled(
+            format!("⋯ {hidden_count} hidden"),
+            Style::default().fg(t.dim()).bg(bg),
         )));
     }
     Paragraph::new(lines)
@@ -1131,7 +1140,7 @@ impl WorkerChromeRowProjection {
         });
         Self::new(
             &child.label,
-            child.status.label(),
+            operation_child_workbench_status_label(child.status, child.operation_kind),
             last_tool,
             (!detail.is_empty()).then_some(detail),
         )
@@ -1188,6 +1197,65 @@ impl WorkerChromeRowProjection {
                 })
                 .collect(),
         )
+    }
+}
+
+fn prioritized_operation_child_indices(
+    children: &[OperationChildRow],
+    max_rows: usize,
+) -> Vec<usize> {
+    if max_rows == 0 || children.is_empty() {
+        return Vec::new();
+    }
+    let visible_rows = if children.len() > max_rows {
+        max_rows.saturating_sub(1)
+    } else {
+        max_rows
+    };
+    if visible_rows == 0 {
+        return Vec::new();
+    }
+
+    let mut indices = Vec::new();
+    let passes: &[fn(&OperationChildRow) -> bool] = &[
+        |child| {
+            matches!(
+                child.status,
+                OperationChildStatus::Running | OperationChildStatus::Starting
+            )
+        },
+        |child| !child.result_viewed && child.status.is_terminal(),
+        |child| {
+            matches!(
+                child.status,
+                OperationChildStatus::Queued | OperationChildStatus::Waiting
+            )
+        },
+        |child| child.status.is_terminal(),
+        |_| true,
+    ];
+    for pass in passes {
+        for (idx, child) in children.iter().enumerate() {
+            if indices.len() >= visible_rows {
+                break;
+            }
+            if !indices.contains(&idx) && pass(child) {
+                indices.push(idx);
+            }
+        }
+    }
+    indices.sort_unstable();
+    indices
+}
+
+fn operation_child_workbench_status_label(
+    status: OperationChildStatus,
+    kind: omegon_traits::OperationKind,
+) -> &'static str {
+    match (kind, status) {
+        (omegon_traits::OperationKind::Delegate, OperationChildStatus::Running) => "proceeding",
+        (omegon_traits::OperationKind::Delegate, OperationChildStatus::Succeeded) => "done",
+        _ => status.label(),
     }
 }
 
@@ -1318,7 +1386,7 @@ mod tests {
 
         let row = WorkerChromeRowProjection::from_operation_child(&child);
         assert_eq!(row.label, "delegate-1");
-        assert_eq!(row.status, "running");
+        assert_eq!(row.status, "proceeding");
         assert!(
             row.tool
                 .as_deref()
