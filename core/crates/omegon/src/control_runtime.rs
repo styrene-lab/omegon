@@ -230,6 +230,8 @@ pub enum ControlRequest {
     VaultConfigure,
     VaultInitPolicy,
     CleaveStatus,
+    SmokeList,
+    SmokeCleave,
     CleaveCancelChild {
         label: String,
     },
@@ -492,6 +494,8 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::VaultConfigure => ControlRequest::VaultConfigure,
         crate::tui::CanonicalSlashCommand::VaultInitPolicy => ControlRequest::VaultInitPolicy,
         crate::tui::CanonicalSlashCommand::CleaveStatus => ControlRequest::CleaveStatus,
+        crate::tui::CanonicalSlashCommand::SmokeList => ControlRequest::SmokeList,
+        crate::tui::CanonicalSlashCommand::SmokeCleave => ControlRequest::SmokeCleave,
         crate::tui::CanonicalSlashCommand::CleaveCancelChild(label) => {
             ControlRequest::CleaveCancelChild {
                 label: label.clone(),
@@ -817,6 +821,15 @@ pub async fn execute_control(
         }
         ControlRequest::VaultStatus => vault_status_response(ctx.agent).await,
         ControlRequest::CleaveStatus => cleave_status_response(ctx.runtime_state).await,
+        ControlRequest::SmokeList => SlashCommandResponse {
+            accepted: true,
+            output: Some("Available smoke suites:\n/smoke cleave — exercise unified cleave/delegate live surface projections".into()),
+        },
+        ControlRequest::SmokeCleave => crate::smoke_surface::launch_cleave_surface_smoke(
+            &mut ctx.agent.dashboard_handles,
+            Some(ctx.events_tx.clone()),
+            None,
+        ),
         ControlRequest::CleaveCancelChild { label } => {
             cleave_cancel_child_response(ctx.runtime_state, &label).await
         }

@@ -607,6 +607,8 @@ struct App {
     operator_events: std::collections::VecDeque<OperatorEvent>,
     /// Previous harness status for diffing on HarnessStatusChanged.
     previous_harness_status: Option<crate::status::HarnessStatus>,
+    /// Receiver for in-process operator-visible smoke-test events.
+    smoke_event_rx: Option<std::sync::mpsc::Receiver<AgentEvent>>,
     /// Startup capability tier detected at startup by systems check probes.
     pub capability_grade: Option<crate::startup::CapabilityTier>,
     /// Tutorial state — active when running /tutorial (lesson-based).
@@ -825,6 +827,8 @@ pub enum CanonicalSlashCommand {
     CleaveStatus,
     CleaveCancelChild(String),
     DelegateStatus,
+    SmokeList,
+    SmokeCleave,
 }
 
 pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<CanonicalSlashCommand> {
@@ -1396,6 +1400,11 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         }
         "delegate" | "subagent" => match args {
             "" | "status" => Some(CanonicalSlashCommand::DelegateStatus),
+            _ => None,
+        },
+        "smoke" => match args {
+            "" | "list" => Some(CanonicalSlashCommand::SmokeList),
+            "cleave" => Some(CanonicalSlashCommand::SmokeCleave),
             _ => None,
         },
         _ => None,
@@ -2275,6 +2284,7 @@ impl App {
             queue_mode: PromptQueueMode::UntilReady,
             operator_events: std::collections::VecDeque::new(),
             previous_harness_status: None,
+            smoke_event_rx: None,
             capability_grade: None,
             tutorial: None,
             tutorial_overlay: None,
@@ -4140,6 +4150,32 @@ impl App {
 
     fn open_profile_menu(&mut self) {
         self.open_menu_projection(self.profile_menu_projection());
+    }
+
+    fn launch_cleave_smoke(&mut self) -> SlashResult {
+        if self.smoke_event_rx.is_some() {
+            return SlashResult::Display("A smoke suite is already running.".into());
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
+        self.smoke_event_rx = Some(rx);
+        let response = crate::smoke_surface::launch_cleave_surface_smoke(
+            &mut self.dashboard_handles,
+            None,
+            Some(tx),
+        );
+        if let Some(cp) = self
+            .dashboard_handles
+            .cleave
+            .as_ref()
+            .and_then(|lock| lock.lock().ok())
+        {
+            self.dashboard.cleave = Some(cp.clone());
+        }
+        SlashResult::Display(
+            response
+                .output
+                .unwrap_or_else(|| "Started unified cleave smoke suite.".into()),
+        )
     }
 
     fn open_command_inventory_menu(&mut self) {
@@ -10118,6 +10154,14 @@ Scroll transcript:
                 env!("OMEGON_GIT_SHA"),
                 env!("OMEGON_BUILD_DATE"),
             )),
+
+            "smoke" => match canonical_slash_command("smoke", args) {
+                Some(CanonicalSlashCommand::SmokeList) => SlashResult::Display(
+                    "Smoke suites:\n  /smoke cleave  run deterministic cleave lifecycle smoke test".into(),
+                ),
+                Some(CanonicalSlashCommand::SmokeCleave) => self.launch_cleave_smoke(),
+                _ => SlashResult::Display("Usage: /smoke [list|cleave]".into()),
+            },
             "q" => SlashResult::Quit,
 
             "editor" => SlashResult::Display(handle_editor_command(args)),
@@ -12168,6 +12212,27 @@ pub async fn run_tui(
         // (memory_ops, tool_calls) are current when draw reads them
         while let Ok(agent_event) = events_rx.try_recv() {
             app.handle_agent_event(agent_event);
+        }
+
+        if let Some(rx) = &app.smoke_event_rx {
+            let mut smoke_events = Vec::new();
+            let mut smoke_disconnected = false;
+            loop {
+                match rx.try_recv() {
+                    Ok(event) => smoke_events.push(event),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        smoke_disconnected = true;
+                        break;
+                    }
+                }
+            }
+            for event in smoke_events {
+                app.handle_agent_event(event);
+            }
+            if smoke_disconnected {
+                app.smoke_event_rx = None;
+            }
         }
 
         // Poll widget receivers for updates

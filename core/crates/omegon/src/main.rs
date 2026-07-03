@@ -108,6 +108,7 @@ pub mod routing;
 mod secret_cli;
 mod sentry;
 mod session;
+mod smoke_surface;
 mod session_router;
 pub mod settings;
 mod setup;

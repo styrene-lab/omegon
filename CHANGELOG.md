@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Added `/smoke` as a unified operator-facing smoke-test namespace and `/smoke cleave` to drive the shared live cleave/progress and Workbench plan projections used by TUI, remote slash, ACP, and served WebUIs instead of writing progress into conversation transcript segments.
+
 ### Added
 
 - Added a manual cleave approval gate so `cleave_assess` advertises menu-based operator approval metadata, `cleave_run` records pending approval state and refuses to launch clove workstreams without a matching approved plan digest, high-cost cleaves require second confirmation, and `/cleave` exposes approve/modify/deny/phased/save/evidence/reassess action backends.

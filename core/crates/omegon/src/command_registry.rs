@@ -535,6 +535,11 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
         &["list", "create", "off"],
     ),
     BuiltinCommandSpec::state_changing("tone", "switch tone (or 'off' to deactivate)", &["off"]),
+    BuiltinCommandSpec::cli_acp_state_changing(
+        "smoke",
+        "run operator-visible harness smoke tests",
+        &["list", "cleave"],
+    ),
     BuiltinCommandSpec::queue_mutation(
         "delegate",
         "subagent/delegate task management",

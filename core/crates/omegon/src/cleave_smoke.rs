@@ -67,7 +67,7 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
             write_file: None,
             expect_exit_ok: false,
             expect_status_line: "0 completed, 1 failed, 0 upstream exhausted, 0 unfinished",
-            expect_merge_line: "failed (no repo changes to merge)",
+            expect_merge_line: "skipped (failed child produced no salvaged changes)",
             runtime_profile: None,
             assert_runtime: None,
         },

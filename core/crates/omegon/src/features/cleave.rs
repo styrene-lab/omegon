@@ -2816,7 +2816,7 @@ mod tests {
             CommandResult::Display(text) => {
                 assert!(text.contains("Pending cleave approval"), "{text}");
                 assert!(text.contains("cleave:cleave_30"), "{text}");
-                assert!(text.contains("3 cloves / max_parallel 2"), "{text}");
+                assert!(text.contains("3 cloveren / max_parallel 2"), "{text}");
             }
             other => panic!("unexpected command result: {other:?}"),
         }
@@ -4282,7 +4282,7 @@ mod assessment_tests {
         let rendered = CleaveFeature::render_status(&progress);
 
         assert!(
-            rendered.contains("Cleave active: 0/1 children"),
+            rendered.contains("Cleave active: 0/1 cloves"),
             "{rendered}"
         );
         assert!(rendered.contains("alpha [running]"), "{rendered}");
