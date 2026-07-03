@@ -13,7 +13,9 @@ use crate::features::cleave::{
     ChildProgress, ChildRuntimeSummary, ChildSupervisionMode, CleaveChildFailureKind,
     CleaveProgress,
 };
-use crate::features::delegate::{DelegateChildFailureKind, DelegateProgress, DelegateProgressChild};
+use crate::features::delegate::{
+    DelegateChildFailureKind, DelegateProgress, DelegateProgressChild,
+};
 use crate::surfaces::conversation::ToolActivitySummary;
 use omegon_traits::{
     AgentEvent, PlanItemProjection, PlanLaneProjection, PlanProgressProjection,
@@ -72,15 +74,11 @@ impl SmokeScenarioKind {
             ["cleave", "docs-research"] | ["cleave-docs-research"] => {
                 Some(Self::CleaveDocsResearch)
             }
-            ["delegate"] | ["delegate", "basic"] | ["delegate-basic"] => {
-                Some(Self::DelegateBasic)
-            }
+            ["delegate"] | ["delegate", "basic"] | ["delegate-basic"] => Some(Self::DelegateBasic),
             ["delegate", "pending-result"] | ["delegate-pending-result"] => {
                 Some(Self::DelegatePendingResult)
             }
-            ["surface", "stress"] | ["surface-stress"] | ["stress"] => {
-                Some(Self::SurfaceStress)
-            }
+            ["surface", "stress"] | ["surface-stress"] | ["stress"] => Some(Self::SurfaceStress),
             _ => None,
         }
     }
@@ -111,6 +109,8 @@ pub fn launch_surface_smoke(
             output: Some("A smoke or live subagent operation is already running.".into()),
         };
     }
+
+    reset_smoke_surfaces(handles, &events_tx, &local_events_tx);
 
     match scenario {
         SmokeScenarioKind::DelegateBasic | SmokeScenarioKind::DelegatePendingResult => {
@@ -164,6 +164,24 @@ fn launch_delegate_surface_smoke(
     }
 }
 
+fn reset_smoke_surfaces(
+    handles: &mut crate::tui::dashboard::DashboardHandles,
+    tx: &Option<broadcast::Sender<AgentEvent>>,
+    local_tx: &Option<std::sync::mpsc::Sender<AgentEvent>>,
+) {
+    handles.cleave = None;
+    handles.delegate = None;
+    let event = AgentEvent::PlanUpdated {
+        projection: PlanSurfaceProjection::default(),
+    };
+    if let Some(tx) = tx {
+        let _ = tx.send(event.clone());
+    }
+    if let Some(local_tx) = local_tx {
+        let _ = local_tx.send(event);
+    }
+}
+
 fn active_cleave(handles: &crate::tui::dashboard::DashboardHandles) -> bool {
     handles
         .cleave
@@ -186,18 +204,24 @@ fn run_cleave_timeline(
     tx: Option<broadcast::Sender<AgentEvent>>,
     local_tx: Option<std::sync::mpsc::Sender<AgentEvent>>,
 ) {
-    let total = progress.lock().map(|p| p.children.len()).unwrap_or(0).max(1);
+    let total = progress
+        .lock()
+        .map(|p| p.children.len())
+        .unwrap_or(0)
+        .max(1);
     send_plan(&tx, &local_tx, scenario, 0, 0, false);
     update(&progress, |p| {
         let now = Instant::now();
         let tools = ["read", "codebase_search", "edit", "validate", "delegate"];
         for (idx, child) in p.children.iter_mut().enumerate() {
             child.status = "running".into();
-            child.supervision_mode = Some(if matches!(scenario, SmokeScenarioKind::SurfaceStress) && idx % 5 == 4 {
-                ChildSupervisionMode::RecoveredDegraded
-            } else {
-                ChildSupervisionMode::Attached
-            });
+            child.supervision_mode = Some(
+                if matches!(scenario, SmokeScenarioKind::SurfaceStress) && idx % 5 == 4 {
+                    ChildSupervisionMode::RecoveredDegraded
+                } else {
+                    ChildSupervisionMode::Attached
+                },
+            );
             child.started_at = Some(now);
             child.last_activity_at = Some(now);
             let tool = tools[idx % tools.len()];
@@ -233,7 +257,11 @@ fn run_cleave_timeline(
                 child.last_tool.clone().unwrap_or_else(|| "tool".into()),
                 Some(format!("{} terminal update", scenario_id)),
             ));
-            p.completed = p.children.iter().filter(|child| child.status == "completed").count();
+            p.completed = p
+                .children
+                .iter()
+                .filter(|child| child.status == "completed")
+                .count();
             p.failed = p
                 .children
                 .iter()
@@ -242,20 +270,38 @@ fn run_cleave_timeline(
             p.total_tokens_in = p.children.iter().map(|child| child.tokens_in).sum();
             p.total_tokens_out = p.children.iter().map(|child| child.tokens_out).sum();
         });
-        send_plan(&tx, &local_tx, scenario, idx + 1, (idx + 1).min(total - 1), false);
+        send_plan(
+            &tx,
+            &local_tx,
+            scenario,
+            idx + 1,
+            (idx + 1).min(total - 1),
+            false,
+        );
     }
 
     std::thread::sleep(Duration::from_millis(250));
     update(&progress, |p| {
         p.active = false;
-        p.completed = p.children.iter().filter(|child| child.status == "completed").count();
+        p.completed = p
+            .children
+            .iter()
+            .filter(|child| child.status == "completed")
+            .count();
         p.failed = p
             .children
             .iter()
             .filter(|child| matches!(child.status.as_str(), "failed" | "upstream_exhausted"))
             .count();
     });
-    send_plan(&tx, &local_tx, scenario, total, total.saturating_sub(1), true);
+    send_plan(
+        &tx,
+        &local_tx,
+        scenario,
+        total,
+        total.saturating_sub(1),
+        true,
+    );
 }
 
 fn cleave_terminal_status(
@@ -268,7 +314,10 @@ fn cleave_terminal_status(
         SmokeScenarioKind::CleaveFailureMix => match idx {
             0 => ("completed", None),
             1 => ("failed", Some(CleaveChildFailureKind::ValidationFailed)),
-            _ => ("upstream_exhausted", Some(CleaveChildFailureKind::UpstreamExhausted)),
+            _ => (
+                "upstream_exhausted",
+                Some(CleaveChildFailureKind::UpstreamExhausted),
+            ),
         },
         SmokeScenarioKind::CleaveActivity => match idx {
             0 | 1 | 3 => ("completed", None),
@@ -280,7 +329,10 @@ fn cleave_terminal_status(
         },
         SmokeScenarioKind::SurfaceStress => match idx % 6 {
             1 => ("failed", Some(CleaveChildFailureKind::WallTimeout)),
-            3 => ("upstream_exhausted", Some(CleaveChildFailureKind::UpstreamExhausted)),
+            3 => (
+                "upstream_exhausted",
+                Some(CleaveChildFailureKind::UpstreamExhausted),
+            ),
             5 if idx + 1 < total => ("failed", Some(CleaveChildFailureKind::MergeConflict)),
             _ => ("completed", None),
         },
@@ -296,7 +348,11 @@ fn run_delegate_timeline(
     tx: Option<broadcast::Sender<AgentEvent>>,
     local_tx: Option<std::sync::mpsc::Sender<AgentEvent>>,
 ) {
-    let total = progress.lock().map(|p| p.children.len()).unwrap_or(0).max(1);
+    let total = progress
+        .lock()
+        .map(|p| p.children.len())
+        .unwrap_or(0)
+        .max(1);
     send_plan(&tx, &local_tx, scenario, 0, 0, false);
     update_delegate(&progress, |p| {
         let now = SystemTime::now();
@@ -334,11 +390,18 @@ fn run_delegate_timeline(
                 .iter()
                 .filter(|child| matches!(child.status.as_str(), "completed" | "completed_unviewed"))
                 .count();
-            p.failed = p.children.iter().filter(|child| child.status == "failed").count();
+            p.failed = p
+                .children
+                .iter()
+                .filter(|child| child.status == "failed")
+                .count();
             p.pending_results = p
                 .children
                 .iter()
-                .filter(|child| !child.result_viewed && matches!(child.status.as_str(), "completed" | "completed_unviewed"))
+                .filter(|child| {
+                    !child.result_viewed
+                        && matches!(child.status.as_str(), "completed" | "completed_unviewed")
+                })
                 .count();
             p.running = p
                 .children
@@ -346,7 +409,14 @@ fn run_delegate_timeline(
                 .filter(|child| child.status == "running")
                 .count();
         });
-        send_plan(&tx, &local_tx, scenario, idx + 1, (idx + 1).min(total - 1), false);
+        send_plan(
+            &tx,
+            &local_tx,
+            scenario,
+            idx + 1,
+            (idx + 1).min(total - 1),
+            false,
+        );
     }
 
     std::thread::sleep(Duration::from_millis(250));
@@ -354,7 +424,14 @@ fn run_delegate_timeline(
         p.active = false;
         p.running = 0;
     });
-    send_plan(&tx, &local_tx, scenario, total, total.saturating_sub(1), true);
+    send_plan(
+        &tx,
+        &local_tx,
+        scenario,
+        total,
+        total.saturating_sub(1),
+        true,
+    );
 }
 
 fn delegate_terminal_status(
@@ -476,7 +553,10 @@ fn scenario_plan_labels(scenario: SmokeScenarioKind) -> Vec<(&'static str, &'sta
         ],
         SmokeScenarioKind::SurfaceStress => (0..12)
             .map(|idx| match idx {
-                0 => ("child-01", "Render active scout child with a deliberately long label"),
+                0 => (
+                    "child-01",
+                    "Render active scout child with a deliberately long label",
+                ),
                 1 => ("child-02", "Render timeout failure"),
                 2 => ("child-03", "Render completed synthesis child"),
                 3 => ("child-04", "Render upstream exhaustion"),
@@ -632,4 +712,84 @@ fn task_items(label: &str, done: usize, total: usize) -> Vec<ChildTaskItem> {
             done: idx < done,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launching_new_smoke_clears_stale_operation_handles() {
+        let mut handles = crate::tui::dashboard::DashboardHandles::default();
+        let mut stale = initial_cleave_progress(SmokeScenarioKind::CleaveFailureMix);
+        stale.active = false;
+        stale.completed = 1;
+        stale.failed = 2;
+        handles.cleave = Some(Arc::new(Mutex::new(stale)));
+
+        let response = launch_surface_smoke(
+            &mut handles,
+            SmokeScenarioKind::DelegatePendingResult,
+            None,
+            None,
+        );
+
+        assert!(response.accepted);
+        assert!(
+            handles.cleave.is_none(),
+            "stale cleave handle must be removed"
+        );
+        let delegate = handles
+            .delegate
+            .as_ref()
+            .and_then(|progress| progress.lock().ok())
+            .expect("delegate smoke progress should be installed");
+        assert_eq!(delegate.children.len(), 3);
+        assert!(
+            delegate
+                .children
+                .iter()
+                .all(|child| child.label != "smoke-pass")
+        );
+    }
+
+    #[test]
+    fn launching_new_smoke_emits_clear_plan_before_new_plan() {
+        let mut handles = crate::tui::dashboard::DashboardHandles::default();
+        let mut stale = initial_cleave_progress(SmokeScenarioKind::CleaveFailureMix);
+        stale.active = false;
+        handles.cleave = Some(Arc::new(Mutex::new(stale)));
+        let (local_tx, local_rx) = std::sync::mpsc::channel();
+
+        let response = launch_surface_smoke(
+            &mut handles,
+            SmokeScenarioKind::DelegatePendingResult,
+            None,
+            Some(local_tx),
+        );
+
+        assert!(response.accepted);
+        let first = local_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("clear plan event");
+        match first {
+            AgentEvent::PlanUpdated { projection } => {
+                assert!(projection.active.is_none());
+                assert!(projection.workstreams.is_empty());
+            }
+            other => panic!("expected PlanUpdated clear event, got {other:?}"),
+        }
+
+        let second = local_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("new smoke plan event");
+        match second {
+            AgentEvent::PlanUpdated { projection } => {
+                let active = projection.active.expect("active smoke plan");
+                assert_eq!(active.plan_id, "smoke:delegate-pending-result");
+                assert_eq!(active.source, "smoke");
+            }
+            other => panic!("expected PlanUpdated smoke event, got {other:?}"),
+        }
+    }
 }

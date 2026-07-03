@@ -30,6 +30,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Cleared stale smoke-owned live operation handles and Workbench plan projections before launching a new `/smoke` scenario so delegate smoke runs no longer display previous cleave child rows, workstreams, or task counters.
 - Made `manage_tools` report enabled tools from the active callable schema inventory so registered-but-filtered tools show as unavailable instead of falsely enabled.
 - Hardened the cleave approval gate so high-cost confirmations are enforced at the final `cleave_run` boundary, non-approved approval states cannot be replayed, payload drift is rejected, generated approval IDs include a monotonic suffix to avoid rapid-call collisions, pending cleave approvals persist across reloads as review-required Workbench rows, active approvals are conservatively downgraded after restart, active plans are not clobbered by cleave approval workstreams, and approval menus only advertise implemented release-safe actions.
 - Restored operator recovery when interrupting wedged turns by abandoning the active turn immediately after cancellation instead of waiting inside the potentially stuck turn path.
