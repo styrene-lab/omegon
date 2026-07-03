@@ -9371,7 +9371,7 @@ Scroll transcript:
                         });
                         SlashResult::Display(format!("Resuming session {id}…"))
                     }
-                    Some(CanonicalSlashCommand::ListSessions) | _ => {
+                    _ => {
                         let _ = tx.try_send(TuiCommand::ListSessions { respond_to: None });
                         SlashResult::Handled
                     }

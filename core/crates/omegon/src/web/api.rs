@@ -715,13 +715,13 @@ pub async fn post_native_session(
         return Err(error.status());
     }
 
-    if let Some(cwd) = request.cwd.as_deref() {
+    if let Some(cwd) = request.cwd {
         let current = std::env::current_dir().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         if cwd != current.to_string_lossy() {
             return Err(StatusCode::BAD_REQUEST);
         }
     }
-    let assistant = if let Some(profile_id) = request.assistant_profile_id.as_deref() {
+    let assistant = if let Some(profile_id) = request.assistant_profile_id {
         let snapshot = capability_inventory_snapshot(state.clone())?;
         Some(
             snapshot
@@ -2509,8 +2509,8 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert_eq!(response.leases.len(), 1);
         assert_eq!(response.leases[0].instance_id, "test-1");
         assert_eq!(
-            response.leases[0].lease.owner_session_id.as_deref(),
-            Some("session-1")
+            response.leases[0].lease.owner_session_id,
+            Some("session-1".to_string())
         );
     }
 
@@ -2552,8 +2552,8 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert_eq!(response.surfaces.memory_status.active_facts, 0);
         assert_eq!(response.surfaces.operations.active_child_runtimes, 0);
         assert_eq!(
-            response.surfaces.settings.auth_mode.as_deref(),
-            Some("ephemeral-bearer")
+            response.surfaces.settings.auth_mode,
+            Some("ephemeral-bearer".to_string())
         );
     }
 
@@ -2689,16 +2689,16 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert!(response.1.assistant_profile_id.is_none());
         assert!(response.1.assistant.is_none());
         assert_eq!(
-            response.1.links.surfaces.as_deref(),
-            Some("/api/sessions/default/surfaces")
+            response.1.links.surfaces,
+            Some("/api/sessions/default/surfaces".to_string())
         );
         assert_eq!(
-            response.1.links.actions.as_deref(),
-            Some("/api/sessions/default/actions")
+            response.1.links.actions,
+            Some("/api/sessions/default/actions".to_string())
         );
         assert_eq!(
-            response.1.links.stream.as_deref(),
-            Some("/api/sessions/default/surfaces/stream")
+            response.1.links.stream,
+            Some("/api/sessions/default/surfaces/stream".to_string())
         );
     }
 
@@ -2725,8 +2725,8 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
         assert_eq!(response.0, StatusCode::CREATED);
         assert_eq!(
-            response.1.assistant_profile_id.as_deref(),
-            Some("blocked-agent")
+            response.1.assistant_profile_id,
+            Some("blocked-agent".to_string())
         );
         let assistant = response.1.assistant.as_ref().expect("assistant readiness");
         assert_eq!(assistant.id, "blocked-agent");
@@ -2839,7 +2839,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
             response.0.status,
             crate::ui_runtime::envelope::UiActionOutcomeStatus::Rejected
         );
-        assert_eq!(response.0.error.as_deref(), Some("capability_not_granted"));
+        assert_eq!(response.0.error, Some("capability_not_granted".to_string()));
         assert!(
             rx.try_recv().is_err(),
             "denied action must not reach command queue"
@@ -2934,16 +2934,16 @@ required = ["MISSING_REQUIRED_TOKEN"]
         assert!(response.session.current);
         assert_eq!(response.schema_version, 1);
         assert_eq!(
-            response.links.surfaces.as_deref(),
-            Some("/api/sessions/default/surfaces")
+            response.links.surfaces,
+            Some("/api/sessions/default/surfaces".to_string())
         );
         assert_eq!(
-            response.links.actions.as_deref(),
-            Some("/api/sessions/default/actions")
+            response.links.actions,
+            Some("/api/sessions/default/actions".to_string())
         );
         assert_eq!(
-            response.links.stream.as_deref(),
-            Some("/api/sessions/default/surfaces/stream")
+            response.links.stream,
+            Some("/api/sessions/default/surfaces/stream".to_string())
         );
         assert_eq!(response.snapshot.session_id, "default");
     }
@@ -2989,7 +2989,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
         .await;
 
         assert_eq!(status, StatusCode::FORBIDDEN);
-        assert_eq!(response.0.error.as_deref(), Some("capability_not_granted"));
+        assert_eq!(response.0.error, Some("capability_not_granted".to_string()));
         assert!(rx.try_recv().is_err());
     }
 
@@ -3077,7 +3077,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
             response.status,
             crate::ui_runtime::envelope::UiActionOutcomeStatus::Rejected
         );
-        assert_eq!(response.error.as_deref(), Some("unknown session_id"));
+        assert_eq!(response.error, Some("unknown session_id".to_string()));
     }
 
     #[tokio::test]
@@ -3407,7 +3407,7 @@ required = ["BRAVE_API_KEY"]
             readiness.status,
             crate::capabilities::secrets::SecretReadinessStatus::Configured
         );
-        assert_eq!(readiness.recipe_kind.as_deref(), Some("env"));
+        assert_eq!(readiness.recipe_kind, Some("env".to_string()));
         let payload = serde_json::to_string(&response).unwrap();
         assert!(!payload.contains("brave-test-key"));
         assert!(!payload.contains("OMEGON_TEST_BRAVE_KEY"));
@@ -3573,8 +3573,8 @@ required = ["BRAVE_API_KEY"]
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(payload.error, "forbidden");
         assert_eq!(payload.reason, "capability_not_granted");
-        assert_eq!(payload.operation.as_deref(), Some("event.ingress"));
-        assert_eq!(payload.role.as_deref(), Some("monitor"));
+        assert_eq!(payload.operation, Some("event.ingress"));
+        assert_eq!(payload.role, Some("monitor"));
         assert!(state.daemon_events.lock().unwrap().is_empty());
     }
 
@@ -3644,9 +3644,9 @@ required = ["BRAVE_API_KEY"]
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(payload.error, "forbidden");
         assert_eq!(payload.reason, "capability_not_granted");
-        assert_eq!(payload.operation.as_deref(), Some("event.ingress"));
+        assert_eq!(payload.operation, Some("event.ingress"));
         assert_eq!(
-            payload.capability.as_deref(),
+            payload.capability,
             Some(omegon_rbac::OmegonCapability::EVENT_INGRESS)
         );
         assert!(state.daemon_events.lock().unwrap().is_empty());
@@ -3901,10 +3901,10 @@ required = ["BRAVE_API_KEY"]
         let child = &snap.cleave.children[0];
         let runtime = child.runtime.as_ref().expect("runtime should be present");
         assert_eq!(
-            runtime.model.as_deref(),
-            Some("anthropic:claude-sonnet-4-6")
+            runtime.model,
+            Some("anthropic:claude-sonnet-4-6".to_string())
         );
-        assert_eq!(runtime.context_class.as_deref(), Some("massive"));
+        assert_eq!(runtime.context_class, Some("massive".to_string()));
         assert_eq!(runtime.disabled_tools, vec!["bash"]);
         assert_eq!(runtime.enabled_extensions, vec!["alpha"]);
         assert_eq!(runtime.preloaded_files, vec!["docs/runtime-preload.md"]);

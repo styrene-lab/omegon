@@ -335,47 +335,47 @@ fn project_operations(state: &WebState) -> WebOperationsSurface {
     let (mut running, mut completed, mut failed) = (0usize, 0usize, 0usize);
     let mut children: Vec<WebOperationChild> = Vec::new();
 
-    if let Some(delegate) = state.handles.delegate.as_ref().and_then(|d| d.lock().ok()) {
-        if delegate.active || !delegate.children.is_empty() {
-            kind = Some("delegate".to_string());
-            running += delegate.running;
-            completed += delegate.completed;
-            failed += delegate.failed;
-            for child in &delegate.children {
-                children.push(WebOperationChild {
-                    label: child.label.clone(),
-                    status: child.status.clone(),
-                    activity: child.last_tool.clone(),
-                    tasks_done: child.tasks_done,
-                    tasks_total: child.tasks.len(),
-                    result_summary: child.result_summary.clone(),
-                });
-            }
+    if let Some(delegate) = state.handles.delegate.as_ref().and_then(|d| d.lock().ok())
+        && (delegate.active || !delegate.children.is_empty())
+    {
+        kind = Some("delegate".to_string());
+        running += delegate.running;
+        completed += delegate.completed;
+        failed += delegate.failed;
+        for child in &delegate.children {
+            children.push(WebOperationChild {
+                label: child.label.clone(),
+                status: child.status.clone(),
+                activity: child.last_tool.clone(),
+                tasks_done: child.tasks_done,
+                tasks_total: child.tasks.len(),
+                result_summary: child.result_summary.clone(),
+            });
         }
     }
 
-    if let Some(cleave) = state.handles.cleave.as_ref().and_then(|c| c.lock().ok()) {
-        if cleave.active || !cleave.children.is_empty() {
-            if kind.is_none() {
-                kind = Some("cleave".to_string());
-            }
-            running += cleave
-                .children
-                .iter()
-                .filter(|c| c.status == "running")
-                .count();
-            completed += cleave.completed;
-            failed += cleave.failed;
-            for child in &cleave.children {
-                children.push(WebOperationChild {
-                    label: child.label.clone(),
-                    status: child.status.clone(),
-                    activity: child.last_tool.clone(),
-                    tasks_done: child.tasks_done,
-                    tasks_total: child.tasks.len(),
-                    result_summary: None,
-                });
-            }
+    if let Some(cleave) = state.handles.cleave.as_ref().and_then(|c| c.lock().ok())
+        && (cleave.active || !cleave.children.is_empty())
+    {
+        if kind.is_none() {
+            kind = Some("cleave".to_string());
+        }
+        running += cleave
+            .children
+            .iter()
+            .filter(|c| c.status == "running")
+            .count();
+        completed += cleave.completed;
+        failed += cleave.failed;
+        for child in &cleave.children {
+            children.push(WebOperationChild {
+                label: child.label.clone(),
+                status: child.status.clone(),
+                activity: child.last_tool.clone(),
+                tasks_done: child.tasks_done,
+                tasks_total: child.tasks.len(),
+                result_summary: None,
+            });
         }
     }
 

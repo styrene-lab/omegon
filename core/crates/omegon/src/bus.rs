@@ -322,15 +322,26 @@ impl EventBus {
         let Some(handle) = &self.tool_inventory else {
             return;
         };
-        let mut names: Vec<String> = self
+        let mut registered: Vec<String> = self
             .tool_defs
             .iter()
             .filter(|(_, def)| !is_model_hidden_tool(&def.name))
             .map(|(_, def)| def.name.clone())
             .collect();
-        names.sort();
+        registered.sort();
+
+        let mut callable: Vec<String> = self
+            .tool_definitions_mode(false)
+            .into_iter()
+            .map(|def| def.name)
+            .collect();
+        callable.sort();
+
         if let Ok(mut inventory) = handle.lock() {
-            *inventory = names;
+            *inventory = crate::features::manage_tools::ToolInventorySnapshot {
+                registered,
+                callable,
+            };
         }
     }
 
@@ -339,7 +350,20 @@ impl EventBus {
     fn tool_inventory_names(&self) -> Vec<String> {
         self.tool_inventory
             .as_ref()
-            .and_then(|handle| handle.lock().ok().map(|names| names.clone()))
+            .and_then(|handle| {
+                handle
+                    .lock()
+                    .ok()
+                    .map(|snapshot| snapshot.registered.clone())
+            })
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    fn callable_tool_inventory_names(&self) -> Vec<String> {
+        self.tool_inventory
+            .as_ref()
+            .and_then(|handle| handle.lock().ok().map(|snapshot| snapshot.callable.clone()))
             .unwrap_or_default()
     }
 
@@ -931,12 +955,38 @@ mod tests {
         let mut bus = EventBus::new();
         bus.register(Box::new(CounterFeature { event_count: 0 }));
 
-        let inventory = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let inventory = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::features::manage_tools::ToolInventorySnapshot::default(),
+        ));
         bus.set_tool_inventory(inventory);
         assert!(bus.tool_inventory_names().is_empty());
 
         bus.finalize();
         assert_eq!(bus.tool_inventory_names(), vec!["count".to_string()]);
+        assert_eq!(
+            bus.callable_tool_inventory_names(),
+            vec!["count".to_string()]
+        );
+    }
+
+    #[test]
+    fn set_tool_inventory_tracks_disabled_tools_as_not_callable() {
+        let mut bus = EventBus::new();
+        bus.register(Box::new(CounterFeature { event_count: 0 }));
+        bus.finalize();
+
+        let disabled = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        bus.set_disabled_tools(disabled.clone());
+        let inventory = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::features::manage_tools::ToolInventorySnapshot::default(),
+        ));
+        bus.set_tool_inventory(inventory);
+
+        disabled.lock().unwrap().insert("count".to_string());
+        bus.finalize();
+
+        assert_eq!(bus.tool_inventory_names(), vec!["count".to_string()]);
+        assert!(bus.callable_tool_inventory_names().is_empty());
     }
 
     #[test]

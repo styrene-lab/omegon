@@ -311,7 +311,7 @@ fn cleave_assessment_approval(legacy_decision: &str, strategy: &Value) -> Value 
         "surface": "menu",
         "workbench_role": "process_tree",
         "reason": if requires {
-            "Cleave execution may launch child agents, create private workspaces, run long validation, and consume paid tokens; operator menu approval is required before execution."
+            "Cleave execution may launch cloves, create private workspaces, run long validation, and consume paid tokens; operator menu approval is required before execution."
         } else {
             "Assessment does not recommend cleave execution."
         },
@@ -328,7 +328,7 @@ fn cleave_assessment_approval(legacy_decision: &str, strategy: &Value) -> Value 
         },
         "confirmation": {
             "required_for_high_cost": true,
-            "prompt": "Approve and run cleave child agents? y/N"
+            "prompt": "Approve and run cleave cloves? y/N"
         }
     })
 }
@@ -419,7 +419,7 @@ fn assess_decomposition_strategy(
     } else if high_overlap {
         (
             "phased_execution",
-            "Large work appears to share central files; parallel worktrees would raise merge risk, so use parent phases or sequential children.",
+            "Large work appears to share central files; parallel worktrees would raise merge risk, so use parent phases or sequential cloves.",
             0.70,
             vec!["shared write scope risk"],
         )
@@ -433,14 +433,14 @@ fn assess_decomposition_strategy(
     } else if legacy_decision == "cleave" && has_scope {
         (
             "sequential_children",
-            "Task is complex and scoped, but evidence is insufficient for confident parallelism; use sequenced child workstreams.",
+            "Task is complex and scoped, but evidence is insufficient for confident parallelism; use sequenced clove workstreams.",
             0.68,
             vec!["parallelism not yet structurally proven"],
         )
     } else {
         (
             "direct_execution",
-            "Current evidence does not justify child workstream orchestration.",
+            "Current evidence does not justify clove workstream orchestration.",
             0.62,
             vec![],
         )
@@ -453,7 +453,7 @@ fn assess_decomposition_strategy(
     if dirty_or_submodule {
         warnings_json.push(json!({
             "kind": "vcs_checkpoint_required",
-            "message": "Directive or scope mentions dirty tree/worktree/submodule ambiguity; checkpoint before private child workspaces."
+            "message": "Directive or scope mentions dirty tree/worktree/submodule ambiguity; checkpoint before private clove workspaces."
         }));
     }
     if mode == "parallel_cleave" && !spec_backed {
@@ -473,7 +473,7 @@ fn assess_decomposition_strategy(
                 "read_scope": [],
                 "forbidden_scope": [],
                 "depends_on": [],
-                "acceptance": ["child reports concrete diff and validation evidence"],
+                "acceptance": ["clove reports concrete diff and validation evidence"],
                 "validation": ["run focused tests for owned scope"],
                 "conflict_risk": "unknown",
                 "confidence": overall
@@ -491,7 +491,7 @@ fn assess_decomposition_strategy(
             "perforation_lines": perforation_lines,
             "waves": if mode == "parallel_cleave" { json!([["foundation"]]) } else { json!([]) },
             "parent_obligations": [
-                "validate child claims against harness-observed diffs/tests",
+                "validate clove claims against harness-observed diffs/tests",
                 "own merge, final validation, synthesis, and release-memory updates"
             ],
             "communication_policy": "ParentOnly"
@@ -1239,7 +1239,7 @@ impl CleaveFeature {
         let mut lines = Vec::new();
         if progress.active {
             lines.push(format!(
-                "Cleave active: {}/{} children ({} completed, {} failed)",
+                "Cleave active: {}/{} cloves ({} completed, {} failed)",
                 progress.completed + progress.failed,
                 progress.total_children,
                 progress.completed,
@@ -1247,7 +1247,7 @@ impl CleaveFeature {
             ));
         } else {
             lines.push(format!(
-                "Last cleave: {} completed, {} failed of {}",
+                "Last cleave: {} completed, {} failed of {} cloves",
                 progress.completed, progress.failed, progress.total_children
             ));
         }
@@ -1478,7 +1478,7 @@ impl CleaveFeature {
                 PlanWorkstreamProjection {
                     id: format!("cleave:{}", approval.id),
                     title: format!(
-                        "{title_prefix} — {} child{} / max_parallel {}",
+                        "{title_prefix} — {} clove{} / max_parallel {}",
                         approval.children,
                         if approval.children == 1 { "" } else { "ren" },
                         approval.max_parallel
@@ -1511,7 +1511,7 @@ impl CleaveFeature {
             .map(|approval| PlanWorkstreamProjection {
                 id: format!("cleave:{}", approval.id),
                 title: format!(
-                    "Cleave approval required — {} child{} / max_parallel {}",
+                    "Cleave approval required — {} clove{} / max_parallel {}",
                     approval.children,
                     if approval.children == 1 { "" } else { "ren" },
                     approval.max_parallel
@@ -1523,6 +1523,21 @@ impl CleaveFeature {
                 },
             })
             .collect()
+    }
+
+    fn approved_run_args_for_pending_approval(&self, id: &str) -> Option<Value> {
+        let approval = self.pending_approval(id)?;
+        if approval.state != CleaveApprovalState::Approved {
+            return None;
+        }
+        Some(json!({
+            "directive": approval.directive,
+            "plan_json": approval.plan_json,
+            "max_parallel": approval.max_parallel,
+            "background": true,
+            "approved": true,
+            "approval_id": approval.id,
+        }))
     }
 
     fn approval_command_response(&self, action: &str, rest: &str) -> CommandResult {
@@ -1539,7 +1554,7 @@ impl CleaveFeature {
                 };
                 if existing.is_high_cost() && tail != "confirm" {
                     return CommandResult::Display(format!(
-                        "Cleave approval {id}: high-cost confirmation required for {} child{} / max_parallel {}. Run `/cleave approve {id} confirm` to launch.",
+                        "Cleave approval {id}: high-cost confirmation required for {} clove{} / max_parallel {}. Run `/cleave approve {id} confirm` to launch.",
                         existing.children,
                         if existing.children == 1 { "" } else { "ren" },
                         existing.max_parallel
@@ -1600,16 +1615,11 @@ Directive: {}{}",
         };
         if let Some(approval) = self.update_pending_approval_state(id, state.clone()) {
             if state == CleaveApprovalState::Approved {
-                let run_args = json!({
-                    "directive": approval.directive,
-                    "plan_json": approval.plan_json,
-                    "max_parallel": approval.max_parallel,
-                    "background": true,
-                    "approved": true,
-                    "approval_id": approval.id,
-                });
+                let run_args = self
+                    .approved_run_args_for_pending_approval(id)
+                    .unwrap_or_else(|| json!({}));
                 return CommandResult::Display(format!(
-                    "Cleave approval {id}: approved. Launch with approved cleave_run args:
+                    "Cleave approval {id}: approved and ready to run. The approval is bound to this exact cleave_run payload; menu surfaces should dispatch it directly instead of asking the operator to copy JSON.
 {}",
                     serde_json::to_string_pretty(&run_args)
                         .unwrap_or_else(|_| run_args.to_string())
@@ -2208,7 +2218,7 @@ impl Feature for CleaveFeature {
                         },
                         "max_parallel": {
                             "type": "number",
-                            "description": "Maximum parallel children (default: 4)"
+                            "description": "Maximum parallel cloves (default: 4)"
                         },
                         "background": {
                             "type": "boolean",
@@ -2297,13 +2307,13 @@ impl Feature for CleaveFeature {
                     let mut lines = Vec::new();
                     if prog.active {
                         lines.push(format!(
-                            "Cleave active: {}/{} children",
+                            "Cleave active: {}/{} cloves",
                             projection.completed + projection.failed,
                             prog.total_children
                         ));
                     } else {
                         lines.push(format!(
-                            "Last cleave: {} completed, {} failed of {}",
+                            "Last cleave: {} completed, {} failed of {} cloves",
                             projection.completed, projection.failed, prog.total_children
                         ));
                     }
@@ -2404,7 +2414,7 @@ fn cleave_run_menu_approval_required(
     ToolResult {
         content: vec![ContentBlock::Text {
             text: format!(
-                "Cleave approval required: open the approval menu for {approval_id} before launching {requested_children} child workstream(s) with max_parallel={max_parallel}."
+                "Cleave approval required: open the approval menu for {approval_id} before launching {requested_children} clove workstream(s) with max_parallel={max_parallel}."
             ),
         }],
         details: json!({
@@ -2457,7 +2467,7 @@ fn enforce_cleave_run_policy_with_policy(
     Some(ToolResult {
         content: vec![ContentBlock::Text {
             text: format!(
-                "Structured approval required: {reason}. Requested {requested_children} child(ren) with max_parallel={max_parallel}; active policy allows at most {} child(ren) and max_parallel={}.",
+                "Structured approval required: {reason}. Requested {requested_children} clove(s) with max_parallel={max_parallel}; active policy allows at most {} clove(s) and max_parallel={}.",
                 policy.max_children, policy.max_parallel
             ),
         }],
@@ -2806,7 +2816,7 @@ mod tests {
             CommandResult::Display(text) => {
                 assert!(text.contains("Pending cleave approval"), "{text}");
                 assert!(text.contains("cleave:cleave_30"), "{text}");
-                assert!(text.contains("3 children / max_parallel 2"), "{text}");
+                assert!(text.contains("3 cloves / max_parallel 2"), "{text}");
             }
             other => panic!("unexpected command result: {other:?}"),
         }
@@ -3039,7 +3049,7 @@ mod tests {
         match confirmed {
             CommandResult::Display(text) => {
                 assert!(text.contains("approved"), "{text}");
-                assert!(text.contains("approved cleave_run args"), "{text}");
+                assert!(text.contains("approved and ready to run"), "{text}");
             }
             other => panic!("unexpected command result: {other:?}"),
         }

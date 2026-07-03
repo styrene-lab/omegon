@@ -446,17 +446,12 @@ enum OperatorValidatorRunnerKind {
     Process,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 enum OperatorPathArgMode {
+    #[default]
     Append,
     None,
-}
-
-impl Default for OperatorPathArgMode {
-    fn default() -> Self {
-        Self::Append
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -933,7 +928,7 @@ fn validate_skill_manifest_content(path: &Path, content: &str) -> std::result::R
         "output_format",
     ] {
         if let Some(item) = value.get(field)
-            && !item.as_str().is_some_and(|text| !text.trim().is_empty())
+            && item.as_str().is_none_or(|text| text.trim().is_empty())
         {
             errors.push(format!(
                 "{}: `{field}` must be a non-empty string when present",

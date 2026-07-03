@@ -21,17 +21,17 @@ priority = "1"
 
 ## Overview
 
-The current model offers two choices: execute in-session or cleave into parallel worktree children. This binary is showing cracks — cleave has high infrastructure overhead (worktrees, branches, merge, submodule issues), while in-session execution hits context limits on large changes. The test-architect design already implies a richer model (analysis phase → implementation phase). What's the right decomposition spectrum?
+The current model offers two choices: execute in-session or cleave into parallel worktree cloves. This binary is showing cracks — cleave has high infrastructure overhead (worktrees, branches, merge, submodule issues), while in-session execution hits context limits on large changes. The test-architect design already implies a richer model (analysis phase → implementation phase). What's the right decomposition spectrum?
 
 ## Research
 
 ### Evidence: the binary model's failure modes from this session alone
 
-**Vault-secret-backend cleave (complexity 4.5 → cleave)**:\n- 5 children planned, 2 completed in wave 0, 3 never dispatched (max_parallel interaction)\n- Both completed children wrote to wrong paths (stale task file paths)\n- Both completed children couldn't commit (submodule boundary)\n- Net result: full cleave infrastructure spun up, 7 minutes wall time, zero usable merged code\n- We ended up doing 100% of the work in-session after salvaging one child's vault.rs from a dirty worktree\n\n**Cleave improvement implementation (complexity 12 → cleave recommended)**:\n- We ignored the recommendation and executed in-session because all three changes touch orchestrator.rs\n- Parallel children would have produced merge conflicts on the same file\n- Sequential in-session execution took ~20 minutes and produced clean code\n\n**Assessment algorithm blind spots**:\n- `systems × (1 + 0.5 × modifiers)` counts SYSTEMS not FILE CONFLICTS. 8 systems across 2 files → score 12 → recommends cleave → guaranteed merge conflict\n- No consideration of submodule boundaries, worktree limitations, or scope overlap\n- No consideration of whether the task is inherently sequential (e.g., fix → test → fix more → retest)\n- 'execute' means 'do it all yourself right now'. 'cleave' means 'full parallel infrastructure'. No middle ground."
+**Vault-secret-backend cleave (complexity 4.5 → cleave)**:\n- 5 cloves planned, 2 completed in wave 0, 3 never dispatched (max_parallel interaction)\n- Both completed cloves wrote to wrong paths (stale task file paths)\n- Both completed cloves couldn't commit (submodule boundary)\n- Net result: full cleave infrastructure spun up, 7 minutes wall time, zero usable merged code\n- We ended up doing 100% of the work in-session after salvaging one clove's vault.rs from a dirty worktree\n\n**Cleave improvement implementation (complexity 12 → cleave recommended)**:\n- We ignored the recommendation and executed in-session because all three changes touch orchestrator.rs\n- Parallel cloves would have produced merge conflicts on the same file\n- Sequential in-session execution took ~20 minutes and produced clean code\n\n**Assessment algorithm blind spots**:\n- `systems × (1 + 0.5 × modifiers)` counts SYSTEMS not FILE CONFLICTS. 8 systems across 2 files → score 12 → recommends cleave → guaranteed merge conflict\n- No consideration of submodule boundaries, worktree limitations, or scope overlap\n- No consideration of whether the task is inherently sequential (e.g., fix → test → fix more → retest)\n- 'execute' means 'do it all yourself right now'. 'cleave' means 'full parallel infrastructure'. No middle ground."
 
 ### The missing middle: a decomposition spectrum
 
-The real decision isn't 'cleave or not'. It's 'what decomposition strategy fits this work'. Five modes on a spectrum:\n\n### 1. Direct execution\nDo it now in this session. Single context, sequential, no git overhead. Best for: focused changes, single-file edits, quick fixes, anything that fits in context.\n\n### 2. Phased execution\nStay in-session but break work into explicit phases with compaction between them. 'First implement the client, compact, then implement the recipe kind, compact, then tests.' The agent manages its own context budget. Best for: medium tasks that are sequential but too large for one context window. This is what we actually did for the vault work.\n\n### 3. Lightweight delegation\nSpawn a single child process for a bounded subtask (like the test-architect), wait for it, consume its output. No worktrees, no branches. The child works in a temp directory or reads the repo read-only. Best for: analysis passes, code generation, test plan creation — anything where the output is a file, not a git commit.\n\n### 4. Sequential children\nSpawn children one at a time, each building on the previous one's committed work. Like cleave waves but with wave size 1 and explicit checkpoints. The parent reviews each child's output before dispatching the next. Best for: dependent task chains where later work depends on earlier output.\n\n### 5. Parallel cleave (current model)\nFull worktree isolation, parallel dispatch, merge. Best for: truly independent scope partitions with no file overlap. The actual sweet spot for this is narrow: 3-5 children working on different directories with zero shared files.\n\n### What's missing from the algorithm\nThe current assessment asks 'how complex is this?' It should ask:\n- **Are the scopes overlapping?** If children will edit the same files → mode 2 or 4, not 5\n- **Is there a dependency chain?** If task B needs task A's output → mode 4, not 5\n- **Does the infrastructure support it?** Submodules, monorepos, large binary files → mode 2 or 3\n- **What's the context budget?** If the work fits in one context window → mode 1\n- **Is there analysis work separable from implementation?** → mode 3 for analysis, then mode 4/5 for impl"
+The real decision isn't 'cleave or not'. It's 'what decomposition strategy fits this work'. Five modes on a spectrum:\n\n### 1. Direct execution\nDo it now in this session. Single context, sequential, no git overhead. Best for: focused changes, single-file edits, quick fixes, anything that fits in context.\n\n### 2. Phased execution\nStay in-session but break work into explicit phases with compaction between them. 'First implement the client, compact, then implement the recipe kind, compact, then tests.' The agent manages its own context budget. Best for: medium tasks that are sequential but too large for one context window. This is what we actually did for the vault work.\n\n### 3. Lightweight delegation\nSpawn a single child process for a bounded subtask (like the test-architect), wait for it, consume its output. No worktrees, no branches. The child works in a temp directory or reads the repo read-only. Best for: analysis passes, code generation, test plan creation — anything where the output is a file, not a git commit.\n\n### 4. Sequential cloves\nSpawn children one at a time, each building on the previous one's committed work. Like cleave waves but with wave size 1 and explicit checkpoints. The parent reviews each child's output before dispatching the next. Best for: dependent task chains where later work depends on earlier output.\n\n### 5. Parallel cleave (current model)\nFull worktree isolation, parallel dispatch, merge. Best for: truly independent scope partitions with no file overlap. The actual sweet spot for this is narrow: 3-5 children working on different directories with zero shared files.\n\n### What's missing from the algorithm\nThe current assessment asks 'how complex is this?' It should ask:\n- **Are the scopes overlapping?** If cloves will edit the same files → mode 2 or 4, not 5\n- **Is there a dependency chain?** If task B needs task A's output → mode 4, not 5\n- **Does the infrastructure support it?** Submodules, monorepos, large binary files → mode 2 or 3\n- **What's the context budget?** If the work fits in one context window → mode 1\n- **Is there analysis work separable from implementation?** → mode 3 for analysis, then mode 4/5 for impl"
 
 ### What the test-architect design already implies
 
@@ -39,7 +39,7 @@ The test-architect is a mode 3 (lightweight delegation) feeding into mode 5 (par
 
 ### Algorithm redesign: scope-graph analysis replaces system counting
 
-The current formula `systems × (1 + 0.5 × modifiers)` is a proxy for 'how hard is this'. It counts nouns in the directive. It should instead analyze the SCOPE GRAPH:\n\n1. **Parse the plan's file scopes** (from OpenSpec tasks.md or the plan_json)\n2. **Build a conflict graph**: edges between children that share files\n3. **Compute maximum independent set**: children that CAN run in parallel without conflicts\n4. **Detect sequential dependencies**: children where B's scope includes A's output\n5. **Check infrastructure constraints**: submodules, monorepo boundaries, worktree limitations\n\nFrom the graph, derive the strategy:\n- Independent set size ≥ 3 and no infrastructure constraints → parallel cleave\n- Independent set size < 3 but tasks are separable → sequential children or phased execution\n- High file overlap → phased execution (stay in-session)\n- Single file → direct execution\n- Analysis + implementation separable → lightweight delegation then parallel\n\nThis replaces the pattern-matching heuristic with a structural analysis that can't be fooled by how the directive is worded. It also naturally discovers the wave structure instead of requiring the operator/agent to specify depends_on manually."
+The current formula `systems × (1 + 0.5 × modifiers)` is a proxy for 'how hard is this'. It counts nouns in the directive. It should instead analyze the SCOPE GRAPH:\n\n1. **Parse the plan's file scopes** (from OpenSpec tasks.md or the plan_json)\n2. **Build a conflict graph**: edges between children that share files\n3. **Compute maximum independent set**: children that CAN run in parallel without conflicts\n4. **Detect sequential dependencies**: children where B's scope includes A's output\n5. **Check infrastructure constraints**: submodules, monorepo boundaries, worktree limitations\n\nFrom the graph, derive the strategy:\n- Independent set size ≥ 3 and no infrastructure constraints → parallel cleave\n- Independent set size < 3 but tasks are separable → sequential cloves or phased execution\n- High file overlap → phased execution (stay in-session)\n- Single file → direct execution\n- Analysis + implementation separable → lightweight delegation then parallel\n\nThis replaces the pattern-matching heuristic with a structural analysis that can't be fooled by how the directive is worded. It also naturally discovers the wave structure instead of requiring the operator/agent to specify depends_on manually."
 
 ### Industry-standard complexity and decomposition models
 
@@ -51,7 +51,7 @@ The DSM and coupling metrics need a structural model of the codebase. This model
 
 ### Proposed algorithm: DSM-partitioned strategy with CPM scheduling
 
-```\nInput:\n  - directive (text)\n  - scope (file paths, from OpenSpec or inferred)\n  - structural_model (from /init, optional)\n  - infrastructure_constraints (submodules, monorepo layout)\n\nStep 1: SCOPE RESOLUTION\n  If scope provided (OpenSpec): use it directly\n  If no scope: infer from directive + structural model\n    - Pattern match directive to modules (current heuristic, but output is modules not a score)\n    - If no structural model: fall back to file path extraction from directive text\n\nStep 2: DEPENDENCY ANALYSIS\n  Build scope-DSM: NxN matrix where N = scope modules\n  For each pair (A, B):\n    - Direct dependency: A imports/uses B → cell = 1\n    - Shared file: A and B modify same file → cell = 2 (merge conflict risk)\n    - Submodule boundary: A and B in different git repos → flag\n  Source: structural model if available, else quick `grep` pass over scope files\n\nStep 3: DSM PARTITIONING\n  Apply Tarjan's algorithm to find strongly-connected components (cycles)\n  Merge cycles into single work units (can't parallelize within a cycle)\n  Topological sort remaining DAG → natural wave order\n  Identify bus modules (high afferent coupling) → foundation wave\n\nStep 4: STRATEGY SELECTION\n  Metrics from the partitioned DSM:\n    - parallel_groups: number of independent clusters after partitioning\n    - max_wave_depth: longest dependency chain\n    - conflict_density: ratio of shared-file edges to total edges\n    - total_scope_size: number of files\n\n  Decision matrix:\n    total_scope_size ≤ 3 → DIRECT EXECUTION\n    conflict_density > 0.5 → PHASED EXECUTION (too many shared files for parallel)\n    parallel_groups ≤ 1 → SEQUENTIAL CHILDREN (everything depends on everything)\n    parallel_groups ≥ 2 AND conflict_density ≤ 0.3 → PARALLEL CLEAVE\n    analysis separable from implementation → LIGHTWEIGHT DELEGATION + one of above\n\nStep 5: PLAN GENERATION\n  Output a strategy plan:\n    phases: [{mode, children, estimated_effort}]\n    critical_path: [module names in order]\n    infrastructure_warnings: [submodule, merge risk, etc.]\n    estimated_total_time: CPM calculation\n```\n\nThis replaces `systems × (1 + 0.5 × modifiers) > 2.0 → cleave`. The output is a plan, not a boolean."
+```\nInput:\n  - directive (text)\n  - scope (file paths, from OpenSpec or inferred)\n  - structural_model (from /init, optional)\n  - infrastructure_constraints (submodules, monorepo layout)\n\nStep 1: SCOPE RESOLUTION\n  If scope provided (OpenSpec): use it directly\n  If no scope: infer from directive + structural model\n    - Pattern match directive to modules (current heuristic, but output is modules not a score)\n    - If no structural model: fall back to file path extraction from directive text\n\nStep 2: DEPENDENCY ANALYSIS\n  Build scope-DSM: NxN matrix where N = scope modules\n  For each pair (A, B):\n    - Direct dependency: A imports/uses B → cell = 1\n    - Shared file: A and B modify same file → cell = 2 (merge conflict risk)\n    - Submodule boundary: A and B in different git repos → flag\n  Source: structural model if available, else quick `grep` pass over scope files\n\nStep 3: DSM PARTITIONING\n  Apply Tarjan's algorithm to find strongly-connected components (cycles)\n  Merge cycles into single work units (can't parallelize within a cycle)\n  Topological sort remaining DAG → natural wave order\n  Identify bus modules (high afferent coupling) → foundation wave\n\nStep 4: STRATEGY SELECTION\n  Metrics from the partitioned DSM:\n    - parallel_groups: number of independent clusters after partitioning\n    - max_wave_depth: longest dependency chain\n    - conflict_density: ratio of shared-file edges to total edges\n    - total_scope_size: number of files\n\n  Decision matrix:\n    total_scope_size ≤ 3 → DIRECT EXECUTION\n    conflict_density > 0.5 → PHASED EXECUTION (too many shared files for parallel)\n    parallel_groups ≤ 1 → SEQUENTIAL CLOVES (everything depends on everything)\n    parallel_groups ≥ 2 AND conflict_density ≤ 0.3 → PARALLEL CLEAVE\n    analysis separable from implementation → LIGHTWEIGHT DELEGATION + one of above\n\nStep 5: PLAN GENERATION\n  Output a strategy plan:\n    phases: [{mode, cloves, estimated_effort}]\n    critical_path: [module names in order]\n    infrastructure_warnings: [submodule, merge risk, etc.]\n    estimated_total_time: CPM calculation\n```\n\nThis replaces `systems × (1 + 0.5 × modifiers) > 2.0 → cleave`. The output is a plan, not a boolean."
 
 ### Memory system as the structural model — not a parallel store
 
@@ -59,7 +59,7 @@ The memory system already has everything the DSM needs:\n\n### What exists today
 
 ### Co-change analysis from git history — the emergent coupling signal
 
-Static import analysis misses emergent coupling. Two files that never import each other but are always modified together are coupled — by shared assumptions, shared data schemas, or shared behavioral contracts. Git history reveals this:\n\n```bash\ngit log --name-only --format='' --diff-filter=M -- '*.rs' | \\\n  awk '/^$/{next} {files[NR]=$0} END{...}' # pairwise co-change frequency\n```\n\nThis produces edges like:\n```\nvault.rs ←[changes_with, confidence=0.8]→ resolve.rs\nlib.rs ←[changes_with, confidence=0.6]→ Cargo.toml\nmod.rs ←[changes_with, confidence=0.9]→ orchestrator.rs\n```\n\nCo-change coupling is MORE predictive than import coupling for merge conflicts. If two files change together 80% of the time, putting them in different cleave children guarantees conflicts. The DSM should weight co-change edges higher than import edges for the conflict_density calculation.\n\n`/init` can compute the co-change matrix from git history (last 100 commits, say) and store as memory edges with `changes_with` relation. This decays naturally — old co-change patterns fade as the code evolves.\n\nThis is exactly the 'Design Structure Matrix approach for measuring co-change-modularity' from the ACM research (Zimmerman et al.) — using association rule mining on co-change graphs to determine evolutionary coupling."
+Static import analysis misses emergent coupling. Two files that never import each other but are always modified together are coupled — by shared assumptions, shared data schemas, or shared behavioral contracts. Git history reveals this:\n\n```bash\ngit log --name-only --format='' --diff-filter=M -- '*.rs' | \\\n  awk '/^$/{next} {files[NR]=$0} END{...}' # pairwise co-change frequency\n```\n\nThis produces edges like:\n```\nvault.rs ←[changes_with, confidence=0.8]→ resolve.rs\nlib.rs ←[changes_with, confidence=0.6]→ Cargo.toml\nmod.rs ←[changes_with, confidence=0.9]→ orchestrator.rs\n```\n\nCo-change coupling is MORE predictive than import coupling for merge conflicts. If two files change together 80% of the time, putting them in different cleave cloves guarantees conflicts. The DSM should weight co-change edges higher than import edges for the conflict_density calculation.\n\n`/init` can compute the co-change matrix from git history (last 100 commits, say) and store as memory edges with `changes_with` relation. This decays naturally — old co-change patterns fade as the code evolves.\n\nThis is exactly the 'Design Structure Matrix approach for measuring co-change-modularity' from the ACM research (Zimmerman et al.) — using association rule mining on co-change graphs to determine evolutionary coupling."
 
 ### Root cause: why edges haven't populated
 
@@ -112,7 +112,7 @@ Implication for Omegon: the planned scope graph should be treated as a sparse DS
 
 The Git documentation describes `git worktree` as managing multiple working trees attached to the same repository. It explicitly states that a repository can support multiple working trees, allowing more than one branch to be checked out at a time, with linked worktrees carrying additional metadata distinct from the main worktree.
 
-Implication for Omegon: git worktrees are not a hack around Git; they are the correct Git-native substrate for child workstreams inside the bounds of an existing repository. The harness should model them explicitly as child workspaces with lifecycle, scope, branch/ref, status, merge, and cleanup state.
+Implication for Omegon: git worktrees are not a hack around Git; they are the correct Git-native substrate for clove workstreams inside the bounds of an existing repository. The harness should model them explicitly as clove workspaces with lifecycle, scope, branch/ref, status, merge, and cleanup state.
 
 #### Jujutsu workspaces fit the same abstraction and may be a better multi-workstream substrate
 
@@ -124,7 +124,7 @@ Implication for Omegon: the harness should not hard-code Git worktree semantics 
 
 Branching-pattern guidance emphasizes integration frequency, integration friction, and modularity. Feature-toggle/trunk-based discussions warn that long-lived branches create painful merges and recommend techniques that keep integration frequent and controlled.
 
-Implication for Omegon: child workstreams should be short-lived, bounded, and merged/harvested by the parent as soon as their acceptance contract is satisfied. Cleave should avoid producing long-running orphan branches. If a task cannot be decomposed into short-lived low-conflict streams, the assessment should choose phased execution or sequential children instead of parallel cleave.
+Implication for Omegon: clove workstreams should be short-lived, bounded, and merged/harvested by the parent as soon as their acceptance contract is satisfied. Cleave should avoid producing long-running orphan branches. If a task cannot be decomposed into short-lived low-conflict streams, the assessment should choose phased execution or sequential cloves instead of parallel cleave.
 
 ### Refined design claim
 
@@ -139,7 +139,7 @@ directive
   -> cluster + sequence analysis
   -> perforation lines
   -> private git/jj workspaces
-  -> child execution
+  -> clove execution
   -> parent merge/harvest
   -> parent validation and synthesis
 ```
@@ -201,7 +201,7 @@ struct ChildWorkspacePlan {
 The parent harness owns:
 
 - substrate selection;
-- child workspace creation;
+- clove workspace creation;
 - scope enforcement or boundary-violation reporting;
 - child result harvest;
 - merge/rebase/integration;
@@ -230,7 +230,7 @@ The old binary `execute` vs `cleave` should remain as a compatibility projection
 - `direct_execution` — small or tightly coupled work;
 - `phased_execution` — large but high-overlap work handled by parent phases;
 - `lightweight_delegate` — bounded analysis/verification/generation without merge authority;
-- `sequential_children` — child workspaces with dependency depth or high integration risk;
+- `sequential_cloves` — clove workspaces with dependency depth or high integration risk;
 - `parallel_cleave` — independent low-overlap perforation lines with parent-governed merge;
 - `hybrid` — e.g. analysis delegate, then sequential foundation, then parallel leaf workstreams.
 
@@ -272,9 +272,9 @@ Additive, backward-compatible result:
     ],
     "waves": [["event-model"], ["delegate-emission", "workbench-projection"]],
     "parent_obligations": [
-      "merge children in wave order",
+      "merge cloves in wave order",
       "run parent validation after each wave",
-      "synthesize child claims against harness-observed diffs/tests"
+      "synthesize clove claims against harness-observed diffs/tests"
     ]
   },
   "warnings": []
@@ -283,7 +283,7 @@ Additive, backward-compatible result:
 
 ### Integration with workstream events
 
-Each perforation line becomes a child workstream in the event model:
+Each perforation line becomes a clove workstream in the event model:
 
 ```text
 cleave_21
@@ -296,7 +296,7 @@ cleave_21
 The parent receives structured events for:
 
 - workspace created;
-- child progress;
+- clove progress;
 - boundary expansion requested;
 - child completed/failed/cancelled;
 - merge started/conflicted/completed;
@@ -320,7 +320,7 @@ This connects decomposition to the result-continuation design: the harness owns 
 
 ### Design position
 
-Cleave child agents are independent Omegon runtimes, but their coordination topology should remain parent-orchestrated by default.
+Cleave cloves are independent Omegon runtimes, but their coordination topology should remain parent-orchestrated by default.
 
 A2A-style communication is valuable as a structured protocol vocabulary for task envelopes, capability declarations, artifacts, progress, cancellation, and status. It should not initially mean freeform peer-to-peer child chat. Direct child-to-child negotiation undermines scope authority, provenance, merge ownership, and deadlock control.
 
@@ -329,14 +329,14 @@ Default topology:
 ```text
             parent Omegon runtime
           /          |           \
- child workstream  child workstream  child workstream
+ clove workstream  clove workstream  clove workstream
 ```
 
-The parent sends task envelopes to children. Children send events, artifacts, blockers, and boundary requests to the parent. The parent may route accepted dependency artifacts or approved questions to downstream children.
+The parent sends task envelopes to cloves. Children send events, artifacts, blockers, and boundary requests to the parent. The parent may route accepted dependency artifacts or approved questions to downstream cloves.
 
 ### Communication layers
 
-#### Layer 1 — Parent-child task protocol
+#### Layer 1 — Parent-clove task protocol
 
 Required for cleave v2.
 
@@ -391,7 +391,7 @@ struct DependencyArtifact {
 }
 ```
 
-A downstream child may consume only parent-accepted artifacts by default. This prevents one child from smuggling unreviewed design decisions into another child's task stream.
+A downstream clove may consume only parent-accepted artifacts by default. This prevents one clove from smuggling unreviewed design decisions into another clove's task stream.
 
 Example:
 
@@ -457,7 +457,7 @@ Recommended mapping:
 |---|---|
 | direct execution | none |
 | lightweight delegate | ParentOnly |
-| sequential children | ParentOnly + parent-accepted dependency artifacts |
+| sequential cloves | ParentOnly + parent-accepted dependency artifacts |
 | parallel cleave | ParentOnly by default; ParentMediatedMailbox if dependency questions are expected |
 | collaborative experimental cleave | DirectPeerWithAudit, explicit approval only |
 
@@ -519,7 +519,7 @@ Contents:
 
 - task envelope sent;
 - child process/workspace created;
-- child progress;
+- clove progress;
 - message routed/denied;
 - artifacts produced;
 - boundary requests;
@@ -555,7 +555,7 @@ Audit answers:
 - what scope authority it had;
 - which artifacts it produced;
 - which artifacts were accepted by the parent;
-- which downstream children consumed those artifacts;
+- which downstream cloves consumed those artifacts;
 - whether scope boundaries changed;
 - which merge/validation results justified final synthesis.
 
@@ -579,7 +579,7 @@ trace: cleave_21
   span: synthesis
 ```
 
-Each parent-child envelope should carry trace context. Child events should include that trace context when reported back. This makes it possible to render an operation timeline, diagnose slow children, and attribute token/tool usage by child.
+Each parent-clove envelope should carry trace context. Clove events should include that trace context when reported back. This makes it possible to render an operation timeline, diagnose slow cloves, and attribute token/tool usage by child.
 
 ### UX/UI projections
 
@@ -623,7 +623,7 @@ The transcript should not show every low-level message by default. It should sho
 
 ```text
 Runtime workstream update:
-cleave_21 delivered accepted event-model schema to workbench-projection and delegate-emission children.
+cleave_21 delivered accepted event-model schema to workbench-projection and delegate-emission cloves.
 ```
 
 Blockers should be explicit:
@@ -655,7 +655,7 @@ Parent synthesis must account for communications, not just final diffs.
 
 A final cleave summary should answer:
 
-- Which child artifacts influenced which downstream children?
+- Which clove artifacts influenced which downstream cloves?
 - Were any child messages denied or unresolved?
 - Did any child request boundary expansion?
 - Were all accepted artifacts validated before downstream consumption?
@@ -695,9 +695,9 @@ The target is not to make cleave more eager. The target is to make cleave more s
 A successful assessment should answer:
 
 1. **Should this work be decomposed?**
-2. **What decomposition mode fits?** direct, phased, delegate, sequential children, parallel cleave, or hybrid.
+2. **What decomposition mode fits?** direct, phased, delegate, sequential cloves, parallel cleave, or hybrid.
 3. **Where are the repo/domain perforation lines?**
-4. **Which child workstreams are safe to run in private git/jj workspaces?**
+4. **Which clove workstreams are safe to run in private git/jj workspaces?**
 5. **What dependencies, artifacts, and validations govern those workstreams?**
 6. **What must remain parent-owned for synthesis, merge, and final claims?**
 
@@ -705,7 +705,7 @@ A successful assessment should answer:
 
 - Do not parallelize merely because a task is large.
 - Do not use keyword complexity as authority for parallel workstream creation.
-- Do not allow child workstreams without concrete write scope and acceptance criteria.
+- Do not allow clove workstreams without concrete write scope and acceptance criteria.
 - Do not introduce direct child-to-child A2A as part of the initial cleave assessment work.
 - Do not require jj for the first implementation; design the substrate abstraction so jj can be added cleanly after Git worktree support.
 
@@ -729,7 +729,7 @@ Add:
 ```json
 {
   "strategy": {
-    "mode": "direct_execution|phased_execution|lightweight_delegate|sequential_children|parallel_cleave|hybrid|needs_design|needs_scope_discovery",
+    "mode": "direct_execution|phased_execution|lightweight_delegate|sequential_cloves|parallel_cleave|hybrid|needs_design|needs_scope_discovery",
     "rationale": "...",
     "confidence": 0.0,
     "perforation_lines": [],
@@ -753,7 +753,7 @@ Add:
 
 Legacy `decision` is a projection from the strategy:
 
-- `parallel_cleave` or `sequential_children` with child workspaces -> `cleave`
+- `parallel_cleave` or `sequential_cloves` with clove workspaces -> `cleave`
 - everything else -> `execute`
 
 This preserves existing callers while giving new callers the structural plan.
@@ -806,7 +806,7 @@ Required for `parallel_cleave`:
 
 - VCS state is clean or checkpointed.
 - Worktree/jj substrate is available.
-- At least two child workstreams have concrete non-identical write scopes.
+- At least two clove workstreams have concrete non-identical write scopes.
 - Every child has acceptance criteria.
 - Every child has validation guidance or a parent validation fallback.
 - Shared write-file conflict risk is low or explicitly sequenced.
@@ -819,9 +819,9 @@ Downgrade rules:
 |---|---|
 | no concrete scope | `needs_scope_discovery` |
 | acceptance criteria missing | `needs_design` or `phased_execution` |
-| high shared-file overlap | `phased_execution` or `sequential_children` |
+| high shared-file overlap | `phased_execution` or `sequential_cloves` |
 | one useful side quest | `lightweight_delegate` |
-| bus/foundation module first | `sequential_children` or hybrid foundation wave |
+| bus/foundation module first | `sequential_cloves` or hybrid foundation wave |
 | dirty/submodule ambiguity | checkpoint first or avoid parallel substrate |
 
 ### Model tier target
@@ -853,7 +853,7 @@ For each perforation line, include:
 Initial policy:
 
 ```text
-parallel cleave children communicate only through parent workstream events and accepted artifacts.
+parallel cleave cloves communicate only through parent workstream events and accepted artifacts.
 ```
 
 ### Acceptance criteria for the cleave additions
@@ -861,7 +861,7 @@ parallel cleave children communicate only through parent workstream events and a
 The cleave assessment additions are successful when tests/replay fixtures demonstrate:
 
 1. A vague large directive returns `needs_scope_discovery`, not confident cleave.
-2. A high-overlap large directive returns `phased_execution` or `sequential_children`, not parallel cleave.
+2. A high-overlap large directive returns `phased_execution` or `sequential_cloves`, not parallel cleave.
 3. A spec-backed low-overlap directive returns `parallel_cleave` with perforation lines, waves, and parent obligations.
 4. A one-child side quest returns `lightweight_delegate`, not one-child cleave.
 5. Dirty tree/submodule ambiguity produces warnings and downgrades or checkpoint requirements.
@@ -944,7 +944,7 @@ The Workbench is for operational state, not authority selection.
 Before approval, Workbench may show a compact pending approval row so the operator knows the session is blocked:
 
 ```text
-Pending approval: cleave_27 — sequential children, 3 waves, medium risk, high cost
+Pending approval: cleave_27 — sequential cloves, 3 waves, medium risk, high cost
 ```
 
 But the Workbench should not become the approval menu. Selecting that row opens the approval menu/details surface.
@@ -971,7 +971,7 @@ Parent obligations
 
 The Workbench should show process status, not ask for permission inline. Its responsibilities are:
 
-- active/pending/completed child workstreams;
+- active/pending/completed clove workstreams;
 - wave structure;
 - child status and recent activity;
 - workspace/substrate identity;
@@ -996,7 +996,7 @@ Only the operator approval/menu path, or a future explicit automation policy, ma
 For medium/low-risk plans, a single menu approval is enough. For high-cost or high-risk plans, approval should require a confirmation step:
 
 ```text
-Approve and run 5 child agents across 4 waves? y/N
+Approve and run 5 cloves across 4 waves? y/N
 ```
 
 This protects against accidental single-key launches.

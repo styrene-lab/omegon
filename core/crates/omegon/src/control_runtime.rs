@@ -2399,7 +2399,7 @@ pub async fn resume_session_response(
                 .unwrap_or_else(|| id.to_string());
             let description = meta
                 .as_ref()
-                .map(|m| session::session_display_description(m))
+                .map(session::session_display_description)
                 .unwrap_or_else(|| format!("Session {session_id}"));
             agent.resume_info = meta.as_ref().map(|m| crate::setup::ResumeInfo {
                 session_id: m.session_id.clone(),

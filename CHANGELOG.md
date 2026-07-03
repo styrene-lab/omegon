@@ -18,17 +18,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
-- Added a manual cleave approval gate so `cleave_assess` advertises menu-based operator approval metadata, `cleave_run` records pending approval state and refuses to launch child workstreams without a matching approved plan digest, high-cost cleaves require second confirmation, and `/cleave` exposes approve/modify/deny/phased/save/evidence/reassess action backends.
+- Added a manual cleave approval gate so `cleave_assess` advertises menu-based operator approval metadata, `cleave_run` records pending approval state and refuses to launch clove workstreams without a matching approved plan digest, high-cost cleaves require second confirmation, and `/cleave` exposes approve/modify/deny/phased/save/evidence/reassess action backends.
 - Extended `cleave_assess` with a backward-compatible decomposition strategy envelope, including strategy mode, confidence breakdown, warnings, assumptions, evidence, draft perforation lines, and parent obligations so future cleave runs can distinguish direct, phased, delegate, sequential, and parallel workstream plans.
-- Added a first-pass cleave approval gate so `cleave_assess` advertises menu-based operator approval metadata, `cleave_run` records pending approval state and refuses to launch child workstreams unless the harness supplies an approved plan marker, and `/cleave` exposes shared action backends for approve/modify/deny/phased/save/evidence/reassess.
+- Added a first-pass cleave approval gate so `cleave_assess` advertises menu-based operator approval metadata, `cleave_run` records pending approval state and refuses to launch clove workstreams unless the harness supplies an approved plan marker, and `/cleave` exposes shared action backends for approve/modify/deny/phased/save/evidence/reassess.
 - Documented the unified workstream-event direction for delegate and cleave continuations, including runtime event schemas, trust boundaries, turn injection, and Workbench synthesis behavior.
 - Added semantic branch labels for delegates so Workbench rows can display human-readable labels such as `verify/tests` while preserving `delegate_N` as the stable result handle, and refreshed shared delegate progress immediately on background completion/failure so rows converge to terminal state without waiting for turn-end polling.
 
 ### Fixed
 
+- Made `manage_tools` report enabled tools from the active callable schema inventory so registered-but-filtered tools show as unavailable instead of falsely enabled.
 - Hardened the cleave approval gate so high-cost confirmations are enforced at the final `cleave_run` boundary, non-approved approval states cannot be replayed, payload drift is rejected, generated approval IDs include a monotonic suffix to avoid rapid-call collisions, pending cleave approvals persist across reloads as review-required Workbench rows, active approvals are conservatively downgraded after restart, active plans are not clobbered by cleave approval workstreams, and approval menus only advertise implemented release-safe actions.
 - Restored operator recovery when interrupting wedged turns by abandoning the active turn immediately after cancellation instead of waiting inside the potentially stuck turn path.
-- Hardened delegate result handling so tool-name/agent-name confusion gets corrective guidance, background delegates return machine-readable result tool calls, and empty child output is treated as degraded instead of successful.
+- Hardened delegate result handling so tool-name/agent-name confusion gets corrective guidance, background delegates return machine-readable result tool calls, and empty clove output is treated as degraded instead of successful.
 - Aligned delegate Workbench rows with plan-style transition language, prioritizing active and pending-result delegates when the live log area is constrained.
 - Removed slash-command delegate retrieval hints from result surfaces in favor of structured `delegate_result` tool-call guidance.
 - Covered delegate Workbench transition labels and constrained-row priority ordering with focused tests.
@@ -151,8 +152,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added an internal autonomy envelope model for session, loop, scheduled-job, and explicit-approval policy precedence without changing loop execution behavior yet.
 - Added execution substrate projection to IPC/web runtime snapshots so attached clients can see the detected host/container substrate alongside harness status.
 - Added a conservative subagent autonomy policy layer that now drives prompt guidance for delegate/cleave operations, keeping `cleave_run` approval-oriented by default while allowing bounded scout/verify delegates.
-- Gated mutating `delegate` patch workers behind structured approval details under the conservative subagent autonomy policy before allocating delegate tasks or spawning child workers.
-- Gated over-limit `cleave_run` requests behind structured approval details under the conservative subagent autonomy policy before creating cleave workspaces or spawning children.
+- Gated mutating `delegate` patch workers behind structured approval details under the conservative subagent autonomy policy before allocating delegate tasks or spawning clove workers.
+- Gated over-limit `cleave_run` requests behind structured approval details under the conservative subagent autonomy policy before creating cleave workspaces or spawning cloves.
 - Added CLI parser coverage for the `--oci` alias, OCI image/runtime overrides, and conflict handling with `--dangerously-bypass-permissions`.
 - Marked host-shim OCI launches with `OMEGON_RUNTIME_CONTEXT=host-shim-oci`/`OMEGON_OCI_LAUNCHER=omegon` and made recursive `--oci` requests inside an OCI container fail closed.
 - Added an orchestrated OCI runtime design for Kubernetes/CRI deployments where Omegon is launched by the orchestrator rather than by the native `--oci` host shim.
@@ -164,7 +165,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added an initial Nex-facing `substrates/omegon-full` package/profile seed for the full-first subagent OCI substrate.
 - Expanded the subagent OCI substrate design around a full-first trim-down strategy, Armory/extension layer composition, mount policy, and Ratatui dogfooding constraints.
 - Documented the inherited-default subagent execution boundary and added a Podman-first OCI smoke target for the explicit isolated subagent substrate.
-- Added first-class delegate cancellation status so cancelled delegate children project as terminal non-failure operation rows instead of failed tasks.
+- Added first-class delegate cancellation status so cancelled delegate cloves project as terminal non-failure operation rows instead of failed tasks.
 - Added `delegate_cancel` so running delegate tasks can be marked cancelled explicitly, preserving terminal non-failure state in delegate status and Workbench operation rows.
 - Fixed subagent/delegate review findings by keeping background delegate startup responses machine-readable, marking delegate/subagent status commands read-only, narrowing the plural `/subagents` alias, and avoiding cleave tool names in base prompts when only `delegate` is exposed.
 - Clarified subagent/delegate/cleave design guidance so requests like “use subagents to merge these branches into main” still route through `cleave_assess`/`cleave_run` when the task shape requires coordinated merge work.
@@ -194,7 +195,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add a read-only capability inventory substrate and ACP `_capabilities/inventory` surface for installed extensions, Armory assets, catalog agents, assistant profiles, capability graphs, trust summaries, secret readiness, assistant launch readiness, assistant-list projections, and assistant run read models.
 - Add assistant run read surfaces and terminal-state compatibility so the non-interactive run contract uses `completed` while still accepting legacy `succeeded`.
 - Add metadata-only backend endpoint registry entries for ACP/runtime/lifecycle/provider/extension/secret/package/plan/task surfaces, including provider retry/failure and turn-cancelled telemetry contracts.
-- Add richer cleave/delegate progress visibility, injected-child execution tests, timeout/cancellation coverage, and Workbench integration for active lifecycle workstreams.
+- Add richer cleave/delegate progress visibility, injected-clove execution tests, timeout/cancellation coverage, and Workbench integration for active lifecycle workstreams.
 - Add headless ACP lifecycle read surfaces for lifecycle snapshots and design-node list/get/ready/blocked/frontier projections.
 - Add `/copy answer` plus focused `/help copy` and `/help mouse` guidance for normal-mode answer copy, transcript scroll, and mouse passthrough.
 - Add affected-crate validation tooling (`just affected`, `just test-changed`, `just check-changed`, `just clippy-changed`, `just test-commit`) plus `just source-clean` and source-vs-agent-state dirty classification for safer local commits.
@@ -270,14 +271,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Unified Slim TUI tool inspection around concrete transcript tool cards so live tools and Ctrl+O-pinned details share the same inspection renderer, with success glyphs aligned before tool identity/category glyphs and delegate/cleave rows classified as subagent tool calls.
 - Routed TUI, web dashboard, startup, tutorial, skill-builder, persona-builder, voice, and active-turn prompt/cancel paths through actor-tagged runtime supervisor ingress instead of TUI/web-local queue or cancellation side channels.
 - Improved slim TUI summaries for shell-based git pushes so remote boilerplate no longer leaves command rows looking empty when a branch is pushed or tracking is set up.
-- Propagated `--dangerously-bypass-permissions` into delegate and cleave child Omegon processes so higher-order workers inherit parent permission bypass authority.
+- Propagated `--dangerously-bypass-permissions` into delegate and cleave clove Omegon processes so higher-order workers inherit parent permission bypass authority.
 - Updated the Claude Code OAuth user-agent to match upstream `@anthropic-ai/claude-code` 2.1.179.
 - Expanded upstream provider failure classification for Anthropic, OpenAI/Codex, Gemini, Groq, Mistral, OpenRouter, xAI, and Cerebras degradation signals, with explicit false-positive guards for generic quota, capacity, and not-found prose.
 - Clarified that policy prompts are allow-once until durable policy grants exist, and documented default-open unknown-tool behavior plus lexical permission-pattern matching.
 - Strengthened Lex Imperialis operator-agency guidance to require interactive background terminal/session handling for OAuth, browser, device-code, approval, and other human-blocking workflows when that tooling is available.
 - Improved slim TUI memory tool rows so recall, query, episode, archive-search, and memory mutation operations expose richer structured result summaries.
-- Moved delegate child prompt files under `.omegon/delegate-prompts/` and cleave child prompt files under `.omegon/cleave-prompts/`; child prompt writing now creates nested state directories and rejects absolute or parent-directory escape paths.
-- Shared delegate/cleave child-agent substrate for prompt path routing, runtime profile deserialization, child activity/task parsing, and sandboxed Nex profile resolution.
+- Moved delegate child prompt files under `.omegon/delegate-prompts/` and cleave clove prompt files under `.omegon/cleave-prompts/`; child prompt writing now creates nested state directories and rejects absolute or parent-directory escape paths.
+- Shared delegate/cleave clove-agent substrate for prompt path routing, runtime profile deserialization, child activity/task parsing, and sandboxed Nex profile resolution.
 - Shortened common compound tool names in slim TUI rows, including search, memory, context, wait, and browser tools.
 - Routed engine status and operation workbench worker rows through inline row projections instead of ad hoc separator/truncation composition.
 - Documented that memory sync and multi-checkout federation workflows are context-gated so one-off and non-Git tasks remain task-local.
@@ -287,14 +288,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Made `delegate` background startup register and detach without awaiting an async boundary before returning the task id.
 - Made `cleave_run` default to background execution so child-agent orchestration returns an operation id immediately and leaves the main agent/operator control path free; pass `background: false` for the previous attached wait behavior.
 - Routed `/cleave status` display rows through the shared operation projection so cleave command status uses the same canonical child status and failure-kind semantics as Workbench.
-- Routed `delegate_status` structured details through the shared operation projection so delegate command/API status output now carries operation kind/id, canonical child statuses, and projected failure payloads.
+- Routed `delegate_status` structured details through the shared operation projection so delegate command/API status output now carries operation kind/id, canonical clove statuses, and projected failure payloads.
 - Updated the `omegon-full` substrate profile seed to separate container home from the mounted workspace and align optional auth/config mounts with `/data/home` for orchestrated OCI deployments.
-- Mapped typed cleave child failure causes into the shared operation/workbench projection, including upstream exhaustion, merge conflicts, scope violations, timeouts, validation failures, and legacy upstream-exhausted compatibility.
+- Mapped typed cleave clove failure causes into the shared operation/workbench projection, including upstream exhaustion, merge conflicts, scope violations, timeouts, validation failures, and legacy upstream-exhausted compatibility.
 - Routed delegate/cleave transcript lifecycle milestones through the shared operation projection so Workbench and transcript rendering share operation semantics.
 - Replaced emoji-style status icons in Rust runtime/TUI strings with text-oriented Unicode glyphs for consistent terminal alignment.
-- Added explicit delegate child execution-boundary prompt sections so scoped workers see their readable/writable scope, enabled/unavailable tools, sandbox profile, and blocker-reporting guidance before acting.
+- Added explicit delegate clove execution-boundary prompt sections so scoped workers see their readable/writable scope, enabled/unavailable tools, sandbox profile, and blocker-reporting guidance before acting.
 - Hardened the shared operation failure taxonomy used by delegate/cleave Workbench projections, including distinct wall-clock timeout vs idle-timeout classification and sandbox-policy classification before generic permission failures.
-- Routed delegate and cleave Workbench rows through a shared renderer-neutral operation projection with canonical child statuses and failure summaries.
+- Routed delegate and cleave Workbench rows through a shared renderer-neutral operation projection with canonical clove statuses and failure summaries.
 - Decomposition lifecycle events now carry operation provenance so delegate-originated child work no longer renders or publishes as cleave activity.
 - Made bundled prompt templates and dynamic prompt guidance capability-aware so hidden or mode-gated memory/lifecycle tools do not get presented as unconditional agent instructions.
 - Tightened the bundled `code-act` skill so batch scripting no longer overrides the canonical read → `edit` → `validate` loop for small source changes.
@@ -609,7 +610,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Render the slim active-tool lane through the semantic conversation presentation hierarchy, preserving readable live-log gutters, tabular spacing, ANSI-sanitized output, and structured content labels.
 - Reject staged agent-state telemetry in source-clean checks so live `.omegon/` audit logs cannot leak into source commits.
 - Make delegate runner script fixtures flush before execution so timeout tests fail only on runner behavior, not file visibility races.
-- Create cleave git worktree branches explicitly before adding libgit2 worktrees, and report failed children with no salvaged changes as skipped instead of successful no-op merges.
+- Create cleave git worktree branches explicitly before adding libgit2 worktrees, and report failed cloves with no salvaged changes as skipped instead of successful no-op merges.
 - Keep extension JSON-RPC request IDs monotonic after optional `initialize` timeouts, recover auto-disabled extensions, keep stdio logs out of transcripts, and retain extension setup events before prompts.
 - Preserve long assistant response tails, clear stale slim plan lanes, prioritize blocking prompt input, and keep interrupt/tutorial feedback out of the transcript.
 - Guard codescan's HEAD fast path against relevant dirty working-tree changes so local edits do not return stale cached chunks.
@@ -1112,7 +1113,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Publish links the local binary with an absolute target** — `just publish` no longer creates a broken `~/.local/bin/omegon -> target/release/omegon` symlink when run from the repository root.
 - **ACP and TUI always-allow now persist through the same grant path** — `allow_always` decisions route through the internal permission grant tool, so host-panel approvals and terminal approvals update the same project profile permission store.
 - **Standard device streams are no longer blocked as outside-workspace paths** — `/dev/null`, standard stdio aliases, and fd aliases for descriptors 0-2 are allowed by the shared workspace boundary instead of triggering permission prompts.
-- **Workspace path discovery no longer escapes into ancestor home repos** — Omegon project/runtime state now respects explicit project markers and shell git commands run with a project-root discovery ceiling, preserving legitimate nested repo status while preventing child workspaces from inheriting unrelated parent repositories.
+- **Workspace path discovery no longer escapes into ancestor home repos** — Omegon project/runtime state now respects explicit project markers and shell git commands run with a project-root discovery ceiling, preserving legitimate nested repo status while preventing clove workspaces from inheriting unrelated parent repositories.
 - **MQTT bridge no longer starts implicitly** — interactive and daemon sessions now leave MQTT disabled unless the profile or environment explicitly enables it, and enabled bridges preflight the broker socket before handing control to the MQTT client event loop.
 - **Startup persona and tone now honor profile defaults** — local, ACP, and embedded startup can load persona/tone defaults from the profile instead of requiring ad hoc child environment variables.
 - **TUI provider status no longer probes credentials every frame** — OAuth footer state is cached on model changes instead of repeatedly reading external credential files during redraws.
@@ -1406,7 +1407,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- **"Always Allow" now persists trusted directories to project settings** — previously session-scoped only, so child/delegate agents spawned as separate processes never inherited approved directories. Skills running in delegates would silently fail on writes to paths outside the workspace (e.g. Obsidian vault) and the agent would declare "done" without completing the step. Now, pressing 'a' on a permission prompt persists the directory so all future child agents inherit it.
+- **"Always Allow" now persists trusted directories to project settings** — previously session-scoped only, so child/delegate agents spawned as separate processes never inherited approved directories. Skills running in delegates would silently fail on writes to paths outside the workspace (e.g. Obsidian vault) and the agent would declare "done" without completing the step. Now, pressing 'a' on a permission prompt persists the directory so all future cloves inherit it.
 - **Permission denial tells agent to use bash** — the error message now instructs the agent to use the bash tool as a fallback for out-of-workspace writes, and names the specific directory to `/trust add`. Previously it just said "Access denied" with no recovery path.
 
 ## [0.17.9] - 2026-04-29
@@ -1432,7 +1433,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
-- **Nex sandbox profiles** — deterministic OCI container isolation for delegate/cleave children. `/sandbox on` in the TUI enables containerized execution with read-only rootfs, no network, workspace mounted at `/work`. Profile registry with 7 built-in domain profiles (chat, coding, coding-python, coding-node, coding-rust, infra, full). TOML manifest format for custom profiles. CLI: `omegon nex init|list|inspect|status`. Footer badge shows "sandbox: isolated" when enabled. Graceful fallback to subprocess when no container runtime available.
+- **Nex sandbox profiles** — deterministic OCI container isolation for delegate/cleave cloves. `/sandbox on` in the TUI enables containerized execution with read-only rootfs, no network, workspace mounted at `/work`. Profile registry with 7 built-in domain profiles (chat, coding, coding-python, coding-node, coding-rust, infra, full). TOML manifest format for custom profiles. CLI: `omegon nex init|list|inspect|status`. Footer badge shows "sandbox: isolated" when enabled. Graceful fallback to subprocess when no container runtime available.
 - **Perplexity AI provider** (#14) — search-augmented inference via `api.perplexity.ai`. Models: `perplexity/sonar`, plus third-party models (`anthropic/claude-sonnet-4-6`, `openai/gpt-5.4`, `openai/gpt-5.4-mini`). Usage: `omegon --model perplexity:perplexity/sonar` or `/login perplexity` in TUI.
 
 ### Fixed
@@ -1873,7 +1874,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- **Cleave/provider routing hardening** — separated OpenAI API routing from Codex OAuth, repaired cross-provider model routing, passed warmed session secrets into children, reset internal workspaces more reliably, and simplified child finalization/cleanup.
+- **Cleave/provider routing hardening** — separated OpenAI API routing from Codex OAuth, repaired cross-provider model routing, passed warmed session secrets into cloves, reset internal workspaces more reliably, and simplified child finalization/cleanup.
 - **Secrets and startup behavior** — aligned preflight with the active model, avoided duplicate keychain reads, hydrated configured API keys into the environment, and unified the macOS keychain service name.
 - **TUI correctness** — fixed wrapped editor growth, cursor alignment/overflow, manual conversation scroll preservation, dashboard scroll routing, context-window synchronization, memory failure surfacing, and wrapped tool/card height stability.
 - **Release/install pipeline** — restored valid nightly/RC automation, tightened `just` release behavior, fixed asset naming and POSIX install compatibility, added signature verification, and now require branch-attached release cuts from `main`.
@@ -2021,7 +2022,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - **Provider routing engine** (`routing.rs`) — `CapabilityTier` (Leaf/Mid/Frontier/Max), `ProviderInventory`, `ProviderEntry`, scored `route()` function, and `BridgeFactory` for cached bridge instances. Providers are ranked by tier match, cost, and local preference. 8 unit tests.
 - **OllamaManager** (`ollama.rs`) — structured Ollama server interaction: `is_reachable()`, `list_models()`, `list_running()`, `hardware_profile()` with Apple Silicon unified memory detection. 5 unit tests.
-- **Per-child cleave routing** — `CleaveConfig.inventory` and `ChildState.provider_id` enable scope-aware provider assignment. Children with ≤2 files get Leaf tier, 3–5 get Mid, 6+ get Frontier. Falls back to global model if no inventory or route() returns empty.
+- **Per-child cleave routing** — `CleaveConfig.inventory` and `CloveState.provider_id` enable scope-aware provider assignment. Children with ≤2 files get Leaf tier, 3–5 get Mid, 6+ get Frontier. Falls back to global model if no inventory or route() returns empty.
 - **`auto_detect_bridge()` routing fallback** — when the requested provider is unavailable, fallback now uses the routing engine's scored candidates before the legacy static provider list.
 - **Startup inventory probing** — `ProviderInventory::probe()` runs after splash, checking env vars and auth.json for credential availability. Stored on `App` for downstream use.
 
@@ -2159,7 +2160,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Auto-transition seed → exploring**: `add_research` and `add_decision` on seed nodes automatically transition to exploring and scaffold the design spec.
 - **Branch↔mind consistency check**: session start detects if the active directive mind doesn't match the current git branch and surfaces a context message.
 - **Dashboard directive indicator**: raised footer shows `▸ directive: name ✓` (branch match) or `▸ directive: name ⚠ main` (mismatch) when a directive mind is active.
-- **Multi-layer testing directive**: AGENTS.md "Testing Standards" section, cleave child contract, task file contract, and system prompt guideline all enforce test-writing as a mandatory part of code changes.
+- **Multi-layer testing directive**: AGENTS.md "Testing Standards" section, cleave clove contract, task file contract, and system prompt guideline all enforce test-writing as a mandatory part of code changes.
 - **Design exploration**: directive-branch-lifecycle, multi-instance coordination, lifecycle gate ergonomics, test coverage directive gap, and omegon directive authority design nodes.
 
 ### Fixed
@@ -2306,15 +2307,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- **Orphaned subprocess elimination** — Cleave child processes spawned with `detached: true` now have three layers of cleanup defense: (1) `process.on('exit')` handler that SIGKILLs all tracked children synchronously when the parent exits for any reason, (2) PID file tracking in `$TMPDIR` with startup scan that kills orphans from dead parents, (3) SIGKILL escalation timer no longer `.unref()`'d so it actually fires during shutdown. Previously, if the parent process crashed or was killed, `session_shutdown` never fired and detached children survived indefinitely.
-- **Nested cleave prevention** — Cleave extension now exits immediately when `PI_CHILD=1` is set, preventing child processes from registering cleave tools or spawning nested subprocesses. Previously, every cleave child loaded the full cleave extension, creating a vector for exponential process growth.
+- **Orphaned subprocess elimination** — Clove processes spawned with `detached: true` now have three layers of cleanup defense: (1) `process.on('exit')` handler that SIGKILLs all tracked children synchronously when the parent exits for any reason, (2) PID file tracking in `$TMPDIR` with startup scan that kills orphans from dead parents, (3) SIGKILL escalation timer no longer `.unref()`'d so it actually fires during shutdown. Previously, if the parent process crashed or was killed, `session_shutdown` never fired and detached children survived indefinitely.
+- **Nested cleave prevention** — Cleave extension now exits immediately when `PI_CHILD=1` is set, preventing child processes from registering cleave tools or spawning nested subprocesses. Previously, every cleave clove loaded the full cleave extension, creating a vector for exponential process growth.
 - **Lifecycle batch ingest contention** — `ingestLifecycleCandidatesBatch` no longer wraps the full batch in a single transaction, reducing SQLite write-lock hold time and SQLITE_BUSY errors when concurrent processes share the database.
 
 ## [0.6.9] - 2026-03-15
 
 ### Fixed
 
-- **Cleave subprocess lifecycle** — Cleave child dispatch and spec-assessment subprocesses now spawn with `detached: true`, are tracked in a shared process registry, and are killed by process group (`-pid`). A `session_shutdown` handler sweeps all tracked processes with SIGTERM→SIGKILL escalation, preventing orphaned `pi` processes from accumulating and causing runaway CPU/thermal issues.
+- **Cleave subprocess lifecycle** — Clove dispatch and spec-assessment subprocesses now spawn with `detached: true`, are tracked in a shared process registry, and are killed by process group (`-pid`). A `session_shutdown` handler sweeps all tracked processes with SIGTERM→SIGKILL escalation, preventing orphaned `pi` processes from accumulating and causing runaway CPU/thermal issues.
 
 ## [0.6.7] - 2026-03-15
 
@@ -2329,7 +2330,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- **Internal subprocess boundary hardening** — Cleave child dispatch, bridged assess subprocesses, and project-memory subprocess fallback now re-enter Omegon explicitly through the canonical Omegon-owned entrypoint instead of depending on PATH resolution of the legacy `pi` alias.
+- **Internal subprocess boundary hardening** — Clove dispatch, bridged assess subprocesses, and project-memory subprocess fallback now re-enter Omegon explicitly through the canonical Omegon-owned entrypoint instead of depending on PATH resolution of the legacy `pi` alias.
 - **Memory search stability** — FTS-backed fact search now tolerates apostrophes and preserves useful recall for technical identifier/path-like queries while continuing to surface unrelated operational storage failures instead of silently returning empty results.
 
 ## [0.6.0] - 2026-03-11
@@ -2400,7 +2401,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
   - `/dashboard` and `/dash` bridged with `agentCallable: false` — returns structured refusal instead of opaque "not registered" error.
   - Shared bridge via `getSharedBridge()` in `extensions/lib/slash-command-bridge.ts` (Symbol.for global singleton).
   - Side-effect metadata: `read` for status/verify/apply, `workspace-write` for propose/spec/ff/archive.
-- **Cleave child progress emission** — `emitCleaveChildProgress()` in `extensions/cleave/dispatcher.ts` now updates shared state and emits `DASHBOARD_UPDATE_EVENT` so the terminal title and dashboard footer reflect child progress in real time.
+- **Clove progress emission** — `emitCleaveChildProgress()` in `extensions/cleave/dispatcher.ts` now updates shared state and emits `DASHBOARD_UPDATE_EVENT` so the terminal title and dashboard footer reflect clove progress in real time.
 
 ### Changed
 
@@ -2410,7 +2411,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- Terminal tab title now updates dynamically as cleave child progress changes (was static after initial render).
+- Terminal tab title now updates dynamically as cleave clove progress changes (was static after initial render).
 - Assess spec bridge tests no longer depend on a real active OpenSpec change — tests scaffold a temporary fixture and clean up after themselves.
 - Dashboard footer recovery section renders safely when recovery state is absent or partially rolled out.
 
@@ -2511,7 +2512,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
   - `/effort <name>` — switch tier mid-session; applies immediately to next decision point
   - `/effort cap` — lock current tier as ceiling; agent cannot upgrade past it
   - `/effort uncap` — remove ceiling lock
-  - Each tier controls: driver model + thinking level, extraction model, compaction routing, cleave child floor/preferLocal, and review model
+  - Each tier controls: driver model + thinking level, extraction model, compaction routing, cleave clove floor/preferLocal, and review model
   - Cap derives ceiling from `capLevel` via `tierConfig()` — survives subsequent `/effort` switches without breaking
   - Tiers 1–5 use local extraction and local compaction; tiers 6–7 escalate to cloud
 
@@ -2536,7 +2537,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - `offline-driver` expanded with full model registry spanning 8GB–128GB hardware. `PREFERRED_ORDER` and `PREFERRED_ORDER_CODE` re-exported from `lib/local-models.ts`.
 - `project-memory` default `extractionModel` changed from `claude-sonnet-4-6` to `devstral-small-2:24b`.
-- Cleave child local model selection uses `PREFERRED_ORDER_CODE` preference list instead of `models[0]` (non-deterministic). Prefers `qwen2.5-coder:32b` → `qwen3-coder:30b` → `devstral:24b` → ... → `qwen3:4b`.
+- Clove local model selection uses `PREFERRED_ORDER_CODE` preference list instead of `models[0]` (non-deterministic). Prefers `qwen2.5-coder:32b` → `qwen3-coder:30b` → `devstral:24b` → ... → `qwen3:4b`.
 - `/effort` slash commands (`/opus`, `/sonnet`, `/haiku`) now enforce the effort cap — no silent bypass.
 - `AbortSignal.any()` gracefully falls back on Node.js < 20.3 (was a hard crash).
 - Duplicate cloud model string extracted to `EFFORT_EXTRACTION_MODELS` constant in project-memory.
@@ -2544,7 +2545,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - **Cap ceiling bug** — `checkEffortCap` now derives ceiling from `capLevel` via `tierConfig()`, not `effort.driver`. Cap survived tier switches incorrectly before this fix.
-- **Tier matrix divergence** — Ruthless (4) and Lethal (5) corrected to `extraction: "local"` and `compaction: "local"` per design matrix (cleave child implemented them with cloud extraction).
+- **Tier matrix divergence** — Ruthless (4) and Lethal (5) corrected to `extraction: "local"` and `compaction: "local"` per design matrix (cleave clove implemented them with cloud extraction).
 - **Average ≠ Servitor** — Average tier differentiated: `thinking: "minimal"`, `cleavePreferLocal: false` (scope-based local bias, not forced-local). Was byte-for-byte identical to Servitor.
 - **`isLocalModel()` heuristic** — replaced fragile `startsWith("claude-")` check with `CLOUD_MODEL_PREFIXES` allowlist (GPT, Gemini, etc. no longer misclassified as local).
 - **Dead code** — `COMPLEX_FILE_PATTERNS` array defined but never used removed from `dispatcher.ts`.
@@ -2588,10 +2589,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
-- **Scenario-first task generation** — cleave child tasks are now matched to spec scenarios using 3-tier priority: spec-domain annotations (`<!-- specs: domain -->`) → file scope matching → word-overlap fallback. Prevents cross-cutting spec scenarios (e.g., RBAC enforcement) from falling between children when tasks are split by file layer.
+- **Scenario-first task generation** — cleave clove tasks are now matched to spec scenarios using 3-tier priority: spec-domain annotations (`<!-- specs: domain -->`) → file scope matching → word-overlap fallback. Prevents cross-cutting spec scenarios (e.g., RBAC enforcement) from falling between children when tasks are split by file layer.
 - **Orphan scenario auto-injection** — any spec scenario matching zero children is automatically injected into the closest child with a `⚠️ CROSS-CUTTING` marker for observability.
 - **`TaskGroup.specDomains`** — parsed from `<!-- specs: ... -->` HTML comments in tasks.md group headers for deterministic scenario-to-child mapping.
-- **`matchScenariosToChildren`** — exported function for pre-computing scenario assignments across all children with orphan detection.
+- **`matchScenariosToChildren`** — exported function for pre-computing scenario assignments across all cloves with orphan detection.
 
 ### Fixed
 

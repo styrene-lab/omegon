@@ -180,28 +180,28 @@ impl MenuProjection {
             .as_deref()
             .filter(|summary| !summary.is_empty())
         {
-            out.push_str("\n");
+            out.push('\n');
             out.push_str(summary);
-            out.push_str("\n");
+            out.push('\n');
         }
 
         for tab in &self.tabs {
             if self.tabs.len() > 1 {
                 out.push_str("\n### ");
                 out.push_str(&tab.label);
-                out.push_str("\n");
+                out.push('\n');
             }
             for group in &tab.groups {
                 out.push_str("\n### ");
                 out.push_str(&group.label);
-                out.push_str("\n");
+                out.push('\n');
                 if let Some(description) = group
                     .description
                     .as_deref()
                     .filter(|value| !value.is_empty())
                 {
                     out.push_str(description);
-                    out.push_str("\n");
+                    out.push('\n');
                 }
                 for row in &group.rows {
                     out.push_str("- `");
@@ -243,15 +243,15 @@ impl MenuProjection {
                         out.push_str("\n  ");
                         out.push_str(&row.description);
                     }
-                    out.push_str("\n");
+                    out.push('\n');
                 }
             }
         }
 
         if let Some(footer) = self.footer.as_deref().filter(|footer| !footer.is_empty()) {
-            out.push_str("\n");
+            out.push('\n');
             out.push_str(footer);
-            out.push_str("\n");
+            out.push('\n');
         }
         out
     }

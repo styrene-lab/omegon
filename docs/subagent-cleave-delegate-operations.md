@@ -8,16 +8,16 @@ tags: [architecture, subagents, cleave, delegate, workbench, lifecycle]
 
 ## Overview
 
-Assess the operational contract between Omegon's subagent mental model, `delegate` single-worker execution, and `cleave` batch decomposition. The goal is not to collapse them into one mechanism by default; it is to identify which guarantees must be shared so operators get predictable lifecycle state, progress, cancellation, provenance, and failure handling across all child-agent work.
+Assess the operational contract between Omegon's subagent mental model, `delegate` single-worker execution, and `cleave` batch decomposition. The goal is not to collapse them into one mechanism by default; it is to identify which guarantees must be shared so operators get predictable lifecycle state, progress, cancellation, provenance, and failure handling across all clove/subagent work.
 
 ## Definitions
 
 | Term | Operational meaning | Current owner |
 |---|---|---|
-| Subagent | User-facing mental model: a task-scoped child worker with its own prompt/context/tools/model. | Design/UX layer; partially represented by `AgentSpec` in `features/delegate.rs`. |
-| Delegate | On-demand single child task, usually async, with result retrieval and status. | `core/crates/omegon/src/features/delegate.rs`. |
-| Cleave | Batch decomposition and parallel child execution over a plan, with dependency waves and merge outcomes. | `core/crates/omegon/src/features/cleave.rs` and `core/crates/omegon/src/cleave/orchestrator.rs`. |
-| Cleave child | One scoped unit inside a cleave run, typically worktree-backed and merge-governed. | `core/crates/omegon/src/cleave/*`. |
+| Subagent | User-facing mental model: a task-scoped clove worker with its own prompt/context/tools/model. | Design/UX layer; partially represented by `AgentSpec` in `features/delegate.rs`. |
+| Delegate | On-demand single clove task, usually async, with result retrieval and status. | `core/crates/omegon/src/features/delegate.rs`. |
+| Cleave | Batch decomposition and parallel clove execution over a plan, with dependency waves and merge outcomes. | `core/crates/omegon/src/features/cleave.rs` and `core/crates/omegon/src/cleave/orchestrator.rs`. |
+| Clove | One scoped unit inside a cleave run, typically worktree-backed and merge-governed. | `core/crates/omegon/src/cleave/*`. |
 | Workbench operation | Live visible progress projection for active plan/cleave/delegate work. | `core/crates/omegon/src/tui/workbench.rs` plus dashboard/runtime state. |
 
 ## Current Architecture Evidence
@@ -49,7 +49,7 @@ Primary file:
 
 - `core/crates/omegon/src/features/delegate.rs`
 
-Delegate owns `AgentSpec`, `DelegateTask`, `DelegateTaskStatus`, `DelegateResultStore`, `DelegateProgress`, duplicate-task checks, background result retrieval, failure classification, and the child prompt/run path. It shares child-agent primitives with cleave but is not merely a thin wrapper over cleave.
+Delegate owns `AgentSpec`, `DelegateTask`, `DelegateTaskStatus`, `DelegateResultStore`, `DelegateProgress`, duplicate-task checks, background result retrieval, failure classification, and the child prompt/run path. It shares clove-agent primitives with cleave but is not merely a thin wrapper over cleave.
 
 ### Workbench/progress path
 
@@ -59,49 +59,49 @@ Primary files:
 - `core/crates/omegon/src/tui/mod.rs`
 - `core/crates/omegon/src/tui/tests.rs`
 
-Existing tests verify active cleave and active delegate states route into the Workbench without requiring the old instruments panel. This is the right direction: child-agent operations should be visible as first-class work, not hidden behind tool-result prose.
+Existing tests verify active cleave and active delegate states route into the Workbench without requiring the old instruments panel. This is the right direction: clove/subagent operations should be visible as first-class work, not hidden behind tool-result prose.
 
 ## Lifecycle Comparison
 
 | Phase | Delegate | Cleave | Shared contract needed? |
 |---|---|---|---|
-| Intent capture | One scoped task, optional agent/profile/scope/model. | Directive plus plan with children/dependencies. | Yes: canonical operation summary and scope disclosure. |
-| Start | Stores `DelegateTask`, spawns child task. | Creates/resumes `CleaveState`, dispatches wave children. | Yes: operation ID, child IDs, started timestamp. |
-| Running progress | `DelegateProgressChild` with status, last tool/turn, checklist heuristic. | Cleave progress events/child statuses/waves. | Yes: common child progress projection for Workbench. |
+| Intent capture | One scoped task, optional agent/profile/scope/model. | Directive plus plan with cloves/dependencies. | Yes: canonical operation summary and scope disclosure. |
+| Start | Stores `DelegateTask`, spawns clove task. | Creates/resumes `CleaveState`, dispatches wave cloves. | Yes: operation ID, clove IDs, started timestamp. |
+| Running progress | `DelegateProgressChild` with status, last tool/turn, checklist heuristic. | Cleave progress events/clove statuses/waves. | Yes: common clove progress projection for Workbench. |
 | Cancellation | Delegate has task runtime cancellation/failure paths; slash/control surface is status-focused. | Cleave has run cancel and child cancel paths. | Yes: cancellation semantics and operator-facing status should align. |
 | Completion | Result stored and retrieved with `delegate_result`; background notifications. | Merge outcomes and run result state. | Yes: completion summary, result/provenance pointer. |
 | Failure | Failure classifier, repeated failure hard-disable. | Child failure kinds, timeout/upstream retry/merge conflict outcomes. | Yes: failure taxonomy and remediation rows. |
-| Provenance | Task/result store and child output summary. | State file, worktree paths, merge outcomes, progress. | Yes: durable enough to inspect what child did and why. |
+| Provenance | Task/result store and clove output summary. | State file, worktree paths, merge outcomes, progress. | Yes: durable enough to inspect what child did and why. |
 
 ## Adversarial Findings
 
 ### 1. Do not force delegate through cleave just for conceptual purity
 
-The subagent design doc says cleave infrastructure can power delegate. Code evidence shows delegate and cleave are separate features sharing lower-level child-agent primitives. That separation is not inherently bad. A one-off read-only scout delegate should not inherit all cleave ceremony: waves, merge policy, plan JSON, or worktree lifecycle unless it needs mutation isolation.
+The subagent design doc says cleave infrastructure can power delegate. Code evidence shows delegate and cleave are separate features sharing lower-level clove-agent primitives. That separation is not inherently bad. A one-off read-only scout delegate should not inherit all cleave ceremony: waves, merge policy, plan JSON, or worktree lifecycle unless it needs mutation isolation.
 
 **Decision pressure:** unify contracts and projections first, not execution engines.
 
 ### 2. The product vocabulary is ahead of the runtime vocabulary
 
-Operators think in subagents. Code mostly thinks in `delegate` tasks and `cleave` children. `AgentSpec` exists, but the named-agent/subagent concept is not yet the single visible abstraction across CLI/TUI/control surfaces.
+Operators think in subagents. Code mostly thinks in `delegate` tasks and `cleave` cloves. `AgentSpec` exists, but the named-agent/subagent concept is not yet the single visible abstraction across CLI/TUI/control surfaces.
 
-**Risk:** docs/prompts may say “subagent” while status surfaces say “delegate” or “cleave child,” making progress and failures feel like different systems.
+**Risk:** docs/prompts may say “subagent” while status surfaces say “delegate” or “cleave clove,” making progress and failures feel like different systems.
 
 ### 3. Progress shapes are similar but not obviously shared
 
-Delegate and cleave both expose child progress fields: label/status/last tool/task checklist. They are represented by separate structs (`DelegateProgressChild`, cleave progress/state child types). This can be acceptable internally, but the Workbench should consume a shared projection to avoid drift.
+Delegate and cleave both expose clove progress fields: label/status/last tool/task checklist. They are represented by separate structs (`DelegateProgressChild`, cleave progress/state child types). This can be acceptable internally, but the Workbench should consume a shared projection to avoid drift.
 
 **Risk:** Workbench polish fixes one operation type and misses the other.
 
 ### 4. Cancellation parity needs explicit review
 
-Cleave has explicit child cancellation control surfaces (`cleave_cancel_child_response`, `/cleave cancel ...`). Delegate has status/result tools and runtime failure handling, but the operator-facing cancellation contract is less visible from the initial scan.
+Cleave has explicit clove cancellation control surfaces (`cleave_cancel_child_response`, `/cleave cancel ...`). Delegate has status/result tools and runtime failure handling, but the operator-facing cancellation contract is less visible from the initial scan.
 
-**Risk:** background delegates become stuck or invisible compared with cleave children.
+**Risk:** background delegates become stuck or invisible compared with cleave cloves.
 
 ### 5. Failure taxonomy is duplicated
 
-Delegate has failure classification and a hard-disable after repeated failures. Cleave has child failure kinds, provider exhaustion handling, timeout paths, and merge outcomes. These likely evolved separately.
+Delegate has failure classification and a hard-disable after repeated failures. Cleave has clove failure kinds, provider exhaustion handling, timeout paths, and merge outcomes. These likely evolved separately.
 
 **Risk:** same underlying failure produces different remediation text depending on whether it happened in delegate or cleave.
 
@@ -135,7 +135,7 @@ Cleave's strongest value is worktree/scope/merge isolation. Delegate has scope i
 
 ## Autonomy and authority target
 
-Subagent autonomy is an operator-selected authority profile, not prompt style. The user-facing knob may be named `manual`, `conservative`, `autonomous`, `orchestrator`, or `batch`, but runtime behavior must derive from an explicit policy that controls whether the harness may spawn child agents, mutate through children, create worktrees, spend model budget, use OCI/sandboxed substrates, and commit/reconcile without asking.
+Subagent autonomy is an operator-selected authority profile, not prompt style. The user-facing knob may be named `manual`, `conservative`, `autonomous`, `orchestrator`, or `batch`, but runtime behavior must derive from an explicit policy that controls whether the harness may spawn cloves, mutate through cloves, create worktrees, spend model budget, use OCI/sandboxed substrates, and commit/reconcile without asking.
 
 Core invariant:
 
@@ -177,10 +177,10 @@ This policy should reuse existing surfaces rather than invent a separate prompt 
 ### Second-order design constraints
 
 - Tool availability is not permission. The prompt must not imply that `delegate`/`cleave` should be used aggressively merely because they are in the tool schema.
-- Higher autonomy should generally imply stronger execution boundaries: OCI child execution should be preferred or required for orchestrator/batch modes once the substrate is production-ready.
+- Higher autonomy should generally imply stronger execution boundaries: OCI clove execution should be preferred or required for orchestrator/batch modes once the substrate is production-ready.
 - Delegate is the normal accelerator for one bounded side quest. Cleave remains the coordinated multi-child/worktree orchestration primitive.
-- Budget and model routing are part of autonomy. Fanout to paid/cloud children should require policy approval unless the profile explicitly grants it.
-- Approval grants should be scoped and expiring, e.g. “approve cleave up to 3 children for this session,” not global “always allow everything.”
+- Budget and model routing are part of autonomy. Fanout to paid/cloud cloves should require policy approval unless the profile explicitly grants it.
+- Approval grants should be scoped and expiring, e.g. “approve cleave up to 3 cloves for this session,” not global “always allow everything.”
 
 ## Proposed Workstream Plan
 
@@ -197,7 +197,7 @@ This policy should reuse existing surfaces rather than invent a separate prompt 
    - If absent, propose `/delegate cancel <task_id>` and control action metadata.
 
 4. **Failure taxonomy assessment**
-   - Compare delegate classifier with cleave child failure handling.
+   - Compare delegate classifier with cleave clove failure handling.
    - Extract common operator-facing failure categories if duplication is material.
 
 5. **Named subagent assessment**
@@ -207,7 +207,7 @@ This policy should reuse existing surfaces rather than invent a separate prompt 
 ## First Implementation Targets If Findings Hold
 
 1. Add missing delegate cancellation/status parity tests.
-2. Add a shared Workbench projection test that renders equivalent delegate and cleave child progress without bespoke layout drift.
+2. Add a shared Workbench projection test that renders equivalent delegate and cleave clove progress without bespoke layout drift.
 3. Add a failure-remediation unit test table covering delegate and cleave provider/timeout/scope errors.
 4. Add named-agent validation tests for malformed `.omegon/agents/*.md` specs if loader exists.
 
@@ -250,7 +250,7 @@ Minimum coherent change:
    - cancelling an unknown delegate returns a clear not-found message
    - cancelled delegate status/result uses a stable failure/cancelled status, not a generic failure string
 
-Open design choice: whether cancellation should be represented as its own `DelegateTaskStatus::Cancelled` variant or as `Failed { error: "cancelled" }`. A first-class `Cancelled` variant is cleaner for Workbench and result surfaces because cancellation is operator intent, not child failure.
+Open design choice: whether cancellation should be represented as its own `DelegateTaskStatus::Cancelled` variant or as `Failed { error: "cancelled" }`. A first-class `Cancelled` variant is cleaner for Workbench and result surfaces because cancellation is operator intent, not clove failure.
 
 ## Operation Selection Update — Delegate for Side Quests, Cleave for Coordinated Subagent Work
 
@@ -264,7 +264,7 @@ Operator assessment: most quick side quests should use `delegate` as a one-shot 
 | Read-only scouting while parent works | `delegate` with `worker_profile: scout` | Keeps parent context clean and avoids broad mutation risk. |
 | Focused mechanical edit | `delegate` with `worker_profile: patch` | Good when decision is already made and file scope is tight. |
 | Focused validation/check run | `delegate` with `worker_profile: verify` | Lets checks run while parent assesses next step. |
-| Multi-track implementation | `cleave_run` | Coordinates multiple children across worktrees and merges. |
+| Multi-track implementation | `cleave_run` | Coordinates multiple cloves across worktrees and merges. |
 | Branch integration/merge work, even if phrased as “use subagents” | `cleave_assess`, then `cleave_run` if split-worthy | The operator is asking for subordinate work, but merge sequencing, conflict isolation, and cross-branch synthesis are cleave-shaped. |
 | Work requiring dependency ordering | `cleave_run` | Plan JSON can express `depends_on` and wave execution. |
 | One child only | Usually `delegate`, not cleave | Cleave adds orchestration overhead without coordination benefit. |
@@ -293,8 +293,8 @@ Add a “Subagent Operations” section to bundled skills and prompt guidance. I
 - Trigger rules:
   - treat “use subagents” as subordinate-execution intent, then choose the primitive by task shape;
   - use delegate scout/patch/verify for bounded side quests;
-  - use cleave for branch integration, dependency ordering, merge governance, or any 2+ independent/coordinated child tasks;
-  - do not cleave a one-child task unless worktree/merge isolation is explicitly needed.
+  - use cleave for branch integration, dependency ordering, merge governance, or any 2+ independent/coordinated clove tasks;
+  - do not cleave a one-clove task unless worktree/merge isolation is explicitly needed.
 - Anti-patterns:
   - calling `cleave_assess` repeatedly without acting on its result;
   - delegating vague repo-wide archaeology;
@@ -303,18 +303,18 @@ Add a “Subagent Operations” section to bundled skills and prompt guidance. I
 - Examples:
   - scout delegate with explicit file scope;
   - verify delegate for focused tests;
-  - cleave_run JSON skeleton with two children and dependency labels.
+  - cleave_run JSON skeleton with two cloves and dependency labels.
 
 ### Design decision candidate
 
-Delegate and cleave should remain separate operator concepts even if they share lower-level child-agent primitives:
+Delegate and cleave should remain separate operator concepts even if they share lower-level clove-agent primitives:
 
 - **Delegate** optimizes for low-friction side quests.
 - **Cleave** optimizes for coordination, isolation, and merge governance across multiple subagents.
 
 The unification target should be projection/progress/failure/cancellation semantics, not necessarily one execution engine.
 
-## Operation Reporting Paradigm — Parent/Child Boundary Skeleton
+## Operation Reporting Paradigm — Parent/Clove Boundary Skeleton
 
 ### Core claim
 
@@ -324,11 +324,11 @@ Subagent reporting should be modeled as an explicit operation protocol between a
 
 1. **Child Omegon runtime** — actual child process: model loop, tools, cwd, environment, sandbox/worktree.
 2. **Child operation event stream** — structured events such as operation started, child started, tool activity, progress, failure, result.
-3. **Parent operation state reducer** — canonical `OperationState`, `ChildState`, `FailureState`, result refs, counts, timestamps.
+3. **Parent operation state reducer** — canonical `OperationState`, `CloveState`, `FailureState`, result refs, counts, timestamps.
 4. **Semantic display projections** — transcript milestones, Workbench live rows, detail-pane model, statusline summary.
 5. **Renderers** — TUI/CLI/ACP/Web convert projections into glyphs, colors, wrapping, and actions.
 
-The current failure mode comes from bypassing layers 2–4: low-level child/decomposition events are rendered directly as TUI text, causing delegate operations to leak `Cleave: 1 children dispatched`.
+The current failure mode comes from bypassing layers 2–4: low-level child/decomposition events are rendered directly as TUI text, causing delegate operations to leak `Cleave: 1 cloves dispatched`.
 
 ### Operation is the primary display unit
 
@@ -348,7 +348,7 @@ struct OperationState {
     status: OperationStatus,
     started_at: DateTime,
     updated_at: DateTime,
-    children: Vec<ChildState>,
+    cloves: Vec<CloveState>,
     result: Option<OperationResult>,
     failure: Option<OperationFailure>,
 }
@@ -361,7 +361,7 @@ A `delegate` is an operation created by a tool call. A `cleave` is also an opera
 Delegate and cleave may keep separate execution engines, but their live rows should reduce to a shared child shape:
 
 ```rust
-struct ChildState {
+struct CloveState {
     id: ChildId,
     operation_id: OperationId,
     operation_kind: OperationKind,
@@ -403,7 +403,7 @@ Because the child binary is ours, the parent/child boundary should be structured
 {"type":"operation.completed","operation_id":"delegate_3","status":"failed"}
 ```
 
-Cleave emits the same vocabulary with `kind: "cleave"`, multiple children, wave metadata, and merge/result metadata.
+Cleave emits the same vocabulary with `kind: "cleave"`, multiple cloves, wave metadata, and merge/result metadata.
 
 Control events and prose output must not share the same stream. The child should write operation events to a dedicated pipe/fd or IPC channel; normal stdout/stderr remain logs/tool output and are summarized, not treated as state.
 
@@ -445,7 +445,7 @@ The screenshot failure `Delegate idle timeout — no output for 120s` should ren
 2. Map `DelegateProgress` into an `OperationWorkbenchProjection`.
 3. Map cleave progress/state into the same row projection.
 4. Make Workbench render operation projections rather than bespoke delegate/cleave rows.
-5. Stop delegate-originated child dispatch from rendering as `Cleave: 1 children dispatched` in transcript.
+5. Stop delegate-originated child dispatch from rendering as `Cleave: 1 cloves dispatched` in transcript.
 6. Later, formalize child→parent JSONL/IPC event streaming.
 
 ### Design decision candidate
@@ -474,7 +474,7 @@ This directly explains the screenshot: delegate uses decomposition event variant
 AgentEvent::DecompositionStarted { children } => {
     self.conversation.push_lifecycle(
         "⚡",
-        &format!("Cleave: {} children dispatched", children.len()),
+        &format!("Cleave: {} cloves dispatched", cloves.len()),
     );
 }
 ```
@@ -513,7 +513,7 @@ Implementing `surfaces::operations` as an adapter layer is lower risk than chang
 
 ### Finding 3: transcript and Workbench must have different responsibilities
 
-The current transcript receives lifecycle spam (`Cleave: 1 children dispatched`) while Workbench also reports live delegate state. This duplicates and conflicts. Transcript should record milestones; Workbench should own live aggregate state.
+The current transcript receives lifecycle spam (`Cleave: 1 cloves dispatched`) while Workbench also reports live delegate state. This duplicates and conflicts. Transcript should record milestones; Workbench should own live aggregate state.
 
 **Required correction:** operation projections should include both milestone events and live rows, and TUI should route them to the correct surface.
 
@@ -527,7 +527,7 @@ Because `mqtt_bridge.rs` exports decomposition payloads, any ACP/Web/MQTT dashbo
 
 ### Finding 6: one-child cleave wording should be treated as a smell, not just a string
 
-If `kind=Delegate`, one child is normal. If `kind=Cleave`, one child should be rare and should only appear when isolation/merge governance was explicitly requested. Projection tests should catch `delegate -> Cleave: 1 children dispatched` as invalid.
+If `kind=Delegate`, one clove is normal. If `kind=Cleave`, one clove should be rare and should only appear when isolation/merge governance was explicitly requested. Projection tests should catch `delegate -> Cleave: 1 cloves dispatched` as invalid.
 
 ## New Open Questions
 

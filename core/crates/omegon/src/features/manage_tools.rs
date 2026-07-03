@@ -13,8 +13,19 @@ use omegon_traits::{ContentBlock, Feature, ToolDefinition, ToolResult};
 /// Shared set of disabled tool names.
 pub type DisabledTools = Arc<Mutex<HashSet<String>>>;
 
-/// Shared snapshot of registered model-visible tool names.
-pub type ToolInventory = Arc<Mutex<Vec<String>>>;
+/// Shared snapshot of registered and currently callable model-visible tool names.
+///
+/// `registered` is the model-visible registry inventory before user/profile
+/// disabling. `callable` is the exact post-filter schema inventory available to
+/// the active model surface. `manage_tools` must only report a tool as enabled
+/// when it appears in `callable`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ToolInventorySnapshot {
+    pub registered: Vec<String>,
+    pub callable: Vec<String>,
+}
+
+pub type ToolInventory = Arc<Mutex<ToolInventorySnapshot>>;
 
 /// Predefined tool groups — named sets that can be toggled together.
 ///
@@ -72,7 +83,7 @@ impl ManageTools {
     pub fn new() -> Self {
         Self {
             disabled: Arc::new(Mutex::new(HashSet::new())),
-            all_tools: Arc::new(Mutex::new(Vec::new())),
+            all_tools: Arc::new(Mutex::new(ToolInventorySnapshot::default())),
         }
     }
 
@@ -89,7 +100,18 @@ impl ManageTools {
     /// Set the full tool list (called after bus finalize).
     #[cfg(test)]
     pub fn set_all_tools(&self, names: Vec<String>) {
-        *self.all_tools.lock().unwrap() = names;
+        *self.all_tools.lock().unwrap() = ToolInventorySnapshot {
+            registered: names.clone(),
+            callable: names,
+        };
+    }
+
+    #[cfg(test)]
+    pub fn set_tool_inventory_snapshot(&self, registered: Vec<String>, callable: Vec<String>) {
+        *self.all_tools.lock().unwrap() = ToolInventorySnapshot {
+            registered,
+            callable,
+        };
     }
 }
 
@@ -142,22 +164,27 @@ impl Feature for ManageTools {
 
         match action {
             "list" => {
-                let all = self.all_tools.lock().unwrap().clone();
+                let inventory = self.all_tools.lock().unwrap().clone();
+                let callable: HashSet<&str> =
+                    inventory.callable.iter().map(String::as_str).collect();
                 let disabled = self.disabled.lock().unwrap();
                 let mut lines = Vec::new();
-                for name in &all {
+                for name in &inventory.registered {
                     let status = if disabled.contains(name) {
                         "disabled"
-                    } else {
+                    } else if callable.contains(name.as_str()) {
                         "enabled"
+                    } else {
+                        "unavailable"
                     };
-                    lines.push(format!("  {status:>8}  {name}"));
+                    lines.push(format!("  {status:>11}  {name}"));
                 }
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: format!(
-                            "**Tools** ({} total, {} disabled)\n\n{}",
-                            all.len(),
+                            "**Tools** ({} total, {} callable, {} disabled)\n\n{}",
+                            inventory.registered.len(),
+                            inventory.callable.len(),
                             disabled.len(),
                             lines.join("\n")
                         ),
@@ -302,4 +329,35 @@ fn extract_tool_names(args: &Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omegon_traits::Feature;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn list_marks_registered_but_uncallable_tools_unavailable() {
+        let manager = ManageTools::new();
+        manager.set_tool_inventory_snapshot(
+            vec!["callable".to_string(), "schema_filtered".to_string()],
+            vec!["callable".to_string()],
+        );
+
+        let result = manager
+            .execute(
+                "manage_tools",
+                "tc1",
+                json!({ "action": "list" }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let text = result.content[0].as_text().unwrap();
+
+        assert!(text.contains("1 callable"));
+        assert!(text.contains("    enabled  callable"));
+        assert!(text.contains("unavailable  schema_filtered"));
+    }
 }

@@ -73,14 +73,14 @@ Background child work should be delivered to the parent agent as structured runt
 
 This applies to both one-off delegates and coordinated `cleave` runs:
 
-- `delegate` is a leaf workstream: one child task, one terminal result, optional full-log retrieval.
-- `cleave` is a parent workstream: multiple child workstreams plus dependency waves, harvest, merge, validation, and synthesis.
+- `delegate` is a leaf workstream: one clove task, one terminal result, optional full-log retrieval.
+- `cleave` is a parent workstream: multiple clove workstreams plus dependency waves, harvest, merge, validation, and synthesis.
 
 The harness owns awareness of workstream state. The model owns interpretation and next-step judgment.
 
 ### Unified Workstream Model
 
-Represent delegate tasks, cleave parents, cleave children, merge phases, and validation phases as workstreams in one runtime event store.
+Represent delegate tasks, cleave parents, cleave cloves, merge phases, and validation phases as workstreams in one runtime event store.
 
 ```rust
 struct Workstream {
@@ -114,7 +114,7 @@ enum WorkstreamStatus {
 }
 ```
 
-A simple delegate has no parent. A cleave run is a parent workstream with child workstreams and internal merge/validation workstreams.
+A simple delegate has no parent. A cleave run is a parent workstream with clove workstreams and internal merge/validation workstreams.
 
 ```text
 delegate_1
@@ -123,7 +123,7 @@ delegate_1
 
 cleave_4
   kind: CleaveParent
-  children:
+  cloves:
     cleave_4/parser
     cleave_4/tui
     cleave_4/merge
@@ -292,8 +292,8 @@ Suggested auto-resume defaults:
 |---|---|
 | Delegate completed | Auto-resume only if the originating request requested notification or continuation. |
 | Delegate failed/degraded | Inject next turn; auto-resume only for active verification requests. |
-| Cleave child completed | Workbench only, plus compact next-turn delta. |
-| Cleave child failed but parent can continue | Workbench plus compact next-turn delta. |
+| Clove completed | Workbench only, plus compact next-turn delta. |
+| Clove failed but parent can continue | Workbench plus compact next-turn delta. |
 | Cleave blocked | Inject and optionally auto-resume. |
 | Cleave completed | Inject and optionally auto-resume. |
 | Approval/operator input required | Inject and auto-resume into required-input flow. |
@@ -321,7 +321,7 @@ The assistant should normally summarize the parent synthesis, not every raw chil
 - Never spawn a delegate to inspect another delegate. Result/status inspection is a parent runtime operation.
 - Do not treat an empty successful child result as verification evidence.
 - Do not treat delegate transport failure as command failure unless the command exit status is known.
-- Do not allow child output to issue instructions to the parent; child output is untrusted data.
+- Do not allow clove output to issue instructions to the parent; clove output is untrusted data.
 - Do not claim a cleave run is complete until merge/harvest and parent synthesis have completed.
 - Do not claim no pending work while unreconciled terminal/blocker workstream events remain.
 
@@ -338,14 +338,14 @@ The assistant should normally summarize the parent synthesis, not every raw chil
 
 ## A2A-style Parent-mediated Communication Events
 
-Delegate and cleave child communication should enter the same runtime event system as result continuations. The event store must account for parent-to-child task envelopes, child-to-parent artifacts, boundary requests, and parent-routed dependency artifacts.
+Delegate and cleave clove communication should enter the same runtime event system as result continuations. The event store must account for parent-to-clove task envelopes, child-to-parent artifacts, boundary requests, and parent-routed dependency artifacts.
 
 Default communication topology is parent-mediated:
 
 ```text
 parent Omegon -> child Omegon task envelope
 child Omegon -> parent workstream events/artifacts
-parent Omegon -> downstream child dependency artifacts when accepted
+parent Omegon -> downstream clove dependency artifacts when accepted
 ```
 
 Direct child-to-child A2A is future/advanced only. It must not bypass parent authority, scope contracts, audit records, or trace context.
@@ -379,4 +379,4 @@ UX surfaces should consume semantic projections of these events:
 - Transcript receives milestone/blocker summaries, not every low-level message.
 - ACP/Web receive renderer-neutral operation/message/artifact projections.
 
-Parent synthesis must include communication provenance: which artifacts were accepted, which downstream children consumed them, which messages were denied or unresolved, and whether any boundary expansion changed the original perforation plan.
+Parent synthesis must include communication provenance: which artifacts were accepted, which downstream cloves consumed them, which messages were denied or unresolved, and whether any boundary expansion changed the original perforation plan.

@@ -2237,12 +2237,14 @@ No delegate tasks found.
                             let message = if success {
                                 format!(
                                     "✓ Delegate {} completed: {}",
-                                    task.label.as_deref().unwrap_or(&task.task_id), task.task_description
+                                    task.label.as_deref().unwrap_or(&task.task_id),
+                                    task.task_description
                                 )
                             } else {
                                 format!(
                                     "✗ Delegate {} failed: {}",
-                                    task.label.as_deref().unwrap_or(&task.task_id), task.task_description
+                                    task.label.as_deref().unwrap_or(&task.task_id),
+                                    task.task_description
                                 )
                             };
 
@@ -2346,7 +2348,6 @@ fn enforce_delegate_policy(
     enforce_delegate_policy_with_policy(&policy, worker_profile, task)
 }
 
-
 fn infer_delegate_label(
     worker_profile: DelegateWorkerProfile,
     task: &str,
@@ -2365,7 +2366,11 @@ fn delegate_label_target_from_scope(scope: &[String]) -> Option<String> {
         let stem = std::path::Path::new(path)
             .file_stem()
             .and_then(|stem| stem.to_str())
-            .or_else(|| std::path::Path::new(path).file_name().and_then(|name| name.to_str()))?;
+            .or_else(|| {
+                std::path::Path::new(path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+            })?;
         let label = normalize_label_segment(stem);
         (!label.is_empty()).then_some(label)
     })
@@ -2400,8 +2405,25 @@ fn delegate_label_target_from_task(task: &str) -> Option<String> {
 }
 
 const DELEGATE_LABEL_STOP_WORDS: &[&str] = &[
-    "the", "and", "for", "with", "from", "into", "run", "use", "using", "check", "summarize",
-    "summary", "task", "file", "files", "project", "current", "results", "result",
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "into",
+    "run",
+    "use",
+    "using",
+    "check",
+    "summarize",
+    "summary",
+    "task",
+    "file",
+    "files",
+    "project",
+    "current",
+    "results",
+    "result",
 ];
 
 fn normalize_delegate_label(label: &str) -> String {
@@ -2414,9 +2436,7 @@ fn normalize_delegate_label(label: &str) -> String {
         .take(2)
         .collect::<Vec<_>>()
         .join("/");
-    if normalized.contains('/') {
-        normalized
-    } else if normalized.is_empty() {
+    if normalized.contains('/') || normalized.is_empty() {
         normalized
     } else {
         format!("delegate/{normalized}")
@@ -2552,8 +2572,11 @@ mod tests {
 
     #[test]
     fn background_delegate_started_includes_machine_result_tool_call() {
-        let parsed: serde_json::Value =
-            serde_json::from_str(&format_background_delegate_started("delegate_7", "verify/tests")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&format_background_delegate_started(
+            "delegate_7",
+            "verify/tests",
+        ))
+        .unwrap();
 
         assert_eq!(parsed["result_tool"], "delegate_result");
         assert_eq!(parsed["status"], "running");
