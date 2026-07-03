@@ -2467,6 +2467,7 @@ async fn run_embedded_command(
 
     let acp_state = web::acp_ws::AcpWebState {
         web_auth: state.web_auth.clone(),
+        web_authority: state.web_authority.clone(),
         model: model.to_string(),
         cwd: cwd.clone(),
         agent_id: agent_id.map(String::from),

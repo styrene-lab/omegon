@@ -5599,6 +5599,7 @@ pub async fn run_server(
 
     let acp_state = crate::web::acp_ws::AcpWebState {
         web_auth: web_auth.clone(),
+        web_authority: crate::web::WebAuthorityConfig::default(),
         model: model.to_string(),
         cwd: std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()),
         agent_id: agent_id.map(String::from),

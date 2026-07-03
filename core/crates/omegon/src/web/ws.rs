@@ -22,6 +22,7 @@
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -39,10 +40,14 @@ pub struct WsQuery {
 /// Upgrade handler — accepts the WebSocket connection after auth check.
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
     Query(query): Query<WsQuery>,
     State(state): State<WebState>,
 ) -> impl IntoResponse {
     if state.web_auth.verify_query_token(query.token.as_deref()) {
+        if let Err(error) = super::rbac::validate_proxy_identity_headers(&state, &headers) {
+            return error.status().into_response();
+        }
         tracing::debug!(
             auth_mode = state.web_auth.mode_name(),
             "WebSocket auth OK, upgrading"

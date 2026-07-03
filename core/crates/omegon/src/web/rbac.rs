@@ -251,17 +251,58 @@ pub fn proxy_identity_assertion_from_headers(
     }))
 }
 
-pub fn validate_proxy_identity_assertion(
+pub fn proxy_identity_assertion_for_state(
     state: &super::WebState,
+    headers: &HeaderMap,
+) -> Result<Option<WebProxyIdentityAssertion>, RbacError> {
+    match proxy_identity_assertion_from_headers(headers) {
+        Ok(assertion) => Ok(assertion),
+        Err(error) if state.web_authority.require_proxy_identity => match error {
+            RbacError::PolicyUnavailable { reason: "missing_proxy_subject" }
+            | RbacError::InvalidRole { .. } => Err(RbacError::ProxyIdentityRequired),
+            _ => Err(RbacError::ProxyIdentityMismatch),
+        },
+        Err(error) => Err(error),
+    }
+}
+
+pub fn validate_proxy_identity_headers_for_config(
+    web_authority: &super::WebAuthorityConfig,
+    headers: &HeaderMap,
+) -> Result<Option<WebProxyIdentityAssertion>, RbacError> {
+    let assertion = proxy_identity_assertion_from_headers(headers).or_else(|error| {
+        if web_authority.require_proxy_identity {
+            match error {
+                RbacError::PolicyUnavailable { reason: "missing_proxy_subject" }
+                | RbacError::InvalidRole { .. } => Err(RbacError::ProxyIdentityRequired),
+                _ => Err(RbacError::ProxyIdentityMismatch),
+            }
+        } else {
+            Err(error)
+        }
+    })?;
+    validate_proxy_identity_assertion_for_config(web_authority, assertion.as_ref())?;
+    Ok(assertion)
+}
+
+pub fn validate_proxy_identity_headers(
+    state: &super::WebState,
+    headers: &HeaderMap,
+) -> Result<Option<WebProxyIdentityAssertion>, RbacError> {
+    validate_proxy_identity_headers_for_config(&state.web_authority, headers)
+}
+
+pub fn validate_proxy_identity_assertion_for_config(
+    web_authority: &super::WebAuthorityConfig,
     assertion: Option<&WebProxyIdentityAssertion>,
 ) -> Result<(), RbacError> {
-    if !state.web_authority.require_proxy_identity {
+    if !web_authority.require_proxy_identity {
         return Ok(());
     }
     let Some(assertion) = assertion else {
         return Err(RbacError::ProxyIdentityRequired);
     };
-    let Some(trusted) = state.web_authority.trusted_proxy.as_ref() else {
+    let Some(trusted) = web_authority.trusted_proxy.as_ref() else {
         return Err(RbacError::ProxyIdentityRequired);
     };
     if assertion.issuer != TRUSTED_PROXY_ISSUER_AUSPEX
@@ -273,6 +314,13 @@ pub fn validate_proxy_identity_assertion(
     Ok(())
 }
 
+pub fn validate_proxy_identity_assertion(
+    state: &super::WebState,
+    assertion: Option<&WebProxyIdentityAssertion>,
+) -> Result<(), RbacError> {
+    validate_proxy_identity_assertion_for_config(&state.web_authority, assertion)
+}
+
 pub fn principal_from_headers(
     state: &super::WebState,
     headers: &HeaderMap,
@@ -282,8 +330,7 @@ pub fn principal_from_headers(
         return Err(RbacError::Unauthorized);
     }
 
-    let assertion = proxy_identity_assertion_from_headers(headers)?;
-    validate_proxy_identity_assertion(state, assertion.as_ref())?;
+    let assertion = validate_proxy_identity_headers(state, headers)?;
 
     let Some(assertion) = assertion else {
         return Ok(WebPrincipal::from_state(state));

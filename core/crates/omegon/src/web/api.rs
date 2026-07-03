@@ -1295,8 +1295,10 @@ pub async fn post_web_action(
 /// GET /api/web/surfaces — browser-native semantic surface snapshot.
 pub async fn get_web_surfaces(
     State(state): State<WebState>,
+    headers: HeaderMap,
 ) -> Result<Json<super::surfaces::WebSurfacesSnapshot>, StatusCode> {
-    let principal = super::rbac::current_web_principal(&state);
+    let principal =
+        super::rbac::principal_from_headers(&state, &headers).map_err(|error| error.status())?;
     if let Err(error) = super::rbac::require_principal_operation(
         &principal,
         omegon_rbac::OmegonOperation::SurfaceRead,
@@ -2528,7 +2530,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn web_surfaces_snapshot_exposes_expected_surface_keys() {
-        let response = get_web_surfaces(axum::extract::State(test_state()))
+        let response = get_web_surfaces(axum::extract::State(test_state()), auth_headers())
             .await
             .unwrap()
             .0;
@@ -2796,7 +2798,7 @@ required = ["MISSING_REQUIRED_TOKEN"]
         let mut state = test_state();
         state.web_role = styrene_rbac::Role::Blocked;
 
-        let response = get_web_surfaces(axum::extract::State(state)).await;
+        let response = get_web_surfaces(axum::extract::State(state), auth_headers()).await;
 
         assert!(matches!(response, Err(StatusCode::FORBIDDEN)));
     }

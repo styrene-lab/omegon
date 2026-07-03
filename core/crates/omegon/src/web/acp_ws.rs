@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -27,6 +28,7 @@ const THREAD_JOIN_TIMEOUT_SECS: u64 = 30;
 #[derive(Clone)]
 pub struct AcpWebState {
     pub web_auth: Arc<super::auth::WebAuthState>,
+    pub web_authority: super::WebAuthorityConfig,
     pub model: String,
     pub cwd: PathBuf,
     pub agent_id: Option<String>,
@@ -43,11 +45,18 @@ pub struct AcpQuery {
 /// Axum handler — authenticates, enforces connection limit, upgrades to WebSocket.
 pub async fn acp_ws_handler(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
     Query(query): Query<AcpQuery>,
     State(state): State<AcpWebState>,
 ) -> impl IntoResponse {
     if !state.web_auth.verify_query_token(query.token.as_deref()) {
         return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    }
+    if let Err(error) = super::rbac::validate_proxy_identity_headers_for_config(
+        &state.web_authority,
+        &headers,
+    ) {
+        return error.status().into_response();
     }
 
     let active = state.active_connections.load(Ordering::Relaxed);

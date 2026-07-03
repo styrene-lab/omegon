@@ -796,6 +796,7 @@ pub async fn start_server(
 ) -> anyhow::Result<(WebStartupInfo, mpsc::Receiver<WebCommand>)> {
     let acp_state = acp_ws::AcpWebState {
         web_auth: state.web_auth.clone(),
+        web_authority: state.web_authority.clone(),
         model: String::new(),
         cwd: std::env::current_dir().unwrap_or_default(),
         agent_id: None,
