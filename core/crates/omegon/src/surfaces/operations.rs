@@ -119,7 +119,7 @@ impl OperationWorkbenchProjection {
             running: progress
                 .children
                 .iter()
-                .filter(|child| matches!(child.status.as_str(), "running" | "pending"))
+                .filter(|child| child.status == "running")
                 .count(),
             completed: progress.completed,
             failed: progress.failed,
@@ -494,6 +494,7 @@ impl OperationFailureKind {
 mod tests {
     use super::*;
     use crate::child_agent::ChildTaskItem;
+    use crate::features::cleave::{CleaveChildFailureKind, CleaveProgress};
     use crate::features::delegate::{DelegateProgress, DelegateProgressChild};
 
     fn delegate_child(status: &str) -> DelegateProgressChild {
@@ -682,6 +683,85 @@ mod tests {
             tokens_out: 0,
             runtime: None,
         }
+    }
+
+    #[test]
+    fn pending_cleave_children_are_queued_not_running() {
+        let progress = CleaveProgress {
+            active: true,
+            run_id: "smoke".into(),
+            total_children: 2,
+            completed: 0,
+            failed: 0,
+            children: vec![
+                cleave_child("research/sources", "pending"),
+                cleave_child("outline/structure", "pending"),
+            ],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        };
+
+        let projection = OperationWorkbenchProjection::from_cleave(&progress);
+        assert_eq!(projection.running, 0);
+        assert_eq!(projection.completed, 0);
+        assert_eq!(projection.failed, 0);
+        assert!(
+            projection
+                .children
+                .iter()
+                .all(|child| child.status == OperationChildStatus::Queued)
+        );
+    }
+
+    #[test]
+    fn terminal_cleave_projection_has_no_running_children() {
+        let mut completed = cleave_child("research/sources", "completed");
+        completed.tasks = vec![
+            ChildTaskItem {
+                description: "collect".into(),
+                done: true,
+            },
+            ChildTaskItem {
+                description: "cite".into(),
+                done: true,
+            },
+        ];
+        completed.tasks_done = 2;
+        let mut failed = cleave_child("review/claims", "failed");
+        failed.failure_kind = Some(CleaveChildFailureKind::ValidationFailed);
+        failed.tasks = vec![
+            ChildTaskItem {
+                description: "check".into(),
+                done: true,
+            },
+            ChildTaskItem {
+                description: "fix".into(),
+                done: false,
+            },
+        ];
+        failed.tasks_done = 1;
+        let progress = CleaveProgress {
+            active: false,
+            run_id: "cleave-docs-research".into(),
+            total_children: 2,
+            completed: 1,
+            failed: 1,
+            children: vec![completed, failed],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        };
+
+        let projection = OperationWorkbenchProjection::from_cleave(&progress);
+        assert_eq!(projection.running, 0);
+        assert_eq!(projection.completed, 1);
+        assert_eq!(projection.failed, 1);
+        assert_eq!(
+            projection.children[0].status,
+            OperationChildStatus::Succeeded
+        );
+        assert_eq!(projection.children[0].progress.as_ref().unwrap().done, 2);
+        assert_eq!(projection.children[1].status, OperationChildStatus::Failed);
+        assert_eq!(projection.children[1].progress.as_ref().unwrap().done, 1);
     }
 
     #[test]

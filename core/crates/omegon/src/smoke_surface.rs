@@ -292,6 +292,7 @@ fn run_cleave_timeline(
             .iter()
             .filter(|child| matches!(child.status.as_str(), "failed" | "upstream_exhausted"))
             .count();
+        p.active = false;
     });
     send_plan(
         &tx,
@@ -301,9 +302,6 @@ fn run_cleave_timeline(
         total.saturating_sub(1),
         true,
     );
-    update(&progress, |p| {
-        p.active = false;
-    });
 }
 
 fn cleave_terminal_status(
@@ -779,6 +777,57 @@ mod tests {
         );
         assert!(handles.cleave.is_none());
         assert!(handles.delegate.is_some());
+    }
+
+    #[test]
+    fn completed_cleave_smoke_terminalizes_operation_before_terminal_plan() {
+        let progress = Arc::new(Mutex::new(initial_cleave_progress(
+            SmokeScenarioKind::CleaveDocsResearch,
+        )));
+        let (local_tx, local_rx) = std::sync::mpsc::channel();
+
+        run_cleave_timeline(
+            progress.clone(),
+            SmokeScenarioKind::CleaveDocsResearch,
+            None,
+            Some(local_tx),
+        );
+
+        let mut terminal_plan = None;
+        while let Ok(event) = local_rx.recv_timeout(Duration::from_millis(50)) {
+            if let AgentEvent::PlanUpdated { projection } = event
+                && projection
+                    .workstreams
+                    .first()
+                    .is_some_and(|workstream| workstream.status == "complete")
+            {
+                terminal_plan = Some(projection);
+                break;
+            }
+        }
+        let terminal_plan = terminal_plan.expect("terminal smoke plan event");
+        let workstream = terminal_plan.workstreams.first().expect("workstream");
+        assert_eq!(workstream.progress.completed, 5);
+        assert_eq!(workstream.progress.total, 5);
+
+        let progress = progress.lock().expect("cleave progress");
+        assert!(
+            !progress.active,
+            "operation must be inactive before terminal plan is observable"
+        );
+        assert_eq!(progress.completed, 4);
+        assert_eq!(progress.failed, 1);
+        assert_eq!(progress.children[0].status, "completed");
+        assert_eq!(progress.children[0].tasks_done, 2);
+        assert_eq!(progress.children[3].status, "failed");
+        assert_eq!(progress.children[3].tasks_done, 1);
+        assert!(
+            progress
+                .children
+                .iter()
+                .all(|child| !matches!(child.status.as_str(), "pending" | "running")),
+            "terminal operation cannot leave children queued/running"
+        );
     }
 
     #[test]
