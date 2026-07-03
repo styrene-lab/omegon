@@ -282,7 +282,6 @@ fn run_cleave_timeline(
 
     std::thread::sleep(Duration::from_millis(250));
     update(&progress, |p| {
-        p.active = false;
         p.completed = p
             .children
             .iter()
@@ -302,6 +301,9 @@ fn run_cleave_timeline(
         total.saturating_sub(1),
         true,
     );
+    update(&progress, |p| {
+        p.active = false;
+    });
 }
 
 fn cleave_terminal_status(
@@ -420,10 +422,6 @@ fn run_delegate_timeline(
     }
 
     std::thread::sleep(Duration::from_millis(250));
-    update_delegate(&progress, |p| {
-        p.active = false;
-        p.running = 0;
-    });
     send_plan(
         &tx,
         &local_tx,
@@ -432,6 +430,10 @@ fn run_delegate_timeline(
         total.saturating_sub(1),
         true,
     );
+    update_delegate(&progress, |p| {
+        p.active = false;
+        p.running = 0;
+    });
 }
 
 fn delegate_terminal_status(
@@ -751,6 +753,32 @@ mod tests {
                 .iter()
                 .all(|child| child.label != "smoke-pass")
         );
+    }
+
+    #[test]
+    fn completed_smoke_rejects_restart_until_terminal_plan_is_sent() {
+        let mut handles = crate::tui::dashboard::DashboardHandles::default();
+        let mut completed = initial_delegate_progress(SmokeScenarioKind::DelegatePendingResult);
+        completed.active = true;
+        completed.running = 0;
+        completed.completed = 2;
+        completed.failed = 1;
+        handles.delegate = Some(Arc::new(Mutex::new(completed)));
+
+        let response = launch_surface_smoke(
+            &mut handles,
+            SmokeScenarioKind::CleaveFailureMix,
+            None,
+            None,
+        );
+
+        assert!(!response.accepted);
+        assert_eq!(
+            response.output.as_deref(),
+            Some("A smoke or live subagent operation is already running.")
+        );
+        assert!(handles.cleave.is_none());
+        assert!(handles.delegate.is_some());
     }
 
     #[test]
