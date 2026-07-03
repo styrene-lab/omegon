@@ -538,7 +538,17 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::cli_acp_state_changing(
         "smoke",
         "run operator-visible harness smoke tests",
-        &["list", "cleave"],
+        &[
+            "list",
+            "cleave",
+            "cleave basic",
+            "cleave failure-mix",
+            "cleave activity",
+            "cleave docs-research",
+            "delegate",
+            "delegate pending-result",
+            "surface stress",
+        ],
     ),
     BuiltinCommandSpec::queue_mutation(
         "delegate",

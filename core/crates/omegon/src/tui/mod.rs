@@ -827,8 +827,7 @@ pub enum CanonicalSlashCommand {
     CleaveStatus,
     CleaveCancelChild(String),
     DelegateStatus,
-    SmokeList,
-    SmokeCleave,
+    Smoke(crate::smoke_surface::SmokeCommand),
 }
 
 pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<CanonicalSlashCommand> {
@@ -1402,11 +1401,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             "" | "status" => Some(CanonicalSlashCommand::DelegateStatus),
             _ => None,
         },
-        "smoke" => match args {
-            "" | "list" => Some(CanonicalSlashCommand::SmokeList),
-            "cleave" => Some(CanonicalSlashCommand::SmokeCleave),
-            _ => None,
-        },
+        "smoke" => crate::smoke_surface::parse_smoke_command(args)
+            .map(CanonicalSlashCommand::Smoke),
         _ => None,
     }
 }
@@ -4152,17 +4148,17 @@ impl App {
         self.open_menu_projection(self.profile_menu_projection());
     }
 
-    fn launch_cleave_smoke(&mut self) -> SlashResult {
-        if self.smoke_event_rx.is_some() {
-            return SlashResult::Display("A smoke suite is already running.".into());
-        }
+    fn launch_surface_smoke(&mut self, scenario: crate::smoke_surface::SmokeScenarioKind) -> SlashResult {
         let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
-        self.smoke_event_rx = Some(rx);
-        let response = crate::smoke_surface::launch_cleave_surface_smoke(
+        let response = crate::smoke_surface::launch_surface_smoke(
             &mut self.dashboard_handles,
+            scenario,
             None,
             Some(tx),
         );
+        if response.accepted {
+            self.smoke_event_rx = Some(rx);
+        }
         if let Some(cp) = self
             .dashboard_handles
             .cleave
@@ -10156,11 +10152,13 @@ Scroll transcript:
             )),
 
             "smoke" => match canonical_slash_command("smoke", args) {
-                Some(CanonicalSlashCommand::SmokeList) => SlashResult::Display(
-                    "Smoke suites:\n  /smoke cleave  run deterministic cleave lifecycle smoke test".into(),
-                ),
-                Some(CanonicalSlashCommand::SmokeCleave) => self.launch_cleave_smoke(),
-                _ => SlashResult::Display("Usage: /smoke [list|cleave]".into()),
+                Some(CanonicalSlashCommand::Smoke(crate::smoke_surface::SmokeCommand::List)) => {
+                    SlashResult::Display(crate::smoke_surface::smoke_list_text())
+                }
+                Some(CanonicalSlashCommand::Smoke(crate::smoke_surface::SmokeCommand::Scenario(scenario))) => {
+                    self.launch_surface_smoke(scenario)
+                }
+                _ => SlashResult::Display("Usage: /smoke [list|cleave|delegate|surface]".into()),
             },
             "q" => SlashResult::Quit,
 
