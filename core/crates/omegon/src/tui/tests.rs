@@ -1762,6 +1762,44 @@ fn slim_status_line_marks_detached_conversation_viewport() {
 }
 
 #[test]
+fn workstream_only_plan_update_merges_without_clearing_active_lane() {
+    let mut app = test_app();
+    app.workbench_state.active = Some(PlanDisplaySnapshot {
+        mode: "planning".into(),
+        completed: 0,
+        total: 1,
+        items: vec![PlanDisplayItem {
+            status: PlanDisplayStatus::Active,
+            description: "active plan work".into(),
+        }],
+    });
+
+    app.handle_agent_event(AgentEvent::PlanUpdated {
+        projection: omegon_traits::PlanSurfaceProjection {
+            version: 1,
+            workstreams: vec![omegon_traits::PlanWorkstreamProjection {
+                id: "cleave:cleave_live".into(),
+                title: "Cleave approval required — 1 child / max_parallel 1".into(),
+                status: "pending_approval".into(),
+                progress: omegon_traits::PlanProgressProjection {
+                    completed: 0,
+                    total: 1,
+                },
+            }],
+            ..Default::default()
+        },
+    });
+
+    assert!(app.workbench_state.active.is_some());
+    assert_eq!(app.workbench_state.workstreams.len(), 1);
+    assert_eq!(app.workbench_state.workstreams[0].id, "cleave:cleave_live");
+    assert_eq!(
+        app.workbench_state.workstreams[0].status,
+        super::workbench::WorkstreamStatus::PendingApproval
+    );
+}
+
+#[test]
 fn plan_update_without_active_lane_clears_stale_workbench_plan() {
     let mut app = test_app();
     app.workbench_state.active = Some(PlanDisplaySnapshot {

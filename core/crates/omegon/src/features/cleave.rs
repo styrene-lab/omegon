@@ -11,9 +11,11 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::autonomy::{
@@ -26,8 +28,8 @@ use crate::surfaces::operations::OperationWorkbenchProjection;
 
 use omegon_traits::{
     AgentEvent, BusEvent, BusRequest, BusRequestSink, CommandDefinition, CommandResult,
-    ContentBlock, Feature, OperationRef, PlanProgressProjection, PlanWorkstreamProjection,
-    ToolDefinition, ToolResult,
+    ContentBlock, Feature, OperationRef, PlanProgressProjection, PlanSurfaceProjection,
+    PlanWorkstreamProjection, ToolDefinition, ToolResult,
 };
 
 /// Shared slot for the runtime-supplied [`BusRequestSink`].
@@ -317,15 +319,12 @@ fn cleave_assessment_approval(legacy_decision: &str, strategy: &Value) -> Value 
             json!([
                 "review_details",
                 "approve_and_run",
-                "modify_plan",
                 "deny",
-                "run_phased_in_parent",
-                "save_assessment",
                 "view_evidence",
                 "reassess"
             ])
         } else {
-            json!(["review_details", "save_assessment"])
+            json!(["review_details"])
         },
         "confirmation": {
             "required_for_high_cost": true,
@@ -524,7 +523,8 @@ fn assess_decomposition_strategy(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Live progress of an active cleave run, for dashboard rendering.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CleaveApprovalState {
     ApprovalRequired,
     Approved,
@@ -547,7 +547,8 @@ impl CleaveApprovalState {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PendingCleaveApproval {
     pub id: String,
     pub directive: String,
@@ -558,6 +559,38 @@ pub struct PendingCleaveApproval {
     pub modification_request: Option<String>,
     pub plan_digest: String,
     pub high_cost_confirmation: bool,
+}
+
+impl Default for PendingCleaveApproval {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            directive: String::new(),
+            plan_json: String::new(),
+            max_parallel: 1,
+            children: 0,
+            state: CleaveApprovalState::ApprovalRequired,
+            modification_request: None,
+            plan_digest: String::new(),
+            high_cost_confirmation: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+struct CleaveApprovalsState {
+    version: u32,
+    approvals: Vec<PendingCleaveApproval>,
+}
+
+impl Default for CleaveApprovalsState {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            approvals: Vec::new(),
+        }
+    }
 }
 
 impl PendingCleaveApproval {
@@ -901,6 +934,7 @@ impl CleaveFeature {
             sandbox,
             dangerously_bypass_permissions,
         };
+        feature.load_pending_approvals();
         feature.refresh_progress_from_workspace_state();
         feature
     }
@@ -936,6 +970,93 @@ impl CleaveFeature {
             sink.send(BusRequest::EmitAgentEvent {
                 event: Box::new(event),
             });
+        }
+    }
+
+    fn emit_pending_approval_workstreams(&self) {
+        let workstreams = self.approval_workstreams();
+        if workstreams.is_empty() {
+            return;
+        }
+        self.emit_decomposition_event(AgentEvent::PlanUpdated {
+            projection: PlanSurfaceProjection {
+                version: 1,
+                active: None,
+                workstreams,
+                completed_session: None,
+                reconciliation_issues: Vec::new(),
+                promotion_nudges: Vec::new(),
+                resume_candidates: Vec::new(),
+            },
+        });
+    }
+
+    fn approvals_state_path(&self) -> PathBuf {
+        self.repo_path.join(".omegon/cleave/approvals.json")
+    }
+
+    fn load_pending_approvals(&self) {
+        let path = self.approvals_state_path();
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(mut state) = serde_json::from_str::<CleaveApprovalsState>(&content) else {
+            tracing::warn!(path = %path.display(), "failed to parse cleave approvals state");
+            return;
+        };
+        let mut approvals = HashMap::new();
+        for mut approval in state.approvals.drain(..) {
+            if approval.id.trim().is_empty() {
+                continue;
+            }
+            approval.plan_digest = cleave_plan_digest(
+                &approval.directive,
+                &approval.plan_json,
+                approval.max_parallel,
+            );
+            if approval.state == CleaveApprovalState::Approved {
+                approval.state = CleaveApprovalState::ApprovalRequired;
+                approval.high_cost_confirmation = false;
+            }
+            approvals.insert(approval.id.clone(), approval);
+        }
+        if let Ok(mut guard) = self.pending_approvals.lock() {
+            *guard = approvals;
+        }
+    }
+
+    fn save_pending_approvals(&self) {
+        let path = self.approvals_state_path();
+        let approvals = self
+            .pending_approvals
+            .lock()
+            .map(|approvals| {
+                let mut values = approvals.values().cloned().collect::<Vec<_>>();
+                values.sort_by(|a, b| a.id.cmp(&b.id));
+                values
+            })
+            .unwrap_or_default();
+        let state = CleaveApprovalsState {
+            version: 1,
+            approvals,
+        };
+        let Ok(content) = serde_json::to_vec_pretty(&state) else {
+            return;
+        };
+        let Some(parent) = path.parent() else {
+            return;
+        };
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            tracing::warn!(path = %parent.display(), error = %err, "failed to create cleave approval state directory");
+            return;
+        }
+        let tmp = path.with_extension("json.tmp");
+        if let Err(err) = std::fs::write(&tmp, content) {
+            tracing::warn!(path = %tmp.display(), error = %err, "failed to write cleave approval state temp file");
+            return;
+        }
+        if let Err(err) = std::fs::rename(&tmp, &path) {
+            tracing::warn!(from = %tmp.display(), to = %path.display(), error = %err, "failed to install cleave approval state file");
         }
     }
 
@@ -1256,6 +1377,8 @@ impl CleaveFeature {
                 ),
             );
         }
+        self.save_pending_approvals();
+        self.emit_pending_approval_workstreams();
     }
 
     fn update_pending_approval_state(
@@ -1266,14 +1389,22 @@ impl CleaveFeature {
         let mut approvals = self.pending_approvals.lock().ok()?;
         let approval = approvals.get_mut(id)?;
         approval.state = state;
-        Some(approval.clone())
+        let approval = approval.clone();
+        drop(approvals);
+        self.save_pending_approvals();
+        self.emit_pending_approval_workstreams();
+        Some(approval)
     }
 
     fn confirm_high_cost_pending_approval(&self, id: &str) -> Option<PendingCleaveApproval> {
         let mut approvals = self.pending_approvals.lock().ok()?;
         let approval = approvals.get_mut(id)?;
         approval.high_cost_confirmation = true;
-        Some(approval.clone())
+        let approval = approval.clone();
+        drop(approvals);
+        self.save_pending_approvals();
+        self.emit_pending_approval_workstreams();
+        Some(approval)
     }
 
     fn update_pending_approval_modification(
@@ -1285,7 +1416,11 @@ impl CleaveFeature {
         let approval = approvals.get_mut(id)?;
         approval.state = CleaveApprovalState::Modified;
         approval.modification_request = Some(request);
-        Some(approval.clone())
+        let approval = approval.clone();
+        drop(approvals);
+        self.save_pending_approvals();
+        self.emit_pending_approval_workstreams();
+        Some(approval)
     }
 
     fn pending_approval(&self, id: &str) -> Option<PendingCleaveApproval> {
@@ -1314,7 +1449,48 @@ impl CleaveFeature {
         self.pending_approval(approval_id).is_some_and(|approval| {
             approval.state == CleaveApprovalState::Approved
                 && approval.plan_digest == requested_digest
+                && (!approval.is_high_cost() || approval.high_cost_confirmation)
         })
+    }
+
+    fn approval_workstreams(&self) -> Vec<PlanWorkstreamProjection> {
+        let mut approvals: Vec<PendingCleaveApproval> = self
+            .pending_approvals
+            .lock()
+            .map(|approvals| approvals.values().cloned().collect())
+            .unwrap_or_default();
+        approvals.sort_by(|a, b| a.id.cmp(&b.id));
+        approvals
+            .into_iter()
+            .map(|approval| {
+                let (status, title_prefix) = match approval.state {
+                    CleaveApprovalState::ApprovalRequired => {
+                        ("pending_approval", "Cleave approval required")
+                    }
+                    CleaveApprovalState::Modified => {
+                        ("pending_approval", "Cleave approval modification requested")
+                    }
+                    CleaveApprovalState::Approved => ("active", "Cleave approval approved"),
+                    CleaveApprovalState::Denied => ("blocked", "Cleave approval denied"),
+                    CleaveApprovalState::Phased => ("blocked", "Cleave approval marked phased"),
+                    CleaveApprovalState::Saved => ("complete", "Cleave approval saved"),
+                };
+                PlanWorkstreamProjection {
+                    id: format!("cleave:{}", approval.id),
+                    title: format!(
+                        "{title_prefix} — {} child{} / max_parallel {}",
+                        approval.children,
+                        if approval.children == 1 { "" } else { "ren" },
+                        approval.max_parallel
+                    ),
+                    status: status.into(),
+                    progress: PlanProgressProjection {
+                        completed: usize::from(approval.state == CleaveApprovalState::Approved),
+                        total: approval.children.max(1),
+                    },
+                }
+            })
+            .collect()
     }
 
     pub fn pending_approval_workstreams(&self) -> Vec<PlanWorkstreamProjection> {
@@ -2198,11 +2374,13 @@ fn cleave_plan_digest(directive: &str, plan_json: &str, max_parallel: usize) -> 
 }
 
 fn generated_cleave_approval_id() -> String {
+    static NEXT_APPROVAL_ID: AtomicU64 = AtomicU64::new(1);
     let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    format!("cleave-approval-{millis}")
+    let seq = NEXT_APPROVAL_ID.fetch_add(1, Ordering::Relaxed);
+    format!("cleave-approval-{millis}-{seq}")
 }
 
 fn cleave_run_has_menu_approval(args: &Value) -> bool {
@@ -2245,10 +2423,7 @@ fn cleave_run_menu_approval_required(
                 "actions": [
                     {"id": "review_details", "label": "Review details", "hotkey": "enter"},
                     {"id": "approve_and_run", "label": "Approve and run", "hotkey": "a"},
-                    {"id": "modify_plan", "label": "Modify plan", "hotkey": "m"},
                     {"id": "deny", "label": "Deny", "hotkey": "d"},
-                    {"id": "run_phased_in_parent", "label": "Run phased in parent", "hotkey": "p"},
-                    {"id": "save_assessment", "label": "Save assessment", "hotkey": "s"},
                     {"id": "view_evidence", "label": "View evidence", "hotkey": "v"},
                     {"id": "reassess", "label": "Reassess", "hotkey": "r"}
                 ]
@@ -2453,10 +2628,17 @@ mod tests {
                 .any(|action| action["id"] == "approve_and_run")
         );
         assert!(actions.iter().any(|action| action["id"] == "deny"));
+        assert!(actions.iter().any(|action| action["id"] == "view_evidence"));
         assert!(
             actions
                 .iter()
-                .any(|action| action["id"] == "run_phased_in_parent")
+                .all(|action| action["id"] != "run_phased_in_parent")
+        );
+        assert!(actions.iter().all(|action| action["id"] != "modify_plan"));
+        assert!(
+            actions
+                .iter()
+                .all(|action| action["id"] != "save_assessment")
         );
     }
 
@@ -2490,6 +2672,98 @@ mod tests {
             }
             other => panic!("unexpected command result: {other:?}"),
         }
+    }
+
+    #[test]
+    fn persisted_pending_approval_survives_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![], false);
+        let plan_json = r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#;
+        feature.record_pending_approval("cleave_persist", "do persisted work", plan_json, 1, 1);
+
+        let recovered = CleaveFeature::new(dir.path(), vec![], false);
+        let approval = recovered.pending_approval("cleave_persist").unwrap();
+        assert_eq!(approval.state, CleaveApprovalState::ApprovalRequired);
+        assert_eq!(approval.directive, "do persisted work");
+        assert_eq!(
+            approval.plan_digest,
+            cleave_plan_digest("do persisted work", plan_json, 1)
+        );
+    }
+
+    #[test]
+    fn persisted_modified_approval_survives_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![], false);
+        feature.record_pending_approval(
+            "cleave_modified",
+            "do editable work",
+            r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#,
+            1,
+            1,
+        );
+        feature.update_pending_approval_modification("cleave_modified", "remove docs child".into());
+
+        let recovered = CleaveFeature::new(dir.path(), vec![], false);
+        let approval = recovered.pending_approval("cleave_modified").unwrap();
+        assert_eq!(approval.state, CleaveApprovalState::Modified);
+        assert_eq!(
+            approval.modification_request.as_deref(),
+            Some("remove docs child")
+        );
+    }
+
+    #[test]
+    fn persisted_approved_approval_requires_review_after_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![], false);
+        let plan_json = r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]},{"label":"two","description":"second","scope":["b.rs"]}]}"#;
+        feature.record_pending_approval("cleave_approved", "do high cost work", plan_json, 2, 2);
+        feature.confirm_high_cost_pending_approval("cleave_approved");
+        feature.update_pending_approval_state("cleave_approved", CleaveApprovalState::Approved);
+
+        let recovered = CleaveFeature::new(dir.path(), vec![], false);
+        let approval = recovered.pending_approval("cleave_approved").unwrap();
+        assert_eq!(approval.state, CleaveApprovalState::ApprovalRequired);
+        assert!(!approval.high_cost_confirmation);
+        assert!(!recovered.cleave_run_has_approved_gate(&json!({
+            "approved": true,
+            "approval_id": "cleave_approved",
+            "directive": "do high cost work",
+            "plan_json": plan_json,
+            "max_parallel": 2
+        })));
+    }
+
+    #[test]
+    fn corrupt_persisted_approval_state_does_not_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_dir = dir.path().join(".omegon/cleave");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::write(state_dir.join("approvals.json"), b"not json").unwrap();
+
+        let recovered = CleaveFeature::new(dir.path(), vec![], false);
+        assert!(recovered.pending_approval("anything").is_none());
+        assert!(recovered.pending_approval_workstreams().is_empty());
+    }
+
+    #[test]
+    fn recovered_pending_approval_projects_to_workbench_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![], false);
+        feature.record_pending_approval(
+            "cleave_recovered",
+            "do recovered work",
+            r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#,
+            1,
+            1,
+        );
+
+        let recovered = CleaveFeature::new(dir.path(), vec![], false);
+        let rows = recovered.pending_approval_workstreams();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "cleave:cleave_recovered");
+        assert_eq!(rows[0].status, "pending_approval");
     }
 
     #[test]
@@ -2651,6 +2925,85 @@ mod tests {
                 assert!(text.contains("remove docs child"), "{text}");
             }
             other => panic!("unexpected command result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn approved_gate_rejects_non_approved_states_and_payload_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![], false);
+        let plan_json = r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#;
+        let args = json!({
+            "approved": true,
+            "approval_id": "cleave_34",
+            "directive": "do gated work",
+            "plan_json": plan_json,
+            "max_parallel": 1
+        });
+
+        for state in [
+            CleaveApprovalState::Denied,
+            CleaveApprovalState::Modified,
+            CleaveApprovalState::Phased,
+            CleaveApprovalState::Saved,
+            CleaveApprovalState::ApprovalRequired,
+        ] {
+            feature.record_pending_approval("cleave_34", "do gated work", plan_json, 1, 1);
+            feature.update_pending_approval_state("cleave_34", state);
+            assert!(!feature.cleave_run_has_approved_gate(&args));
+        }
+
+        feature.record_pending_approval("cleave_34", "do gated work", plan_json, 1, 1);
+        feature.update_pending_approval_state("cleave_34", CleaveApprovalState::Approved);
+        assert!(!feature.cleave_run_has_approved_gate(&json!({
+            "approved": true,
+            "approval_id": "cleave_34",
+            "directive": "do gated work",
+            "plan_json": r#"{"children":[{"label":"changed","description":"first","scope":["a.rs"]}]}"#,
+            "max_parallel": 1
+        })));
+        assert!(!feature.cleave_run_has_approved_gate(&json!({
+            "approved": true,
+            "approval_id": "cleave_34",
+            "directive": "do gated work",
+            "plan_json": plan_json,
+            "max_parallel": 2
+        })));
+        assert!(!feature.cleave_run_has_approved_gate(&json!({
+            "approval_id": "cleave_34",
+            "directive": "do gated work",
+            "plan_json": plan_json,
+            "max_parallel": 1
+        })));
+    }
+
+    #[test]
+    fn high_cost_gate_rejects_approved_state_without_confirmation() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![], false);
+        let plan_json = r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]},{"label":"two","description":"second","scope":["b.rs"]}]}"#;
+        feature.record_pending_approval("cleave_35", "do high cost work", plan_json, 2, 2);
+        feature.update_pending_approval_state("cleave_35", CleaveApprovalState::Approved);
+
+        let args = json!({
+            "approved": true,
+            "approval_id": "cleave_35",
+            "directive": "do high cost work",
+            "plan_json": plan_json,
+            "max_parallel": 2
+        });
+
+        assert!(!feature.cleave_run_has_approved_gate(&args));
+        feature.confirm_high_cost_pending_approval("cleave_35");
+        assert!(feature.cleave_run_has_approved_gate(&args));
+    }
+
+    #[test]
+    fn generated_cleave_approval_ids_are_unique_under_rapid_calls() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..128 {
+            let id = generated_cleave_approval_id();
+            assert!(seen.insert(id));
         }
     }
 
@@ -2827,12 +3180,14 @@ mod tests {
         assert_eq!(result["approval"]["workbench_role"], "process_tree");
         let actions = result["approval"]["actions"].as_array().unwrap();
         assert!(actions.iter().any(|action| action == "approve_and_run"));
-        assert!(actions.iter().any(|action| action == "modify_plan"));
+        assert!(actions.iter().any(|action| action == "view_evidence"));
+        assert!(actions.iter().all(|action| action != "modify_plan"));
         assert!(
             actions
                 .iter()
-                .any(|action| action == "run_phased_in_parent")
+                .all(|action| action != "run_phased_in_parent")
         );
+        assert!(actions.iter().all(|action| action != "save_assessment"));
     }
 
     #[test]
@@ -2991,6 +3346,32 @@ mod tests {
             }
         });
         (sink, rx)
+    }
+
+    #[tokio::test]
+    async fn pending_approval_emits_workstream_only_plan_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![], false);
+        let (sink, mut rx) = test_sink_with_receiver();
+        *feature.event_sender_slot().lock().unwrap() = Some(sink);
+
+        feature.record_pending_approval(
+            "cleave_live",
+            "do gated work",
+            r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#,
+            1,
+            1,
+        );
+
+        match rx.recv().await.unwrap() {
+            AgentEvent::PlanUpdated { projection } => {
+                assert!(projection.active.is_none());
+                assert_eq!(projection.workstreams.len(), 1);
+                assert_eq!(projection.workstreams[0].id, "cleave:cleave_live");
+                assert_eq!(projection.workstreams[0].status, "pending_approval");
+            }
+            other => panic!("expected PlanUpdated, got {other:?}"),
+        }
     }
 
     #[tokio::test]

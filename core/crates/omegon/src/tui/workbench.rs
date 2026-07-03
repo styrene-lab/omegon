@@ -172,6 +172,43 @@ impl WorkbenchState {
             ..Self::default()
         }
     }
+    pub fn merge_workstreams(&mut self, incoming: Vec<WorkstreamSummary>) {
+        for stream in incoming {
+            if let Some(existing) = self
+                .workstreams
+                .iter_mut()
+                .find(|existing| existing.id == stream.id)
+            {
+                *existing = stream;
+            } else {
+                self.workstreams.push(stream);
+            }
+        }
+        self.workstreams.sort_by(|a, b| a.id.cmp(&b.id));
+    }
+
+    pub fn merge_workstream_projection(
+        &mut self,
+        projection: &omegon_traits::PlanSurfaceProjection,
+    ) {
+        let incoming = projection
+            .workstreams
+            .iter()
+            .filter_map(WorkstreamSummary::from_projection)
+            .collect();
+        self.merge_workstreams(incoming);
+    }
+
+    pub fn is_workstream_only_projection(
+        projection: &omegon_traits::PlanSurfaceProjection,
+    ) -> bool {
+        projection.active.is_none()
+            && !projection.workstreams.is_empty()
+            && projection.completed_session.is_none()
+            && projection.reconciliation_issues.is_empty()
+            && projection.promotion_nudges.is_empty()
+            && projection.resume_candidates.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

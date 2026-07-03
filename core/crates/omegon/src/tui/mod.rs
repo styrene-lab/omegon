@@ -11104,6 +11104,11 @@ Scroll transcript:
                 }
             }
             AgentEvent::PlanUpdated { projection } => {
+                if WorkbenchState::is_workstream_only_projection(&projection) {
+                    self.workbench_state
+                        .merge_workstream_projection(&projection);
+                    return;
+                }
                 let dock_state = WorkbenchState::from_plan_projection(&projection);
                 self.completed_plan_history_available = dock_state
                     .active
