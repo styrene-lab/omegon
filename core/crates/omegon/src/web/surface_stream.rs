@@ -135,7 +135,22 @@ fn authorize_surface_stream(
         if !state.web_auth.verify_query_token(query.token.as_deref()) {
             return axum::http::StatusCode::UNAUTHORIZED.into_response();
         }
-        super::rbac::current_web_principal(&state)
+        let assertion = match super::rbac::proxy_identity_assertion_from_headers(&headers) {
+            Ok(assertion) => assertion,
+            Err(error) => return error.status().into_response(),
+        };
+        if let Err(error) = super::rbac::validate_proxy_identity_assertion(&state, assertion.as_ref())
+        {
+            return error.status().into_response();
+        }
+        if assertion.is_some() {
+            match super::rbac::principal_from_headers(&state, &headers) {
+                Ok(principal) => principal,
+                Err(error) => return error.status().into_response(),
+            }
+        } else {
+            super::rbac::current_web_principal(&state)
+        }
     } else {
         match super::rbac::principal_from_headers(&state, &headers) {
             Ok(principal) => principal,
@@ -356,7 +371,23 @@ mod tests {
             "Omegon-Principal-Role",
             axum::http::HeaderValue::from_str(role).unwrap(),
         );
+        headers.insert(
+            "Auspex-Proxy-Identity-Fingerprint",
+            axum::http::HeaderValue::from_static("fp-123"),
+        );
         headers
+    }
+
+    fn strict_proxy_state() -> WebState {
+        test_state().with_web_authority(crate::web::WebAuthorityConfig {
+            trusted_proxy: Some(crate::web::WebTrustedProxyIdentity {
+                schema_version: 1,
+                subject: "user:alice".to_string(),
+                fingerprint: "fp-123".to_string(),
+                strict_daemon_identity: true,
+            }),
+            require_proxy_identity: true,
+        })
     }
 
     #[test]
@@ -424,6 +455,31 @@ mod tests {
         );
         assert_eq!(principal.role, styrene_rbac::Role::Monitor);
         assert!(require_surface_stream_operation(&principal, Some("default")).is_ok());
+    }
+
+    #[test]
+    fn surface_stream_strict_proxy_state_accepts_matching_assertion() {
+        let state = strict_proxy_state();
+        let principal =
+            super::super::rbac::principal_from_headers(&state, &trusted_proxy_headers("monitor"))
+                .expect("strict proxy principal");
+
+        assert_eq!(
+            principal.issuer,
+            super::super::rbac::WebPrincipalIssuer::TrustedProxy
+        );
+        assert_eq!(principal.subject, "user:alice");
+        assert_eq!(principal.role, styrene_rbac::Role::Monitor);
+    }
+
+    #[test]
+    fn surface_stream_strict_proxy_state_rejects_local_bearer_only() {
+        let state = strict_proxy_state();
+
+        assert!(matches!(
+            super::super::rbac::principal_from_headers(&state, &auth_headers()),
+            Err(super::super::rbac::RbacError::ProxyIdentityRequired)
+        ));
     }
 
     #[test]

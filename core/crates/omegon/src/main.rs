@@ -126,6 +126,7 @@ mod workflow;
 
 pub mod nex;
 
+use anyhow::Context;
 use bridge::LlmBridge;
 use omegon_traits::AgentEvent;
 use tokio::sync::oneshot;
@@ -459,6 +460,14 @@ enum Commands {
         #[arg(long)]
         agent: Option<String>,
 
+        /// Trusted Auspex local web proxy identity JSON file.
+        #[arg(long, value_name = "PATH")]
+        web_trusted_proxy_identity: Option<PathBuf>,
+
+        /// Require matching trusted proxy identity headers on web principal routes.
+        #[arg(long)]
+        require_web_proxy_identity: bool,
+
         #[command(flatten)]
         tls: ControlTlsArgs,
     },
@@ -473,6 +482,14 @@ enum Commands {
         /// Require the exact control port instead of auto-falling back.
         #[arg(long)]
         strict_port: bool,
+
+        /// Trusted Auspex local web proxy identity JSON file.
+        #[arg(long, value_name = "PATH")]
+        web_trusted_proxy_identity: Option<PathBuf>,
+
+        /// Require matching trusted proxy identity headers on web principal routes.
+        #[arg(long)]
+        require_web_proxy_identity: bool,
 
         #[command(flatten)]
         tls: ControlTlsArgs,
@@ -1425,6 +1442,8 @@ async fn main() -> anyhow::Result<()> {
             control_port,
             strict_port,
             ref agent,
+            ref web_trusted_proxy_identity,
+            require_web_proxy_identity,
             ref tls,
         }) => {
             run_embedded_command(
@@ -1432,6 +1451,8 @@ async fn main() -> anyhow::Result<()> {
                 strict_port,
                 &cli.model,
                 agent.as_deref(),
+                web_trusted_proxy_identity.as_deref(),
+                require_web_proxy_identity,
                 tls.clone().into_config()?,
                 cli.dangerously_bypass_permissions,
             )
@@ -1440,6 +1461,8 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Embedded {
             control_port,
             strict_port,
+            ref web_trusted_proxy_identity,
+            require_web_proxy_identity,
             ref tls,
         }) => {
             run_embedded_command(
@@ -1447,6 +1470,8 @@ async fn main() -> anyhow::Result<()> {
                 strict_port,
                 &cli.model,
                 None,
+                web_trusted_proxy_identity.as_deref(),
+                require_web_proxy_identity,
                 tls.clone().into_config()?,
                 cli.dangerously_bypass_permissions,
             )
@@ -2292,11 +2317,46 @@ pub(crate) fn apply_agent_manifest_pre_setup(
     Ok(resolved)
 }
 
+fn load_web_authority_config(
+    trusted_proxy_identity_path: Option<&Path>,
+    require_proxy_identity: bool,
+) -> anyhow::Result<web::WebAuthorityConfig> {
+    let trusted_proxy = match trusted_proxy_identity_path {
+        Some(path) => {
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("reading trusted proxy identity {}", path.display()))?;
+            let identity: web::WebTrustedProxyIdentity = serde_json::from_str(&content)
+                .with_context(|| format!("parsing trusted proxy identity {}", path.display()))?;
+            if identity.subject.trim().is_empty() {
+                anyhow::bail!("trusted proxy identity subject must not be empty");
+            }
+            if identity.fingerprint.trim().is_empty() {
+                anyhow::bail!("trusted proxy identity fingerprint must not be empty");
+            }
+            Some(identity)
+        }
+        None => None,
+    };
+
+    if require_proxy_identity && trusted_proxy.is_none() {
+        anyhow::bail!(
+            "--require-web-proxy-identity requires --web-trusted-proxy-identity <PATH>"
+        );
+    }
+
+    Ok(web::WebAuthorityConfig {
+        trusted_proxy,
+        require_proxy_identity,
+    })
+}
+
 async fn run_embedded_command(
     control_port: u16,
     strict_port: bool,
     model: &str,
     agent_id: Option<&str>,
+    web_trusted_proxy_identity: Option<&Path>,
+    require_web_proxy_identity: bool,
     tls: Option<control_tls::ControlTlsConfig>,
     dangerously_bypass_permissions: bool,
 ) -> anyhow::Result<()> {
@@ -2395,8 +2455,13 @@ async fn run_embedded_command(
         .ok()
         .and_then(|settings| crate::permissions::styrene_role_from_settings(&settings))
         .unwrap_or(styrene_rbac::Role::Admin);
+    let web_authority = load_web_authority_config(
+        web_trusted_proxy_identity,
+        require_web_proxy_identity,
+    )?;
     let state = web::WebState::new(agent.dashboard_handles.clone(), events_tx.clone())
-        .with_web_role(web_role);
+        .with_web_role(web_role)
+        .with_web_authority(web_authority);
     let vox_daemon_events = state.daemon_events.clone();
     let global_cancel = CancellationToken::new();
 
@@ -10659,6 +10724,7 @@ mod tests {
                 control_port,
                 strict_port,
                 tls,
+                ..
             } => {
                 assert_eq!(control_port, 7842);
                 assert!(strict_port);
@@ -10685,6 +10751,7 @@ mod tests {
                 strict_port,
                 agent: _,
                 tls,
+                ..
             } => {
                 assert_eq!(control_port, 7842);
                 assert!(strict_port);

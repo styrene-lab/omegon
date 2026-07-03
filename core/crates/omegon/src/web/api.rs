@@ -2272,6 +2272,7 @@ mod tests {
                 token: "test".into(),
                 auth_mode: "ephemeral-bearer".into(),
                 auth_source: "generated".into(),
+                web_authority: crate::web::WebAuthorityConfig::default().status(),
                 control_plane_state: ControlPlaneState::Ready,
                 daemon_status: WebDaemonStatus::default(),
                 instance_descriptor: None,
@@ -2304,6 +2305,7 @@ mod tests {
                 std::sync::Mutex::new(std::collections::VecDeque::new()),
             ),
             web_role: styrene_rbac::Role::Admin,
+            web_authority: crate::web::WebAuthorityConfig::default(),
         }
     }
 

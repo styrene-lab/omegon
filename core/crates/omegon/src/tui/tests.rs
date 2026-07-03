@@ -6202,6 +6202,7 @@ fn slash_auspex_status_reports_attach_metadata() {
         token: "test".into(),
         auth_mode: "ephemeral-bearer".into(),
         auth_source: "generated".into(),
+        web_authority: crate::web::WebAuthorityConfig::default().status(),
         control_plane_state: crate::web::ControlPlaneState::Ready,
         daemon_status: WebDaemonStatus {
             queued_events: 2,
@@ -6271,6 +6272,7 @@ fn slash_dash_status_uses_compatibility_wording() {
         token: "test".into(),
         auth_mode: "ephemeral-bearer".into(),
         auth_source: "generated".into(),
+        web_authority: crate::web::WebAuthorityConfig::default().status(),
         control_plane_state: crate::web::ControlPlaneState::Ready,
         daemon_status: WebDaemonStatus {
             queued_events: 4,
@@ -6327,6 +6329,7 @@ fn slash_dash_status_preserves_tls_startup_urls() {
         token: "test".into(),
         auth_mode: "ephemeral-bearer".into(),
         auth_source: "generated".into(),
+        web_authority: crate::web::WebAuthorityConfig::default().status(),
         control_plane_state: crate::web::ControlPlaneState::Ready,
         daemon_status: WebDaemonStatus {
             queued_events: 4,
@@ -6384,6 +6387,7 @@ fn web_dashboard_started_event_updates_cached_addr() {
         token: "test".into(),
         auth_mode: "ephemeral-bearer".into(),
         auth_source: "generated".into(),
+        web_authority: crate::web::WebAuthorityConfig::default().status(),
         control_plane_state: crate::web::ControlPlaneState::Ready,
         daemon_status: WebDaemonStatus {
             queued_events: 2,
@@ -6433,6 +6437,7 @@ fn auspex_attach_payload_carries_startup_and_instance_metadata() {
         token: "test".into(),
         auth_mode: "ephemeral-bearer".into(),
         auth_source: "generated".into(),
+        web_authority: crate::web::WebAuthorityConfig::default().status(),
         control_plane_state: crate::web::ControlPlaneState::Ready,
         daemon_status: WebDaemonStatus {
             queued_events: 0,
@@ -6528,6 +6533,7 @@ fn auspex_attach_payload_carries_tls_transport_security_without_instance() {
         token: "test".into(),
         auth_mode: "ephemeral-bearer".into(),
         auth_source: "generated".into(),
+        web_authority: crate::web::WebAuthorityConfig::default().status(),
         control_plane_state: crate::web::ControlPlaneState::Ready,
         daemon_status: WebDaemonStatus::default(),
         instance_descriptor: None,

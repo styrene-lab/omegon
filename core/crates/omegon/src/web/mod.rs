@@ -78,6 +78,49 @@ pub struct WebDaemonStatus {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WebTrustedProxyIdentity {
+    pub schema_version: u8,
+    pub subject: String,
+    pub fingerprint: String,
+    #[serde(default)]
+    pub strict_daemon_identity: bool,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct WebAuthorityConfig {
+    pub trusted_proxy: Option<WebTrustedProxyIdentity>,
+    pub require_proxy_identity: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WebAuthorityStatus {
+    pub mode: String,
+    pub trusted_proxy_configured: bool,
+    pub trusted_proxy_subject: Option<String>,
+    pub trusted_proxy_fingerprint: Option<String>,
+    pub strict_proxy_identity: bool,
+}
+
+impl WebAuthorityConfig {
+    pub fn status(&self) -> WebAuthorityStatus {
+        let configured = self.trusted_proxy.as_ref();
+        WebAuthorityStatus {
+            mode: if self.require_proxy_identity {
+                "trusted_proxy_strict".to_string()
+            } else if configured.is_some() {
+                "trusted_proxy".to_string()
+            } else {
+                "bearer".to_string()
+            },
+            trusted_proxy_configured: configured.is_some(),
+            trusted_proxy_subject: configured.map(|identity| identity.subject.clone()),
+            trusted_proxy_fingerprint: configured.map(|identity| identity.fingerprint.clone()),
+            strict_proxy_identity: self.require_proxy_identity,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebStartupInfo {
     pub schema_version: u32,
     pub addr: String,
@@ -91,6 +134,7 @@ pub struct WebStartupInfo {
     pub token: String,
     pub auth_mode: String,
     pub auth_source: String,
+    pub web_authority: WebAuthorityStatus,
     pub control_plane_state: ControlPlaneState,
     pub daemon_status: WebDaemonStatus,
     pub instance_descriptor: Option<omegon_traits::OmegonInstanceDescriptor>,
@@ -320,6 +364,8 @@ pub struct WebState {
     /// Effective Styrene role for browser/native web requests. Defaults to Admin
     /// for local ephemeral bearer mode until profile settings thread a stricter role.
     pub web_role: styrene_rbac::Role,
+    /// Optional local authority proxy identity contract for Auspex-mediated web access.
+    pub web_authority: WebAuthorityConfig,
 }
 
 /// Maximum conversation segments retained for reload replay. Older segments are
@@ -353,6 +399,11 @@ impl WebState {
         self
     }
 
+    pub fn with_web_authority(mut self, web_authority: WebAuthorityConfig) -> Self {
+        self.web_authority = web_authority;
+        self
+    }
+
     pub fn with_auth_state_and_secrets(
         handles: DashboardHandles,
         events_tx: broadcast::Sender<omegon_traits::AgentEvent>,
@@ -382,6 +433,7 @@ impl WebState {
             plan_surface: Arc::new(Mutex::new(omegon_traits::PlanSurfaceProjection::default())),
             tool_runs: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             web_role: styrene_rbac::Role::Admin,
+            web_authority: WebAuthorityConfig::default(),
         }
     }
 }
@@ -966,6 +1018,7 @@ pub async fn start_server_with_options(
         token,
         auth_mode: auth_mode.to_string(),
         auth_source,
+        web_authority: state.web_authority.status(),
         control_plane_state: ControlPlaneState::Ready,
         daemon_status: daemon_status
             .lock()
@@ -1514,6 +1567,7 @@ mod tests {
             token: state.web_auth.issue_query_token(),
             auth_mode: state.web_auth.mode_name().into(),
             auth_source: state.web_auth.source_name().into(),
+            web_authority: WebAuthorityConfig::default().status(),
             control_plane_state: ControlPlaneState::Ready,
             daemon_status: WebDaemonStatus {
                 transport_warnings: default_transport_warnings(),
@@ -1569,6 +1623,7 @@ mod tests {
             token: "test".into(),
             auth_mode: "ephemeral-bearer".into(),
             auth_source: "generated".into(),
+            web_authority: WebAuthorityConfig::default().status(),
             control_plane_state: ControlPlaneState::Ready,
             daemon_status: WebDaemonStatus::default(),
             instance_descriptor: None,
@@ -1625,6 +1680,7 @@ mod tests {
             token: "test".into(),
             auth_mode: "ephemeral-bearer".into(),
             auth_source: "generated".into(),
+            web_authority: WebAuthorityConfig::default().status(),
             control_plane_state: ControlPlaneState::Ready,
             daemon_status: WebDaemonStatus::default(),
             instance_descriptor: None,
@@ -1913,6 +1969,7 @@ mod tests {
             token: "test".into(),
             auth_mode: "ephemeral-bearer".into(),
             auth_source: "generated".into(),
+            web_authority: WebAuthorityConfig::default().status(),
             control_plane_state: ControlPlaneState::Ready,
             daemon_status: WebDaemonStatus::default(),
             instance_descriptor: None,

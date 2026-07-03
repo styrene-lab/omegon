@@ -21,6 +21,8 @@ pub struct RbacContext<'a> {
 #[derive(Debug, Clone)]
 pub enum RbacError {
     Unauthorized,
+    ProxyIdentityRequired,
+    ProxyIdentityMismatch,
     InvalidRole {
         role: String,
     },
@@ -84,7 +86,8 @@ pub struct RbacErrorResponse {
 impl RbacError {
     pub fn status(&self) -> StatusCode {
         match self {
-            Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Unauthorized | Self::ProxyIdentityRequired => StatusCode::UNAUTHORIZED,
+            Self::ProxyIdentityMismatch => StatusCode::FORBIDDEN,
             Self::InvalidRole { .. } => StatusCode::BAD_REQUEST,
             Self::Forbidden { .. } => StatusCode::FORBIDDEN,
             Self::Misconfigured { .. } => StatusCode::INTERNAL_SERVER_ERROR,
@@ -98,6 +101,26 @@ impl RbacError {
                 schema_version: 1,
                 error: "unauthorized",
                 reason: "missing_or_invalid_token",
+                operation: None,
+                capability: None,
+                required_base: None,
+                role: None,
+                mode: "styrene-mapped",
+            },
+            Self::ProxyIdentityRequired => RbacErrorResponse {
+                schema_version: 1,
+                error: "unauthorized",
+                reason: "proxy_identity_required",
+                operation: None,
+                capability: None,
+                required_base: None,
+                role: None,
+                mode: "styrene-mapped",
+            },
+            Self::ProxyIdentityMismatch => RbacErrorResponse {
+                schema_version: 1,
+                error: "forbidden",
+                reason: "proxy_identity_mismatch",
                 operation: None,
                 capability: None,
                 required_base: None,
@@ -152,6 +175,17 @@ impl RbacError {
     }
 }
 
+pub const HEADER_PRINCIPAL_ISSUER: &str = "omegon-principal-issuer";
+pub const HEADER_PRINCIPAL_SUBJECT: &str = "omegon-principal-subject";
+pub const HEADER_PRINCIPAL_ROLE: &str = "omegon-principal-role";
+pub const HEADER_PRINCIPAL_DISPLAY_NAME: &str = "omegon-principal-display-name";
+pub const HEADER_PRINCIPAL_SESSION_ID: &str = "omegon-principal-session-id";
+pub const HEADER_PRINCIPAL_CLIENT_ID: &str = "omegon-principal-client-id";
+pub const HEADER_BACK_URL: &str = "omegon-back-url";
+pub const HEADER_AUSPEX_PROXY_IDENTITY_FINGERPRINT: &str =
+    "auspex-proxy-identity-fingerprint";
+const TRUSTED_PROXY_ISSUER_AUSPEX: &str = "auspex";
+
 pub fn parse_control_role(label: &str) -> Result<styrene_rbac::Role, RbacError> {
     omegon_rbac::role_from_control_label(label).ok_or_else(|| RbacError::InvalidRole {
         role: label.to_string(),
@@ -168,11 +202,75 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
 }
 
 fn trusted_proxy_name(headers: &HeaderMap) -> Option<&str> {
-    header_str(headers, "omegon-principal-issuer")
+    header_str(headers, HEADER_PRINCIPAL_ISSUER)
 }
 
 fn is_trusted_proxy(name: &str) -> bool {
-    name == "auspex"
+    name == TRUSTED_PROXY_ISSUER_AUSPEX
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebProxyIdentityAssertion {
+    pub issuer: String,
+    pub subject: String,
+    pub role: styrene_rbac::Role,
+    pub client_id: Option<String>,
+    pub back_url: Option<String>,
+    pub fingerprint: Option<String>,
+}
+
+pub fn proxy_identity_assertion_from_headers(
+    headers: &HeaderMap,
+) -> Result<Option<WebProxyIdentityAssertion>, RbacError> {
+    let Some(issuer) = trusted_proxy_name(headers) else {
+        return Ok(None);
+    };
+    if !is_trusted_proxy(issuer) {
+        return Err(RbacError::PolicyUnavailable {
+            reason: "untrusted_proxy",
+        });
+    }
+    let subject = header_str(headers, HEADER_PRINCIPAL_SUBJECT)
+        .filter(|subject| !subject.trim().is_empty())
+        .ok_or(RbacError::PolicyUnavailable {
+            reason: "missing_proxy_subject",
+        })?;
+    let role_label = header_str(headers, HEADER_PRINCIPAL_ROLE)
+        .filter(|role| !role.trim().is_empty())
+        .ok_or_else(|| RbacError::InvalidRole {
+            role: "missing".to_string(),
+        })?;
+    Ok(Some(WebProxyIdentityAssertion {
+        issuer: issuer.to_string(),
+        subject: subject.to_string(),
+        role: parse_control_role(role_label)?,
+        client_id: header_str(headers, HEADER_PRINCIPAL_CLIENT_ID).map(str::to_string),
+        back_url: header_str(headers, HEADER_BACK_URL).map(str::to_string),
+        fingerprint: header_str(headers, HEADER_AUSPEX_PROXY_IDENTITY_FINGERPRINT)
+            .map(str::to_string),
+    }))
+}
+
+pub fn validate_proxy_identity_assertion(
+    state: &super::WebState,
+    assertion: Option<&WebProxyIdentityAssertion>,
+) -> Result<(), RbacError> {
+    if !state.web_authority.require_proxy_identity {
+        return Ok(());
+    }
+    let Some(assertion) = assertion else {
+        return Err(RbacError::ProxyIdentityRequired);
+    };
+    let Some(trusted) = state.web_authority.trusted_proxy.as_ref() else {
+        return Err(RbacError::ProxyIdentityRequired);
+    };
+    if assertion.issuer != TRUSTED_PROXY_ISSUER_AUSPEX
+        || assertion.subject != trusted.subject
+        || assertion.fingerprint.as_deref() != Some(trusted.fingerprint.as_str())
+    {
+        return Err(RbacError::ProxyIdentityMismatch);
+    }
+    Ok(())
 }
 
 pub fn principal_from_headers(
@@ -184,36 +282,21 @@ pub fn principal_from_headers(
         return Err(RbacError::Unauthorized);
     }
 
-    let Some(proxy_name) = trusted_proxy_name(headers) else {
+    let assertion = proxy_identity_assertion_from_headers(headers)?;
+    validate_proxy_identity_assertion(state, assertion.as_ref())?;
+
+    let Some(assertion) = assertion else {
         return Ok(WebPrincipal::from_state(state));
     };
 
-    if !is_trusted_proxy(proxy_name) {
-        return Err(RbacError::PolicyUnavailable {
-            reason: "untrusted_proxy",
-        });
-    }
-
-    let subject = header_str(headers, "omegon-principal-subject")
-        .filter(|subject| !subject.trim().is_empty())
-        .ok_or(RbacError::PolicyUnavailable {
-            reason: "missing_proxy_subject",
-        })?;
-    let role_label = header_str(headers, "omegon-principal-role")
-        .filter(|role| !role.trim().is_empty())
-        .ok_or_else(|| RbacError::InvalidRole {
-            role: "missing".to_string(),
-        })?;
-    let role = parse_control_role(role_label)?;
-
     Ok(WebPrincipal {
-        subject: subject.to_string(),
-        display_name: header_str(headers, "omegon-principal-display-name").map(str::to_string),
+        subject: assertion.subject,
+        display_name: header_str(headers, HEADER_PRINCIPAL_DISPLAY_NAME).map(str::to_string),
         issuer: WebPrincipalIssuer::TrustedProxy,
-        auth_source: format!("trusted-proxy:{proxy_name}"),
-        role,
-        session_id: header_str(headers, "omegon-principal-session-id").map(str::to_string),
-        client_id: header_str(headers, "omegon-principal-client-id").map(str::to_string),
+        auth_source: format!("trusted-proxy:{}", assertion.issuer),
+        role: assertion.role,
+        session_id: header_str(headers, HEADER_PRINCIPAL_SESSION_ID).map(str::to_string),
+        client_id: assertion.client_id,
     })
 }
 
@@ -565,6 +648,57 @@ mod tests {
         assert!(matches!(
             principal_from_headers(&state, &invalid_role),
             Err(RbacError::InvalidRole { role }) if role == "root"
+        ));
+    }
+
+    #[test]
+    fn strict_proxy_identity_requires_configured_subject_and_fingerprint() {
+        let mut state = test_state().with_web_authority(super::super::WebAuthorityConfig {
+            trusted_proxy: Some(super::super::WebTrustedProxyIdentity {
+                schema_version: 1,
+                subject: "auspex-local".to_string(),
+                fingerprint: "fp-123".to_string(),
+                strict_daemon_identity: true,
+            }),
+            require_proxy_identity: true,
+        });
+
+        let mut headers = bearer_headers("test");
+        headers.insert(
+            HEADER_PRINCIPAL_ISSUER,
+            axum::http::HeaderValue::from_static("auspex"),
+        );
+        headers.insert(
+            HEADER_PRINCIPAL_SUBJECT,
+            axum::http::HeaderValue::from_static("auspex-local"),
+        );
+        headers.insert(
+            HEADER_PRINCIPAL_ROLE,
+            axum::http::HeaderValue::from_static("monitor"),
+        );
+        headers.insert(
+            HEADER_AUSPEX_PROXY_IDENTITY_FINGERPRINT,
+            axum::http::HeaderValue::from_static("fp-123"),
+        );
+
+        let principal = principal_from_headers(&state, &headers).expect("strict proxy principal");
+        assert_eq!(principal.issuer, WebPrincipalIssuer::TrustedProxy);
+        assert_eq!(principal.subject, "auspex-local");
+        assert_eq!(principal.role, styrene_rbac::Role::Monitor);
+
+        headers.insert(
+            HEADER_AUSPEX_PROXY_IDENTITY_FINGERPRINT,
+            axum::http::HeaderValue::from_static("wrong"),
+        );
+        assert!(matches!(
+            principal_from_headers(&state, &headers),
+            Err(RbacError::ProxyIdentityMismatch)
+        ));
+
+        state.web_authority.trusted_proxy = None;
+        assert!(matches!(
+            principal_from_headers(&state, &bearer_headers("test")),
+            Err(RbacError::ProxyIdentityRequired)
         ));
     }
 

@@ -16,9 +16,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Added `/smoke` as a unified operator-facing smoke-test namespace and `/smoke cleave` to drive the shared live cleave/progress and Workbench plan projections used by TUI, remote slash, ACP, and served WebUIs instead of writing progress into conversation transcript segments.
+- Added `/smoke` as a unified operator-facing smoke-test namespace and `/smoke cleave` to drive a value-set of shared live cleave/delegate progress and Workbench plan projections used by TUI, remote slash, ACP, and served WebUIs instead of writing progress into conversation transcript segments.
 
 ### Added
+
+- Added Auspex local-authority proxy strict mode for the web daemon: `serve`/`embedded` can load a trusted proxy identity JSON, require matching Auspex subject/fingerprint headers before accepting proxy principals, reject query-token-only surface streams in strict mode, and report web authority status in startup metadata.
 
 - Added a manual cleave approval gate so `cleave_assess` advertises menu-based operator approval metadata, `cleave_run` records pending approval state and refuses to launch clove workstreams without a matching approved plan digest, high-cost cleaves require second confirmation, and `/cleave` exposes approve/modify/deny/phased/save/evidence/reassess action backends.
 - Extended `cleave_assess` with a backward-compatible decomposition strategy envelope, including strategy mode, confidence breakdown, warnings, assumptions, evidence, draft perforation lines, and parent obligations so future cleave runs can distinguish direct, phased, delegate, sequential, and parallel workstream plans.
