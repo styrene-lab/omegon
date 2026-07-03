@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Extended `cleave_assess` with a backward-compatible decomposition strategy envelope, including strategy mode, confidence breakdown, warnings, assumptions, evidence, draft perforation lines, and parent obligations so future cleave runs can distinguish direct, phased, delegate, sequential, and parallel workstream plans.
+- Added a first-pass cleave approval gate so `cleave_assess` advertises menu-based operator approval metadata, `cleave_run` records pending approval state and refuses to launch child workstreams unless the harness supplies an approved plan marker, and `/cleave` exposes shared action backends for approve/modify/deny/phased/save/evidence/reassess.
 - Added semantic branch labels for delegates so Workbench rows can display human-readable labels such as `verify/tests` while preserving `delegate_N` as the stable result handle, and refreshed shared delegate progress immediately on background completion/failure so rows converge to terminal state without waiting for turn-end polling.
 
 ### Fixed

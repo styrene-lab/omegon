@@ -26,7 +26,8 @@ use crate::surfaces::operations::OperationWorkbenchProjection;
 
 use omegon_traits::{
     AgentEvent, BusEvent, BusRequest, BusRequestSink, CommandDefinition, CommandResult,
-    ContentBlock, Feature, OperationRef, ToolDefinition, ToolResult,
+    ContentBlock, Feature, OperationRef, PlanProgressProjection, PlanWorkstreamProjection,
+    ToolDefinition, ToolResult,
 };
 
 /// Shared slot for the runtime-supplied [`BusRequestSink`].
@@ -263,14 +264,22 @@ fn assess_directive(directive: &str, threshold: f64) -> Value {
     let complexity = systems * (1.0 + 0.5 * modifier_count);
     let effective = complexity + 1.0; // +1 for validation offset
 
-    let decision = if effective > threshold {
+    let legacy_decision = if effective > threshold {
         "cleave"
     } else {
         "execute"
     };
+    let strategy = assess_decomposition_strategy(
+        directive,
+        &lower,
+        &words,
+        legacy_decision,
+        confidence,
+        &active_modifiers,
+    );
 
     json!({
-        "decision": decision,
+        "decision": legacy_decision,
         "complexity": complexity,
         "systems": systems as u8,
         "modifiers": active_modifiers,
@@ -279,6 +288,234 @@ fn assess_directive(directive: &str, threshold: f64) -> Value {
         "pattern_id": pattern_id,
         "confidence": confidence,
         "threshold": threshold,
+        "strategy": strategy["strategy"].clone(),
+        "confidence_breakdown": strategy["confidence_breakdown"].clone(),
+        "warnings": strategy["warnings"].clone(),
+        "assumptions": strategy["assumptions"].clone(),
+        "evidence": strategy["evidence"].clone(),
+        "approval": cleave_assessment_approval(legacy_decision, &strategy),
+    })
+}
+
+fn cleave_assessment_approval(legacy_decision: &str, strategy: &Value) -> Value {
+    let mode = strategy["strategy"]["mode"]
+        .as_str()
+        .unwrap_or("direct_execution");
+    let requires = legacy_decision == "cleave"
+        || matches!(mode, "parallel_cleave" | "sequential_children" | "hybrid");
+    json!({
+        "required": requires,
+        "operation": "cleave_run",
+        "surface": "menu",
+        "workbench_role": "process_tree",
+        "reason": if requires {
+            "Cleave execution may launch child agents, create private workspaces, run long validation, and consume paid tokens; operator menu approval is required before execution."
+        } else {
+            "Assessment does not recommend cleave execution."
+        },
+        "actions": if requires {
+            json!([
+                "review_details",
+                "approve_and_run",
+                "modify_plan",
+                "deny",
+                "run_phased_in_parent",
+                "save_assessment",
+                "view_evidence",
+                "reassess"
+            ])
+        } else {
+            json!(["review_details", "save_assessment"])
+        },
+        "confirmation": {
+            "required_for_high_cost": true,
+            "prompt": "Approve and run cleave child agents? y/N"
+        }
+    })
+}
+
+fn assess_decomposition_strategy(
+    directive: &str,
+    lower: &str,
+    words: &[&str],
+    legacy_decision: &str,
+    pattern_confidence: f64,
+    modifiers: &[&str],
+) -> Value {
+    let explicit_paths: Vec<&str> = words
+        .iter()
+        .copied()
+        .filter(|w| {
+            w.contains('/')
+                || w.ends_with(".rs")
+                || w.ends_with(".ts")
+                || w.ends_with(".tsx")
+                || w.ends_with(".md")
+                || w.ends_with(".toml")
+                || w.ends_with(".json")
+        })
+        .collect();
+    let has_scope = !explicit_paths.is_empty();
+    let vague = pattern_confidence == 0.0
+        || ["thing", "stuff", "better", "improve", "fix it", "make it"]
+            .iter()
+            .any(|needle| lower.contains(needle));
+    let high_overlap = [
+        "same file",
+        "shared file",
+        "single file",
+        "one file",
+        "overlap",
+        "orchestrator.rs",
+        "tui/mod.rs",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    let spec_backed = [
+        "openspec",
+        "spec-backed",
+        "scenario",
+        "tasks.md",
+        "acceptance",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    let side_quest = [
+        "scout",
+        "inspect",
+        "review",
+        "verify",
+        "run tests",
+        "check results",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    let dirty_or_submodule = ["dirty", "submodule", "uncommitted", "worktree"]
+        .iter()
+        .any(|needle| lower.contains(needle));
+    let parallel_signal = [
+        "parallel",
+        "independent",
+        "low-overlap",
+        "separate",
+        "workstreams",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+
+    let (mode, rationale, overall, warnings) = if vague && !has_scope && !spec_backed {
+        (
+            "needs_scope_discovery",
+            "Directive lacks concrete scope evidence; structural assessment must discover affected files/domains before decomposition.",
+            0.35,
+            vec!["no concrete scope evidence"],
+        )
+    } else if side_quest && !parallel_signal {
+        (
+            "lightweight_delegate",
+            "Directive looks like a bounded side quest better handled by one delegate than cleave orchestration.",
+            0.72,
+            vec![],
+        )
+    } else if high_overlap {
+        (
+            "phased_execution",
+            "Large work appears to share central files; parallel worktrees would raise merge risk, so use parent phases or sequential children.",
+            0.70,
+            vec!["shared write scope risk"],
+        )
+    } else if spec_backed && (parallel_signal || legacy_decision == "cleave") {
+        (
+            "parallel_cleave",
+            "Spec/acceptance evidence plus cleave complexity supports bounded parallel workstreams if mechanical VCS gates pass.",
+            0.84,
+            vec![],
+        )
+    } else if legacy_decision == "cleave" && has_scope {
+        (
+            "sequential_children",
+            "Task is complex and scoped, but evidence is insufficient for confident parallelism; use sequenced child workstreams.",
+            0.68,
+            vec!["parallelism not yet structurally proven"],
+        )
+    } else {
+        (
+            "direct_execution",
+            "Current evidence does not justify child workstream orchestration.",
+            0.62,
+            vec![],
+        )
+    };
+
+    let mut warnings_json: Vec<Value> = warnings
+        .into_iter()
+        .map(|message| json!({"kind": "assessment_gate", "message": message}))
+        .collect();
+    if dirty_or_submodule {
+        warnings_json.push(json!({
+            "kind": "vcs_checkpoint_required",
+            "message": "Directive or scope mentions dirty tree/worktree/submodule ambiguity; checkpoint before private child workspaces."
+        }));
+    }
+    if mode == "parallel_cleave" && !spec_backed {
+        warnings_json.push(json!({
+            "kind": "acceptance_criteria_weak",
+            "message": "Parallel cleave requires concrete acceptance criteria for every child."
+        }));
+    }
+
+    let perforation_lines = if mode == "parallel_cleave" {
+        json!([
+            {
+                "id": "foundation",
+                "domain": "foundation/interface workstream",
+                "rationale": "Initial foundation slice; replace with scope-graph-derived domain in v2 planner.",
+                "write_scope": explicit_paths,
+                "read_scope": [],
+                "forbidden_scope": [],
+                "depends_on": [],
+                "acceptance": ["child reports concrete diff and validation evidence"],
+                "validation": ["run focused tests for owned scope"],
+                "conflict_risk": "unknown",
+                "confidence": overall
+            }
+        ])
+    } else {
+        json!([])
+    };
+
+    json!({
+        "strategy": {
+            "mode": mode,
+            "rationale": rationale,
+            "confidence": overall,
+            "perforation_lines": perforation_lines,
+            "waves": if mode == "parallel_cleave" { json!([["foundation"]]) } else { json!([]) },
+            "parent_obligations": [
+                "validate child claims against harness-observed diffs/tests",
+                "own merge, final validation, synthesis, and release-memory updates"
+            ],
+            "communication_policy": "ParentOnly"
+        },
+        "confidence_breakdown": {
+            "scope_resolution": if has_scope { 0.75 } else { 0.35 },
+            "dependency_graph": if spec_backed { 0.70 } else { 0.30 },
+            "conflict_analysis": if high_overlap { 0.25 } else { 0.65 },
+            "acceptance_criteria": if spec_backed { 0.80 } else { 0.35 },
+            "vcs_substrate": if dirty_or_submodule { 0.40 } else { 0.75 },
+            "model_judgment": pattern_confidence,
+            "overall": overall
+        },
+        "warnings": warnings_json,
+        "assumptions": if mode == "parallel_cleave" {
+            json!(["scope graph and VCS gates must validate these draft perforation lines before cleave_run"])
+        } else {
+            json!([])
+        },
+        "evidence": [
+            {"kind": "directive", "summary": directive},
+            {"kind": "heuristic_pattern", "confidence": pattern_confidence, "modifiers": modifiers}
+        ]
     })
 }
 
@@ -287,6 +524,60 @@ fn assess_directive(directive: &str, threshold: f64) -> Value {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Live progress of an active cleave run, for dashboard rendering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleaveApprovalState {
+    ApprovalRequired,
+    Approved,
+    Modified,
+    Denied,
+    Phased,
+    Saved,
+}
+
+impl CleaveApprovalState {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::ApprovalRequired => "approval_required",
+            Self::Approved => "approved",
+            Self::Modified => "modified",
+            Self::Denied => "denied",
+            Self::Phased => "phased",
+            Self::Saved => "saved",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingCleaveApproval {
+    pub id: String,
+    pub directive: String,
+    pub plan_json: String,
+    pub max_parallel: usize,
+    pub children: usize,
+    pub state: CleaveApprovalState,
+    pub modification_request: Option<String>,
+}
+
+impl PendingCleaveApproval {
+    fn new(
+        id: String,
+        directive: String,
+        plan_json: String,
+        max_parallel: usize,
+        children: usize,
+    ) -> Self {
+        Self {
+            id,
+            directive,
+            plan_json,
+            max_parallel,
+            children,
+            state: CleaveApprovalState::ApprovalRequired,
+            modification_request: None,
+        }
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct CleaveProgress {
     pub active: bool,
@@ -548,6 +839,10 @@ pub struct CleaveFeature {
     /// Shared progress state — updated by the spawned orchestrator task,
     /// read by the dashboard renderer.
     progress: Arc<Mutex<CleaveProgress>>,
+    /// Pending cleave approval states keyed by approval id. This is the
+    /// harness/menu authority gate; Workbench may summarize it, but the menu
+    /// owns operator choice.
+    pending_approvals: Arc<Mutex<HashMap<String, PendingCleaveApproval>>>,
     /// In-process cancel handles for active cleave children, keyed by label.
     child_cancel_tokens: Arc<Mutex<HashMap<String, tokio_util::sync::CancellationToken>>>,
     /// Provider inventory for per-child routing.
@@ -588,6 +883,7 @@ impl CleaveFeature {
         let feature = Self {
             repo_path: repo_path.to_path_buf(),
             progress,
+            pending_approvals: Arc::new(Mutex::new(HashMap::new())),
             child_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             inventory: None,
             session_secret_env,
@@ -931,6 +1227,170 @@ impl CleaveFeature {
         true
     }
 
+    fn record_pending_approval(
+        &self,
+        id: &str,
+        directive: &str,
+        plan_json: &str,
+        max_parallel: usize,
+        children: usize,
+    ) {
+        if let Ok(mut approvals) = self.pending_approvals.lock() {
+            approvals.insert(
+                id.to_string(),
+                PendingCleaveApproval::new(
+                    id.to_string(),
+                    directive.to_string(),
+                    plan_json.to_string(),
+                    max_parallel,
+                    children,
+                ),
+            );
+        }
+    }
+
+    fn update_pending_approval_state(
+        &self,
+        id: &str,
+        state: CleaveApprovalState,
+    ) -> Option<PendingCleaveApproval> {
+        let mut approvals = self.pending_approvals.lock().ok()?;
+        let approval = approvals.get_mut(id)?;
+        approval.state = state;
+        Some(approval.clone())
+    }
+
+    fn update_pending_approval_modification(
+        &self,
+        id: &str,
+        request: String,
+    ) -> Option<PendingCleaveApproval> {
+        let mut approvals = self.pending_approvals.lock().ok()?;
+        let approval = approvals.get_mut(id)?;
+        approval.state = CleaveApprovalState::Modified;
+        approval.modification_request = Some(request);
+        Some(approval.clone())
+    }
+
+    fn pending_approval(&self, id: &str) -> Option<PendingCleaveApproval> {
+        self.pending_approvals.lock().ok()?.get(id).cloned()
+    }
+
+    fn cleave_run_has_approved_gate(&self, args: &Value) -> bool {
+        if !cleave_run_has_menu_approval(args) {
+            return false;
+        }
+        let Some(approval_id) = args
+            .get("approval_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        else {
+            // Future non-interactive harness paths may synthesize an approved
+            // marker without a persisted approval id. The explicit marker is
+            // still required; normal menu approvals should include an id.
+            return true;
+        };
+        self.pending_approval(approval_id)
+            .is_some_and(|approval| approval.state == CleaveApprovalState::Approved)
+    }
+
+    pub fn pending_approval_workstreams(&self) -> Vec<PlanWorkstreamProjection> {
+        let mut approvals: Vec<PendingCleaveApproval> = self
+            .pending_approvals
+            .lock()
+            .map(|approvals| approvals.values().cloned().collect())
+            .unwrap_or_default();
+        approvals.sort_by(|a, b| a.id.cmp(&b.id));
+        approvals
+            .into_iter()
+            .filter(|approval| {
+                matches!(
+                    approval.state,
+                    CleaveApprovalState::ApprovalRequired | CleaveApprovalState::Modified
+                )
+            })
+            .map(|approval| PlanWorkstreamProjection {
+                id: format!("cleave:{}", approval.id),
+                title: format!(
+                    "Cleave approval required — {} child{} / max_parallel {}",
+                    approval.children,
+                    if approval.children == 1 { "" } else { "ren" },
+                    approval.max_parallel
+                ),
+                status: "pending_approval".into(),
+                progress: PlanProgressProjection {
+                    completed: 0,
+                    total: approval.children.max(1),
+                },
+            })
+            .collect()
+    }
+
+    fn approval_command_response(&self, action: &str, rest: &str) -> CommandResult {
+        let (id, tail) = rest.split_once(' ').unwrap_or((rest, ""));
+        let id = id.trim();
+        let tail = tail.trim();
+        if id.is_empty() {
+            return CommandResult::Display(format!("Usage: /cleave {action} <approval-id>"));
+        }
+        let state = match action {
+            "approve" => CleaveApprovalState::Approved,
+            "modify" => {
+                if tail.is_empty() {
+                    return CommandResult::Display(
+                        "Usage: /cleave modify <approval-id> <change request>".into(),
+                    );
+                }
+                if let Some(approval) =
+                    self.update_pending_approval_modification(id, tail.to_string())
+                {
+                    return CommandResult::Display(format!(
+                        "Cleave approval {id}: {}. Modification request recorded; approval remains blocked until the menu/action backend regenerates the plan.",
+                        approval.state.as_str()
+                    ));
+                }
+                return CommandResult::Display(format!("No pending cleave approval '{id}'."));
+            }
+            "deny" => CleaveApprovalState::Denied,
+            "phased" => CleaveApprovalState::Phased,
+            "save" => CleaveApprovalState::Saved,
+            "evidence" => {
+                if let Some(approval) = self.pending_approval(id) {
+                    let modification = approval
+                        .modification_request
+                        .as_deref()
+                        .map(|request| {
+                            format!(
+                                "
+Modification request: {request}"
+                            )
+                        })
+                        .unwrap_or_default();
+                    return CommandResult::Display(format!(
+                        "Cleave approval {id}: state={}, children={}, max_parallel={}
+Directive: {}{}",
+                        approval.state.as_str(),
+                        approval.children,
+                        approval.max_parallel,
+                        approval.directive,
+                        modification
+                    ));
+                }
+                return CommandResult::Display(format!("No pending cleave approval '{id}'."));
+            }
+            "reassess" => CleaveApprovalState::ApprovalRequired,
+            _ => return CommandResult::NotHandled,
+        };
+        if let Some(approval) = self.update_pending_approval_state(id, state.clone()) {
+            CommandResult::Display(format!(
+                "Cleave approval {id}: {}. Workbench remains process-only; use the approval menu/action backend to continue.",
+                approval.state.as_str()
+            ))
+        } else {
+            CommandResult::Display(format!("No pending cleave approval '{id}'."))
+        }
+    }
+
     fn execute_assess(&self, args: &Value) -> anyhow::Result<ToolResult> {
         let directive = args["directive"]
             .as_str()
@@ -959,7 +1419,7 @@ impl CleaveFeature {
             return self.execute_run_attached(args, cancel, None).await;
         }
 
-        let _directive = args["directive"]
+        let directive = args["directive"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("directive required"))?
             .to_string();
@@ -969,6 +1429,20 @@ impl CleaveFeature {
             .to_string();
         let max_parallel = args["max_parallel"].as_u64().unwrap_or(4) as usize;
         let plan = CleavePlan::from_json(&plan_json)?;
+        if !self.cleave_run_has_approved_gate(args) {
+            let result = cleave_run_menu_approval_required(&plan, max_parallel, args);
+            let approval_id = result.details["approval_id"]
+                .as_str()
+                .unwrap_or("pending-cleave-approval");
+            self.record_pending_approval(
+                approval_id,
+                &directive,
+                &plan_json,
+                max_parallel,
+                plan.children.len(),
+            );
+            return Ok(result);
+        }
         let policy = self.subagent_policy();
         if let Some(result) = enforce_cleave_run_policy_with_policy(&policy, &plan, max_parallel) {
             return Ok(result);
@@ -1074,6 +1548,20 @@ impl CleaveFeature {
         let max_parallel = args["max_parallel"].as_u64().unwrap_or(4) as usize;
 
         let plan = CleavePlan::from_json(plan_json)?;
+        if !cleave_run_has_menu_approval(args) {
+            let result = cleave_run_menu_approval_required(&plan, max_parallel, args);
+            let approval_id = result.details["approval_id"]
+                .as_str()
+                .unwrap_or("pending-cleave-approval");
+            self.record_pending_approval(
+                approval_id,
+                directive,
+                plan_json,
+                max_parallel,
+                plan.children.len(),
+            );
+            return Ok(result);
+        }
         let policy = self.subagent_policy();
         if let Some(result) = enforce_cleave_run_policy_with_policy(&policy, &plan, max_parallel) {
             return Ok(result);
@@ -1491,6 +1979,15 @@ impl Feature for CleaveFeature {
                             "type": "boolean",
                             "description": "Run cleave in the background and return immediately (default: true)",
                             "default": true
+                        },
+                        "approved": {
+                            "type": "boolean",
+                            "description": "True only after the harness/operator cleave approval menu has approved this exact run plan",
+                            "default": false
+                        },
+                        "approval_id": {
+                            "type": "string",
+                            "description": "Pending cleave approval identifier from the menu gate, when available"
                         }
                     },
                     "required": ["directive", "plan_json"]
@@ -1521,7 +2018,17 @@ impl Feature for CleaveFeature {
         vec![CommandDefinition {
             name: "cleave".into(),
             description: "Show cleave status or trigger decomposition".into(),
-            subcommands: vec!["status".into(), "cancel <label>".into()],
+            subcommands: vec![
+                "status".into(),
+                "cancel <label>".into(),
+                "approve <id>".into(),
+                "modify <id>".into(),
+                "deny <id>".into(),
+                "phased <id>".into(),
+                "save <id>".into(),
+                "evidence <id>".into(),
+                "reassess <id>".into(),
+            ],
             availability: omegon_traits::CommandAvailability::ALL,
             safety: omegon_traits::CommandSafety::STATE_CHANGING,
         }]
@@ -1531,10 +2038,25 @@ impl Feature for CleaveFeature {
         match name {
             "cleave" => {
                 let sub = args.trim();
-                let prog = self.progress.lock().unwrap();
                 if sub == "status" || sub.is_empty() {
-                    if !prog.active && prog.total_children == 0 {
+                    let prog = self.progress.lock().unwrap();
+                    let pending_workstreams = self.pending_approval_workstreams();
+                    if !prog.active && prog.total_children == 0 && pending_workstreams.is_empty() {
                         return CommandResult::Display("No active cleave run.".into());
+                    }
+                    if !prog.active && prog.total_children == 0 {
+                        let mut lines = vec![format!(
+                            "Pending cleave approval{}:",
+                            if pending_workstreams.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            }
+                        )];
+                        for workstream in pending_workstreams {
+                            lines.push(format!("  ○ {} — {}", workstream.id, workstream.title));
+                        }
+                        return CommandResult::Display(lines.join("\n"));
                     }
                     let projection = OperationWorkbenchProjection::from_cleave(&prog);
                     let mut lines = Vec::new();
@@ -1569,6 +2091,13 @@ impl Feature for CleaveFeature {
                         lines.push(format!("  {} {}{}{}", icon, child.label, dur, failure));
                     }
                     CommandResult::Display(lines.join("\n"))
+                } else if let Some((action, rest)) = sub.split_once(' ')
+                    && matches!(
+                        action,
+                        "approve" | "modify" | "deny" | "phased" | "save" | "evidence" | "reassess"
+                    )
+                {
+                    self.approval_command_response(action, rest.trim())
                 } else if let Some(label) = sub.strip_prefix("cancel ").map(str::trim) {
                     if label.is_empty() {
                         CommandResult::Display("Usage: /cleave cancel <label>".into())
@@ -1578,7 +2107,7 @@ impl Feature for CleaveFeature {
                         CommandResult::Display(format!("No active cleave child '{label}'."))
                     }
                 } else {
-                    CommandResult::Display("Usage: /cleave [status|cancel <label>]".into())
+                    CommandResult::Display("Usage: /cleave [status|cancel <label>|approve <id>|modify <id>|deny <id>|phased <id>|save <id>|evidence <id>|reassess <id>]".into())
                 }
             }
             _ => CommandResult::NotHandled,
@@ -1587,6 +2116,57 @@ impl Feature for CleaveFeature {
 
     fn on_event(&mut self, _event: &BusEvent) -> Vec<BusRequest> {
         vec![]
+    }
+}
+
+fn cleave_run_has_menu_approval(args: &Value) -> bool {
+    args.get("approved")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn cleave_run_menu_approval_required(
+    plan: &CleavePlan,
+    max_parallel: usize,
+    args: &Value,
+) -> ToolResult {
+    let requested_children = plan.children.len();
+    let approval_id = args
+        .get("approval_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("pending-cleave-approval");
+    ToolResult {
+        content: vec![ContentBlock::Text {
+            text: format!(
+                "Cleave approval required: open the approval menu for {approval_id} before launching {requested_children} child workstream(s) with max_parallel={max_parallel}."
+            ),
+        }],
+        details: json!({
+            "approval_required": true,
+            "kind": "cleave_menu_approval_required",
+            "operation": "cleave_run",
+            "approval_id": approval_id,
+            "surface": "menu",
+            "workbench_role": "process_tree_after_approval",
+            "requested": {
+                "children": requested_children,
+                "max_parallel": max_parallel,
+            },
+            "menu": {
+                "title": "Cleave approval required",
+                "actions": [
+                    {"id": "review_details", "label": "Review details", "hotkey": "enter"},
+                    {"id": "approve_and_run", "label": "Approve and run", "hotkey": "a"},
+                    {"id": "modify_plan", "label": "Modify plan", "hotkey": "m"},
+                    {"id": "deny", "label": "Deny", "hotkey": "d"},
+                    {"id": "run_phased_in_parent", "label": "Run phased in parent", "hotkey": "p"},
+                    {"id": "save_assessment", "label": "Save assessment", "hotkey": "s"},
+                    {"id": "view_evidence", "label": "View evidence", "hotkey": "v"},
+                    {"id": "reassess", "label": "Reassess", "hotkey": "r"}
+                ]
+            }
+        }),
     }
 }
 
@@ -1756,6 +2336,226 @@ mod tests {
     use omegon_traits::OperationKind;
 
     #[test]
+    fn cleave_run_menu_gate_blocks_unapproved_launch() {
+        let plan = CleavePlan::from_json(
+            r#"{
+                "children": [
+                    {"label":"one","description":"first","scope":["a.rs"]}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let args = json!({"approval_id": "cleave_27"});
+
+        let result = cleave_run_menu_approval_required(&plan, 1, &args);
+
+        assert_eq!(result.details["approval_required"], true);
+        assert_eq!(result.details["kind"], "cleave_menu_approval_required");
+        assert_eq!(result.details["operation"], "cleave_run");
+        assert_eq!(result.details["approval_id"], "cleave_27");
+        assert_eq!(result.details["surface"], "menu");
+        assert_eq!(
+            result.details["workbench_role"],
+            "process_tree_after_approval"
+        );
+        assert_eq!(result.details["requested"]["children"], 1);
+        let actions = result.details["menu"]["actions"].as_array().unwrap();
+        assert!(
+            actions
+                .iter()
+                .any(|action| action["id"] == "approve_and_run")
+        );
+        assert!(actions.iter().any(|action| action["id"] == "deny"));
+        assert!(
+            actions
+                .iter()
+                .any(|action| action["id"] == "run_phased_in_parent")
+        );
+    }
+
+    #[test]
+    fn cleave_approval_commands_update_pending_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut feature = CleaveFeature::new(dir.path(), vec![], false);
+        feature.record_pending_approval(
+            "cleave_27",
+            "do large work",
+            r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#,
+            1,
+            1,
+        );
+
+        let approved = feature.handle_command("cleave", "approve cleave_27");
+        match approved {
+            CommandResult::Display(text) => assert!(text.contains("approved"), "{text}"),
+            other => panic!("unexpected command result: {other:?}"),
+        }
+        assert_eq!(
+            feature.pending_approval("cleave_27").unwrap().state,
+            CleaveApprovalState::Approved
+        );
+
+        let evidence = feature.handle_command("cleave", "evidence cleave_27");
+        match evidence {
+            CommandResult::Display(text) => {
+                assert!(text.contains("children=1"), "{text}");
+                assert!(text.contains("Directive: do large work"), "{text}");
+            }
+            other => panic!("unexpected command result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pending_cleave_approval_projects_as_workstream_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![], false);
+        feature.record_pending_approval(
+            "cleave_29",
+            "do visible work",
+            r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#,
+            2,
+            3,
+        );
+
+        let workstreams = feature.pending_approval_workstreams();
+
+        assert_eq!(workstreams.len(), 1);
+        assert_eq!(workstreams[0].id, "cleave:cleave_29");
+        assert_eq!(workstreams[0].status, "pending_approval");
+        assert_eq!(workstreams[0].progress.completed, 0);
+        assert_eq!(workstreams[0].progress.total, 3);
+        assert!(workstreams[0].title.contains("approval required"));
+    }
+
+    #[test]
+    fn cleave_status_lists_pending_approval_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut feature = CleaveFeature::new(dir.path(), vec![], false);
+        feature.record_pending_approval(
+            "cleave_30",
+            "do blocked work",
+            r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#,
+            2,
+            3,
+        );
+
+        let result = feature.handle_command("cleave", "status");
+
+        match result {
+            CommandResult::Display(text) => {
+                assert!(text.contains("Pending cleave approval"), "{text}");
+                assert!(text.contains("cleave:cleave_30"), "{text}");
+                assert!(text.contains("3 children / max_parallel 2"), "{text}");
+            }
+            other => panic!("unexpected command result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cleave_approval_commands_cover_alternate_states_and_missing_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut feature = CleaveFeature::new(dir.path(), vec![], false);
+        feature.record_pending_approval(
+            "cleave_28",
+            "do alternate work",
+            r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#,
+            1,
+            1,
+        );
+
+        for (command, expected) in [
+            ("deny cleave_28", CleaveApprovalState::Denied),
+            ("phased cleave_28", CleaveApprovalState::Phased),
+            ("save cleave_28", CleaveApprovalState::Saved),
+            ("reassess cleave_28", CleaveApprovalState::ApprovalRequired),
+        ] {
+            let result = feature.handle_command("cleave", command);
+            match result {
+                CommandResult::Display(text) => {
+                    assert!(text.contains(expected.as_str()), "{command}: {text}");
+                }
+                other => panic!("unexpected command result for {command}: {other:?}"),
+            }
+            assert_eq!(
+                feature.pending_approval("cleave_28").unwrap().state,
+                expected
+            );
+        }
+
+        let missing = feature.handle_command("cleave", "deny missing");
+        match missing {
+            CommandResult::Display(text) => {
+                assert!(text.contains("No pending cleave approval"), "{text}")
+            }
+            other => panic!("unexpected command result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn approved_gate_requires_matching_approved_pending_state_when_id_is_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![], false);
+        feature.record_pending_approval(
+            "cleave_32",
+            "do gated work",
+            r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#,
+            1,
+            1,
+        );
+
+        assert!(!feature.cleave_run_has_approved_gate(&json!({
+            "approved": true,
+            "approval_id": "cleave_32"
+        })));
+
+        feature.update_pending_approval_state("cleave_32", CleaveApprovalState::Approved);
+        assert!(feature.cleave_run_has_approved_gate(&json!({
+            "approved": true,
+            "approval_id": "cleave_32"
+        })));
+        assert!(!feature.cleave_run_has_approved_gate(&json!({
+            "approved": true,
+            "approval_id": "missing"
+        })));
+    }
+
+    fn cleave_modify_records_change_request_and_evidence_reports_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut feature = CleaveFeature::new(dir.path(), vec![], false);
+        feature.record_pending_approval(
+            "cleave_31",
+            "do editable work",
+            r#"{"children":[{"label":"one","description":"first","scope":["a.rs"]}]}"#,
+            1,
+            1,
+        );
+
+        let modified = feature.handle_command(
+            "cleave",
+            "modify cleave_31 remove docs child and cap max_parallel at 1",
+        );
+        match modified {
+            CommandResult::Display(text) => assert!(text.contains("modified"), "{text}"),
+            other => panic!("unexpected command result: {other:?}"),
+        }
+        let approval = feature.pending_approval("cleave_31").unwrap();
+        assert_eq!(approval.state, CleaveApprovalState::Modified);
+        assert_eq!(
+            approval.modification_request.as_deref(),
+            Some("remove docs child and cap max_parallel at 1")
+        );
+
+        let evidence = feature.handle_command("cleave", "evidence cleave_31");
+        match evidence {
+            CommandResult::Display(text) => {
+                assert!(text.contains("Modification request"), "{text}");
+                assert!(text.contains("remove docs child"), "{text}");
+            }
+            other => panic!("unexpected command result: {other:?}"),
+        }
+    }
+
+    #[test]
     fn cleave_run_policy_requires_approval_when_over_conservative_limits() {
         let plan = CleavePlan::from_json(
             r#"{
@@ -1871,6 +2671,27 @@ mod tests {
         );
         assert_eq!(result["decision"], "cleave");
         assert!(result["complexity"].as_f64().unwrap() >= 3.0);
+    }
+
+    #[test]
+    fn assess_complex_directive_requires_menu_approval() {
+        let result = assess_directive(
+            "Build a multi-service integration with gRPC, authentication, and backward compatibility for legacy clients with concurrent processing",
+            2.0,
+        );
+
+        assert_eq!(result["approval"]["required"], true);
+        assert_eq!(result["approval"]["operation"], "cleave_run");
+        assert_eq!(result["approval"]["surface"], "menu");
+        assert_eq!(result["approval"]["workbench_role"], "process_tree");
+        let actions = result["approval"]["actions"].as_array().unwrap();
+        assert!(actions.iter().any(|action| action == "approve_and_run"));
+        assert!(actions.iter().any(|action| action == "modify_plan"));
+        assert!(
+            actions
+                .iter()
+                .any(|action| action == "run_phased_in_parent")
+        );
     }
 
     #[test]
