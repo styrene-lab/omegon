@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added a manual cleave approval gate so `cleave_assess` advertises menu-based operator approval metadata, `cleave_run` records pending approval state and refuses to launch child workstreams without a matching approved plan digest, high-cost cleaves require second confirmation, and `/cleave` exposes approve/modify/deny/phased/save/evidence/reassess action backends.
 - Extended `cleave_assess` with a backward-compatible decomposition strategy envelope, including strategy mode, confidence breakdown, warnings, assumptions, evidence, draft perforation lines, and parent obligations so future cleave runs can distinguish direct, phased, delegate, sequential, and parallel workstream plans.
 - Added a first-pass cleave approval gate so `cleave_assess` advertises menu-based operator approval metadata, `cleave_run` records pending approval state and refuses to launch child workstreams unless the harness supplies an approved plan marker, and `/cleave` exposes shared action backends for approve/modify/deny/phased/save/evidence/reassess.
 - Documented the unified workstream-event direction for delegate and cleave continuations, including runtime event schemas, trust boundaries, turn injection, and Workbench synthesis behavior.
