@@ -420,6 +420,10 @@ fn run_delegate_timeline(
     }
 
     std::thread::sleep(Duration::from_millis(250));
+    update_delegate(&progress, |p| {
+        p.active = false;
+        p.running = 0;
+    });
     send_plan(
         &tx,
         &local_tx,
@@ -428,10 +432,6 @@ fn run_delegate_timeline(
         total.saturating_sub(1),
         true,
     );
-    update_delegate(&progress, |p| {
-        p.active = false;
-        p.running = 0;
-    });
 }
 
 fn delegate_terminal_status(
@@ -491,13 +491,18 @@ fn smoke_plan(
 ) -> PlanSurfaceProjection {
     let labels = scenario_plan_labels(scenario);
     let total = labels.len();
+    let completed = if finished {
+        total
+    } else {
+        completed.min(total)
+    };
     let items = labels
         .iter()
         .enumerate()
         .map(|(idx, (id, label))| PlanItemProjection {
             id: Some((*id).into()),
             label: (*label).into(),
-            status: if idx < completed || finished && idx + 1 == total {
+            status: if idx < completed {
                 "done"
             } else if idx == active_idx {
                 "active"
@@ -777,6 +782,104 @@ mod tests {
         );
         assert!(handles.cleave.is_none());
         assert!(handles.delegate.is_some());
+    }
+
+    #[test]
+    fn all_cleave_smoke_scenarios_terminalize_before_terminal_plan() {
+        for scenario in [
+            SmokeScenarioKind::CleaveBasic,
+            SmokeScenarioKind::CleaveFailureMix,
+            SmokeScenarioKind::CleaveActivity,
+            SmokeScenarioKind::CleaveDocsResearch,
+            SmokeScenarioKind::SurfaceStress,
+        ] {
+            let progress = Arc::new(Mutex::new(initial_cleave_progress(scenario)));
+            let (local_tx, local_rx) = std::sync::mpsc::channel();
+
+            run_cleave_timeline(progress.clone(), scenario, None, Some(local_tx));
+
+            let terminal_plan = terminal_smoke_plan(local_rx);
+            let workstream = terminal_plan.workstreams.first().expect("workstream");
+            assert_eq!(workstream.status, "complete", "scenario: {:?}", scenario);
+            assert_eq!(
+                workstream.progress.completed, workstream.progress.total,
+                "scenario: {:?}",
+                scenario
+            );
+
+            let progress = progress.lock().expect("cleave progress");
+            assert!(!progress.active, "scenario: {:?}", scenario);
+            assert_eq!(
+                progress.completed + progress.failed,
+                progress.children.len(),
+                "scenario: {:?}",
+                scenario
+            );
+            assert!(
+                progress
+                    .children
+                    .iter()
+                    .all(|child| !matches!(child.status.as_str(), "pending" | "running")),
+                "scenario left non-terminal children: {:?}",
+                scenario
+            );
+        }
+    }
+
+    #[test]
+    fn all_delegate_smoke_scenarios_terminalize_before_terminal_plan() {
+        for scenario in [
+            SmokeScenarioKind::DelegateBasic,
+            SmokeScenarioKind::DelegatePendingResult,
+        ] {
+            let progress = Arc::new(Mutex::new(initial_delegate_progress(scenario)));
+            let (local_tx, local_rx) = std::sync::mpsc::channel();
+
+            run_delegate_timeline(progress.clone(), scenario, None, Some(local_tx));
+
+            let terminal_plan = terminal_smoke_plan(local_rx);
+            let workstream = terminal_plan.workstreams.first().expect("workstream");
+            assert_eq!(workstream.status, "complete", "scenario: {:?}", scenario);
+            assert_eq!(
+                workstream.progress.completed, workstream.progress.total,
+                "scenario: {:?}",
+                scenario
+            );
+
+            let progress = progress.lock().expect("delegate progress");
+            assert!(!progress.active, "scenario: {:?}", scenario);
+            assert_eq!(progress.running, 0, "scenario: {:?}", scenario);
+            assert_eq!(
+                progress.completed + progress.failed,
+                progress.children.len(),
+                "scenario: {:?}",
+                scenario
+            );
+            assert!(
+                progress
+                    .children
+                    .iter()
+                    .all(|child| child.status != "running"),
+                "scenario left running delegate children: {:?}",
+                scenario
+            );
+        }
+    }
+
+    fn terminal_smoke_plan(
+        local_rx: std::sync::mpsc::Receiver<AgentEvent>,
+    ) -> PlanSurfaceProjection {
+        while let Ok(event) = local_rx.recv_timeout(Duration::from_millis(50)) {
+            if let AgentEvent::PlanUpdated { projection } = event
+                && projection
+                    .workstreams
+                    .first()
+                    .is_some_and(|workstream| workstream.status == "complete")
+            {
+                return projection;
+            }
+        }
+        panic!("terminal smoke plan event");
     }
 
     #[test]
