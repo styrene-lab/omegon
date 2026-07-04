@@ -9,7 +9,7 @@ think:
   desc: "Raise reasoning effort"
 
 context:
-  cmd: "/context clan"
+  cmd: "/context extended"
   desc: "Raise context class"
 
 status:

@@ -51,26 +51,26 @@ import Docs from "../../layouts/Docs.astro";
   <table>
     <thead><tr><th>Class</th><th>Window</th><th>Use Case</th></tr></thead>
     <tbody>
-      <tr><td><strong>Squad</strong></td><td>128k tokens</td><td>Quick tasks, simple edits</td></tr>
-      <tr><td><strong>Maniple</strong></td><td>272k tokens</td><td>Standard development work</td></tr>
-      <tr><td><strong>Clan</strong></td><td>400k tokens</td><td>Large refactors, multi-file analysis</td></tr>
-      <tr><td><strong>Legion</strong></td><td>1M tokens</td><td>Massive codebases, full-project comprehension</td></tr>
+      <tr><td><strong>Compact</strong></td><td>128k tokens</td><td>Quick tasks, simple edits</td></tr>
+      <tr><td><strong>Standard</strong></td><td>272k tokens</td><td>Standard development work</td></tr>
+      <tr><td><strong>Extended</strong></td><td>400k tokens</td><td>Large refactors, multi-file analysis</td></tr>
+      <tr><td><strong>Massive</strong></td><td>1M+ tokens</td><td>Massive codebases, full-project comprehension</td></tr>
     </tbody>
   </table>
-  <pre><code>/context legion   # Pin to maximum context
-/context squad    # Minimize for cost</code></pre>
+  <pre><code>/context massive  # Pin to maximum context
+/context compact  # Minimize for cost</code></pre>
 
   <h2>Orthogonality</h2>
   <p>
-    The axes are independent. You can request <code>grade S + off + squad</code> (frontier model,
-    no extra thinking, small window) or <code>grade D + high + legion</code> (cheap model, deep reasoning,
+    The axes are independent. You can request <code>grade S + off + compact</code> (frontier model,
+    no extra thinking, small window) or <code>grade D + high + massive</code> (cheap model, deep reasoning,
     huge context). The route controller preserves those intents without pretending they are the same thing.
   </p>
   <ul>
     <li>Simple file read → <code>grade D + off</code></li>
     <li>Architecture decision → <code>grade S + high</code></li>
     <li>Boilerplate generation → <code>grade C + minimal</code></li>
-    <li>Large codebase audit → <code>grade B + medium + legion</code></li>
+    <li>Large codebase audit → <code>grade B + medium + massive</code></li>
   </ul>
 
   <h2>Provider routing</h2>

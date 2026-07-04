@@ -176,7 +176,7 @@
     "desc": "Raise reasoning effort"
   },
   "slash.context": {
-    "cmd": "/context clan",
+    "cmd": "/context extended",
     "desc": "Raise context class"
   },
   "slash.status": {

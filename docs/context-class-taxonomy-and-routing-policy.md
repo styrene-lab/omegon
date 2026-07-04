@@ -40,7 +40,7 @@ Provider context metadata changes over time and sometimes regresses or diverges 
 
 ## Decisions
 
-### Decision: Four stable context classes: Compact (128k), Standard (272k), Extended (400k), Ultra (1m+)
+### Decision: Four stable context classes: Compact (128k), Standard (272k), Extended (400k), Massive (1m+)
 
 **Status:** decided
 **Rationale:** These classes match the real breakpoints currently observed across Anthropic, OpenAI, Copilot, Codex, and local Ollama models. They are easy for operators to reason about and stable enough to survive upstream drift. Exact token counts remain internal metadata; the classes are the operator-facing and policy-facing abstraction.

@@ -65,20 +65,20 @@ context: Context Class {
     border-radius: 8
   }
 
-  squad: Squad 128k {
+  compact: Compact 128k {
     style: { fill: "#2e2010"; stroke: "#b89020"; font-color: "#c4d8e4"; border-radius: 6 }
   }
-  maniple: Maniple 272k {
+  standard: Standard 272k {
     style: { fill: "#2e2010"; stroke: "#b89020"; font-color: "#c4d8e4"; border-radius: 6 }
   }
-  clan: Clan 400k {
+  extended: Extended 400k {
     style: { fill: "#2e2010"; stroke: "#b89020"; font-color: "#c4d8e4"; border-radius: 6 }
   }
-  legion: Legion 1M {
+  massive: Massive 1M+ {
     style: { fill: "#2e2010"; stroke: "#b89020"; font-color: "#c4d8e4"; border-radius: 6 }
   }
 
-  squad -> maniple -> clan -> legion {
+  compact -> standard -> extended -> massive {
     style: { stroke: "#344858" }
   }
 }

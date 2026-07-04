@@ -51,12 +51,12 @@ const downloadLabel = stats.downloadMB ? `~${stats.downloadMB}MB` : "a single";
       </tr>
       <tr>
         <td><strong>Context Class</strong></td>
-        <td>Squad (128k) → Maniple (272k) → Clan (400k) → Legion (1M)</td>
+        <td>Compact (128k) → Standard (272k) → Extended (400k) → Massive (1M+)</td>
         <td>Context window capacity</td>
       </tr>
     </tbody>
   </table>
-  <!-- DIAGRAM:three-axis-overview | 3D matrix or cube showing Model Grade Intent x Thinking Level x Context Class as independent axes, with example configurations plotted (e.g. grade S + high + legion vs grade D + off + squad) -->
+  <!-- DIAGRAM:three-axis-overview | 3D matrix or cube showing Model Grade Intent x Thinking Level x Context Class as independent axes, with example configurations plotted (e.g. grade S + high + massive vs grade D + off + compact) -->
   <p>
     The agent adjusts these axes autonomously based on task complexity, or operators
     can override with <code>/model</code>, <code>/think</code>, and <code>/context</code>.
