@@ -52,10 +52,9 @@ pub async fn acp_ws_handler(
     if !state.web_auth.verify_query_token(query.token.as_deref()) {
         return axum::http::StatusCode::UNAUTHORIZED.into_response();
     }
-    if let Err(error) = super::rbac::validate_proxy_identity_headers_for_config(
-        &state.web_authority,
-        &headers,
-    ) {
+    if let Err(error) =
+        super::rbac::validate_proxy_identity_headers_for_config(&state.web_authority, &headers)
+    {
         return error.status().into_response();
     }
 

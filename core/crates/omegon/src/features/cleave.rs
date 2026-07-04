@@ -4281,10 +4281,7 @@ mod assessment_tests {
 
         let rendered = CleaveFeature::render_status(&progress);
 
-        assert!(
-            rendered.contains("Cleave active: 0/1 cloves"),
-            "{rendered}"
-        );
+        assert!(rendered.contains("Cleave active: 0/1 cloves"), "{rendered}");
         assert!(rendered.contains("alpha [running]"), "{rendered}");
         assert!(rendered.contains("pid=1234"), "{rendered}");
         assert!(rendered.contains("supervision=Attached"), "{rendered}");

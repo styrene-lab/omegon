@@ -108,10 +108,10 @@ pub mod routing;
 mod secret_cli;
 mod sentry;
 mod session;
-mod smoke_surface;
 mod session_router;
 pub mod settings;
 mod setup;
+mod smoke_surface;
 mod startup;
 pub mod status;
 mod task_tree;
@@ -2339,9 +2339,7 @@ fn load_web_authority_config(
     };
 
     if require_proxy_identity && trusted_proxy.is_none() {
-        anyhow::bail!(
-            "--require-web-proxy-identity requires --web-trusted-proxy-identity <PATH>"
-        );
+        anyhow::bail!("--require-web-proxy-identity requires --web-trusted-proxy-identity <PATH>");
     }
 
     Ok(web::WebAuthorityConfig {
@@ -2455,10 +2453,8 @@ async fn run_embedded_command(
         .ok()
         .and_then(|settings| crate::permissions::styrene_role_from_settings(&settings))
         .unwrap_or(styrene_rbac::Role::Admin);
-    let web_authority = load_web_authority_config(
-        web_trusted_proxy_identity,
-        require_web_proxy_identity,
-    )?;
+    let web_authority =
+        load_web_authority_config(web_trusted_proxy_identity, require_web_proxy_identity)?;
     let state = web::WebState::new(agent.dashboard_handles.clone(), events_tx.clone())
         .with_web_role(web_role)
         .with_web_authority(web_authority);

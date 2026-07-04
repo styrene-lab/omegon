@@ -1823,6 +1823,78 @@ fn plan_update_without_active_lane_clears_stale_workbench_plan() {
 }
 
 #[test]
+fn completed_plan_update_clears_live_operation_handles_but_keeps_workstream_summary() {
+    let mut app = test_app();
+    app.dashboard_handles.cleave = Some(std::sync::Arc::new(std::sync::Mutex::new(
+        crate::features::cleave::CleaveProgress {
+            active: true,
+            run_id: "cleave-activity".into(),
+            total_children: 1,
+            completed: 0,
+            failed: 0,
+            children: vec![crate::features::cleave::ChildProgress {
+                label: "scout/files".into(),
+                status: "pending".into(),
+                failure_kind: None,
+                duration_secs: None,
+                supervision_mode: None,
+                pid: None,
+                last_tool: None,
+                last_tool_activity: None,
+                last_turn: None,
+                tasks: Vec::new(),
+                tasks_done: 0,
+                started_at: None,
+                last_activity_at: None,
+                tokens_in: 0,
+                tokens_out: 0,
+                runtime: None,
+            }],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        },
+    )));
+
+    app.handle_agent_event(AgentEvent::PlanUpdated {
+        projection: omegon_traits::PlanSurfaceProjection {
+            version: 1,
+            active: Some(omegon_traits::PlanLaneProjection {
+                plan_id: "smoke:cleave-activity".into(),
+                mode: "complete".into(),
+                status: "complete".into(),
+                source: "smoke".into(),
+                progress: omegon_traits::PlanProgressProjection {
+                    completed: 4,
+                    total: 4,
+                },
+                items: vec![omegon_traits::PlanItemProjection {
+                    label: "Cleave child activity".into(),
+                    status: "done".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            workstreams: vec![omegon_traits::PlanWorkstreamProjection {
+                id: "smoke:cleave-activity".into(),
+                title: "Cleave child activity – shared surfaces".into(),
+                status: "complete".into(),
+                progress: omegon_traits::PlanProgressProjection {
+                    completed: 4,
+                    total: 4,
+                },
+            }],
+            ..Default::default()
+        },
+    });
+
+    assert!(app.dashboard_handles.cleave.is_none());
+    assert!(app.workbench_state.active.is_none());
+    assert_eq!(app.workbench_state.workstreams.len(), 1);
+    assert_eq!(app.workbench_state.workstreams[0].completed, 4);
+    assert_eq!(app.workbench_state.workstreams[0].total, 4);
+}
+
+#[test]
 fn plan_update_preserves_workspace_context() {
     let mut app = test_app();
     app.workbench_state.workspace = WorkbenchWorkspaceContext {

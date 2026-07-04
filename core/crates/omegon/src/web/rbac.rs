@@ -182,8 +182,7 @@ pub const HEADER_PRINCIPAL_DISPLAY_NAME: &str = "omegon-principal-display-name";
 pub const HEADER_PRINCIPAL_SESSION_ID: &str = "omegon-principal-session-id";
 pub const HEADER_PRINCIPAL_CLIENT_ID: &str = "omegon-principal-client-id";
 pub const HEADER_BACK_URL: &str = "omegon-back-url";
-pub const HEADER_AUSPEX_PROXY_IDENTITY_FINGERPRINT: &str =
-    "auspex-proxy-identity-fingerprint";
+pub const HEADER_AUSPEX_PROXY_IDENTITY_FINGERPRINT: &str = "auspex-proxy-identity-fingerprint";
 const TRUSTED_PROXY_ISSUER_AUSPEX: &str = "auspex";
 
 pub fn parse_control_role(label: &str) -> Result<styrene_rbac::Role, RbacError> {
@@ -258,7 +257,9 @@ pub fn proxy_identity_assertion_for_state(
     match proxy_identity_assertion_from_headers(headers) {
         Ok(assertion) => Ok(assertion),
         Err(error) if state.web_authority.require_proxy_identity => match error {
-            RbacError::PolicyUnavailable { reason: "missing_proxy_subject" }
+            RbacError::PolicyUnavailable {
+                reason: "missing_proxy_subject",
+            }
             | RbacError::InvalidRole { .. } => Err(RbacError::ProxyIdentityRequired),
             _ => Err(RbacError::ProxyIdentityMismatch),
         },
@@ -273,7 +274,9 @@ pub fn validate_proxy_identity_headers_for_config(
     let assertion = proxy_identity_assertion_from_headers(headers).or_else(|error| {
         if web_authority.require_proxy_identity {
             match error {
-                RbacError::PolicyUnavailable { reason: "missing_proxy_subject" }
+                RbacError::PolicyUnavailable {
+                    reason: "missing_proxy_subject",
+                }
                 | RbacError::InvalidRole { .. } => Err(RbacError::ProxyIdentityRequired),
                 _ => Err(RbacError::ProxyIdentityMismatch),
             }

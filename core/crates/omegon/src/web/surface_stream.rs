@@ -139,7 +139,8 @@ fn authorize_surface_stream(
             Ok(assertion) => assertion,
             Err(error) => return error.status().into_response(),
         };
-        if let Err(error) = super::rbac::validate_proxy_identity_assertion(&state, assertion.as_ref())
+        if let Err(error) =
+            super::rbac::validate_proxy_identity_assertion(&state, assertion.as_ref())
         {
             return error.status().into_response();
         }

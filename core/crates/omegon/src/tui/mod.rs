@@ -1401,8 +1401,9 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             "" | "status" => Some(CanonicalSlashCommand::DelegateStatus),
             _ => None,
         },
-        "smoke" => crate::smoke_surface::parse_smoke_command(args)
-            .map(CanonicalSlashCommand::Smoke),
+        "smoke" => {
+            crate::smoke_surface::parse_smoke_command(args).map(CanonicalSlashCommand::Smoke)
+        }
         _ => None,
     }
 }
@@ -4148,7 +4149,10 @@ impl App {
         self.open_menu_projection(self.profile_menu_projection());
     }
 
-    fn launch_surface_smoke(&mut self, scenario: crate::smoke_surface::SmokeScenarioKind) -> SlashResult {
+    fn launch_surface_smoke(
+        &mut self,
+        scenario: crate::smoke_surface::SmokeScenarioKind,
+    ) -> SlashResult {
         let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
         let response = crate::smoke_surface::launch_surface_smoke(
             &mut self.dashboard_handles,
@@ -11170,6 +11174,11 @@ Scroll transcript:
                             .push_system(&snapshot.system_notification_text("Plan progress"));
                     }
                     self.conversation.snap_to_bottom();
+                    self.dashboard_handles.cleave = None;
+                    self.dashboard_handles.delegate = None;
+                    self.dashboard.cleave = None;
+                    self.dashboard.delegate = None;
+                    self.instrument_panel.set_cleave_progress(None);
                     let refreshed_workspace = self.current_workbench_workspace_context();
                     self.workbench_state = WorkbenchState {
                         active: None,
