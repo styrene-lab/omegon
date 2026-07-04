@@ -14,7 +14,7 @@ install_nightly:
   desc: "Install latest nightly"
 
 install_version:
-  cmd: "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --version=v0.27.0"
+  cmd: "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --version=v0.27.1"
   desc: "Install a specific version"
 
 install_ci:

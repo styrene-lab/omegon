@@ -1,12 +1,19 @@
 {
   "latestStable": {
-    "tag": "v0.27.0",
-    "date": "2026-07-01",
-    "url": "https://github.com/styrene-lab/omegon/releases/tag/v0.27.0"
+    "tag": "v0.27.1",
+    "date": "2026-07-04",
+    "url": "https://github.com/styrene-lab/omegon/releases/tag/v0.27.1"
   },
   "latestRc": null,
   "latestNightly": null,
   "releases": [
+    {
+      "tag": "v0.27.1",
+      "channel": "stable",
+      "prerelease": false,
+      "date": "2026-07-04",
+      "url": "https://github.com/styrene-lab/omegon/releases/tag/v0.27.1"
+    },
     {
       "tag": "v0.27.0",
       "channel": "stable",
@@ -104,14 +111,7 @@
       "prerelease": false,
       "date": "2026-06-05",
       "url": "https://github.com/styrene-lab/omegon/releases/tag/v0.26.4"
-    },
-    {
-      "tag": "v0.26.3",
-      "channel": "stable",
-      "prerelease": false,
-      "date": "2026-06-04",
-      "url": "https://github.com/styrene-lab/omegon/releases/tag/v0.26.3"
     }
   ],
-  "fetchedAt": "2026-07-01T23:28:50.293Z"
+  "fetchedAt": "2026-07-04T15:32:51.930Z"
 }
