@@ -78,7 +78,10 @@ import { snippet } from "../../lib/snippets";
 
   <h2>Process Safety</h2>
   <ul>
-    <li>The agent executes tools directly — no sandbox. The operator is responsible for reviewing tool calls.</li>
+    <li>The agent executes tools directly under a layered tool policy. Per-tool rules can allow, prompt, or deny operations with wildcard subject matching.</li>
+    <li>Policy prompts are currently allow-once decisions until durable grants are configured; unknown tools remain default-open unless policy says otherwise.</li>
+    <li>Bash mediation is static and advisory for common shell forms. Hard filesystem containment belongs to the sandbox layer.</li>
+    <li>Outside-workspace file prompts wait for an explicit operator allow/deny decision instead of timing out as denial; run cancellation still unblocks the wait.</li>
     <li>All tool calls are logged in the conversation with full arguments and results.</li>
     <li><code>Esc</code> or <code>Ctrl+C</code> cancels the active turn immediately.</li>
     <li>Session auto-save means you can always audit what happened.</li>

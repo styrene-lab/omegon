@@ -432,19 +432,7 @@ impl WorkspaceBoundary {
         // Canonicalize to resolve symlinks and `..` — but the file may not
         // exist yet (write/edit creating new files). In that case, canonicalize
         // the parent directory and append the filename.
-        let canonical = if resolved.exists() {
-            resolved.canonicalize()?
-        } else if let Some(parent) = resolved.parent() {
-            if parent.exists() {
-                parent
-                    .canonicalize()?
-                    .join(resolved.file_name().unwrap_or_default())
-            } else {
-                lexical_normalize(&resolved)
-            }
-        } else {
-            resolved.clone()
-        };
+        let canonical = canonicalize_existing_parent(&resolved);
 
         let cwd_canonical = self.cwd.canonicalize().unwrap_or_else(|_| self.cwd.clone());
 
@@ -483,7 +471,7 @@ impl WorkspaceBoundary {
         }
 
         let cwd_canonical = self.cwd.canonicalize().unwrap_or_else(|_| self.cwd.clone());
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = canonicalize_existing_parent(path);
 
         if canonical.starts_with(&cwd_canonical) {
             return true;
@@ -663,6 +651,29 @@ impl CoreTools {
     /// Resolve a user-provided path against cwd, enforcing workspace boundaries.
     fn resolve_path(&self, path_str: &str) -> anyhow::Result<PathBuf> {
         self.boundary.check_path(path_str)
+    }
+}
+
+fn canonicalize_existing_parent(path: &Path) -> PathBuf {
+    if path.exists() {
+        return path.canonicalize().unwrap_or_else(|_| lexical_normalize(path));
+    }
+
+    let Some(parent) = path.parent() else {
+        return lexical_normalize(path);
+    };
+
+    if parent.exists() {
+        return parent
+            .canonicalize()
+            .unwrap_or_else(|_| lexical_normalize(parent))
+            .join(path.file_name().unwrap_or_default());
+    }
+
+    let canonical_parent = canonicalize_existing_parent(parent);
+    match path.file_name() {
+        Some(file_name) => canonical_parent.join(file_name),
+        None => canonical_parent,
     }
 }
 
@@ -2137,6 +2148,14 @@ open_questions:
         assert!(!b.is_inside_boundary(Path::new("/opt/data/file.txt")));
         b.approve_directory(PathBuf::from("/opt/data"));
         assert!(b.is_inside_boundary(Path::new("/opt/data/file.txt")));
+    }
+
+    #[test]
+    fn boundary_trusted_tmp_allows_missing_child_paths() {
+        let b = WorkspaceBoundary::new(PathBuf::from("/tmp/workspace"));
+        b.approve_directory(PathBuf::from("/tmp"));
+        assert!(b.is_inside_boundary(Path::new("/tmp/omegon-missing-test-file.log")));
+        assert!(b.check_path("/tmp/omegon-missing-test-file.log").is_ok());
     }
 
     #[test]

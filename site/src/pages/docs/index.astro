@@ -66,13 +66,13 @@ const downloadLabel = stats.downloadMB ? `~${stats.downloadMB}MB` : "a single";
   <h2>Key Features</h2>
   <ul>
     <li><strong>{stats.providerCount} Inference Providers</strong> — {stats.providerNames.join(", ")}. Native Rust clients with automatic failover.</li>
-    <li><strong>Parallel Execution</strong> — Cleave tasks into parallel worktree children with automatic merge, conflict detection, and adversarial review.</li>
-    <li><strong>Project Memory</strong> — Persistent facts, episodes, semantic recall, and knowledge graphs across sessions. Not a markdown file — a real memory system.</li>
+    <li><strong>Parallel Execution</strong> — Cleave tasks into parallel worktree children, or use delegate for bounded scout/patch/verify subagents. Workbench keeps child operations visible until reconciled.</li>
+    <li><strong>Project Memory</strong> — Persistent facts, episodes, semantic recall, Git-tracked JSONL federation status, and knowledge graphs across sessions.</li>
     <li><strong>OpenAPI Tools</strong> — Turn project REST APIs into structured tools from <code>.omegon/openapi.toml</code>.</li>
     <li><strong>Design Tree</strong> — knowledge graph tracking architecture decisions, dependencies, and implementation status.</li>
     <li><strong>OpenSpec Lifecycle</strong> — Spec-driven development: propose, spec, fast-forward, cleave, assess, archive.</li>
     <li><strong>Sentry Automation</strong> — Long-running task execution with triggers, budgets, run logs, and optional auto model routing.</li>
-    <li><strong>Live Dashboard</strong> — Terminal TUI with a wrapped multiline editor, segment rendering with model tags, context and memory telemetry, plus a web dashboard over WebSocket.</li>
+    <li><strong>Live Dashboard</strong> — Terminal TUI with a semantic wrapped multiline editor, Workbench operation rows, segment rendering with model tags, context and memory telemetry, plus a web dashboard over WebSocket.</li>
     <li><strong>Plugins</strong> — Personas with organic memory growth, tones, and memory layers. Not prompt templates — living cognitive profiles.</li>
     <li><strong>Extensions</strong> — First-party and community extensions for communication (<a href="https://github.com/styrene-lab/vox">Vox</a>), image generation (<a href="https://github.com/styrene-lab/scry">Scry</a>), and more. Process-isolated, crash-safe, installed with a single command.</li>
     <li><strong>Sessions</strong> — Auto-save and resume, plus a session log tool and narrative history for orientation across runs.</li>

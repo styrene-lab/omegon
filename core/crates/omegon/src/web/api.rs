@@ -430,6 +430,8 @@ pub enum WebActionPayload {
     RespondPermission {
         request_id: String,
         allow: bool,
+        #[serde(default)]
+        always: bool,
     },
     RespondOperatorWait {
         request_id: String,
@@ -1188,8 +1190,14 @@ pub async fn post_web_action(
                 respond_to: None,
             })
         }
-        WebActionPayload::RespondPermission { request_id, allow } => {
-            let decision = if allow {
+        WebActionPayload::RespondPermission {
+            request_id,
+            allow,
+            always,
+        } => {
+            let decision = if always {
+                omegon_traits::PermissionResponse::AlwaysAllow
+            } else if allow {
                 omegon_traits::PermissionResponse::Allow
             } else {
                 omegon_traits::PermissionResponse::Deny
@@ -1201,10 +1209,12 @@ pub async fn post_web_action(
                         request.session_id,
                         request.action_id,
                         Some(
-                            if allow {
-                                "permission allowed"
-                            } else {
-                                "permission denied"
+                            match decision {
+                                omegon_traits::PermissionResponse::Allow => "permission allowed",
+                                omegon_traits::PermissionResponse::AlwaysAllow => {
+                                    "permission always allowed"
+                                }
+                                omegon_traits::PermissionResponse::Deny => "permission denied",
                             }
                             .to_string(),
                         ),
@@ -3059,6 +3069,42 @@ required = ["MISSING_REQUIRED_TOKEN"]
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn web_action_permission_can_answer_always_allow() {
+        let state = test_state();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+        let request_id = state.register_permission(&respond);
+
+        let (status, response) = post_web_action(
+            axum::extract::State(state),
+            auth_headers(),
+            Json(WebActionRequest {
+                schema_version: 1,
+                action_id: "perm-always".to_string(),
+                client_id: "browser-tab".to_string(),
+                session_id: "default".to_string(),
+                action: WebActionPayload::RespondPermission {
+                    request_id,
+                    allow: true,
+                    always: true,
+                },
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(
+            response.status,
+            crate::ui_runtime::envelope::UiActionOutcomeStatus::Accepted
+        );
+        assert_eq!(response.message.as_deref(), Some("permission always allowed"));
+        assert_eq!(
+            rx.recv().expect("permission response"),
+            omegon_traits::PermissionResponse::AlwaysAllow
+        );
     }
 
     #[tokio::test]

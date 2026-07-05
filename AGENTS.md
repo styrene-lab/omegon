@@ -32,6 +32,7 @@ Omegon is a Rust-native agent loop and lifecycle engine. You are working on the 
 - **Direct commits to `main`** for focused changes. Feature branches for multi-session work. Release hardening happens on `release/X.Y` branches once the line is cut; `release/X.Y` owns stable tags, `main` owns nightly tags, and hardening fixes merge forward with `just merge-release-forward`.
 - **Read before editing** — `Edit` requires exact text matches. Always read the file first.
 - **Run tests after changes** — `cargo test -p omegon` from the repo root. Don't commit with failures.
+- **Cargo test filters** — Cargo accepts only one positional test-name filter per `cargo test` invocation. To run multiple focused tests, use one shared substring filter, run separate invocations, or loop: `for f in test_one test_two; do cargo test -p omegon "$f" --locked || exit 1; done`.
 - **Build and install after changes** — `just link` from the repo root to install over itself.
 - **CHANGELOG.md is mandatory release memory** — every commit that changes behavior, docs/site output, tooling, packaging, public API, or operator workflow must update `[Unreleased]` in the same change. Every release/tag must have a complete section for that exact version and must not skip intermediate released versions.
 

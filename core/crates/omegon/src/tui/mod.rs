@@ -6523,10 +6523,10 @@ warning: {warning}"
             omegon_traits::PermissionResponse::AlwaysAllow => {
                 match context.as_ref().map(|ctx| ctx.persistence) {
                     Some(omegon_traits::PermissionPersistence::ProjectDirectory) => {
-                        "always allowed - project directory grant requested"
+                        "always allowed - saved directory grant"
                     }
                     Some(omegon_traits::PermissionPersistence::SessionDirectory) => {
-                        "always allowed - session directory grant requested"
+                        "always allowed - session directory grant"
                     }
                     _ => "allowed for this operation",
                 }
@@ -14066,7 +14066,7 @@ mod slash_command_parsing_tests {
         };
         assert_eq!(
             slim_operator_hint(true, true, true, active, &context),
-            "permission · y once · a always · n deny"
+            "permission · y once · Shift+A always · n deny"
         );
         assert_eq!(
             slim_operator_hint(false, true, true, active, &context),

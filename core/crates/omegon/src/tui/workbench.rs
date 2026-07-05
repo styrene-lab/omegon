@@ -706,7 +706,7 @@ pub fn slim_operator_hint(
     plan_context: &SlimPlanContext,
 ) -> String {
     if pending_permission {
-        "permission · y once · a always · n deny".to_string()
+        "permission · y once · Shift+A always · n deny".to_string()
     } else if pending_operator_wait {
         "manual wait · Enter done · Esc cancel".to_string()
     } else if terminal_copy_mode {

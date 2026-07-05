@@ -111,12 +111,18 @@ import Docs from "../../layouts/Docs.astro";
   <h2>Editor</h2>
   <p>
     The input area is a real wrapped multiline editor with visible cursor placement,
-    prompt history, and proportional height growth.
+    prompt history, proportional height growth, and semantic edit actions shared by
+    TUI, ACP, and future frontend surfaces. Recent 0.27.0 work moved character,
+    word, replacement, clear, attachment, typed text, and paste operations through
+    the shared <code>UiAction</code> seam instead of binding behavior to frontend key events.
   </p>
   <ul>
     <li><strong>Enter</strong> sends the prompt</li>
     <li><strong>Shift+Enter</strong> inserts a newline</li>
     <li><strong>Arrow keys</strong> navigate text and history</li>
+    <li><strong>Meta / Alt word bindings</strong> move and edit by word where the terminal reports those keys reliably</li>
+    <li><strong>Paste</strong> inserts through the same text path as typed characters, including large-paste collapse behavior</li>
+    <li><strong>History recall</strong> preserves the draft you were editing and clears recall state once you modify recalled input</li>
     <li><strong>Mouse wheel</strong> scrolls the pane it is hovering over (conversation or dashboard), not prompt history recall</li>
   </ul>
 

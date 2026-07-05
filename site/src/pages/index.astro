@@ -16,13 +16,13 @@ const valueCards = [
   {
     title: "Parallel worktree orchestration",
     href: "/docs/cleave",
-    body: "<strong>Cleave</strong> decomposes work into dependency-ordered waves of <strong>isolated git worktrees</strong>, each with its own agent process. Handles merge-back, conflict detection, and provider fallback on failure.",
+    body: "<strong>Cleave</strong> decomposes work into dependency-ordered waves of <strong>isolated git worktrees</strong>; <strong>delegate</strong> handles bounded one-shot subagents. Workbench keeps background child state visible until reconciled.",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4" r="2"/><circle cx="6" cy="20" r="2"/><circle cx="18" cy="20" r="2"/><path d="M12 6v4m0 0l-6 8m6-8l6 8"/></svg>`,
   },
   {
     title: "Persistent memory & lifecycle",
     href: "/docs/memory",
-    body: "<strong>SQLite-backed</strong> project memory with confidence scoring, decay, and semantic recall. Design trees and specifications <strong>survive across sessions</strong> — the agent remembers what it learned and where the project stands.",
+    body: "<strong>Git-tracked JSONL</strong> memory with semantic recall, SQLite indexing, and federation status for multi-checkout work. Design trees and specifications <strong>survive across sessions</strong>.",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>`,
   },
   {
@@ -40,7 +40,7 @@ const valueCards = [
   {
     title: "Encrypted secrets vault",
     href: "/docs/security",
-    body: "API keys and tokens stored <strong>AES-256-GCM encrypted at rest</strong>, each with a unique nonce. OS keyring on macOS/Linux/Windows, or passphrase-derived keys for headless. Extensions receive secrets via RPC — <strong>never leaked to environment variables</strong>.",
+    body: "API keys and tokens stored <strong>AES-256-GCM encrypted at rest</strong>, with layered tool policy prompts for sensitive operations. Extensions receive secrets via RPC — <strong>never leaked to environment variables</strong>.",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><circle cx="12" cy="16" r="1"/></svg>`,
   },
   {

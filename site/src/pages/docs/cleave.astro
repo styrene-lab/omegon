@@ -110,7 +110,10 @@ import Docs from "../../layouts/Docs.astro";
   <p>
     Not every task needs parallel decomposition. The <code>delegate</code> tool spawns a single
     subagent for a bounded task — a scout to search the codebase, a patch worker for a scoped
-    edit, or a verifier to run tests.
+    edit, or a verifier to run tests. In the 0.27.0 line, delegate and cleave share a
+    renderer-neutral operation projection, so Workbench rows, command status, transcript
+    lifecycle events, and failure summaries all use the same operation identity and child
+    status taxonomy.
   </p>
 
   <h3>Worker Profiles</h3>
@@ -143,6 +146,20 @@ import Docs from "../../layouts/Docs.astro";
       messages and parroted user acknowledgments.
     </li>
   </ul>
+
+  <h3>Background reconciliation</h3>
+  <p>
+    Background delegates return quickly with a task id. Completion and failure notifications
+    appear in the parent lane with actionable <code>/delegate result &lt;id&gt;</code> hints, and
+    active or unviewed delegate results are injected into model context so the agent does not
+    lose track of subordinate work. Cleave now defaults to background orchestration as well;
+    pass <code>background: false</code> when an attached wait is required.
+  </p>
+  <p>
+    Cancellation is first-class: cancelled delegate children project as terminal non-failure
+    operation rows rather than failed tasks. Permission-bypass authority and subagent autonomy
+    policy are propagated explicitly into child agent processes.
+  </p>
 
   <h3>TUI Continuation</h3>
   <p>
