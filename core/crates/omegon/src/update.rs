@@ -518,6 +518,41 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
     }
 }
 
+#[cfg(unix)]
+fn update_install_symlinks(binary_link: &Path, latest_binary: &Path) -> anyhow::Result<()> {
+    if let Some(parent) = binary_link.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    replace_symlink(binary_link, latest_binary)?;
+    if let Some(parent) = binary_link.parent() {
+        let om_link = parent.join("om");
+        replace_symlink(&om_link, latest_binary)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn replace_symlink(link: &Path, target: &Path) -> anyhow::Result<()> {
+    match std::fs::symlink_metadata(link) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || metadata.is_file() {
+                std::fs::remove_file(link)?;
+            } else {
+                anyhow::bail!("refusing to replace non-file install target: {}", link.display());
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err.into()),
+    }
+    std::os::unix::fs::symlink(target, link)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn update_install_symlinks(_binary_link: &Path, _latest_binary: &Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
 async fn update_install_receipt_for_replaced_binary(
     receipt: &Option<InstallReceipt>,
     latest: &str,
@@ -550,6 +585,10 @@ async fn update_install_receipt_for_replaced_binary(
         Ok(content) => serde_json::from_str(&content)?,
         Err(_) => serde_json::json!({}),
     };
+    if let Some(binary_link) = receipt.binary.as_ref() {
+        update_install_symlinks(binary_link, &latest_binary)?;
+    }
+
     value["version"] = serde_json::Value::String(latest.to_string());
     value["binary"] = receipt
         .binary
@@ -751,6 +790,38 @@ mod tests {
         assert_eq!(
             receipt.versioned_binary_path().as_deref(),
             Some(Path::new("/home/me/.omegon/versions/0.27.0/omegon"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replace_symlink_repoints_installer_launcher() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let old_target = temp.path().join("old");
+        let new_target = temp.path().join("new");
+        let link = temp.path().join("omegon");
+        std::fs::write(&old_target, "old").expect("old target");
+        std::fs::write(&new_target, "new").expect("new target");
+        std::os::unix::fs::symlink(&old_target, &link).expect("initial symlink");
+
+        replace_symlink(&link, &new_target).expect("replace symlink");
+
+        assert_eq!(std::fs::read_link(&link).expect("read link"), new_target);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replace_symlink_rejects_directories() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let target = temp.path().join("new");
+        let link = temp.path().join("omegon");
+        std::fs::write(&target, "new").expect("target");
+        std::fs::create_dir(&link).expect("directory at install target");
+
+        let err = replace_symlink(&link, &target).expect_err("directory should be rejected");
+        assert!(
+            err.to_string().contains("refusing to replace non-file"),
+            "{err}"
         );
     }
 
