@@ -477,20 +477,32 @@ pub fn is_homebrew_managed(exe: &Path) -> bool {
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct InstallReceipt {
-    current: Option<String>,
-    versions_dir: Option<PathBuf>,
+    version: Option<String>,
+    binary: Option<PathBuf>,
+    version_dir: Option<PathBuf>,
+    versioned_binary: Option<PathBuf>,
 }
 
 impl InstallReceipt {
     fn versioned_binary_path(&self) -> Option<PathBuf> {
-        let version = self.current.as_deref()?;
-        let versions_dir = self.versions_dir.as_ref()?;
-        Some(versions_dir.join(version).join("omegon"))
+        self.versioned_binary.clone().or_else(|| {
+            self.version_dir
+                .as_ref()
+                .map(|version_dir| version_dir.join("omegon"))
+        })
+    }
+
+    fn versions_root(&self) -> Option<PathBuf> {
+        self.version_dir.as_ref()?.parent().map(Path::to_path_buf)
     }
 }
 
 fn install_receipt_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".omegon").join("install.json"))
+    dirs::home_dir().map(|home| {
+        home.join(".config")
+            .join("omegon")
+            .join("install-receipt.json")
+    })
 }
 
 fn read_install_receipt() -> anyhow::Result<InstallReceipt> {
@@ -513,18 +525,19 @@ async fn update_install_receipt_for_replaced_binary(
     let Some(receipt) = receipt else {
         return Ok(());
     };
-    let Some(versions_dir) = receipt.versions_dir.as_ref() else {
+    let Some(versions_root) = receipt.versions_root() else {
         return Ok(());
     };
     let Some(receipt_path) = install_receipt_path() else {
         return Ok(());
     };
 
-    let latest_dir = versions_dir.join(latest);
+    let current_exe = std::env::current_exe()?;
+    let latest_dir = versions_root.join(latest);
     tokio::fs::create_dir_all(&latest_dir).await?;
     let latest_binary = latest_dir.join("omegon");
-    if !paths_refer_to_same_file(&latest_binary, &std::env::current_exe()?) {
-        tokio::fs::copy(std::env::current_exe()?, &latest_binary).await?;
+    if !paths_refer_to_same_file(&latest_binary, &current_exe) {
+        tokio::fs::copy(&current_exe, &latest_binary).await?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -537,8 +550,15 @@ async fn update_install_receipt_for_replaced_binary(
         Ok(content) => serde_json::from_str(&content)?,
         Err(_) => serde_json::json!({}),
     };
-    value["current"] = serde_json::Value::String(latest.to_string());
-    value["binary"] = serde_json::Value::String(latest_binary.display().to_string());
+    value["version"] = serde_json::Value::String(latest.to_string());
+    value["binary"] = receipt
+        .binary
+        .as_ref()
+        .map(|path| serde_json::Value::String(path.display().to_string()))
+        .unwrap_or_else(|| serde_json::Value::String(latest_binary.display().to_string()));
+    value["version_dir"] = serde_json::Value::String(latest_dir.display().to_string());
+    value["versioned_binary"] = serde_json::Value::String(latest_binary.display().to_string());
+    value["installed_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
     tokio::fs::write(&receipt_path, serde_json::to_string_pretty(&value)? + "\n").await?;
     Ok(())
 }
@@ -696,6 +716,42 @@ mod tests {
         assert!(!is_homebrew_managed(Path::new(
             "/tmp/omegon-release-ws/core/target/release/omegon"
         )));
+    }
+
+    #[test]
+    fn install_receipt_uses_installer_receipt_layout() {
+        let receipt = InstallReceipt {
+            version: Some("0.27.0".into()),
+            binary: Some(PathBuf::from("/usr/local/bin/omegon")),
+            version_dir: Some(PathBuf::from("/home/me/.omegon/versions/0.27.0")),
+            versioned_binary: Some(PathBuf::from(
+                "/home/me/.omegon/versions/0.27.0/omegon",
+            )),
+        };
+
+        assert_eq!(
+            receipt.versioned_binary_path().as_deref(),
+            Some(Path::new("/home/me/.omegon/versions/0.27.0/omegon"))
+        );
+        assert_eq!(
+            receipt.versions_root().as_deref(),
+            Some(Path::new("/home/me/.omegon/versions"))
+        );
+    }
+
+    #[test]
+    fn install_receipt_derives_binary_from_version_dir_when_needed() {
+        let receipt = InstallReceipt {
+            version: Some("0.27.0".into()),
+            binary: None,
+            version_dir: Some(PathBuf::from("/home/me/.omegon/versions/0.27.0")),
+            versioned_binary: None,
+        };
+
+        assert_eq!(
+            receipt.versioned_binary_path().as_deref(),
+            Some(Path::new("/home/me/.omegon/versions/0.27.0/omegon"))
+        );
     }
 
     #[test]
