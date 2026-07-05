@@ -475,6 +475,74 @@ pub fn is_homebrew_managed(exe: &Path) -> bool {
         .any(|c| c.as_os_str() == "Cellar" || c.as_os_str() == ".linuxbrew")
 }
 
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct InstallReceipt {
+    current: Option<String>,
+    versions_dir: Option<PathBuf>,
+}
+
+impl InstallReceipt {
+    fn versioned_binary_path(&self) -> Option<PathBuf> {
+        let version = self.current.as_deref()?;
+        let versions_dir = self.versions_dir.as_ref()?;
+        Some(versions_dir.join(version).join("omegon"))
+    }
+}
+
+fn install_receipt_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|home| home.join(".omegon").join("install.json"))
+}
+
+fn read_install_receipt() -> anyhow::Result<InstallReceipt> {
+    let path = install_receipt_path().ok_or_else(|| anyhow::anyhow!("home directory not found"))?;
+    let content = std::fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&content)?)
+}
+
+fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
+}
+
+async fn update_install_receipt_for_replaced_binary(
+    receipt: &Option<InstallReceipt>,
+    latest: &str,
+) -> anyhow::Result<()> {
+    let Some(receipt) = receipt else {
+        return Ok(());
+    };
+    let Some(versions_dir) = receipt.versions_dir.as_ref() else {
+        return Ok(());
+    };
+    let Some(receipt_path) = install_receipt_path() else {
+        return Ok(());
+    };
+
+    let latest_dir = versions_dir.join(latest);
+    tokio::fs::create_dir_all(&latest_dir).await?;
+    let latest_binary = latest_dir.join("omegon");
+    if !paths_refer_to_same_file(&latest_binary, &std::env::current_exe()?) {
+        tokio::fs::copy(std::env::current_exe()?, &latest_binary).await?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tokio::fs::set_permissions(&latest_binary, std::fs::Permissions::from_mode(0o755))
+                .await?;
+        }
+    }
+
+    let mut value: serde_json::Value = match tokio::fs::read_to_string(&receipt_path).await {
+        Ok(content) => serde_json::from_str(&content)?,
+        Err(_) => serde_json::json!({}),
+    };
+    value["current"] = serde_json::Value::String(latest.to_string());
+    value["binary"] = serde_json::Value::String(latest_binary.display().to_string());
+    tokio::fs::write(&receipt_path, serde_json::to_string_pretty(&value)? + "\n").await?;
+    Ok(())
+}
+
 /// Download, verify, and replace the current binary, then exec() into it.
 /// Returns the path to the new binary on success (caller does the exec).
 pub async fn download_and_replace(info: &UpdateInfo) -> anyhow::Result<PathBuf> {
@@ -494,6 +562,12 @@ pub async fn download_and_replace(info: &UpdateInfo) -> anyhow::Result<PathBuf> 
              version tracking.\n\nTo upgrade, run:\n  brew upgrade {formula}"
         );
     }
+    let install_receipt = read_install_receipt().ok();
+    let managed_install = install_receipt
+        .as_ref()
+        .and_then(InstallReceipt::versioned_binary_path)
+        .is_some_and(|path| paths_refer_to_same_file(&path, &current_exe));
+
     let tmp_path = current_exe.with_extension("new");
     let archive_path = current_exe.with_extension("tar.gz");
     let signature_path = current_exe.with_extension("tar.gz.sig");
@@ -575,6 +649,10 @@ pub async fn download_and_replace(info: &UpdateInfo) -> anyhow::Result<PathBuf> 
     }
     tokio::fs::rename(&current_exe, &backup_path).await?;
     tokio::fs::rename(&tmp_path, &current_exe).await?;
+
+    if managed_install {
+        update_install_receipt_for_replaced_binary(&install_receipt, &info.latest).await?;
+    }
 
     tracing::info!("binary replaced: {} → {}", info.current, info.latest);
     Ok(current_exe)
