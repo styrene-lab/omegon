@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-07-05
+
+### Fixed
+- Fixed managed self-updates so `/update install` refreshes the real installer receipt at `~/.config/omegon/install-receipt.json`, writes the replaced binary into `~/.omegon/versions/<latest>/omegon`, repoints the `omegon`/`om` launcher symlinks, and rejects Cargo-managed installs with the correct `cargo install --force` remediation instead of mutating Cargo's bin directory.
+- Set the trunk workspace target to `0.27.2` so release builds and `just run` no longer present as stale release candidates.
+
 ## [0.27.1] - 2026-07-04
 
 - Added `/smoke` as a unified operator-facing smoke-test namespace and `/smoke cleave` to drive a value-set of shared live cleave/delegate progress and Workbench plan projections used by TUI, remote slash, ACP, and served WebUIs instead of writing progress into conversation transcript segments.
