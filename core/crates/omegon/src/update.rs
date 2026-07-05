@@ -520,15 +520,46 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
 
 #[cfg(unix)]
 fn update_install_symlinks(binary_link: &Path, latest_binary: &Path) -> anyhow::Result<()> {
+    ensure_link_repointable(binary_link)?;
     if let Some(parent) = binary_link.parent() {
         std::fs::create_dir_all(parent)?;
     }
     replace_symlink(binary_link, latest_binary)?;
     if let Some(parent) = binary_link.parent() {
         let om_link = parent.join("om");
+        ensure_link_repointable(&om_link)?;
         replace_symlink(&om_link, latest_binary)?;
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_link_repointable(link: &Path) -> anyhow::Result<()> {
+    if !link.exists() && !link.symlink_metadata().is_ok() {
+        return Ok(());
+    }
+    let parent = link
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("install target has no parent: {}", link.display()))?;
+    let probe = parent.join(format!(
+        ".omegon-update-write-test-{}",
+        std::process::id()
+    ));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(err) => Err(anyhow::anyhow!(
+            "install target is not writable: {} ({err}). Re-run the installer or update with elevated permissions.",
+            link.display()
+        )),
+    }
 }
 
 #[cfg(unix)]
@@ -555,6 +586,7 @@ fn update_install_symlinks(_binary_link: &Path, _latest_binary: &Path) -> anyhow
 
 async fn update_install_receipt_for_replaced_binary(
     receipt: &Option<InstallReceipt>,
+    replaced_binary: &Path,
     latest: &str,
 ) -> anyhow::Result<()> {
     let Some(receipt) = receipt else {
@@ -567,12 +599,11 @@ async fn update_install_receipt_for_replaced_binary(
         return Ok(());
     };
 
-    let current_exe = std::env::current_exe()?;
     let latest_dir = versions_root.join(latest);
     tokio::fs::create_dir_all(&latest_dir).await?;
     let latest_binary = latest_dir.join("omegon");
-    if !paths_refer_to_same_file(&latest_binary, &current_exe) {
-        tokio::fs::copy(&current_exe, &latest_binary).await?;
+    if !paths_refer_to_same_file(&latest_binary, replaced_binary) {
+        tokio::fs::copy(replaced_binary, &latest_binary).await?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -710,7 +741,8 @@ pub async fn download_and_replace(info: &UpdateInfo) -> anyhow::Result<PathBuf> 
     tokio::fs::rename(&tmp_path, &current_exe).await?;
 
     if managed_install {
-        update_install_receipt_for_replaced_binary(&install_receipt, &info.latest).await?;
+        update_install_receipt_for_replaced_binary(&install_receipt, &current_exe, &info.latest)
+            .await?;
     }
 
     tracing::info!("binary replaced: {} → {}", info.current, info.latest);
