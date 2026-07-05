@@ -617,7 +617,8 @@ release:
     # rewrite tracked files after the release commit already exists.
     {{cargo}} check -p omegon -q
 
-    git add Cargo.toml Cargo.lock .omegon/milestones.json
+    git add Cargo.toml Cargo.lock
+    git add -f .omegon/milestones.json
     git commit -m "chore(release): ${NEW_VERSION}"
     git tag "v${NEW_VERSION}"
 
