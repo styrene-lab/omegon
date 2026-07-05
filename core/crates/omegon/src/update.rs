@@ -518,6 +518,31 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
     }
 }
 
+fn ensure_parent_writable(path: &Path, context: &str) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("{context} has no parent: {}", path.display()))?;
+    let probe = parent.join(format!(
+        ".omegon-update-write-test-{}",
+        std::process::id()
+    ));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(err) => Err(anyhow::anyhow!(
+            "{context} is not writable: {} ({err}). Re-run the installer or update with elevated permissions.",
+            parent.display()
+        )),
+    }
+}
+
 #[cfg(unix)]
 fn update_install_symlinks(binary_link: &Path, latest_binary: &Path) -> anyhow::Result<()> {
     ensure_link_repointable(binary_link)?;
@@ -538,28 +563,7 @@ fn ensure_link_repointable(link: &Path) -> anyhow::Result<()> {
     if !link.exists() && !link.symlink_metadata().is_ok() {
         return Ok(());
     }
-    let parent = link
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("install target has no parent: {}", link.display()))?;
-    let probe = parent.join(format!(
-        ".omegon-update-write-test-{}",
-        std::process::id()
-    ));
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&probe)
-    {
-        Ok(_) => {
-            let _ = std::fs::remove_file(&probe);
-            Ok(())
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        Err(err) => Err(anyhow::anyhow!(
-            "install target is not writable: {} ({err}). Re-run the installer or update with elevated permissions.",
-            link.display()
-        )),
-    }
+    ensure_parent_writable(link, "install target")
 }
 
 #[cfg(unix)]
@@ -582,6 +586,43 @@ fn replace_symlink(link: &Path, target: &Path) -> anyhow::Result<()> {
 #[cfg(not(unix))]
 fn update_install_symlinks(_binary_link: &Path, _latest_binary: &Path) -> anyhow::Result<()> {
     Ok(())
+}
+
+fn is_cargo_managed(exe: &Path) -> bool {
+    let cargo_home = std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".cargo")));
+    cargo_home
+        .as_ref()
+        .is_some_and(|home| is_cargo_managed_with_home(exe, home))
+}
+
+fn is_cargo_managed_with_home(exe: &Path, cargo_home: &Path) -> bool {
+    let cargo_bin = cargo_home.join("bin");
+    exe.parent()
+        .is_some_and(|parent| paths_refer_to_same_file(parent, &cargo_bin))
+}
+
+fn preflight_update_target(current_exe: &Path) -> anyhow::Result<()> {
+    preflight_update_target_with_cargo_home(current_exe, std::env::var_os("CARGO_HOME"))
+}
+
+fn preflight_update_target_with_cargo_home(
+    current_exe: &Path,
+    cargo_home: Option<std::ffi::OsString>,
+) -> anyhow::Result<()> {
+    let cargo_home = cargo_home
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".cargo")));
+    if cargo_home
+        .as_ref()
+        .is_some_and(|home| is_cargo_managed_with_home(current_exe, home))
+    {
+        anyhow::bail!(
+            "This binary appears to be managed by Cargo. To upgrade, run:\n  cargo install --git https://github.com/styrene-lab/omegon --locked --force"
+        );
+    }
+    ensure_parent_writable(current_exe, "running binary directory")
 }
 
 async fn update_install_receipt_for_replaced_binary(
@@ -652,6 +693,7 @@ pub async fn download_and_replace(info: &UpdateInfo) -> anyhow::Result<PathBuf> 
              version tracking.\n\nTo upgrade, run:\n  brew upgrade {formula}"
         );
     }
+    preflight_update_target(&current_exe)?;
     let install_receipt = read_install_receipt().ok();
     let managed_install = install_receipt
         .as_ref()
@@ -787,6 +829,32 @@ mod tests {
         assert!(!is_homebrew_managed(Path::new(
             "/tmp/omegon-release-ws/core/target/release/omegon"
         )));
+    }
+
+    #[test]
+    fn cargo_managed_detection_respects_cargo_home() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let cargo_binary = temp.path().join("bin").join("omegon");
+        let other_binary = temp.path().join("other").join("omegon");
+
+        assert!(is_cargo_managed_with_home(&cargo_binary, temp.path()));
+        assert!(!is_cargo_managed_with_home(&other_binary, temp.path()));
+    }
+
+    #[test]
+    fn preflight_rejects_cargo_managed_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let cargo_bin = temp.path().join("bin");
+        std::fs::create_dir_all(&cargo_bin).expect("cargo bin");
+        let cargo_binary = cargo_bin.join("omegon");
+        std::fs::write(&cargo_binary, "binary").expect("binary");
+
+        let err = preflight_update_target_with_cargo_home(
+            &cargo_binary,
+            Some(temp.path().as_os_str().to_os_string()),
+        )
+        .expect_err("cargo install should reject");
+        assert!(err.to_string().contains("managed by Cargo"), "{err}");
     }
 
     #[test]
