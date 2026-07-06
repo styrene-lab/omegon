@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Grouped `/model list` output by conceptual model identity and included provider, producer, execution class, and availability per route.
 - Added conceptual/producer/execution metadata to the TUI model catalog and grouped catalog routes by conceptual model identity.
 - Added semantic route resolution so conceptual model intents can resolve to policy-compliant provider routes such as Copilot-only Claude Sonnet/Opus/GPT routes.
 - Documented that the local Copilot CLI is a cleanroom oracle only, not a shipping dependency, and captured direct GitHub Copilot transport requirements before provider bridge work.
