@@ -71,9 +71,7 @@ fn provider_class(provider: &str) -> ProviderClass {
     match provider {
         "github-copilot" => ProviderClass::Subscription,
         "anthropic" | "openai" | "openai-codex" | "google" | "google-antigravity" | "xai"
-        | "mistral" | "groq" | "cerebras" | "ollama-cloud" | "opencode-go" => {
-            ProviderClass::Direct
-        }
+        | "mistral" | "groq" | "cerebras" | "ollama-cloud" | "opencode-go" => ProviderClass::Direct,
         "openrouter" | "perplexity" | "huggingface" => ProviderClass::Broker,
         "ollama" | "local" => ProviderClass::Local,
         _ => ProviderClass::Other,
@@ -93,8 +91,12 @@ pub struct ResolvedSemanticRoute {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticRouteResolutionError {
-    UnknownRoute { requested: String },
-    UnknownConceptualModel { requested: String },
+    UnknownRoute {
+        requested: String,
+    },
+    UnknownConceptualModel {
+        requested: String,
+    },
     ProviderNotAllowed {
         requested: String,
         provider: String,

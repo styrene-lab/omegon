@@ -187,6 +187,18 @@ impl ModelIntent {
         req
     }
 
+    pub fn to_provider_policy(&self) -> crate::semantic_route::ProviderPolicy {
+        match &self.provider_selection {
+            ProviderSelection::Auto => crate::semantic_route::ProviderPolicy::Auto,
+            ProviderSelection::Local => crate::semantic_route::ProviderPolicy::LocalOnly,
+            ProviderSelection::Upstream => crate::semantic_route::ProviderPolicy::Auto,
+            ProviderSelection::Endpoint(endpoint) if endpoint == "github-copilot" => {
+                crate::semantic_route::ProviderPolicy::CopilotOnly
+            }
+            ProviderSelection::Endpoint(_) => crate::semantic_route::ProviderPolicy::Auto,
+        }
+    }
+
     pub fn summary(&self) -> String {
         if let Some(model) = &self.exact_model_override {
             return format!("pinned {model}");
