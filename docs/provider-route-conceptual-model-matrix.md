@@ -6,6 +6,7 @@ tags: [architecture, routing, providers, models, github-copilot]
 open_questions:
   - "[assumption] Stable conceptual IDs such as claude-sonnet-4.6, gpt-5.5, and gemini-2.5-pro can be maintained in the reviewed model registry."
   - "[assumption] Copilot-hosted variants are close enough to direct-provider variants to share conceptual model identity even when route envelopes, safety filters, context limits, or tool behavior differ."
+  - "[assumption] executionClass values local, remote-local-network, subscription-cloud, api-cloud, broker-cloud are sufficient for initial policy and UX grouping."
 dependencies: []
 related: []
 ---
@@ -30,7 +31,14 @@ Provider route metadata must own context envelope, output limit, transport diale
 
 **Rationale:** The same model class can be served by multiple commercial/auth/transport surfaces. Collapsing routes loses auth, billing, transport, quota, and diagnostics truth; treating routes as unrelated fragments capability routing, degradation, benchmarking, and UX grouping. The route matrix therefore links concrete provider routes to stable conceptual model IDs.
 
+### Add producer and execution class as separate axes without constraining local/offline routes
+
+**Status:** decided
+
+**Rationale:** OpenAI/Anthropic/Google can be both model producers and serving providers, while OpenRouter/GitHub Copilot broker producer models and Ollama/DwarfStar serve local/offline model artifacts. The matrix needs producer for attribution/policy/benchmarking and executionClass for privacy/trust posture, but producer must remain optional so dynamic local/offline routes with unknown lineage continue to work.
+
 ## Open Questions
 
 - [assumption] Stable conceptual IDs such as claude-sonnet-4.6, gpt-5.5, and gemini-2.5-pro can be maintained in the reviewed model registry.
 - [assumption] Copilot-hosted variants are close enough to direct-provider variants to share conceptual model identity even when route envelopes, safety filters, context limits, or tool behavior differ.
+- [assumption] executionClass values local, remote-local-network, subscription-cloud, api-cloud, broker-cloud are sufficient for initial policy and UX grouping.

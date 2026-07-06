@@ -333,6 +333,15 @@ pub struct ModelEntry {
     pub description: String,
     #[serde(default, rename = "supportsReasoning")]
     pub supports_reasoning: bool,
+    /// Model lineage/creator. Optional so dynamic local/offline routes with
+    /// unknown provenance remain valid during discovery.
+    #[serde(default)]
+    pub producer: Option<String>,
+    /// Trust/deployment posture for this route (for example `local`,
+    /// `remote-local-network`, `subscription-cloud`, `api-cloud`, or
+    /// `broker-cloud`). Kept stringly typed while the policy surface settles.
+    #[serde(default, rename = "executionClass")]
+    pub execution_class: Option<String>,
 }
 
 pub struct ModelRegistry {
@@ -523,6 +532,32 @@ impl ModelRegistry {
             .collect()
     }
 
+    /// Model producer/lineage for a qualified provider route, when known.
+    pub fn producer_for_route(&self, qualified_id: &str) -> Option<&str> {
+        self.model_info(qualified_id)?.producer.as_deref()
+    }
+
+    /// Execution trust/deployment class for a qualified provider route, when known.
+    pub fn execution_class_for_route(&self, qualified_id: &str) -> Option<&str> {
+        self.model_info(qualified_id)?.execution_class.as_deref()
+    }
+
+    /// All concrete provider routes attributed to a model producer.
+    pub fn routes_for_producer(&self, producer: &str) -> Vec<&ModelEntry> {
+        self.models
+            .values()
+            .filter(|entry| entry.producer.as_deref() == Some(producer))
+            .collect()
+    }
+
+    /// All concrete provider routes with a given execution trust/deployment class.
+    pub fn routes_for_execution_class(&self, execution_class: &str) -> Vec<&ModelEntry> {
+        self.models
+            .values()
+            .filter(|entry| entry.execution_class.as_deref() == Some(execution_class))
+            .collect()
+    }
+
     /// All model entries for a given provider.
     pub fn models_for_provider(&self, provider: &str) -> Vec<&ModelEntry> {
         self.models
@@ -635,6 +670,8 @@ impl ModelRegistry {
             provider: provider.to_string(),
             name: model_id.to_string(),
             conceptual_model_id: None,
+            producer: None,
+            execution_class: None,
             context_input: d.context_input,
             context_output: d.context_output,
             capabilities: caps,
@@ -841,6 +878,52 @@ mod tests {
         assert!(routes.contains(&"anthropic:claude-sonnet-4-6".to_string()));
         assert!(routes.contains(&"github-copilot:claude-sonnet-4.6".to_string()));
         assert!(routes.contains(&"perplexity:anthropic/claude-sonnet-4-6".to_string()));
+    }
+
+    #[test]
+    fn producer_and_execution_class_are_distinct_from_provider_route() {
+        let reg = ModelRegistry::global();
+
+        assert_eq!(
+            reg.producer_for_route("github-copilot:claude-sonnet-4.6"),
+            Some("anthropic")
+        );
+        assert_eq!(
+            reg.execution_class_for_route("github-copilot:claude-sonnet-4.6"),
+            Some("subscription-cloud")
+        );
+        assert_eq!(
+            reg.producer_for_route("github-copilot:gpt-5.5"),
+            Some("openai")
+        );
+        assert_eq!(
+            reg.producer_for_route("anthropic:claude-sonnet-4-6"),
+            Some("anthropic")
+        );
+
+        let anthropic_routes: Vec<String> = reg
+            .routes_for_producer("anthropic")
+            .into_iter()
+            .map(|entry| format!("{}:{}", entry.provider, entry.id))
+            .collect();
+        assert!(anthropic_routes.contains(&"github-copilot:claude-sonnet-4.6".to_string()));
+        assert!(anthropic_routes.contains(&"anthropic:claude-sonnet-4-6".to_string()));
+    }
+
+    #[test]
+    fn dynamic_local_models_remain_valid_without_producer_metadata() {
+        let reg = ModelRegistry::global();
+        let model = reg.infer_unknown_model("ollama", "my-finetune:latest");
+
+        assert_eq!(model.provider, "ollama");
+        assert_eq!(model.producer, None);
+        assert_eq!(model.execution_class, None);
+        assert_eq!(model.conceptual_model_id, None);
+        assert_eq!(
+            reg.model_info_or_infer("ollama", "my-finetune:latest")
+                .producer,
+            None
+        );
     }
 
     #[test]
