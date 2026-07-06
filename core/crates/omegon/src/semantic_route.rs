@@ -10,6 +10,16 @@ pub enum ProviderPolicy {
 }
 
 impl ProviderPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::CopilotOnly => "copilot-only",
+            Self::DirectFirst => "direct-first",
+            Self::BrokerFirst => "broker-first",
+            Self::LocalOnly => "local-only",
+        }
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim() {
             "auto" => Some(Self::Auto),

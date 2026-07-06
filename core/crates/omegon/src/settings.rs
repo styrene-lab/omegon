@@ -1223,6 +1223,8 @@ pub struct ProfileModelIntent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grade_policy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_policy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub exact_model_override: Option<String>,
 }
 
@@ -1246,6 +1248,9 @@ impl ProfileModelIntent {
                 .map(|grade| grade.as_str().to_string()),
             provider: Some(provider),
             grade_policy: Some(grade_policy.to_string()),
+            provider_policy: intent
+                .provider_policy
+                .map(|policy| policy.as_str().to_string()),
             exact_model_override: intent.exact_model_override.clone(),
         }
     }
@@ -1264,10 +1269,15 @@ impl ProfileModelIntent {
             Some(raw) => crate::route::GradePolicy::parse(raw)?,
             None => crate::route::GradePolicy::Minimum,
         };
+        let provider_policy = match self.provider_policy.as_deref() {
+            Some(raw) => Some(crate::semantic_route::ProviderPolicy::parse(raw)?),
+            None => None,
+        };
         Some(crate::route::ModelIntent {
             grade,
             provider_selection,
             grade_policy,
+            provider_policy,
             exact_model_override: self.exact_model_override.clone(),
             ..crate::route::ModelIntent::default()
         })
@@ -2735,6 +2745,7 @@ mod tests {
             grade: Some(crate::route::ModelGrade::S),
             provider_selection: crate::route::ProviderSelection::Local,
             grade_policy: crate::route::GradePolicy::Exact,
+            provider_policy: Some(crate::semantic_route::ProviderPolicy::CopilotOnly),
             exact_model_override: None,
             ..crate::route::ModelIntent::default()
         };
@@ -2742,6 +2753,7 @@ mod tests {
         assert_eq!(profile.grade.as_deref(), Some("S"));
         assert_eq!(profile.provider.as_deref(), Some("local"));
         assert_eq!(profile.grade_policy.as_deref(), Some("exact"));
+        assert_eq!(profile.provider_policy.as_deref(), Some("copilot-only"));
         assert_eq!(profile.to_route_intent(), Some(intent));
     }
 
@@ -2751,6 +2763,7 @@ mod tests {
             grade: Some("local".into()),
             provider: Some("auto".into()),
             grade_policy: Some("minimum".into()),
+            provider_policy: None,
             exact_model_override: None,
         };
         assert_eq!(profile.to_route_intent(), None);
