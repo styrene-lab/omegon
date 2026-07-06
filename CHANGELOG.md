@@ -17,7 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
-- Added a redacted GitHub Copilot contract probe helper for token exchange and model-list endpoint verification without exposing token values.
+- Added a non-UI redacted GitHub Copilot contract probe helper for token exchange and model-list endpoint verification without exposing token values.
 - Grouped `/model list` output by conceptual model identity and included provider, producer, execution class, and availability per route.
 - Added conceptual/producer/execution metadata to the TUI model catalog and grouped catalog routes by conceptual model identity.
 - Added semantic route resolution so conceptual model intents can resolve to policy-compliant provider routes such as Copilot-only Claude Sonnet/Opus/GPT routes.
