@@ -225,6 +225,7 @@ fn is_inference_provider(id: &str) -> bool {
         "anthropic"
             | "openai"
             | "openai-codex"
+            | "github-copilot"
             | "openrouter"
             | "groq"
             | "xai"
@@ -241,8 +242,8 @@ fn is_inference_provider(id: &str) -> bool {
 fn provider_grade(id: &str) -> CapabilityGradeBand {
     match id {
         "anthropic" | "openai" => CapabilityGradeBand::Max,
-        "openai-codex" | "openrouter" | "google" | "google-antigravity" | "xai" | "mistral"
-        | "huggingface" => CapabilityGradeBand::Frontier,
+        "openai-codex" | "github-copilot" | "openrouter" | "google" | "google-antigravity"
+        | "xai" | "mistral" | "huggingface" => CapabilityGradeBand::Frontier,
         "groq" | "cerebras" | "ollama" => CapabilityGradeBand::Mid,
         _ => CapabilityGradeBand::Leaf,
     }
