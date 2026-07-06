@@ -125,6 +125,7 @@ pub struct ModelIntent {
     pub grade_policy: GradePolicy,
     pub failover_policy: FailoverPolicy,
     pub degradation_policy: DegradationPolicy,
+    pub provider_policy: Option<crate::semantic_route::ProviderPolicy>,
     pub exact_model_override: Option<String>,
 }
 
@@ -136,6 +137,7 @@ impl Default for ModelIntent {
             grade_policy: GradePolicy::Minimum,
             failover_policy: FailoverPolicy::AnyPolicyCompliantEndpoint,
             degradation_policy: DegradationPolicy::Ask,
+            provider_policy: None,
             exact_model_override: None,
         }
     }
@@ -188,6 +190,9 @@ impl ModelIntent {
     }
 
     pub fn to_provider_policy(&self) -> crate::semantic_route::ProviderPolicy {
+        if let Some(policy) = self.provider_policy {
+            return policy;
+        }
         match &self.provider_selection {
             ProviderSelection::Auto => crate::semantic_route::ProviderPolicy::Auto,
             ProviderSelection::Local => crate::semantic_route::ProviderPolicy::LocalOnly,
@@ -692,6 +697,21 @@ impl RouteController {
     ) -> RouteSnapshot {
         let mut state = self.state.write().await;
         state.intent.provider_selection = provider_selection;
+        state.intent.exact_model_override = None;
+        if state.intent.grade.is_none() {
+            state.intent.grade = Some(ModelGrade::B);
+        }
+        state.warning = None;
+        drop(state);
+        self.emit_changed().await
+    }
+
+    pub async fn set_provider_policy(
+        &self,
+        provider_policy: Option<crate::semantic_route::ProviderPolicy>,
+    ) -> RouteSnapshot {
+        let mut state = self.state.write().await;
+        state.intent.provider_policy = provider_policy;
         state.intent.exact_model_override = None;
         if state.intent.grade.is_none() {
             state.intent.grade = Some(ModelGrade::B);
@@ -1659,6 +1679,18 @@ mod tests {
         let req = intent.to_capability_request();
         assert_eq!(req.grade, crate::routing::CapabilityGradeBand::Max);
         assert!(req.only_providers.is_empty());
+    }
+
+    #[test]
+    fn explicit_provider_policy_overrides_provider_selection_policy() {
+        let mut intent = ModelIntent::with_grade(ModelGrade::B);
+        intent.provider_selection = ProviderSelection::Local;
+        intent.provider_policy = Some(crate::semantic_route::ProviderPolicy::CopilotOnly);
+
+        assert_eq!(
+            intent.to_provider_policy(),
+            crate::semantic_route::ProviderPolicy::CopilotOnly
+        );
     }
 
     #[test]
