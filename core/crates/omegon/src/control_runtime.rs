@@ -1080,9 +1080,22 @@ pub async fn set_model_response(
     route_controller: Option<Arc<crate::route::RouteController>>,
     requested_model: &str,
 ) -> SlashCommandResponse {
-    let effective_model = providers::resolve_execution_model_spec(requested_model)
+    let intent_policy = if let Some(controller) = route_controller.as_ref() {
+        controller.snapshot().await.intent.to_provider_policy()
+    } else {
+        crate::semantic_route::ProviderPolicy::Auto
+    };
+    let effective_model = crate::semantic_route::resolve_semantic_model_route(
+        crate::model_registry::ModelRegistry::global(),
+        requested_model,
+        intent_policy,
+    )
+    .map(|route| route.qualified_model)
+    .ok()
+    .unwrap_or_else(|| requested_model.to_string());
+    let effective_model = providers::resolve_execution_model_spec(&effective_model)
         .await
-        .unwrap_or_else(|| requested_model.to_string());
+        .unwrap_or(effective_model);
     let (old_model, old_provider) = shared_settings
         .lock()
         .ok()
