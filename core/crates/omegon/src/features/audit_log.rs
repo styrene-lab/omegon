@@ -190,6 +190,7 @@ impl Feature for AuditLog {
                 duration_secs,
                 initial_prompt,
                 outcome_summary,
+                ..
             } => {
                 self.append(&AuditEntry {
                     ts,

@@ -745,6 +745,7 @@ mod tests {
             duration_secs: 10.0,
             initial_prompt: None,
             outcome_summary: None,
+            files_modified: vec![],
         });
         let requests = bus.drain_requests();
         assert_eq!(requests.len(), 1);
@@ -878,6 +879,7 @@ mod tests {
             duration_secs: 1.0,
             initial_prompt: None,
             outcome_summary: None,
+            files_modified: vec![],
         });
         assert_eq!(bus.drain_requests().len(), 1);
         // Second drain should be empty

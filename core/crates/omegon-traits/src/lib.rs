@@ -1275,6 +1275,8 @@ pub enum BusEvent {
         initial_prompt: Option<String>,
         /// Last assistant text — captured for journal outcome summary.
         outcome_summary: Option<String>,
+        /// Files modified during this session (from intent tracking).
+        files_modified: Vec<String>,
     },
 
     // ── Turn lifecycle ──────────────────────────────────────────────

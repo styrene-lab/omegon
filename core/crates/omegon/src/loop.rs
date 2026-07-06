@@ -1315,12 +1315,19 @@ pub async fn run(
     let outcome_summary = conversation
         .last_assistant_text()
         .map(|t| t.chars().take(300).collect::<String>());
+    let files_modified: Vec<String> = conversation
+        .intent
+        .files_modified
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
     bus.emit(&omegon_traits::BusEvent::SessionEnd {
         turns: turn,
         tool_calls: conversation.intent.stats.tool_calls,
         duration_secs: elapsed.as_secs_f64(),
         initial_prompt,
         outcome_summary,
+        files_modified,
     });
 
     // Process any pending bus requests (e.g. auto-compact notifications,

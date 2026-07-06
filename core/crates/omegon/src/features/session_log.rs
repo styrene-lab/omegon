@@ -28,6 +28,10 @@ pub struct SessionLog {
     context_snippet: Option<String>,
     /// Per-turn provider/model/telemetry snapshots collected during the live session.
     turn_summaries: Vec<TurnSummary>,
+    /// Session identifier captured from SessionStart for journal traceability.
+    session_id: Option<String>,
+    /// Git HEAD at session start — used to scope commits to this session only.
+    head_at_start: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +114,8 @@ impl SessionLog {
             cwd: cwd.to_path_buf(),
             context_snippet: None,
             turn_summaries: Vec::new(),
+            session_id: None,
+            head_at_start: None,
         }
     }
 
@@ -232,25 +238,9 @@ impl SessionLog {
         format!("{y:04}-{m:02}-{d:02}")
     }
 
-    /// Append a structured entry to `.omegon/agent-journal.md`.
-    fn append_entry(
-        &self,
-        turns: u32,
-        tool_calls: u32,
-        duration_secs: f64,
-        initial_prompt: Option<&str>,
-        outcome_summary: Option<&str>,
-    ) {
-        let date = Self::today();
-        let branch = self
-            .git(&["branch", "--show-current"])
-            .unwrap_or_else(|| "main".to_string());
-        let commits = self
-            .git(&["log", "--oneline", "-3", "--no-decorate"])
-            .unwrap_or_default();
-        let openspec = self.active_openspec();
-
-        let duration = if duration_secs >= 3600.0 {
+    /// Format duration for display.
+    fn format_duration(duration_secs: f64) -> String {
+        if duration_secs >= 3600.0 {
             format!(
                 "{:.0}h{:.0}m",
                 duration_secs / 3600.0,
@@ -260,12 +250,137 @@ impl SessionLog {
             format!("{:.0}m{:.0}s", duration_secs / 60.0, duration_secs % 60.0)
         } else {
             format!("{:.0}s", duration_secs)
-        };
+        }
+    }
 
+    /// Resolve model from turn summaries — prefers last, falls back to first non-None.
+    fn resolve_model(&self) -> &str {
+        self.turn_summaries
+            .last()
+            .and_then(|s| s.model.as_deref())
+            .or_else(|| {
+                self.turn_summaries
+                    .iter()
+                    .find_map(|s| s.model.as_deref())
+            })
+            .unwrap_or("unknown")
+    }
+
+    /// Get commits scoped to this session. Uses head_at_start..HEAD when available,
+    /// falls back to last 3 commits.
+    fn session_commits(&self) -> String {
+        if let Some(ref base) = self.head_at_start {
+            self.git(&["log", "--oneline", "--no-decorate", &format!("{base}..HEAD")])
+                .unwrap_or_default()
+        } else {
+            self.git(&["log", "--oneline", "-3", "--no-decorate"])
+                .unwrap_or_default()
+        }
+    }
+
+    /// Extract the last entry's fingerprint content for dedup comparison.
+    /// Returns the body text (everything after the ## header line) of the last entry.
+    fn last_entry_body(&self) -> Option<String> {
+        let content = fs::read_to_string(&self.log_path).ok()?;
+        let parts: Vec<&str> = content.split("\n## ").collect();
+        let last = parts.last()?;
+        // Skip the header line itself, return the body
+        let body: String = last
+            .lines()
+            .skip(1) // skip the "YYYY-MM-DD — branch ..." header
+            .collect::<Vec<_>>()
+            .join("\n");
+        if body.trim().is_empty() {
+            None
+        } else {
+            Some(body.trim().to_string())
+        }
+    }
+
+    /// Compute a simple fingerprint of entry content for dedup.
+    /// Uses task + commits + files_modified — ignores volatile fields like token counts.
+    fn fingerprint(task: Option<&str>, commits: &str, files_modified: &[String]) -> u64 {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        task.unwrap_or("").hash(&mut hasher);
+        commits.hash(&mut hasher);
+        files_modified.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Append a structured entry to `.omegon/agent-journal.md`.
+    ///
+    /// Session-scoped: only shows commits from this session (head_at_start..HEAD).
+    /// Deduplicates against the previous entry. Compresses idle sessions to one-liners.
+    fn append_entry(
+        &self,
+        turns: u32,
+        tool_calls: u32,
+        duration_secs: f64,
+        initial_prompt: Option<&str>,
+        outcome_summary: Option<&str>,
+        files_modified: &[String],
+    ) {
+        let date = Self::today();
+        let branch = self
+            .git(&["branch", "--show-current"])
+            .unwrap_or_else(|| "main".to_string());
+        let commits = self.session_commits();
+        let openspec = self.active_openspec();
+        let duration = Self::format_duration(duration_secs);
+        let session_tag = self
+            .session_id
+            .as_deref()
+            .map(|id| format!(" [session:{id}]"))
+            .unwrap_or_default();
+
+        let is_idle = commits.is_empty() && files_modified.is_empty();
+
+        // ── Idle session: one-liner, skip verbose output ──────────────
+        if is_idle {
+            let entry = format!(
+                "## {date} — {branch} ({turns}t {tool_calls}tc {duration}){session_tag} — no changes"
+            );
+            self.write_entry(&entry);
+            return;
+        }
+
+        // ── Content-based dedup ──────────────────────────────────────
+        let fp = Self::fingerprint(initial_prompt, &commits, files_modified);
+        if let Some(prev_body) = self.last_entry_body() {
+            let prev_fp = Self::fingerprint(
+                // Extract task from previous body
+                prev_body
+                    .lines()
+                    .find(|l| l.starts_with("**Task:**"))
+                    .map(|l| l.trim_start_matches("**Task:** ")),
+                // Extract commits from previous body
+                &prev_body
+                    .lines()
+                    .skip_while(|l| !l.starts_with("**Commits:**"))
+                    .skip(1)
+                    .take_while(|l| l.starts_with("  "))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                // Extract files from previous body
+                &prev_body
+                    .lines()
+                    .skip_while(|l| !l.starts_with("**Files changed:**"))
+                    .skip(1)
+                    .take_while(|l| l.starts_with("  "))
+                    .map(|l| l.trim().to_string())
+                    .collect::<Vec<_>>(),
+            );
+            if fp == prev_fp {
+                tracing::info!("Skipped duplicate journal entry (fingerprint match)");
+                return;
+            }
+        }
+
+        // ── Build full entry ─────────────────────────────────────────
         let mut lines = vec![
             format!(
-                "## {} — {} ({}t {}tc {})",
-                date, branch, turns, tool_calls, duration
+                "## {date} — {branch} ({turns}t {tool_calls}tc {duration}){session_tag}"
             ),
             String::new(),
         ];
@@ -275,18 +390,30 @@ impl SessionLog {
             lines.push(String::new());
         }
 
-        if let Some(outcome) = outcome_summary {
-            lines.push(format!("**Outcome:** {outcome}"));
+        // Derive outcome from what actually changed, not what the LLM said last.
+        // Priority: commit subjects > files modified summary > raw assistant text.
+        let derived_outcome = if !commits.is_empty() {
+            let subjects: Vec<&str> = commits.lines().collect();
+            Some(format!("Committed: {}", subjects.join("; ")))
+        } else if !files_modified.is_empty() {
+            Some(format!(
+                "Modified {} file{}: {}",
+                files_modified.len(),
+                if files_modified.len() == 1 { "" } else { "s" },
+                files_modified.join(", ")
+            ))
+        } else {
+            outcome_summary.map(|s| s.to_string())
+        };
+        if let Some(outcome) = derived_outcome {
+            // Truncate derived outcome to 500 chars to keep entries scannable
+            let display: String = outcome.chars().take(500).collect();
+            lines.push(format!("**Outcome:** {display}"));
             lines.push(String::new());
         }
 
         if !self.turn_summaries.is_empty() {
-            // Compact summary: just model and total tokens, not full per-turn telemetry.
-            let model = self
-                .turn_summaries
-                .last()
-                .and_then(|s| s.model.as_deref())
-                .unwrap_or("unknown");
+            let model = self.resolve_model();
             let total_in: u64 = self
                 .turn_summaries
                 .iter()
@@ -320,9 +447,20 @@ impl SessionLog {
             lines.push(String::new());
         }
 
-        let entry = lines.join("\n");
+        if !files_modified.is_empty() {
+            lines.push("**Files changed:**".to_string());
+            for f in files_modified {
+                lines.push(format!("  {f}"));
+            }
+            lines.push(String::new());
+        }
 
-        // Bootstrap header if file doesn't exist
+        let entry = lines.join("\n");
+        self.write_entry(&entry);
+    }
+
+    /// Write an entry to the journal file, bootstrapping the header if needed.
+    fn write_entry(&self, entry: &str) {
         let header = "# Agent Journal\n\nAppend-only record of agent sessions. Read recent entries for context.\n\n";
         let prefix = if self.log_path.exists() {
             String::new()
@@ -864,9 +1002,11 @@ impl Feature for SessionLog {
 
     fn on_event(&mut self, event: &BusEvent) -> Vec<BusRequest> {
         match event {
-            BusEvent::SessionStart { .. } => {
+            BusEvent::SessionStart { session_id, .. } => {
                 self.context_snippet = self.read_narrative_entries(3);
                 self.turn_summaries.clear();
+                self.session_id = Some(session_id.clone());
+                self.head_at_start = self.git(&["rev-parse", "HEAD"]);
                 if self.context_snippet.is_some() {
                     tracing::info!(
                         "Session log context loaded from {}",
@@ -894,6 +1034,7 @@ impl Feature for SessionLog {
                 duration_secs,
                 initial_prompt,
                 outcome_summary,
+                files_modified,
             }
                 // Only write an entry if the session did meaningful work
                 if *turns > 0 => {
@@ -903,6 +1044,7 @@ impl Feature for SessionLog {
                         *duration_secs,
                         initial_prompt.as_deref(),
                         outcome_summary.as_deref(),
+                        files_modified,
                     );
                     tracing::info!("Session log entry appended to {}", self.log_path.display());
                 }
@@ -999,7 +1141,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let feature = SessionLog::new(dir.path());
 
-        feature.append_entry(5, 20, 300.0, Some("build the widget"), Some("widget built"));
+        feature.append_entry(
+            5,
+            20,
+            300.0,
+            Some("build the widget"),
+            Some("widget built"),
+            &["src/widget.rs".to_string()],
+        );
 
         assert!(feature.log_path.exists(), "log file should be created");
         let content = fs::read_to_string(&feature.log_path).unwrap();
@@ -1009,9 +1158,14 @@ mod tests {
             content.contains("**Task:** build the widget"),
             "should have task"
         );
+        // Outcome should be derived from files_modified (no commits in tempdir)
         assert!(
-            content.contains("**Outcome:** widget built"),
-            "should have outcome"
+            content.contains("**Outcome:** Modified 1 file: src/widget.rs"),
+            "should have derived outcome, got: {content}"
+        );
+        assert!(
+            content.contains("**Files changed:**"),
+            "should have files section"
         );
     }
 
@@ -1030,7 +1184,8 @@ mod tests {
         .unwrap();
 
         let feature = SessionLog::new(dir.path());
-        feature.append_entry(3, 10, 60.0, None, None);
+        // Pass a file so it's not treated as idle (which would be a one-liner)
+        feature.append_entry(3, 10, 60.0, None, None, &["src/foo.rs".to_string()]);
 
         let content = fs::read_to_string(&log_path).unwrap();
         assert!(
@@ -1085,6 +1240,7 @@ mod tests {
             duration_secs: 450.0,
             initial_prompt: Some("test prompt".into()),
             outcome_summary: Some("test outcome".into()),
+            files_modified: vec!["src/main.rs".into()],
         });
 
         assert!(
@@ -1097,9 +1253,10 @@ mod tests {
             content.contains("**Task:** test prompt"),
             "should record task"
         );
+        // Outcome is derived from files_modified (no git commits in tempdir)
         assert!(
-            content.contains("**Outcome:** test outcome"),
-            "should record outcome"
+            content.contains("**Outcome:** Modified 1 file: src/main.rs"),
+            "should record derived outcome, got: {content}"
         );
         assert!(
             content.contains("anthropic:claude-sonnet-4-6"),
@@ -1237,6 +1394,7 @@ mod tests {
             duration_secs: 1.0,
             initial_prompt: None,
             outcome_summary: None,
+            files_modified: vec![],
         });
 
         assert!(
@@ -1338,5 +1496,147 @@ mod tests {
         let ctx = feature.provide_context(&signals).unwrap();
         assert!(ctx.content.contains("Context here"));
         assert!(ctx.content.starts_with("[Recent sessions]"));
+    }
+
+    #[test]
+    fn idle_session_produces_one_liner() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = SessionLog::new(dir.path());
+
+        // No commits (tempdir has no git), no files_modified → idle
+        feature.append_entry(3, 5, 30.0, Some("what is this"), None, &[]);
+
+        let content = fs::read_to_string(&feature.log_path).unwrap();
+        assert!(
+            content.contains("— no changes"),
+            "idle sessions should produce a one-liner, got: {content}"
+        );
+        // Should NOT have verbose sections
+        assert!(
+            !content.contains("**Task:**"),
+            "idle one-liner should skip task section"
+        );
+        assert!(
+            !content.contains("**Outcome:**"),
+            "idle one-liner should skip outcome section"
+        );
+    }
+
+    #[test]
+    fn duplicate_entry_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = SessionLog::new(dir.path());
+        let files = vec!["src/lib.rs".to_string()];
+
+        // Write first entry
+        feature.append_entry(3, 5, 30.0, Some("fix bug"), None, &files);
+        let content_after_first = fs::read_to_string(&feature.log_path).unwrap();
+        let first_len = content_after_first.len();
+
+        // Write identical entry — should be skipped
+        feature.append_entry(4, 6, 45.0, Some("fix bug"), None, &files);
+        let content_after_second = fs::read_to_string(&feature.log_path).unwrap();
+
+        assert_eq!(
+            first_len,
+            content_after_second.len(),
+            "duplicate entry should not be appended"
+        );
+    }
+
+    #[test]
+    fn session_id_in_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut feature = SessionLog::new(dir.path());
+        feature.session_id = Some("2026-05-06T10-22-03_a1b2c3d4".into());
+
+        feature.append_entry(
+            2,
+            4,
+            60.0,
+            Some("do stuff"),
+            None,
+            &["src/foo.rs".to_string()],
+        );
+
+        let content = fs::read_to_string(&feature.log_path).unwrap();
+        assert!(
+            content.contains("[session:2026-05-06T10-22-03_a1b2c3d4]"),
+            "header should contain session id, got: {content}"
+        );
+    }
+
+    #[test]
+    fn model_fallback_to_first_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut feature = SessionLog::new(dir.path());
+
+        // First turn has model, second doesn't (simulates resume degradation)
+        feature.turn_summaries.push(TurnSummary {
+            turn: 1,
+            model: Some("anthropic:claude-sonnet-4-6".into()),
+            provider: Some("anthropic".into()),
+            estimated_tokens: 0,
+            context_window: 0,
+            context_composition: Default::default(),
+            actual_input_tokens: 100,
+            actual_output_tokens: 50,
+            cache_read_tokens: 0,
+            provider_telemetry: None,
+        });
+        feature.turn_summaries.push(TurnSummary {
+            turn: 2,
+            model: None, // degraded
+            provider: None,
+            estimated_tokens: 0,
+            context_window: 0,
+            context_composition: Default::default(),
+            actual_input_tokens: 200,
+            actual_output_tokens: 100,
+            cache_read_tokens: 0,
+            provider_telemetry: None,
+        });
+
+        feature.append_entry(
+            2,
+            3,
+            60.0,
+            Some("resume work"),
+            None,
+            &["src/bar.rs".to_string()],
+        );
+
+        let content = fs::read_to_string(&feature.log_path).unwrap();
+        assert!(
+            content.contains("anthropic:claude-sonnet-4-6"),
+            "should fall back to first turn's model, got: {content}"
+        );
+        assert!(
+            !content.contains("unknown"),
+            "should not show 'unknown' when a model is available"
+        );
+    }
+
+    #[test]
+    fn files_modified_section_in_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = SessionLog::new(dir.path());
+
+        feature.append_entry(
+            2,
+            4,
+            30.0,
+            Some("refactor"),
+            None,
+            &["src/a.rs".to_string(), "src/b.rs".to_string()],
+        );
+
+        let content = fs::read_to_string(&feature.log_path).unwrap();
+        assert!(
+            content.contains("**Files changed:**"),
+            "should have files section"
+        );
+        assert!(content.contains("src/a.rs"), "should list first file");
+        assert!(content.contains("src/b.rs"), "should list second file");
     }
 }
