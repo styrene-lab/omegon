@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Documented that the local Copilot CLI is a cleanroom oracle only, not a shipping dependency, and captured direct GitHub Copilot transport requirements before provider bridge work.
 - Added producer and execution-class metadata validation for model registry entries while keeping producer optional for local/offline/dynamic routes.
 - Added additive conceptual model IDs to the model registry so multiple provider routes can map to the same semantic model class ahead of first-class GitHub Copilot routing.
 
