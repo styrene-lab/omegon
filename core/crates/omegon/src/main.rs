@@ -87,6 +87,7 @@ mod eval;
 mod evidence;
 mod extension_cli;
 mod extension_registry;
+mod github_copilot;
 mod lifecycle;
 mod r#loop;
 mod model_registry;
