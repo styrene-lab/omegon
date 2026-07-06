@@ -7,6 +7,7 @@ const DEFAULT_COPILOT_API_BASE_URL: &str = "https://api.business.githubcopilot.c
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubCopilotContractProbe {
+    pub sign_in_source: String,
     pub token_exchange: GithubCopilotTokenExchangeProbe,
     pub models: Option<GithubCopilotModelsProbe>,
 }
@@ -34,17 +35,96 @@ pub struct GithubCopilotModelsProbe {
     pub redacted_error: Option<String>,
 }
 
-pub async fn probe_github_copilot_contract() -> anyhow::Result<GithubCopilotContractProbe> {
-    let github_token = crate::providers::resolve_api_key_sync("github-copilot")
-        .map(|(token, _)| token)
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok().filter(|token| !token.is_empty()))
-        .ok_or_else(|| anyhow::anyhow!("missing GitHub/Copilot token; set GITHUB_COPILOT_TOKEN, COPILOT_OAUTH_TOKEN, or GITHUB_TOKEN"))?;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedGithubSignin {
+    pub source: GithubSigninSource,
+    pub token: String,
+}
 
-    probe_github_copilot_contract_with_token(&github_token).await
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GithubSigninSource {
+    OmegonGithubCopilot,
+    OmegonGithub,
+    GithubCliDiagnostic,
+    Environment,
+}
+
+impl GithubSigninSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OmegonGithubCopilot => "omegon:github-copilot",
+            Self::OmegonGithub => "omegon:github",
+            Self::GithubCliDiagnostic => "gh-diagnostic",
+            Self::Environment => "environment",
+        }
+    }
+}
+
+pub async fn resolve_github_signin() -> anyhow::Result<ResolvedGithubSignin> {
+    if let Some((token, _)) = crate::providers::resolve_api_key_sync("github-copilot") {
+        if !token.trim().is_empty() {
+            return Ok(ResolvedGithubSignin {
+                source: GithubSigninSource::OmegonGithubCopilot,
+                token,
+            });
+        }
+    }
+    if let Some((token, _)) = crate::providers::resolve_api_key_sync("github") {
+        if !token.trim().is_empty() {
+            return Ok(ResolvedGithubSignin {
+                source: GithubSigninSource::OmegonGithub,
+                token,
+            });
+        }
+    }
+    if let Some(token) = github_cli_token().await {
+        return Ok(ResolvedGithubSignin {
+            source: GithubSigninSource::GithubCliDiagnostic,
+            token,
+        });
+    }
+    for name in ["GITHUB_TOKEN", "GITHUB_COPILOT_TOKEN", "COPILOT_OAUTH_TOKEN"] {
+        if let Ok(token) = std::env::var(name) {
+            if !token.trim().is_empty() {
+                return Ok(ResolvedGithubSignin {
+                    source: GithubSigninSource::Environment,
+                    token,
+                });
+            }
+        }
+    }
+    anyhow::bail!(
+        "No GitHub sign-in found for GitHub Copilot. Checked Omegon github-copilot login, Omegon github login, GitHub CLI session, and environment fallback. Run `omegon auth login github-copilot` or `gh auth login`."
+    )
+}
+
+async fn github_cli_token() -> Option<String> {
+    let output = tokio::process::Command::new("gh")
+        .args(["auth", "token"])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let token = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (!token.is_empty()).then_some(token)
+}
+
+pub async fn probe_github_copilot_contract() -> anyhow::Result<GithubCopilotContractProbe> {
+    let signin = resolve_github_signin().await?;
+    probe_github_copilot_contract_with_token_and_source(&signin.token, signin.source.as_str()).await
 }
 
 pub async fn probe_github_copilot_contract_with_token(
     github_token: &str,
+) -> anyhow::Result<GithubCopilotContractProbe> {
+    probe_github_copilot_contract_with_token_and_source(github_token, "explicit").await
+}
+
+pub async fn probe_github_copilot_contract_with_token_and_source(
+    github_token: &str,
+    sign_in_source: &str,
 ) -> anyhow::Result<GithubCopilotContractProbe> {
     let client = reqwest::Client::new();
     let github_api_base_url = std::env::var("GITHUB_API_BASE_URL")
@@ -87,6 +167,7 @@ pub async fn probe_github_copilot_contract_with_token(
     };
 
     Ok(GithubCopilotContractProbe {
+        sign_in_source: sign_in_source.to_string(),
         token_exchange,
         models,
     })
@@ -251,6 +332,14 @@ fn redact_probe_body(body: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn github_signin_source_names_are_operator_oriented() {
+        assert_eq!(GithubSigninSource::OmegonGithubCopilot.as_str(), "omegon:github-copilot");
+        assert_eq!(GithubSigninSource::OmegonGithub.as_str(), "omegon:github");
+        assert_eq!(GithubSigninSource::GithubCliDiagnostic.as_str(), "gh-diagnostic");
+        assert_eq!(GithubSigninSource::Environment.as_str(), "environment");
+    }
 
     #[test]
     fn token_exchange_summary_redacts_token_value() {
