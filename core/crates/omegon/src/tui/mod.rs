@@ -838,16 +838,16 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             Some(CanonicalSlashCommand::ModelList)
         }
         "model" if args == "unpin" => Some(CanonicalSlashCommand::ModelUnpin),
-        "model" if let Some(policy) = args.strip_prefix("policy ") => {
-            let policy = policy.trim();
+        "model" if args.starts_with("policy ") => {
+            let policy = args.trim_start_matches("policy ").trim();
             if policy.is_empty() {
                 None
             } else {
                 Some(CanonicalSlashCommand::SetModelPolicy(policy.to_string()))
             }
         }
-        "model" if let Some(provider) = args.strip_prefix("provider ") => {
-            let provider = provider.trim();
+        "model" if args.starts_with("provider ") => {
+            let provider = args.trim_start_matches("provider ").trim();
             if provider.is_empty() {
                 None
             } else {
@@ -856,8 +856,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 ))
             }
         }
-        "model" if let Some(grade) = args.strip_prefix("grade ") => {
-            let grade = grade.trim();
+        "model" if args.starts_with("grade ") => {
+            let grade = args.trim_start_matches("grade ").trim();
             if matches!(grade, "F" | "D" | "C" | "B" | "A" | "S") {
                 Some(CanonicalSlashCommand::SetModelGrade(grade.to_string()))
             } else {
@@ -1093,8 +1093,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "resume" if !args.is_empty() => {
             Some(CanonicalSlashCommand::ResumeSession(args.to_string()))
         }
-        "sessions" if let Some(id) = args.strip_prefix("resume ") => {
-            let id = id.trim();
+        "sessions" if args.starts_with("resume ") => {
+            let id = args.trim_start_matches("resume ").trim();
             (!id.is_empty()).then(|| CanonicalSlashCommand::ResumeSession(id.to_string()))
         }
         "auth" => match args {

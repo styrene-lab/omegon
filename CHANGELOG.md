@@ -16,6 +16,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+- Replaced unstable `if let` match guards in slash-command parsing so `just run` compiles on the supported Rust toolchain.
+
 ## [0.27.2] - 2026-07-05
 
 ### Fixed
