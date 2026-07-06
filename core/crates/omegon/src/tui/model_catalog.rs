@@ -173,6 +173,7 @@ impl ModelCatalog {
             ("anthropic", "Anthropic"),
             ("openai", "OpenAI"),
             ("openai-codex", "OpenAI Codex"),
+            ("github-copilot", "GitHub Copilot"),
             ("ollama-cloud", "Ollama Cloud"),
             ("groq", "Groq"),
             ("xai", "xAI"),

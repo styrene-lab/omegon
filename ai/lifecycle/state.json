@@ -1247,6 +1247,141 @@
       "bound_change": null,
       "created_at": "2026-06-26T13:19:46Z",
       "updated_at": "2026-06-26T13:19:46Z"
+    },
+    {
+      "id": "provider-route-conceptual-model-matrix",
+      "title": "Provider Route / Conceptual Model Matrix — first-class semantic model identity across providers",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-07-06T15:43:57Z",
+      "updated_at": "2026-07-06T15:43:57Z"
+    },
+    {
+      "id": "conceptual-model-identity-schema",
+      "title": "Conceptual Model Identity Schema — stable semantic model IDs independent of provider route",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-07-06T15:44:36Z",
+      "updated_at": "2026-07-06T15:44:36Z"
+    },
+    {
+      "id": "provider-route-schema",
+      "title": "Provider Route Schema — concrete auth/transport/model route serving a conceptual model",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-07-06T15:44:36Z",
+      "updated_at": "2026-07-06T15:44:36Z"
+    },
+    {
+      "id": "github-copilot-first-class-provider",
+      "title": "GitHub Copilot as First-Class Meta-Provider — OAuth broker serving top-tier model routes",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-07-06T15:44:36Z",
+      "updated_at": "2026-07-06T15:44:36Z"
+    },
+    {
+      "id": "semantic-route-resolution",
+      "title": "Semantic Route Resolution — resolve conceptual model intent into concrete provider routes",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-07-06T15:44:36Z",
+      "updated_at": "2026-07-06T15:44:36Z"
+    },
+    {
+      "id": "provider-policy-and-route-preference",
+      "title": "Provider Policy and Route Preference — operator-visible control over provider route selection",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-07-06T15:44:55Z",
+      "updated_at": "2026-07-06T15:44:55Z"
+    },
+    {
+      "id": "route-matrix-registry-migration",
+      "title": "Route Matrix Registry Migration — evolve provider-centric registry into conceptual model + provider route matrix",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-07-06T15:44:55Z",
+      "updated_at": "2026-07-06T15:44:55Z"
+    },
+    {
+      "id": "model-catalog-and-ux-grouping",
+      "title": "Model Catalog and UX Grouping — show conceptual models with provider route availability",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-07-06T15:44:55Z",
+      "updated_at": "2026-07-06T15:44:55Z"
+    },
+    {
+      "id": "route-diagnostics-failover-and-degradation",
+      "title": "Route Diagnostics, Failover, and Degradation — explain same-model alternate routes and cross-model downgrade",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-07-06T15:44:55Z",
+      "updated_at": "2026-07-06T15:44:55Z"
     }
   ],
   "changes": [
@@ -3501,6 +3636,168 @@
       "to_state": "archived",
       "reason": null,
       "forced": false
+    },
+    {
+      "timestamp": "2026-07-06T15:43:57Z",
+      "entity_type": "node",
+      "entity_id": "provider-route-conceptual-model-matrix",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-06T15:43:57Z",
+      "entity_type": "node",
+      "entity_id": "provider-route-conceptual-model-matrix",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-07-06T15:44:36Z",
+      "entity_type": "node",
+      "entity_id": "conceptual-model-identity-schema",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-06T15:44:36Z",
+      "entity_type": "node",
+      "entity_id": "conceptual-model-identity-schema",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-07-06T15:44:36Z",
+      "entity_type": "node",
+      "entity_id": "provider-route-schema",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-06T15:44:36Z",
+      "entity_type": "node",
+      "entity_id": "provider-route-schema",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-07-06T15:44:36Z",
+      "entity_type": "node",
+      "entity_id": "github-copilot-first-class-provider",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-06T15:44:36Z",
+      "entity_type": "node",
+      "entity_id": "github-copilot-first-class-provider",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-07-06T15:44:36Z",
+      "entity_type": "node",
+      "entity_id": "semantic-route-resolution",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-06T15:44:36Z",
+      "entity_type": "node",
+      "entity_id": "semantic-route-resolution",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-07-06T15:44:55Z",
+      "entity_type": "node",
+      "entity_id": "provider-policy-and-route-preference",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-06T15:44:55Z",
+      "entity_type": "node",
+      "entity_id": "provider-policy-and-route-preference",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-07-06T15:44:55Z",
+      "entity_type": "node",
+      "entity_id": "route-matrix-registry-migration",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-06T15:44:55Z",
+      "entity_type": "node",
+      "entity_id": "route-matrix-registry-migration",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-07-06T15:44:55Z",
+      "entity_type": "node",
+      "entity_id": "model-catalog-and-ux-grouping",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-06T15:44:55Z",
+      "entity_type": "node",
+      "entity_id": "model-catalog-and-ux-grouping",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-07-06T15:44:55Z",
+      "entity_type": "node",
+      "entity_id": "route-diagnostics-failover-and-degradation",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-06T15:44:55Z",
+      "entity_type": "node",
+      "entity_id": "route-diagnostics-failover-and-degradation",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
     }
   ]
 }

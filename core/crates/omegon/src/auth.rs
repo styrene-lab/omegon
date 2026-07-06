@@ -81,6 +81,14 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         auth_method: AuthMethod::OAuth,
         description: "OAuth — experimental consumer ChatGPT/Codex route",
     },
+    ProviderCredential {
+        id: "github-copilot",
+        auth_key: "github-copilot",
+        display_name: "GitHub Copilot",
+        env_vars: &["GITHUB_COPILOT_TOKEN", "COPILOT_OAUTH_TOKEN"],
+        auth_method: AuthMethod::Dynamic,
+        description: "Dynamic — GitHub Copilot subscription via local copilot CLI",
+    },
     // ── OpenAI-compatible inference providers ───────────────────────
     ProviderCredential {
         id: "openrouter",
@@ -249,6 +257,7 @@ pub fn canonical_provider_id(id: &str) -> &str {
         "anthropic" => "anthropic",
         "openai" => "openai",
         "openai-codex" => "openai-codex",
+        "github-copilot" | "copilot" => "github-copilot",
         "openrouter" => "openrouter",
         "opencode-go" => "opencode-go",
         "perplexity" => "perplexity",

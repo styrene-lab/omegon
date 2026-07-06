@@ -64,7 +64,8 @@
     "ollama-cloud": "gpt-oss:120b-cloud",
     "ollama": "qwen3:32b",
     "opencode-go": "deepseek-v4-pro",
-    "perplexity": "perplexity/sonar"
+    "perplexity": "perplexity/sonar",
+    "github-copilot": "gpt-5.5"
   },
   "grades": {
     "S": {
@@ -74,7 +75,8 @@
       "google": "gemini-3.1-pro-preview",
       "google-antigravity": "gemini-3.1-pro-preview",
       "openrouter": "anthropic/claude-opus-4-7",
-      "xai": "grok-4-0709"
+      "xai": "grok-4-0709",
+      "github-copilot": "gpt-5.5"
     },
     "B": {
       "anthropic": "claude-sonnet-5",
@@ -83,7 +85,8 @@
       "google": "gemini-2.5-flash",
       "google-antigravity": "gemini-2.5-flash",
       "openrouter": "anthropic/claude-sonnet-4-7",
-      "xai": "grok-3"
+      "xai": "grok-3",
+      "github-copilot": "claude-sonnet-4.6"
     },
     "D": {
       "anthropic": "claude-haiku-4-5-20251001",
@@ -100,6 +103,9 @@
       "ollama": "qwen3:32b",
       "opencode-go": "deepseek-v4-flash",
       "perplexity": "perplexity/sonar"
+    },
+    "A": {
+      "github-copilot": "gpt-5.4"
     }
   },
   "endpoints": [
@@ -161,6 +167,32 @@
         "quirks": [],
         "docsUrl": "https://platform.openai.com/docs/api-reference/chat/create",
         "verifiedAt": "2026-06-11"
+      }
+    },
+    {
+      "id": "github-copilot",
+      "displayName": "GitHub Copilot",
+      "class": "upstream",
+      "protocol": "openAiCompatible",
+      "baseUrl": null,
+      "authScheme": {
+        "kind": "oauthProvider",
+        "provider": "github-copilot"
+      },
+      "enabled": true,
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": false,
+        "supportsResponsesApi": false,
+        "supportsStreaming": true,
+        "supportsTools": false,
+        "unsupportedRequestFields": [],
+        "requiredHeaders": [],
+        "optionalHeaders": [],
+        "quirks": [
+          "initially modeled as CLI-backed diagnostic route; direct HTTP bridge not implemented yet"
+        ],
+        "docsUrl": "https://docs.github.com/en/copilot",
+        "verifiedAt": "2026-07-06"
       }
     },
     {
@@ -454,6 +486,12 @@
     },
     {
       "provider": "github-copilot",
+      "modelIdPattern": "claude-opus-*",
+      "contextCeiling": 128000,
+      "grade": "S"
+    },
+    {
+      "provider": "github-copilot",
       "modelIdPattern": "claude-*",
       "contextCeiling": 128000,
       "grade": "B"
@@ -573,7 +611,8 @@
         "vision"
       ],
       "description": "Latest frontier reasoning, coding, and vision",
-      "supportsReasoning": true
+      "supportsReasoning": true,
+      "conceptualModelId": "claude-opus-4.8"
     },
     {
       "id": "claude-opus-4-7",
@@ -588,7 +627,8 @@
       ],
       "recommended": false,
       "description": "Previous Opus release retained for compatibility; not recommended for new sessions now that Opus 4.8 is available",
-      "supportsReasoning": true
+      "supportsReasoning": true,
+      "conceptualModelId": "claude-opus-4.7"
     },
     {
       "id": "claude-sonnet-5",
@@ -602,7 +642,8 @@
         "vision"
       ],
       "description": "Latest Sonnet 5 balanced performance profile for reasoning, coding, and vision",
-      "supportsReasoning": true
+      "supportsReasoning": true,
+      "conceptualModelId": "claude-sonnet-5"
     },
     {
       "id": "claude-sonnet-4-7",
@@ -616,7 +657,8 @@
         "vision"
       ],
       "description": "Latest balanced performance profile",
-      "supportsReasoning": true
+      "supportsReasoning": true,
+      "conceptualModelId": "claude-sonnet-4.7"
     },
     {
       "id": "claude-opus-4-6",
@@ -630,7 +672,8 @@
         "vision"
       ],
       "description": "Frontier reasoning, coding, and vision",
-      "supportsReasoning": true
+      "supportsReasoning": true,
+      "conceptualModelId": "claude-opus-4.6"
     },
     {
       "id": "claude-sonnet-4-6",
@@ -644,7 +687,8 @@
         "vision"
       ],
       "description": "Balanced performance profile",
-      "supportsReasoning": true
+      "supportsReasoning": true,
+      "conceptualModelId": "claude-sonnet-4.6"
     },
     {
       "id": "claude-haiku-4-5-20251001",
@@ -670,7 +714,8 @@
         "coding"
       ],
       "supportsReasoning": true,
-      "description": "OpenAI frontier, 1M context, native reasoning"
+      "description": "OpenAI frontier, 1M context, native reasoning",
+      "conceptualModelId": "gpt-5.5"
     },
     {
       "id": "gpt-5.4",
@@ -684,7 +729,8 @@
         "coding"
       ],
       "supportsReasoning": true,
-      "description": "Previous frontier model, 1M context"
+      "description": "Previous frontier model, 1M context",
+      "conceptualModelId": "gpt-5.4"
     },
     {
       "id": "gpt-5",
@@ -711,7 +757,8 @@
         "instruction",
         "coding"
       ],
-      "description": "Fast, efficient, 1M context"
+      "description": "Fast, efficient, 1M context",
+      "conceptualModelId": "gpt-5-mini"
     },
     {
       "id": "gpt-4.1",
@@ -836,7 +883,8 @@
         "coding",
         "vision"
       ],
-      "description": "Google's latest frontier reasoning model, 1M context"
+      "description": "Google's latest frontier reasoning model, 1M context",
+      "conceptualModelId": "gemini-3.1-pro-preview"
     },
     {
       "id": "gemini-2.5-flash",
@@ -849,7 +897,8 @@
         "coding",
         "fast"
       ],
-      "description": "Fast reasoning with thinking, 1M context"
+      "description": "Fast reasoning with thinking, 1M context",
+      "conceptualModelId": "gemini-2.5-flash"
     },
     {
       "id": "gemini-2.0-flash-lite",
@@ -924,6 +973,49 @@
       "description": "Meta's Llama 2 via OpenRouter \u2014 solid baseline"
     },
     {
+      "id": "anthropic/claude-sonnet-4-7",
+      "provider": "openrouter",
+      "name": "Claude Sonnet 4.7 (OpenRouter)",
+      "contextInput": 1000000,
+      "contextOutput": 65536,
+      "capabilities": [
+        "reasoning",
+        "coding",
+        "vision"
+      ],
+      "description": "Latest balanced performance profile via OpenRouter",
+      "supportsReasoning": true,
+      "conceptualModelId": "claude-sonnet-4.7"
+    },
+    {
+      "id": "anthropic/claude-haiku-4-5-20251001",
+      "provider": "openrouter",
+      "name": "Claude Haiku 4.5 (OpenRouter)",
+      "contextInput": 200000,
+      "contextOutput": 65536,
+      "capabilities": [
+        "fast",
+        "instruction"
+      ],
+      "description": "Fastest, cheapest Claude via OpenRouter",
+      "conceptualModelId": "claude-haiku-4.5"
+    },
+    {
+      "id": "anthropic/claude-opus-4-7",
+      "provider": "openrouter",
+      "name": "Claude Opus 4.7 (OpenRouter)",
+      "contextInput": 1000000,
+      "contextOutput": 131072,
+      "capabilities": [
+        "reasoning",
+        "coding",
+        "vision"
+      ],
+      "description": "Previous Opus release retained for compatibility; not recommended for new sessions now that Opus 4.8 is available via OpenRouter",
+      "supportsReasoning": true,
+      "conceptualModelId": "claude-opus-4.7"
+    },
+    {
       "id": "gpt-5.5",
       "provider": "openai-codex",
       "name": "GPT-5.5 (Codex)",
@@ -935,7 +1027,8 @@
         "coding"
       ],
       "supportsReasoning": true,
-      "description": "GPT-5.5 via ChatGPT/Codex OAuth \u2014 experimental consumer route, 1M context"
+      "description": "GPT-5.5 via ChatGPT/Codex OAuth \u2014 experimental consumer route, 1M context",
+      "conceptualModelId": "gpt-5.5"
     },
     {
       "id": "gpt-5.4",
@@ -948,7 +1041,8 @@
         "vision",
         "coding"
       ],
-      "description": "GPT-5.4 via ChatGPT/Codex OAuth"
+      "description": "GPT-5.4 via ChatGPT/Codex OAuth",
+      "conceptualModelId": "gpt-5.4"
     },
     {
       "id": "gpt-5.4-mini",
@@ -961,7 +1055,8 @@
         "instruction",
         "coding"
       ],
-      "description": "GPT-5.4 Mini via ChatGPT/Codex OAuth"
+      "description": "GPT-5.4 Mini via ChatGPT/Codex OAuth",
+      "conceptualModelId": "gpt-5.4-mini"
     },
     {
       "id": "deepseek-v4-pro",
@@ -1059,7 +1154,8 @@
         "coding",
         "search"
       ],
-      "description": "Claude Sonnet 4.6 via Perplexity \u2014 search-augmented ($3/$15 per 1M tokens)"
+      "description": "Claude Sonnet 4.6 via Perplexity \u2014 search-augmented ($3/$15 per 1M tokens)",
+      "conceptualModelId": "claude-sonnet-4.6"
     },
     {
       "id": "openai/gpt-5.4",
@@ -1072,7 +1168,8 @@
         "coding",
         "search"
       ],
-      "description": "GPT 5.4 via Perplexity \u2014 search-augmented ($2.50/$15 per 1M tokens)"
+      "description": "GPT 5.4 via Perplexity \u2014 search-augmented ($2.50/$15 per 1M tokens)",
+      "conceptualModelId": "gpt-5.4"
     },
     {
       "id": "openai/gpt-5.4-mini",
@@ -1085,7 +1182,68 @@
         "coding",
         "search"
       ],
-      "description": "GPT 5.4 Mini via Perplexity \u2014 fast search-augmented ($0.75/$4.50 per 1M tokens)"
+      "description": "GPT 5.4 Mini via Perplexity \u2014 fast search-augmented ($0.75/$4.50 per 1M tokens)",
+      "conceptualModelId": "gpt-5.4-mini"
+    },
+    {
+      "id": "gpt-5.5",
+      "provider": "github-copilot",
+      "name": "GPT-5.5 (GitHub Copilot)",
+      "conceptualModelId": "gpt-5.5",
+      "contextInput": 128000,
+      "contextOutput": 65536,
+      "capabilities": [
+        "reasoning",
+        "vision",
+        "coding"
+      ],
+      "supportsReasoning": true,
+      "description": "GPT-5.5 served through GitHub Copilot subscription; locally verified via copilot --model gpt-5.5"
+    },
+    {
+      "id": "gpt-5.4",
+      "provider": "github-copilot",
+      "name": "GPT-5.4 (GitHub Copilot)",
+      "conceptualModelId": "gpt-5.4",
+      "contextInput": 400000,
+      "contextOutput": 32768,
+      "capabilities": [
+        "reasoning",
+        "vision",
+        "coding"
+      ],
+      "supportsReasoning": true,
+      "description": "GPT-5.4 served through GitHub Copilot subscription; locally verified via copilot --model gpt-5.4"
+    },
+    {
+      "id": "claude-sonnet-4.6",
+      "provider": "github-copilot",
+      "name": "Claude Sonnet 4.6 (GitHub Copilot)",
+      "conceptualModelId": "claude-sonnet-4.6",
+      "contextInput": 128000,
+      "contextOutput": 65536,
+      "capabilities": [
+        "reasoning",
+        "coding",
+        "vision"
+      ],
+      "supportsReasoning": true,
+      "description": "Claude Sonnet 4.6 served through GitHub Copilot subscription; locally verified via copilot --model claude-sonnet-4.6. Copilot model ID uses dotted version while Anthropic route uses hyphenated provider ID."
+    },
+    {
+      "id": "claude-opus-4.7",
+      "provider": "github-copilot",
+      "name": "Claude Opus 4.7 (GitHub Copilot)",
+      "contextInput": 128000,
+      "contextOutput": 32768,
+      "capabilities": [
+        "reasoning",
+        "coding",
+        "vision"
+      ],
+      "supportsReasoning": true,
+      "description": "GitHub Copilot subscription route for Claude Opus 4.7; verified via local Copilot CLI",
+      "conceptualModelId": "claude-opus-4.7"
     }
   ]
 }

@@ -317,6 +317,12 @@ pub struct ModelEntry {
     pub id: String,
     pub provider: String,
     pub name: String,
+    /// Stable semantic model identity shared by multiple provider routes.
+    ///
+    /// A missing value falls back to the provider-native model id so existing
+    /// registry entries remain valid during the additive migration.
+    #[serde(default, rename = "conceptualModelId")]
+    pub conceptual_model_id: Option<String>,
     #[serde(rename = "contextInput")]
     pub context_input: usize,
     #[serde(rename = "contextOutput")]
@@ -488,6 +494,35 @@ impl ModelRegistry {
         self.models.get(qualified_id)
     }
 
+    /// Stable semantic model identity for a qualified provider route.
+    ///
+    /// During the additive migration, registry entries that have not yet been
+    /// annotated with `conceptualModelId` use their provider-native model id as
+    /// the conceptual fallback.
+    pub fn conceptual_model_id(&self, qualified_id: &str) -> Option<&str> {
+        let entry = self.model_info(qualified_id)?;
+        Some(
+            entry
+                .conceptual_model_id
+                .as_deref()
+                .unwrap_or(entry.id.as_str()),
+        )
+    }
+
+    /// All concrete provider routes that serve the given conceptual model id.
+    pub fn routes_for_conceptual_model(&self, conceptual_model_id: &str) -> Vec<&ModelEntry> {
+        self.models
+            .values()
+            .filter(|entry| {
+                entry
+                    .conceptual_model_id
+                    .as_deref()
+                    .unwrap_or(entry.id.as_str())
+                    == conceptual_model_id
+            })
+            .collect()
+    }
+
     /// All model entries for a given provider.
     pub fn models_for_provider(&self, provider: &str) -> Vec<&ModelEntry> {
         self.models
@@ -599,6 +634,7 @@ impl ModelRegistry {
             id: model_id.to_string(),
             provider: provider.to_string(),
             name: model_id.to_string(),
+            conceptual_model_id: None,
             context_input: d.context_input,
             context_output: d.context_output,
             capabilities: caps,
@@ -737,6 +773,7 @@ mod tests {
         let reg = ModelRegistry::global();
         assert_eq!(reg.default_model("openai"), Some("gpt-5.5"));
         assert_eq!(reg.default_model("openai-codex"), Some("gpt-5.5"));
+        assert_eq!(reg.default_model("github-copilot"), Some("gpt-5.5"));
         assert_eq!(reg.default_model("anthropic"), Some("claude-fable-5"));
         assert_eq!(reg.default_model("nonexistent"), None);
     }
@@ -745,6 +782,11 @@ mod tests {
     fn grade_model_lookup() {
         let reg = ModelRegistry::global();
         assert_eq!(reg.grade_model("S", "openai"), Some("gpt-5.5"));
+        assert_eq!(reg.grade_model("S", "github-copilot"), Some("gpt-5.5"));
+        assert_eq!(
+            reg.grade_model("B", "github-copilot"),
+            Some("claude-sonnet-4.6")
+        );
         assert_eq!(reg.grade_model("S", "anthropic"), Some("claude-fable-5"));
         assert_eq!(
             reg.grade_model("D", "anthropic"),
@@ -770,6 +812,44 @@ mod tests {
         assert_eq!(info.name, "GPT-5.5");
         assert_eq!(info.context_input, 1_000_000);
         assert!(info.supports_reasoning);
+    }
+
+    #[test]
+    fn conceptual_model_lookup_groups_equivalent_provider_routes() {
+        let reg = ModelRegistry::global();
+
+        assert_eq!(
+            reg.conceptual_model_id("anthropic:claude-sonnet-4-6"),
+            Some("claude-sonnet-4.6")
+        );
+        assert_eq!(
+            reg.conceptual_model_id("github-copilot:claude-sonnet-4.6"),
+            Some("claude-sonnet-4.6")
+        );
+        assert_eq!(
+            reg.conceptual_model_id("github-copilot:claude-opus-4.7"),
+            Some("claude-opus-4.7")
+        );
+
+        let mut routes: Vec<String> = reg
+            .routes_for_conceptual_model("claude-sonnet-4.6")
+            .into_iter()
+            .map(|entry| format!("{}:{}", entry.provider, entry.id))
+            .collect();
+        routes.sort();
+
+        assert!(routes.contains(&"anthropic:claude-sonnet-4-6".to_string()));
+        assert!(routes.contains(&"github-copilot:claude-sonnet-4.6".to_string()));
+        assert!(routes.contains(&"perplexity:anthropic/claude-sonnet-4-6".to_string()));
+    }
+
+    #[test]
+    fn conceptual_model_lookup_falls_back_to_provider_model_id() {
+        let reg = ModelRegistry::global();
+        assert_eq!(
+            reg.conceptual_model_id("openrouter:qwen/qwen-qwq-32b"),
+            Some("qwen/qwen-qwq-32b")
+        );
     }
 
     #[test]
@@ -1004,10 +1084,9 @@ mod tests {
     #[test]
     fn openai_error_normalization_rejects_non_openai_endpoint() {
         let reg = ModelRegistry::global();
-        assert!(
-            reg.normalize_openai_error("anthropic", reqwest::StatusCode::TOO_MANY_REQUESTS, "{}")
-                .is_err()
-        );
+        assert!(reg
+            .normalize_openai_error("anthropic", reqwest::StatusCode::TOO_MANY_REQUESTS, "{}")
+            .is_err());
     }
     #[test]
     fn openai_tool_call_delta_normalization_uses_profile_paths() {
@@ -1032,9 +1111,8 @@ mod tests {
     #[test]
     fn openai_tool_call_delta_normalization_rejects_non_openai_endpoint() {
         let reg = ModelRegistry::global();
-        assert!(
-            reg.normalize_openai_tool_call_deltas("anthropic", &serde_json::json!({}))
-                .is_err()
-        );
+        assert!(reg
+            .normalize_openai_tool_call_deltas("anthropic", &serde_json::json!({}))
+            .is_err());
     }
 }
