@@ -346,6 +346,9 @@ enum AuthAction {
     },
     /// Unlock encrypted secrets store.
     Unlock,
+    /// Probe GitHub Copilot token exchange and models endpoint with redacted output.
+    #[command(hide = true)]
+    CopilotProbe,
 }
 
 #[derive(Subcommand)]
@@ -7452,6 +7455,66 @@ async fn run_tdd_command(action: &TddAction) -> anyhow::Result<()> {
     }
 }
 
+
+fn format_github_copilot_contract_probe(
+    probe: &github_copilot::GithubCopilotContractProbe,
+) -> String {
+    let token = &probe.token_exchange;
+    let mut output = String::from("GitHub Copilot contract probe\n");
+    if probe.sign_in_source == "gh-diagnostic" {
+        output.push_str(
+            "Note: GitHub CLI auth is diagnostic-only for Copilot; GitHub may reject Copilot session exchange when the OAuth token was minted for the GitHub CLI client instead of a Copilot-compatible client.\n",
+        );
+    }
+    output.push_str(&format!(
+        "Token exchange: HTTP {} success={} token_present={} keys={:?}\n",
+        token.status, token.success, token.token_present, token.json_keys
+    ));
+    if let Some(expires_at) = &token.expires_at {
+        output.push_str(&format!("Token expires_at: {expires_at}\n"));
+    }
+    if let Some(refresh_in) = &token.refresh_in {
+        output.push_str(&format!("Token refresh_in: {refresh_in}\n"));
+    }
+    if !token.endpoints.is_empty() {
+        output.push_str(&format!("Endpoint hints: {:?}\n", token.endpoints));
+    }
+    if let Some(error) = &token.redacted_error {
+        output.push_str(&format!("Token error body: {error}\n"));
+    }
+    if let Some(models) = &probe.models {
+        output.push_str(&format!(
+            "Models endpoint: {} HTTP {} success={} model_count={}\n",
+            models.base_url,
+            models.status,
+            models.success,
+            models.model_ids.len()
+        ));
+        if !models.model_ids.is_empty() {
+            output.push_str("Models:\n");
+            for model in &models.model_ids {
+                output.push_str(&format!("  - {model}\n"));
+            }
+        }
+        if let Some(error) = &models.redacted_error {
+            output.push_str(&format!("Models error body: {error}\n"));
+        }
+    } else {
+        output.push_str("Models endpoint: skipped because token exchange failed\n");
+    }
+    output
+}
+
+async fn run_github_copilot_probe_command() -> anyhow::Result<()> {
+    let probe = github_copilot::probe_github_copilot_contract().await?;
+    println!("{}", format_github_copilot_contract_probe(&probe));
+    if probe.token_exchange.success && probe.models.as_ref().is_some_and(|models| models.success) {
+        Ok(())
+    } else {
+        anyhow::bail!("GitHub Copilot contract probe failed")
+    }
+}
+
 async fn run_auth_command(action: &AuthAction) -> anyhow::Result<()> {
     match action {
         AuthAction::Status => {
@@ -7460,6 +7523,7 @@ async fn run_auth_command(action: &AuthAction) -> anyhow::Result<()> {
             Ok(())
         }
         AuthAction::Login { provider } => run_auth_login(provider).await,
+        AuthAction::CopilotProbe => run_github_copilot_probe_command().await,
         AuthAction::Logout { provider } => match auth::logout_provider(provider) {
             Ok(()) => {
                 auth::clear_provider_auth_env(provider);
