@@ -997,11 +997,18 @@ pub async fn model_view_response(
 
 pub async fn model_list_response() -> SlashCommandResponse {
     let catalog = crate::tui::model_catalog::ModelCatalog::discover();
+    let grouped = catalog.by_conceptual_model();
     let mut output = String::from("Available Models\n");
-    for (provider_name, models) in &catalog.providers {
-        output.push_str(&format!("\n{}\n", provider_name));
-        for model in models {
-            output.push_str(&format!("  {} ({})\n", model.name, model.id));
+    for (conceptual_model_id, routes) in grouped {
+        output.push_str(&format!("\n{}\n", conceptual_model_id));
+        for model in routes {
+            let producer = model.producer.as_deref().unwrap_or("unknown");
+            let execution_class = model.execution_class.as_deref().unwrap_or("unknown");
+            let availability = if model.available { "available" } else { "unavailable" };
+            output.push_str(&format!(
+                "  {} ({}) — provider={}, producer={}, execution={}, {}\n",
+                model.name, model.id, model.provider, producer, execution_class, availability
+            ));
         }
     }
     SlashCommandResponse {
