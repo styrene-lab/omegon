@@ -105,6 +105,7 @@ mod prompts;
 mod providers;
 mod route;
 pub mod routing;
+mod semantic_route;
 mod secret_cli;
 mod sentry;
 mod session;
