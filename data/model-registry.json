@@ -582,7 +582,9 @@
         "vision"
       ],
       "description": "Generally available Mythos-class model for highest-capability reasoning, coding, and long-horizon agentic work",
-      "supportsReasoning": true
+      "supportsReasoning": true,
+      "producer": "anthropic",
+      "executionClass": "api-cloud"
     },
     {
       "id": "claude-mythos-5",
@@ -597,7 +599,9 @@
       ],
       "recommended": false,
       "description": "Limited-release Mythos-class model; exposed for explicit operator selection when account access is available",
-      "supportsReasoning": true
+      "supportsReasoning": true,
+      "producer": "anthropic",
+      "executionClass": "api-cloud"
     },
     {
       "id": "claude-opus-4-8",
@@ -612,7 +616,9 @@
       ],
       "description": "Latest frontier reasoning, coding, and vision",
       "supportsReasoning": true,
-      "conceptualModelId": "claude-opus-4.8"
+      "conceptualModelId": "claude-opus-4.8",
+      "producer": "anthropic",
+      "executionClass": "api-cloud"
     },
     {
       "id": "claude-opus-4-7",
@@ -628,7 +634,9 @@
       "recommended": false,
       "description": "Previous Opus release retained for compatibility; not recommended for new sessions now that Opus 4.8 is available",
       "supportsReasoning": true,
-      "conceptualModelId": "claude-opus-4.7"
+      "conceptualModelId": "claude-opus-4.7",
+      "producer": "anthropic",
+      "executionClass": "api-cloud"
     },
     {
       "id": "claude-sonnet-5",
@@ -643,7 +651,9 @@
       ],
       "description": "Latest Sonnet 5 balanced performance profile for reasoning, coding, and vision",
       "supportsReasoning": true,
-      "conceptualModelId": "claude-sonnet-5"
+      "conceptualModelId": "claude-sonnet-5",
+      "producer": "anthropic",
+      "executionClass": "api-cloud"
     },
     {
       "id": "claude-sonnet-4-7",
@@ -658,7 +668,9 @@
       ],
       "description": "Latest balanced performance profile",
       "supportsReasoning": true,
-      "conceptualModelId": "claude-sonnet-4.7"
+      "conceptualModelId": "claude-sonnet-4.7",
+      "producer": "anthropic",
+      "executionClass": "api-cloud"
     },
     {
       "id": "claude-opus-4-6",
@@ -673,7 +685,9 @@
       ],
       "description": "Frontier reasoning, coding, and vision",
       "supportsReasoning": true,
-      "conceptualModelId": "claude-opus-4.6"
+      "conceptualModelId": "claude-opus-4.6",
+      "producer": "anthropic",
+      "executionClass": "api-cloud"
     },
     {
       "id": "claude-sonnet-4-6",
@@ -688,7 +702,9 @@
       ],
       "description": "Balanced performance profile",
       "supportsReasoning": true,
-      "conceptualModelId": "claude-sonnet-4.6"
+      "conceptualModelId": "claude-sonnet-4.6",
+      "producer": "anthropic",
+      "executionClass": "api-cloud"
     },
     {
       "id": "claude-haiku-4-5-20251001",
@@ -700,7 +716,9 @@
         "fast",
         "instruction"
       ],
-      "description": "Fastest, cheapest Claude"
+      "description": "Fastest, cheapest Claude",
+      "producer": "anthropic",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gpt-5.5",
@@ -715,7 +733,9 @@
       ],
       "supportsReasoning": true,
       "description": "OpenAI frontier, 1M context, native reasoning",
-      "conceptualModelId": "gpt-5.5"
+      "conceptualModelId": "gpt-5.5",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gpt-5.4",
@@ -730,7 +750,9 @@
       ],
       "supportsReasoning": true,
       "description": "Previous frontier model, 1M context",
-      "conceptualModelId": "gpt-5.4"
+      "conceptualModelId": "gpt-5.4",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gpt-5",
@@ -744,7 +766,9 @@
         "coding"
       ],
       "supportsReasoning": true,
-      "description": "Flagship reasoning, replaces GPT-4o / o3 / o4-mini"
+      "description": "Flagship reasoning, replaces GPT-4o / o3 / o4-mini",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gpt-5-mini",
@@ -758,7 +782,9 @@
         "coding"
       ],
       "description": "Fast, efficient, 1M context",
-      "conceptualModelId": "gpt-5-mini"
+      "conceptualModelId": "gpt-5-mini",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gpt-4.1",
@@ -771,7 +797,9 @@
         "vision",
         "coding"
       ],
-      "description": "1M context (legacy, superseded by GPT-5)"
+      "description": "1M context (legacy, superseded by GPT-5)",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "o4-mini",
@@ -784,7 +812,9 @@
         "coding"
       ],
       "supportsReasoning": true,
-      "description": "Efficient o-series reasoning (succeeded by GPT-5 mini)"
+      "description": "Efficient o-series reasoning (succeeded by GPT-5 mini)",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gpt-oss:120b-cloud",
@@ -796,7 +826,9 @@
         "reasoning",
         "coding"
       ],
-      "description": "Hosted Ollama model via ollama.com/api"
+      "description": "Hosted Ollama model via ollama.com/api",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "qwen3-coder:480b-cloud",
@@ -808,7 +840,9 @@
         "reasoning",
         "coding"
       ],
-      "description": "Hosted Qwen coder model via Ollama Cloud"
+      "description": "Hosted Qwen coder model via Ollama Cloud",
+      "producer": "qwen",
+      "executionClass": "api-cloud"
     },
     {
       "id": "llama-3.3-70b-versatile",
@@ -821,7 +855,9 @@
         "instruction",
         "coding"
       ],
-      "description": "Llama 3.3 70B on Groq \u2014 fast inference, free tier"
+      "description": "Llama 3.3 70B on Groq \u2014 fast inference, free tier",
+      "producer": "meta",
+      "executionClass": "api-cloud"
     },
     {
       "id": "grok-4-0709",
@@ -834,7 +870,9 @@
         "coding",
         "vision"
       ],
-      "description": "xAI flagship reasoning and coding model"
+      "description": "xAI flagship reasoning and coding model",
+      "producer": "xai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "grok-3",
@@ -846,7 +884,9 @@
         "reasoning",
         "fast"
       ],
-      "description": "Fast reasoning, 131k context"
+      "description": "Fast reasoning, 131k context",
+      "producer": "xai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "mistral-large-latest",
@@ -858,7 +898,9 @@
         "reasoning",
         "coding"
       ],
-      "description": "128k context, open-weight MoE flagship"
+      "description": "128k context, open-weight MoE flagship",
+      "producer": "mistral",
+      "executionClass": "api-cloud"
     },
     {
       "id": "mistral-small-latest",
@@ -870,7 +912,9 @@
         "fast",
         "instruction"
       ],
-      "description": "Lightweight, efficient"
+      "description": "Lightweight, efficient",
+      "producer": "mistral",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gemini-3.1-pro-preview",
@@ -884,7 +928,9 @@
         "vision"
       ],
       "description": "Google's latest frontier reasoning model, 1M context",
-      "conceptualModelId": "gemini-3.1-pro-preview"
+      "conceptualModelId": "gemini-3.1-pro-preview",
+      "producer": "google",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gemini-2.5-flash",
@@ -898,7 +944,9 @@
         "fast"
       ],
       "description": "Fast reasoning with thinking, 1M context",
-      "conceptualModelId": "gemini-2.5-flash"
+      "conceptualModelId": "gemini-2.5-flash",
+      "producer": "google",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gemini-2.0-flash-lite",
@@ -910,7 +958,9 @@
         "fast",
         "instruction"
       ],
-      "description": "Fastest, cheapest Gemini"
+      "description": "Fastest, cheapest Gemini",
+      "producer": "google",
+      "executionClass": "api-cloud"
     },
     {
       "id": "qwen/qwen-qwq-32b",
@@ -922,7 +972,9 @@
         "reasoning",
         "coding"
       ],
-      "description": "Qwen's reasoning model \u2014 fast, cheap"
+      "description": "Qwen's reasoning model \u2014 fast, cheap",
+      "producer": "qwen",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "qwen/qwen-2.5-72b-instruct",
@@ -935,7 +987,9 @@
         "coding",
         "multilingual"
       ],
-      "description": "Long context, multilingual"
+      "description": "Long context, multilingual",
+      "producer": "qwen",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "minimax/minimax-m2.7",
@@ -947,7 +1001,8 @@
         "instruction",
         "coding"
       ],
-      "description": "Fast, lightweight inference"
+      "description": "Fast, lightweight inference",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "deepseek/deepseek-chat",
@@ -959,7 +1014,9 @@
         "instruction",
         "coding"
       ],
-      "description": "Long context, very affordable"
+      "description": "Long context, very affordable",
+      "producer": "deepseek",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "meta-llama/llama-2-70b-chat",
@@ -970,7 +1027,9 @@
       "capabilities": [
         "instruction"
       ],
-      "description": "Meta's Llama 2 via OpenRouter \u2014 solid baseline"
+      "description": "Meta's Llama 2 via OpenRouter \u2014 solid baseline",
+      "producer": "meta",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "anthropic/claude-sonnet-4-7",
@@ -985,7 +1044,9 @@
       ],
       "description": "Latest balanced performance profile via OpenRouter",
       "supportsReasoning": true,
-      "conceptualModelId": "claude-sonnet-4.7"
+      "conceptualModelId": "claude-sonnet-4.7",
+      "producer": "anthropic",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "anthropic/claude-haiku-4-5-20251001",
@@ -998,7 +1059,9 @@
         "instruction"
       ],
       "description": "Fastest, cheapest Claude via OpenRouter",
-      "conceptualModelId": "claude-haiku-4.5"
+      "conceptualModelId": "claude-haiku-4.5",
+      "producer": "anthropic",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "anthropic/claude-opus-4-7",
@@ -1013,7 +1076,9 @@
       ],
       "description": "Previous Opus release retained for compatibility; not recommended for new sessions now that Opus 4.8 is available via OpenRouter",
       "supportsReasoning": true,
-      "conceptualModelId": "claude-opus-4.7"
+      "conceptualModelId": "claude-opus-4.7",
+      "producer": "anthropic",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "gpt-5.5",
@@ -1028,7 +1093,9 @@
       ],
       "supportsReasoning": true,
       "description": "GPT-5.5 via ChatGPT/Codex OAuth \u2014 experimental consumer route, 1M context",
-      "conceptualModelId": "gpt-5.5"
+      "conceptualModelId": "gpt-5.5",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gpt-5.4",
@@ -1042,7 +1109,9 @@
         "coding"
       ],
       "description": "GPT-5.4 via ChatGPT/Codex OAuth",
-      "conceptualModelId": "gpt-5.4"
+      "conceptualModelId": "gpt-5.4",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gpt-5.4-mini",
@@ -1056,7 +1125,9 @@
         "coding"
       ],
       "description": "GPT-5.4 Mini via ChatGPT/Codex OAuth",
-      "conceptualModelId": "gpt-5.4-mini"
+      "conceptualModelId": "gpt-5.4-mini",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "deepseek-v4-pro",
@@ -1068,7 +1139,9 @@
         "reasoning",
         "coding"
       ],
-      "description": "DeepSeek V4 Pro via OpenCode Go \u2014 $10/mo subscription"
+      "description": "DeepSeek V4 Pro via OpenCode Go \u2014 $10/mo subscription",
+      "producer": "deepseek",
+      "executionClass": "api-cloud"
     },
     {
       "id": "deepseek-v4-flash",
@@ -1080,7 +1153,9 @@
         "fast",
         "coding"
       ],
-      "description": "DeepSeek V4 Flash via OpenCode Go \u2014 fast, cheap"
+      "description": "DeepSeek V4 Flash via OpenCode Go \u2014 fast, cheap",
+      "producer": "deepseek",
+      "executionClass": "api-cloud"
     },
     {
       "id": "kimi-k2.6",
@@ -1092,7 +1167,8 @@
         "reasoning",
         "coding"
       ],
-      "description": "Kimi K2.6 via OpenCode Go"
+      "description": "Kimi K2.6 via OpenCode Go",
+      "executionClass": "api-cloud"
     },
     {
       "id": "qwen3.6-plus",
@@ -1104,7 +1180,9 @@
         "reasoning",
         "coding"
       ],
-      "description": "Qwen 3.6 Plus via OpenCode Go"
+      "description": "Qwen 3.6 Plus via OpenCode Go",
+      "producer": "qwen",
+      "executionClass": "api-cloud"
     },
     {
       "id": "glm-5.1",
@@ -1116,7 +1194,8 @@
         "reasoning",
         "coding"
       ],
-      "description": "GLM 5.1 via OpenCode Go"
+      "description": "GLM 5.1 via OpenCode Go",
+      "executionClass": "api-cloud"
     },
     {
       "id": "minimax-m2.7",
@@ -1128,7 +1207,8 @@
         "reasoning",
         "coding"
       ],
-      "description": "MiniMax M2.7 via OpenCode Go"
+      "description": "MiniMax M2.7 via OpenCode Go",
+      "executionClass": "api-cloud"
     },
     {
       "id": "perplexity/sonar",
@@ -1141,7 +1221,9 @@
         "search",
         "coding"
       ],
-      "description": "Perplexity Sonar \u2014 search-augmented coding and Q&A ($0.25/$2.50 per 1M tokens)"
+      "description": "Perplexity Sonar \u2014 search-augmented coding and Q&A ($0.25/$2.50 per 1M tokens)",
+      "producer": "perplexity",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "anthropic/claude-sonnet-4-6",
@@ -1155,7 +1237,9 @@
         "search"
       ],
       "description": "Claude Sonnet 4.6 via Perplexity \u2014 search-augmented ($3/$15 per 1M tokens)",
-      "conceptualModelId": "claude-sonnet-4.6"
+      "conceptualModelId": "claude-sonnet-4.6",
+      "producer": "anthropic",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "openai/gpt-5.4",
@@ -1169,7 +1253,9 @@
         "search"
       ],
       "description": "GPT 5.4 via Perplexity \u2014 search-augmented ($2.50/$15 per 1M tokens)",
-      "conceptualModelId": "gpt-5.4"
+      "conceptualModelId": "gpt-5.4",
+      "producer": "openai",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "openai/gpt-5.4-mini",
@@ -1183,7 +1269,9 @@
         "search"
       ],
       "description": "GPT 5.4 Mini via Perplexity \u2014 fast search-augmented ($0.75/$4.50 per 1M tokens)",
-      "conceptualModelId": "gpt-5.4-mini"
+      "conceptualModelId": "gpt-5.4-mini",
+      "producer": "openai",
+      "executionClass": "broker-cloud"
     },
     {
       "id": "gpt-5.5",
@@ -1198,7 +1286,9 @@
         "coding"
       ],
       "supportsReasoning": true,
-      "description": "GPT-5.5 served through GitHub Copilot subscription; locally verified via copilot --model gpt-5.5"
+      "description": "GPT-5.5 served through GitHub Copilot subscription; locally verified via copilot --model gpt-5.5",
+      "producer": "openai",
+      "executionClass": "subscription-cloud"
     },
     {
       "id": "gpt-5.4",
@@ -1213,7 +1303,9 @@
         "coding"
       ],
       "supportsReasoning": true,
-      "description": "GPT-5.4 served through GitHub Copilot subscription; locally verified via copilot --model gpt-5.4"
+      "description": "GPT-5.4 served through GitHub Copilot subscription; locally verified via copilot --model gpt-5.4",
+      "producer": "openai",
+      "executionClass": "subscription-cloud"
     },
     {
       "id": "claude-sonnet-4.6",
@@ -1228,7 +1320,9 @@
         "vision"
       ],
       "supportsReasoning": true,
-      "description": "Claude Sonnet 4.6 served through GitHub Copilot subscription; locally verified via copilot --model claude-sonnet-4.6. Copilot model ID uses dotted version while Anthropic route uses hyphenated provider ID."
+      "description": "Claude Sonnet 4.6 served through GitHub Copilot subscription; locally verified via copilot --model claude-sonnet-4.6. Copilot model ID uses dotted version while Anthropic route uses hyphenated provider ID.",
+      "producer": "anthropic",
+      "executionClass": "subscription-cloud"
     },
     {
       "id": "claude-opus-4.7",
@@ -1243,7 +1337,9 @@
       ],
       "supportsReasoning": true,
       "description": "GitHub Copilot subscription route for Claude Opus 4.7; verified via local Copilot CLI",
-      "conceptualModelId": "claude-opus-4.7"
+      "conceptualModelId": "claude-opus-4.7",
+      "producer": "anthropic",
+      "executionClass": "subscription-cloud"
     }
   ]
 }
