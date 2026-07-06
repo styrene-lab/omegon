@@ -16,6 +16,7 @@ pub struct ControlContext<'a> {
     pub agent: &'a mut InteractiveAgentHost,
     pub shared_settings: &'a settings::SharedSettings,
     pub bridge: &'a Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+    pub route_controller: Option<Arc<crate::route::RouteController>>,
     pub login_prompt_tx: &'a std::sync::Arc<tokio::sync::Mutex<Option<oneshot::Sender<String>>>>,
     pub events_tx: &'a broadcast::Sender<AgentEvent>,
     pub cli: &'a CliRuntimeView<'a>,
@@ -646,14 +647,20 @@ pub async fn execute_control(
                 ctx.agent,
                 ctx.shared_settings,
                 ctx.bridge,
-                None,
+                ctx.route_controller.clone(),
                 &requested_model,
             )
             .await
         }
-        ControlRequest::SetModelIntent { grade } => set_model_intent_response(&grade),
-        ControlRequest::SetModelProvider { provider } => set_model_provider_response(&provider),
-        ControlRequest::SetModelPolicy { policy } => set_model_policy_response(&policy),
+        ControlRequest::SetModelIntent { grade } => {
+            set_model_intent_control_response(ctx.route_controller.clone(), &ctx.agent.cwd, &grade).await
+        }
+        ControlRequest::SetModelProvider { provider } => {
+            set_model_provider_control_response(ctx.route_controller.clone(), &ctx.agent.cwd, &provider).await
+        }
+        ControlRequest::SetModelPolicy { policy } => {
+            set_model_policy_control_response(ctx.route_controller.clone(), &ctx.agent.cwd, &policy).await
+        }
         ControlRequest::ClearModelOverride => SlashCommandResponse {
             accepted: true,
             output: Some("Model exact override clear requested; interactive route state clears this through /model unpin.".into()),
@@ -1014,6 +1021,98 @@ pub async fn model_list_response() -> SlashCommandResponse {
     SlashCommandResponse {
         accepted: true,
         output: Some(output),
+    }
+}
+
+
+async fn set_model_intent_control_response(
+    route_controller: Option<Arc<crate::route::RouteController>>,
+    cwd: &std::path::Path,
+    grade: &str,
+) -> SlashCommandResponse {
+    let Some(controller) = route_controller else {
+        return set_model_intent_response(grade);
+    };
+    let Some(parsed) = crate::route::ModelGrade::parse(grade) else {
+        return set_model_intent_response(grade);
+    };
+    let snapshot = controller
+        .set_model_intent(crate::route::ModelIntent::with_grade(parsed))
+        .await;
+    let persist_note = settings::persist_model_intent(cwd, &snapshot.intent)
+        .err()
+        .map(|err| format!(" Failed to persist model intent: {err}"))
+        .unwrap_or_default();
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(format!(
+            "Model intent updated — {}.{persist_note}",
+            snapshot.intent.summary()
+        )),
+    }
+}
+
+async fn set_model_provider_control_response(
+    route_controller: Option<Arc<crate::route::RouteController>>,
+    cwd: &std::path::Path,
+    provider: &str,
+) -> SlashCommandResponse {
+    let Some(controller) = route_controller else {
+        return set_model_provider_response(provider);
+    };
+    let Some(selection) = crate::route::ProviderSelection::parse(provider) else {
+        return set_model_provider_response(provider);
+    };
+    let snapshot = controller.set_provider_selection(selection).await;
+    let persist_note = settings::persist_model_intent(cwd, &snapshot.intent)
+        .err()
+        .map(|err| format!(" Failed to persist model intent: {err}"))
+        .unwrap_or_default();
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(format!(
+            "Model provider intent updated — {}.{persist_note}",
+            snapshot.intent.summary()
+        )),
+    }
+}
+
+async fn set_model_policy_control_response(
+    route_controller: Option<Arc<crate::route::RouteController>>,
+    cwd: &std::path::Path,
+    policy: &str,
+) -> SlashCommandResponse {
+    let Some(controller) = route_controller else {
+        return set_model_policy_response(policy);
+    };
+    if let Some(provider_policy) = crate::semantic_route::ProviderPolicy::parse(policy) {
+        let snapshot = controller.set_provider_policy(Some(provider_policy)).await;
+        let persist_note = settings::persist_model_intent(cwd, &snapshot.intent)
+            .err()
+            .map(|err| format!(" Failed to persist model intent: {err}"))
+            .unwrap_or_default();
+        return SlashCommandResponse {
+            accepted: true,
+            output: Some(format!(
+                "Model provider policy updated — {}.{persist_note}",
+                snapshot.intent.summary()
+            )),
+        };
+    }
+    let Some(grade_policy) = crate::route::GradePolicy::parse(policy) else {
+        return set_model_policy_response(policy);
+    };
+    let snapshot = controller.set_grade_policy(grade_policy).await;
+    let persist_note = settings::persist_model_intent(cwd, &snapshot.intent)
+        .err()
+        .map(|err| format!(" Failed to persist model intent: {err}"))
+        .unwrap_or_default();
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(format!(
+            "Model grade policy updated — {}.{persist_note}",
+            snapshot.intent.summary()
+        )),
     }
 }
 

@@ -1284,6 +1284,15 @@ impl ProfileModelIntent {
     }
 }
 
+pub fn persist_model_intent(
+    cwd: &std::path::Path,
+    intent: &crate::route::ModelIntent,
+) -> anyhow::Result<()> {
+    let mut profile = Profile::load(cwd);
+    profile.model_intent = Some(ProfileModelIntent::from_route_intent(intent));
+    profile.save(cwd)
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfilePermissions {

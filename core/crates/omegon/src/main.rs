@@ -1174,15 +1174,6 @@ async fn resolve_current_model_intent_route(
         .ok()
 }
 
-fn persist_model_intent(
-    cwd: &std::path::Path,
-    intent: &crate::route::ModelIntent,
-) -> anyhow::Result<()> {
-    let mut profile = settings::Profile::load(cwd);
-    profile.model_intent = Some(settings::ProfileModelIntent::from_route_intent(intent));
-    profile.save(cwd)
-}
-
 fn parse_bool_env(name: &str) -> Option<bool> {
     let raw = std::env::var(name).ok()?;
     match raw.trim().to_ascii_lowercase().as_str() {
@@ -4443,6 +4434,7 @@ fn build_tui_secret_readiness_snapshot(
                     agent: &mut agent,
                     shared_settings: &shared_settings,
                     bridge: &bridge,
+                    route_controller: Some(route_controller.clone()),
                     login_prompt_tx: &login_prompt_tx,
                     events_tx: &events_tx,
                     cli: &CliRuntimeView {
@@ -4687,7 +4679,7 @@ fn build_tui_secret_readiness_snapshot(
                         *bridge_model = None;
                     }
                     let snapshot = route_controller.snapshot().await;
-                    if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
+                    if let Err(err) = settings::persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                     }
                 }
@@ -4704,7 +4696,7 @@ fn build_tui_secret_readiness_snapshot(
                     let snapshot = route_controller
                         .set_model_intent(crate::route::ModelIntent::with_grade(parsed))
                         .await;
-                    if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
+                    if let Err(err) = settings::persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                     }
                     let resolved = resolve_current_model_intent_route(&route_controller).await;
@@ -4747,7 +4739,7 @@ fn build_tui_secret_readiness_snapshot(
             tui::TuiCommand::SetModelProvider { provider, respond_to } => {
                 let response = if let Some(selection) = crate::route::ProviderSelection::parse(&provider) {
                     let snapshot = route_controller.set_provider_selection(selection).await;
-                    if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
+                    if let Err(err) = settings::persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                     }
                     let resolved = resolve_current_model_intent_route(&route_controller).await;
@@ -4784,7 +4776,7 @@ fn build_tui_secret_readiness_snapshot(
             tui::TuiCommand::SetModelPolicy { policy, respond_to } => {
                 let response = if let Some(parsed) = crate::route::GradePolicy::parse(&policy) {
                     let snapshot = route_controller.set_grade_policy(parsed).await;
-                    if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
+                    if let Err(err) = settings::persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                     }
                     let resolved = resolve_current_model_intent_route(&route_controller).await;
@@ -4820,7 +4812,7 @@ fn build_tui_secret_readiness_snapshot(
 
             tui::TuiCommand::ModelUnpin { respond_to } => {
                 let snapshot = route_controller.clear_exact_model_override().await;
-                if let Err(err) = persist_model_intent(&agent.cwd, &snapshot.intent) {
+                if let Err(err) = settings::persist_model_intent(&agent.cwd, &snapshot.intent) {
                     let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                 }
                 let output = format!(
@@ -4972,6 +4964,7 @@ fn build_tui_secret_readiness_snapshot(
                     agent: &mut agent,
                     shared_settings: &shared_settings,
                     bridge: &bridge,
+                    route_controller: Some(route_controller.clone()),
                     login_prompt_tx: &login_prompt_tx,
                     events_tx: &events_tx,
                     cli: &CliRuntimeView {
@@ -5002,6 +4995,7 @@ fn build_tui_secret_readiness_snapshot(
                     agent: &mut agent,
                     shared_settings: &shared_settings,
                     bridge: &bridge,
+                    route_controller: Some(route_controller.clone()),
                     login_prompt_tx: &login_prompt_tx,
                     events_tx: &events_tx,
                     cli: &CliRuntimeView {
@@ -7587,6 +7581,7 @@ async fn execute_remote_slash_command(
             agent,
             shared_settings,
             bridge,
+            route_controller: None,
             login_prompt_tx,
             events_tx,
             cli: &CliRuntimeView {
