@@ -53,6 +53,12 @@ pub struct ModelInfo {
     pub description: String,
     /// Whether it's available (authenticated, installed, etc.)
     pub available: bool,
+    /// Stable semantic model identity shared across provider routes.
+    pub conceptual_model_id: Option<String>,
+    /// Model producer/vendor independent of serving provider route.
+    pub producer: Option<String>,
+    /// Trust/deployment/commercial execution class for the route.
+    pub execution_class: Option<String>,
 }
 
 impl ModelInfo {
@@ -153,6 +159,9 @@ impl ModelCatalog {
                 capabilities: vec![Capability::Instruction, Capability::Coding],
                 description,
                 available: true,
+                conceptual_model_id: None,
+                producer: None,
+                execution_class: Some("local".to_string()),
             });
         }
         models
@@ -212,6 +221,9 @@ impl ModelCatalog {
                         capabilities,
                         description: m.description.clone(),
                         available: true,
+                        conceptual_model_id: m.conceptual_model_id.clone(),
+                        producer: m.producer.clone(),
+                        execution_class: m.execution_class.clone(),
                     }
                 })
                 .collect();
@@ -246,6 +258,9 @@ impl ModelCatalog {
                         .collect(),
                     description: format!("{} via Antigravity subscription", m.name),
                     available: false,
+                    conceptual_model_id: m.conceptual_model_id.clone(),
+                    producer: m.producer.clone(),
+                    execution_class: m.execution_class.clone(),
                 })
                 .collect();
             if !models.is_empty() {
@@ -285,6 +300,9 @@ impl ModelCatalog {
                         .collect(),
                     description: m.description.clone(),
                     available: false,
+                    conceptual_model_id: m.conceptual_model_id.clone(),
+                    producer: m.producer.clone(),
+                    execution_class: m.execution_class.clone(),
                 })
                 .collect();
             if !models.is_empty() {
@@ -353,6 +371,20 @@ impl ModelCatalog {
             .unwrap_or_default()
     }
 
+    /// Group all catalog routes by conceptual model identity.
+    pub fn by_conceptual_model(&self) -> BTreeMap<String, Vec<&ModelInfo>> {
+        let mut grouped: BTreeMap<String, Vec<&ModelInfo>> = BTreeMap::new();
+        for model in self.all_models() {
+            let key = model
+                .conceptual_model_id
+                .as_deref()
+                .unwrap_or(model.id.as_str())
+                .to_string();
+            grouped.entry(key).or_default().push(model);
+        }
+        grouped
+    }
+
     /// Get models available for immediate use (authenticated, installed).
     pub fn available(&self) -> Vec<&ModelInfo> {
         self.all_models()
@@ -396,6 +428,9 @@ mod tests {
                 capabilities: vec![Capability::Reasoning, Capability::Coding],
                 description: "Qwen reasoning model".to_string(),
                 available: true,
+                conceptual_model_id: Some("qwen/qwen-qwq-32b".to_string()),
+                producer: Some("qwen".to_string()),
+                execution_class: Some("broker-cloud".to_string()),
             }],
         );
         providers.insert(
@@ -413,6 +448,9 @@ mod tests {
                 ],
                 description: "Claude Sonnet 4.6".to_string(),
                 available: true,
+                conceptual_model_id: Some("claude-sonnet-4.6".to_string()),
+                producer: Some("anthropic".to_string()),
+                execution_class: Some("api-cloud".to_string()),
             }],
         );
         ModelCatalog { providers }
@@ -434,6 +472,39 @@ mod tests {
     }
 
     #[test]
+    fn groups_routes_by_conceptual_model_identity() {
+        let mut cat = fixture_catalog();
+        cat.providers
+            .entry("GitHub Copilot".to_string())
+            .or_default()
+            .push(ModelInfo {
+                id: "github-copilot:claude-sonnet-4.6".to_string(),
+                name: "Claude Sonnet 4.6 (GitHub Copilot)".to_string(),
+                provider: "GitHub Copilot".to_string(),
+                context_input: 128_000,
+                context_output: 32_768,
+                capabilities: vec![Capability::Reasoning, Capability::Coding],
+                description: "Claude Sonnet via Copilot".to_string(),
+                available: true,
+                conceptual_model_id: Some("claude-sonnet-4.6".to_string()),
+                producer: Some("anthropic".to_string()),
+                execution_class: Some("subscription-cloud".to_string()),
+            });
+
+        let grouped = cat.by_conceptual_model();
+        let sonnet_routes = grouped
+            .get("claude-sonnet-4.6")
+            .expect("sonnet conceptual group");
+        assert_eq!(sonnet_routes.len(), 2);
+        assert!(sonnet_routes
+            .iter()
+            .any(|route| route.id == "anthropic:claude-sonnet-4-6"));
+        assert!(sonnet_routes
+            .iter()
+            .any(|route| route.id == "github-copilot:claude-sonnet-4.6"));
+    }
+
+    #[test]
     fn context_str_formats_correctly() {
         let model = ModelInfo {
             id: "test:model".to_string(),
@@ -444,6 +515,9 @@ mod tests {
             capabilities: vec![],
             description: "test".to_string(),
             available: true,
+            conceptual_model_id: None,
+            producer: None,
+            execution_class: None,
         };
         assert_eq!(model.context_str(), "128k in / 8k out");
     }
