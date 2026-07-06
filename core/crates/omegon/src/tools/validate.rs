@@ -1183,6 +1183,35 @@ fn validate_model_registry_content(path: &Path, content: &str) -> std::result::R
         } else {
             errors.push(format!("{label}: missing capabilities"));
         }
+        if let Some(conceptual_model_id) = model.get("conceptualModelId")
+            && !conceptual_model_id
+                .as_str()
+                .is_some_and(|value| !value.trim().is_empty())
+        {
+            errors.push(format!(
+                "{label}: conceptualModelId must be a non-empty string when present"
+            ));
+        }
+        if let Some(producer) = model.get("producer")
+            && !producer
+                .as_str()
+                .is_some_and(|value| !value.trim().is_empty())
+        {
+            errors.push(format!(
+                "{label}: producer must be a non-empty string when present"
+            ));
+        }
+        if let Some(execution_class) = model.get("executionClass") {
+            match execution_class.as_str() {
+                Some(value) if is_known_execution_class(value) => {}
+                Some(value) => errors.push(format!(
+                    "{label}: executionClass `{value}` is not recognized"
+                )),
+                None => errors.push(format!(
+                    "{label}: executionClass must be a string when present"
+                )),
+            }
+        }
         if !provider.is_empty() && !id.is_empty() {
             let ids = by_provider.entry(provider.clone()).or_default();
             if !ids.insert(id.clone()) {
@@ -1216,6 +1245,19 @@ fn validate_model_registry_content(path: &Path, content: &str) -> std::result::R
     } else {
         Err(errors.join("\n"))
     }
+}
+
+fn is_known_execution_class(value: &str) -> bool {
+    matches!(
+        value,
+        "local"
+            | "remote-local-network"
+            | "subscription-cloud"
+            | "api-cloud"
+            | "broker-cloud"
+            | "private-cloud"
+            | "enterprise-gateway"
+    )
 }
 
 fn required_json_string(
@@ -2834,6 +2876,56 @@ mod tests {
         );
         assert!(
             message.contains("references unknown model `also-missing`"),
+            "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn model_registry_domain_validator_rejects_bad_optional_metadata_shapes() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let path = data_dir.join("model-registry.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "models": [{
+                "id": "claude-fable-5",
+                "provider": "anthropic",
+                "name": "Claude Fable 5",
+                "contextInput": 1000000,
+                "contextOutput": 65536,
+                "capabilities": ["reasoning", "coding"],
+                "conceptualModelId": "",
+                "producer": 42,
+                "executionClass": "mystery-cloud"
+              }],
+              "defaults": {"anthropic": "claude-fable-5"},
+              "grades": {"S": {"anthropic": "claude-fable-5"}}
+            }"#,
+        )
+        .unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("conceptualModelId must be a non-empty string"),
+            "{message}"
+        );
+        assert!(
+            message.contains("producer must be a non-empty string"),
+            "{message}"
+        );
+        assert!(
+            message.contains("executionClass `mystery-cloud` is not recognized"),
             "{message}"
         );
     }

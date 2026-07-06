@@ -17,7 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
-- Added producer and execution-class metadata to the model registry so model lineage, semantic model identity, provider route, and local/cloud trust posture are separate routing axes.
+- Added producer and execution-class metadata validation for model registry entries while keeping producer optional for local/offline/dynamic routes.
 - Added additive conceptual model IDs to the model registry so multiple provider routes can map to the same semantic model class ahead of first-class GitHub Copilot routing.
 
 ### Fixed
