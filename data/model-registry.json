@@ -65,7 +65,7 @@
     "ollama": "qwen3:32b",
     "opencode-go": "deepseek-v4-pro",
     "perplexity": "perplexity/sonar",
-    "github-copilot": "gpt-5.5"
+    "github-copilot": "gpt-5.4"
   },
   "grades": {
     "S": {
@@ -76,7 +76,7 @@
       "google-antigravity": "gemini-3.1-pro-preview",
       "openrouter": "anthropic/claude-opus-4-7",
       "xai": "grok-4-0709",
-      "github-copilot": "gpt-5.5"
+      "github-copilot": "gpt-5.4"
     },
     "B": {
       "anthropic": "claude-sonnet-5",
@@ -1286,7 +1286,7 @@
         "coding"
       ],
       "supportsReasoning": true,
-      "description": "GPT-5.5 served through GitHub Copilot subscription; locally verified via copilot --model gpt-5.5",
+      "description": "GitHub Copilot subscription route for GPT-5.5; listed by Copilot model inventory but not currently used as the default chat-completions route",
       "producer": "openai",
       "executionClass": "subscription-cloud"
     },
@@ -1303,7 +1303,7 @@
         "coding"
       ],
       "supportsReasoning": true,
-      "description": "GPT-5.4 served through GitHub Copilot subscription; locally verified via copilot --model gpt-5.4",
+      "description": "GitHub Copilot subscription route for GPT-5.4; verified usable via Copilot chat-completions transport",
       "producer": "openai",
       "executionClass": "subscription-cloud"
     },

@@ -810,7 +810,7 @@ mod tests {
         let reg = ModelRegistry::global();
         assert_eq!(reg.default_model("openai"), Some("gpt-5.5"));
         assert_eq!(reg.default_model("openai-codex"), Some("gpt-5.5"));
-        assert_eq!(reg.default_model("github-copilot"), Some("gpt-5.5"));
+        assert_eq!(reg.default_model("github-copilot"), Some("gpt-5.4"));
         assert_eq!(reg.default_model("anthropic"), Some("claude-fable-5"));
         assert_eq!(reg.default_model("nonexistent"), None);
     }
@@ -819,7 +819,7 @@ mod tests {
     fn grade_model_lookup() {
         let reg = ModelRegistry::global();
         assert_eq!(reg.grade_model("S", "openai"), Some("gpt-5.5"));
-        assert_eq!(reg.grade_model("S", "github-copilot"), Some("gpt-5.5"));
+        assert_eq!(reg.grade_model("S", "github-copilot"), Some("gpt-5.4"));
         assert_eq!(
             reg.grade_model("B", "github-copilot"),
             Some("claude-sonnet-4.6")
@@ -1167,9 +1167,10 @@ mod tests {
     #[test]
     fn openai_error_normalization_rejects_non_openai_endpoint() {
         let reg = ModelRegistry::global();
-        assert!(reg
-            .normalize_openai_error("anthropic", reqwest::StatusCode::TOO_MANY_REQUESTS, "{}")
-            .is_err());
+        assert!(
+            reg.normalize_openai_error("anthropic", reqwest::StatusCode::TOO_MANY_REQUESTS, "{}")
+                .is_err()
+        );
     }
     #[test]
     fn openai_tool_call_delta_normalization_uses_profile_paths() {
@@ -1194,8 +1195,9 @@ mod tests {
     #[test]
     fn openai_tool_call_delta_normalization_rejects_non_openai_endpoint() {
         let reg = ModelRegistry::global();
-        assert!(reg
-            .normalize_openai_tool_call_deltas("anthropic", &serde_json::json!({}))
-            .is_err());
+        assert!(
+            reg.normalize_openai_tool_call_deltas("anthropic", &serde_json::json!({}))
+                .is_err()
+        );
     }
 }

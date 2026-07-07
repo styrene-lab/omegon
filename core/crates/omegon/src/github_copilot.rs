@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::OnceLock;
 
 const DEFAULT_GITHUB_API_BASE_URL: &str = "https://api.github.com";
-const DEFAULT_COPILOT_API_BASE_URL: &str = "https://api.business.githubcopilot.com";
+pub const DEFAULT_COPILOT_API_BASE_URL: &str = "https://api.business.githubcopilot.com";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -31,8 +32,95 @@ pub struct GithubCopilotModelsProbe {
     pub base_url: String,
     pub status: u16,
     pub success: bool,
+    pub header_profile: GithubCopilotHeaderProfile,
     pub model_ids: Vec<String>,
     pub redacted_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubCopilotHeaderProfile {
+    pub editor_version: String,
+    pub editor_plugin_version: String,
+    pub copilot_integration_id: String,
+    pub github_api_version: String,
+    pub vscode_session_id: String,
+    pub vscode_machine_id: String,
+}
+
+impl GithubCopilotHeaderProfile {
+    pub fn from_env() -> Self {
+        Self {
+            editor_version: env_or("GITHUB_COPILOT_EDITOR_VERSION", default_editor_version()),
+            editor_plugin_version: env_or(
+                "GITHUB_COPILOT_EDITOR_PLUGIN_VERSION",
+                "copilot-chat/0.31.5".to_string(),
+            ),
+            copilot_integration_id: env_or(
+                "GITHUB_COPILOT_INTEGRATION_ID",
+                "vscode-chat".to_string(),
+            ),
+            github_api_version: env_or("GITHUB_COPILOT_API_VERSION", "2025-07-16".to_string()),
+            vscode_session_id: env_or(
+                "GITHUB_COPILOT_VSCODE_SESSION_ID",
+                stable_probe_uuid("session"),
+            ),
+            vscode_machine_id: env_or(
+                "GITHUB_COPILOT_VSCODE_MACHINE_ID",
+                stable_probe_uuid("machine"),
+            ),
+        }
+    }
+
+    pub fn apply_to(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        request
+            .header("Editor-Version", &self.editor_version)
+            .header("Editor-Plugin-Version", &self.editor_plugin_version)
+            .header("Copilot-Integration-Id", &self.copilot_integration_id)
+            .header("X-GitHub-Api-Version", &self.github_api_version)
+            .header("VScode-SessionId", &self.vscode_session_id)
+            .header("VScode-MachineId", &self.vscode_machine_id)
+            .header("Openai-Organization", "github-copilot")
+    }
+}
+
+fn env_or(name: &str, fallback: String) -> String {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(fallback)
+}
+
+fn default_editor_version() -> String {
+    std::env::var("VSCODE_VERSION")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|version| format!("vscode/{version}"))
+        .unwrap_or_else(|| "vscode/1.102.0".to_string())
+}
+
+fn stable_probe_uuid(kind: &str) -> String {
+    static SESSION: OnceLock<String> = OnceLock::new();
+    static MACHINE: OnceLock<String> = OnceLock::new();
+    let cell = if kind == "machine" {
+        &MACHINE
+    } else {
+        &SESSION
+    };
+    cell.get_or_init(|| {
+        let mut bytes = [0u8; 16];
+        if getrandom::fill(&mut bytes).is_err() {
+            bytes.copy_from_slice(kind.as_bytes().get(..16).unwrap_or(b"omegon-copilot!!"));
+        }
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        format!(
+            "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+        )
+    })
+    .clone()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,7 +171,11 @@ pub async fn resolve_github_signin() -> anyhow::Result<ResolvedGithubSignin> {
             token,
         });
     }
-    for name in ["GITHUB_TOKEN", "GITHUB_COPILOT_TOKEN", "COPILOT_OAUTH_TOKEN"] {
+    for name in [
+        "GITHUB_TOKEN",
+        "GITHUB_COPILOT_TOKEN",
+        "COPILOT_OAUTH_TOKEN",
+    ] {
         if let Ok(token) = std::env::var(name) {
             if !token.trim().is_empty() {
                 return Ok(ResolvedGithubSignin {
@@ -109,6 +201,55 @@ async fn github_cli_token() -> Option<String> {
     }
     let token = String::from_utf8(output.stdout).ok()?.trim().to_string();
     (!token.is_empty()).then_some(token)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubCopilotApiToken {
+    pub token: String,
+    pub expires_at: Option<i64>,
+    pub refresh_in: Option<i64>,
+    pub endpoints: Vec<String>,
+}
+
+pub async fn exchange_github_copilot_token(
+    github_token: &str,
+) -> anyhow::Result<GithubCopilotApiToken> {
+    let client = reqwest::Client::new();
+    let github_api_base_url = std::env::var("GITHUB_API_BASE_URL")
+        .unwrap_or_else(|_| DEFAULT_GITHUB_API_BASE_URL.to_string());
+    let token_url = format!(
+        "{}/copilot_internal/v2/token",
+        github_api_base_url.trim_end_matches('/')
+    );
+    let response = client
+        .get(token_url)
+        .header("Authorization", format!("Bearer {github_token}"))
+        .header("Accept", "application/json")
+        .header("User-Agent", "omegon-github-copilot")
+        .header("X-GitHub-Api-Version", "2024-12-15")
+        .send()
+        .await?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!(
+            "GitHub Copilot token exchange failed ({status}): {}",
+            redact_probe_body(&body)
+        );
+    }
+    let value: Value = serde_json::from_str(&body)?;
+    let token = value
+        .get("token")
+        .and_then(Value::as_str)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("GitHub Copilot token exchange returned no token"))?
+        .to_string();
+    Ok(GithubCopilotApiToken {
+        token,
+        expires_at: value.get("expires_at").and_then(Value::as_i64),
+        refresh_in: value.get("refresh_in").and_then(Value::as_i64),
+        endpoints: extract_endpoint_values(&value),
+    })
 }
 
 pub async fn probe_github_copilot_contract() -> anyhow::Result<GithubCopilotContractProbe> {
@@ -179,15 +320,13 @@ async fn probe_models(
     copilot_token: &str,
 ) -> anyhow::Result<GithubCopilotModelsProbe> {
     let models_url = format!("{}/models", base_url.trim_end_matches('/'));
-    let response = client
+    let header_profile = GithubCopilotHeaderProfile::from_env();
+    let request = client
         .get(models_url)
         .header("Authorization", format!("Bearer {copilot_token}"))
         .header("Accept", "application/json")
-        .header("User-Agent", "omegon-github-copilot-probe")
-        .header("Editor-Version", "omegon/0")
-        .header("Editor-Plugin-Version", "omegon/0")
-        .send()
-        .await?;
+        .header("User-Agent", "omegon-github-copilot-probe");
+    let response = header_profile.apply_to(request).send().await?;
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     let parsed = serde_json::from_str::<Value>(&body).ok();
@@ -195,6 +334,7 @@ async fn probe_models(
         base_url: base_url.to_string(),
         status: status.as_u16(),
         success: status.is_success(),
+        header_profile,
         model_ids: parsed.as_ref().map(extract_model_ids).unwrap_or_default(),
         redacted_error: if status.is_success() {
             None
@@ -306,7 +446,8 @@ fn redact_probe_body(body: &str) -> String {
     let mut in_long_token = false;
     let mut token_len = 0usize;
     for ch in truncated.chars() {
-        let tokenish = ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '~' | '+' | '/');
+        let tokenish =
+            ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '~' | '+' | '/');
         if tokenish {
             token_len += 1;
             if token_len > 20 {
@@ -335,9 +476,15 @@ mod tests {
 
     #[test]
     fn github_signin_source_names_are_operator_oriented() {
-        assert_eq!(GithubSigninSource::OmegonGithubCopilot.as_str(), "omegon:github-copilot");
+        assert_eq!(
+            GithubSigninSource::OmegonGithubCopilot.as_str(),
+            "omegon:github-copilot"
+        );
         assert_eq!(GithubSigninSource::OmegonGithub.as_str(), "omegon:github");
-        assert_eq!(GithubSigninSource::GithubCliDiagnostic.as_str(), "gh-diagnostic");
+        assert_eq!(
+            GithubSigninSource::GithubCliDiagnostic.as_str(),
+            "gh-diagnostic"
+        );
         assert_eq!(GithubSigninSource::Environment.as_str(), "environment");
     }
 
@@ -353,7 +500,11 @@ mod tests {
         assert!(summary.token_present);
         assert_eq!(summary.expires_at, Some(123));
         assert!(summary.json_keys.contains(&"token".to_string()));
-        assert!(summary.endpoints.contains(&"https://api.githubcopilot.com".to_string()));
+        assert!(
+            summary
+                .endpoints
+                .contains(&"https://api.githubcopilot.com".to_string())
+        );
     }
 
     #[test]
@@ -365,7 +516,10 @@ mod tests {
             ]
         });
         let ids = extract_model_ids(&value);
-        assert_eq!(ids, vec!["claude-sonnet-4.6".to_string(), "gpt-5.5".to_string()]);
+        assert_eq!(
+            ids,
+            vec!["claude-sonnet-4.6".to_string(), "gpt-5.5".to_string()]
+        );
     }
 
     #[test]
