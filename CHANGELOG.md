@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added additive conceptual model IDs to the model registry so multiple provider routes can map to the same semantic model class ahead of first-class GitHub Copilot routing.
 
 ### Fixed
+- Coalesced duplicate tool results after provider-compatible ID sanitization so wrapper-tool rollback/no-op paths cannot poison Anthropic history with multiple `tool_result` blocks.
 - Routed GitHub Copilot `gpt-5.5` through Copilot's `/responses` endpoint instead of the unsupported `/chat/completions` path and made Copilot runtime errors name the failing endpoint.
 - Prevented GitHub Copilot routes with an empty effective model from sending blank `model` values to the Copilot API and reject explicit empty model switches such as `github-copilot:`.
 - Added `github-copilot` to `/auth` command suggestions so Copilot login is discoverable from the TUI command picker.

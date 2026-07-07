@@ -1053,6 +1053,11 @@ impl ConversationState {
             }
         }
 
+        // Collapse duplicate tool results before provider-shape repair. Wrapper
+        // tools can emit multiple local result events for one upstream tool_use;
+        // Anthropic requires those to be represented as one tool_result block.
+        coalesce_duplicate_tool_results(&mut messages);
+
         // Strip orphaned tool_use assistant calls whose matching tool_result
         // message was evicted or dropped during compaction/decay. Anthropic
         // rejects these with "tool_use ids were found without tool_result
@@ -1616,6 +1621,69 @@ fn tool_result_text_and_images(result: &ToolResultEntry) -> (String, Vec<ImageAt
     (text_blocks.join("\n"), images)
 }
 
+fn coalesce_duplicate_tool_results(messages: &mut Vec<LlmMessage>) {
+    let mut idx = 0;
+    while idx < messages.len() {
+        let LlmMessage::ToolResult { call_id, .. } = &messages[idx] else {
+            idx += 1;
+            continue;
+        };
+        let sanitized = sanitize_tool_like_id(call_id);
+        let mut merge_idx = idx + 1;
+        while merge_idx < messages.len() {
+            let LlmMessage::ToolResult {
+                call_id: next_call_id,
+                ..
+            } = &messages[merge_idx]
+            else {
+                break;
+            };
+            if sanitize_tool_like_id(next_call_id) != sanitized {
+                merge_idx += 1;
+                continue;
+            }
+            let duplicate = messages.remove(merge_idx);
+            merge_tool_result_message(&mut messages[idx], duplicate);
+        }
+        idx += 1;
+    }
+}
+
+fn merge_tool_result_message(target: &mut LlmMessage, duplicate: LlmMessage) {
+    let LlmMessage::ToolResult {
+        content: duplicate_content,
+        images: duplicate_images,
+        is_error: duplicate_is_error,
+        args_summary: duplicate_args_summary,
+        ..
+    } = duplicate
+    else {
+        return;
+    };
+    let LlmMessage::ToolResult {
+        content,
+        images,
+        is_error,
+        args_summary,
+        ..
+    } = target
+    else {
+        return;
+    };
+
+    if !duplicate_content.is_empty() {
+        if !content.is_empty() {
+            content.push_str("\n\n");
+        }
+        content.push_str(&duplicate_content);
+    }
+    images.extend(duplicate_images);
+    *is_error |= duplicate_is_error;
+    if args_summary.is_none() {
+        *args_summary = duplicate_args_summary;
+    }
+}
+
 fn bash_command_committed_successfully(call: &ToolCall, results: &[ToolResultEntry]) -> bool {
     let Some(command) = call.arguments.get("command").and_then(|v| v.as_str()) else {
         return false;
@@ -1827,7 +1895,18 @@ fn strip_orphaned_tool_results(messages: &mut Vec<LlmMessage>) {
 }
 
 fn sanitize_tool_like_id(id: &str) -> String {
-    id.split('|').next().unwrap_or(id).to_string()
+    id.split('|')
+        .next()
+        .unwrap_or(id)
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// Returns sequences of `[a-zA-Z0-9_]` that are at least 8 chars long.
@@ -3478,6 +3557,112 @@ mod tests {
         assert!(matches!(&view[0], LlmMessage::User { .. }));
         assert!(matches!(&view[1], LlmMessage::Assistant { .. }));
         assert!(matches!(&view[2], LlmMessage::ToolResult { .. }));
+    }
+
+    #[test]
+    fn coalesces_duplicate_tool_results_before_provider_replay() {
+        let mut conv = ConversationState::new();
+        conv.push_user("run tools".into());
+        push_matching_assistant(&mut conv, "toolu_abc");
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "toolu_abc".into(),
+            tool_name: "multi_tool_use.parallel".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "first child result".into(),
+            }],
+            is_error: false,
+            args_summary: Some("batch".into()),
+        });
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "toolu_abc".into(),
+            tool_name: "multi_tool_use.parallel".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "rollback notice".into(),
+            }],
+            is_error: true,
+            args_summary: None,
+        });
+
+        let view = conv.build_llm_view();
+        let results: Vec<_> = view
+            .iter()
+            .filter_map(|msg| match msg {
+                LlmMessage::ToolResult {
+                    call_id,
+                    content,
+                    is_error,
+                    args_summary,
+                    ..
+                } => Some((call_id, content, is_error, args_summary)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            results.len(),
+            1,
+            "duplicate tool results survived: {view:?}"
+        );
+        assert_eq!(results[0].0, "toolu_abc");
+        assert!(results[0].1.contains("first child result"));
+        assert!(results[0].1.contains("rollback notice"));
+        assert!(*results[0].2);
+        assert_eq!(results[0].3.as_deref(), Some("batch"));
+    }
+
+    #[test]
+    fn provider_sanitized_duplicate_tool_results_do_not_orphan_assistant_tool_use() {
+        let mut conv = ConversationState::new();
+        conv.push_user("run tools".into());
+        push_matching_assistant(&mut conv, "toolu_abc.bad|fc_1");
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "toolu_abc.bad|result_1".into(),
+            tool_name: "multi_tool_use.parallel".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "first child result".into(),
+            }],
+            is_error: false,
+            args_summary: None,
+        });
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "toolu_abc_bad|result_2".into(),
+            tool_name: "multi_tool_use.parallel".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "second child result".into(),
+            }],
+            is_error: false,
+            args_summary: None,
+        });
+
+        let view = conv.build_llm_view();
+        let assistant_calls: Vec<_> = view
+            .iter()
+            .filter_map(|msg| match msg {
+                LlmMessage::Assistant { tool_calls, .. } => Some(tool_calls),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(assistant_calls.len(), 1, "assistant was stripped: {view:?}");
+        assert_eq!(
+            assistant_calls[0].len(),
+            1,
+            "tool call was stripped: {view:?}"
+        );
+
+        let results: Vec<_> = view
+            .iter()
+            .filter_map(|msg| match msg {
+                LlmMessage::ToolResult { content, .. } => Some(content),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "duplicate tool results survived: {view:?}"
+        );
+        assert!(results[0].contains("first child result"));
+        assert!(results[0].contains("second child result"));
     }
 
     #[test]
