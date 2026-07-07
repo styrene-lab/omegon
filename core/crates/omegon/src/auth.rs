@@ -1491,6 +1491,12 @@ fn parse_callback_url(url: &str) -> anyhow::Result<(String, String)> {
 /// without writing to stderr.
 pub type LoginProgress = Box<dyn Fn(&str) + Send + Sync>;
 
+pub type LoginCopyBlock = Box<
+    dyn Fn(String, String, omegon_traits::OperatorCopyKind, Option<omegon_traits::ClipboardCopyStatus>)
+        + Send
+        + Sync,
+>;
+
 /// Prompt callback for headless login — requests a line of input from the user.
 /// The closure receives a prompt string and returns the user's input.
 pub type LoginPrompt = Box<
@@ -1499,6 +1505,10 @@ pub type LoginPrompt = Box<
 
 fn default_progress() -> LoginProgress {
     Box::new(|msg| eprintln!("{msg}"))
+}
+
+fn default_copy_block() -> LoginCopyBlock {
+    Box::new(|_, _, _, _| {})
 }
 
 fn default_prompt() -> LoginPrompt {
@@ -1685,7 +1695,15 @@ pub async fn login_github_copilot_with_progress(
 
 pub async fn login_github_copilot_with_callbacks(
     progress: LoginProgress,
+    prompt: LoginPrompt,
+) -> anyhow::Result<OAuthCredentials> {
+    login_github_copilot_with_copy_callback(progress, prompt, default_copy_block()).await
+}
+
+pub async fn login_github_copilot_with_copy_callback(
+    progress: LoginProgress,
     _prompt: LoginPrompt,
+    copy_block: LoginCopyBlock,
 ) -> anyhow::Result<OAuthCredentials> {
     let scope = std::env::var("GITHUB_COPILOT_OAUTH_SCOPE")
         .ok()
@@ -1707,10 +1725,25 @@ pub async fn login_github_copilot_with_callbacks(
         .await?;
 
     progress(&format!(
-        "Open {} and enter code {} to authorize GitHub Copilot.",
-        device.verification_uri, device.user_code
+        "Open {} and enter the GitHub Copilot device code below.",
+        device.verification_uri
     ));
-    let _ = open::that(&device.verification_uri);
+    let code_copy_attempt = crate::clipboard::copy_operator_text(&device.user_code);
+    copy_block(
+        "GitHub Copilot device code".to_string(),
+        device.user_code.clone(),
+        omegon_traits::OperatorCopyKind::AuthDeviceCode,
+        Some(code_copy_attempt),
+    );
+    let opened_browser = open::that(&device.verification_uri).is_ok();
+    if !opened_browser {
+        copy_block(
+            "GitHub Copilot device URL".to_string(),
+            device.verification_uri.clone(),
+            omegon_traits::OperatorCopyKind::AuthUrl,
+            None,
+        );
+    }
 
     let started = std::time::Instant::now();
     let mut interval = device.interval.unwrap_or(5).max(1);

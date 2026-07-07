@@ -2607,6 +2607,42 @@ pub enum PermissionPersistence {
     ProjectDirectory,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorCopyKind {
+    AuthDeviceCode,
+    AuthUrl,
+    PairingCode,
+    Generic,
+}
+
+impl OperatorCopyKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AuthDeviceCode => "auth_device_code",
+            Self::AuthUrl => "auth_url",
+            Self::PairingCode => "pairing_code",
+            Self::Generic => "generic",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipboardCopyStatus {
+    Copied { mechanism: String },
+    Unavailable,
+    Failed { mechanism: String, reason: String },
+}
+
+impl ClipboardCopyStatus {
+    pub fn label(&self) -> String {
+        match self {
+            Self::Copied { mechanism } => format!("copied via {mechanism}"),
+            Self::Unavailable => "manual copy required".to_string(),
+            Self::Failed { mechanism, .. } => format!("copy failed via {mechanism}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     TurnStart {
@@ -2702,6 +2738,13 @@ pub enum AgentEvent {
     /// System notification — displayed in TUI but not sent to the LLM.
     SystemNotification {
         message: String,
+    },
+    /// Operator-facing copy payload with exact copy/export text.
+    OperatorCopyBlock {
+        label: String,
+        text: String,
+        kind: OperatorCopyKind,
+        copy_attempt: Option<ClipboardCopyStatus>,
     },
     /// Structured stream-idle telemetry — renderers must not treat this as assistant-authored content.
     StreamIdle {

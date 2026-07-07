@@ -15,7 +15,7 @@ use super::inline_render::DETAILS_HINT_LABEL;
 use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
-    ConversationSegmentProjection, ImageSegment, LifecycleSegment, PeerAgentSegment,
+    ConversationSegmentProjection, ImageSegment, LifecycleSegment, OperatorCopySegment, PeerAgentSegment,
     PeerAgentSource, PeerAgentStatus, ProjectConversationSegment, SegmentCopyPolicy,
     SegmentPresentation, SegmentRole, SkillEventSegment, SystemSegment, ToolSegment, UserSegment,
 };
@@ -1438,6 +1438,14 @@ pub enum SegmentContent {
     /// System notification (slash command response, info message).
     SystemNotification { text: String },
 
+    /// Operator-facing copy payload. Copy/export returns exactly `text`.
+    OperatorCopyBlock {
+        label: String,
+        text: String,
+        kind: omegon_traits::OperatorCopyKind,
+        copy_attempt: Option<omegon_traits::ClipboardCopyStatus>,
+    },
+
     /// Skill activation/provenance event.
     SkillEvent {
         active_ref: String,
@@ -1531,6 +1539,23 @@ impl Segment {
         Self {
             meta: SegmentMeta::default(),
             content: SegmentContent::SystemNotification { text: text.into() },
+        }
+    }
+
+    pub fn operator_copy_block(
+        label: impl Into<String>,
+        text: impl Into<String>,
+        kind: omegon_traits::OperatorCopyKind,
+        copy_attempt: Option<omegon_traits::ClipboardCopyStatus>,
+    ) -> Self {
+        Self {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::OperatorCopyBlock {
+                label: label.into(),
+                text: text.into(),
+                kind,
+                copy_attempt,
+            },
         }
     }
     pub fn skill_event(event: &omegon_traits::SkillActivationEvent) -> Self {
@@ -1627,6 +1652,16 @@ impl<'a> ProjectConversationSegment<'a> for Segment {
                     text: text.as_str(),
                 })
             }
+            SegmentContent::OperatorCopyBlock {
+                label,
+                text,
+                kind,
+                copy_attempt: _,
+            } => ConversationSegmentKind::OperatorCopy(OperatorCopySegment {
+                label: label.as_str(),
+                text: text.as_str(),
+                kind: *kind,
+            }),
             SegmentContent::SkillEvent {
                 active_ref,
                 reason,
@@ -1700,6 +1735,11 @@ impl Segment {
             },
             SegmentContent::SystemNotification { .. } => SegmentCapabilities {
                 external_dto_candidate: false,
+                ..SegmentCapabilities::timeline_item()
+            },
+            SegmentContent::OperatorCopyBlock { .. } => SegmentCapabilities {
+                detail_openable: false,
+                replay_relevant: false,
                 ..SegmentCapabilities::timeline_item()
             },
             SegmentContent::SkillEvent { .. } => SegmentCapabilities::timeline_item(),
@@ -1806,6 +1846,7 @@ status: {}
                 lines.join("\n")
             }
             SegmentContent::SystemNotification { text } => text.clone(),
+            SegmentContent::OperatorCopyBlock { text, .. } => text.clone(),
             SegmentContent::SkillEvent {
                 active_ref,
                 reason,
@@ -1838,6 +1879,7 @@ status: {}
             SegmentCopyPolicy::Body => match &self.content {
                 SegmentContent::UserPrompt { text }
                 | SegmentContent::SystemNotification { text }
+                | SegmentContent::OperatorCopyBlock { text, .. }
                 | SegmentContent::LifecycleEvent { text, .. }
                 | SegmentContent::PeerAgentText { text, .. } => export_text_fragment(text, mode),
                 SegmentContent::SkillEvent { .. } => {
@@ -2005,6 +2047,25 @@ status: {}
                         mode,
                         density,
                         pinned,
+                    },
+                    area,
+                    buf,
+                    render_ctx,
+                );
+            }
+            OperatorCopyBlock {
+                label,
+                text,
+                copy_attempt,
+                ..
+            } => {
+                let status = copy_attempt.as_ref().map(|s| s.label()).unwrap_or_else(|| "copy available".to_string());
+                let rendered = format!("{label} · {status}\n{text}");
+                super::segment_components::system::render(
+                    super::segment_components::system::SystemRenderProps {
+                        text: &rendered,
+                        surface,
+                        mode,
                     },
                     area,
                     buf,
@@ -2269,6 +2330,7 @@ status: {}
                     + result_separator_rows
                     + 4
             }
+            OperatorCopyBlock { .. } => 3,
             SystemNotification { text } if matches!(mode, SegmentRenderMode::Slim) => {
                 if is_plan_progress_text(text) {
                     0

@@ -246,6 +246,27 @@ where
                     selection: SegmentSelectionTreatment::Explicit,
                 },
             },
+            ConversationSegmentKind::OperatorCopy(copy) => SegmentPresentationModel {
+                producer: SegmentProducer::System,
+                state: SegmentState::Informational,
+                content: SegmentContentPresentation {
+                    form: ContentForm::Code,
+                    title: Some(copy.label.as_ref()),
+                    summary: Some(copy.text.as_ref()),
+                    body: Some(copy.text.as_ref()),
+                },
+                metrics: Vec::new(),
+                affordances: SegmentAffordances {
+                    selectable: true,
+                    copyable: true,
+                    ..Default::default()
+                },
+                surface: SegmentSurfacePolicy {
+                    surface: SegmentSurfaceTreatment::Card,
+                    copy: SegmentCopyPolicy::Body,
+                    selection: SegmentSelectionTreatment::Explicit,
+                },
+            },
             ConversationSegmentKind::System(system) => SegmentPresentationModel {
                 producer: SegmentProducer::System,
                 state: SegmentState::Informational,
@@ -363,6 +384,7 @@ pub enum ConversationSegmentKind<TText = String, TPath = PathBuf> {
     Assistant(AssistantSegment<TText>),
     PeerAgent(PeerAgentSegment<TText>),
     Tool(ToolSegment<TText>),
+    OperatorCopy(OperatorCopySegment<TText>),
     System(SystemSegment<TText>),
     Skill(SkillEventSegment<TText>),
     Lifecycle(LifecycleSegment<TText>),
@@ -377,6 +399,7 @@ impl<TText, TPath> ConversationSegmentKind<TText, TPath> {
             Self::Assistant(_) => SegmentRole::Assistant,
             Self::PeerAgent(_) => SegmentRole::PeerAgent,
             Self::Tool(_) => SegmentRole::Tool,
+            Self::OperatorCopy(_) => SegmentRole::System,
             Self::System(_) => SegmentRole::System,
             Self::Skill(_) => SegmentRole::Lifecycle,
             Self::Lifecycle(_) => SegmentRole::Lifecycle,
@@ -622,6 +645,13 @@ pub struct ToolSegment<TText = String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemSegment<TText = String> {
     pub text: TText,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorCopySegment<TText = String> {
+    pub label: TText,
+    pub text: TText,
+    pub kind: omegon_traits::OperatorCopyKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

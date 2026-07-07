@@ -189,6 +189,7 @@ fn segment_kind_label(segment: &Segment) -> &'static str {
         SegmentContent::PeerAgentText { .. } => "peer_agent",
         SegmentContent::ToolCard { .. } => "tool",
         SegmentContent::SystemNotification { .. } => "system",
+        SegmentContent::OperatorCopyBlock { .. } => "operator_copy",
         SegmentContent::SkillEvent { .. } => "skill",
         SegmentContent::LifecycleEvent { .. } => "lifecycle",
         SegmentContent::Image { .. } => "image",

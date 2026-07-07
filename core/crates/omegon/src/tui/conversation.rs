@@ -380,6 +380,23 @@ impl ConversationView {
         self.conv_state.force_scroll_to_bottom();
     }
 
+    pub fn push_operator_copy_block(
+        &mut self,
+        label: impl Into<String>,
+        text: impl Into<String>,
+        kind: omegon_traits::OperatorCopyKind,
+        copy_attempt: Option<omegon_traits::ClipboardCopyStatus>,
+    ) {
+        self.segments.push(Segment::operator_copy_block(
+            label,
+            text,
+            kind,
+            copy_attempt,
+        ));
+        self.conv_state.invalidate();
+        self.conv_state.auto_scroll_to_bottom();
+    }
+
     pub fn push_system(&mut self, text: &str) {
         if is_plan_progress_text(text)
             && let Some(existing) = self

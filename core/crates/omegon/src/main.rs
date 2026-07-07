@@ -5423,7 +5423,16 @@ fn build_tui_secret_readiness_snapshot(
                                             auth::login_openai_with_callbacks(progress, prompt).await
                                         }
                                         "github-copilot" | "copilot" => {
-                                            auth::login_github_copilot_with_callbacks(progress, prompt).await
+                                            let copy_tx = events_tx_clone.clone();
+                                            let copy_block: auth::LoginCopyBlock = Box::new(move |label, text, kind, copy_attempt| {
+                                                let _ = copy_tx.send(AgentEvent::OperatorCopyBlock {
+                                                    label,
+                                                    text,
+                                                    kind,
+                                                    copy_attempt,
+                                                });
+                                            });
+                                            auth::login_github_copilot_with_copy_callback(progress, prompt, copy_block).await
                                         }
                                         "google-antigravity" | "antigravity" => {
                                             auth::login_antigravity_with_callbacks(progress, prompt).await

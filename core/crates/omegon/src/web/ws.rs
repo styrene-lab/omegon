@@ -2324,6 +2324,14 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "event_name": "system.notification",
             "message": escape_html(message),
         }),
+        AgentEvent::OperatorCopyBlock { label, text, kind, copy_attempt } => json!({
+            "type": "operator_copy_block",
+            "event_name": "operator.copy_block",
+            "label": escape_html(label),
+            "text": escape_html(text),
+            "kind": kind.as_str(),
+            "copy_status": copy_attempt.as_ref().map(|status| status.label()),
+        }),
         AgentEvent::StreamIdle {
             provider,
             model,
@@ -3069,6 +3077,7 @@ mod tests {
             AgentEvent::RouteChanged { .. } => {}
             AgentEvent::SkillActivation { .. } => {}
             AgentEvent::SystemNotification { .. } => {}
+            AgentEvent::OperatorCopyBlock { .. } => {}
             AgentEvent::StreamIdle { .. } => {}
             AgentEvent::ProviderRetry { .. } => {}
             AgentEvent::ProviderFailure { .. } => {}
@@ -3215,6 +3224,12 @@ mod tests {
             AgentEvent::SystemNotification {
                 message: "test".into(),
             },
+            AgentEvent::OperatorCopyBlock {
+                label: "Device code".into(),
+                text: "432F-FB36".into(),
+                kind: omegon_traits::OperatorCopyKind::AuthDeviceCode,
+                copy_attempt: Some(omegon_traits::ClipboardCopyStatus::Unavailable),
+            },
             // Variants previously missing from this test — added so the
             // exhaustive `_exhaustive_agent_event_serialization_coverage`
             // guard above is the *only* thing the test relies on for
@@ -3272,8 +3287,8 @@ mod tests {
         }
         assert_eq!(
             events.len(),
-            26,
-            "should cover all 26 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
+            27,
+            "should cover all 27 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
         );
     }
 

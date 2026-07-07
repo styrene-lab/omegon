@@ -1661,6 +1661,20 @@ pub fn daemon_event_stream_envelope(
             "extension.status_changed",
             serde_json::to_value(event).unwrap_or_else(|_| serde_json::json!({})),
         ),
+        AgentEvent::OperatorCopyBlock {
+            label,
+            text,
+            kind,
+            copy_attempt,
+        } => (
+            "session.operator_copy_block",
+            serde_json::json!({
+                "label": label,
+                "text": text,
+                "kind": kind.as_str(),
+                "copy_status": copy_attempt.as_ref().map(|status| status.label()),
+            }),
+        ),
         AgentEvent::HarnessStatusChanged { status_json } => {
             ("runtime.status_changed", status_json.clone())
         }
