@@ -4055,10 +4055,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let (effective_model, bridge): (String, Box<dyn LlmBridge>) = match (&startup_route, resolved_bridge) {
         (route::ProviderRoute::Serving { model }, Some(native)) => {
             tracing::info!(model = %model, "using native LLM provider");
-            startup_decision.bridge_model = model.clone();
+            startup_decision.bridge_model = model.as_str().to_string();
             startup_decision.provider_connected = true;
             startup_decision.use_null_bridge = false;
-            (model.clone(), native)
+            (model.as_str().to_string(), native)
         }
         (route::ProviderRoute::Fallback { selected, serving, reason }, Some(fallback_bridge)) => {
             tracing::warn!(
@@ -4070,10 +4070,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             startup_auth_warnings.push(format!(
                 "Selected profile model {selected} is unavailable for this session; explicitly configured fallback {serving} is serving. Remove `fallbackProviders` or refresh credentials to stop fallback."
             ));
-            startup_decision.bridge_model = serving.clone();
+            startup_decision.bridge_model = serving.as_str().to_string();
             startup_decision.provider_connected = true;
             startup_decision.use_null_bridge = false;
-            (serving.clone(), fallback_bridge)
+            (serving.as_str().to_string(), fallback_bridge)
         }
         (route::ProviderRoute::Fallback { selected, serving, .. }, None) => {
             tracing::warn!(selected = %selected, serving = %serving, "configured fallback provider resolved but bridge detection failed");
@@ -4083,7 +4083,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             ));
             startup_decision.provider_connected = false;
             startup_decision.use_null_bridge = true;
-            (serving.clone(), Box::new(bridge::NullBridge) as Box<dyn LlmBridge>)
+            (serving.as_str().to_string(), Box::new(bridge::NullBridge) as Box<dyn LlmBridge>)
         }
         (route::ProviderRoute::Serving { model }, None) => {
             tracing::warn!(model = %model, "startup credential probe passed but bridge detection failed");
@@ -4093,7 +4093,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             ));
             startup_decision.provider_connected = false;
             startup_decision.use_null_bridge = true;
-            (model.clone(), Box::new(bridge::NullBridge) as Box<dyn LlmBridge>)
+            (model.as_str().to_string(), Box::new(bridge::NullBridge) as Box<dyn LlmBridge>)
         }
         (route::ProviderRoute::Disconnected { selected, reason }, _) => {
             tracing::warn!(selected = %selected, reason = ?reason, "no LLM provider available for selected interactive model and no explicit fallback engaged");
