@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added additive conceptual model IDs to the model registry so multiple provider routes can map to the same semantic model class ahead of first-class GitHub Copilot routing.
 
 ### Fixed
+- Routed GitHub Copilot `gpt-5.5` through Copilot's `/responses` endpoint instead of the unsupported `/chat/completions` path and made Copilot runtime errors name the failing endpoint.
 - Prevented GitHub Copilot routes with an empty effective model from sending blank `model` values to the Copilot API and reject explicit empty model switches such as `github-copilot:`.
 - Added `github-copilot` to `/auth` command suggestions so Copilot login is discoverable from the TUI command picker.
 - Unified `/auth` status probing with the canonical operator auth provider list so GitHub Copilot appears on every auth surface and obsolete Ollama Cloud rows no longer leak through the old hardcoded status path.
