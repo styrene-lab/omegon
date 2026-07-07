@@ -4488,6 +4488,7 @@ impl App {
         let provider_ids = [
             "anthropic",
             "openai-codex",
+            "github-copilot",
             "openai",
             "openrouter",
             "google",

@@ -29,6 +29,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added additive conceptual model IDs to the model registry so multiple provider routes can map to the same semantic model class ahead of first-class GitHub Copilot routing.
 
 ### Fixed
+- Added GitHub Copilot to the shared TUI `/auth` and `/model providers` provider rows and refreshed CLI auth provider help so the first-class Copilot login route is discoverable.
 - Replaced unstable `if let` match guards in slash-command parsing so `just run` compiles on the supported Rust toolchain.
 
 ## [0.27.2] - 2026-07-05
