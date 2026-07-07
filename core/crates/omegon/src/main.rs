@@ -2347,6 +2347,7 @@ fn load_web_authority_config(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_embedded_command(
     control_port: u16,
     strict_port: bool,
@@ -7510,7 +7511,6 @@ fn format_github_copilot_contract_probe(
     output
 }
 
-
 fn format_github_copilot_tools_probe(probe: &github_copilot::GithubCopilotToolsProbe) -> String {
     let mut output = String::from("GitHub Copilot tools contract probe\n");
     output.push_str(&format!(
@@ -7543,7 +7543,11 @@ fn format_github_copilot_tools_probe(probe: &github_copilot::GithubCopilotToolsP
 async fn run_github_copilot_tools_probe_command() -> anyhow::Result<()> {
     let probe = github_copilot::probe_github_copilot_tools_contract().await?;
     println!("{}", format_github_copilot_tools_probe(&probe));
-    if probe.first_success && probe.tool_call_present && probe.second_success && probe.final_text_present {
+    if probe.first_success
+        && probe.tool_call_present
+        && probe.second_success
+        && probe.final_text_present
+    {
         Ok(())
     } else {
         anyhow::bail!("GitHub Copilot tools contract probe failed")

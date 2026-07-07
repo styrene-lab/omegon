@@ -5317,7 +5317,8 @@ warning: {warning}"
                 match value.as_str() {
                     p if crate::auth::provider_by_id(p).is_some_and(|provider| {
                         provider.auth_method == crate::auth::AuthMethod::OAuth
-                    }) => {
+                    }) =>
+                    {
                         let _ = tx.try_send(TuiCommand::BusCommand {
                             name: "auth_login".to_string(),
                             args: value.clone(),

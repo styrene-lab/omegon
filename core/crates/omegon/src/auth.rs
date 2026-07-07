@@ -3653,7 +3653,9 @@ mod tests {
             )
             .unwrap();
 
-            assert!(provider_connected_for_model("anthropic:github-copilot:gpt-5.5"));
+            assert!(provider_connected_for_model(
+                "anthropic:github-copilot:gpt-5.5"
+            ));
             assert!(provider_oauth_for_model("anthropic:github-copilot:gpt-5.5"));
         });
     }

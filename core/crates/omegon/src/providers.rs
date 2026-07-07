@@ -1411,18 +1411,17 @@ impl LlmBridge for AnthropicClient {
             )
             .header("anthropic-version", "2023-06-01")
             .header("anthropic-beta", {
-                let flags = if is_oauth {
-                    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14"
-                        .to_string()
-                } else {
-                    "interleaved-thinking-2025-05-14".to_string()
-                };
                 // NOTE: context-1m-2025-08-07 is NEVER sent. Sonnet 4.6 and
                 // Opus 4.6 support 1M context natively without a beta flag.
                 // Sending it triggers "Extra usage is required for long context
                 // requests" (429) on OAuth subscriptions — a deprecated billing
                 // gate that no longer corresponds to a capability gate.
-                flags
+                if is_oauth {
+                    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14"
+                        .to_string()
+                } else {
+                    "interleaved-thinking-2025-05-14".to_string()
+                }
             })
             .header("content-type", "application/json")
             // Claude Code identity headers for OAuth subscription recognition
@@ -2061,7 +2060,6 @@ async fn parse_openai_stream(
 // OpenRouter speaks the OpenAI wire protocol but routes across 27+ free models.
 // Uses the OpenAI client internally with a different base URL and API key source.
 
-
 pub struct GithubCopilotClient {
     client: reqwest::Client,
     base_url: String,
@@ -2071,8 +2069,9 @@ impl GithubCopilotClient {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
-            base_url: std::env::var("GITHUB_COPILOT_BASE_URL")
-                .unwrap_or_else(|_| crate::github_copilot::DEFAULT_COPILOT_API_BASE_URL.to_string()),
+            base_url: std::env::var("GITHUB_COPILOT_BASE_URL").unwrap_or_else(|_| {
+                crate::github_copilot::DEFAULT_COPILOT_API_BASE_URL.to_string()
+            }),
         }
     }
 }
@@ -2118,17 +2117,18 @@ impl LlmBridge for GithubCopilotClient {
                     return;
                 }
             };
-            let copilot_token = match crate::github_copilot::exchange_github_copilot_token(&github_token).await {
-                Ok(token) => token,
-                Err(error) => {
-                    let _ = tx
-                        .send(LlmEvent::Error {
-                            message: format!("GitHub Copilot token exchange failed: {error:#}"),
-                        })
-                        .await;
-                    return;
-                }
-            };
+            let copilot_token =
+                match crate::github_copilot::exchange_github_copilot_token(&github_token).await {
+                    Ok(token) => token,
+                    Err(error) => {
+                        let _ = tx
+                            .send(LlmEvent::Error {
+                                message: format!("GitHub Copilot token exchange failed: {error:#}"),
+                            })
+                            .await;
+                        return;
+                    }
+                };
             let header_profile = crate::github_copilot::GithubCopilotHeaderProfile::from_env();
             let mut body = json!({
                 "model": model,
@@ -2152,7 +2152,9 @@ impl LlmBridge for GithubCopilotClient {
                 Err(error) => {
                     let _ = tx
                         .send(LlmEvent::Error {
-                            message: format!("GitHub Copilot chat completion request failed: {error:#}"),
+                            message: format!(
+                                "GitHub Copilot chat completion request failed: {error:#}"
+                            ),
                         })
                         .await;
                     return;
@@ -2226,7 +2228,6 @@ impl LlmBridge for GithubCopilotClient {
     }
 }
 
-
 #[derive(Debug)]
 struct CopilotParsedCompletion {
     content: String,
@@ -2269,7 +2270,11 @@ fn parse_copilot_chat_completion(value: &Value) -> anyhow::Result<CopilotParsedC
             let arguments = serde_json::from_str(raw_args).map_err(|error| {
                 anyhow::anyhow!("tool call {idx} arguments are not valid JSON: {error}")
             })?;
-            tool_calls.push(crate::bridge::WireToolCall { id, name, arguments });
+            tool_calls.push(crate::bridge::WireToolCall {
+                id,
+                name,
+                arguments,
+            });
         }
     }
     if content.is_empty() && tool_calls.is_empty() {
@@ -6000,7 +6005,10 @@ mod tests {
         }))
         .expect_err("empty response should fail");
 
-        assert!(error.to_string().contains("neither assistant text nor tool calls"));
+        assert!(
+            error
+                .to_string()
+                .contains("neither assistant text nor tool calls")
+        );
     }
-
 }

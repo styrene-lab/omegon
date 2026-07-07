@@ -804,7 +804,9 @@ impl RouteController {
         let serving = format!("{}:{}", candidate.provider_id, candidate.model_id);
         *self.bridge.write().await = new_bridge;
         let mut state = self.state.write().await;
-        state.route = ProviderRoute::Serving { model: ModelRouteSpec::parse(serving) };
+        state.route = ProviderRoute::Serving {
+            model: ModelRouteSpec::parse(serving),
+        };
         state.warning = None;
         drop(state);
         Ok(self.emit_changed().await)
@@ -905,9 +907,11 @@ impl RouteController {
 
 fn route_event_fields(route: &ProviderRoute) -> (String, Option<String>, Option<String>) {
     match route {
-        ProviderRoute::Serving { model } => {
-            ("serving".into(), Some(model.as_str().to_string()), Some(model.as_str().to_string()))
-        }
+        ProviderRoute::Serving { model } => (
+            "serving".into(),
+            Some(model.as_str().to_string()),
+            Some(model.as_str().to_string()),
+        ),
         ProviderRoute::Fallback {
             selected, serving, ..
         } => (
@@ -921,9 +925,11 @@ fn route_event_fields(route: &ProviderRoute) -> (String, Option<String>, Option<
             let selected = route_event_fields(prior).1;
             ("login_pending".into(), selected, Some(provider.clone()))
         }
-        ProviderRoute::Disconnected { selected, .. } => {
-            ("disconnected".into(), Some(selected.as_str().to_string()), None)
-        }
+        ProviderRoute::Disconnected { selected, .. } => (
+            "disconnected".into(),
+            Some(selected.as_str().to_string()),
+            None,
+        ),
     }
 }
 
@@ -1410,7 +1416,10 @@ mod tests {
         let serving = ProviderRoute::Serving {
             model: "anthropic:github-copilot:gpt-5.5".into(),
         };
-        assert_eq!(serving_model_from_route(&serving), Some("github-copilot:gpt-5.5"));
+        assert_eq!(
+            serving_model_from_route(&serving),
+            Some("github-copilot:gpt-5.5")
+        );
 
         let fallback = ProviderRoute::Fallback {
             selected: "anthropic:github-copilot:gpt-5.5".into(),
@@ -1420,7 +1429,9 @@ mod tests {
             },
         };
         match fallback {
-            ProviderRoute::Fallback { selected, serving, .. } => {
+            ProviderRoute::Fallback {
+                selected, serving, ..
+            } => {
                 assert_eq!(selected.as_str(), "github-copilot:gpt-5.5");
                 assert_eq!(serving.as_str(), "github-copilot:claude-sonnet-4-6");
             }

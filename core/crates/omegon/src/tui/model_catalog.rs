@@ -496,12 +496,16 @@ mod tests {
             .get("claude-sonnet-4.6")
             .expect("sonnet conceptual group");
         assert_eq!(sonnet_routes.len(), 2);
-        assert!(sonnet_routes
-            .iter()
-            .any(|route| route.id == "anthropic:claude-sonnet-4-6"));
-        assert!(sonnet_routes
-            .iter()
-            .any(|route| route.id == "github-copilot:claude-sonnet-4.6"));
+        assert!(
+            sonnet_routes
+                .iter()
+                .any(|route| route.id == "anthropic:claude-sonnet-4-6")
+        );
+        assert!(
+            sonnet_routes
+                .iter()
+                .any(|route| route.id == "github-copilot:claude-sonnet-4.6")
+        );
     }
 
     #[test]

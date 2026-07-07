@@ -522,10 +522,7 @@ fn ensure_parent_writable(path: &Path, context: &str) -> anyhow::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("{context} has no parent: {}", path.display()))?;
-    let probe = parent.join(format!(
-        ".omegon-update-write-test-{}",
-        std::process::id()
-    ));
+    let probe = parent.join(format!(".omegon-update-write-test-{}", std::process::id()));
     match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -560,7 +557,7 @@ fn update_install_symlinks(binary_link: &Path, latest_binary: &Path) -> anyhow::
 
 #[cfg(unix)]
 fn ensure_link_repointable(link: &Path) -> anyhow::Result<()> {
-    if !link.exists() && !link.symlink_metadata().is_ok() {
+    if !link.exists() && link.symlink_metadata().is_err() {
         return Ok(());
     }
     ensure_parent_writable(link, "install target")
@@ -573,7 +570,10 @@ fn replace_symlink(link: &Path, target: &Path) -> anyhow::Result<()> {
             if metadata.file_type().is_symlink() || metadata.is_file() {
                 std::fs::remove_file(link)?;
             } else {
-                anyhow::bail!("refusing to replace non-file install target: {}", link.display());
+                anyhow::bail!(
+                    "refusing to replace non-file install target: {}",
+                    link.display()
+                );
             }
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
@@ -863,9 +863,7 @@ mod tests {
             version: Some("0.27.0".into()),
             binary: Some(PathBuf::from("/usr/local/bin/omegon")),
             version_dir: Some(PathBuf::from("/home/me/.omegon/versions/0.27.0")),
-            versioned_binary: Some(PathBuf::from(
-                "/home/me/.omegon/versions/0.27.0/omegon",
-            )),
+            versioned_binary: Some(PathBuf::from("/home/me/.omegon/versions/0.27.0/omegon")),
         };
 
         assert_eq!(

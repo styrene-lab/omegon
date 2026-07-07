@@ -1184,18 +1184,18 @@ fn validate_model_registry_content(path: &Path, content: &str) -> std::result::R
             errors.push(format!("{label}: missing capabilities"));
         }
         if let Some(conceptual_model_id) = model.get("conceptualModelId")
-            && !conceptual_model_id
+            && conceptual_model_id
                 .as_str()
-                .is_some_and(|value| !value.trim().is_empty())
+                .is_none_or(|value| value.trim().is_empty())
         {
             errors.push(format!(
                 "{label}: conceptualModelId must be a non-empty string when present"
             ));
         }
         if let Some(producer) = model.get("producer")
-            && !producer
+            && producer
                 .as_str()
-                .is_some_and(|value| !value.trim().is_empty())
+                .is_none_or(|value| value.trim().is_empty())
         {
             errors.push(format!(
                 "{label}: producer must be a non-empty string when present"
@@ -2050,9 +2050,22 @@ fn validation_recommendation(
             lines.push(format!("  - {recommendation}"));
         }
         if paths.iter().any(|path| is_markdown_path(path)) {
-            lines.push(
-                "  - For Markdown/docs, prefer the repo's documentation build or linter when present (`just docs`, `mdbook test`, `markdownlint`, etc.).".to_string(),
-            );
+            let workspace_kind = crate::workspace::infer::infer_workspace_kind(cwd);
+            let change_kind =
+                crate::workspace::change_kind::classify_change_kind(cwd, workspace_kind, paths);
+            if matches!(
+                change_kind,
+                crate::workspace::change_kind::ChangeKind::HumanDocs
+                    | crate::workspace::change_kind::ChangeKind::KnowledgeNotes
+            ) {
+                lines.push(
+                    "  - For document-only Markdown changes, use Markdown hygiene, frontmatter, spelling/style, or link checks if configured; code build/test validation is not applicable unless source files changed.".to_string(),
+                );
+            } else {
+                lines.push(
+                    "  - For project documentation, prefer the repo's documentation build or linter when present (`just docs`, `mdbook test`, `markdownlint`, etc.).".to_string(),
+                );
+            }
         }
         lines.push(
             "  - If this file type should be first-class, add a lightweight Omegon Armory validator plugin so agents can call a named validator instead of guessing shell commands.".to_string(),
