@@ -443,15 +443,77 @@ impl CredentialProbe for CredentialLedger {
     }
 }
 
+/// Canonical provider-qualified model route stored in route state.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ModelRouteSpec(String);
+
+impl ModelRouteSpec {
+    pub fn parse(model: impl AsRef<str>) -> Self {
+        Self(crate::providers::canonical_model_spec(model.as_ref()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ModelRouteSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::ops::Deref for ModelRouteSpec {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl From<&str> for ModelRouteSpec {
+    fn from(value: &str) -> Self {
+        Self::parse(value)
+    }
+}
+
+impl From<String> for ModelRouteSpec {
+    fn from(value: String) -> Self {
+        Self::parse(value)
+    }
+}
+
+impl PartialEq<&str> for ModelRouteSpec {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl PartialEq<String> for ModelRouteSpec {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<ModelRouteSpec> for String {
+    fn eq(&self, other: &ModelRouteSpec) -> bool {
+        self == other.as_str()
+    }
+}
+
 /// Authoritative route for an interactive provider bridge.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProviderRoute {
     Serving {
-        model: String,
+        model: ModelRouteSpec,
     },
     Fallback {
-        selected: String,
-        serving: String,
+        selected: ModelRouteSpec,
+        serving: ModelRouteSpec,
         reason: FallbackReason,
     },
     LoginPending {
@@ -460,7 +522,7 @@ pub enum ProviderRoute {
         prior: Box<ProviderRoute>,
     },
     Disconnected {
-        selected: String,
+        selected: ModelRouteSpec,
         reason: DisconnectedReason,
     },
 }
@@ -501,9 +563,9 @@ impl RouteSnapshot {
 
 pub(crate) fn intent_from_route(route: &ProviderRoute) -> ModelIntent {
     match route {
-        ProviderRoute::Serving { model } => ModelIntent::pinned_model(model.clone()),
+        ProviderRoute::Serving { model } => ModelIntent::pinned_model(model.as_str().to_string()),
         ProviderRoute::Fallback { selected, .. } | ProviderRoute::Disconnected { selected, .. } => {
-            ModelIntent::pinned_model(selected.clone())
+            ModelIntent::pinned_model(selected.as_str().to_string())
         }
         ProviderRoute::LoginPending { prior, .. } => intent_from_route(prior),
     }
@@ -511,8 +573,8 @@ pub(crate) fn intent_from_route(route: &ProviderRoute) -> ModelIntent {
 
 fn serving_model_from_route(route: &ProviderRoute) -> Option<&str> {
     match route {
-        ProviderRoute::Serving { model } => Some(model),
-        ProviderRoute::Fallback { serving, .. } => Some(serving),
+        ProviderRoute::Serving { model } => Some(model.as_str()),
+        ProviderRoute::Fallback { serving, .. } => Some(serving.as_str()),
         ProviderRoute::LoginPending { prior, .. } => serving_model_from_route(prior),
         ProviderRoute::Disconnected { .. } => None,
     }
@@ -586,10 +648,10 @@ impl RouteController {
         tracing::info!(selected_model = %selected_model, selected_provider = %selected_provider, credential_state = %selected_probe.summary(), fallback_providers = ?fallback_providers, "provider route startup credential probe");
         match selected_probe {
             CredentialState::Valid { .. } => ProviderRoute::Serving {
-                model: selected_model,
+                model: ModelRouteSpec::parse(selected_model),
             },
             selected_state if fallback_providers.is_empty() => ProviderRoute::Disconnected {
-                selected: selected_model,
+                selected: ModelRouteSpec::parse(selected_model),
                 reason: disconnected_for_provider_state(selected_provider, selected_state),
             },
             selected_state => {
@@ -603,8 +665,8 @@ impl RouteController {
                             crate::providers::default_model_for_provider(provider)
                     {
                         return ProviderRoute::Fallback {
-                            selected: selected_model,
-                            serving,
+                            selected: ModelRouteSpec::parse(selected_model),
+                            serving: ModelRouteSpec::parse(serving),
                             reason: fallback_reason_for_state(selected_provider, selected_state),
                         };
                     }
@@ -614,7 +676,7 @@ impl RouteController {
                     });
                 }
                 ProviderRoute::Disconnected {
-                    selected: selected_model.clone(),
+                    selected: ModelRouteSpec::parse(selected_model.clone()),
                     reason: DisconnectedReason::FallbackExhausted {
                         selected: selected_model,
                         attempts,
@@ -657,7 +719,7 @@ impl RouteController {
                 };
                 *self.bridge.write().await = bridge;
                 state.route = ProviderRoute::Serving {
-                    model: model.clone(),
+                    model: ModelRouteSpec::parse(model.clone()),
                 };
                 state.warning = None;
             }
@@ -742,7 +804,7 @@ impl RouteController {
         let serving = format!("{}:{}", candidate.provider_id, candidate.model_id);
         *self.bridge.write().await = new_bridge;
         let mut state = self.state.write().await;
-        state.route = ProviderRoute::Serving { model: serving };
+        state.route = ProviderRoute::Serving { model: ModelRouteSpec::parse(serving) };
         state.warning = None;
         drop(state);
         Ok(self.emit_changed().await)
@@ -776,8 +838,8 @@ impl RouteController {
         ledger: &impl CredentialProbe,
         new_bridge: Option<Box<dyn LlmBridge>>,
     ) -> anyhow::Result<RouteSnapshot> {
-        let model = crate::providers::canonical_model_spec(&model);
-        let provider = crate::providers::infer_provider_id(&model);
+        let model = ModelRouteSpec::parse(model);
+        let provider = crate::providers::infer_provider_id(model.as_str());
         crate::auth::trace_auth_store_probe(&provider, "route_switch_model");
         let credential_state = ledger.probe_provider(&provider);
         tracing::info!(model = %model, provider = %provider, credential_state = %credential_state.summary(), "provider route model switch credential probe");
@@ -800,7 +862,7 @@ impl RouteController {
 
         *self.bridge.write().await = bridge;
         let mut state = self.state.write().await;
-        state.intent = ModelIntent::pinned_model(model.clone());
+        state.intent = ModelIntent::pinned_model(model.as_str().to_string());
         state.route = ProviderRoute::Serving { model };
         state.warning = None;
         drop(state);
@@ -812,7 +874,7 @@ impl RouteController {
         let mut state = self.state.write().await;
         if provider == selected_provider {
             state.route = ProviderRoute::Disconnected {
-                selected: selected_model,
+                selected: ModelRouteSpec::parse(selected_model),
                 reason: DisconnectedReason::MissingCredentials {
                     provider,
                     probed_sources: vec!["logout".to_string()],
@@ -844,14 +906,14 @@ impl RouteController {
 fn route_event_fields(route: &ProviderRoute) -> (String, Option<String>, Option<String>) {
     match route {
         ProviderRoute::Serving { model } => {
-            ("serving".into(), Some(model.clone()), Some(model.clone()))
+            ("serving".into(), Some(model.as_str().to_string()), Some(model.as_str().to_string()))
         }
         ProviderRoute::Fallback {
             selected, serving, ..
         } => (
             "fallback".into(),
-            Some(selected.clone()),
-            Some(serving.clone()),
+            Some(selected.as_str().to_string()),
+            Some(serving.as_str().to_string()),
         ),
         ProviderRoute::LoginPending {
             provider, prior, ..
@@ -860,7 +922,7 @@ fn route_event_fields(route: &ProviderRoute) -> (String, Option<String>, Option<
             ("login_pending".into(), selected, Some(provider.clone()))
         }
         ProviderRoute::Disconnected { selected, .. } => {
-            ("disconnected".into(), Some(selected.clone()), None)
+            ("disconnected".into(), Some(selected.as_str().to_string()), None)
         }
     }
 }
@@ -1026,7 +1088,7 @@ impl Default for RouteController {
     fn default() -> Self {
         Self::new(
             ProviderRoute::Disconnected {
-                selected: String::new(),
+                selected: ModelRouteSpec::parse(""),
                 reason: DisconnectedReason::ProviderUnavailable {
                     provider: String::new(),
                     detail: "route controller not initialized".to_string(),
@@ -1329,6 +1391,18 @@ mod tests {
             }
         );
         assert!(snapshot.warning.is_none());
+    }
+
+    #[test]
+    fn model_route_spec_canonicalizes_nested_provider_prefixes() {
+        assert_eq!(
+            ModelRouteSpec::parse("anthropic:github-copilot:gpt-5.5").as_str(),
+            "github-copilot:gpt-5.5"
+        );
+        assert_eq!(
+            ModelRouteSpec::parse("github-copilot:anthropic:claude-sonnet-4-6").as_str(),
+            "github-copilot:claude-sonnet-4-6"
+        );
     }
 
     #[tokio::test]
