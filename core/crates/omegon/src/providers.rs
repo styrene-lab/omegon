@@ -408,7 +408,7 @@ pub fn explicit_provider_id(model_spec: &str) -> Option<String> {
     Some(if head == "local" { "ollama" } else { head }.to_string())
 }
 
-fn model_id_from_spec(model_spec: &str) -> &str {
+pub(crate) fn model_id_from_spec(model_spec: &str) -> &str {
     let trimmed = model_spec.trim();
     if trimmed.eq_ignore_ascii_case("deepseek-local") {
         return "deepseek-v4-flash";
