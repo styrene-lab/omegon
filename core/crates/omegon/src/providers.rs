@@ -2064,8 +2064,12 @@ impl LlmBridge for GithubCopilotClient {
             .unwrap_or("gpt-5.4")
             .to_string();
         let wire_msgs = OpenAIClient::build_wire_messages(system_prompt, messages);
-        let signin = crate::github_copilot::resolve_github_signin().await?;
-        let copilot_token = crate::github_copilot::exchange_github_copilot_token(&signin.token).await?;
+        let (github_token, _is_oauth) = resolve_api_key_sync("github-copilot").ok_or_else(|| {
+            anyhow::anyhow!(
+                "GitHub Copilot provider requires `omegon auth login github-copilot` or a GitHub Copilot-specific token; diagnostic GitHub CLI/GITHUB_TOKEN fallbacks are not used for runtime inference"
+            )
+        })?;
+        let copilot_token = crate::github_copilot::exchange_github_copilot_token(&github_token).await?;
         let header_profile = crate::github_copilot::GithubCopilotHeaderProfile::from_env();
         let body = json!({
             "model": model,
@@ -2088,7 +2092,10 @@ impl LlmBridge for GithubCopilotClient {
             if !status.is_success() {
                 let _ = tx
                     .send(LlmEvent::Error {
-                        message: format!("GitHub Copilot chat completion failed ({status}): {text}"),
+                        message: format!(
+                            "GitHub Copilot chat completion failed ({status}): {}",
+                            crate::github_copilot::redact_body_for_display(&text)
+                        ),
                     })
                     .await;
                 return;
