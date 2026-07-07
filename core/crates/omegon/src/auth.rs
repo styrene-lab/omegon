@@ -328,7 +328,7 @@ pub fn endpoint_secret_refs(provider_id: &str) -> Vec<String> {
 pub fn operator_auth_provider_ids() -> Vec<&'static str> {
     PROVIDERS
         .iter()
-        .filter(|provider| provider.id != "ollama")
+        .filter(|provider| provider.id != "ollama" && provider.id != "ollama-cloud")
         .map(|provider| provider.id)
         .collect()
 }
@@ -942,16 +942,8 @@ pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Re
 pub async fn probe_all_providers() -> AuthStatus {
     let mut providers = Vec::new();
 
-    for provider in ["anthropic", "openai", "openai-codex", "ollama-cloud"] {
+    for provider in operator_auth_provider_ids() {
         providers.push(probe_provider(provider).await);
-    }
-
-    // Probe optional providers only show if configured.
-    for provider in ["openrouter"] {
-        let info = probe_provider(provider).await;
-        if info.status == ProviderAuthStatus::Authenticated {
-            providers.push(info);
-        }
     }
 
     // TODO: Probe Vault
@@ -3665,8 +3657,40 @@ mod tests {
         let providers = operator_auth_provider_help_list();
         assert!(providers.contains("anthropic"), "got: {providers}");
         assert!(providers.contains("openai-codex"), "got: {providers}");
-        assert!(!providers.contains("ollama,"), "got: {providers}");
-        assert!(!providers.contains("ollama "), "got: {providers}");
+        assert!(providers.contains("github-copilot"), "got: {providers}");
+        assert!(!providers.contains("ollama"), "got: {providers}");
+    }
+
+    #[test]
+    fn auth_status_uses_operator_auth_provider_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("auth.json");
+        let status = with_auth_json_path_and_home_env(Some(&override_path), dir.path(), || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(probe_all_providers())
+        });
+        let providers: std::collections::HashSet<_> = status
+            .providers
+            .iter()
+            .map(|provider| provider.name.as_str())
+            .collect();
+
+        for provider in operator_auth_provider_ids() {
+            assert!(
+                providers.contains(provider),
+                "auth status missing operator auth provider {provider}; got: {:?}",
+                providers
+            );
+        }
+        assert!(
+            providers.contains("github-copilot"),
+            "auth status must include GitHub Copilot even before login"
+        );
+        assert!(
+            !providers.contains("ollama-cloud"),
+            "auth status must not use the obsolete hardcoded provider list"
+        );
     }
     #[test]
     fn endpoint_secret_refs_cover_registry_only_providers() {
