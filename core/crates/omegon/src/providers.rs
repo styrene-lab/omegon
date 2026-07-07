@@ -6192,8 +6192,15 @@ mod tests {
 
     #[tokio::test]
     async fn compat_endpoints_are_reachable_and_speak_openai_protocol() {
+        if std::env::var_os("OMEGON_LIVE_ENDPOINT_PROBES").is_none() {
+            eprintln!(
+                "skipping live compat endpoint probes; set OMEGON_LIVE_ENDPOINT_PROBES=1 to run"
+            );
+            return;
+        }
+
         // Probe every non-local OpenAI-compatible endpoint without auth.
-        // This is a free validation that base URLs are correct.
+        // This is a live validation that base URLs are correct.
         // HuggingFace excluded: returns HTML on 401 (auth page).
         // Perplexity excluded: returns 404 on unauthenticated probe.
         // Both work correctly with valid tokens.

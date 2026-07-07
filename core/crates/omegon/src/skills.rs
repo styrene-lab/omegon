@@ -1093,13 +1093,18 @@ path = "{skill_path}"
 
     struct CwdRestore {
         original: std::path::PathBuf,
+        _guard: tokio::sync::MutexGuard<'static, ()>,
     }
 
     impl CwdRestore {
         fn enter(path: &std::path::Path) -> Self {
+            let guard = crate::test_support::cwd::lock();
             let original = std::env::current_dir().unwrap();
             std::env::set_current_dir(path).unwrap();
-            Self { original }
+            Self {
+                original,
+                _guard: guard,
+            }
         }
     }
 

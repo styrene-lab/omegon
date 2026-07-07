@@ -22,3 +22,22 @@ pub mod env {
         ENV_LOCK.blocking_lock()
     }
 }
+
+#[cfg(test)]
+pub mod cwd {
+    use std::sync::LazyLock;
+
+    /// Global current-working-directory lock for tests that call
+    /// `std::env::set_current_dir`. The process CWD is shared across all test
+    /// threads, and tempdir-backed CWDs disappear when their guard drops.
+    pub static CWD_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+        LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+    pub async fn lock_async() -> tokio::sync::MutexGuard<'static, ()> {
+        CWD_LOCK.lock().await
+    }
+
+    pub fn lock() -> tokio::sync::MutexGuard<'static, ()> {
+        CWD_LOCK.blocking_lock()
+    }
+}

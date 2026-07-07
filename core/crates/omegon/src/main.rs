@@ -23,8 +23,8 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 #[cfg(test)]
-pub(crate) static GLOBAL_TEST_ENV_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
-    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+pub(crate) static GLOBAL_TEST_ENV_LOCK: std::sync::LazyLock<&'static tokio::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| &crate::test_support::cwd::CWD_LOCK);
 
 #[allow(clippy::await_holding_refcell_ref)] // single-threaded LocalSet — no concurrent mutations
 mod acp;
@@ -10794,6 +10794,7 @@ mod tests {
 
     #[test]
     fn plan_list_renders_visible_completed_and_openspec_sections() {
+        let _guard = crate::test_support::cwd::lock();
         let cwd = tempfile::tempdir().unwrap();
         let previous_cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(cwd.path()).unwrap();
