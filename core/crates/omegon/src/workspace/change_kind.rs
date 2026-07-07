@@ -33,9 +33,11 @@ pub fn classify_change_kind(
             saw_spec = true;
         } else if is_knowledge_note_path(&rel, workspace_kind) {
             saw_notes = true;
+        } else if is_human_document_path(&rel, workspace_kind) {
+            saw_human_docs = true;
         } else if is_project_docs_path(&rel, workspace_kind) {
             saw_project_docs = true;
-        } else if is_human_document_path(&rel, workspace_kind) {
+        } else if is_document_asset_path(&rel, workspace_kind) {
             saw_human_docs = true;
         } else {
             saw_unknown = true;
@@ -150,6 +152,21 @@ fn is_human_document_path(path: &Path, workspace_kind: WorkspaceKind) -> bool {
         && matches!(extension(path).as_deref(), Some("md" | "txt" | "rst" | "adoc"))
 }
 
+fn is_document_asset_path(path: &Path, workspace_kind: WorkspaceKind) -> bool {
+    let text = path_str(path);
+    let in_document_workspace = matches!(workspace_kind, WorkspaceKind::Knowledge | WorkspaceKind::Generic | WorkspaceKind::Vault);
+    if !in_document_workspace {
+        return false;
+    }
+    text.starts_with("assets/")
+        || text.starts_with("images/")
+        || text.starts_with("media/")
+        || matches!(
+            extension(path).as_deref(),
+            Some("png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "pdf" | "yaml" | "yml")
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +190,26 @@ mod tests {
                 Path::new("."),
                 WorkspaceKind::Knowledge,
                 &[p("chapter-1.md")]
+            ),
+            ChangeKind::HumanDocs
+        );
+    }
+
+    #[test]
+    fn classifies_readme_in_knowledge_workspace_as_human_docs() {
+        assert_eq!(
+            classify_change_kind(Path::new("."), WorkspaceKind::Knowledge, &[p("README.md")]),
+            ChangeKind::HumanDocs
+        );
+    }
+
+    #[test]
+    fn classifies_document_assets_as_human_docs_in_document_workspace() {
+        assert_eq!(
+            classify_change_kind(
+                Path::new("."),
+                WorkspaceKind::Knowledge,
+                &[p("chapter-1.md"), p("images/cover.png"), p("metadata.yml")]
             ),
             ChangeKind::HumanDocs
         );
