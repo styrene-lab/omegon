@@ -579,6 +579,7 @@ impl RouteController {
         fallback_providers: &[String],
         ledger: &impl CredentialProbe,
     ) -> ProviderRoute {
+        let selected_model = crate::providers::canonical_model_spec(&selected_model);
         let selected_provider = crate::providers::infer_provider_id(&selected_model);
         crate::auth::trace_auth_store_probe(&selected_provider, "route_startup:selected");
         let selected_probe = ledger.probe_provider(&selected_provider);
@@ -775,6 +776,7 @@ impl RouteController {
         ledger: &impl CredentialProbe,
         new_bridge: Option<Box<dyn LlmBridge>>,
     ) -> anyhow::Result<RouteSnapshot> {
+        let model = crate::providers::canonical_model_spec(&model);
         let provider = crate::providers::infer_provider_id(&model);
         crate::auth::trace_auth_store_probe(&provider, "route_switch_model");
         let credential_state = ledger.probe_provider(&provider);
@@ -1304,6 +1306,26 @@ mod tests {
             snapshot.route,
             ProviderRoute::Serving {
                 model: "openai-codex:gpt-5.5".into()
+            }
+        );
+        assert!(snapshot.warning.is_none());
+    }
+
+    #[tokio::test]
+    async fn switch_model_canonicalizes_nested_copilot_route_before_state_storage() {
+        let controller = RouteController::default();
+        let snapshot = controller
+            .switch_model(
+                "anthropic:github-copilot:gpt-5.5".into(),
+                &ledger(&[("github-copilot", valid())]),
+                Some(Box::new(NullBridge)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot.route,
+            ProviderRoute::Serving {
+                model: "github-copilot:gpt-5.5".into()
             }
         );
         assert!(snapshot.warning.is_none());

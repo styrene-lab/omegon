@@ -424,6 +424,14 @@ pub(crate) fn model_id_from_spec(model_spec: &str) -> &str {
     current
 }
 
+pub(crate) fn canonical_model_spec(model_spec: &str) -> String {
+    let trimmed = model_spec.trim();
+    if let Some(provider) = explicit_provider_id(trimmed) {
+        return format!("{}:{}", provider, model_id_from_spec(trimmed));
+    }
+    trimmed.to_string()
+}
+
 fn is_openai_family_model(model_spec: &str) -> bool {
     let model_id = model_id_from_spec(model_spec).to_ascii_lowercase();
     model_id.starts_with("gpt-")
