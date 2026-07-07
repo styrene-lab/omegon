@@ -29,6 +29,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added additive conceptual model IDs to the model registry so multiple provider routes can map to the same semantic model class ahead of first-class GitHub Copilot routing.
 
 ### Fixed
+- Updated capability grade inference to use shared Copilot-aware provider/model normalization so nested Copilot routes do not get down-ranked as Anthropic producer routes during orchestration.
 - Aligned strict provider inference and auth-status provider/model parsing with the Copilot nested-provider rules so connected/authenticated indicators do not consult expired producer credentials.
 - Forced malformed nested Copilot route strings to resolve and probe as `github-copilot`, preventing producer prefixes from winning provider inference in route switches, setup checks, footer state, and other shared provider callers.
 - Routed `/auth list` to the shared auth status/list surface and hardened nested provider-qualified model IDs so Copilot routes like `anthropic:github-copilot:gpt-5.5` do not probe Anthropic credentials or preserve producer prefixes as execution providers.

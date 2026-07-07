@@ -352,16 +352,17 @@ fn default_model_for_provider(provider_id: &str, grade: CapabilityGradeBand) -> 
 /// to the parent model — children are capped to parent grade to avoid accidentally
 /// routing a leaf-scoped task to a more expensive model than the one that launched the run.
 pub fn infer_model_grade_band(model_str: &str) -> CapabilityGradeBand {
-    let (provider, model) = model_str.split_once(':').unwrap_or(("", model_str));
+    let provider = crate::providers::infer_provider_id(model_str);
+    let model = crate::providers::model_id_from_spec(model_str);
 
     // Local/ollama models use parameter-count heuristic
-    if matches!(provider, "ollama" | "local") {
+    if matches!(provider.as_str(), "ollama" | "local") {
         return infer_local_model_grade_band(model);
     }
 
     // Try registry route patterns first
     let reg = crate::model_registry::ModelRegistry::global();
-    if let Some(grade) = reg.infer_grade(provider, model) {
+    if let Some(grade) = reg.infer_grade(&provider, model) {
         return match grade {
             "S" => CapabilityGradeBand::Max,
             "A" | "B" => CapabilityGradeBand::Frontier,
@@ -372,10 +373,14 @@ pub fn infer_model_grade_band(model_str: &str) -> CapabilityGradeBand {
     }
 
     // Provider-level heuristics for models not in the registry
-    match provider {
+    match provider.as_str() {
         "anthropic" if model.contains("opus") => CapabilityGradeBand::Max,
         "anthropic" if model.contains("sonnet") => CapabilityGradeBand::Frontier,
         "anthropic" => CapabilityGradeBand::Leaf,
+        "github-copilot" if model.starts_with("gpt-5") || model.contains("opus") => {
+            CapabilityGradeBand::Max
+        }
+        "github-copilot" => CapabilityGradeBand::Frontier,
         "openai-codex" if model.contains("mini") => CapabilityGradeBand::Mid,
         "openai-codex" => CapabilityGradeBand::Max,
         "groq" if model.contains("70b") || model.contains("90b") => CapabilityGradeBand::Frontier,
@@ -482,6 +487,18 @@ mod tests {
         assert!(CapabilityGradeBand::Leaf < CapabilityGradeBand::Mid);
         assert!(CapabilityGradeBand::Mid < CapabilityGradeBand::Frontier);
         assert!(CapabilityGradeBand::Frontier < CapabilityGradeBand::Max);
+    }
+
+    #[test]
+    fn nested_copilot_route_grade_uses_copilot_provider_and_inner_model() {
+        assert_eq!(
+            infer_model_grade_band("anthropic:github-copilot:gpt-5.5"),
+            CapabilityGradeBand::Max
+        );
+        assert_eq!(
+            infer_model_grade_band("github-copilot:anthropic:claude-sonnet-4-6"),
+            CapabilityGradeBand::Frontier
+        );
     }
 
     #[test]
