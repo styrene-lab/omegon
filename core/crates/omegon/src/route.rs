@@ -1405,6 +1405,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn direct_route_state_construction_canonicalizes_model_specs() {
+        let serving = ProviderRoute::Serving {
+            model: "anthropic:github-copilot:gpt-5.5".into(),
+        };
+        assert_eq!(serving_model_from_route(&serving), Some("github-copilot:gpt-5.5"));
+
+        let fallback = ProviderRoute::Fallback {
+            selected: "anthropic:github-copilot:gpt-5.5".into(),
+            serving: "github-copilot:anthropic:claude-sonnet-4-6".into(),
+            reason: FallbackReason::MissingCredentials {
+                provider: "anthropic".into(),
+            },
+        };
+        match fallback {
+            ProviderRoute::Fallback { selected, serving, .. } => {
+                assert_eq!(selected.as_str(), "github-copilot:gpt-5.5");
+                assert_eq!(serving.as_str(), "github-copilot:claude-sonnet-4-6");
+            }
+            other => panic!("expected fallback route, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn logout_active_provider_disconnects_route() {
         let controller = RouteController::new(
