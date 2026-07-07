@@ -85,9 +85,13 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         id: "github-copilot",
         auth_key: "github-copilot",
         display_name: "GitHub Copilot",
-        env_vars: &["GITHUB_COPILOT_TOKEN", "COPILOT_OAUTH_TOKEN"],
-        auth_method: AuthMethod::Dynamic,
-        description: "Dynamic — GitHub Copilot subscription via local copilot CLI",
+        env_vars: &[
+            "GITHUB_COPILOT_OAUTH_TOKEN",
+            "GITHUB_COPILOT_TOKEN",
+            "COPILOT_OAUTH_TOKEN",
+        ],
+        auth_method: AuthMethod::OAuth,
+        description: "OAuth — GitHub Copilot subscription",
     },
     // ── OpenAI-compatible inference providers ───────────────────────
     ProviderCredential {
@@ -1661,6 +1665,114 @@ pub async fn login_anthropic_with_callbacks(
     progress("✓ Authentication successful. Credentials saved.");
 
     Ok(creds)
+}
+
+const GITHUB_COPILOT_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
+const GITHUB_DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
+const GITHUB_OAUTH_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
+const GITHUB_COPILOT_DEFAULT_SCOPE: &str = "read:user user:email repo workflow";
+
+#[derive(Debug, Deserialize)]
+struct GithubDeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubDeviceTokenResponse {
+    access_token: Option<String>,
+    token_type: Option<String>,
+    scope: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+pub async fn login_github_copilot() -> anyhow::Result<OAuthCredentials> {
+    login_github_copilot_with_callbacks(default_progress(), default_prompt()).await
+}
+
+pub async fn login_github_copilot_with_progress(
+    progress: LoginProgress,
+) -> anyhow::Result<OAuthCredentials> {
+    login_github_copilot_with_callbacks(progress, default_prompt()).await
+}
+
+pub async fn login_github_copilot_with_callbacks(
+    progress: LoginProgress,
+    _prompt: LoginPrompt,
+) -> anyhow::Result<OAuthCredentials> {
+    let scope = std::env::var("GITHUB_COPILOT_OAUTH_SCOPE")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| GITHUB_COPILOT_DEFAULT_SCOPE.to_string());
+    let client = reqwest::Client::new();
+    progress("Requesting GitHub Copilot device login code…");
+    let device: GithubDeviceCodeResponse = client
+        .post(GITHUB_DEVICE_CODE_URL)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .form(&[
+            ("client_id", GITHUB_COPILOT_CLIENT_ID),
+            ("scope", scope.as_str()),
+        ])
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    progress(&format!(
+        "Open {} and enter code {} to authorize GitHub Copilot.",
+        device.verification_uri, device.user_code
+    ));
+    let _ = open::that(&device.verification_uri);
+
+    let started = std::time::Instant::now();
+    let mut interval = device.interval.unwrap_or(5).max(1);
+    loop {
+        if started.elapsed().as_secs() >= device.expires_in {
+            anyhow::bail!("GitHub Copilot device login expired before authorization completed");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+        let response: GithubDeviceTokenResponse = client
+            .post(GITHUB_OAUTH_TOKEN_URL)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .form(&[
+                ("client_id", GITHUB_COPILOT_CLIENT_ID),
+                ("device_code", device.device_code.as_str()),
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            ])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        if let Some(access) = response.access_token.filter(|token| !token.is_empty()) {
+            let creds = OAuthCredentials {
+                cred_type: "oauth".into(),
+                access,
+                refresh: String::new(),
+                expires: u64::MAX,
+            };
+            write_credentials("github-copilot", &creds)?;
+            progress("✓ GitHub Copilot authentication successful. Credentials saved.");
+            return Ok(creds);
+        }
+        match response.error.as_deref() {
+            Some("authorization_pending") => continue,
+            Some("slow_down") => {
+                interval = interval.saturating_add(5);
+                continue;
+            }
+            Some(error) => {
+                let description = response.error_description.unwrap_or_default();
+                anyhow::bail!("GitHub Copilot device login failed: {error} {description}");
+            }
+            None => anyhow::bail!("GitHub Copilot device login returned no access token"),
+        }
+    }
 }
 
 const OPENAI_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";

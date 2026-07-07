@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added GitHub Copilot device OAuth login plus a redacted inventory probe that verifies Copilot token exchange and `/models` access using VS Code-compatible integration headers.
 - Added a non-UI redacted GitHub Copilot contract probe helper for token exchange and model-list endpoint verification without exposing token values.
 - Grouped `/model list` output by conceptual model identity and included provider, producer, execution class, and availability per route.
 - Added conceptual/producer/execution metadata to the TUI model catalog and grouped catalog routes by conceptual model identity.

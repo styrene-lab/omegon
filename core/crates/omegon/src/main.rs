@@ -106,8 +106,8 @@ mod prompts;
 mod providers;
 mod route;
 pub mod routing;
-mod semantic_route;
 mod secret_cli;
+mod semantic_route;
 mod sentry;
 mod session;
 mod session_router;
@@ -7455,7 +7455,6 @@ async fn run_tdd_command(action: &TddAction) -> anyhow::Result<()> {
     }
 }
 
-
 fn format_github_copilot_contract_probe(
     probe: &github_copilot::GithubCopilotContractProbe,
 ) -> String {
@@ -8017,6 +8016,7 @@ async fn run_auth_login(provider: &str) -> anyhow::Result<()> {
     let result = match provider {
         "anthropic" => auth::login_anthropic().await,
         "openai-codex" => auth::login_openai().await,
+        "github-copilot" => auth::login_github_copilot().await,
         "google-antigravity" => auth::login_antigravity().await,
         "google" => {
             login_api_key(
