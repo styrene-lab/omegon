@@ -2134,16 +2134,18 @@ impl LlmBridge for GithubCopilotClient {
                     }
                 };
             let header_profile = crate::github_copilot::GithubCopilotHeaderProfile::from_env();
-            let mut body = json!({
-                "model": model,
-                "messages": wire_msgs,
-                "stream": false,
-            });
-            if !wire_tools.is_empty() {
-                body["tools"] = Value::Array(wire_tools);
-                body["tool_choice"] = json!("auto");
-            }
-            let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+            let use_responses_api = copilot_model_requires_responses_api(&model);
+            let body = if use_responses_api {
+                build_copilot_responses_body(&model, &wire_msgs, &wire_tools)
+            } else {
+                build_copilot_chat_completions_body(&model, &wire_msgs, &wire_tools)
+            };
+            let endpoint_path = if use_responses_api {
+                "responses"
+            } else {
+                "chat/completions"
+            };
+            let url = format!("{}/{endpoint_path}", base_url.trim_end_matches('/'));
             let request = client
                 .post(url)
                 .header("Authorization", format!("Bearer {}", copilot_token.token))
@@ -2170,7 +2172,7 @@ impl LlmBridge for GithubCopilotClient {
                 let _ = tx
                     .send(LlmEvent::Error {
                         message: format!(
-                            "GitHub Copilot chat completion failed ({status}): {}",
+                            "GitHub Copilot {endpoint_path} request failed ({status}): {}",
                             crate::github_copilot::redact_body_for_display(&text)
                         ),
                     })
@@ -2188,7 +2190,11 @@ impl LlmBridge for GithubCopilotClient {
                     return;
                 }
             };
-            let parsed_completion = match parse_copilot_chat_completion(&parsed) {
+            let parsed_completion = match if use_responses_api {
+                parse_copilot_responses_completion(&parsed)
+            } else {
+                parse_copilot_chat_completion(&parsed)
+            } {
                 Ok(completion) => completion,
                 Err(error) => {
                     let _ = tx
@@ -2239,6 +2245,125 @@ struct CopilotParsedCompletion {
     done_message: Value,
     input_tokens: u64,
     output_tokens: u64,
+}
+
+fn copilot_model_requires_responses_api(model: &str) -> bool {
+    matches!(model.trim(), "gpt-5.5")
+}
+
+fn build_copilot_chat_completions_body(model: &str, wire_msgs: &[Value], wire_tools: &[Value]) -> Value {
+    let mut body = json!({
+        "model": model,
+        "messages": wire_msgs,
+        "stream": false,
+    });
+    if !wire_tools.is_empty() {
+        body["tools"] = Value::Array(wire_tools.to_vec());
+        body["tool_choice"] = json!("auto");
+    }
+    body
+}
+
+fn build_copilot_responses_body(model: &str, wire_msgs: &[Value], wire_tools: &[Value]) -> Value {
+    let mut body = json!({
+        "model": model,
+        "input": copilot_responses_input_from_chat_messages(wire_msgs),
+        "stream": false,
+        "store": false,
+        "truncation": "disabled",
+    });
+    if !wire_tools.is_empty() {
+        body["tools"] = Value::Array(
+            wire_tools
+                .iter()
+                .filter_map(copilot_responses_tool_from_chat_tool)
+                .collect(),
+        );
+        body["tool_choice"] = json!("auto");
+    }
+    body
+}
+
+fn copilot_responses_tool_from_chat_tool(tool: &Value) -> Option<Value> {
+    let function = tool.get("function")?;
+    Some(json!({
+        "type": "function",
+        "name": function.get("name")?.clone(),
+        "description": function.get("description").cloned().unwrap_or_else(|| json!("")),
+        "parameters": function.get("parameters").cloned().unwrap_or_else(|| json!({})),
+        "strict": false,
+    }))
+}
+
+fn copilot_responses_input_from_chat_messages(messages: &[Value]) -> Vec<Value> {
+    let mut input = Vec::new();
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user");
+        match role {
+            "assistant" => {
+                if let Some(content) = message.get("content").and_then(Value::as_str) {
+                    if !content.trim().is_empty() {
+                        input.push(json!({
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": content, "annotations": []}],
+                            "id": "msg_123",
+                            "status": "completed",
+                            "type": "message",
+                        }));
+                    }
+                }
+                if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+                    for call in tool_calls {
+                        if let (Some(call_id), Some(name), Some(arguments)) = (
+                            call.get("id").and_then(Value::as_str),
+                            call.pointer("/function/name").and_then(Value::as_str),
+                            call.pointer("/function/arguments").and_then(Value::as_str),
+                        ) {
+                            input.push(json!({
+                                "type": "function_call",
+                                "name": name,
+                                "arguments": arguments,
+                                "call_id": call_id,
+                            }));
+                        }
+                    }
+                }
+            }
+            "tool" => {
+                if let Some(call_id) = message.get("tool_call_id").and_then(Value::as_str) {
+                    input.push(json!({
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": message_content_as_text(message),
+                    }));
+                }
+            }
+            "system" => input.push(json!({
+                "role": "system",
+                "content": [{"type": "input_text", "text": message_content_as_text(message)}],
+            })),
+            _ => input.push(json!({
+                "role": "user",
+                "content": [{"type": "input_text", "text": message_content_as_text(message)}],
+            })),
+        }
+    }
+    input
+}
+
+fn message_content_as_text(message: &Value) -> String {
+    match message.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
 }
 
 fn parse_copilot_chat_completion(value: &Value) -> anyhow::Result<CopilotParsedCompletion> {
@@ -2313,6 +2438,95 @@ fn parse_copilot_chat_completion(value: &Value) -> anyhow::Result<CopilotParsedC
         "tool_calls": tc_vals,
         "provider_stop_reason": stop_reason,
         "provider_message": message,
+    });
+    Ok(CopilotParsedCompletion {
+        content,
+        tool_calls,
+        done_message,
+        input_tokens,
+        output_tokens,
+    })
+}
+
+fn parse_copilot_responses_completion(value: &Value) -> anyhow::Result<CopilotParsedCompletion> {
+    let output = value
+        .get("output")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("missing output array"))?;
+    let mut content_parts = Vec::new();
+    let mut tool_calls = Vec::new();
+    for item in output {
+        match item.get("type").and_then(Value::as_str) {
+            Some("message") => {
+                if let Some(parts) = item.get("content").and_then(Value::as_array) {
+                    for part in parts {
+                        if matches!(part.get("type").and_then(Value::as_str), Some("output_text")) {
+                            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                                content_parts.push(text.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            Some("function_call") => {
+                let id = item
+                    .get("call_id")
+                    .or_else(|| item.get("id"))
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("responses function_call missing call_id"))?
+                    .to_string();
+                let name = item
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("responses function_call missing name"))?
+                    .to_string();
+                let raw_args = item
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow::anyhow!("responses function_call missing arguments"))?;
+                let arguments = serde_json::from_str(raw_args).map_err(|error| {
+                    anyhow::anyhow!("responses function_call arguments are not valid JSON: {error}")
+                })?;
+                tool_calls.push(crate::bridge::WireToolCall {
+                    id,
+                    name,
+                    arguments,
+                });
+            }
+            _ => {}
+        }
+    }
+    let content = content_parts.join("");
+    if content.is_empty() && tool_calls.is_empty() {
+        let keys = value
+            .as_object()
+            .map(|object| object.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        anyhow::bail!(
+            "neither response text nor tool calls were present; top-level keys: {:?}",
+            keys
+        );
+    }
+    let usage = value.get("usage");
+    let input_tokens = usage
+        .and_then(|usage| usage.get("input_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .and_then(|usage| usage.get("output_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let tc_vals: Vec<Value> = tool_calls
+        .iter()
+        .map(|tc| json!({"id": tc.id, "name": tc.name, "arguments": tc.arguments}))
+        .collect();
+    let done_message = json!({
+        "text": content,
+        "tool_calls": tc_vals,
+        "provider_stop_reason": value.get("status").and_then(Value::as_str).unwrap_or("unknown"),
+        "provider_message": value,
     });
     Ok(CopilotParsedCompletion {
         content,
@@ -4223,6 +4437,57 @@ mod tests {
             model_id_from_spec_or_default(Some("github-copilot:gpt-5.4"), "gpt-5.4"),
             "gpt-5.4"
         );
+    }
+
+    #[test]
+    fn copilot_gpt_5_5_uses_responses_api_body() {
+        assert!(copilot_model_requires_responses_api("gpt-5.5"));
+        assert!(!copilot_model_requires_responses_api("gpt-5.4"));
+        let messages = vec![
+            json!({"role": "system", "content": "sys"}),
+            json!({"role": "user", "content": "hello"}),
+        ];
+        let body = build_copilot_responses_body("gpt-5.5", &messages, &[]);
+        assert_eq!(body.get("model").and_then(Value::as_str), Some("gpt-5.5"));
+        assert!(body.get("messages").is_none());
+        let input = body.get("input").and_then(Value::as_array).unwrap();
+        assert_eq!(input[0].get("role").and_then(Value::as_str), Some("system"));
+        assert_eq!(input[1].get("role").and_then(Value::as_str), Some("user"));
+    }
+
+    #[test]
+    fn parse_copilot_responses_completion_extracts_text_and_usage() {
+        let parsed = parse_copilot_responses_completion(&json!({
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "content": [{"type": "output_text", "text": "ok"}]
+            }],
+            "usage": {"input_tokens": 7, "output_tokens": 3}
+        }))
+        .unwrap();
+        assert_eq!(parsed.content, "ok");
+        assert_eq!(parsed.input_tokens, 7);
+        assert_eq!(parsed.output_tokens, 3);
+        assert!(parsed.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn parse_copilot_responses_completion_extracts_tool_calls() {
+        let parsed = parse_copilot_responses_completion(&json!({
+            "status": "completed",
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "echo",
+                "arguments": "{\"text\":\"hi\"}"
+            }]
+        }))
+        .unwrap();
+        assert_eq!(parsed.tool_calls.len(), 1);
+        assert_eq!(parsed.tool_calls[0].id, "call_1");
+        assert_eq!(parsed.tool_calls[0].name, "echo");
+        assert_eq!(parsed.tool_calls[0].arguments, json!({"text":"hi"}));
     }
 
     #[test]
