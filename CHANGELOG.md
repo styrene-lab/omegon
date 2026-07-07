@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
+- Added a text-only GitHub Copilot provider bridge that exchanges stored Copilot OAuth credentials for a Copilot API token and calls `/chat/completions` with VS Code-compatible integration headers.
 - Added GitHub Copilot device OAuth login plus a redacted inventory probe that verifies Copilot token exchange and `/models` access using VS Code-compatible integration headers.
 - Added a non-UI redacted GitHub Copilot contract probe helper for token exchange and model-list endpoint verification without exposing token values.
 - Grouped `/model list` output by conceptual model identity and included provider, producer, execution class, and availability per route.
