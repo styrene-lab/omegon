@@ -466,6 +466,7 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
             "anthropic",
             "openai",
             "openai-codex",
+            "github-copilot",
             "openrouter",
             "ollama-cloud",
             "github",
@@ -650,5 +651,6 @@ mod tests {
         assert!(auth.availability.tui);
         assert!(auth.availability.acp);
         assert!(auth.availability.cli);
+        assert!(auth.subcommands.iter().any(|subcommand| subcommand == "github-copilot"));
     }
 }
