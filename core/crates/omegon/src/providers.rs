@@ -2053,10 +2053,18 @@ impl LlmBridge for GithubCopilotClient {
         &self,
         system_prompt: &str,
         messages: &[LlmMessage],
-        _tools: &[ToolDefinition],
+        tools: &[ToolDefinition],
         options: &StreamOptions,
     ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
         let (tx, rx) = mpsc::channel(16);
+        if !tools.is_empty() {
+            let _ = tx
+                .send(LlmEvent::Error {
+                    message: "GitHub Copilot bridge is currently text-only; tool calling is not yet implemented".into(),
+                })
+                .await;
+            return Ok(rx);
+        }
         let model = options
             .model
             .as_deref()
@@ -2064,31 +2072,58 @@ impl LlmBridge for GithubCopilotClient {
             .unwrap_or("gpt-5.4")
             .to_string();
         let wire_msgs = OpenAIClient::build_wire_messages(system_prompt, messages);
-        let (github_token, _is_oauth) = resolve_api_key_sync("github-copilot").ok_or_else(|| {
-            anyhow::anyhow!(
-                "GitHub Copilot provider requires `omegon auth login github-copilot` or a GitHub Copilot-specific token; diagnostic GitHub CLI/GITHUB_TOKEN fallbacks are not used for runtime inference"
-            )
-        })?;
-        let copilot_token = crate::github_copilot::exchange_github_copilot_token(&github_token).await?;
-        let header_profile = crate::github_copilot::GithubCopilotHeaderProfile::from_env();
-        let body = json!({
-            "model": model,
-            "messages": wire_msgs,
-            "stream": false,
-        });
-        let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-        let request = self
-            .client
-            .post(url)
-            .header("Authorization", format!("Bearer {}", copilot_token.token))
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
-            .header("User-Agent", "omegon-github-copilot")
-            .json(&body);
-        let response = header_profile.apply_to(request).send().await?;
-        let status = response.status();
-        let text = response.text().await.unwrap_or_default();
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
         tokio::spawn(async move {
+            let (github_token, _is_oauth) = match resolve_api_key_sync("github-copilot") {
+                Some(credential) => credential,
+                None => {
+                    let _ = tx
+                        .send(LlmEvent::Error {
+                            message: "GitHub Copilot provider requires `omegon auth login github-copilot` or a GitHub Copilot-specific token; diagnostic GitHub CLI/GITHUB_TOKEN fallbacks are not used for runtime inference".into(),
+                        })
+                        .await;
+                    return;
+                }
+            };
+            let copilot_token = match crate::github_copilot::exchange_github_copilot_token(&github_token).await {
+                Ok(token) => token,
+                Err(error) => {
+                    let _ = tx
+                        .send(LlmEvent::Error {
+                            message: format!("GitHub Copilot token exchange failed: {error:#}"),
+                        })
+                        .await;
+                    return;
+                }
+            };
+            let header_profile = crate::github_copilot::GithubCopilotHeaderProfile::from_env();
+            let body = json!({
+                "model": model,
+                "messages": wire_msgs,
+                "stream": false,
+            });
+            let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+            let request = client
+                .post(url)
+                .header("Authorization", format!("Bearer {}", copilot_token.token))
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/json")
+                .header("User-Agent", "omegon-github-copilot")
+                .json(&body);
+            let response = match header_profile.apply_to(request).send().await {
+                Ok(response) => response,
+                Err(error) => {
+                    let _ = tx
+                        .send(LlmEvent::Error {
+                            message: format!("GitHub Copilot chat completion request failed: {error:#}"),
+                        })
+                        .await;
+                    return;
+                }
+            };
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
             if !status.is_success() {
                 let _ = tx
                     .send(LlmEvent::Error {
@@ -2116,9 +2151,22 @@ impl LlmBridge for GithubCopilotClient {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            if !content.is_empty() {
-                let _ = tx.send(LlmEvent::TextDelta { delta: content.clone() }).await;
+            if content.is_empty() {
+                let keys = parsed
+                    .as_object()
+                    .map(|object| object.keys().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let _ = tx
+                    .send(LlmEvent::Error {
+                        message: format!(
+                            "GitHub Copilot returned no assistant text content; unsupported response shape with top-level keys: {:?}",
+                            keys
+                        ),
+                    })
+                    .await;
+                return;
             }
+            let _ = tx.send(LlmEvent::TextDelta { delta: content.clone() }).await;
             let usage = parsed.get("usage");
             let input_tokens = usage
                 .and_then(|usage| usage.get("prompt_tokens"))
