@@ -2642,6 +2642,9 @@ pub async fn auth_login_response(
             "openai-codex" | "chatgpt" | "codex" => {
                 auth::login_openai_with_callbacks(progress, prompt).await
             }
+            "github-copilot" | "copilot" => {
+                auth::login_github_copilot_with_callbacks(progress, prompt).await
+            }
             "openai" => Err(anyhow::anyhow!(auth::operator_api_key_login_guidance(
                 "openai",
                 "OPENAI_API_KEY",
