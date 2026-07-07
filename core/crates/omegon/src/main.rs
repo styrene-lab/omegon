@@ -335,7 +335,7 @@ enum AuthAction {
     Status,
     /// Log in to a provider (OAuth or API key depending on provider).
     Login {
-        /// Provider to log in to (anthropic, openai, openai-codex, openrouter, or ollama-cloud). Default: anthropic.
+        /// Provider to log in to (anthropic, openai, openai-codex, github-copilot, openrouter, or ollama-cloud). Default: anthropic.
         #[arg(default_value = "anthropic")]
         provider: String,
     },
@@ -8104,7 +8104,7 @@ async fn run_auth_login(provider: &str) -> anyhow::Result<()> {
         }
         _ => {
             eprintln!(
-                "Unknown provider: {provider}. Use: anthropic, openai, openai-codex, google, google-antigravity, openrouter, opencode-go, ollama-cloud"
+                "Unknown provider: {provider}. Use: anthropic, openai, openai-codex, github-copilot, google, google-antigravity, openrouter, opencode-go, ollama-cloud"
             );
             std::process::exit(1);
         }
