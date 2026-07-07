@@ -452,6 +452,21 @@ impl ModelRouteSpec {
         Self(crate::providers::canonical_model_spec(model.as_ref()))
     }
 
+    pub fn try_parse(model: impl AsRef<str>) -> anyhow::Result<Self> {
+        let raw = model.as_ref();
+        let parsed = Self::parse(raw);
+        if crate::providers::model_id_from_spec(parsed.as_str())
+            .trim()
+            .is_empty()
+        {
+            anyhow::bail!(
+                "model route `{}` has empty model id; use `provider:model`, for example `github-copilot:gpt-5.4`",
+                raw.trim()
+            );
+        }
+        Ok(parsed)
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -840,7 +855,7 @@ impl RouteController {
         ledger: &impl CredentialProbe,
         new_bridge: Option<Box<dyn LlmBridge>>,
     ) -> anyhow::Result<RouteSnapshot> {
-        let model = ModelRouteSpec::parse(model);
+        let model = ModelRouteSpec::try_parse(model)?;
         let provider = crate::providers::infer_provider_id(model.as_str());
         crate::auth::trace_auth_store_probe(&provider, "route_switch_model");
         let credential_state = ledger.probe_provider(&provider);
@@ -1377,6 +1392,20 @@ mod tests {
             }
         );
         assert!(snapshot.warning.is_none());
+    }
+
+    #[tokio::test]
+    async fn switch_model_rejects_empty_model_id() {
+        let controller = RouteController::default();
+        let err = controller
+            .switch_model(
+                "github-copilot:".into(),
+                &ledger(&[("github-copilot", valid())]),
+                Some(Box::new(NullBridge)),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("empty model id"));
     }
 
     #[tokio::test]

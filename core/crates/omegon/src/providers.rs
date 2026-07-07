@@ -424,6 +424,15 @@ pub(crate) fn model_id_from_spec(model_spec: &str) -> &str {
     current
 }
 
+fn model_id_from_spec_or_default(model_spec: Option<&str>, default: &'static str) -> String {
+    model_spec
+        .map(model_id_from_spec)
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .unwrap_or(default)
+        .to_string()
+}
+
 pub(crate) fn canonical_model_spec(model_spec: &str) -> String {
     let trimmed = model_spec.trim();
     if let Some(provider) = explicit_provider_id(trimmed) {
@@ -2086,12 +2095,7 @@ impl LlmBridge for GithubCopilotClient {
         options: &StreamOptions,
     ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
         let (tx, rx) = mpsc::channel(16);
-        let model = options
-            .model
-            .as_deref()
-            .map(model_id_from_spec)
-            .unwrap_or("gpt-5.4")
-            .to_string();
+        let model = model_id_from_spec_or_default(options.model.as_deref(), "gpt-5.4");
         let wire_msgs = OpenAIClient::build_wire_messages(system_prompt, messages);
         let wire_tools: Vec<Value> = tools
             .iter()
@@ -4204,6 +4208,21 @@ mod tests {
         let key = "OMEGON_TEST_ENV_SECS_NONEXISTENT_XYZ";
         // Unset key → default.
         assert_eq!(env_secs(key, 120, 60), std::time::Duration::from_secs(120));
+    }
+
+    #[test]
+    fn model_id_from_spec_or_default_handles_empty_copilot_routes() {
+        assert_eq!(model_id_from_spec("github-copilot:gpt-5.4"), "gpt-5.4");
+        assert_eq!(model_id_from_spec_or_default(None, "gpt-5.4"), "gpt-5.4");
+        assert_eq!(model_id_from_spec_or_default(Some(""), "gpt-5.4"), "gpt-5.4");
+        assert_eq!(
+            model_id_from_spec_or_default(Some("github-copilot:"), "gpt-5.4"),
+            "gpt-5.4"
+        );
+        assert_eq!(
+            model_id_from_spec_or_default(Some("github-copilot:gpt-5.4"), "gpt-5.4"),
+            "gpt-5.4"
+        );
     }
 
     #[test]
