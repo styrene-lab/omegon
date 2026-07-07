@@ -61,6 +61,7 @@ mod ipc;
 #[cfg(feature = "local-embeddings")]
 mod local_embedding;
 mod migrate;
+mod observation;
 mod shadow_context;
 mod skills;
 mod smoke;

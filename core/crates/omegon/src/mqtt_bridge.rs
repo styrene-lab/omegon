@@ -228,9 +228,11 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
         AgentEvent::SystemNotification { message } => Some(IpcEventPayload::SystemNotification {
             message: message.clone(),
         }),
-        AgentEvent::OperatorCopyBlock { label, text, .. } => Some(IpcEventPayload::SystemNotification {
-            message: format!("{label}: {text}"),
-        }),
+        AgentEvent::OperatorCopyBlock { label, text, .. } => {
+            Some(IpcEventPayload::SystemNotification {
+                message: format!("{label}: {text}"),
+            })
+        }
         AgentEvent::StreamIdle {
             provider,
             model,

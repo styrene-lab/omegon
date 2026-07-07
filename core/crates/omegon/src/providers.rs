@@ -2251,7 +2251,11 @@ fn copilot_model_requires_responses_api(model: &str) -> bool {
     matches!(model.trim(), "gpt-5.5")
 }
 
-fn build_copilot_chat_completions_body(model: &str, wire_msgs: &[Value], wire_tools: &[Value]) -> Value {
+fn build_copilot_chat_completions_body(
+    model: &str,
+    wire_msgs: &[Value],
+    wire_tools: &[Value],
+) -> Value {
     let mut body = json!({
         "model": model,
         "messages": wire_msgs,
@@ -2460,7 +2464,10 @@ fn parse_copilot_responses_completion(value: &Value) -> anyhow::Result<CopilotPa
             Some("message") => {
                 if let Some(parts) = item.get("content").and_then(Value::as_array) {
                     for part in parts {
-                        if matches!(part.get("type").and_then(Value::as_str), Some("output_text")) {
+                        if matches!(
+                            part.get("type").and_then(Value::as_str),
+                            Some("output_text")
+                        ) {
                             if let Some(text) = part.get("text").and_then(Value::as_str) {
                                 content_parts.push(text.to_string());
                             }
@@ -4428,7 +4435,10 @@ mod tests {
     fn model_id_from_spec_or_default_handles_empty_copilot_routes() {
         assert_eq!(model_id_from_spec("github-copilot:gpt-5.4"), "gpt-5.4");
         assert_eq!(model_id_from_spec_or_default(None, "gpt-5.4"), "gpt-5.4");
-        assert_eq!(model_id_from_spec_or_default(Some(""), "gpt-5.4"), "gpt-5.4");
+        assert_eq!(
+            model_id_from_spec_or_default(Some(""), "gpt-5.4"),
+            "gpt-5.4"
+        );
         assert_eq!(
             model_id_from_spec_or_default(Some("github-copilot:"), "gpt-5.4"),
             "gpt-5.4"

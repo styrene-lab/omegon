@@ -7043,7 +7043,7 @@ fn slash_logout_usage_lists_supported_remote_logout_providers() {
     assert!(message.contains("openai"), "got: {message}");
     assert!(message.contains("openai-codex"), "got: {message}");
     assert!(message.contains("openrouter"), "got: {message}");
-    assert!(message.contains("ollama-cloud"), "got: {message}");
+    assert!(!message.contains("ollama-cloud"), "got: {message}");
     assert!(!message.contains("ollama,"), "got: {message}");
 }
 

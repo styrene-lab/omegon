@@ -1421,7 +1421,7 @@ pub async fn run(
             work_plan_snapshot_with_lifecycle(&conversation.intent, &config.cwd);
         conversation
             .intent
-            .update_from_tools(dispatch_calls, &results);
+            .update_from_tools(&tool_catalog, dispatch_calls, &results);
         enrich_plan_list_tool_results(&mut results, dispatch_calls, &conversation.intent);
         for result in &results {
             conversation.push_tool_result(result.clone());
@@ -5404,7 +5404,7 @@ mod tests {
             name: "read".into(),
             arguments: serde_json::json!({"path": "src/main.rs"}),
         }];
-        intent.update_from_tools(&read_calls, &[]);
+        intent.update_from_tools(&test_tool_catalog(), &read_calls, &[]);
         let after_read = intent.work_plan_snapshot_json();
         assert!(!work_plan_snapshot_changed(&before, &after_read));
 
@@ -5413,7 +5413,7 @@ mod tests {
             name: crate::tool_registry::core::PLAN.into(),
             arguments: serde_json::json!({"action": "advance"}),
         }];
-        intent.update_from_tools(&plan_calls, &[]);
+        intent.update_from_tools(&test_tool_catalog(), &plan_calls, &[]);
         let after_plan = intent.work_plan_snapshot_json();
         assert!(work_plan_snapshot_changed(&after_read, &after_plan));
         assert_eq!(after_plan["completed"], 1);
