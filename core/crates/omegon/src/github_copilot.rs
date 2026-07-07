@@ -469,6 +469,10 @@ fn redact_probe_body(body: &str) -> String {
     out
 }
 
+pub fn redact_body_for_display(body: &str) -> String {
+    redact_probe_body(body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
