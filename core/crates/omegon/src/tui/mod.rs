@@ -4485,15 +4485,19 @@ impl App {
             MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuRowKind,
             MenuRowProjection,
         };
-        let provider_ids = [
-            "anthropic",
-            "openai-codex",
-            "github-copilot",
-            "openai",
-            "openrouter",
-            "google",
-            "ollama",
-        ];
+        let provider_ids: Vec<&str> = if row_prefix == "auth.provider" {
+            crate::auth::operator_auth_provider_ids()
+        } else {
+            vec![
+                "anthropic",
+                "openai-codex",
+                "github-copilot",
+                "openai",
+                "openrouter",
+                "google",
+                "ollama",
+            ]
+        };
         let settings_model = self.settings().model.clone();
         let selected_provider = self
             .route_selected_model
@@ -5310,7 +5314,9 @@ warning: {warning}"
                 // OAuth providers go through the auth login flow (opens browser)
                 // API key providers go through secret input mode (hidden input)
                 match value.as_str() {
-                    "anthropic" | "openai-codex" => {
+                    p if crate::auth::provider_by_id(p).is_some_and(|provider| {
+                        provider.auth_method == crate::auth::AuthMethod::OAuth
+                    }) => {
                         let _ = tx.try_send(TuiCommand::BusCommand {
                             name: "auth_login".to_string(),
                             args: value.clone(),

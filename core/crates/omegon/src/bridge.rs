@@ -277,6 +277,7 @@ impl LlmBridge for NullBridge {
              Suggested routes:\n\
              • /login anthropic      — Claude Pro/Max (OAuth)\n\
              • /login openai-codex   — ChatGPT/Codex consumer OAuth\n\
+             • /login github-copilot — GitHub Copilot subscription OAuth\n\
              • /login openai         — OpenAI API key\n\
              • /login openrouter     — OpenRouter API key\n\
              • /login ollama-cloud   — Hosted Ollama API key\n\
