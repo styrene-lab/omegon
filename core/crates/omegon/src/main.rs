@@ -5421,6 +5421,9 @@ fn build_tui_secret_readiness_snapshot(
                                         "openai-codex" | "chatgpt" | "codex" => {
                                             auth::login_openai_with_callbacks(progress, prompt).await
                                         }
+                                        "github-copilot" | "copilot" => {
+                                            auth::login_github_copilot_with_callbacks(progress, prompt).await
+                                        }
                                         "google-antigravity" | "antigravity" => {
                                             auth::login_antigravity_with_callbacks(progress, prompt).await
                                         }
@@ -10965,7 +10968,7 @@ mod tests {
     }
 
     #[test]
-    fn auth_login_help_lists_all_supported_non_oauth_providers() {
+    fn auth_login_help_lists_supported_provider_examples() {
         let mut cmd = Cli::command();
         let auth_cmd = cmd
             .find_subcommand_mut("auth")
@@ -10975,14 +10978,12 @@ mod tests {
             .expect("auth login command must exist");
         let help = login_cmd.render_help().to_string();
 
-        assert!(
-            help.contains("openrouter"),
-            "auth login help should mention openrouter: {help}"
-        );
-        assert!(
-            help.contains("ollama-cloud"),
-            "auth login help should mention ollama-cloud: {help}"
-        );
+        for provider in ["github-copilot", "openrouter", "ollama-cloud"] {
+            assert!(
+                help.contains(provider),
+                "auth login help should mention {provider}: {help}"
+            );
+        }
     }
 
     #[test]
