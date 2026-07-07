@@ -371,12 +371,13 @@ pub fn infer_provider_id_strict(model_spec: &str) -> Option<String> {
         return Some("anthropic".to_string());
     }
 
-    if let Some((head, _tail)) = trimmed.split_once(':') {
-        if head == "local" {
-            return Some("ollama".to_string());
+    if trimmed.contains(':') {
+        let provider_chain = leading_provider_chain(trimmed);
+        if provider_chain.contains(&"github-copilot") {
+            return Some("github-copilot".to_string());
         }
-        if is_known_provider_id(head) {
-            return Some(head.to_string());
+        if let Some(head) = provider_chain.first().copied() {
+            return Some(if head == "local" { "ollama" } else { head }.to_string());
         }
         return None;
     }
@@ -4412,6 +4413,10 @@ mod tests {
         assert_eq!(
             infer_provider_id_strict("local:qwen3:30b"),
             Some("ollama".to_string())
+        );
+        assert_eq!(
+            infer_provider_id_strict("anthropic:github-copilot:gpt-5.5"),
+            Some("github-copilot".to_string())
         );
         assert_eq!(infer_provider_id_strict("nonexistent-provider:test"), None);
     }

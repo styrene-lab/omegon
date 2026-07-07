@@ -469,28 +469,19 @@ fn openai_family_model(model_spec: &str) -> bool {
 
 fn model_id_for_auth_model(model_spec: &str) -> &str {
     let trimmed = model_spec.trim();
-    if let Some((head, tail)) = trimmed.split_once(':')
-        && (provider_by_id(head).is_some() || head == "local")
-    {
-        return tail;
+    let mut current = trimmed;
+    while let Some((head, tail)) = current.split_once(':') {
+        if provider_by_id(head).is_some() || head == "local" {
+            current = tail;
+        } else {
+            break;
+        }
     }
-    trimmed
+    current
 }
 
 fn provider_for_model(model_spec: &str) -> Option<&'static ProviderCredential> {
-    let trimmed = model_spec.trim();
-    let provider_id = if let Some((head, _tail)) = trimmed.split_once(':') {
-        if head == "local" {
-            "ollama".to_string()
-        } else if provider_by_id(head).is_some() {
-            head.to_string()
-        } else {
-            return None;
-        }
-    } else {
-        crate::providers::infer_provider_id(trimmed)
-    };
-
+    let provider_id = crate::providers::infer_provider_id_strict(model_spec)?;
     provider_by_id(&provider_id)
 }
 
@@ -3633,6 +3624,37 @@ mod tests {
 
             assert!(provider_connected_for_model("openai-codex:gpt-5.5"));
             assert!(!provider_oauth_for_model("openai-codex:gpt-5.5"));
+        });
+    }
+
+    #[test]
+    fn nested_copilot_models_use_copilot_auth_status_not_producer_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("auth.json");
+        with_auth_json_path_and_home_env(Some(&override_path), dir.path(), || {
+            write_credentials(
+                "anthropic",
+                &OAuthCredentials {
+                    cred_type: "oauth".into(),
+                    access: "expired-anthropic-token".into(),
+                    refresh: "expired-anthropic-refresh".into(),
+                    expires: 0,
+                },
+            )
+            .unwrap();
+            write_credentials(
+                "github-copilot",
+                &OAuthCredentials {
+                    cred_type: "oauth".into(),
+                    access: "copilot-token".into(),
+                    refresh: "copilot-refresh".into(),
+                    expires: u64::MAX,
+                },
+            )
+            .unwrap();
+
+            assert!(provider_connected_for_model("anthropic:github-copilot:gpt-5.5"));
+            assert!(provider_oauth_for_model("anthropic:github-copilot:gpt-5.5"));
         });
     }
 
