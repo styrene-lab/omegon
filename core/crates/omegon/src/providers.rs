@@ -537,6 +537,7 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
         }
         "openai" => OpenAIClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         "openrouter" => OpenRouterClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
+        "github-copilot" => Some(Box::new(GithubCopilotClient::new()) as Box<dyn LlmBridge>),
         // Google Antigravity — Gemini CLI OAuth via Cloud Code Assist internal API.
         // Requires a GCP project with Cloud AI Companion API enabled. Google Workspace
         // accounts on the "standard-tier" must link a project; the free tier that
@@ -2029,6 +2030,115 @@ async fn parse_openai_stream(
 //
 // OpenRouter speaks the OpenAI wire protocol but routes across 27+ free models.
 // Uses the OpenAI client internally with a different base URL and API key source.
+
+
+pub struct GithubCopilotClient {
+    client: reqwest::Client,
+    base_url: String,
+}
+
+impl GithubCopilotClient {
+    pub fn new() -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            base_url: std::env::var("GITHUB_COPILOT_BASE_URL")
+                .unwrap_or_else(|_| crate::github_copilot::DEFAULT_COPILOT_API_BASE_URL.to_string()),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmBridge for GithubCopilotClient {
+    async fn stream(
+        &self,
+        system_prompt: &str,
+        messages: &[LlmMessage],
+        _tools: &[ToolDefinition],
+        options: &StreamOptions,
+    ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
+        let (tx, rx) = mpsc::channel(16);
+        let model = options
+            .model
+            .as_deref()
+            .map(model_id_from_spec)
+            .unwrap_or("gpt-5.4")
+            .to_string();
+        let wire_msgs = OpenAIClient::build_wire_messages(system_prompt, messages);
+        let signin = crate::github_copilot::resolve_github_signin().await?;
+        let copilot_token = crate::github_copilot::exchange_github_copilot_token(&signin.token).await?;
+        let header_profile = crate::github_copilot::GithubCopilotHeaderProfile::from_env();
+        let body = json!({
+            "model": model,
+            "messages": wire_msgs,
+            "stream": false,
+        });
+        let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
+        let request = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", copilot_token.token))
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "omegon-github-copilot")
+            .json(&body);
+        let response = header_profile.apply_to(request).send().await?;
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        tokio::spawn(async move {
+            if !status.is_success() {
+                let _ = tx
+                    .send(LlmEvent::Error {
+                        message: format!("GitHub Copilot chat completion failed ({status}): {text}"),
+                    })
+                    .await;
+                return;
+            }
+            let parsed: Value = match serde_json::from_str(&text) {
+                Ok(value) => value,
+                Err(error) => {
+                    let _ = tx
+                        .send(LlmEvent::Error {
+                            message: format!("GitHub Copilot returned invalid JSON: {error}"),
+                        })
+                        .await;
+                    return;
+                }
+            };
+            let content = parsed
+                .pointer("/choices/0/message/content")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if !content.is_empty() {
+                let _ = tx.send(LlmEvent::TextDelta { delta: content.clone() }).await;
+            }
+            let usage = parsed.get("usage");
+            let input_tokens = usage
+                .and_then(|usage| usage.get("prompt_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let output_tokens = usage
+                .and_then(|usage| usage.get("completion_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let message = parsed
+                .pointer("/choices/0/message")
+                .cloned()
+                .unwrap_or_else(|| json!({ "role": "assistant", "content": content }));
+            let _ = tx
+                .send(LlmEvent::Done {
+                    message,
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                    provider_telemetry: None,
+                })
+                .await;
+        });
+        Ok(rx)
+    }
+}
 
 pub struct OpenRouterClient {
     inner: OpenAIClient,
