@@ -2152,53 +2152,25 @@ impl LlmBridge for GithubCopilotClient {
                     return;
                 }
             };
-            let message = parsed
-                .pointer("/choices/0/message")
-                .cloned()
-                .unwrap_or_else(|| json!({}));
-            let content = message
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let tool_calls: Vec<crate::bridge::WireToolCall> = message
-                .get("tool_calls")
-                .and_then(Value::as_array)
-                .map(|calls| {
-                    calls
-                        .iter()
-                        .filter_map(|call| {
-                            let id = call.get("id").and_then(Value::as_str)?.to_string();
-                            let name = call.pointer("/function/name").and_then(Value::as_str)?.to_string();
-                            let arguments = call
-                                .pointer("/function/arguments")
-                                .and_then(Value::as_str)
-                                .and_then(|raw| serde_json::from_str(raw).ok())
-                                .unwrap_or_default();
-                            Some(crate::bridge::WireToolCall { id, name, arguments })
+            let parsed_completion = match parse_copilot_chat_completion(&parsed) {
+                Ok(completion) => completion,
+                Err(error) => {
+                    let _ = tx
+                        .send(LlmEvent::Error {
+                            message: format!("GitHub Copilot response parse failed: {error}"),
                         })
-                        .collect()
-                })
-                .unwrap_or_default();
-            if content.is_empty() && tool_calls.is_empty() {
-                let keys = parsed
-                    .as_object()
-                    .map(|object| object.keys().cloned().collect::<Vec<_>>())
-                    .unwrap_or_default();
+                        .await;
+                    return;
+                }
+            };
+            if !parsed_completion.content.is_empty() {
                 let _ = tx
-                    .send(LlmEvent::Error {
-                        message: format!(
-                            "GitHub Copilot returned neither assistant text nor tool calls; unsupported response shape with top-level keys: {:?}",
-                            keys
-                        ),
+                    .send(LlmEvent::TextDelta {
+                        delta: parsed_completion.content.clone(),
                     })
                     .await;
-                return;
             }
-            if !content.is_empty() {
-                let _ = tx.send(LlmEvent::TextDelta { delta: content.clone() }).await;
-            }
-            for tool_call in &tool_calls {
+            for tool_call in &parsed_completion.tool_calls {
                 let _ = tx.send(LlmEvent::ToolCallStart).await;
                 let _ = tx
                     .send(LlmEvent::ToolCallEnd {
@@ -2206,20 +2178,11 @@ impl LlmBridge for GithubCopilotClient {
                     })
                     .await;
             }
-            let usage = parsed.get("usage");
-            let input_tokens = usage
-                .and_then(|usage| usage.get("prompt_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let output_tokens = usage
-                .and_then(|usage| usage.get("completion_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
             let _ = tx
                 .send(LlmEvent::Done {
-                    message,
-                    input_tokens,
-                    output_tokens,
+                    message: parsed_completion.done_message,
+                    input_tokens: parsed_completion.input_tokens,
+                    output_tokens: parsed_completion.output_tokens,
                     cache_read_tokens: 0,
                     cache_creation_tokens: 0,
                     provider_telemetry: None,
@@ -2228,6 +2191,94 @@ impl LlmBridge for GithubCopilotClient {
         });
         Ok(rx)
     }
+}
+
+
+#[derive(Debug)]
+struct CopilotParsedCompletion {
+    content: String,
+    tool_calls: Vec<crate::bridge::WireToolCall>,
+    done_message: Value,
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+fn parse_copilot_chat_completion(value: &Value) -> anyhow::Result<CopilotParsedCompletion> {
+    let message = value
+        .pointer("/choices/0/message")
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("missing choices[0].message"))?;
+    let content = message
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let raw_tool_calls = message.get("tool_calls").and_then(Value::as_array);
+    let mut tool_calls = Vec::new();
+    if let Some(calls) = raw_tool_calls {
+        for (idx, call) in calls.iter().enumerate() {
+            let id = call
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("tool call {idx} missing id"))?
+                .to_string();
+            let name = call
+                .pointer("/function/name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("tool call {idx} missing function.name"))?
+                .to_string();
+            let raw_args = call
+                .pointer("/function/arguments")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow::anyhow!("tool call {idx} missing function.arguments"))?;
+            let arguments = serde_json::from_str(raw_args).map_err(|error| {
+                anyhow::anyhow!("tool call {idx} arguments are not valid JSON: {error}")
+            })?;
+            tool_calls.push(crate::bridge::WireToolCall { id, name, arguments });
+        }
+    }
+    if content.is_empty() && tool_calls.is_empty() {
+        let keys = value
+            .as_object()
+            .map(|object| object.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        anyhow::bail!(
+            "neither assistant text nor tool calls were present; top-level keys: {:?}",
+            keys
+        );
+    }
+    let usage = value.get("usage");
+    let input_tokens = usage
+        .and_then(|usage| usage.get("prompt_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .and_then(|usage| usage.get("completion_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let stop_reason = value
+        .pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let tc_vals: Vec<Value> = tool_calls
+        .iter()
+        .map(|tc| json!({"id": tc.id, "name": tc.name, "arguments": tc.arguments}))
+        .collect();
+    let done_message = json!({
+        "text": content,
+        "tool_calls": tc_vals,
+        "provider_stop_reason": stop_reason,
+        "provider_message": message,
+    });
+    Ok(CopilotParsedCompletion {
+        content,
+        tool_calls,
+        done_message,
+        input_tokens,
+        output_tokens,
+    })
 }
 
 pub struct OpenRouterClient {
@@ -5813,4 +5864,82 @@ mod tests {
             failures.join("\n")
         );
     }
+    #[test]
+    fn copilot_chat_completion_parser_accepts_text_response() {
+        let parsed = parse_copilot_chat_completion(&json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": "hello"}
+            }],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2}
+        }))
+        .expect("parse text response");
+
+        assert_eq!(parsed.content, "hello");
+        assert!(parsed.tool_calls.is_empty());
+        assert_eq!(parsed.input_tokens, 3);
+        assert_eq!(parsed.output_tokens, 2);
+        assert_eq!(parsed.done_message["text"], "hello");
+        assert_eq!(parsed.done_message["provider_stop_reason"], "stop");
+    }
+
+    #[test]
+    fn copilot_chat_completion_parser_accepts_tool_calls() {
+        let parsed = parse_copilot_chat_completion(&json!({
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "echo",
+                            "arguments": "{\"text\":\"copilot-tools-ok\"}"
+                        }
+                    }]
+                }
+            }]
+        }))
+        .expect("parse tool call response");
+
+        assert_eq!(parsed.content, "");
+        assert_eq!(parsed.tool_calls.len(), 1);
+        assert_eq!(parsed.tool_calls[0].id, "call_1");
+        assert_eq!(parsed.tool_calls[0].name, "echo");
+        assert_eq!(parsed.tool_calls[0].arguments["text"], "copilot-tools-ok");
+        assert_eq!(parsed.done_message["provider_stop_reason"], "tool_calls");
+        assert_eq!(parsed.done_message["tool_calls"][0]["name"], "echo");
+    }
+
+    #[test]
+    fn copilot_chat_completion_parser_rejects_malformed_tool_arguments() {
+        let error = parse_copilot_chat_completion(&json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": "not-json"}
+                    }]
+                }
+            }]
+        }))
+        .expect_err("malformed arguments should fail");
+
+        assert!(error.to_string().contains("arguments are not valid JSON"));
+    }
+
+    #[test]
+    fn copilot_chat_completion_parser_rejects_empty_response() {
+        let error = parse_copilot_chat_completion(&json!({
+            "choices": [{"message": {"role": "assistant", "content": ""}}]
+        }))
+        .expect_err("empty response should fail");
+
+        assert!(error.to_string().contains("neither assistant text nor tool calls"));
+    }
+
 }
