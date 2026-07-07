@@ -353,9 +353,27 @@ mod tests {
         .unwrap();
 
         let feature = HttpPluginFeature::new(manifest);
-        // Set cwd to the temp dir so the local file is found
-        let old_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        // Set cwd to the temp dir so the local file is found. Hold the shared
+        // CWD lock and restore via RAII so a panic cannot leave the process in
+        // a deleted tempdir and poison unrelated tests.
+        struct CwdRestore {
+            original: std::path::PathBuf,
+            _guard: tokio::sync::MutexGuard<'static, ()>,
+        }
+        impl Drop for CwdRestore {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.original);
+            }
+        }
+        let _cwd = {
+            let guard = crate::test_support::cwd::lock();
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(dir.path()).unwrap();
+            CwdRestore {
+                original,
+                _guard: guard,
+            }
+        };
 
         let signals = ContextSignals {
             user_prompt: "",
@@ -370,7 +388,5 @@ mod tests {
         let injection = ctx.unwrap();
         assert!(injection.content.contains("partnership: acme"));
         assert_eq!(injection.ttl_turns, 15);
-
-        std::env::set_current_dir(old_cwd).unwrap();
     }
 }

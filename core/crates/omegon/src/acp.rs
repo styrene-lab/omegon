@@ -5191,26 +5191,21 @@ auto_disabled = true
 
     #[tokio::test]
     async fn assistant_runs_list_reports_empty_runtime_projection() {
-        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
-        let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(home.path()).unwrap();
+        let _cwd = crate::test_support::cwd::CurrentDirGuard::enter_async(home.path()).await;
         let agent = Rc::new(OmegonAcpAgent::new("test-model"));
         let response =
             handle_acp_request_result(agent, "_assistant_runs/list", &serde_json::json!({}))
                 .await
                 .unwrap();
-        std::env::set_current_dir(cwd).unwrap();
 
         assert!(response["runs"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn assistant_runs_show_reports_missing_runtime_run() {
-        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
-        let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(home.path()).unwrap();
+        let _cwd = crate::test_support::cwd::CurrentDirGuard::enter_async(home.path()).await;
         let agent = Rc::new(OmegonAcpAgent::new("test-model"));
         let response = handle_acp_request_result(
             agent,
@@ -5219,7 +5214,6 @@ auto_disabled = true
         )
         .await
         .unwrap();
-        std::env::set_current_dir(cwd).unwrap();
 
         assert_eq!(response["error"], "assistant_run_not_found");
     }

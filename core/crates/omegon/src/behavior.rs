@@ -5,10 +5,72 @@
 //! `ControllerState` streak tracker. Extracted from `loop.rs` to keep
 //! the core state machine focused on turn orchestration.
 
-use crate::conversation::{ConversationState, ToolCall, ToolResultEntry};
+use crate::conversation::{ConversationState, TaskMode, ToolCall, ToolResultEntry};
 pub(crate) use omegon_traits::ProgressSignal;
 use omegon_traits::{DriftKind, OodaPhase, ProgressNudgeReason, ToolCapability, ToolDefinition};
 use std::collections::{BTreeSet, HashMap};
+
+// ─── Task-mode inference ────────────────────────────────────────────────────
+
+/// Infer the guidance task mode from the operator's prompt.
+///
+/// Research-style prompts (questions, explain/summarize/review requests, any
+/// read-oriented ask) legitimately spend many turns in read/search without
+/// mutating files, so convergence pressure must relax for them. The heuristic
+/// errs strongly toward `Research`: a false `Implementation` classification
+/// pushes the model to invent file-writing work the user never requested,
+/// which is the worse failure mode.
+pub(crate) fn infer_task_mode_from_prompt(prompt: &str) -> TaskMode {
+    let prompt = prompt.to_lowercase();
+    let starts = |w: &str| prompt.trim_start().starts_with(w);
+    let research = prompt.contains('?')
+        || starts("explain")
+        || starts("what")
+        || starts("why")
+        || starts("how")
+        || starts("when")
+        || starts("where")
+        || starts("which")
+        || starts("who")
+        || starts("describe")
+        || starts("summarize")
+        || starts("summary")
+        || starts("rundown")
+        || starts("overview")
+        || starts("review")
+        || starts("assess")
+        || starts("analyze")
+        || starts("compare")
+        || starts("contrast")
+        || starts("outline")
+        || starts("discuss")
+        || starts("tell me")
+        || starts("show me")
+        || starts("give me")
+        || starts("list")
+        || starts("can you")
+        || starts("could you")
+        || starts("do you")
+        || starts("is ")
+        || starts("are ")
+        || starts("does")
+        || starts("did")
+        || starts("read")
+        || starts("look")
+        || starts("check")
+        || starts("find")
+        || starts("search")
+        || starts("investigate")
+        || starts("research")
+        || prompt.contains(" rundown")
+        || prompt.contains(" summary")
+        || prompt.contains(" overview");
+    if research {
+        TaskMode::Research
+    } else {
+        TaskMode::Implementation
+    }
+}
 
 // ─── Tool classification predicates ────────────────────────────────────────
 
@@ -314,6 +376,11 @@ pub(crate) fn should_inject_execution_pressure(
     tool_calls: &[ToolCall],
     behavior: BehavioralTier,
 ) -> bool {
+    // Research turns legitimately read/search without mutating files; do not
+    // pressure them toward edits they were never asked to make.
+    if conversation.intent.task_mode == TaskMode::Research {
+        return false;
+    }
     if tool_calls.is_empty()
         || !conversation.intent.files_modified.is_empty()
         || conversation.intent.files_read.is_empty()
@@ -749,11 +816,21 @@ pub(crate) fn continuation_pressure_tier(
 
     let local_evidence_sufficient = controller.local_evidence_sufficient_streak > 0;
     let evidence_sufficient = controller.evidence_sufficient_streak > 0;
-    let om_local_first_lock = is_slim_execution_bias(config)
+    let research_mode = conversation.intent.task_mode == TaskMode::Research;
+    let om_local_first_lock = !research_mode
+        && is_slim_execution_bias(config)
         && local_evidence_sufficient
         && has_local_target_hypothesis(conversation);
     let constrained = behavior == BehavioralTier::Constrained;
-    let (tier1, tier2, tier3) = if om_local_first_lock {
+    let (tier1, tier2, tier3) = if research_mode {
+        // Research turns legitimately spend many turns in read/search.
+        // Keep only a late safety net against genuinely unbounded exploration.
+        if constrained {
+            (8, 12, 16)
+        } else {
+            (16, 24, 32)
+        }
+    } else if om_local_first_lock {
         if constrained { (2, 3, 5) } else { (4, 6, 8) }
     } else if evidence_sufficient {
         if constrained { (3, 4, 6) } else { (6, 8, 10) }
@@ -779,7 +856,7 @@ pub(crate) fn continuation_pressure_tier(
         return Some(3);
     }
 
-    if discoveries >= 2 {
+    if discoveries >= 2 && !research_mode {
         return Some(2);
     }
 
@@ -978,6 +1055,59 @@ mod tests {
                 assert_recovery_directive(&message);
             }
         }
+    }
+
+    #[test]
+    fn task_mode_inference_classifies_research_prompts() {
+        for prompt in [
+            "what does the observation layer do?",
+            "Explain the OODA loop wiring",
+            "summarize the recent changes",
+            "give me a rundown of loop.rs",
+            "review the pressure heuristics",
+            "How does compaction work",
+            "investigate the flaky test",
+            "can you check whether the tests pass",
+        ] {
+            assert_eq!(
+                infer_task_mode_from_prompt(prompt),
+                TaskMode::Research,
+                "prompt should infer Research: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn task_mode_inference_classifies_implementation_prompts() {
+        for prompt in [
+            "fix the bug in conversation.rs",
+            "implement the observation normalizer",
+            "add a regression test for orphaned tool results",
+            "refactor the pressure tiers into policy rows",
+            "commit the changes",
+        ] {
+            assert_eq!(
+                infer_task_mode_from_prompt(prompt),
+                TaskMode::Implementation,
+                "prompt should infer Implementation: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn observed_task_mode_does_not_override_pinned_mode() {
+        let mut conversation = ConversationState::new();
+        conversation.intent.pin_task_mode(TaskMode::Research);
+        conversation
+            .intent
+            .observe_task_mode(TaskMode::Implementation);
+        assert_eq!(conversation.intent.task_mode, TaskMode::Research);
+
+        let mut unpinned = ConversationState::new();
+        unpinned.intent.observe_task_mode(TaskMode::Research);
+        assert_eq!(unpinned.intent.task_mode, TaskMode::Research);
+        unpinned.intent.observe_task_mode(TaskMode::Implementation);
+        assert_eq!(unpinned.intent.task_mode, TaskMode::Implementation);
     }
 
     #[test]

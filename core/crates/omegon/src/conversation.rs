@@ -112,6 +112,27 @@ impl AgentMessage {
     }
 }
 
+/// Operator/task intent mode for the guidance policy (A1 in the harness
+/// guidance affordances). Research-style turns legitimately spend many turns
+/// in read/search without mutating files, so anti-orientation and forced-
+/// convergence pressure must relax. Implementation turns keep full pressure.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskMode {
+    #[default]
+    Implementation,
+    Research,
+}
+
+impl TaskMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Implementation => "implementation",
+            Self::Research => "research",
+        }
+    }
+}
+
 /// Structured intent tracking — auto-populated, survives compaction verbatim.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -119,6 +140,16 @@ pub struct IntentDocument {
     pub current_task: Option<String>,
     pub approach: Option<String>,
     pub lifecycle_phase: LifecyclePhase,
+
+    /// Guidance-policy mode for the current operator task. Inferred from the
+    /// operator prompt at the start of each run unless pinned by an explicit
+    /// operator declaration.
+    #[serde(default)]
+    pub task_mode: TaskMode,
+    /// True when the operator explicitly declared the mode. Pinned mode is
+    /// not overwritten by per-prompt inference.
+    #[serde(default)]
+    pub task_mode_pinned: bool,
 
     pub files_read: IndexSet<PathBuf>,
     pub files_modified: IndexSet<PathBuf>,
@@ -346,6 +377,20 @@ pub struct SessionStatsAccumulator {
 }
 
 impl IntentDocument {
+    /// Observe an inferred task mode for the current operator prompt.
+    /// Inference never overrides an explicit operator declaration.
+    pub fn observe_task_mode(&mut self, inferred: TaskMode) {
+        if !self.task_mode_pinned {
+            self.task_mode = inferred;
+        }
+    }
+
+    /// Pin the task mode from an explicit operator declaration.
+    pub fn pin_task_mode(&mut self, mode: TaskMode) {
+        self.task_mode = mode;
+        self.task_mode_pinned = true;
+    }
+
     /// Update from tool call activity — automatic population.
     pub fn update_from_tools(
         &mut self,

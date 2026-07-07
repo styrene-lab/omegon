@@ -25,6 +25,7 @@ pub mod env {
 
 #[cfg(test)]
 pub mod cwd {
+    use std::path::{Path, PathBuf};
     use std::sync::LazyLock;
 
     /// Global current-working-directory lock for tests that call
@@ -39,5 +40,41 @@ pub mod cwd {
 
     pub fn lock() -> tokio::sync::MutexGuard<'static, ()> {
         CWD_LOCK.blocking_lock()
+    }
+
+    /// RAII current-directory guard for tests. It holds the shared CWD lock for
+    /// its lifetime and restores the original directory on drop, so panics do
+    /// not leave the process inside a tempdir that gets deleted underneath
+    /// unrelated tests.
+    pub struct CurrentDirGuard {
+        original: PathBuf,
+        _guard: tokio::sync::MutexGuard<'static, ()>,
+    }
+
+    impl CurrentDirGuard {
+        pub fn enter(path: &Path) -> Self {
+            let guard = lock();
+            Self::with_guard(path, guard)
+        }
+
+        pub async fn enter_async(path: &Path) -> Self {
+            let guard = lock_async().await;
+            Self::with_guard(path, guard)
+        }
+
+        fn with_guard(path: &Path, guard: tokio::sync::MutexGuard<'static, ()>) -> Self {
+            let original = std::env::current_dir().expect("current dir");
+            std::env::set_current_dir(path).expect("set current dir");
+            Self {
+                original,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
     }
 }

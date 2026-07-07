@@ -10794,10 +10794,8 @@ mod tests {
 
     #[test]
     fn plan_list_renders_visible_completed_and_openspec_sections() {
-        let _guard = crate::test_support::cwd::lock();
         let cwd = tempfile::tempdir().unwrap();
-        let previous_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(cwd.path()).unwrap();
+        let _cwd = crate::test_support::cwd::CurrentDirGuard::enter(cwd.path());
         std::fs::create_dir_all("openspec/changes/example/specs/lifecycle").unwrap();
         std::fs::write("openspec/changes/example/proposal.md", "# Example\n").unwrap();
         std::fs::write(
@@ -10817,7 +10815,6 @@ mod tests {
             .set_work_plan(vec!["visible work".into()]);
 
         let output = render_plan_list(&runtime_state);
-        std::env::set_current_dir(previous_cwd).unwrap();
 
         assert!(output.contains("Visible"), "{output}");
         assert!(output.contains("visible work"), "{output}");

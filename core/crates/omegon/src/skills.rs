@@ -1408,10 +1408,9 @@ description: Project git override
         )
         .unwrap();
 
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd = CwdRestore::enter(dir.path());
         let entries = list_structured().unwrap();
-        std::env::set_current_dir(original).unwrap();
+        drop(_cwd);
 
         let project_git = entries
             .iter()
@@ -1441,10 +1440,9 @@ description: Project git override
         )
         .unwrap();
 
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd = CwdRestore::enter(dir.path());
         let details = get_skill_details("git").unwrap();
-        std::env::set_current_dir(original).unwrap();
+        drop(_cwd);
 
         assert_eq!(details.manifest.description, "Project git override");
         let entry = details.entry.expect("resolved listing metadata");
