@@ -302,9 +302,11 @@ pub fn infer_provider_id(model_spec: &str) -> String {
         return "anthropic".to_string();
     }
 
-    if let Some((head, _tail)) = trimmed.split_once(':')
-        && is_known_provider_id(head)
-    {
+    let provider_chain = leading_provider_chain(trimmed);
+    if provider_chain.contains(&"github-copilot") {
+        return "github-copilot".to_string();
+    }
+    if let Some(head) = provider_chain.first().copied() {
         return if head == "local" { "ollama" } else { head }.to_string();
     }
 
@@ -382,12 +384,27 @@ pub fn infer_provider_id_strict(model_spec: &str) -> Option<String> {
     Some(infer_provider_id(trimmed))
 }
 
-pub fn explicit_provider_id(model_spec: &str) -> Option<String> {
-    let (head, _tail) = model_spec.trim().split_once(':')?;
-    if head == "local" {
-        return Some("ollama".to_string());
+fn leading_provider_chain(model_spec: &str) -> Vec<&str> {
+    let mut providers = Vec::new();
+    let mut current = model_spec.trim();
+    while let Some((head, tail)) = current.split_once(':') {
+        if is_known_provider_id(head) {
+            providers.push(head);
+            current = tail;
+        } else {
+            break;
+        }
     }
-    is_known_provider_id(head).then(|| head.to_string())
+    providers
+}
+
+pub fn explicit_provider_id(model_spec: &str) -> Option<String> {
+    let providers = leading_provider_chain(model_spec);
+    if providers.contains(&"github-copilot") {
+        return Some("github-copilot".to_string());
+    }
+    let head = providers.first().copied()?;
+    Some(if head == "local" { "ollama" } else { head }.to_string())
 }
 
 fn model_id_from_spec(model_spec: &str) -> &str {
@@ -4372,6 +4389,14 @@ mod tests {
             infer_provider_id("ollama-cloud:gpt-oss:120b-cloud"),
             "ollama-cloud"
         );
+        assert_eq!(
+            infer_provider_id("anthropic:github-copilot:gpt-5.5"),
+            "github-copilot"
+        );
+        assert_eq!(
+            infer_provider_id("github-copilot:anthropic:claude-sonnet-4-6"),
+            "github-copilot"
+        );
         assert_eq!(infer_provider_id("claude-opus-4-6"), "anthropic");
         assert_eq!(infer_provider_id("gpt-5.4"), "openai");
         assert_eq!(infer_provider_id("gpt-5.4-mini"), "openai");
@@ -5447,6 +5472,14 @@ mod tests {
         assert_eq!(
             explicit_provider_id("local:qwen3:32b").as_deref(),
             Some("ollama")
+        );
+        assert_eq!(
+            explicit_provider_id("anthropic:github-copilot:gpt-5.5").as_deref(),
+            Some("github-copilot")
+        );
+        assert_eq!(
+            explicit_provider_id("github-copilot:anthropic:claude-sonnet-4-6").as_deref(),
+            Some("github-copilot")
         );
         assert_eq!(explicit_provider_id("deepseek-v4-flash"), None);
         assert_eq!(explicit_provider_id("not-a-provider:model"), None);
