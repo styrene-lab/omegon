@@ -8414,6 +8414,59 @@ fn menu_login_secret_input_closes_menu_without_output_panel() {
 }
 
 #[test]
+fn login_selector_routes_github_copilot_through_oauth_flow() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    app.open_login_selector();
+    let selector = app.selector.as_mut().expect("login selector");
+    selector.cursor = selector
+        .options
+        .iter()
+        .position(|option| option.value == "github-copilot")
+        .expect("github copilot login option");
+
+    let message = app.confirm_selector(&tx).expect("selector message");
+
+    assert!(
+        message.contains("GitHub Copilot"),
+        "selector message should name GitHub Copilot: {message}"
+    );
+    assert!(!matches!(
+        app.editor.mode(),
+        super::editor::EditorMode::SecretInput { .. }
+    ));
+    match rx.try_recv().expect("auth login command") {
+        TuiCommand::BusCommand { name, args } => {
+            assert_eq!(name, "auth_login");
+            assert_eq!(args, "github-copilot");
+        }
+        other => panic!("expected auth login bus command, got {other:?}"),
+    }
+}
+
+#[test]
+fn auth_menu_rows_cover_operator_auth_providers() {
+    let mut app = test_app();
+    app.open_auth_menu();
+    let menu = app.active_menu.as_ref().expect("auth menu");
+    let row_ids: std::collections::HashSet<_> = menu
+        .state
+        .visible_rows(&menu.projection)
+        .into_iter()
+        .map(|row| row.row.id.clone())
+        .collect();
+
+    for provider in crate::auth::operator_auth_provider_ids() {
+        let expected = format!("auth.provider.{provider}");
+        assert!(
+            row_ids.contains(&expected),
+            "auth menu missing operator auth provider row {expected}"
+        );
+    }
+}
+
+#[test]
 fn canonical_secrets_set_rejects_plaintext_values() {
     assert_eq!(
         canonical_slash_command("secrets", "set API_TOKEN super-secret-value"),
