@@ -286,6 +286,7 @@ fn is_known_provider_id(provider_id: &str) -> bool {
             | "huggingface"
             | "ollama"
             | "ollama-cloud"
+            | "github-copilot"
             | "dwarfstar"
             | "local"
     )
@@ -394,12 +395,15 @@ fn model_id_from_spec(model_spec: &str) -> &str {
     if trimmed.eq_ignore_ascii_case("deepseek-local") {
         return "deepseek-v4-flash";
     }
-    if let Some((head, tail)) = trimmed.split_once(':')
-        && is_known_provider_id(head)
-    {
-        return tail;
+    let mut current = trimmed;
+    while let Some((head, tail)) = current.split_once(':') {
+        if is_known_provider_id(head) {
+            current = tail;
+        } else {
+            break;
+        }
     }
-    trimmed
+    current
 }
 
 fn is_openai_family_model(model_spec: &str) -> bool {
@@ -5724,6 +5728,14 @@ mod tests {
             "gpt-5.4-mini"
         );
         assert_eq!(model_id_from_spec("ollama:qwen3:32b"), "qwen3:32b");
+        assert_eq!(
+            model_id_from_spec("anthropic:github-copilot:gpt-5.5"),
+            "gpt-5.5"
+        );
+        assert_eq!(
+            model_id_from_spec("github-copilot:anthropic:claude-sonnet-4-6"),
+            "claude-sonnet-4-6"
+        );
         assert_eq!(
             model_id_from_spec("dwarfstar:deepseek-v4-flash"),
             "deepseek-v4-flash"

@@ -1099,6 +1099,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         }
         "auth" => match args {
             "" | "status" => Some(CanonicalSlashCommand::AuthStatus),
+            "list" => Some(CanonicalSlashCommand::AuthStatus),
             _ if args.starts_with("login ") => {
                 let provider = args.trim_start_matches("login ").trim();
                 (!provider.is_empty())
@@ -14136,6 +14137,14 @@ mod slash_command_parsing_tests {
 
         let context = SlimPlanContext::from_dashboard(false, &[], None);
         assert_eq!(context.labels(), vec!["no active plan"]);
+    }
+
+    #[test]
+    fn auth_list_aliases_auth_status() {
+        assert_eq!(
+            canonical_slash_command("auth", "list"),
+            Some(CanonicalSlashCommand::AuthStatus)
+        );
     }
 
     #[test]
