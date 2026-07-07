@@ -17,7 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
-- Added a GitHub Copilot provider bridge with OpenAI-compatible tool-call support, Copilot OAuth token exchange, and `/chat/completions` requests using VS Code-compatible integration headers.
+- Made git guidance and validation recommendations document-aware so Markdown-only human documents/knowledge notes are not framed as code changes.
 - Added a redacted GitHub Copilot tools contract probe that verifies OpenAI-style `tools`, returned `tool_calls`, and tool-result continuation against the live Copilot endpoint.
 - Added GitHub Copilot device OAuth login plus a redacted inventory probe that verifies Copilot token exchange and `/models` access using VS Code-compatible integration headers.
 - Added a non-UI redacted GitHub Copilot contract probe helper for token exchange and model-list endpoint verification without exposing token values.

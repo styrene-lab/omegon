@@ -52,6 +52,16 @@ test(api): add rate limit validation tests
 chore(deps): bump serde to 1.0.200
 ```
 
+### Document-aware Markdown commits
+
+Markdown is not automatically code. Before choosing a commit message or validation wording, classify the changed paths in context:
+
+- Project documentation/lifecycle artifacts (`README.md`, `CHANGELOG.md`, `docs/**`, `openspec/**`, `skills/**/SKILL.md`) use `docs:` unless the repo's release policy requires `chore(release):`.
+- Human documents and writing/knowledge notes (`*.md`, `notes/**`, `.obsidian/**`, `drafts/**`, `content/**`) should be described as document, content, or note updates. In conventional-commit repos, prefer `docs:`; if the repo explicitly allows `notes:` or `content:`, those are acceptable.
+- Mixed code + document changes should usually be split when independently meaningful. If committed together, choose the type that matches the primary operator intent and state that the commit is mixed.
+
+Do not call pure document edits "code", "implementation", or "tests passed" unless code was actually changed and validated. Use wording such as "document update", "note update", "Markdown hygiene", or "document checks" for document-only changes.
+
 ### Breaking Changes
 
 Mark with `!` after the type/scope, and explain in the footer:
