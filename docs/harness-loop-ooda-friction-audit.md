@@ -160,8 +160,11 @@ searching, answer now"). Verified live in this session.
   log corpus confirmation.
 - [ ] Where does `dominant_phase` get computed per turn, and is phase
   *history* consulted anywhere? (Believed no — unverified.)
-- [ ] Does `should_nudge_plan_reconciliation` loop indefinitely on a
-  fingerprint-stable plan? (`plan_reconciliation_nudges` counts but cap not
-  yet located.)
-- [ ] What writes `intent.files_read` — do `codebase_search`/`view` count, or
-  only `read`? Determines how often research undercounts as "no evidence."
+- [x] ~~Does `should_nudge_plan_reconciliation` loop indefinitely?~~ No —
+  capped by `MAX_PLAN_RECONCILIATION_NUDGES` (`loop.rs:4206`).
+- [x] ~~What writes `intent.files_read`?~~ **Resolved, and it's F9:** only
+  hardcoded names `"read" | "understand"` count (`conversation.rs:353-357`).
+  `bash` grep/sed reads, `codebase_search`, and `view` register zero
+  evidence, and the string match bypasses the capability catalog. Research
+  via bash appears to the controller as "read nothing" — worst-case
+  classification. See `harness-loop-guidance-affordances.md` (A2).
