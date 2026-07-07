@@ -2811,8 +2811,12 @@ mod tests {
             "should probe chatgpt/codex"
         );
         assert!(
-            status.providers.iter().any(|p| p.name == "ollama-cloud"),
-            "should probe ollama cloud"
+            status.providers.iter().any(|p| p.name == "github-copilot"),
+            "should probe github copilot"
+        );
+        assert!(
+            !status.providers.iter().any(|p| p.name == "ollama-cloud"),
+            "should not probe obsolete ollama cloud"
         );
     }
 
