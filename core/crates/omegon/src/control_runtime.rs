@@ -1199,9 +1199,16 @@ pub async fn set_model_response(
     .map(|route| route.qualified_model)
     .ok()
     .unwrap_or_else(|| requested_model.to_string());
-    let effective_model = providers::resolve_execution_model_spec(&effective_model)
-        .await
-        .unwrap_or(effective_model);
+    let effective_model = if crate::providers::explicit_provider_id(&effective_model)
+        .as_deref()
+        == Some("github-copilot")
+    {
+        effective_model
+    } else {
+        providers::resolve_execution_model_spec(&effective_model)
+            .await
+            .unwrap_or(effective_model)
+    };
     let (old_model, old_provider) = shared_settings
         .lock()
         .ok()
