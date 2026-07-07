@@ -656,7 +656,9 @@ impl CoreTools {
 
 fn canonicalize_existing_parent(path: &Path) -> PathBuf {
     if path.exists() {
-        return path.canonicalize().unwrap_or_else(|_| lexical_normalize(path));
+        return path
+            .canonicalize()
+            .unwrap_or_else(|_| lexical_normalize(path));
     }
 
     let Some(parent) = path.parent() else {

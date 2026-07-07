@@ -3100,7 +3100,10 @@ required = ["MISSING_REQUIRED_TOKEN"]
             response.status,
             crate::ui_runtime::envelope::UiActionOutcomeStatus::Accepted
         );
-        assert_eq!(response.message.as_deref(), Some("permission always allowed"));
+        assert_eq!(
+            response.message.as_deref(),
+            Some("permission always allowed")
+        );
         assert_eq!(
             rx.recv().expect("permission response"),
             omegon_traits::PermissionResponse::AlwaysAllow

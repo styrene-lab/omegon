@@ -1184,18 +1184,18 @@ fn validate_model_registry_content(path: &Path, content: &str) -> std::result::R
             errors.push(format!("{label}: missing capabilities"));
         }
         if let Some(conceptual_model_id) = model.get("conceptualModelId")
-            && !conceptual_model_id
+            && conceptual_model_id
                 .as_str()
-                .is_some_and(|value| !value.trim().is_empty())
+                .is_none_or(|value| value.trim().is_empty())
         {
             errors.push(format!(
                 "{label}: conceptualModelId must be a non-empty string when present"
             ));
         }
         if let Some(producer) = model.get("producer")
-            && !producer
+            && producer
                 .as_str()
-                .is_some_and(|value| !value.trim().is_empty())
+                .is_none_or(|value| value.trim().is_empty())
         {
             errors.push(format!(
                 "{label}: producer must be a non-empty string when present"
@@ -2051,11 +2051,8 @@ fn validation_recommendation(
         }
         if paths.iter().any(|path| is_markdown_path(path)) {
             let workspace_kind = crate::workspace::infer::infer_workspace_kind(cwd);
-            let change_kind = crate::workspace::change_kind::classify_change_kind(
-                cwd,
-                workspace_kind,
-                paths,
-            );
+            let change_kind =
+                crate::workspace::change_kind::classify_change_kind(cwd, workspace_kind, paths);
             if matches!(
                 change_kind,
                 crate::workspace::change_kind::ChangeKind::HumanDocs

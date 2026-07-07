@@ -8543,11 +8543,13 @@ fn slash_auth_opens_provider_auth_menu() {
         .find(|row| row.row.id == "auth.provider.github-copilot")
         .expect("github copilot auth row");
     assert_eq!(copilot.row.label, "GitHub Copilot");
-    assert!(copilot
-        .row
-        .metadata
-        .iter()
-        .any(|m| m == "/login github-copilot"));
+    assert!(
+        copilot
+            .row
+            .metadata
+            .iter()
+            .any(|m| m == "/login github-copilot")
+    );
 }
 
 #[test]

@@ -271,17 +271,17 @@ pub fn validate_proxy_identity_headers_for_config(
     web_authority: &super::WebAuthorityConfig,
     headers: &HeaderMap,
 ) -> Result<Option<WebProxyIdentityAssertion>, RbacError> {
-    let assertion = proxy_identity_assertion_from_headers(headers).or_else(|error| {
+    let assertion = proxy_identity_assertion_from_headers(headers).map_err(|error| {
         if web_authority.require_proxy_identity {
             match error {
                 RbacError::PolicyUnavailable {
                     reason: "missing_proxy_subject",
                 }
-                | RbacError::InvalidRole { .. } => Err(RbacError::ProxyIdentityRequired),
-                _ => Err(RbacError::ProxyIdentityMismatch),
+                | RbacError::InvalidRole { .. } => RbacError::ProxyIdentityRequired,
+                _ => RbacError::ProxyIdentityMismatch,
             }
         } else {
-            Err(error)
+            error
         }
     })?;
     validate_proxy_identity_assertion_for_config(web_authority, assertion.as_ref())?;

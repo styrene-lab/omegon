@@ -1011,7 +1011,11 @@ pub async fn model_list_response() -> SlashCommandResponse {
         for model in routes {
             let producer = model.producer.as_deref().unwrap_or("unknown");
             let execution_class = model.execution_class.as_deref().unwrap_or("unknown");
-            let availability = if model.available { "available" } else { "unavailable" };
+            let availability = if model.available {
+                "available"
+            } else {
+                "unavailable"
+            };
             output.push_str(&format!(
                 "  {} ({}) — provider={}, producer={}, execution={}, {}\n",
                 model.name, model.id, model.provider, producer, execution_class, availability
@@ -1023,7 +1027,6 @@ pub async fn model_list_response() -> SlashCommandResponse {
         output: Some(output),
     }
 }
-
 
 async fn set_model_intent_control_response(
     route_controller: Option<Arc<crate::route::RouteController>>,
@@ -1199,8 +1202,7 @@ pub async fn set_model_response(
     .map(|route| route.qualified_model)
     .ok()
     .unwrap_or_else(|| requested_model.to_string());
-    let effective_model = if crate::providers::explicit_provider_id(&effective_model)
-        .as_deref()
+    let effective_model = if crate::providers::explicit_provider_id(&effective_model).as_deref()
         == Some("github-copilot")
     {
         effective_model

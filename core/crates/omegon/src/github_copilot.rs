@@ -37,7 +37,6 @@ pub struct GithubCopilotModelsProbe {
     pub redacted_error: Option<String>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubCopilotToolsProbe {
@@ -166,21 +165,21 @@ impl GithubSigninSource {
 }
 
 pub async fn resolve_github_signin() -> anyhow::Result<ResolvedGithubSignin> {
-    if let Some((token, _)) = crate::providers::resolve_api_key_sync("github-copilot") {
-        if !token.trim().is_empty() {
-            return Ok(ResolvedGithubSignin {
-                source: GithubSigninSource::OmegonGithubCopilot,
-                token,
-            });
-        }
+    if let Some((token, _)) = crate::providers::resolve_api_key_sync("github-copilot")
+        && !token.trim().is_empty()
+    {
+        return Ok(ResolvedGithubSignin {
+            source: GithubSigninSource::OmegonGithubCopilot,
+            token,
+        });
     }
-    if let Some((token, _)) = crate::providers::resolve_api_key_sync("github") {
-        if !token.trim().is_empty() {
-            return Ok(ResolvedGithubSignin {
-                source: GithubSigninSource::OmegonGithub,
-                token,
-            });
-        }
+    if let Some((token, _)) = crate::providers::resolve_api_key_sync("github")
+        && !token.trim().is_empty()
+    {
+        return Ok(ResolvedGithubSignin {
+            source: GithubSigninSource::OmegonGithub,
+            token,
+        });
     }
     if let Some(token) = github_cli_token().await {
         return Ok(ResolvedGithubSignin {
@@ -193,13 +192,13 @@ pub async fn resolve_github_signin() -> anyhow::Result<ResolvedGithubSignin> {
         "GITHUB_COPILOT_TOKEN",
         "COPILOT_OAUTH_TOKEN",
     ] {
-        if let Ok(token) = std::env::var(name) {
-            if !token.trim().is_empty() {
-                return Ok(ResolvedGithubSignin {
-                    source: GithubSigninSource::Environment,
-                    token,
-                });
-            }
+        if let Ok(token) = std::env::var(name)
+            && !token.trim().is_empty()
+        {
+            return Ok(ResolvedGithubSignin {
+                source: GithubSigninSource::Environment,
+                token,
+            });
         }
     }
     anyhow::bail!(
@@ -361,7 +360,6 @@ async fn probe_models(
     })
 }
 
-
 pub async fn probe_github_copilot_tools_contract() -> anyhow::Result<GithubCopilotToolsProbe> {
     let (github_token, _is_oauth) = crate::providers::resolve_api_key_sync("github-copilot").ok_or_else(|| {
         anyhow::anyhow!("GitHub Copilot tools probe requires `omegon auth login github-copilot`; diagnostic GitHub CLI/GITHUB_TOKEN fallbacks are not used")
@@ -378,8 +376,8 @@ pub async fn probe_github_copilot_tools_contract_with_token(
         .unwrap_or_else(|_| DEFAULT_COPILOT_API_BASE_URL.to_string());
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let header_profile = GithubCopilotHeaderProfile::from_env();
-    let model = std::env::var("GITHUB_COPILOT_TOOLS_PROBE_MODEL")
-        .unwrap_or_else(|_| "gpt-5.4".to_string());
+    let model =
+        std::env::var("GITHUB_COPILOT_TOOLS_PROBE_MODEL").unwrap_or_else(|_| "gpt-5.4".to_string());
     let first_body = serde_json::json!({
         "model": model,
         "messages": [

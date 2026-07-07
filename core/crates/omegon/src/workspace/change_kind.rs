@@ -111,15 +111,33 @@ fn is_code_path(path: &Path) -> bool {
     matches!(
         extension(path).as_deref(),
         Some(
-            "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "go" | "java" | "kt" | "swift"
-                | "c" | "h" | "cpp" | "hpp" | "cs" | "rb" | "php" | "sh" | "sql"
+            "rs" | "ts"
+                | "tsx"
+                | "js"
+                | "jsx"
+                | "py"
+                | "go"
+                | "java"
+                | "kt"
+                | "swift"
+                | "c"
+                | "h"
+                | "cpp"
+                | "hpp"
+                | "cs"
+                | "rb"
+                | "php"
+                | "sh"
+                | "sql"
         )
     )
 }
 
 fn is_spec_path(path: &Path) -> bool {
     let text = path_str(path);
-    text.starts_with("openspec/") || text.ends_with(".openapi.yaml") || text.ends_with(".openapi.yml")
+    text.starts_with("openspec/")
+        || text.ends_with(".openapi.yaml")
+        || text.ends_with(".openapi.yml")
 }
 
 fn is_project_docs_path(path: &Path, workspace_kind: WorkspaceKind) -> bool {
@@ -130,8 +148,10 @@ fn is_project_docs_path(path: &Path, workspace_kind: WorkspaceKind) -> bool {
     {
         return true;
     }
-    matches!(workspace_kind, WorkspaceKind::Code | WorkspaceKind::Mixed | WorkspaceKind::Spec)
-        && matches!(extension(path).as_deref(), Some("md" | "rst" | "adoc"))
+    matches!(
+        workspace_kind,
+        WorkspaceKind::Code | WorkspaceKind::Mixed | WorkspaceKind::Spec
+    ) && matches!(extension(path).as_deref(), Some("md" | "rst" | "adoc"))
 }
 
 fn is_knowledge_note_path(path: &Path, workspace_kind: WorkspaceKind) -> bool {
@@ -144,17 +164,24 @@ fn is_knowledge_note_path(path: &Path, workspace_kind: WorkspaceKind) -> bool {
 
 fn is_human_document_path(path: &Path, workspace_kind: WorkspaceKind) -> bool {
     let text = path_str(path);
-    if text.starts_with("drafts/") || text.starts_with("writing/") || text.starts_with("content/")
-    {
+    if text.starts_with("drafts/") || text.starts_with("writing/") || text.starts_with("content/") {
         return true;
     }
-    matches!(workspace_kind, WorkspaceKind::Knowledge | WorkspaceKind::Generic)
-        && matches!(extension(path).as_deref(), Some("md" | "txt" | "rst" | "adoc"))
+    matches!(
+        workspace_kind,
+        WorkspaceKind::Knowledge | WorkspaceKind::Generic
+    ) && matches!(
+        extension(path).as_deref(),
+        Some("md" | "txt" | "rst" | "adoc")
+    )
 }
 
 fn is_document_asset_path(path: &Path, workspace_kind: WorkspaceKind) -> bool {
     let text = path_str(path);
-    let in_document_workspace = matches!(workspace_kind, WorkspaceKind::Knowledge | WorkspaceKind::Generic | WorkspaceKind::Vault);
+    let in_document_workspace = matches!(
+        workspace_kind,
+        WorkspaceKind::Knowledge | WorkspaceKind::Generic | WorkspaceKind::Vault
+    );
     if !in_document_workspace {
         return false;
     }
