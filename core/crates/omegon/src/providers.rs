@@ -2163,6 +2163,8 @@ impl LlmBridge for GithubCopilotClient {
                     return;
                 }
             };
+            let _ = tx.send(LlmEvent::Start).await;
+            let _ = tx.send(LlmEvent::TextStart).await;
             if !parsed_completion.content.is_empty() {
                 let _ = tx
                     .send(LlmEvent::TextDelta {
@@ -2178,6 +2180,7 @@ impl LlmBridge for GithubCopilotClient {
                     })
                     .await;
             }
+            let _ = tx.send(LlmEvent::TextEnd).await;
             let _ = tx
                 .send(LlmEvent::Done {
                     message: parsed_completion.done_message,
