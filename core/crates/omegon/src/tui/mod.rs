@@ -11138,6 +11138,15 @@ Scroll transcript:
                 self.conversation
                     .push_system(&format!("{glyph} {}", parts.join(" · ")));
             }
+            AgentEvent::OperatorCopyBlock {
+                label,
+                text,
+                kind,
+                copy_attempt,
+            } => {
+                self.conversation
+                    .push_operator_copy_block(label, text, kind, copy_attempt);
+            }
             AgentEvent::SystemNotification { message } => {
                 if let Some(detail) = upstream_retry_hint(&message) {
                     self.slim_turn_state = SlimTurnState::UpstreamRetrying(detail);

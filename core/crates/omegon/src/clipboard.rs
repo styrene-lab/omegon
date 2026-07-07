@@ -285,3 +285,104 @@ mod tests {
         );
     }
 }
+
+/// Best-effort copy for operator-visible payloads such as device auth codes.
+/// This never shells out through an interpolated command string; the payload is
+/// written to the selected helper's stdin.
+pub fn copy_operator_text(text: &str) -> omegon_traits::ClipboardCopyStatus {
+    let candidates: &[(&str, &[&str])] = if cfg!(target_os = "macos") {
+        &[("pbcopy", &[])]
+    } else if cfg!(target_os = "windows") {
+        &[("clip.exe", &[])]
+    } else {
+        &[
+            ("wl-copy", &[] as &[&str]),
+            ("xclip", &["-selection", "clipboard"] as &[&str]),
+            ("xsel", &["--clipboard", "--input"] as &[&str]),
+        ]
+    };
+    copy_operator_text_with_candidates(text, candidates)
+}
+
+fn copy_operator_text_with_candidates(
+    text: &str,
+    candidates: &[(&str, &[&str])],
+) -> omegon_traits::ClipboardCopyStatus {
+    let mut saw_candidate = false;
+    let mut last_failure: Option<omegon_traits::ClipboardCopyStatus> = None;
+    for (program, args) in candidates {
+        let mut child = match std::process::Command::new(program)
+            .args(*args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                saw_candidate = true;
+                last_failure = Some(omegon_traits::ClipboardCopyStatus::Failed {
+                    mechanism: (*program).to_string(),
+                    reason: err.to_string(),
+                });
+                continue;
+            }
+        };
+        saw_candidate = true;
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            if let Err(err) = stdin.write_all(text.as_bytes()) {
+                last_failure = Some(omegon_traits::ClipboardCopyStatus::Failed {
+                    mechanism: (*program).to_string(),
+                    reason: err.to_string(),
+                });
+                let _ = child.kill();
+                let _ = child.wait();
+                continue;
+            }
+        }
+        match child.wait_with_output() {
+            Ok(output) if output.status.success() => {
+                return omegon_traits::ClipboardCopyStatus::Copied {
+                    mechanism: (*program).to_string(),
+                };
+            }
+            Ok(output) => {
+                let reason = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                last_failure = Some(omegon_traits::ClipboardCopyStatus::Failed {
+                    mechanism: (*program).to_string(),
+                    reason: if reason.is_empty() {
+                        format!("exit status {}", output.status)
+                    } else {
+                        reason
+                    },
+                });
+            }
+            Err(err) => {
+                last_failure = Some(omegon_traits::ClipboardCopyStatus::Failed {
+                    mechanism: (*program).to_string(),
+                    reason: err.to_string(),
+                });
+            }
+        }
+    }
+    if saw_candidate {
+        last_failure.unwrap_or(omegon_traits::ClipboardCopyStatus::Unavailable)
+    } else {
+        omegon_traits::ClipboardCopyStatus::Unavailable
+    }
+}
+
+#[cfg(test)]
+mod operator_copy_tests {
+    use super::*;
+
+    #[test]
+    fn operator_copy_reports_unavailable_without_candidates() {
+        assert_eq!(
+            copy_operator_text_with_candidates("432F-FB36", &[]),
+            omegon_traits::ClipboardCopyStatus::Unavailable
+        );
+    }
+}

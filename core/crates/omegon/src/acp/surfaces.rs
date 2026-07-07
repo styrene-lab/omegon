@@ -112,6 +112,12 @@ pub enum AcpConversationSegmentKind {
     System {
         text: String,
     },
+    OperatorCopy {
+        label: String,
+        text: String,
+        kind: String,
+        copy_status: Option<String>,
+    },
     Skill {
         active_ref: String,
         reason: String,
@@ -227,6 +233,12 @@ where
                 expanded: tool.expanded,
             }
         }
+        ConversationSegmentKind::OperatorCopy(copy) => AcpConversationSegmentKind::OperatorCopy {
+            label: redact(copy.label.as_ref()),
+            text: redact(copy.text.as_ref()),
+            kind: copy.kind.as_str().to_string(),
+            copy_status: None,
+        },
         ConversationSegmentKind::System(system) => AcpConversationSegmentKind::System {
             text: redact(system.text.as_ref()),
         },

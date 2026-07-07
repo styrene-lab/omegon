@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Added first-class operator copy blocks for auth/device-code flows, including best-effort host clipboard copy for GitHub Copilot device codes and exact copy/export payloads in conversation surfaces.
+
 ### Added
 - Added a GitHub Copilot provider bridge with OpenAI-compatible tool-call support, Copilot OAuth token exchange, and `/chat/completions` requests using VS Code-compatible integration headers.
 - Added a redacted GitHub Copilot tools contract probe that verifies OpenAI-style `tools`, returned `tool_calls`, and tool-result continuation against the live Copilot endpoint.
