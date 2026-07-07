@@ -349,6 +349,9 @@ enum AuthAction {
     /// Probe GitHub Copilot token exchange and models endpoint with redacted output.
     #[command(hide = true)]
     CopilotProbe,
+    /// Probe GitHub Copilot OpenAI-style tool-call contract with redacted output.
+    #[command(hide = true)]
+    CopilotToolsProbe,
 }
 
 #[derive(Subcommand)]
@@ -7504,6 +7507,46 @@ fn format_github_copilot_contract_probe(
     output
 }
 
+
+fn format_github_copilot_tools_probe(probe: &github_copilot::GithubCopilotToolsProbe) -> String {
+    let mut output = String::from("GitHub Copilot tools contract probe\n");
+    output.push_str(&format!(
+        "First turn: {} HTTP {} success={} tool_call_present={}\n",
+        probe.base_url, probe.first_status, probe.first_success, probe.tool_call_present
+    ));
+    if let Some(id) = &probe.tool_call_id {
+        output.push_str(&format!("Tool call id present: {}\n", !id.is_empty()));
+    }
+    if let Some(name) = &probe.tool_call_name {
+        output.push_str(&format!("Tool call name: {name}\n"));
+    }
+    if let Some(arguments) = &probe.tool_call_arguments {
+        output.push_str(&format!("Tool call arguments: {arguments}\n"));
+    }
+    if let Some(status) = probe.second_status {
+        output.push_str(&format!(
+            "Second turn: HTTP {} success={} final_text_present={}\n",
+            status, probe.second_success, probe.final_text_present
+        ));
+    } else {
+        output.push_str("Second turn: skipped\n");
+    }
+    if let Some(error) = &probe.redacted_error {
+        output.push_str(&format!("Error body: {error}\n"));
+    }
+    output
+}
+
+async fn run_github_copilot_tools_probe_command() -> anyhow::Result<()> {
+    let probe = github_copilot::probe_github_copilot_tools_contract().await?;
+    println!("{}", format_github_copilot_tools_probe(&probe));
+    if probe.first_success && probe.tool_call_present && probe.second_success && probe.final_text_present {
+        Ok(())
+    } else {
+        anyhow::bail!("GitHub Copilot tools contract probe failed")
+    }
+}
+
 async fn run_github_copilot_probe_command() -> anyhow::Result<()> {
     let probe = github_copilot::probe_github_copilot_contract().await?;
     println!("{}", format_github_copilot_contract_probe(&probe));
@@ -7523,6 +7566,7 @@ async fn run_auth_command(action: &AuthAction) -> anyhow::Result<()> {
         }
         AuthAction::Login { provider } => run_auth_login(provider).await,
         AuthAction::CopilotProbe => run_github_copilot_probe_command().await,
+        AuthAction::CopilotToolsProbe => run_github_copilot_tools_probe_command().await,
         AuthAction::Logout { provider } => match auth::logout_provider(provider) {
             Ok(()) => {
                 auth::clear_provider_auth_env(provider);

@@ -37,6 +37,23 @@ pub struct GithubCopilotModelsProbe {
     pub redacted_error: Option<String>,
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubCopilotToolsProbe {
+    pub base_url: String,
+    pub first_status: u16,
+    pub first_success: bool,
+    pub tool_call_present: bool,
+    pub tool_call_id: Option<String>,
+    pub tool_call_name: Option<String>,
+    pub tool_call_arguments: Option<String>,
+    pub second_status: Option<u16>,
+    pub second_success: bool,
+    pub final_text_present: bool,
+    pub redacted_error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubCopilotHeaderProfile {
@@ -340,6 +357,152 @@ async fn probe_models(
             None
         } else {
             Some(redact_probe_body(&body))
+        },
+    })
+}
+
+
+pub async fn probe_github_copilot_tools_contract() -> anyhow::Result<GithubCopilotToolsProbe> {
+    let (github_token, _is_oauth) = crate::providers::resolve_api_key_sync("github-copilot").ok_or_else(|| {
+        anyhow::anyhow!("GitHub Copilot tools probe requires `omegon auth login github-copilot`; diagnostic GitHub CLI/GITHUB_TOKEN fallbacks are not used")
+    })?;
+    let copilot_token = exchange_github_copilot_token(&github_token).await?;
+    probe_github_copilot_tools_contract_with_token(&copilot_token.token).await
+}
+
+pub async fn probe_github_copilot_tools_contract_with_token(
+    copilot_token: &str,
+) -> anyhow::Result<GithubCopilotToolsProbe> {
+    let client = reqwest::Client::new();
+    let base_url = std::env::var("GITHUB_COPILOT_BASE_URL")
+        .unwrap_or_else(|_| DEFAULT_COPILOT_API_BASE_URL.to_string());
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let header_profile = GithubCopilotHeaderProfile::from_env();
+    let model = std::env::var("GITHUB_COPILOT_TOOLS_PROBE_MODEL")
+        .unwrap_or_else(|_| "gpt-5.4".to_string());
+    let first_body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are a contract test harness. Use the provided tool exactly once."},
+            {"role": "user", "content": "Call the echo tool with text exactly copilot-tools-ok."}
+        ],
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "echo",
+                "description": "Echo a string.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                    "additionalProperties": false
+                }
+            }
+        }],
+        "tool_choice": "auto",
+        "stream": false
+    });
+    let request = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {copilot_token}"))
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .header("User-Agent", "omegon-github-copilot-tools-probe")
+        .json(&first_body);
+    let response = header_profile.apply_to(request).send().await?;
+    let first_status = response.status();
+    let first_text = response.text().await.unwrap_or_default();
+    let first_parsed = serde_json::from_str::<Value>(&first_text).ok();
+    let first_message = first_parsed
+        .as_ref()
+        .and_then(|value| value.pointer("/choices/0/message"));
+    let first_tool_call = first_message
+        .and_then(|message| message.get("tool_calls"))
+        .and_then(Value::as_array)
+        .and_then(|calls| calls.first());
+    let tool_call_id = first_tool_call
+        .and_then(|call| call.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let tool_call_name = first_tool_call
+        .and_then(|call| call.pointer("/function/name"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let tool_call_arguments = first_tool_call
+        .and_then(|call| call.pointer("/function/arguments"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if !first_status.is_success() || first_tool_call.is_none() {
+        return Ok(GithubCopilotToolsProbe {
+            base_url,
+            first_status: first_status.as_u16(),
+            first_success: first_status.is_success(),
+            tool_call_present: first_tool_call.is_some(),
+            tool_call_id,
+            tool_call_name,
+            tool_call_arguments,
+            second_status: None,
+            second_success: false,
+            final_text_present: false,
+            redacted_error: Some(redact_probe_body(&first_text)),
+        });
+    }
+    let Some(tool_call_id_value) = tool_call_id.clone() else {
+        return Ok(GithubCopilotToolsProbe {
+            base_url,
+            first_status: first_status.as_u16(),
+            first_success: true,
+            tool_call_present: true,
+            tool_call_id,
+            tool_call_name,
+            tool_call_arguments,
+            second_status: None,
+            second_success: false,
+            final_text_present: false,
+            redacted_error: Some("tool call had no id".into()),
+        });
+    };
+    let second_body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are a contract test harness. Use the provided tool exactly once."},
+            {"role": "user", "content": "Call the echo tool with text exactly copilot-tools-ok."},
+            first_message.cloned().unwrap_or_else(|| serde_json::json!({})),
+            {"role": "tool", "tool_call_id": tool_call_id_value, "content": "copilot-tools-ok"}
+        ],
+        "stream": false
+    });
+    let request = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {copilot_token}"))
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .header("User-Agent", "omegon-github-copilot-tools-probe")
+        .json(&second_body);
+    let response = header_profile.apply_to(request).send().await?;
+    let second_status = response.status();
+    let second_text = response.text().await.unwrap_or_default();
+    let second_parsed = serde_json::from_str::<Value>(&second_text).ok();
+    let final_text_present = second_parsed
+        .as_ref()
+        .and_then(|value| value.pointer("/choices/0/message/content"))
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty());
+    Ok(GithubCopilotToolsProbe {
+        base_url,
+        first_status: first_status.as_u16(),
+        first_success: first_status.is_success(),
+        tool_call_present: true,
+        tool_call_id,
+        tool_call_name,
+        tool_call_arguments,
+        second_status: Some(second_status.as_u16()),
+        second_success: second_status.is_success(),
+        final_text_present,
+        redacted_error: if second_status.is_success() {
+            None
+        } else {
+            Some(redact_probe_body(&second_text))
         },
     })
 }

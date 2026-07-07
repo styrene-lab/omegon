@@ -2057,14 +2057,6 @@ impl LlmBridge for GithubCopilotClient {
         options: &StreamOptions,
     ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
         let (tx, rx) = mpsc::channel(16);
-        if !tools.is_empty() {
-            let _ = tx
-                .send(LlmEvent::Error {
-                    message: "GitHub Copilot bridge is currently text-only; tool calling is not yet implemented".into(),
-                })
-                .await;
-            return Ok(rx);
-        }
         let model = options
             .model
             .as_deref()
@@ -2072,6 +2064,16 @@ impl LlmBridge for GithubCopilotClient {
             .unwrap_or("gpt-5.4")
             .to_string();
         let wire_msgs = OpenAIClient::build_wire_messages(system_prompt, messages);
+        let wire_tools: Vec<Value> = tools
+            .iter()
+            .map(|t| {
+                let params = openai_function_parameters(&t.parameters);
+                json!({
+                    "type": "function",
+                    "function": {"name": t.name, "description": t.description, "parameters": params},
+                })
+            })
+            .collect();
         let client = self.client.clone();
         let base_url = self.base_url.clone();
         tokio::spawn(async move {
@@ -2098,11 +2100,15 @@ impl LlmBridge for GithubCopilotClient {
                 }
             };
             let header_profile = crate::github_copilot::GithubCopilotHeaderProfile::from_env();
-            let body = json!({
+            let mut body = json!({
                 "model": model,
                 "messages": wire_msgs,
                 "stream": false,
             });
+            if !wire_tools.is_empty() {
+                body["tools"] = Value::Array(wire_tools);
+                body["tool_choice"] = json!("auto");
+            }
             let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
             let request = client
                 .post(url)
@@ -2146,12 +2152,35 @@ impl LlmBridge for GithubCopilotClient {
                     return;
                 }
             };
-            let content = parsed
-                .pointer("/choices/0/message/content")
+            let message = parsed
+                .pointer("/choices/0/message")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let content = message
+                .get("content")
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            if content.is_empty() {
+            let tool_calls: Vec<crate::bridge::WireToolCall> = message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .map(|calls| {
+                    calls
+                        .iter()
+                        .filter_map(|call| {
+                            let id = call.get("id").and_then(Value::as_str)?.to_string();
+                            let name = call.pointer("/function/name").and_then(Value::as_str)?.to_string();
+                            let arguments = call
+                                .pointer("/function/arguments")
+                                .and_then(Value::as_str)
+                                .and_then(|raw| serde_json::from_str(raw).ok())
+                                .unwrap_or_default();
+                            Some(crate::bridge::WireToolCall { id, name, arguments })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if content.is_empty() && tool_calls.is_empty() {
                 let keys = parsed
                     .as_object()
                     .map(|object| object.keys().cloned().collect::<Vec<_>>())
@@ -2159,14 +2188,24 @@ impl LlmBridge for GithubCopilotClient {
                 let _ = tx
                     .send(LlmEvent::Error {
                         message: format!(
-                            "GitHub Copilot returned no assistant text content; unsupported response shape with top-level keys: {:?}",
+                            "GitHub Copilot returned neither assistant text nor tool calls; unsupported response shape with top-level keys: {:?}",
                             keys
                         ),
                     })
                     .await;
                 return;
             }
-            let _ = tx.send(LlmEvent::TextDelta { delta: content.clone() }).await;
+            if !content.is_empty() {
+                let _ = tx.send(LlmEvent::TextDelta { delta: content.clone() }).await;
+            }
+            for tool_call in &tool_calls {
+                let _ = tx.send(LlmEvent::ToolCallStart).await;
+                let _ = tx
+                    .send(LlmEvent::ToolCallEnd {
+                        tool_call: tool_call.clone(),
+                    })
+                    .await;
+            }
             let usage = parsed.get("usage");
             let input_tokens = usage
                 .and_then(|usage| usage.get("prompt_tokens"))
@@ -2176,10 +2215,6 @@ impl LlmBridge for GithubCopilotClient {
                 .and_then(|usage| usage.get("completion_tokens"))
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
-            let message = parsed
-                .pointer("/choices/0/message")
-                .cloned()
-                .unwrap_or_else(|| json!({ "role": "assistant", "content": content }));
             let _ = tx
                 .send(LlmEvent::Done {
                     message,
