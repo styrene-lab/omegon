@@ -5697,6 +5697,9 @@ fn build_tui_secret_readiness_snapshot(
                         events_tx.clone(),
                         active,
                     ));
+                    let active_wait_started_at = std::time::Instant::now();
+                    let mut slow_turn_probe = Box::pin(tokio::time::sleep(std::time::Duration::from_secs(10)));
+                    let mut slow_turn_notifications: u32 = 0;
 
                     loop {
                         tokio::select! {
@@ -5715,6 +5718,25 @@ fn build_tui_secret_readiness_snapshot(
                                     }
                                 };
                                 break;
+                            }
+                            _ = &mut slow_turn_probe => {
+                                slow_turn_notifications = slow_turn_notifications.saturating_add(1);
+                                let elapsed = active_wait_started_at.elapsed();
+                                tracing::warn!(
+                                    elapsed_secs = elapsed.as_secs(),
+                                    queued_prompts = runtime.queue_depth(),
+                                    slow_turn_notifications,
+                                    "interactive active turn worker is still running after visible turn start; queued prompts remain blocked until worker returns"
+                                );
+                                if slow_turn_notifications == 1 || slow_turn_notifications % 6 == 0 {
+                                    let _ = events_tx.send(AgentEvent::SystemNotification {
+                                        message: format!(
+                                            "Active turn worker has been running for {}s after start; queued prompts wait until cleanup returns. Diagnostic telemetry is being written to the agent log.",
+                                            elapsed.as_secs()
+                                        ),
+                                    });
+                                }
+                                slow_turn_probe.as_mut().reset(tokio::time::Instant::now() + std::time::Duration::from_secs(10));
                             }
                             maybe_cmd = command_rx.recv() => {
                                 let Some(cmd) = maybe_cmd else {
@@ -6401,6 +6423,7 @@ async fn run_interactive_active_turn(
         *guard = Some(cancel.clone());
     }
 
+    let loop_started_at = std::time::Instant::now();
     let run_result = {
         let bridge_guard = bridge.read().await;
         let mut run = std::pin::pin!(r#loop::run(
@@ -6430,6 +6453,18 @@ async fn run_interactive_active_turn(
             }
         }
     };
+    let cleanup_started_at = std::time::Instant::now();
+    tracing::info!(
+        runtime_turn_id = active.runtime_turn_id,
+        loop_elapsed_ms = loop_started_at.elapsed().as_millis() as u64,
+        cancelled = cancel.is_cancelled(),
+        result = match &run_result {
+            Some(Ok(_)) => "ok",
+            Some(Err(_)) => "error",
+            None => "abandoned",
+        },
+        "interactive active turn loop returned; starting post-turn cleanup"
+    );
 
     if (matches!(run_result, Some(Ok(_))) || run_result.is_none()) && cancel.is_cancelled() {
         let keep_prompt = cancel_keeps_prompt.load(std::sync::atomic::Ordering::Relaxed);
@@ -6462,26 +6497,93 @@ async fn run_interactive_active_turn(
         let _ = events_tx.send(AgentEvent::AgentEnd);
     }
 
+    let cancel_lock_started_at = std::time::Instant::now();
     if let Ok(mut guard) = shared_cancel.lock() {
         guard.take();
     }
+    let cancel_lock_elapsed = cancel_lock_started_at.elapsed();
+    if cancel_lock_elapsed > std::time::Duration::from_millis(250) {
+        tracing::warn!(
+            runtime_turn_id = active.runtime_turn_id,
+            elapsed_ms = cancel_lock_elapsed.as_millis() as u64,
+            "post-turn cleanup waited on shared cancel lock"
+        );
+    } else {
+        tracing::debug!(
+            runtime_turn_id = active.runtime_turn_id,
+            elapsed_ms = cancel_lock_elapsed.as_millis() as u64,
+            "post-turn cleanup cleared shared cancel token"
+        );
+    }
 
+    let estimate_started_at = std::time::Instant::now();
     let est = runtime_state.conversation.estimate_tokens();
+    let estimate_elapsed = estimate_started_at.elapsed();
+    if estimate_elapsed > std::time::Duration::from_millis(250) {
+        tracing::warn!(
+            runtime_turn_id = active.runtime_turn_id,
+            elapsed_ms = estimate_elapsed.as_millis() as u64,
+            estimated_tokens = est,
+            "post-turn cleanup spent unusually long estimating transcript tokens"
+        );
+    } else {
+        tracing::debug!(
+            runtime_turn_id = active.runtime_turn_id,
+            elapsed_ms = estimate_elapsed.as_millis() as u64,
+            estimated_tokens = est,
+            "post-turn cleanup estimated transcript tokens"
+        );
+    }
+
+    let settings_lock_started_at = std::time::Instant::now();
     let settings = shared_settings.lock().unwrap();
+    let settings_lock_elapsed = settings_lock_started_at.elapsed();
+    if settings_lock_elapsed > std::time::Duration::from_millis(250) {
+        tracing::warn!(
+            runtime_turn_id = active.runtime_turn_id,
+            elapsed_ms = settings_lock_elapsed.as_millis() as u64,
+            "post-turn cleanup waited on shared settings lock"
+        );
+    } else {
+        tracing::debug!(
+            runtime_turn_id = active.runtime_turn_id,
+            elapsed_ms = settings_lock_elapsed.as_millis() as u64,
+            "post-turn cleanup acquired shared settings lock"
+        );
+    }
+    let context_window = settings.context_window;
+    let context_class = settings.effective_requested_class().label().to_string();
+    let thinking_level = settings.thinking.as_str().to_string();
+
+    let metrics_lock_started_at = std::time::Instant::now();
     if let Ok(mut metrics) = runtime.context_metrics.lock() {
-        metrics.update(
-            est,
-            settings.context_window,
-            settings.effective_requested_class().label(),
-            settings.thinking.as_str(),
+        metrics.update(est, context_window, &context_class, &thinking_level);
+    }
+    let metrics_lock_elapsed = metrics_lock_started_at.elapsed();
+    if metrics_lock_elapsed > std::time::Duration::from_millis(250) {
+        tracing::warn!(
+            runtime_turn_id = active.runtime_turn_id,
+            elapsed_ms = metrics_lock_elapsed.as_millis() as u64,
+            "post-turn cleanup waited on context metrics lock"
+        );
+    } else {
+        tracing::debug!(
+            runtime_turn_id = active.runtime_turn_id,
+            elapsed_ms = metrics_lock_elapsed.as_millis() as u64,
+            "post-turn cleanup updated context metrics"
         );
     }
     let _ = events_tx.send(AgentEvent::ContextUpdated {
         tokens: est as u64,
-        context_window: settings.context_window as u64,
-        context_class: settings.effective_requested_class().label().to_string(),
-        thinking_level: settings.thinking.as_str().to_string(),
+        context_window: context_window as u64,
+        context_class,
+        thinking_level,
     });
+    tracing::info!(
+        runtime_turn_id = active.runtime_turn_id,
+        cleanup_elapsed_ms = cleanup_started_at.elapsed().as_millis() as u64,
+        "interactive active turn post-turn cleanup finished"
+    );
 
     runtime_state
 }
