@@ -2308,16 +2308,16 @@ fn copilot_responses_input_from_chat_messages(messages: &[Value]) -> Vec<Value> 
             .unwrap_or("user");
         match role {
             "assistant" => {
-                if let Some(content) = message.get("content").and_then(Value::as_str) {
-                    if !content.trim().is_empty() {
-                        input.push(json!({
-                            "role": "assistant",
-                            "content": [{"type": "output_text", "text": content, "annotations": []}],
-                            "id": "msg_123",
-                            "status": "completed",
-                            "type": "message",
-                        }));
-                    }
+                if let Some(content) = message.get("content").and_then(Value::as_str)
+                    && !content.trim().is_empty()
+                {
+                    input.push(json!({
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": content, "annotations": []}],
+                        "id": "msg_123",
+                        "status": "completed",
+                        "type": "message",
+                    }));
                 }
                 if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
                     for call in tool_calls {
@@ -2467,10 +2467,9 @@ fn parse_copilot_responses_completion(value: &Value) -> anyhow::Result<CopilotPa
                         if matches!(
                             part.get("type").and_then(Value::as_str),
                             Some("output_text")
-                        ) {
-                            if let Some(text) = part.get("text").and_then(Value::as_str) {
-                                content_parts.push(text.to_string());
-                            }
+                        ) && let Some(text) = part.get("text").and_then(Value::as_str)
+                        {
+                            content_parts.push(text.to_string());
                         }
                     }
                 }
