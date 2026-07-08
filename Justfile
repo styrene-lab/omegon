@@ -448,7 +448,7 @@ install-catalog:
         fi
     done
     if [ -n "$BINARY" ]; then
-        "$BINARY" catalog install
+        "$BINARY" catalog install --offline
     else
         # Binary not built yet — fall back to rsync from source tree
         CATALOG_SRC="$(pwd)/catalog"

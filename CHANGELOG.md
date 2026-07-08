@@ -16,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Make `just link` install bundled catalog agents offline by default so local build/link loops do not repeatedly hit unauthenticated GitHub raw catalog endpoints.
 - Ensure structured menu rendering keeps the selected row visible on long menus by windowing against rendered line height and showing descriptions only for the selected row.
 
 ## [0.27.7] - 2026-07-08
