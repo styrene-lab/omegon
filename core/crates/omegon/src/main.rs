@@ -8065,8 +8065,11 @@ fn remote_builtin_policy(
     }
 
     match command {
-        crate::tui::CanonicalSlashCommand::AuthStatus
-        | crate::tui::CanonicalSlashCommand::AuthLogout(_) => RemoteBuiltinPolicy::Allow,
+        crate::tui::CanonicalSlashCommand::AuthView
+        | crate::tui::CanonicalSlashCommand::AuthStatus => RemoteBuiltinPolicy::Allow,
+        crate::tui::CanonicalSlashCommand::AuthUnlock
+        | crate::tui::CanonicalSlashCommand::AuthLogin(_)
+        | crate::tui::CanonicalSlashCommand::AuthLogout(_) => RemoteBuiltinPolicy::RequiresBypass,
         _ if definition.safety.requires_confirmation => RemoteBuiltinPolicy::RequiresBypass,
         _ => RemoteBuiltinPolicy::Allow,
     }
@@ -8079,8 +8082,11 @@ fn remote_registry_name_for_command<'a>(
     match command {
         crate::tui::CanonicalSlashCommand::AutomationView
         | crate::tui::CanonicalSlashCommand::AutomationSet(_) => "automation",
-        crate::tui::CanonicalSlashCommand::AuthLogin { .. }
-        | crate::tui::CanonicalSlashCommand::AuthLogout { .. } => "auth",
+        crate::tui::CanonicalSlashCommand::AuthView
+        | crate::tui::CanonicalSlashCommand::AuthStatus
+        | crate::tui::CanonicalSlashCommand::AuthUnlock
+        | crate::tui::CanonicalSlashCommand::AuthLogin(_)
+        | crate::tui::CanonicalSlashCommand::AuthLogout(_) => "auth",
         crate::tui::CanonicalSlashCommand::SkillsView
         | crate::tui::CanonicalSlashCommand::SkillsHelp
         | crate::tui::CanonicalSlashCommand::SkillsReload
@@ -10276,6 +10282,36 @@ mod tests {
             }
             _ => panic!("Expected Auth command"),
         }
+    }
+
+    #[test]
+    fn remote_auth_status_is_allowed_but_nested_auth_side_effects_require_bypass() {
+        assert_eq!(
+            remote_builtin_policy("auth", &crate::tui::CanonicalSlashCommand::AuthStatus,),
+            RemoteBuiltinPolicy::Allow
+        );
+        assert_eq!(
+            remote_builtin_policy("auth", &crate::tui::CanonicalSlashCommand::AuthView,),
+            RemoteBuiltinPolicy::Allow
+        );
+        assert_eq!(
+            remote_builtin_policy(
+                "auth",
+                &crate::tui::CanonicalSlashCommand::AuthLogin("anthropic".into()),
+            ),
+            RemoteBuiltinPolicy::RequiresBypass
+        );
+        assert_eq!(
+            remote_builtin_policy(
+                "auth",
+                &crate::tui::CanonicalSlashCommand::AuthLogout("anthropic".into()),
+            ),
+            RemoteBuiltinPolicy::RequiresBypass
+        );
+        assert_eq!(
+            remote_builtin_policy("auth", &crate::tui::CanonicalSlashCommand::AuthUnlock,),
+            RemoteBuiltinPolicy::RequiresBypass
+        );
     }
 
     #[test]
