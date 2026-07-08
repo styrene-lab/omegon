@@ -33,6 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added additive conceptual model IDs to the model registry so multiple provider routes can map to the same semantic model class ahead of first-class GitHub Copilot routing.
 
 ### Fixed
+- Routed StuckDetector file/churn tracking through normalized observation events so bash/view/search evidence shares the same validation and mutation reset semantics as structured tool calls.
 - Gated live OpenAI-compatible provider endpoint probes behind `OMEGON_LIVE_ENDPOINT_PROBES=1` so default test runs do not fail or stall on external network availability.
 - Serialized current-directory-mutating tests on a shared CWD test lock so the default parallel `cargo test -p omegon` run no longer observes deleted temporary working directories.
 - Coalesced duplicate tool results after provider-compatible ID sanitization so wrapper-tool rollback/no-op paths cannot poison Anthropic history with multiple `tool_result` blocks.

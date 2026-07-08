@@ -402,14 +402,15 @@ impl IntentDocument {
 
         for event in ObservationNormalizer::new(catalog).normalize(calls, results) {
             match event {
-                ObservationEvent::FileRead { path } => {
+                ObservationEvent::FileRead { path, .. } => {
                     self.files_read.insert(path);
                 }
-                ObservationEvent::FileMutated { path } => {
+                ObservationEvent::FileMutated { path, .. } => {
                     self.files_modified.insert(path);
                 }
                 ObservationEvent::ProgressBoundary {
                     clears_mutation_state,
+                    ..
                 } => {
                     if clears_mutation_state {
                         // A progress boundary such as commit clears the mutation set —
@@ -419,7 +420,8 @@ impl IntentDocument {
                         self.commit_nudged = false;
                     }
                 }
-                ObservationEvent::SearchPerformed | ObservationEvent::ValidationRun => {}
+                ObservationEvent::SearchPerformed { .. }
+                | ObservationEvent::ValidationRun { .. } => {}
             }
         }
 

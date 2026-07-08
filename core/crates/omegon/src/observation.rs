@@ -5,11 +5,24 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ObservationEvent {
-    FileRead { path: PathBuf },
-    SearchPerformed,
-    FileMutated { path: PathBuf },
-    ValidationRun,
-    ProgressBoundary { clears_mutation_state: bool },
+    FileRead {
+        source_tool: String,
+        path: PathBuf,
+    },
+    SearchPerformed {
+        source_tool: String,
+    },
+    FileMutated {
+        source_tool: String,
+        path: PathBuf,
+    },
+    ValidationRun {
+        source_tool: String,
+    },
+    ProgressBoundary {
+        source_tool: String,
+        clears_mutation_state: bool,
+    },
 }
 
 pub(crate) struct ObservationNormalizer<'a> {
@@ -46,6 +59,7 @@ impl<'a> ObservationNormalizer<'a> {
 
         if caps.contains(&ToolCapability::ProgressBoundary) || call.name == "commit" {
             events.push(ObservationEvent::ProgressBoundary {
+                source_tool: call.name.clone(),
                 clears_mutation_state: call.name == "commit",
             });
         }
@@ -54,12 +68,17 @@ impl<'a> ObservationNormalizer<'a> {
             || matches!(call.name.as_str(), "change" | "write" | "edit")
         {
             for path in mutation_paths(call) {
-                events.push(ObservationEvent::FileMutated { path });
+                events.push(ObservationEvent::FileMutated {
+                    source_tool: call.name.clone(),
+                    path,
+                });
             }
         }
 
         if caps.contains(&ToolCapability::Validation) {
-            events.push(ObservationEvent::ValidationRun);
+            events.push(ObservationEvent::ValidationRun {
+                source_tool: call.name.clone(),
+            });
         }
 
         let is_repo_inspection = caps.iter().any(|cap| {
@@ -74,10 +93,13 @@ impl<'a> ObservationNormalizer<'a> {
         if is_repo_inspection {
             if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
                 events.push(ObservationEvent::FileRead {
+                    source_tool: call.name.clone(),
                     path: PathBuf::from(path),
                 });
             } else if caps.contains(&ToolCapability::BroadRepoInspection) {
-                events.push(ObservationEvent::SearchPerformed);
+                events.push(ObservationEvent::SearchPerformed {
+                    source_tool: call.name.clone(),
+                });
             }
         }
 
@@ -126,6 +148,7 @@ fn classify_bash_segment(segment: &str) -> Vec<ObservationEvent> {
     match program {
         "git" | "jj" if tokens.get(1).is_some_and(|arg| arg == "commit") => {
             vec![ObservationEvent::ProgressBoundary {
+                source_tool: "bash".into(),
                 clears_mutation_state: true,
             }]
         }
@@ -134,23 +157,34 @@ fn classify_bash_segment(segment: &str) -> Vec<ObservationEvent> {
                 matches!(arg.as_str(), "test" | "check" | "clippy" | "build")
             }) =>
         {
-            vec![ObservationEvent::ValidationRun]
+            vec![ObservationEvent::ValidationRun {
+                source_tool: "bash".into(),
+            }]
         }
         "just"
             if tokens.get(1).is_some_and(|arg| {
                 arg.starts_with("test") || matches!(arg.as_str(), "lint" | "check" | "build")
             }) =>
         {
-            vec![ObservationEvent::ValidationRun]
+            vec![ObservationEvent::ValidationRun {
+                source_tool: "bash".into(),
+            }]
         }
         "npm" | "pnpm" | "yarn" if tokens.iter().any(|arg| arg == "test" || arg == "check") => {
-            vec![ObservationEvent::ValidationRun]
+            vec![ObservationEvent::ValidationRun {
+                source_tool: "bash".into(),
+            }]
         }
-        "rg" | "grep" | "find" | "fd" | "ls" | "tree" => vec![ObservationEvent::SearchPerformed],
+        "rg" | "grep" | "find" | "fd" | "ls" | "tree" => vec![ObservationEvent::SearchPerformed {
+            source_tool: format!("bash:{program}"),
+        }],
         "cat" | "head" | "tail" | "sed" | "awk" | "wc" | "nl" | "strings" | "xxd" | "hexdump" => {
             read_paths_from_tokens(&tokens)
                 .into_iter()
-                .map(|path| ObservationEvent::FileRead { path })
+                .map(|path| ObservationEvent::FileRead {
+                    source_tool: format!("bash:{program}"),
+                    path,
+                })
                 .collect()
         }
         _ => Vec::new(),
@@ -263,6 +297,7 @@ mod tests {
         assert_eq!(
             events,
             vec![ObservationEvent::FileRead {
+                source_tool: "view".into(),
                 path: PathBuf::from("docs/a.md")
             }]
         );
@@ -281,7 +316,12 @@ mod tests {
             )],
             &[ok_result()],
         );
-        assert_eq!(events, vec![ObservationEvent::SearchPerformed]);
+        assert_eq!(
+            events,
+            vec![ObservationEvent::SearchPerformed {
+                source_tool: "codebase_search".into()
+            }]
+        );
     }
 
     #[test]
@@ -307,6 +347,7 @@ mod tests {
         assert_eq!(
             events,
             vec![ObservationEvent::FileRead {
+                source_tool: "bash:sed".into(),
                 path: PathBuf::from("core/crates/omegon/src/conversation.rs")
             }]
         );
@@ -322,7 +363,12 @@ mod tests {
             )],
             &[ok_result()],
         );
-        assert_eq!(events, vec![ObservationEvent::SearchPerformed]);
+        assert_eq!(
+            events,
+            vec![ObservationEvent::SearchPerformed {
+                source_tool: "bash:rg".into()
+            }]
+        );
     }
 
     #[test]
@@ -338,8 +384,11 @@ mod tests {
         assert_eq!(
             events,
             vec![
-                ObservationEvent::ValidationRun,
+                ObservationEvent::ValidationRun {
+                    source_tool: "bash".into(),
+                },
                 ObservationEvent::ProgressBoundary {
+                    source_tool: "bash".into(),
                     clears_mutation_state: true,
                 },
             ]
