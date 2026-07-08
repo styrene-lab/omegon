@@ -5685,6 +5685,8 @@ fn build_tui_secret_readiness_snapshot(
 
                 while let Some(active) = runtime.maybe_start_next_turn() {
                     emit_runtime_queue_snapshot(&runtime, &events_tx);
+                    let mut lifecycle = RuntimeTurnLifecycle::new(&active, "promoted");
+                    lifecycle.transition("promoted", runtime.queue_depth(), &events_tx);
                     let _ = events_tx.send(AgentEvent::RuntimePromptStarted {
                         text: active.prompt.text.clone(),
                         image_paths: active.prompt.image_paths.clone(),
@@ -5692,6 +5694,7 @@ fn build_tui_secret_readiness_snapshot(
                     stop_voice_session_if_requested(&active.prompt, &runtime_state.bus, &events_tx)
                         .await;
                     mark_interactive_session_busy(&agent.dashboard_handles, true);
+                    lifecycle.transition("worker_spawned", runtime.queue_depth(), &events_tx);
 
                     let mut quit_after_turn = false;
                     let state_for_turn = runtime_state;
@@ -5713,7 +5716,10 @@ fn build_tui_secret_readiness_snapshot(
                         tokio::select! {
                             turn_result = &mut turn_task => {
                                 runtime_state = match turn_result {
-                                    Ok(runtime_state) => runtime_state,
+                                    Ok(runtime_state) => {
+                                        lifecycle.transition("worker_returned", runtime.queue_depth(), &events_tx);
+                                        runtime_state
+                                    }
                                     Err(join_err) => {
                                         let message = format_interactive_turn_task_failure(&join_err);
                                         tracing::error!("interactive turn task failed: {join_err}");
@@ -5733,10 +5739,14 @@ fn build_tui_secret_readiness_snapshot(
                                 tracing::warn!(
                                     elapsed_secs = elapsed.as_secs(),
                                     queued_prompts = runtime.queue_depth(),
+                                    lifecycle = %lifecycle.snapshot(runtime.queue_depth()),
                                     slow_turn_notifications,
                                     "interactive active turn worker is still running after visible turn start; queued prompts remain blocked until worker returns"
                                 );
                                 if slow_turn_notifications == 1 || slow_turn_notifications % 6 == 0 {
+                                    let _ = events_tx.send(AgentEvent::RuntimeTurnLifecycleUpdated {
+                                        snapshot_json: lifecycle.snapshot(runtime.queue_depth()),
+                                    });
                                     let _ = events_tx.send(AgentEvent::SystemNotification {
                                         message: format!(
                                             "Active turn worker has been running for {}s after start; queued prompts wait until cleanup returns. Diagnostic telemetry is being written to the agent log.",
@@ -5813,7 +5823,9 @@ fn build_tui_secret_readiness_snapshot(
                         }
                     }
 
+                    lifecycle.transition("supervisor_completing", runtime.queue_depth(), &events_tx);
                     runtime.complete_active_turn();
+                    lifecycle.transition("supervisor_completed", runtime.queue_depth(), &events_tx);
                     emit_runtime_queue_snapshot(&runtime, &events_tx);
                     mark_interactive_session_busy(&agent.dashboard_handles, runtime.is_busy());
 
@@ -6185,6 +6197,66 @@ struct ActiveTurnMeta {
     prompt: PromptEnvelope,
     phase: ActiveTurnPhase,
     started_at: std::time::Instant,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeTurnLifecycle {
+    runtime_turn_id: u64,
+    prompt_id: u64,
+    phase: &'static str,
+    phase_started_at: std::time::Instant,
+    turn_started_at: std::time::Instant,
+    sequence: u64,
+}
+
+impl RuntimeTurnLifecycle {
+    fn new(active: &ActiveTurnMeta, phase: &'static str) -> Self {
+        let now = std::time::Instant::now();
+        Self {
+            runtime_turn_id: active.runtime_turn_id,
+            prompt_id: active.prompt.id,
+            phase,
+            phase_started_at: now,
+            turn_started_at: active.started_at,
+            sequence: 0,
+        }
+    }
+
+    fn transition(
+        &mut self,
+        phase: &'static str,
+        queue_depth: usize,
+        events_tx: &broadcast::Sender<AgentEvent>,
+    ) {
+        let now = std::time::Instant::now();
+        self.sequence = self.sequence.saturating_add(1);
+        self.phase = phase;
+        self.phase_started_at = now;
+        let _ = events_tx.send(AgentEvent::RuntimeTurnLifecycleUpdated {
+            snapshot_json: serde_json::json!({
+                "turn_id": self.runtime_turn_id,
+                "prompt_id": self.prompt_id,
+                "phase": self.phase,
+                "sequence": self.sequence,
+                "phase_elapsed_ms": 0u64,
+                "turn_elapsed_ms": now.saturating_duration_since(self.turn_started_at).as_millis() as u64,
+                "queue_depth": queue_depth,
+            }),
+        });
+    }
+
+    fn snapshot(&self, queue_depth: usize) -> serde_json::Value {
+        let now = std::time::Instant::now();
+        serde_json::json!({
+            "turn_id": self.runtime_turn_id,
+            "prompt_id": self.prompt_id,
+            "phase": self.phase,
+            "sequence": self.sequence,
+            "phase_elapsed_ms": now.saturating_duration_since(self.phase_started_at).as_millis() as u64,
+            "turn_elapsed_ms": now.saturating_duration_since(self.turn_started_at).as_millis() as u64,
+            "queue_depth": queue_depth,
+        })
+    }
 }
 
 fn runtime_actor_kind_from_via(via: &str) -> RuntimeActorKind {

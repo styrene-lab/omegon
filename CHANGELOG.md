@@ -16,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Add runtime turn lifecycle events wired through the supervisor tick/event loop, audit log, WebSocket serialization, and daemon SSE stream.
 - Add interactive-turn telemetry for post-turn cleanup phases and slow active-turn workers so logs and operator notifications can identify where queued prompts are blocked after visible completion.
 - Add runtime queue wait/elapsed timings and queue-blocked prompt log fields for active-turn diagnostics.
 - Add audit-log tool duration/progress cadence summaries plus structured runtime queue, prompt-start, context, stream-idle, and provider retry/failure projections.

@@ -60,6 +60,9 @@ fn agent_event_kind(event: &omegon_traits::AgentEvent) -> &'static str {
         omegon_traits::AgentEvent::HarnessStatusChanged { .. } => "harness_status_changed",
         omegon_traits::AgentEvent::WebDashboardStarted { .. } => "web_dashboard_started",
         omegon_traits::AgentEvent::RuntimeQueueUpdated { .. } => "runtime_queue_updated",
+        omegon_traits::AgentEvent::RuntimeTurnLifecycleUpdated { .. } => {
+            "runtime_turn_lifecycle_updated"
+        }
         omegon_traits::AgentEvent::RuntimePromptStarted { .. } => "runtime_prompt_started",
         omegon_traits::AgentEvent::ContextUpdated { .. } => "context_updated",
         omegon_traits::AgentEvent::ContextCompaction { .. } => "context_compaction",
@@ -218,6 +221,12 @@ impl AuditLog {
         match event {
             omegon_traits::AgentEvent::RuntimeQueueUpdated { snapshot_json } => Some((
                 "runtime_queue",
+                serde_json::json!({
+                    "snapshot": snapshot_json,
+                }),
+            )),
+            omegon_traits::AgentEvent::RuntimeTurnLifecycleUpdated { snapshot_json } => Some((
+                "runtime_turn_lifecycle",
                 serde_json::json!({
                     "snapshot": snapshot_json,
                 }),

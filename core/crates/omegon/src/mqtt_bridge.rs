@@ -282,6 +282,7 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                 snapshot: snapshot_json.clone(),
             })
         }
+        AgentEvent::RuntimeTurnLifecycleUpdated { .. } => None,
         AgentEvent::RuntimePromptStarted { .. } => None,
         AgentEvent::FamilyVitalSignsUpdated { signs } => {
             Some(IpcEventPayload::FamilyVitalSignsUpdated {

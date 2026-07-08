@@ -11113,6 +11113,7 @@ Scroll transcript:
             AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
                 self.runtime_queue_snapshot = Some(snapshot_json);
             }
+            AgentEvent::RuntimeTurnLifecycleUpdated { .. } => {}
             AgentEvent::RuntimePromptStarted { text, image_paths } => {
                 if image_paths.is_empty() {
                     self.conversation.push_user(&text);

@@ -2800,6 +2800,11 @@ pub enum AgentEvent {
     RuntimeQueueUpdated {
         snapshot_json: Value,
     },
+    /// Runtime turn lifecycle phase changed. This is the tick/event-loop spine for
+    /// diagnosing where an interactive turn is spending time after prompt ingress.
+    RuntimeTurnLifecycleUpdated {
+        snapshot_json: Value,
+    },
     /// A queued prompt has been promoted to the active runtime turn and is now
     /// being sent to the model. Operator surfaces should render this as the
     /// visible operator segment for that turn.

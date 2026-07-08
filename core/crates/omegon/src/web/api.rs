@@ -1688,6 +1688,9 @@ pub fn daemon_event_stream_envelope(
         AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
             ("runtime.queue_changed", snapshot_json.clone())
         }
+        AgentEvent::RuntimeTurnLifecycleUpdated { snapshot_json } => {
+            ("runtime.turn_lifecycle_changed", snapshot_json.clone())
+        }
         AgentEvent::ContextUpdated {
             tokens,
             context_window,

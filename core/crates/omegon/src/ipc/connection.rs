@@ -1133,6 +1133,7 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                 snapshot: snapshot_json.clone(),
             })
         }
+        AgentEvent::RuntimeTurnLifecycleUpdated { .. } => None,
         AgentEvent::RuntimePromptStarted { .. } => None,
         AgentEvent::SessionReset => Some(IpcEventPayload::SessionReset),
         // Internal-only events — not projected to IPC
