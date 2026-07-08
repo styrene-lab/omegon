@@ -9070,12 +9070,18 @@ fn secrets_menu_capabilities_tab_groups_first_party_secret_readiness() {
         .expect("web_search capability row");
 
     assert_eq!(row.label, "Web search and external evidence");
-    assert_eq!(row.value.as_deref(), Some("partial"));
+    assert_eq!(row.value.as_deref(), Some("ready"));
     assert!(
         row.metadata
             .iter()
-            .any(|item| item == "1 configured · 3 missing")
+            .any(|item| item == "1 configured · 0 deferred · 4 known providers")
     );
+    assert!(
+        row.metadata
+            .iter()
+            .any(|item| { item == "policy: any configured provider enables this capability" })
+    );
+    assert!(row.metadata.iter().any(|item| item == "category: research"));
     assert!(
         row.metadata
             .iter()

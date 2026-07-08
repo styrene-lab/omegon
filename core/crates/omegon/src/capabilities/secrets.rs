@@ -17,9 +17,13 @@ pub struct HarnessCapabilitySecretReadiness {
     pub label: String,
     pub category: HarnessCapabilityCategory,
     pub description: String,
+    pub policy: HarnessCapabilitySecretPolicy,
     pub secret_names: Vec<String>,
+    pub preferred_secret: Option<String>,
     pub configured_count: usize,
+    pub deferred_count: usize,
     pub missing_count: usize,
+    pub candidate_count: usize,
     pub status: HarnessCapabilityReadinessStatus,
 }
 
@@ -29,6 +33,23 @@ pub enum HarnessCapabilityCategory {
     LlmProvider,
     Research,
     Forge,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessCapabilitySecretPolicy {
+    AnyOf,
+    AllOf,
+}
+
+impl HarnessCapabilityCategory {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::LlmProvider => "LLM providers",
+            Self::Research => "research",
+            Self::Forge => "forge",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -56,7 +77,7 @@ pub struct SecretConsumer {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum SecretConsumerKind {
     Extension,
@@ -206,29 +227,37 @@ struct FirstPartySecretCatalogEntry {
     capability_label: &'static str,
     category: HarnessCapabilityCategory,
     description: &'static str,
+    policy: HarnessCapabilitySecretPolicy,
+    preferred: bool,
 }
 
 const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
     FirstPartySecretCatalogEntry {
         name: "ANTHROPIC_API_KEY",
-        capability_id: "llm_provider",
+        capability_id: "llm_provider_api_keys",
         capability_label: "LLM provider API keys",
         category: HarnessCapabilityCategory::LlmProvider,
         description: "API-key credentials for built-in LLM provider routes when OAuth is not used.",
+        policy: HarnessCapabilitySecretPolicy::AnyOf,
+        preferred: true,
     },
     FirstPartySecretCatalogEntry {
         name: "OPENAI_API_KEY",
-        capability_id: "llm_provider",
+        capability_id: "llm_provider_api_keys",
         capability_label: "LLM provider API keys",
         category: HarnessCapabilityCategory::LlmProvider,
         description: "API-key credentials for built-in LLM provider routes when OAuth is not used.",
+        policy: HarnessCapabilitySecretPolicy::AnyOf,
+        preferred: false,
     },
     FirstPartySecretCatalogEntry {
         name: "OPENROUTER_API_KEY",
-        capability_id: "llm_provider",
+        capability_id: "llm_provider_api_keys",
         capability_label: "LLM provider API keys",
         category: HarnessCapabilityCategory::LlmProvider,
         description: "API-key credentials for built-in LLM provider routes when OAuth is not used.",
+        policy: HarnessCapabilitySecretPolicy::AnyOf,
+        preferred: false,
     },
     FirstPartySecretCatalogEntry {
         name: "BRAVE_API_KEY",
@@ -236,6 +265,8 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_label: "Web search and external evidence",
         category: HarnessCapabilityCategory::Research,
         description: "Search provider credentials for first-party external research tools.",
+        policy: HarnessCapabilitySecretPolicy::AnyOf,
+        preferred: true,
     },
     FirstPartySecretCatalogEntry {
         name: "TAVILY_API_KEY",
@@ -243,6 +274,8 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_label: "Web search and external evidence",
         category: HarnessCapabilityCategory::Research,
         description: "Search provider credentials for first-party external research tools.",
+        policy: HarnessCapabilitySecretPolicy::AnyOf,
+        preferred: false,
     },
     FirstPartySecretCatalogEntry {
         name: "SERPER_API_KEY",
@@ -250,6 +283,8 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_label: "Web search and external evidence",
         category: HarnessCapabilityCategory::Research,
         description: "Search provider credentials for first-party external research tools.",
+        policy: HarnessCapabilitySecretPolicy::AnyOf,
+        preferred: false,
     },
     FirstPartySecretCatalogEntry {
         name: "FIRECRAWL_API_KEY",
@@ -257,27 +292,35 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_label: "Web search and external evidence",
         category: HarnessCapabilityCategory::Research,
         description: "Search provider credentials for first-party external research tools.",
+        policy: HarnessCapabilitySecretPolicy::AnyOf,
+        preferred: false,
     },
     FirstPartySecretCatalogEntry {
         name: "GITHUB_TOKEN",
-        capability_id: "forge",
-        capability_label: "Forge and source-control integration",
+        capability_id: "github_forge",
+        capability_label: "GitHub forge integration",
         category: HarnessCapabilityCategory::Forge,
-        description: "Tokens for first-party forge, issue, PR, and repository workflows.",
+        description: "Tokens for first-party GitHub issue, PR, and repository workflows.",
+        policy: HarnessCapabilitySecretPolicy::AnyOf,
+        preferred: true,
     },
     FirstPartySecretCatalogEntry {
         name: "GH_TOKEN",
-        capability_id: "forge",
-        capability_label: "Forge and source-control integration",
+        capability_id: "github_forge",
+        capability_label: "GitHub forge integration",
         category: HarnessCapabilityCategory::Forge,
-        description: "Tokens for first-party forge, issue, PR, and repository workflows.",
+        description: "Tokens for first-party GitHub issue, PR, and repository workflows.",
+        policy: HarnessCapabilitySecretPolicy::AnyOf,
+        preferred: false,
     },
     FirstPartySecretCatalogEntry {
         name: "GITLAB_TOKEN",
-        capability_id: "forge",
-        capability_label: "Forge and source-control integration",
+        capability_id: "gitlab_forge",
+        capability_label: "GitLab forge integration",
         category: HarnessCapabilityCategory::Forge,
-        description: "Tokens for first-party forge, issue, PR, and repository workflows.",
+        description: "Tokens for first-party GitLab issue, merge-request, and repository workflows.",
+        policy: HarnessCapabilitySecretPolicy::AnyOf,
+        preferred: true,
     },
 ];
 
@@ -312,46 +355,57 @@ fn build_harness_capability_readiness(
                 category: entry.category.clone(),
                 description: entry.description.to_string(),
                 secret_names: Vec::new(),
+                preferred_secret: None,
                 configured_count: 0,
+                deferred_count: 0,
                 missing_count: 0,
+                candidate_count: 0,
                 status: HarnessCapabilityReadinessStatus::Missing,
+                policy: entry.policy.clone(),
             }
         });
         capability.secret_names.push(entry.name.to_string());
+        capability.candidate_count += 1;
+        if entry.preferred {
+            capability.preferred_secret = Some(entry.name.to_string());
+        }
 
         match secrets_by_name.get(entry.name).map(|secret| &secret.status) {
             Some(SecretReadinessStatus::Warmed | SecretReadinessStatus::Configured) => {
                 capability.configured_count += 1;
             }
-            Some(SecretReadinessStatus::Deferred | SecretReadinessStatus::Missing) | None => {
+            Some(SecretReadinessStatus::Deferred) => {
+                capability.deferred_count += 1;
+            }
+            Some(SecretReadinessStatus::Missing) | None => {
                 capability.missing_count += 1;
             }
         }
     }
 
     for capability in capabilities.values_mut() {
-        capability.status = if capability.configured_count == 0 {
-            HarnessCapabilityReadinessStatus::Missing
-        } else if capability.missing_count == 0 {
-            HarnessCapabilityReadinessStatus::Ready
-        } else {
-            HarnessCapabilityReadinessStatus::Partial
+        let available_count = capability.configured_count + capability.deferred_count;
+        capability.status = match capability.policy {
+            HarnessCapabilitySecretPolicy::AnyOf => {
+                if available_count > 0 {
+                    HarnessCapabilityReadinessStatus::Ready
+                } else {
+                    HarnessCapabilityReadinessStatus::Missing
+                }
+            }
+            HarnessCapabilitySecretPolicy::AllOf => {
+                if capability.missing_count == 0 && capability.deferred_count == 0 {
+                    HarnessCapabilityReadinessStatus::Ready
+                } else if available_count > 0 {
+                    HarnessCapabilityReadinessStatus::Partial
+                } else {
+                    HarnessCapabilityReadinessStatus::Missing
+                }
+            }
         };
     }
 
     capabilities.into_values().collect()
-}
-
-impl Ord for SecretConsumerKind {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        format!("{:?}", self).cmp(&format!("{:?}", other))
-    }
-}
-
-impl PartialOrd for SecretConsumerKind {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 #[cfg(test)]
@@ -366,16 +420,16 @@ mod tests {
         let snapshot = build_secret_readiness_snapshot(&[], &[], SecretReadinessInputs::default());
 
         for (name, capability) in [
-            ("ANTHROPIC_API_KEY", "llm_provider"),
-            ("OPENAI_API_KEY", "llm_provider"),
-            ("OPENROUTER_API_KEY", "llm_provider"),
+            ("ANTHROPIC_API_KEY", "llm_provider_api_keys"),
+            ("OPENAI_API_KEY", "llm_provider_api_keys"),
+            ("OPENROUTER_API_KEY", "llm_provider_api_keys"),
             ("BRAVE_API_KEY", "web_search"),
             ("TAVILY_API_KEY", "web_search"),
             ("SERPER_API_KEY", "web_search"),
             ("FIRECRAWL_API_KEY", "web_search"),
-            ("GITHUB_TOKEN", "forge"),
-            ("GH_TOKEN", "forge"),
-            ("GITLAB_TOKEN", "forge"),
+            ("GITHUB_TOKEN", "github_forge"),
+            ("GH_TOKEN", "github_forge"),
+            ("GITLAB_TOKEN", "gitlab_forge"),
         ] {
             let secret = snapshot
                 .secrets
@@ -413,10 +467,42 @@ mod tests {
         assert_eq!(web_search.label, "Web search and external evidence");
         assert_eq!(web_search.category, HarnessCapabilityCategory::Research);
         assert_eq!(web_search.configured_count, 1);
+        assert_eq!(web_search.deferred_count, 0);
         assert_eq!(web_search.missing_count, 3);
-        assert_eq!(web_search.status, HarnessCapabilityReadinessStatus::Partial);
+        assert_eq!(web_search.candidate_count, 4);
+        assert_eq!(
+            web_search.preferred_secret.as_deref(),
+            Some("BRAVE_API_KEY")
+        );
+        assert_eq!(web_search.policy, HarnessCapabilitySecretPolicy::AnyOf);
+        assert_eq!(web_search.status, HarnessCapabilityReadinessStatus::Ready);
         assert!(web_search.secret_names.contains(&"BRAVE_API_KEY".into()));
         assert!(web_search.secret_names.contains(&"TAVILY_API_KEY".into()));
+    }
+
+    #[test]
+    fn deferred_any_of_capability_counts_as_ready_but_deferred() {
+        let snapshot = build_secret_readiness_snapshot(
+            &[],
+            &[],
+            SecretReadinessInputs {
+                session_diagnostics: Vec::new(),
+                recipe_descriptors: vec![SecretRecipeDescriptorSummary {
+                    name: "BRAVE_API_KEY".into(),
+                    kind: "vault".into(),
+                }],
+            },
+        );
+
+        let web_search = snapshot
+            .harness_capabilities
+            .iter()
+            .find(|capability| capability.id == "web_search")
+            .expect("web_search harness capability readiness");
+        assert_eq!(web_search.configured_count, 0);
+        assert_eq!(web_search.deferred_count, 1);
+        assert_eq!(web_search.missing_count, 3);
+        assert_eq!(web_search.status, HarnessCapabilityReadinessStatus::Ready);
     }
 
     #[test]

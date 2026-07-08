@@ -3429,18 +3429,33 @@ impl App {
                     }
                     HarnessCapabilityReadinessStatus::Missing => ("missing", MenuBadgeTone::Danger),
                 };
+                let policy_label = match capability.policy {
+                    crate::capabilities::secrets::HarnessCapabilitySecretPolicy::AnyOf => {
+                        "any configured provider enables this capability"
+                    }
+                    crate::capabilities::secrets::HarnessCapabilitySecretPolicy::AllOf => {
+                        "all listed secrets are needed"
+                    }
+                };
                 let mut metadata = vec![format!(
-                    "{} configured · {} missing",
-                    capability.configured_count, capability.missing_count
+                    "{} configured · {} deferred · {} known providers",
+                    capability.configured_count,
+                    capability.deferred_count,
+                    capability.candidate_count
                 )];
-                metadata.push(format!("category: {:?}", capability.category));
+                metadata.push(format!("policy: {policy_label}"));
+                metadata.push(format!("category: {}", capability.category.label()));
                 metadata.extend(
                     capability
                         .secret_names
                         .iter()
                         .map(|name| format!("secret: {name}")),
                 );
-                let primary_secret = capability.secret_names.first().cloned().unwrap_or_default();
+                let primary_secret = capability
+                    .preferred_secret
+                    .clone()
+                    .or_else(|| capability.secret_names.first().cloned())
+                    .unwrap_or_default();
                 MenuRowProjection {
                     id: format!("secrets.capabilities.{}", capability.id),
                     label: capability.label.clone(),
