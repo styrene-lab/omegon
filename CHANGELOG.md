@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 - Fix TUI interrupt input suppression so an interrupted turn that never emits `AgentEnd` no longer leaves the composer permanently unable to accept typing or `/exit`.
+- Treat terminal `TurnEnd` events as authoritative for releasing the TUI active-turn gate, preventing the activity row from showing `active turn` while the footer says `turn done`.
 
 ## [0.27.5] - 2026-07-08
 

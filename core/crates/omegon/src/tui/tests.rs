@@ -2202,6 +2202,18 @@ fn slim_status_line_marks_turn_state() {
             streaks: omegon_traits::ControllerStreaks::default(),
         },
     )));
+    assert_eq!(app.slim_turn_state, SlimTurnState::Finished("done"));
+    assert!(
+        !app.agent_active,
+        "terminal TurnEnd must release the TUI-local active-turn gate even if AgentEnd is delayed"
+    );
+    let done_before_agent_end = render_app_to_string(&mut app, 140, 18);
+    assert!(done_before_agent_end.contains("turn done"), "{done_before_agent_end}");
+    assert!(
+        !done_before_agent_end.contains("active turn"),
+        "activity row must not disagree with terminal turn state: {done_before_agent_end}"
+    );
+
     app.handle_agent_event(AgentEvent::AgentEnd);
     assert_eq!(app.slim_turn_state, SlimTurnState::Finished("done"));
     let done = render_app_to_string(&mut app, 140, 18);

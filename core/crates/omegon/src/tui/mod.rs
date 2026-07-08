@@ -10606,6 +10606,18 @@ Scroll transcript:
                     omegon_traits::TurnEndReason::ProgressNudge => "nudged",
                     omegon_traits::TurnEndReason::Cancelled => "cancelled",
                 });
+                if matches!(
+                    turn_end_reason,
+                    omegon_traits::TurnEndReason::AssistantCompleted
+                        | omegon_traits::TurnEndReason::Cancelled
+                ) {
+                    self.agent_active = false;
+                    if let Ok(mut ss) = self.dashboard_handles.session.lock() {
+                        ss.busy = false;
+                    }
+                    self.effects.stop_spinner_glow();
+                    self.effects.stop_border_pulse();
+                }
                 if matches!(turn_end_reason, omegon_traits::TurnEndReason::Cancelled) {
                     // Cancellation abandons the in-flight turn, so clear the live workbench
                     // lane. Completed plans are still cleared by PlanUpdated handling; incomplete
