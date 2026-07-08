@@ -5750,7 +5750,7 @@ fn build_tui_secret_readiness_snapshot(
                                     });
                                     let _ = events_tx.send(AgentEvent::SystemNotification {
                                         message: format!(
-                                            "Active turn worker has been running for {}s after start; queued prompts wait until cleanup returns. Diagnostic telemetry is being written to the agent log.",
+                                            "Active turn worker has been running for {}s; latest lifecycle state is recorded in the agent log. New prompts remain queued until this turn's worker returns.",
                                             elapsed.as_secs()
                                         ),
                                     });

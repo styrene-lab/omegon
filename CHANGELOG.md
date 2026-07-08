@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Clarify slow active-turn notification wording so it does not imply the worker is in cleanup unless lifecycle telemetry proves that separately.
+- Propagate cancellation and timeout handling through extension tool retry paths after transport reconnects.
 - Extend runtime turn lifecycle telemetry into worker-side phases so diagnostics can distinguish inner loop execution from post-loop cleanup stalls.
 - Add runtime turn lifecycle events wired through the supervisor tick/event loop, audit log, WebSocket serialization, and daemon SSE stream.
 - Add interactive-turn telemetry for post-turn cleanup phases and slow active-turn workers so logs and operator notifications can identify where queued prompts are blocked after visible completion.

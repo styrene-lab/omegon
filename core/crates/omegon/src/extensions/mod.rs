@@ -43,6 +43,9 @@ pub use widgets::{ExtensionTabWidget, WidgetDeclaration, WidgetEvent};
 
 /// Environment variables that are safe to inherit from the parent process.
 /// Everything else is stripped via env_clear() — secrets never leak via env.
+const EXTENSION_TOOL_RPC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+const EXTENSION_POLL_RPC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 const SAFE_INHERIT_ENVS: &[&str] = &[
     "PATH",
     "HOME",
@@ -285,13 +288,20 @@ impl ExtensionFeature {
 
     /// Send a JSON-RPC request and receive the response.
     async fn rpc_call(&self, method: &str, params: Value) -> Result<Value> {
-        self.rpc_call_with_idle_timeout(method, params, None).await
+        self.rpc_call_with_cancel(
+            method,
+            params,
+            CancellationToken::new(),
+            Some(EXTENSION_TOOL_RPC_TIMEOUT),
+        )
+        .await
     }
 
-    async fn rpc_call_with_idle_timeout(
+    async fn rpc_call_with_cancel(
         &self,
         method: &str,
         params: Value,
+        cancel: CancellationToken,
         idle_timeout: Option<std::time::Duration>,
     ) -> Result<Value> {
         let mut guard = self.handles.lock().await;
@@ -312,17 +322,52 @@ impl ExtensionFeature {
             .await?;
         handles.stdin.flush().await?;
 
+        let started_at = std::time::Instant::now();
+        let mut last_notification: Option<String> = None;
         let mut line = String::new();
         loop {
             line.clear();
             let read = handles.reader.read_line(&mut line);
             let n = if let Some(timeout) = idle_timeout {
-                match tokio::time::timeout(timeout, read).await {
-                    Ok(result) => result?,
-                    Err(_) => return Ok(json!({"timeout": true})),
+                tokio::select! {
+                    result = tokio::time::timeout(timeout, read) => match result {
+                        Ok(result) => result?,
+                        Err(_) => {
+                            anyhow::bail!(
+                                "extension '{}' RPC '{}' id {} timed out after {}ms waiting for response (last_notification={})",
+                                self.runtime.name,
+                                method,
+                                id,
+                                started_at.elapsed().as_millis(),
+                                last_notification.as_deref().unwrap_or("none")
+                            );
+                        }
+                    },
+                    _ = cancel.cancelled() => {
+                        anyhow::bail!(
+                            "extension '{}' RPC '{}' id {} cancelled after {}ms (last_notification={})",
+                            self.runtime.name,
+                            method,
+                            id,
+                            started_at.elapsed().as_millis(),
+                            last_notification.as_deref().unwrap_or("none")
+                        );
+                    }
                 }
             } else {
-                read.await?
+                tokio::select! {
+                    result = read => result?,
+                    _ = cancel.cancelled() => {
+                        anyhow::bail!(
+                            "extension '{}' RPC '{}' id {} cancelled after {}ms (last_notification={})",
+                            self.runtime.name,
+                            method,
+                            id,
+                            started_at.elapsed().as_millis(),
+                            last_notification.as_deref().unwrap_or("none")
+                        );
+                    }
+                }
             };
             if n == 0 {
                 return Err(anyhow!("extension closed connection"));
@@ -349,6 +394,7 @@ impl ExtensionFeature {
                         continue;
                     }
                     omegon_extension::RpcIncoming::Notification(notification) => {
+                        last_notification = Some(notification.method.clone());
                         if let Some(sink) = &self.runtime.notification_sink {
                             sink.send(notification);
                         }
@@ -621,10 +667,15 @@ impl Feature for ExtensionFeature {
         tool_name: &str,
         _call_id: &str,
         args: Value,
-        _cancel: CancellationToken,
+        cancel: CancellationToken,
     ) -> Result<ToolResult> {
         match self
-            .rpc_call("execute_tool", json!({ "name": tool_name, "args": args }))
+            .rpc_call_with_cancel(
+                "execute_tool",
+                json!({ "name": tool_name, "args": args.clone() }),
+                cancel.clone(),
+                Some(EXTENSION_TOOL_RPC_TIMEOUT),
+            )
             .await
         {
             Ok(output) => Ok(self.extension_tool_result(output, _call_id).await),
@@ -632,7 +683,12 @@ impl Feature for ExtensionFeature {
                 self.record_error(format!("transport failure: {e}")).await;
                 self.respawn_after_transport_error(&e).await?;
                 let output = self
-                    .rpc_call("execute_tool", json!({ "name": tool_name, "args": args }))
+                    .rpc_call_with_cancel(
+                        "execute_tool",
+                        json!({ "name": tool_name, "args": args }),
+                        cancel,
+                        Some(EXTENSION_TOOL_RPC_TIMEOUT),
+                    )
                     .await
                     .map_err(|retry_err| {
                         anyhow!(
@@ -680,11 +736,12 @@ impl Feature for ExtensionFeature {
         _sink: omegon_traits::ToolProgressSink,
         context: omegon_traits::ToolExecutionContext,
     ) -> Result<ToolResult> {
-        let _ = cancel;
         match self
-            .rpc_call(
+            .rpc_call_with_cancel(
                 "execute_tool",
                 json!({ "name": tool_name, "args": args.clone() }),
+                cancel.clone(),
+                Some(EXTENSION_TOOL_RPC_TIMEOUT),
             )
             .await
         {
@@ -695,7 +752,12 @@ impl Feature for ExtensionFeature {
                 self.record_error(format!("transport failure: {e}")).await;
                 self.respawn_after_transport_error(&e).await?;
                 let output = self
-                    .rpc_call("execute_tool", json!({ "name": tool_name, "args": args }))
+                    .rpc_call_with_cancel(
+                        "execute_tool",
+                        json!({ "name": tool_name, "args": args }),
+                        cancel,
+                        Some(EXTENSION_TOOL_RPC_TIMEOUT),
+                    )
                     .await
                     .map_err(|retry_err| {
                         anyhow!(
