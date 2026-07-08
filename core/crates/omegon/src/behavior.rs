@@ -478,6 +478,18 @@ pub(crate) struct ControllerState {
     pub evidence_sufficient_streak: u32,
 }
 
+/// Minimum trimmed length for interleaved assistant prose to count as
+/// visible output for continuation-pressure purposes. Short narration
+/// ("Checking the config...") stays below this; substantive analysis
+/// delivered alongside tool calls clears it.
+const SUBSTANTIVE_PROSE_MIN_CHARS: usize = 240;
+
+/// True when the assistant text emitted alongside tool calls is substantive
+/// output rather than transitional narration.
+pub(crate) fn is_substantive_interleaved_prose(text: &str) -> bool {
+    text.trim().len() >= SUBSTANTIVE_PROSE_MIN_CHARS
+}
+
 impl ControllerState {
     pub fn reset(&mut self) {
         *self = Self::default();
@@ -502,6 +514,7 @@ impl ControllerState {
         drift_kind: Option<DriftKind>,
         progress_signal: ProgressSignal,
         evidence: EvidenceAssessment,
+        substantive_prose: bool,
     ) {
         match progress_signal {
             ProgressSignal::Mutation | ProgressSignal::Commit | ProgressSignal::Completion => {
@@ -522,8 +535,15 @@ impl ControllerState {
             turn_end_reason,
             omegon_traits::TurnEndReason::ToolContinuation
         ) {
-            self.consecutive_tool_continuations =
-                self.consecutive_tool_continuations.saturating_add(1);
+            // Substantive interleaved prose IS visible output — the operator
+            // is being answered while tools run. Hold the counter instead of
+            // incrementing so "exploring without producing output" pressure
+            // only accrues on genuinely silent tool grinding. Short narration
+            // ("Let me check X...") still counts as silent.
+            if !substantive_prose {
+                self.consecutive_tool_continuations =
+                    self.consecutive_tool_continuations.saturating_add(1);
+            }
         } else {
             self.consecutive_tool_continuations = 0;
         }

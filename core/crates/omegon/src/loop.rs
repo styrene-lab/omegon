@@ -1438,6 +1438,7 @@ pub async fn run(
             drift_kind,
             progress_signal,
             evidence,
+            behavior::is_substantive_interleaved_prose(&assistant_msg.text),
         );
         let behavior = behavioral_tier(config);
         let continuation_tier = continuation_pressure_tier(
@@ -3899,7 +3900,19 @@ fn should_continue_text_only_turn(
         ) || user_prompt_is_continue_or_proceed(user_prompt);
     }
     if looks_like_continuation_request(assistant) {
-        return true;
+        // A trailing "want me to proceed?" is only a dead mouse when
+        // proceeding was already authorized — by the automation level or by
+        // the operator's prompt. Otherwise the question is a legitimate
+        // operator decision point (e.g. an assessment ending with "want me
+        // to fix these?"), and auto-answering it overrides operator agency.
+        return match automation_level {
+            crate::settings::AutomationLevel::Flow
+            | crate::settings::AutomationLevel::Autonomous => true,
+            _ => {
+                user_prompt_is_continue_or_proceed(user_prompt)
+                    || user_prompt_expects_concrete_action(user_prompt)
+            }
+        };
     }
     if matches!(automation_level, crate::settings::AutomationLevel::Guarded) {
         return user_prompt_is_continue_or_proceed(user_prompt)
@@ -6665,6 +6678,26 @@ mod tests {
     }
 
     #[test]
+    fn continuation_question_after_assessment_is_operator_decision_point() {
+        // An assessment/review prompt that never authorized changes: the
+        // trailing "want me to fix these?" is a legitimate decision point,
+        // not a dead mouse. Guarded mode must hand control back.
+        assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Guarded,
+            "assess the recent harness changes for the release",
+            "Found three issues in the detector. Want me to implement the fixes now?",
+            true
+        ));
+        // Autonomous automation levels still self-answer the question.
+        assert!(should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "assess the recent harness changes for the release",
+            "Found three issues in the detector. Want me to implement the fixes now?",
+            true
+        ));
+    }
+
+    #[test]
     fn incomplete_structured_answers_continue_in_flow_mode() {
         let reply = r#"What Flynt should not copy directly
 
@@ -7836,6 +7869,50 @@ This is the right first slice."#;
     }
 
     #[test]
+    fn substantive_prose_holds_continuation_counter() {
+        let mut controller = ControllerState {
+            consecutive_tool_continuations: 5,
+            ..ControllerState::default()
+        };
+        // Substantive interleaved prose is visible output — counter holds.
+        controller.observe_turn(
+            TurnEndReason::ToolContinuation,
+            None,
+            ProgressSignal::None,
+            EvidenceAssessment {
+                local: EvidenceSufficiency::None,
+                global: EvidenceSufficiency::None,
+            },
+            true,
+        );
+        assert_eq!(controller.consecutive_tool_continuations, 5);
+        // Silent tool grinding still accrues pressure.
+        controller.observe_turn(
+            TurnEndReason::ToolContinuation,
+            None,
+            ProgressSignal::None,
+            EvidenceAssessment {
+                local: EvidenceSufficiency::None,
+                global: EvidenceSufficiency::None,
+            },
+            false,
+        );
+        assert_eq!(controller.consecutive_tool_continuations, 6);
+    }
+
+    #[test]
+    fn substantive_prose_threshold_separates_narration_from_analysis() {
+        assert!(!behavior::is_substantive_interleaved_prose(
+            "Checking the config now."
+        ));
+        let analysis = "The detector fires because the search events hash a constant marker, \
+             which collapses every distinct query into one fingerprint. That means three \
+             unrelated greps in the window count as identical calls, and the escalation \
+             path then injects recovery guidance built on a false premise.";
+        assert!(behavior::is_substantive_interleaved_prose(analysis));
+    }
+
+    #[test]
     fn mutation_resets_evidence_sufficiency_streak() {
         let mut controller = ControllerState {
             local_evidence_sufficient_streak: 2,
@@ -7851,6 +7928,7 @@ This is the right first slice."#;
                 local: EvidenceSufficiency::Actionable,
                 global: EvidenceSufficiency::Actionable,
             },
+            false,
         );
         assert_eq!(controller.evidence_sufficient_streak, 0);
         assert_eq!(controller.local_evidence_sufficient_streak, 0);
@@ -7929,6 +8007,7 @@ This is the right first slice."#;
                 local: EvidenceSufficiency::None,
                 global: EvidenceSufficiency::None,
             },
+            false,
         );
         assert!(controller.consecutive_tool_continuations < 8);
         assert!(controller.orientation_churn_streak < 4);
@@ -8363,6 +8442,7 @@ This is the right first slice."#;
                     local: EvidenceSufficiency::None,
                     global: EvidenceSufficiency::None,
                 },
+                false,
             );
         }
 

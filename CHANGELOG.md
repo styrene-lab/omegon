@@ -35,6 +35,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Fingerprinted search observations by query and roots instead of a constant marker, so healthy exploration with distinct grep/search queries is no longer misclassified as argument repetition.
 - Made bash observation segmentation quote- and escape-aware, so quoted regex alternations like `grep -E "a|b"` produce one search event instead of shredding into bogus segments.
 - Softened the stuck-loop escalation injection from an accusatory verdict to neutral repetition-pressure framing that names the exit paths (produce the deliverable, take one different action, or state the blocker).
+- Held the continuation-pressure counter when the assistant emits substantive interleaved prose alongside tool calls, so "exploring without producing output" pressure only accrues on genuinely silent tool grinding.
+- Stopped Guarded-mode dead-mouse continuation from auto-answering a trailing "want me to proceed?" when the operator prompt never authorized changes (e.g. assessment/review asks), returning that decision to the operator.
 - Replaced the `files_read <= 2` actionability shortcut with novelty-decay-based local evidence sufficiency, preventing first targeted reads from forcing premature convergence.
 - Suppressed anti-orientation drift and read-only evidence convergence in research mode unless validation or mutation evidence makes the target actionable.
 - Required matching successful tool results before normalized observations create positive guidance evidence, so orphaned/missing tool results no longer look like successful reads or mutations.
