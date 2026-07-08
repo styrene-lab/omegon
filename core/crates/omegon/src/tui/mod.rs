@@ -3257,7 +3257,7 @@ impl App {
             groups: vec![MenuGroupProjection {
                 id: "secrets.inventory".into(),
                 label: "Secret inventory".into(),
-                description: Some("Declared secret readiness from capability metadata. Values are never resolved while rendering this menu.".into()),
+                description: Some("Known and declared secret bindings from first-party harness capabilities and extension/agent metadata. Values are never resolved while rendering this menu.".into()),
                 rows: self.secret_readiness_rows(),
             }],
         }, MenuTabProjection {
@@ -3376,7 +3376,7 @@ impl App {
             return vec![MenuRowProjection {
                 id: "secrets.inventory.unavailable".into(),
                 label: "No secret readiness snapshot loaded".into(),
-                description: "No extension/agent secret inventory is currently available in the TUI; use Actions for safe recipes or /secrets status for configured recipe names.".into(),
+                description: "No known first-party or declared extension/agent secret bindings are currently available in the TUI; use Actions for safe recipes or /secrets status for configured recipe names.".into(),
                 value: None,
                 kind: MenuRowKind::Object,
                 badges: vec![MenuBadgeProjection { label: "metadata only".into(), tone: MenuBadgeTone::Neutral }],
@@ -3391,8 +3391,8 @@ impl App {
         if snapshot.secrets.is_empty() {
             return vec![MenuRowProjection {
                 id: "secrets.inventory.empty".into(),
-                label: "No declared secret requirements discovered".into(),
-                description: "Capability metadata did not declare extension or agent secret requirements for this session.".into(),
+                label: "No known secret bindings discovered".into(),
+                description: "No first-party harness secret catalog entries or declared extension/agent secret requirements were discovered for this session.".into(),
                 value: None,
                 kind: MenuRowKind::Object,
                 badges: vec![MenuBadgeProjection { label: "empty".into(), tone: MenuBadgeTone::Neutral }],

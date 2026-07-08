@@ -8975,6 +8975,67 @@ fn secrets_menu_inventory_rows_offer_safe_crud_actions() {
 }
 
 #[test]
+fn secrets_menu_inventory_includes_first_party_catalog_rows() {
+    let mut app = test_app();
+    app.secret_readiness = Some(
+        crate::capabilities::secrets::build_secret_readiness_snapshot(
+            &[],
+            &[],
+            crate::capabilities::secrets::SecretReadinessInputs::default(),
+        ),
+    );
+
+    app.open_secrets_menu();
+    let menu = app.active_menu.as_ref().expect("secrets menu");
+    let inventory = menu
+        .projection
+        .tabs
+        .iter()
+        .find(|tab| tab.id == "inventory")
+        .expect("inventory tab");
+    assert!(
+        inventory.groups[0]
+            .description
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Known and declared")
+    );
+
+    let row = inventory.groups[0]
+        .rows
+        .iter()
+        .find(|row| row.id == "secrets.inventory.BRAVE_API_KEY")
+        .expect("BRAVE_API_KEY inventory row");
+
+    assert_eq!(row.label, "BRAVE_API_KEY");
+    assert!(
+        row.metadata
+            .iter()
+            .any(|item| item == "consumer: HarnessCapability:web_search")
+    );
+    assert_eq!(
+        row.primary_action
+            .as_ref()
+            .and_then(|action| action.command.as_deref()),
+        Some("/secrets get BRAVE_API_KEY")
+    );
+    for expected in [
+        "/secrets set BRAVE_API_KEY",
+        "/secrets set BRAVE_API_KEY env:",
+        "/secrets set BRAVE_API_KEY cmd:",
+        "/secrets set BRAVE_API_KEY vault:",
+        "/secrets delete BRAVE_API_KEY",
+    ] {
+        assert!(
+            row.actions
+                .iter()
+                .any(|action| action.editor_text.as_deref() == Some(expected)),
+            "missing safe secret action for {expected}"
+        );
+    }
+}
+
+#[test]
 fn slash_variables_set_get_delete_queue_control_requests() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();

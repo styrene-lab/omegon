@@ -32,6 +32,7 @@ pub struct SecretConsumer {
 pub enum SecretConsumerKind {
     Extension,
     AgentBundle,
+    HarnessCapability,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -67,6 +68,8 @@ pub fn build_secret_readiness_snapshot(
     inputs: SecretReadinessInputs,
 ) -> SecretReadinessSnapshot {
     let mut requirements: BTreeMap<String, SecretRequirementAccumulator> = BTreeMap::new();
+
+    seed_first_party_secret_catalog(&mut requirements);
 
     for extension in extensions {
         for name in &extension.required_secrets {
@@ -118,6 +121,10 @@ pub fn build_secret_readiness_snapshot(
         .map(|descriptor| (descriptor.name, descriptor.kind))
         .collect();
 
+    for name in warmed.iter().chain(recipes.keys()) {
+        requirements.entry(name.clone()).or_default();
+    }
+
     let secrets = requirements
         .into_iter()
         .map(|(name, requirement)| {
@@ -158,6 +165,32 @@ struct SecretRequirementAccumulator {
     consumers: BTreeSet<(SecretConsumerKind, String)>,
 }
 
+const FIRST_PARTY_SECRET_CATALOG: &[(&str, &str)] = &[
+    ("ANTHROPIC_API_KEY", "llm_provider"),
+    ("OPENAI_API_KEY", "llm_provider"),
+    ("OPENROUTER_API_KEY", "llm_provider"),
+    ("BRAVE_API_KEY", "web_search"),
+    ("TAVILY_API_KEY", "web_search"),
+    ("SERPER_API_KEY", "web_search"),
+    ("FIRECRAWL_API_KEY", "web_search"),
+    ("GITHUB_TOKEN", "forge"),
+    ("GH_TOKEN", "forge"),
+    ("GITLAB_TOKEN", "forge"),
+];
+
+fn seed_first_party_secret_catalog(
+    requirements: &mut BTreeMap<String, SecretRequirementAccumulator>,
+) {
+    for (name, capability) in FIRST_PARTY_SECRET_CATALOG {
+        let requirement = requirements.entry((*name).to_string()).or_default();
+        requirement.optional = true;
+        requirement.consumers.insert((
+            SecretConsumerKind::HarnessCapability,
+            (*capability).to_string(),
+        ));
+    }
+}
+
 impl Ord for SecretConsumerKind {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         format!("{:?}", self).cmp(&format!("{:?}", other))
@@ -176,6 +209,71 @@ mod tests {
     use crate::capabilities::agents::{
         AgentPersonaSummary, AgentSecretsSummary, AgentSettingsSummary,
     };
+
+    #[test]
+    fn first_party_secret_catalog_surfaces_core_harness_capabilities() {
+        let snapshot = build_secret_readiness_snapshot(&[], &[], SecretReadinessInputs::default());
+
+        for (name, capability) in [
+            ("ANTHROPIC_API_KEY", "llm_provider"),
+            ("OPENAI_API_KEY", "llm_provider"),
+            ("OPENROUTER_API_KEY", "llm_provider"),
+            ("BRAVE_API_KEY", "web_search"),
+            ("TAVILY_API_KEY", "web_search"),
+            ("SERPER_API_KEY", "web_search"),
+            ("FIRECRAWL_API_KEY", "web_search"),
+            ("GITHUB_TOKEN", "forge"),
+            ("GH_TOKEN", "forge"),
+            ("GITLAB_TOKEN", "forge"),
+        ] {
+            let secret = snapshot
+                .secrets
+                .iter()
+                .find(|secret| secret.name == name)
+                .unwrap_or_else(|| panic!("missing first-party secret catalog entry for {name}"));
+            assert_eq!(secret.status, SecretReadinessStatus::Missing);
+            assert!(!secret.required);
+            assert!(secret.optional);
+            assert!(secret.consumers.iter().any(|consumer| {
+                consumer.kind == SecretConsumerKind::HarnessCapability && consumer.id == capability
+            }));
+        }
+    }
+
+    #[test]
+    fn undeclared_recipe_and_warmed_secrets_surface_in_readiness() {
+        let snapshot = build_secret_readiness_snapshot(
+            &[],
+            &[],
+            SecretReadinessInputs {
+                session_diagnostics: vec![SecretSessionDiagnostic {
+                    name: "CUSTOM_RUNTIME_SECRET".into(),
+                    warmed: true,
+                }],
+                recipe_descriptors: vec![SecretRecipeDescriptorSummary {
+                    name: "CUSTOM_RECIPE_SECRET".into(),
+                    kind: "env".into(),
+                }],
+            },
+        );
+
+        let warmed = snapshot
+            .secrets
+            .iter()
+            .find(|secret| secret.name == "CUSTOM_RUNTIME_SECRET")
+            .expect("warmed undeclared secret should be visible");
+        assert_eq!(warmed.status, SecretReadinessStatus::Warmed);
+        assert!(warmed.consumers.is_empty());
+
+        let recipe = snapshot
+            .secrets
+            .iter()
+            .find(|secret| secret.name == "CUSTOM_RECIPE_SECRET")
+            .expect("recipe-only undeclared secret should be visible");
+        assert_eq!(recipe.status, SecretReadinessStatus::Configured);
+        assert_eq!(recipe.recipe_kind.as_deref(), Some("env"));
+        assert!(recipe.consumers.is_empty());
+    }
 
     #[test]
     fn secret_readiness_uses_metadata_without_resolving_values() {
