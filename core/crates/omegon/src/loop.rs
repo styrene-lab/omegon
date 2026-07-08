@@ -540,10 +540,10 @@ pub async fn run(
                     warning.consecutive
                 );
                 conversation.push_user(
-                    "[System: STUCK LOOP DETECTED. You have been repeating the same \
-                     actions for multiple turns despite warnings. Do not repeat the \
-                     same failing tool call. If a concrete next action is available, \
-                     take it now with a different tool or corrected arguments. If no \
+                    "[System: Repetition pressure — several recent turns repeated \
+                     similar tool calls without producing new evidence. If you \
+                     already have what you need, produce the deliverable now. \
+                     Otherwise take one concrete, different next action. If no \
                      concrete action is possible, state the blocker plainly and stop.]"
                         .to_string(),
                 );
@@ -4310,12 +4310,29 @@ impl StuckDetector {
                 self.recent.push((tool_name, hash_str_path(path), false));
                 self.recent_file_accesses.push(path.display().to_string());
             }
-            crate::observation::ObservationEvent::SearchPerformed { source_tool, .. } => {
+            crate::observation::ObservationEvent::SearchPerformed {
+                source_tool,
+                query,
+                roots,
+            } => {
                 let tool_name = source_tool
                     .strip_prefix("bash:")
                     .unwrap_or(source_tool)
                     .to_string();
-                self.recent.push((tool_name, hash_str("<search>"), false));
+                // Fingerprint the actual query and roots. Hashing a constant
+                // here collapsed every search by the same program into "same
+                // arguments", firing false repeat warnings on healthy
+                // exploration with distinct queries.
+                let mut fingerprint = String::from("<search>");
+                if let Some(query) = query {
+                    fingerprint.push('\u{1f}');
+                    fingerprint.push_str(query);
+                }
+                for root in roots {
+                    fingerprint.push('\u{1f}');
+                    fingerprint.push_str(&root.display().to_string());
+                }
+                self.recent.push((tool_name, hash_str(&fingerprint), false));
             }
             crate::observation::ObservationEvent::FileMutated { source_tool, path } => {
                 self.recent
@@ -4395,7 +4412,7 @@ impl StuckDetector {
         }
 
         // Pattern 2: Same tool + same args called 3+ times
-        if let Some(repeated) = self.find_repeated_call(window, 3) {
+        if let Some(repeated) = self.find_repeated_call(catalog, window, 3) {
             self.consecutive_warnings += 1;
             return Some(StuckWarning {
                 message: format!(
@@ -4451,13 +4468,37 @@ impl StuckDetector {
     }
 
     /// Find a (tool_name, count) where the same tool+args appears N+ times in the window.
+    ///
+    /// Read entries are excluded: their hashes are path-normalized (distinct
+    /// line ranges collapse to one hash), so exact-repeat counting would
+    /// double-punish legitimate paging through a large file. Read churn is
+    /// owned by patterns 1 and 4, which use wider thresholds and
+    /// mutation/validation guards. Validation and progress entries hash a
+    /// constant marker and are also excluded — repeated validation runs are
+    /// convergence, not argument repetition.
     fn find_repeated_call(
         &self,
+        catalog: &ToolCapabilityCatalog,
         window: &[(String, u64, bool)],
         threshold: usize,
     ) -> Option<(String, usize)> {
+        let validation_marker = hash_str("<validation>");
+        let progress_marker = hash_str("<progress>");
         let mut counts: HashMap<(String, u64), usize> = HashMap::new();
         for (name, hash, _) in window {
+            if *hash == validation_marker || *hash == progress_marker {
+                continue;
+            }
+            if is_repo_inspection_tool(catalog, name) || crate::observation::is_read_program(name)
+            {
+                continue;
+            }
+            // Mutation entries are path-normalized too (FileMutated hashes the
+            // path), so distinct successful edits to one file would count as
+            // repeats. Repeated *failing* mutations are pattern 3's job.
+            if is_mutation_tool_name(catalog, name) || name.starts_with("bash:") {
+                continue;
+            }
             let key = (name.clone(), *hash);
             *counts.entry(key).or_default() += 1;
         }
@@ -5112,6 +5153,146 @@ mod tests {
         );
     }
 
+    fn observe_bash(detector: &mut StuckDetector, catalog: &ToolCapabilityCatalog, command: &str) {
+        let call = ToolCall {
+            id: command.into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({"command": command}),
+        };
+        let result = ToolResultEntry {
+            call_id: command.into(),
+            tool_name: "bash".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        let events =
+            crate::observation::ObservationNormalizer::new(catalog).normalize(&[call], &[result]);
+        for event in events {
+            detector.record_observation(&event);
+        }
+    }
+
+    #[test]
+    fn stuck_detector_distinct_searches_are_not_repeats() {
+        let mut detector = StuckDetector::new();
+        let catalog = test_tool_catalog();
+        for command in [
+            "grep -n 'alpha' src/main.rs",
+            "grep -n 'beta' src/main.rs",
+            "grep -n 'gamma' src/main.rs",
+            "grep -n 'delta' src/main.rs",
+        ] {
+            observe_bash(&mut detector, &catalog, command);
+        }
+        assert!(
+            detector.check(&catalog).is_none(),
+            "distinct search queries must not count as repeated arguments"
+        );
+    }
+
+    #[test]
+    fn stuck_detector_identical_searches_are_repeats() {
+        let mut detector = StuckDetector::new();
+        let catalog = test_tool_catalog();
+        for _ in 0..3 {
+            observe_bash(&mut detector, &catalog, "grep -n 'alpha' src/main.rs");
+        }
+        let warning = detector
+            .check(&catalog)
+            .expect("identical searches should warn");
+        assert!(warning.message.contains("same arguments"));
+    }
+
+    #[test]
+    fn stuck_detector_quoted_pipe_search_is_single_event() {
+        let catalog = test_tool_catalog();
+        let call = ToolCall {
+            id: "1".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({"command": r#"grep -n -E "alpha|beta" src/main.rs"#}),
+        };
+        let result = ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "bash".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        let events =
+            crate::observation::ObservationNormalizer::new(&catalog).normalize(&[call], &[result]);
+        assert_eq!(events.len(), 1, "quoted pipe must not split: {events:?}");
+        match &events[0] {
+            crate::observation::ObservationEvent::SearchPerformed { query, .. } => {
+                assert_eq!(query.as_deref(), Some("alpha|beta"));
+            }
+            other => panic!("expected SearchPerformed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stuck_detector_paged_reads_of_large_file_do_not_repeat() {
+        let mut detector = StuckDetector::new();
+        let catalog = test_tool_catalog();
+        for command in [
+            "sed -n '1,40p' src/main.rs",
+            "sed -n '41,80p' src/main.rs",
+            "sed -n '81,120p' src/main.rs",
+        ] {
+            observe_bash(&mut detector, &catalog, command);
+        }
+        assert!(
+            detector.check(&catalog).is_none(),
+            "paging through one file in distinct ranges is not an exact repeat"
+        );
+    }
+
+    #[test]
+    fn stuck_detector_repeated_validation_is_not_a_repeat() {
+        let mut detector = StuckDetector::new();
+        let catalog = test_tool_catalog();
+        for _ in 0..4 {
+            observe_bash(&mut detector, &catalog, "cargo test -p omegon --locked");
+        }
+        assert!(
+            detector.check(&catalog).is_none(),
+            "repeated validation runs are convergence, not repetition"
+        );
+    }
+
+    #[test]
+    fn stuck_detector_distinct_edits_to_same_file_do_not_repeat() {
+        let mut detector = StuckDetector::new();
+        let catalog = test_tool_catalog();
+        for (i, old) in ["a", "b", "c", "d"].iter().enumerate() {
+            let call = ToolCall {
+                id: format!("{i}"),
+                name: "edit".into(),
+                arguments: serde_json::json!({
+                    "path": "src/main.rs",
+                    "oldText": old,
+                    "newText": "x",
+                }),
+            };
+            let result = ToolResultEntry {
+                call_id: format!("{i}"),
+                tool_name: "edit".into(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            };
+            let events = crate::observation::ObservationNormalizer::new(&catalog)
+                .normalize(&[call], &[result]);
+            for event in events {
+                detector.record_observation(&event);
+            }
+        }
+        assert!(
+            detector.check(&catalog).is_none(),
+            "distinct successful edits to one file are progress, not repetition"
+        );
+    }
+
     #[test]
     fn stuck_detector_mutation_observation_clears_file_churn() {
         let mut detector = StuckDetector::new();
@@ -5252,8 +5433,13 @@ mod tests {
             );
         }
 
-        let warning = detector.check(&test_tool_catalog()).expect("warning");
-        assert!(warning.message.contains("same arguments"));
+        // Inspection hashes are path-normalized, so pattern 2 must not treat
+        // distinct-range paging as "same arguments". Read churn on one path
+        // is owned by patterns 1 and 4 with wider thresholds.
+        assert!(
+            detector.check(&test_tool_catalog()).is_none(),
+            "distinct-range views of one file are paging, not repetition"
+        );
     }
 
     #[test]

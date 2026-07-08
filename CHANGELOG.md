@@ -31,6 +31,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Made git guidance and validation recommendations document-aware so Markdown-only human documents/knowledge notes are not framed as code changes.
 
 ### Fixed
+- Excluded path-normalized read/inspection, mutation, validation, and progress entries from the StuckDetector "same arguments" repeat pattern, so paging through one file in distinct ranges, distinct edits to one file, and repeated validation runs no longer fire false stuck-loop warnings.
+- Fingerprinted search observations by query and roots instead of a constant marker, so healthy exploration with distinct grep/search queries is no longer misclassified as argument repetition.
+- Made bash observation segmentation quote- and escape-aware, so quoted regex alternations like `grep -E "a|b"` produce one search event instead of shredding into bogus segments.
+- Softened the stuck-loop escalation injection from an accusatory verdict to neutral repetition-pressure framing that names the exit paths (produce the deliverable, take one different action, or state the blocker).
 - Replaced the `files_read <= 2` actionability shortcut with novelty-decay-based local evidence sufficiency, preventing first targeted reads from forcing premature convergence.
 - Suppressed anti-orientation drift and read-only evidence convergence in research mode unless validation or mutation evidence makes the target actionable.
 - Required matching successful tool results before normalized observations create positive guidance evidence, so orphaned/missing tool results no longer look like successful reads or mutations.

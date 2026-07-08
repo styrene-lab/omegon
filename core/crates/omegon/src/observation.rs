@@ -175,12 +175,74 @@ fn normalize_bash(call: &ToolCall) -> Vec<ObservationEvent> {
     let Some(command) = call.arguments.get("command").and_then(|v| v.as_str()) else {
         return Vec::new();
     };
-    command
-        .split(['\n', ';', '|'])
-        .flat_map(|segment| segment.split("&&"))
-        .flat_map(|segment| segment.split("||"))
-        .flat_map(classify_bash_segment)
+    split_bash_segments(command)
+        .iter()
+        .flat_map(|segment| classify_bash_segment(segment))
         .collect()
+}
+
+/// Split a shell command into pipeline/sequence segments, respecting single
+/// and double quotes and backslash escapes. A naive `split(['|', ';'])` shreds
+/// quoted regex alternations like `grep -E "a|b"` into bogus segments,
+/// inflating observation counts with garbage events.
+fn split_bash_segments(command: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' if !in_double => {
+                in_single = !in_single;
+                current.push(ch);
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                current.push(ch);
+            }
+            '\\' if !in_single => {
+                current.push(ch);
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            '\n' | ';' | '|' if !in_single && !in_double => {
+                if ch == '|' && chars.peek() == Some(&'|') {
+                    chars.next();
+                }
+                if !current.trim().is_empty() {
+                    segments.push(std::mem::take(&mut current));
+                } else {
+                    current.clear();
+                }
+            }
+            '&' if !in_single && !in_double && chars.peek() == Some(&'&') => {
+                chars.next();
+                if !current.trim().is_empty() {
+                    segments.push(std::mem::take(&mut current));
+                } else {
+                    current.clear();
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        segments.push(current);
+    }
+    segments
+}
+
+/// Bash programs whose invocation is a file read. Shared with the stuck
+/// detector so path-normalized read entries get read-churn treatment
+/// (same-path counting with mutation/validation guards) instead of
+/// exact-repeat treatment.
+pub(crate) fn is_read_program(name: &str) -> bool {
+    matches!(
+        name,
+        "cat" | "head" | "tail" | "sed" | "awk" | "wc" | "nl" | "strings" | "xxd" | "hexdump"
+    )
 }
 
 fn classify_bash_segment(segment: &str) -> Vec<ObservationEvent> {
@@ -223,7 +285,7 @@ fn classify_bash_segment(segment: &str) -> Vec<ObservationEvent> {
             query: search_query(program, &tokens),
             roots: search_roots_from_tokens(program, &tokens),
         }],
-        "cat" | "head" | "tail" | "sed" | "awk" | "wc" | "nl" | "strings" | "xxd" | "hexdump" => {
+        _ if is_read_program(program) => {
             read_paths_from_tokens(&tokens)
                 .into_iter()
                 .map(|path| ObservationEvent::FileRead {
@@ -536,5 +598,16 @@ mod tests {
             &[ok_result()],
         );
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn split_bash_segments_respects_quotes_and_escapes() {
+        let segments = split_bash_segments(r#"grep -E "a|b" src; echo 'x;y' && cat f"#);
+        let trimmed: Vec<&str> = segments.iter().map(|s| s.trim()).collect();
+        assert_eq!(trimmed, vec![r#"grep -E "a|b" src"#, "echo 'x;y'", "cat f"]);
+
+        let escaped = split_bash_segments(r"grep a\|b src | wc -l");
+        let trimmed: Vec<&str> = escaped.iter().map(|s| s.trim()).collect();
+        assert_eq!(trimmed, vec![r"grep a\|b src", "wc -l"]);
     }
 }
