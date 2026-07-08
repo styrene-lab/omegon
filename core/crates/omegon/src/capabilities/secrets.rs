@@ -18,6 +18,7 @@ pub struct HarnessCapabilitySecretReadiness {
     pub category: HarnessCapabilityCategory,
     pub description: String,
     pub policy: HarnessCapabilitySecretPolicy,
+    pub candidate_label: String,
     pub secret_names: Vec<String>,
     pub preferred_secret: Option<String>,
     pub configured_count: usize,
@@ -226,6 +227,7 @@ struct FirstPartySecretCatalogEntry {
     capability_id: &'static str,
     capability_label: &'static str,
     category: HarnessCapabilityCategory,
+    candidate_label: &'static str,
     description: &'static str,
     policy: HarnessCapabilitySecretPolicy,
     preferred: bool,
@@ -237,6 +239,7 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_id: "llm_provider_api_keys",
         capability_label: "LLM provider API keys",
         category: HarnessCapabilityCategory::LlmProvider,
+        candidate_label: "API keys",
         description: "API-key credentials for built-in LLM provider routes when OAuth is not used.",
         policy: HarnessCapabilitySecretPolicy::AnyOf,
         preferred: true,
@@ -246,6 +249,7 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_id: "llm_provider_api_keys",
         capability_label: "LLM provider API keys",
         category: HarnessCapabilityCategory::LlmProvider,
+        candidate_label: "API keys",
         description: "API-key credentials for built-in LLM provider routes when OAuth is not used.",
         policy: HarnessCapabilitySecretPolicy::AnyOf,
         preferred: false,
@@ -255,6 +259,7 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_id: "llm_provider_api_keys",
         capability_label: "LLM provider API keys",
         category: HarnessCapabilityCategory::LlmProvider,
+        candidate_label: "API keys",
         description: "API-key credentials for built-in LLM provider routes when OAuth is not used.",
         policy: HarnessCapabilitySecretPolicy::AnyOf,
         preferred: false,
@@ -264,6 +269,7 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_id: "web_search",
         capability_label: "Web search and external evidence",
         category: HarnessCapabilityCategory::Research,
+        candidate_label: "providers",
         description: "Search provider credentials for first-party external research tools.",
         policy: HarnessCapabilitySecretPolicy::AnyOf,
         preferred: true,
@@ -273,6 +279,7 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_id: "web_search",
         capability_label: "Web search and external evidence",
         category: HarnessCapabilityCategory::Research,
+        candidate_label: "providers",
         description: "Search provider credentials for first-party external research tools.",
         policy: HarnessCapabilitySecretPolicy::AnyOf,
         preferred: false,
@@ -282,6 +289,7 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_id: "web_search",
         capability_label: "Web search and external evidence",
         category: HarnessCapabilityCategory::Research,
+        candidate_label: "providers",
         description: "Search provider credentials for first-party external research tools.",
         policy: HarnessCapabilitySecretPolicy::AnyOf,
         preferred: false,
@@ -291,6 +299,7 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_id: "web_search",
         capability_label: "Web search and external evidence",
         category: HarnessCapabilityCategory::Research,
+        candidate_label: "providers",
         description: "Search provider credentials for first-party external research tools.",
         policy: HarnessCapabilitySecretPolicy::AnyOf,
         preferred: false,
@@ -300,6 +309,7 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_id: "github_forge",
         capability_label: "GitHub forge integration",
         category: HarnessCapabilityCategory::Forge,
+        candidate_label: "tokens",
         description: "Tokens for first-party GitHub issue, PR, and repository workflows.",
         policy: HarnessCapabilitySecretPolicy::AnyOf,
         preferred: true,
@@ -309,6 +319,7 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_id: "github_forge",
         capability_label: "GitHub forge integration",
         category: HarnessCapabilityCategory::Forge,
+        candidate_label: "tokens",
         description: "Tokens for first-party GitHub issue, PR, and repository workflows.",
         policy: HarnessCapabilitySecretPolicy::AnyOf,
         preferred: false,
@@ -318,6 +329,7 @@ const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
         capability_id: "gitlab_forge",
         capability_label: "GitLab forge integration",
         category: HarnessCapabilityCategory::Forge,
+        candidate_label: "tokens",
         description: "Tokens for first-party GitLab issue, merge-request, and repository workflows.",
         policy: HarnessCapabilitySecretPolicy::AnyOf,
         preferred: true,
@@ -354,6 +366,8 @@ fn build_harness_capability_readiness(
                 label: entry.capability_label.to_string(),
                 category: entry.category.clone(),
                 description: entry.description.to_string(),
+                policy: entry.policy.clone(),
+                candidate_label: entry.candidate_label.to_string(),
                 secret_names: Vec::new(),
                 preferred_secret: None,
                 configured_count: 0,
@@ -361,7 +375,6 @@ fn build_harness_capability_readiness(
                 missing_count: 0,
                 candidate_count: 0,
                 status: HarnessCapabilityReadinessStatus::Missing,
-                policy: entry.policy.clone(),
             }
         });
         capability.secret_names.push(entry.name.to_string());
@@ -394,7 +407,7 @@ fn build_harness_capability_readiness(
                 }
             }
             HarnessCapabilitySecretPolicy::AllOf => {
-                if capability.missing_count == 0 && capability.deferred_count == 0 {
+                if capability.missing_count == 0 {
                     HarnessCapabilityReadinessStatus::Ready
                 } else if available_count > 0 {
                     HarnessCapabilityReadinessStatus::Partial
