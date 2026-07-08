@@ -4310,7 +4310,7 @@ impl StuckDetector {
                 self.recent.push((tool_name, hash_str_path(path), false));
                 self.recent_file_accesses.push(path.display().to_string());
             }
-            crate::observation::ObservationEvent::SearchPerformed { source_tool } => {
+            crate::observation::ObservationEvent::SearchPerformed { source_tool, .. } => {
                 let tool_name = source_tool
                     .strip_prefix("bash:")
                     .unwrap_or(source_tool)

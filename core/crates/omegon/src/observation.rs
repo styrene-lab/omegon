@@ -11,6 +11,8 @@ pub(crate) enum ObservationEvent {
     },
     SearchPerformed {
         source_tool: String,
+        query: Option<String>,
+        roots: Vec<PathBuf>,
     },
     FileMutated {
         source_tool: String,
@@ -99,11 +101,52 @@ impl<'a> ObservationNormalizer<'a> {
             } else if caps.contains(&ToolCapability::BroadRepoInspection) {
                 events.push(ObservationEvent::SearchPerformed {
                     source_tool: call.name.clone(),
+                    query: call
+                        .arguments
+                        .get("query")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    roots: search_roots(call),
                 });
             }
         }
 
         events
+    }
+}
+
+fn search_roots(call: &ToolCall) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(within) = call.arguments.get("within").and_then(|v| v.as_str()) {
+        roots.push(PathBuf::from(within));
+    }
+    if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
+        roots.push(PathBuf::from(path));
+    }
+    if let Some(paths) = call.arguments.get("paths").and_then(|v| v.as_array()) {
+        roots.extend(paths.iter().filter_map(|v| v.as_str()).map(PathBuf::from));
+    }
+    roots
+}
+
+fn search_query(program: &str, tokens: &[String]) -> Option<String> {
+    match program {
+        "rg" | "grep" => tokens.iter().skip(1).find(|t| !t.starts_with('-')).cloned(),
+        "find" | "fd" | "ls" | "tree" => None,
+        _ => None,
+    }
+}
+
+fn search_roots_from_tokens(program: &str, tokens: &[String]) -> Vec<PathBuf> {
+    let args: Vec<&String> = tokens
+        .iter()
+        .skip(1)
+        .filter(|t| !t.starts_with('-'))
+        .collect();
+    match program {
+        "rg" | "grep" => args.into_iter().skip(1).map(PathBuf::from).collect(),
+        "find" | "fd" | "ls" | "tree" => args.into_iter().map(PathBuf::from).collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -177,6 +220,8 @@ fn classify_bash_segment(segment: &str) -> Vec<ObservationEvent> {
         }
         "rg" | "grep" | "find" | "fd" | "ls" | "tree" => vec![ObservationEvent::SearchPerformed {
             source_tool: format!("bash:{program}"),
+            query: search_query(program, &tokens),
+            roots: search_roots_from_tokens(program, &tokens),
         }],
         "cat" | "head" | "tail" | "sed" | "awk" | "wc" | "nl" | "strings" | "xxd" | "hexdump" => {
             read_paths_from_tokens(&tokens)
@@ -363,7 +408,9 @@ mod tests {
         assert_eq!(
             events,
             vec![ObservationEvent::SearchPerformed {
-                source_tool: "codebase_search".into()
+                source_tool: "codebase_search".into(),
+                query: Some("OrientationChurn".into()),
+                roots: Vec::new(),
             }]
         );
     }
@@ -447,7 +494,12 @@ mod tests {
         assert_eq!(
             events,
             vec![ObservationEvent::SearchPerformed {
-                source_tool: "bash:rg".into()
+                source_tool: "bash:rg".into(),
+                query: Some("OrientationChurn".into()),
+                roots: vec![
+                    PathBuf::from("core/crates/omegon/src"),
+                    PathBuf::from("docs")
+                ],
             }]
         );
     }

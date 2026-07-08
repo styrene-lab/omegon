@@ -219,6 +219,8 @@ pub struct IntentDocument {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct EvidenceLedger {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_scope: Option<String>,
     #[serde(default)]
     pub seen_paths: IndexSet<PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -233,6 +235,8 @@ pub struct EvidenceTurn {
     pub revisits: u32,
     pub searches: u32,
     pub mutation_or_validation: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub search_roots: Vec<PathBuf>,
 }
 
 impl EvidenceTurn {
@@ -255,6 +259,25 @@ impl EvidenceTurn {
 
 impl EvidenceLedger {
     const MAX_TURNS: usize = 32;
+    const ACTIONABLE_REVISIT_STREAK: u32 = 2;
+    const LOW_NOVELTY_THRESHOLD: f32 = 0.34;
+    const REVISIT_RATE_THRESHOLD: f32 = 0.5;
+
+    pub fn set_task_scope(&mut self, task_scope: Option<&str>) {
+        let normalized = task_scope
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        if self.task_scope != normalized {
+            self.task_scope = normalized;
+            self.seen_paths.clear();
+            self.turns.clear();
+        }
+    }
+
+    pub fn actionable_revisit_streak(&self) -> bool {
+        self.low_novelty_revisit_streak() >= Self::ACTIONABLE_REVISIT_STREAK
+    }
 
     pub fn record_turn(&mut self, events: &[ObservationEvent]) {
         let mut turn = EvidenceTurn::default();
@@ -268,9 +291,10 @@ impl EvidenceLedger {
                         turn.revisits = turn.revisits.saturating_add(1);
                     }
                 }
-                ObservationEvent::SearchPerformed { .. } => {
+                ObservationEvent::SearchPerformed { roots, .. } => {
                     turn.observations = turn.observations.saturating_add(1);
                     turn.searches = turn.searches.saturating_add(1);
+                    turn.search_roots.extend(roots.iter().cloned());
                 }
                 ObservationEvent::FileMutated { path, .. } => {
                     turn.observations = turn.observations.saturating_add(1);
@@ -302,7 +326,10 @@ impl EvidenceLedger {
             if turn.mutation_or_validation {
                 break;
             }
-            if turn.observations > 0 && turn.novelty_rate() < 0.34 && turn.revisit_rate() >= 0.5 {
+            if turn.observations > 0
+                && turn.novelty_rate() < Self::LOW_NOVELTY_THRESHOLD
+                && turn.revisit_rate() >= Self::REVISIT_RATE_THRESHOLD
+            {
                 streak = streak.saturating_add(1);
             } else {
                 break;
@@ -598,6 +625,9 @@ impl IntentDocument {
             first_line.to_string()
         };
         if !task.trim().is_empty() {
+            if self.current_task.as_deref() != Some(task.as_str()) {
+                self.evidence_ledger.set_task_scope(Some(&task));
+            }
             self.current_task = Some(task);
         }
     }
@@ -2918,6 +2948,65 @@ mod tests {
         assert!(block.contains("30-minute TTL"));
         assert!(block.contains("Direct replacement"));
         assert!(block.contains("Cache holds stale refs"));
+    }
+
+    #[test]
+    fn evidence_ledger_resets_when_task_changes() {
+        let mut intent = IntentDocument::default();
+        intent.set_task_from_prompt("inspect foo");
+        let read_call = ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "src/foo.rs"}),
+        };
+        let read_result = ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "read".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        intent.update_from_tools(
+            &test_tool_catalog(),
+            std::slice::from_ref(&read_call),
+            std::slice::from_ref(&read_result),
+        );
+        assert!(
+            intent
+                .evidence_ledger
+                .seen_paths
+                .contains(&PathBuf::from("src/foo.rs"))
+        );
+
+        intent.set_task_from_prompt("inspect bar");
+        assert!(intent.evidence_ledger.seen_paths.is_empty());
+        assert!(intent.evidence_ledger.turns.is_empty());
+        intent.update_from_tools(&test_tool_catalog(), &[read_call], &[read_result]);
+        assert_eq!(intent.evidence_ledger.turns.last().unwrap().novel_paths, 1);
+    }
+
+    #[test]
+    fn evidence_ledger_records_search_roots() {
+        let mut intent = IntentDocument::default();
+        let call = ToolCall {
+            id: "1".into(),
+            name: "codebase_search".into(),
+            arguments: serde_json::json!({"query": "EvidenceLedger", "within": "core/crates/omegon/src"}),
+        };
+        let result = ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "codebase_search".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        intent.update_from_tools(&test_tool_catalog(), &[call], &[result]);
+        let turn = intent.evidence_ledger.turns.last().unwrap();
+        assert_eq!(turn.searches, 1);
+        assert_eq!(
+            turn.search_roots,
+            vec![PathBuf::from("core/crates/omegon/src")]
+        );
     }
 
     #[test]

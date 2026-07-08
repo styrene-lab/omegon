@@ -1130,6 +1130,50 @@ mod tests {
     }
 
     #[test]
+    fn repeated_observation_flow_makes_target_actionable_after_revisits() {
+        let catalog = ToolCapabilityCatalog::from_tool_defs(&[omegon_traits::ToolDefinition {
+            name: "read".into(),
+            label: String::new(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            capabilities: vec![
+                omegon_traits::ToolCapability::RepoInspection,
+                omegon_traits::ToolCapability::TargetedRepoInspection,
+            ],
+        }]);
+        let mut conversation = ConversationState::new();
+        let call = ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/crates/omegon/src/behavior.rs"}),
+        };
+        let result = ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "read".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        conversation.intent.update_from_tools(
+            &catalog,
+            std::slice::from_ref(&call),
+            std::slice::from_ref(&result),
+        );
+        conversation.intent.update_from_tools(
+            &catalog,
+            std::slice::from_ref(&call),
+            std::slice::from_ref(&result),
+        );
+        conversation.intent.update_from_tools(
+            &catalog,
+            std::slice::from_ref(&call),
+            std::slice::from_ref(&result),
+        );
+        let evidence = assess_evidence(&conversation, &catalog, &[call], &[result]);
+        assert_eq!(evidence.local, EvidenceSufficiency::Actionable);
+    }
+
+    #[test]
     fn first_targeted_read_is_targeted_not_actionable() {
         let catalog = ToolCapabilityCatalog::from_tool_defs(&[omegon_traits::ToolDefinition {
             name: "read".into(),
@@ -1179,6 +1223,7 @@ mod tests {
                 novel_paths: 0,
                 revisits: 1,
                 searches: 0,
+                search_roots: Vec::new(),
                 mutation_or_validation: false,
             });
         conversation
@@ -1190,6 +1235,7 @@ mod tests {
                 novel_paths: 0,
                 revisits: 1,
                 searches: 0,
+                search_roots: Vec::new(),
                 mutation_or_validation: false,
             });
         let call = ToolCall {
