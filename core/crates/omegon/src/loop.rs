@@ -391,6 +391,19 @@ pub async fn run(
     let mut session_used_tools: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     let mut turn: u32 = 0;
+    // Infer the guidance task mode for this operator prompt (A1). Explicit
+    // operator declarations pin the mode; otherwise inference updates it for
+    // the current task without overriding a previously pinned mode.
+    let last_user_prompt = conversation.last_user_prompt();
+    if let Some(mode) = crate::behavior::explicit_task_mode_from_prompt(last_user_prompt) {
+        conversation.intent.pin_task_mode(mode);
+    } else {
+        conversation
+            .intent
+            .observe_task_mode(crate::behavior::infer_task_mode_from_prompt(
+                last_user_prompt,
+            ));
+    }
     // Active model for this turn — updated each iteration from settings.
     // Used in TurnEnd events and error classification instead of the
     // immutable config.model which is frozen at startup. Starts from the
@@ -1200,55 +1213,15 @@ pub async fn run(
             //   of whether tools were called to gather context first
             // - Skip if the user explicitly did not ask for a file write
             let in_task_mode = conversation.intent.stats.tool_calls > 0;
-            // Skip dead-mouse if the user's last prompt looks like a question,
-            // rundown, summary, or any read/explain-style request — text-only
-            // responses are legitimate. We err *strongly* on the side of NOT
-            // firing: false positives push the model to invent file-writing
-            // work the user never requested (worse failure mode than false
-            // negatives).
-            let user_asked_question = {
-                let prompt = conversation.last_user_prompt().to_lowercase();
-                let starts = |w: &str| prompt.trim_start().starts_with(w);
-                prompt.contains('?')
-                    || starts("explain")
-                    || starts("what")
-                    || starts("why")
-                    || starts("how")
-                    || starts("when")
-                    || starts("where")
-                    || starts("which")
-                    || starts("who")
-                    || starts("describe")
-                    || starts("summarize")
-                    || starts("summary")
-                    || starts("rundown")
-                    || starts("overview")
-                    || starts("review")
-                    || starts("analyze")
-                    || starts("compare")
-                    || starts("contrast")
-                    || starts("outline")
-                    || starts("discuss")
-                    || starts("tell me")
-                    || starts("show me")
-                    || starts("give me")
-                    || starts("list")
-                    || starts("can you")
-                    || starts("could you")
-                    || starts("do you")
-                    || starts("is ")
-                    || starts("are ")
-                    || starts("does")
-                    || starts("did")
-                    || starts("read")
-                    || starts("look")
-                    || starts("check")
-                    || starts("find")
-                    || starts("search")
-                    || prompt.contains(" rundown")
-                    || prompt.contains(" summary")
-                    || prompt.contains(" overview")
-            };
+            // Skip dead-mouse if the operator's task mode is Research —
+            // question / rundown / summary / read-style prompts make
+            // text-only responses legitimate. The shared inference in
+            // `behavior::infer_task_mode_from_prompt` errs *strongly* on the
+            // side of Research: false Implementation classifications push the
+            // model to invent file-writing work the user never requested
+            // (worse failure mode than false negatives).
+            let user_asked_question =
+                conversation.intent.task_mode == crate::conversation::TaskMode::Research;
             // If the model's last assistant message was substantial natural
             // language (i.e. it produced an actual answer), treat the turn
             // as complete regardless of mutations. Q&A is a primary mode for
@@ -1421,7 +1394,7 @@ pub async fn run(
             work_plan_snapshot_with_lifecycle(&conversation.intent, &config.cwd);
         conversation
             .intent
-            .update_from_tools(dispatch_calls, &results);
+            .update_from_tools(&tool_catalog, dispatch_calls, &results);
         enrich_plan_list_tool_results(&mut results, dispatch_calls, &conversation.intent);
         for result in &results {
             conversation.push_tool_result(result.clone());
@@ -1578,12 +1551,19 @@ pub async fn run(
         }
         context.update_phase_from_activity(dispatch_calls);
 
+        let observations = crate::observation::ObservationNormalizer::new(&tool_catalog)
+            .normalize(dispatch_calls, &results);
+        for event in &observations {
+            stuck_detector.record_observation(event);
+        }
         for call in dispatch_calls {
             let is_error = results
                 .iter()
                 .find(|r| r.call_id == call.id)
                 .is_some_and(|r| r.is_error);
-            stuck_detector.record(&tool_catalog, call, is_error);
+            if is_error {
+                stuck_detector.record(&tool_catalog, call, true);
+            }
         }
 
         let system_prompt =
@@ -4320,6 +4300,60 @@ impl StuckDetector {
         }
     }
 
+    fn record_observation(&mut self, event: &crate::observation::ObservationEvent) {
+        match event {
+            crate::observation::ObservationEvent::FileRead { source_tool, path } => {
+                let tool_name = source_tool
+                    .strip_prefix("bash:")
+                    .unwrap_or(source_tool)
+                    .to_string();
+                self.recent.push((tool_name, hash_str_path(path), false));
+                self.recent_file_accesses.push(path.display().to_string());
+            }
+            crate::observation::ObservationEvent::SearchPerformed { source_tool, .. } => {
+                let tool_name = source_tool
+                    .strip_prefix("bash:")
+                    .unwrap_or(source_tool)
+                    .to_string();
+                self.recent.push((tool_name, hash_str("<search>"), false));
+            }
+            crate::observation::ObservationEvent::FileMutated { source_tool, path } => {
+                self.recent
+                    .push((source_tool.clone(), hash_str_path(path), false));
+                let rendered = path.display().to_string();
+                self.recent_file_accesses.retain(|p| p != &rendered);
+            }
+            crate::observation::ObservationEvent::ValidationRun { source_tool } => {
+                let tool_name = if source_tool == "bash" {
+                    crate::tool_registry::core::VALIDATE.to_string()
+                } else {
+                    source_tool.clone()
+                };
+                self.recent
+                    .push((tool_name, hash_str("<validation>"), false));
+                // Validation is a convergence action, not inspection churn.
+                // Clear path-only churn history so a validate→re-read loop is
+                // treated as post-validation investigation rather than stale
+                // pre-validation spinning.
+                self.recent_file_accesses.clear();
+            }
+            crate::observation::ObservationEvent::ProgressBoundary { source_tool, .. } => {
+                let tool_name = if source_tool == "bash" {
+                    crate::tool_registry::core::COMMIT.to_string()
+                } else {
+                    source_tool.clone()
+                };
+                self.recent.push((tool_name, hash_str("<progress>"), false));
+            }
+        }
+        if self.recent.len() > self.window * 2 {
+            self.recent.drain(..self.window);
+        }
+        if self.recent_file_accesses.len() > self.window * 2 {
+            self.recent_file_accesses.drain(..self.window);
+        }
+    }
+
     /// Check for stuck patterns. Returns a warning with escalation level if detected.
     fn check(&mut self, catalog: &ToolCapabilityCatalog) -> Option<StuckWarning> {
         let len = self.recent.len();
@@ -4571,6 +4605,16 @@ fn hash_value(v: &Value) -> u64 {
     let s = v.to_string();
     s.hash(&mut hasher);
     hasher.finish()
+}
+
+fn hash_str(s: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    s.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_str_path(path: &std::path::Path) -> u64 {
+    hash_str(&path.display().to_string())
 }
 
 #[cfg(test)]
@@ -4997,6 +5041,155 @@ mod tests {
     }
 
     #[test]
+    fn stuck_detector_tracks_file_churn_through_observation_events() {
+        let mut detector = StuckDetector::new();
+        let path = "src/main.rs";
+
+        for command in [
+            "sed -n '1,40p' src/main.rs",
+            "cat src/main.rs",
+            "head -20 src/main.rs",
+            "tail -20 src/main.rs",
+        ] {
+            let call = ToolCall {
+                id: command.into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({"command": command}),
+            };
+            let result = ToolResultEntry {
+                call_id: command.into(),
+                tool_name: "bash".into(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            };
+            let events = crate::observation::ObservationNormalizer::new(&test_tool_catalog())
+                .normalize(&[call], &[result]);
+            for event in events {
+                detector.record_observation(&event);
+            }
+        }
+
+        let warning = detector.check(&test_tool_catalog()).expect("warning");
+        assert!(warning.message.contains(path), "{}", warning.message);
+    }
+
+    #[test]
+    fn stuck_detector_bash_validation_breaks_file_churn() {
+        let mut detector = StuckDetector::new();
+        let catalog = test_tool_catalog();
+
+        for command in [
+            "sed -n '1,40p' src/main.rs",
+            "cat src/main.rs",
+            "head -20 src/main.rs",
+            "cargo test -p omegon observation --locked",
+            "tail -20 src/main.rs",
+            "sed -n '41,80p' src/main.rs",
+        ] {
+            let call = ToolCall {
+                id: command.into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({"command": command}),
+            };
+            let result = ToolResultEntry {
+                call_id: command.into(),
+                tool_name: "bash".into(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            };
+            let events = crate::observation::ObservationNormalizer::new(&catalog)
+                .normalize(&[call], &[result]);
+            for event in events {
+                detector.record_observation(&event);
+            }
+        }
+
+        assert!(
+            detector.check(&catalog).is_none(),
+            "bash validation should break repeated read-only churn"
+        );
+    }
+
+    #[test]
+    fn stuck_detector_mutation_observation_clears_file_churn() {
+        let mut detector = StuckDetector::new();
+        let catalog = test_tool_catalog();
+
+        for command in [
+            "sed -n '1,40p' src/main.rs",
+            "cat src/main.rs",
+            "head -20 src/main.rs",
+        ] {
+            let call = ToolCall {
+                id: command.into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({"command": command}),
+            };
+            let result = ToolResultEntry {
+                call_id: command.into(),
+                tool_name: "bash".into(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            };
+            let events = crate::observation::ObservationNormalizer::new(&catalog)
+                .normalize(&[call], &[result]);
+            for event in events {
+                detector.record_observation(&event);
+            }
+        }
+
+        let edit = ToolCall {
+            id: "edit".into(),
+            name: "edit".into(),
+            arguments: serde_json::json!({"path": "src/main.rs", "oldText": "a", "newText": "b"}),
+        };
+        let edit_result = ToolResultEntry {
+            call_id: "edit".into(),
+            tool_name: "edit".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        let events = crate::observation::ObservationNormalizer::new(&catalog)
+            .normalize(&[edit], &[edit_result]);
+        for event in events {
+            detector.record_observation(&event);
+        }
+
+        for command in [
+            "tail -20 src/main.rs",
+            "sed -n '41,80p' src/main.rs",
+            "cat src/main.rs",
+        ] {
+            let call = ToolCall {
+                id: command.into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({"command": command}),
+            };
+            let result = ToolResultEntry {
+                call_id: command.into(),
+                tool_name: "bash".into(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            };
+            let events = crate::observation::ObservationNormalizer::new(&catalog)
+                .normalize(&[call], &[result]);
+            for event in events {
+                detector.record_observation(&event);
+            }
+        }
+
+        assert!(
+            detector.check(&catalog).is_none(),
+            "mutation observation should clear prior access entries for the path"
+        );
+    }
+
+    #[test]
     fn stuck_detector_mutation_clears_file_access_history() {
         let mut detector = StuckDetector::new();
         let path = "src/main.rs";
@@ -5404,7 +5597,7 @@ mod tests {
             name: "read".into(),
             arguments: serde_json::json!({"path": "src/main.rs"}),
         }];
-        intent.update_from_tools(&read_calls, &[]);
+        intent.update_from_tools(&test_tool_catalog(), &read_calls, &[]);
         let after_read = intent.work_plan_snapshot_json();
         assert!(!work_plan_snapshot_changed(&before, &after_read));
 
@@ -5413,7 +5606,7 @@ mod tests {
             name: crate::tool_registry::core::PLAN.into(),
             arguments: serde_json::json!({"action": "advance"}),
         }];
-        intent.update_from_tools(&plan_calls, &[]);
+        intent.update_from_tools(&test_tool_catalog(), &plan_calls, &[]);
         let after_plan = intent.work_plan_snapshot_json();
         assert!(work_plan_snapshot_changed(&after_read, &after_plan));
         assert_eq!(after_plan["completed"], 1);
@@ -6653,6 +6846,157 @@ This is the right first slice."#;
     }
 
     #[test]
+    fn infer_task_mode_classifies_research_and_implementation_prompts() {
+        use crate::behavior::infer_task_mode_from_prompt;
+        use crate::conversation::TaskMode;
+
+        for prompt in [
+            "what does the observation normalizer do?",
+            "Explain the OODA loop wiring",
+            "give me a rundown of the guidance affordances",
+            "review the recent additions",
+            "How does compaction work",
+            "investigate the flaky test",
+        ] {
+            assert_eq!(
+                infer_task_mode_from_prompt(prompt),
+                TaskMode::Research,
+                "prompt should classify as research: {prompt}"
+            );
+        }
+
+        for prompt in [
+            "fix the failing test in loop.rs",
+            "implement the task-mode intent channel",
+            "add a regression test and commit",
+            "refactor update_from_tools to use the catalog",
+        ] {
+            assert_eq!(
+                infer_task_mode_from_prompt(prompt),
+                TaskMode::Implementation,
+                "prompt should classify as implementation: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn observed_task_mode_does_not_override_pinned_mode() {
+        use crate::conversation::TaskMode;
+
+        let mut intent = IntentDocument::default();
+        intent.pin_task_mode(TaskMode::Implementation);
+        intent.observe_task_mode(TaskMode::Research);
+        assert_eq!(intent.task_mode, TaskMode::Implementation);
+
+        let mut unpinned = IntentDocument::default();
+        unpinned.observe_task_mode(TaskMode::Research);
+        assert_eq!(unpinned.task_mode, TaskMode::Research);
+    }
+
+    #[test]
+    fn execution_pressure_suppressed_in_research_mode() {
+        use crate::conversation::TaskMode;
+
+        let config = LoopConfig::default();
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("src/lib.rs"));
+        conversation.intent.observe_task_mode(TaskMode::Research);
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "codebase_search".into(),
+            arguments: Value::Null,
+        }];
+        // Same shape fires in implementation mode at turn 7 (see
+        // execution_pressure_detected_after_repeated_repo_inspection_without_edits)
+        // but must stay silent for research turns.
+        assert!(!should_inject_execution_pressure(
+            12,
+            &config,
+            &conversation,
+            &test_tool_catalog(),
+            &tool_calls,
+            BehavioralTier::Standard,
+        ));
+    }
+
+    #[test]
+    fn continuation_pressure_relaxed_but_not_disabled_in_research_mode() {
+        use crate::conversation::TaskMode;
+
+        let config = LoopConfig::default();
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("core/src/context.rs"));
+        conversation.intent.observe_task_mode(TaskMode::Research);
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: Value::Null,
+        }];
+
+        // Streaks that trigger tier 1 in implementation mode stay quiet.
+        let moderate = ControllerState {
+            consecutive_tool_continuations: 12,
+            orientation_churn_streak: 4,
+            ..ControllerState::default()
+        };
+        assert_eq!(
+            continuation_pressure_tier(
+                &config,
+                &moderate,
+                &conversation,
+                &tool_calls,
+                Some(OodaPhase::Observe),
+                BehavioralTier::Standard,
+            ),
+            None,
+            "research mode should absorb implementation-tier churn"
+        );
+
+        // The late safety net still exists for unbounded exploration.
+        let extreme = ControllerState {
+            consecutive_tool_continuations: 32,
+            orientation_churn_streak: 24,
+            ..ControllerState::default()
+        };
+        assert!(
+            continuation_pressure_tier(
+                &config,
+                &extreme,
+                &conversation,
+                &tool_calls,
+                Some(OodaPhase::Observe),
+                BehavioralTier::Standard,
+            )
+            .is_some(),
+            "research mode must keep a late safety net"
+        );
+
+        // Genuine pathology (repeated action failure) keeps full pressure.
+        let failing = ControllerState {
+            repeated_action_failure_streak: 2,
+            ..ControllerState::default()
+        };
+        assert_eq!(
+            continuation_pressure_tier(
+                &config,
+                &failing,
+                &conversation,
+                &tool_calls,
+                Some(OodaPhase::Observe),
+                BehavioralTier::Standard,
+            ),
+            Some(2),
+            "repeated action failure is mode-independent pathology"
+        );
+    }
+
+    #[test]
     fn continuation_pressure_detected_for_sustained_orientation_churn() {
         let config = LoopConfig {
             enforce_first_turn_execution_bias: true,
@@ -6690,6 +7034,154 @@ This is the right first slice."#;
                 BehavioralTier::Standard,
             ),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn research_mode_relaxes_continuation_pressure_for_orientation_churn() {
+        let config = LoopConfig {
+            enforce_first_turn_execution_bias: true,
+            ..LoopConfig::default()
+        };
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .pin_task_mode(crate::conversation::TaskMode::Research);
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("core/src/context.rs"));
+        let tool_calls = vec![
+            ToolCall {
+                id: "1".into(),
+                name: "read".into(),
+                arguments: Value::Null,
+            },
+            ToolCall {
+                id: "2".into(),
+                name: "codebase_search".into(),
+                arguments: Value::Null,
+            },
+        ];
+        // The same streaks that trigger tier-1 pressure in Implementation
+        // mode stay quiet in Research mode.
+        let controller = ControllerState {
+            consecutive_tool_continuations: 12,
+            orientation_churn_streak: 4,
+            ..ControllerState::default()
+        };
+        assert_eq!(
+            continuation_pressure_tier(
+                &config,
+                &controller,
+                &conversation,
+                &tool_calls,
+                Some(OodaPhase::Observe),
+                BehavioralTier::Standard,
+            ),
+            None,
+            "research mode must not fire on implementation-mode thresholds"
+        );
+
+        // Genuinely unbounded exploration still hits the safety net.
+        let runaway = ControllerState {
+            consecutive_tool_continuations: 32,
+            orientation_churn_streak: 24,
+            ..ControllerState::default()
+        };
+        assert_eq!(
+            continuation_pressure_tier(
+                &config,
+                &runaway,
+                &conversation,
+                &tool_calls,
+                Some(OodaPhase::Observe),
+                BehavioralTier::Standard,
+            ),
+            Some(3),
+            "research mode keeps a late safety net"
+        );
+    }
+
+    #[test]
+    fn research_mode_keeps_failure_driven_pressure() {
+        let config = LoopConfig {
+            enforce_first_turn_execution_bias: true,
+            ..LoopConfig::default()
+        };
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .pin_task_mode(crate::conversation::TaskMode::Research);
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("core/src/context.rs"));
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: Value::Null,
+        }];
+        // RepeatedActionFailure is genuine pathology in any mode.
+        let controller = ControllerState {
+            repeated_action_failure_streak: 2,
+            ..ControllerState::default()
+        };
+        assert_eq!(
+            continuation_pressure_tier(
+                &config,
+                &controller,
+                &conversation,
+                &tool_calls,
+                Some(OodaPhase::Observe),
+                BehavioralTier::Standard,
+            ),
+            Some(2),
+            "failure streaks must keep firing in research mode"
+        );
+    }
+
+    #[test]
+    fn research_mode_suppresses_execution_pressure() {
+        let config = LoopConfig {
+            enforce_first_turn_execution_bias: true,
+            ..LoopConfig::default()
+        };
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("core/src/context.rs"));
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "codebase_search".into(),
+            arguments: Value::Null,
+        }];
+        assert!(
+            should_inject_execution_pressure(
+                9,
+                &config,
+                &conversation,
+                &test_tool_catalog(),
+                &tool_calls,
+                BehavioralTier::Standard,
+            ),
+            "implementation mode still pressures repeated inspection"
+        );
+
+        conversation
+            .intent
+            .pin_task_mode(crate::conversation::TaskMode::Research);
+        assert!(
+            !should_inject_execution_pressure(
+                9,
+                &config,
+                &conversation,
+                &test_tool_catalog(),
+                &tool_calls,
+                BehavioralTier::Standard,
+            ),
+            "research mode must never pressure toward edits"
         );
     }
 
@@ -7099,7 +7591,7 @@ This is the right first slice."#;
             args_summary: None,
         }];
         let evidence = assess_evidence(&conversation, &test_tool_catalog(), &tool_calls, &results);
-        assert_eq!(evidence.local, EvidenceSufficiency::Actionable);
+        assert_eq!(evidence.local, EvidenceSufficiency::Targeted);
         assert_eq!(evidence.global, EvidenceSufficiency::None);
     }
 

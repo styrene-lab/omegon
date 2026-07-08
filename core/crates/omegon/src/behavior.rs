@@ -5,10 +5,87 @@
 //! `ControllerState` streak tracker. Extracted from `loop.rs` to keep
 //! the core state machine focused on turn orchestration.
 
-use crate::conversation::{ConversationState, ToolCall, ToolResultEntry};
+use crate::conversation::{ConversationState, TaskMode, ToolCall, ToolResultEntry};
 pub(crate) use omegon_traits::ProgressSignal;
 use omegon_traits::{DriftKind, OodaPhase, ProgressNudgeReason, ToolCapability, ToolDefinition};
 use std::collections::{BTreeSet, HashMap};
+
+// ─── Task-mode inference ────────────────────────────────────────────────────
+
+/// Infer the guidance task mode from the operator's prompt.
+///
+/// Research-style prompts (questions, explain/summarize/review requests, any
+/// read-oriented ask) legitimately spend many turns in read/search without
+/// mutating files, so convergence pressure must relax for them. The heuristic
+/// errs strongly toward `Research`: a false `Implementation` classification
+/// pushes the model to invent file-writing work the user never requested,
+/// which is the worse failure mode.
+pub(crate) fn explicit_task_mode_from_prompt(prompt: &str) -> Option<TaskMode> {
+    let normalized = prompt.trim_start().to_lowercase();
+    let first_line = normalized.lines().next().unwrap_or("").trim();
+    match first_line {
+        "/mode research" | "/mode: research" | "[mode: research]" => Some(TaskMode::Research),
+        "/mode implementation" | "/mode: implementation" | "[mode: implementation]" => {
+            Some(TaskMode::Implementation)
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn infer_task_mode_from_prompt(prompt: &str) -> TaskMode {
+    if let Some(mode) = explicit_task_mode_from_prompt(prompt) {
+        return mode;
+    }
+    let prompt = prompt.to_lowercase();
+    let starts = |w: &str| prompt.trim_start().starts_with(w);
+    let research = prompt.contains('?')
+        || starts("explain")
+        || starts("what")
+        || starts("why")
+        || starts("how")
+        || starts("when")
+        || starts("where")
+        || starts("which")
+        || starts("who")
+        || starts("describe")
+        || starts("summarize")
+        || starts("summary")
+        || starts("rundown")
+        || starts("overview")
+        || starts("review")
+        || starts("assess")
+        || starts("analyze")
+        || starts("compare")
+        || starts("contrast")
+        || starts("outline")
+        || starts("discuss")
+        || starts("tell me")
+        || starts("show me")
+        || starts("give me")
+        || starts("list")
+        || starts("can you")
+        || starts("could you")
+        || starts("do you")
+        || starts("is ")
+        || starts("are ")
+        || starts("does")
+        || starts("did")
+        || starts("read")
+        || starts("look")
+        || starts("check")
+        || starts("find")
+        || starts("search")
+        || starts("investigate")
+        || starts("research")
+        || prompt.contains(" rundown")
+        || prompt.contains(" summary")
+        || prompt.contains(" overview");
+    if research {
+        TaskMode::Research
+    } else {
+        TaskMode::Implementation
+    }
+}
 
 // ─── Tool classification predicates ────────────────────────────────────────
 
@@ -203,7 +280,10 @@ pub(crate) fn classify_drift_kind(
         .filter(|call| is_targeted_repo_inspection_tool(catalog, &call.name))
         .count();
 
-    if conversation.intent.files_modified.is_empty()
+    let research_mode = conversation.intent.task_mode == TaskMode::Research;
+
+    if !research_mode
+        && conversation.intent.files_modified.is_empty()
         && !conversation.intent.files_read.is_empty()
         && tool_calls
             .iter()
@@ -215,7 +295,8 @@ pub(crate) fn classify_drift_kind(
         return Some(DriftKind::OrientationChurn);
     }
 
-    if conversation.intent.files_modified.is_empty()
+    if !research_mode
+        && conversation.intent.files_modified.is_empty()
         && conversation.intent.files_read.is_empty()
         && turn >= 3
         && broad_orientation_calls == tool_calls.len()
@@ -314,6 +395,11 @@ pub(crate) fn should_inject_execution_pressure(
     tool_calls: &[ToolCall],
     behavior: BehavioralTier,
 ) -> bool {
+    // Research turns legitimately read/search without mutating files; do not
+    // pressure them toward edits they were never asked to make.
+    if conversation.intent.task_mode == TaskMode::Research {
+        return false;
+    }
     if tool_calls.is_empty()
         || !conversation.intent.files_modified.is_empty()
         || conversation.intent.files_read.is_empty()
@@ -699,19 +785,35 @@ pub(crate) fn assess_evidence(
                 .iter()
                 .any(|read| read == std::path::Path::new(path))
         });
-    let local_target_count = conversation.intent.files_read.len();
-    let local = if targeted_paths_known && local_target_count <= 2 {
-        EvidenceSufficiency::Actionable
-    } else if targeted_paths_known || local_target_count <= 2 {
-        EvidenceSufficiency::Targeted
-    } else {
-        EvidenceSufficiency::None
-    };
+    let low_novelty_revisit_streak = conversation
+        .intent
+        .evidence_ledger
+        .low_novelty_revisit_streak();
     let global = if targeted_validation
         || failed_mutation_on_known_target
         || inspection_backed_by_validation_failure
     {
         EvidenceSufficiency::Actionable
+    } else {
+        EvidenceSufficiency::None
+    };
+    if conversation.intent.task_mode == TaskMode::Research
+        && global != EvidenceSufficiency::Actionable
+    {
+        return EvidenceAssessment {
+            local: if targeted_paths_known {
+                EvidenceSufficiency::Targeted
+            } else {
+                EvidenceSufficiency::None
+            },
+            global,
+        };
+    }
+
+    let local = if targeted_paths_known && low_novelty_revisit_streak >= 2 {
+        EvidenceSufficiency::Actionable
+    } else if targeted_paths_known || !conversation.intent.files_read.is_empty() {
+        EvidenceSufficiency::Targeted
     } else {
         EvidenceSufficiency::None
     };
@@ -749,11 +851,21 @@ pub(crate) fn continuation_pressure_tier(
 
     let local_evidence_sufficient = controller.local_evidence_sufficient_streak > 0;
     let evidence_sufficient = controller.evidence_sufficient_streak > 0;
-    let om_local_first_lock = is_slim_execution_bias(config)
+    let research_mode = conversation.intent.task_mode == TaskMode::Research;
+    let om_local_first_lock = !research_mode
+        && is_slim_execution_bias(config)
         && local_evidence_sufficient
         && has_local_target_hypothesis(conversation);
     let constrained = behavior == BehavioralTier::Constrained;
-    let (tier1, tier2, tier3) = if om_local_first_lock {
+    let (tier1, tier2, tier3) = if research_mode {
+        // Research turns legitimately spend many turns in read/search.
+        // Keep only a late safety net against genuinely unbounded exploration.
+        if constrained {
+            (8, 12, 16)
+        } else {
+            (16, 24, 32)
+        }
+    } else if om_local_first_lock {
         if constrained { (2, 3, 5) } else { (4, 6, 8) }
     } else if evidence_sufficient {
         if constrained { (3, 4, 6) } else { (6, 8, 10) }
@@ -779,7 +891,7 @@ pub(crate) fn continuation_pressure_tier(
         return Some(3);
     }
 
-    if discoveries >= 2 {
+    if discoveries >= 2 && !research_mode {
         return Some(2);
     }
 
@@ -978,6 +1090,222 @@ mod tests {
                 assert_recovery_directive(&message);
             }
         }
+    }
+
+    #[test]
+    fn task_mode_inference_classifies_research_prompts() {
+        for prompt in [
+            "what does the observation layer do?",
+            "Explain the OODA loop wiring",
+            "summarize the recent changes",
+            "give me a rundown of loop.rs",
+            "review the pressure heuristics",
+            "How does compaction work",
+            "investigate the flaky test",
+            "can you check whether the tests pass",
+        ] {
+            assert_eq!(
+                infer_task_mode_from_prompt(prompt),
+                TaskMode::Research,
+                "prompt should infer Research: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn task_mode_inference_classifies_implementation_prompts() {
+        for prompt in [
+            "fix the bug in conversation.rs",
+            "implement the observation normalizer",
+            "add a regression test for orphaned tool results",
+            "refactor the pressure tiers into policy rows",
+            "commit the changes",
+        ] {
+            assert_eq!(
+                infer_task_mode_from_prompt(prompt),
+                TaskMode::Implementation,
+                "prompt should infer Implementation: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_observation_flow_makes_target_actionable_after_revisits() {
+        let catalog = ToolCapabilityCatalog::from_tool_defs(&[omegon_traits::ToolDefinition {
+            name: "read".into(),
+            label: String::new(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            capabilities: vec![
+                omegon_traits::ToolCapability::RepoInspection,
+                omegon_traits::ToolCapability::TargetedRepoInspection,
+            ],
+        }]);
+        let mut conversation = ConversationState::new();
+        let call = ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/crates/omegon/src/behavior.rs"}),
+        };
+        let result = ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "read".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        conversation.intent.update_from_tools(
+            &catalog,
+            std::slice::from_ref(&call),
+            std::slice::from_ref(&result),
+        );
+        conversation.intent.update_from_tools(
+            &catalog,
+            std::slice::from_ref(&call),
+            std::slice::from_ref(&result),
+        );
+        conversation.intent.update_from_tools(
+            &catalog,
+            std::slice::from_ref(&call),
+            std::slice::from_ref(&result),
+        );
+        let evidence = assess_evidence(&conversation, &catalog, &[call], &[result]);
+        assert_eq!(evidence.local, EvidenceSufficiency::Actionable);
+    }
+
+    #[test]
+    fn first_targeted_read_is_targeted_not_actionable() {
+        let catalog = ToolCapabilityCatalog::from_tool_defs(&[omegon_traits::ToolDefinition {
+            name: "read".into(),
+            label: String::new(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            capabilities: vec![omegon_traits::ToolCapability::RepoInspection],
+        }]);
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert("core/crates/omegon/src/behavior.rs".into());
+        let call = ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/crates/omegon/src/behavior.rs"}),
+        };
+        let evidence = assess_evidence(&conversation, &catalog, &[call], &[]);
+        assert_eq!(evidence.local, EvidenceSufficiency::Targeted);
+        assert_eq!(evidence.global, EvidenceSufficiency::None);
+    }
+
+    #[test]
+    fn repeated_low_novelty_revisits_make_known_target_actionable() {
+        let catalog = ToolCapabilityCatalog::from_tool_defs(&[omegon_traits::ToolDefinition {
+            name: "read".into(),
+            label: String::new(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            capabilities: vec![
+                omegon_traits::ToolCapability::RepoInspection,
+                omegon_traits::ToolCapability::TargetedRepoInspection,
+            ],
+        }]);
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert("core/crates/omegon/src/behavior.rs".into());
+        conversation
+            .intent
+            .evidence_ledger
+            .turns
+            .push(crate::conversation::EvidenceTurn {
+                observations: 1,
+                novel_paths: 0,
+                revisits: 1,
+                searches: 0,
+                search_roots: Vec::new(),
+                mutation_or_validation: false,
+            });
+        conversation
+            .intent
+            .evidence_ledger
+            .turns
+            .push(crate::conversation::EvidenceTurn {
+                observations: 1,
+                novel_paths: 0,
+                revisits: 1,
+                searches: 0,
+                search_roots: Vec::new(),
+                mutation_or_validation: false,
+            });
+        let call = ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/crates/omegon/src/behavior.rs"}),
+        };
+        let evidence = assess_evidence(&conversation, &catalog, &[call], &[]);
+        assert_eq!(evidence.local, EvidenceSufficiency::Actionable);
+    }
+
+    #[test]
+    fn explicit_task_mode_marker_is_recognized() {
+        assert_eq!(
+            explicit_task_mode_from_prompt("/mode research\nreview the loop"),
+            Some(TaskMode::Research)
+        );
+        assert_eq!(
+            infer_task_mode_from_prompt("[mode: implementation]\nwhat file should change?"),
+            TaskMode::Implementation
+        );
+    }
+
+    #[test]
+    fn research_mode_suppresses_orientation_churn_drift() {
+        let catalog = ToolCapabilityCatalog::from_tool_defs(&[omegon_traits::ToolDefinition {
+            name: "codebase_search".into(),
+            label: String::new(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            capabilities: vec![
+                omegon_traits::ToolCapability::RepoInspection,
+                omegon_traits::ToolCapability::BroadRepoInspection,
+            ],
+        }]);
+        let call = ToolCall {
+            id: "1".into(),
+            name: "codebase_search".into(),
+            arguments: serde_json::json!({"query": "loop"}),
+        };
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert("core/crates/omegon/src/loop.rs".into());
+        assert_eq!(
+            classify_drift_kind(&catalog, 4, &conversation, std::slice::from_ref(&call), &[]),
+            Some(DriftKind::OrientationChurn)
+        );
+        conversation.intent.pin_task_mode(TaskMode::Research);
+        assert_eq!(
+            classify_drift_kind(&catalog, 4, &conversation, &[call], &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn observed_task_mode_does_not_override_pinned_mode() {
+        let mut conversation = ConversationState::new();
+        conversation.intent.pin_task_mode(TaskMode::Research);
+        conversation
+            .intent
+            .observe_task_mode(TaskMode::Implementation);
+        assert_eq!(conversation.intent.task_mode, TaskMode::Research);
+
+        let mut unpinned = ConversationState::new();
+        unpinned.intent.observe_task_mode(TaskMode::Research);
+        assert_eq!(unpinned.intent.task_mode, TaskMode::Research);
+        unpinned.intent.observe_task_mode(TaskMode::Implementation);
+        assert_eq!(unpinned.intent.task_mode, TaskMode::Implementation);
     }
 
     #[test]

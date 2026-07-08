@@ -4,6 +4,7 @@
 //! and the LLM-facing view with decay applied for context efficiency.
 
 use crate::bridge::{ImageAttachment, LlmMessage, WireToolCall};
+use crate::observation::{ObservationEvent, ObservationNormalizer};
 pub use crate::plan::*;
 use indexmap::IndexSet;
 use omegon_traits::LifecyclePhase;
@@ -111,6 +112,27 @@ impl AgentMessage {
     }
 }
 
+/// Operator/task intent mode for the guidance policy (A1 in the harness
+/// guidance affordances). Research-style turns legitimately spend many turns
+/// in read/search without mutating files, so anti-orientation and forced-
+/// convergence pressure must relax. Implementation turns keep full pressure.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskMode {
+    #[default]
+    Implementation,
+    Research,
+}
+
+impl TaskMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Implementation => "implementation",
+            Self::Research => "research",
+        }
+    }
+}
+
 /// Structured intent tracking — auto-populated, survives compaction verbatim.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -119,8 +141,22 @@ pub struct IntentDocument {
     pub approach: Option<String>,
     pub lifecycle_phase: LifecyclePhase,
 
+    /// Guidance-policy mode for the current operator task. Inferred from the
+    /// operator prompt at the start of each run unless pinned by an explicit
+    /// operator declaration.
+    #[serde(default)]
+    pub task_mode: TaskMode,
+    /// True when the operator explicitly declared the mode. Pinned mode is
+    /// not overwritten by per-prompt inference.
+    #[serde(default)]
+    pub task_mode_pinned: bool,
+
     pub files_read: IndexSet<PathBuf>,
     pub files_modified: IndexSet<PathBuf>,
+    /// Per-session discovery ledger for A3 guidance. Tracks novelty and
+    /// revisit pressure separately from scalar file counts.
+    #[serde(default)]
+    pub evidence_ledger: EvidenceLedger,
     /// Set to true after the agent has been nudged to commit once.
     /// Persists across loop invocations (TUI re-enters run() per user turn)
     /// to prevent the nudge from firing every turn in the same session.
@@ -178,6 +214,129 @@ pub struct IntentDocument {
     pub open_questions: Vec<String>,
 
     pub stats: SessionStatsAccumulator,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvidenceLedger {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_scope: Option<String>,
+    #[serde(default)]
+    pub seen_paths: IndexSet<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turns: Vec<EvidenceTurn>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvidenceTurn {
+    pub observations: u32,
+    pub novel_paths: u32,
+    pub revisits: u32,
+    pub searches: u32,
+    pub mutation_or_validation: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub search_roots: Vec<PathBuf>,
+}
+
+impl EvidenceTurn {
+    pub fn novelty_rate(&self) -> f32 {
+        if self.observations == 0 {
+            0.0
+        } else {
+            self.novel_paths as f32 / self.observations as f32
+        }
+    }
+
+    pub fn revisit_rate(&self) -> f32 {
+        if self.observations == 0 {
+            0.0
+        } else {
+            self.revisits as f32 / self.observations as f32
+        }
+    }
+}
+
+impl EvidenceLedger {
+    const MAX_TURNS: usize = 32;
+    const ACTIONABLE_REVISIT_STREAK: u32 = 2;
+    const LOW_NOVELTY_THRESHOLD: f32 = 0.34;
+    const REVISIT_RATE_THRESHOLD: f32 = 0.5;
+
+    pub fn set_task_scope(&mut self, task_scope: Option<&str>) {
+        let normalized = task_scope
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        if self.task_scope != normalized {
+            self.task_scope = normalized;
+            self.seen_paths.clear();
+            self.turns.clear();
+        }
+    }
+
+    pub fn actionable_revisit_streak(&self) -> bool {
+        self.low_novelty_revisit_streak() >= Self::ACTIONABLE_REVISIT_STREAK
+    }
+
+    pub fn record_turn(&mut self, events: &[ObservationEvent]) {
+        let mut turn = EvidenceTurn::default();
+        for event in events {
+            match event {
+                ObservationEvent::FileRead { path, .. } => {
+                    turn.observations = turn.observations.saturating_add(1);
+                    if self.seen_paths.insert(path.clone()) {
+                        turn.novel_paths = turn.novel_paths.saturating_add(1);
+                    } else {
+                        turn.revisits = turn.revisits.saturating_add(1);
+                    }
+                }
+                ObservationEvent::SearchPerformed { roots, .. } => {
+                    turn.observations = turn.observations.saturating_add(1);
+                    turn.searches = turn.searches.saturating_add(1);
+                    turn.search_roots.extend(roots.iter().cloned());
+                }
+                ObservationEvent::FileMutated { path, .. } => {
+                    turn.observations = turn.observations.saturating_add(1);
+                    turn.mutation_or_validation = true;
+                    self.seen_paths.insert(path.clone());
+                }
+                ObservationEvent::ValidationRun { .. } => {
+                    turn.observations = turn.observations.saturating_add(1);
+                    turn.mutation_or_validation = true;
+                }
+                ObservationEvent::ProgressBoundary { .. } => {
+                    turn.observations = turn.observations.saturating_add(1);
+                }
+            }
+        }
+        if turn.observations == 0 {
+            return;
+        }
+        self.turns.push(turn);
+        if self.turns.len() > Self::MAX_TURNS {
+            let excess = self.turns.len() - Self::MAX_TURNS;
+            self.turns.drain(..excess);
+        }
+    }
+
+    pub fn low_novelty_revisit_streak(&self) -> u32 {
+        let mut streak = 0u32;
+        for turn in self.turns.iter().rev() {
+            if turn.mutation_or_validation {
+                break;
+            }
+            if turn.observations > 0
+                && turn.novelty_rate() < Self::LOW_NOVELTY_THRESHOLD
+                && turn.revisit_rate() >= Self::REVISIT_RATE_THRESHOLD
+            {
+                streak = streak.saturating_add(1);
+            } else {
+                break;
+            }
+        }
+        streak
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -345,80 +504,96 @@ pub struct SessionStatsAccumulator {
 }
 
 impl IntentDocument {
+    /// Observe an inferred task mode for the current operator prompt.
+    /// Inference never overrides an explicit operator declaration.
+    pub fn observe_task_mode(&mut self, inferred: TaskMode) {
+        if !self.task_mode_pinned {
+            self.task_mode = inferred;
+        }
+    }
+
+    /// Pin the task mode from an explicit operator declaration.
+    pub fn pin_task_mode(&mut self, mode: TaskMode) {
+        self.task_mode = mode;
+        self.task_mode_pinned = true;
+    }
+
     /// Update from tool call activity — automatic population.
-    pub fn update_from_tools(&mut self, calls: &[ToolCall], results: &[ToolResultEntry]) {
+    pub fn update_from_tools(
+        &mut self,
+        catalog: &crate::behavior::ToolCapabilityCatalog,
+        calls: &[ToolCall],
+        results: &[ToolResultEntry],
+    ) {
         self.stats.tool_calls += calls.len() as u32;
 
+        let observations = ObservationNormalizer::new(catalog).normalize(calls, results);
+        self.evidence_ledger.record_turn(&observations);
+
+        for event in observations {
+            match event {
+                ObservationEvent::FileRead { path, .. } => {
+                    self.files_read.insert(path);
+                }
+                ObservationEvent::FileMutated { path, .. } => {
+                    self.files_modified.insert(path);
+                }
+                ObservationEvent::ProgressBoundary {
+                    clears_mutation_state,
+                    ..
+                } => {
+                    if clears_mutation_state {
+                        // A progress boundary such as commit clears the mutation set —
+                        // after a commit the working tree is clean. Also reset
+                        // commit_nudged so future changes can be nudged again.
+                        self.files_modified.clear();
+                        self.commit_nudged = false;
+                    }
+                }
+                ObservationEvent::SearchPerformed { .. }
+                | ObservationEvent::ValidationRun { .. } => {}
+            }
+        }
+
         for call in calls {
-            match call.name.as_str() {
-                "read" | "understand" => {
-                    if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
-                        self.files_read.insert(PathBuf::from(path));
-                    }
-                }
-                "change" | "write" | "edit" => {
-                    if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
-                        self.files_modified.insert(PathBuf::from(path));
-                    }
-                    // change tool may include multiple file paths in an edits array
-                    if let Some(edits) = call.arguments.get("edits").and_then(|v| v.as_array()) {
-                        for edit in edits {
-                            if let Some(path) = edit.get("file").and_then(|v| v.as_str()) {
-                                self.files_modified.insert(PathBuf::from(path));
-                            }
-                        }
-                    }
-                }
-                // commit clears the mutation set — after a commit the working tree is clean.
-                // Also resets commit_nudged so the agent can be nudged again if it makes
-                // further changes after committing.
-                "commit" => {
-                    self.files_modified.clear();
-                    self.commit_nudged = false;
-                }
-                "bash" if bash_command_committed_successfully(call, results) => {
-                    self.files_modified.clear();
-                    self.commit_nudged = false;
-                }
-                "plan" => {
-                    let action = call
+            if call.name != "plan" {
+                continue;
+            }
+            let action = call
+                .arguments
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("status");
+            match action {
+                "set" => {
+                    let items: Vec<String> = call
                         .arguments
-                        .get("action")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("status");
-                    match action {
-                        "set" => {
-                            let items: Vec<String> = call
-                                .arguments
-                                .get("items")
-                                .and_then(|v| v.as_array())
-                                .map(|arr| {
-                                    arr.iter()
-                                        .filter_map(|v| v.as_str().map(String::from))
-                                        .collect()
-                                })
-                                .unwrap_or_default();
-                            if !items.is_empty() {
-                                self.apply_plan_action(PlanAction::Set { items });
-                            }
-                        }
-                        "advance" => self.apply_plan_action(PlanAction::Advance),
-                        "approve" => self.apply_plan_action(PlanAction::Approve),
-                        "execute" => self.apply_plan_action(PlanAction::Execute),
-                        "complete" => {
-                            let index = call
-                                .arguments
-                                .get("index")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0) as usize;
-                            self.apply_plan_action(PlanAction::Complete { index });
-                        }
-                        "skip" => self.apply_plan_action(PlanAction::Skip),
-                        "clear" => self.apply_plan_action(PlanAction::Clear),
-                        "list" | "status" => self.apply_plan_action(PlanAction::View),
-                        _ => {}
+                        .get("items")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if !items.is_empty() {
+                        self.apply_plan_action(PlanAction::Set { items });
                     }
                 }
+                "advance" => self.apply_plan_action(PlanAction::Advance),
+                "approve" => self.apply_plan_action(PlanAction::Approve),
+                "execute" => self.apply_plan_action(PlanAction::Execute),
+                "complete" => {
+                    let index = call
+                        .arguments
+                        .get("index")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as usize;
+                    self.apply_plan_action(PlanAction::Complete { index });
+                }
+                "skip" => self.apply_plan_action(PlanAction::Skip),
+                "clear" => self.apply_plan_action(PlanAction::Clear),
+                "list" | "status" => self.apply_plan_action(PlanAction::View),
                 _ => {}
             }
         }
@@ -450,6 +625,9 @@ impl IntentDocument {
             first_line.to_string()
         };
         if !task.trim().is_empty() {
+            if self.current_task.as_deref() != Some(task.as_str()) {
+                self.evidence_ledger.set_task_scope(Some(&task));
+            }
             self.current_task = Some(task);
         }
     }
@@ -1053,6 +1231,11 @@ impl ConversationState {
             }
         }
 
+        // Collapse duplicate tool results before provider-shape repair. Wrapper
+        // tools can emit multiple local result events for one upstream tool_use;
+        // Anthropic requires those to be represented as one tool_result block.
+        coalesce_duplicate_tool_results(&mut messages);
+
         // Strip orphaned tool_use assistant calls whose matching tool_result
         // message was evicted or dropped during compaction/decay. Anthropic
         // rejects these with "tool_use ids were found without tool_result
@@ -1616,6 +1799,69 @@ fn tool_result_text_and_images(result: &ToolResultEntry) -> (String, Vec<ImageAt
     (text_blocks.join("\n"), images)
 }
 
+fn coalesce_duplicate_tool_results(messages: &mut Vec<LlmMessage>) {
+    let mut idx = 0;
+    while idx < messages.len() {
+        let LlmMessage::ToolResult { call_id, .. } = &messages[idx] else {
+            idx += 1;
+            continue;
+        };
+        let sanitized = sanitize_tool_like_id(call_id);
+        let mut merge_idx = idx + 1;
+        while merge_idx < messages.len() {
+            let LlmMessage::ToolResult {
+                call_id: next_call_id,
+                ..
+            } = &messages[merge_idx]
+            else {
+                break;
+            };
+            if sanitize_tool_like_id(next_call_id) != sanitized {
+                merge_idx += 1;
+                continue;
+            }
+            let duplicate = messages.remove(merge_idx);
+            merge_tool_result_message(&mut messages[idx], duplicate);
+        }
+        idx += 1;
+    }
+}
+
+fn merge_tool_result_message(target: &mut LlmMessage, duplicate: LlmMessage) {
+    let LlmMessage::ToolResult {
+        content: duplicate_content,
+        images: duplicate_images,
+        is_error: duplicate_is_error,
+        args_summary: duplicate_args_summary,
+        ..
+    } = duplicate
+    else {
+        return;
+    };
+    let LlmMessage::ToolResult {
+        content,
+        images,
+        is_error,
+        args_summary,
+        ..
+    } = target
+    else {
+        return;
+    };
+
+    if !duplicate_content.is_empty() {
+        if !content.is_empty() {
+            content.push_str("\n\n");
+        }
+        content.push_str(&duplicate_content);
+    }
+    images.extend(duplicate_images);
+    *is_error |= duplicate_is_error;
+    if args_summary.is_none() {
+        *args_summary = duplicate_args_summary;
+    }
+}
+
 fn bash_command_committed_successfully(call: &ToolCall, results: &[ToolResultEntry]) -> bool {
     let Some(command) = call.arguments.get("command").and_then(|v| v.as_str()) else {
         return false;
@@ -1827,7 +2073,18 @@ fn strip_orphaned_tool_results(messages: &mut Vec<LlmMessage>) {
 }
 
 fn sanitize_tool_like_id(id: &str) -> String {
-    id.split('|').next().unwrap_or(id).to_string()
+    id.split('|')
+        .next()
+        .unwrap_or(id)
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// Returns sequences of `[a-zA-Z0-9_]` that are at least 8 chars long.
@@ -2125,6 +2382,67 @@ pub fn normalize_leet_speak(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_tool_catalog() -> crate::behavior::ToolCapabilityCatalog {
+        crate::behavior::ToolCapabilityCatalog::from_tool_defs(&[
+            omegon_traits::ToolDefinition {
+                name: "read".into(),
+                label: String::new(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+                capabilities: vec![omegon_traits::ToolCapability::TargetedRepoInspection],
+            },
+            omegon_traits::ToolDefinition {
+                name: "understand".into(),
+                label: String::new(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+                capabilities: vec![omegon_traits::ToolCapability::TargetedRepoInspection],
+            },
+            omegon_traits::ToolDefinition {
+                name: "view".into(),
+                label: String::new(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+                capabilities: vec![omegon_traits::ToolCapability::TargetedRepoInspection],
+            },
+            omegon_traits::ToolDefinition {
+                name: "codebase_search".into(),
+                label: String::new(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+                capabilities: vec![omegon_traits::ToolCapability::BroadRepoInspection],
+            },
+            omegon_traits::ToolDefinition {
+                name: "edit".into(),
+                label: String::new(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+                capabilities: vec![omegon_traits::ToolCapability::Mutation],
+            },
+            omegon_traits::ToolDefinition {
+                name: "write".into(),
+                label: String::new(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+                capabilities: vec![omegon_traits::ToolCapability::Mutation],
+            },
+            omegon_traits::ToolDefinition {
+                name: "change".into(),
+                label: String::new(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+                capabilities: vec![omegon_traits::ToolCapability::Mutation],
+            },
+            omegon_traits::ToolDefinition {
+                name: "commit".into(),
+                label: String::new(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+                capabilities: vec![omegon_traits::ToolCapability::ProgressBoundary],
+            },
+        ])
+    }
 
     /// Insert an assistant message with a tool_call matching the given call_id.
     /// Required so that subsequent tool_result messages aren't stripped as orphans.
@@ -2633,6 +2951,106 @@ mod tests {
     }
 
     #[test]
+    fn evidence_ledger_resets_when_task_changes() {
+        let mut intent = IntentDocument::default();
+        intent.set_task_from_prompt("inspect foo");
+        let read_call = ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "src/foo.rs"}),
+        };
+        let read_result = ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "read".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        intent.update_from_tools(
+            &test_tool_catalog(),
+            std::slice::from_ref(&read_call),
+            std::slice::from_ref(&read_result),
+        );
+        assert!(
+            intent
+                .evidence_ledger
+                .seen_paths
+                .contains(&PathBuf::from("src/foo.rs"))
+        );
+
+        intent.set_task_from_prompt("inspect bar");
+        assert!(intent.evidence_ledger.seen_paths.is_empty());
+        assert!(intent.evidence_ledger.turns.is_empty());
+        intent.update_from_tools(&test_tool_catalog(), &[read_call], &[read_result]);
+        assert_eq!(intent.evidence_ledger.turns.last().unwrap().novel_paths, 1);
+    }
+
+    #[test]
+    fn evidence_ledger_records_search_roots() {
+        let mut intent = IntentDocument::default();
+        let call = ToolCall {
+            id: "1".into(),
+            name: "codebase_search".into(),
+            arguments: serde_json::json!({"query": "EvidenceLedger", "within": "core/crates/omegon/src"}),
+        };
+        let result = ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "codebase_search".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        intent.update_from_tools(&test_tool_catalog(), &[call], &[result]);
+        let turn = intent.evidence_ledger.turns.last().unwrap();
+        assert_eq!(turn.searches, 1);
+        assert_eq!(
+            turn.search_roots,
+            vec![PathBuf::from("core/crates/omegon/src")]
+        );
+    }
+
+    #[test]
+    fn evidence_ledger_tracks_novel_revisit_and_boundary() {
+        let mut intent = IntentDocument::default();
+        let read_call = ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "src/foo.rs"}),
+        };
+        let read_result = ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "read".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        intent.update_from_tools(
+            &test_tool_catalog(),
+            std::slice::from_ref(&read_call),
+            std::slice::from_ref(&read_result),
+        );
+        assert_eq!(intent.evidence_ledger.turns.last().unwrap().novel_paths, 1);
+        intent.update_from_tools(&test_tool_catalog(), &[read_call], &[read_result]);
+        assert_eq!(intent.evidence_ledger.turns.last().unwrap().revisits, 1);
+        assert_eq!(intent.evidence_ledger.low_novelty_revisit_streak(), 1);
+
+        let validate_call = ToolCall {
+            id: "2".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({"command": "cargo test -p omegon foo --locked"}),
+        };
+        let validate_result = ToolResultEntry {
+            call_id: "2".into(),
+            tool_name: "bash".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        intent.update_from_tools(&test_tool_catalog(), &[validate_call], &[validate_result]);
+        assert_eq!(intent.evidence_ledger.low_novelty_revisit_streak(), 0);
+    }
+
+    #[test]
     fn intent_tracks_files_from_tool_calls() {
         let mut intent = IntentDocument::default();
         let calls = vec![
@@ -2657,13 +3075,85 @@ mod tests {
                 arguments: serde_json::json!({"command": "ls"}),
             },
         ];
-        intent.update_from_tools(&calls, &[]);
+        let results: Vec<ToolResultEntry> = calls
+            .iter()
+            .map(|call| ToolResultEntry {
+                call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            })
+            .collect();
+        intent.update_from_tools(&test_tool_catalog(), &calls, &results);
         assert!(intent.files_read.contains(&PathBuf::from("src/foo.rs")));
         assert!(intent.files_modified.contains(&PathBuf::from("src/bar.rs")));
         assert!(intent.files_modified.contains(&PathBuf::from("src/new.rs")));
         assert_eq!(intent.files_read.len(), 1);
         assert_eq!(intent.files_modified.len(), 2);
         assert_eq!(intent.stats.tool_calls, 4);
+    }
+
+    #[test]
+    fn intent_tracks_view_file_reads_from_capability_catalog() {
+        let mut intent = IntentDocument::default();
+        let calls = vec![ToolCall {
+            id: "1".into(),
+            name: "view".into(),
+            arguments: serde_json::json!({"path": "README.md"}),
+        }];
+
+        let results = vec![ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "view".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        }];
+        intent.update_from_tools(&test_tool_catalog(), &calls, &results);
+
+        assert!(intent.files_read.contains(&PathBuf::from("README.md")));
+    }
+
+    #[test]
+    fn intent_tracks_bash_file_reads_without_literal_read_tool() {
+        let mut intent = IntentDocument::default();
+        let call = ToolCall {
+            id: "1".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({
+                "command": "sed -n '1,80p' core/crates/omegon/src/conversation.rs"
+            }),
+        };
+        let result = ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "bash".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+
+        intent.update_from_tools(&test_tool_catalog(), &[call], &[result]);
+
+        assert!(
+            intent
+                .files_read
+                .contains(&PathBuf::from("core/crates/omegon/src/conversation.rs"))
+        );
+    }
+
+    #[test]
+    fn intent_does_not_treat_search_as_file_read() {
+        let mut intent = IntentDocument::default();
+        let calls = vec![ToolCall {
+            id: "1".into(),
+            name: "codebase_search".into(),
+            arguments: serde_json::json!({"query": "ObservationNormalizer"}),
+        }];
+
+        intent.update_from_tools(&test_tool_catalog(), &calls, &[]);
+
+        assert!(intent.files_read.is_empty());
     }
 
     #[test]
@@ -2675,22 +3165,36 @@ mod tests {
 
         // Simulate: agent edits a file, then commits
         intent.update_from_tools(
+            &test_tool_catalog(),
             &[ToolCall {
                 id: "1".into(),
                 name: "edit".into(),
                 arguments: serde_json::json!({"path": "src/foo.rs"}),
             }],
-            &[],
+            &[ToolResultEntry {
+                call_id: "1".into(),
+                tool_name: "edit".into(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            }],
         );
         assert!(!intent.files_modified.is_empty(), "should have a mutation");
 
         intent.update_from_tools(
+            &test_tool_catalog(),
             &[ToolCall {
                 id: "2".into(),
                 name: "commit".into(),
                 arguments: serde_json::json!({"message": "fix: foo"}),
             }],
-            &[],
+            &[ToolResultEntry {
+                call_id: "2".into(),
+                tool_name: "commit".into(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            }],
         );
         assert!(
             intent.files_modified.is_empty(),
@@ -2721,7 +3225,7 @@ mod tests {
             args_summary: Some("git add src/foo.rs && git commit -m 'fix: foo'".into()),
         };
 
-        intent.update_from_tools(&[call], &[result]);
+        intent.update_from_tools(&test_tool_catalog(), &[call], &[result]);
 
         assert!(
             intent.files_modified.is_empty(),
@@ -2749,7 +3253,7 @@ mod tests {
             args_summary: Some("git add src/foo.rs && git commit -m 'fix: foo'".into()),
         };
 
-        intent.update_from_tools(&[call], &[result]);
+        intent.update_from_tools(&test_tool_catalog(), &[call], &[result]);
 
         assert!(
             !intent.files_modified.is_empty(),
@@ -3112,7 +3616,14 @@ mod tests {
                 ]
             }),
         }];
-        intent.update_from_tools(&calls, &[]);
+        let results = vec![ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "change".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        }];
+        intent.update_from_tools(&test_tool_catalog(), &calls, &results);
         assert!(intent.files_modified.contains(&PathBuf::from("src/a.rs")));
         assert!(intent.files_modified.contains(&PathBuf::from("src/b.rs")));
     }
@@ -3478,6 +3989,112 @@ mod tests {
         assert!(matches!(&view[0], LlmMessage::User { .. }));
         assert!(matches!(&view[1], LlmMessage::Assistant { .. }));
         assert!(matches!(&view[2], LlmMessage::ToolResult { .. }));
+    }
+
+    #[test]
+    fn coalesces_duplicate_tool_results_before_provider_replay() {
+        let mut conv = ConversationState::new();
+        conv.push_user("run tools".into());
+        push_matching_assistant(&mut conv, "toolu_abc");
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "toolu_abc".into(),
+            tool_name: "multi_tool_use.parallel".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "first child result".into(),
+            }],
+            is_error: false,
+            args_summary: Some("batch".into()),
+        });
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "toolu_abc".into(),
+            tool_name: "multi_tool_use.parallel".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "rollback notice".into(),
+            }],
+            is_error: true,
+            args_summary: None,
+        });
+
+        let view = conv.build_llm_view();
+        let results: Vec<_> = view
+            .iter()
+            .filter_map(|msg| match msg {
+                LlmMessage::ToolResult {
+                    call_id,
+                    content,
+                    is_error,
+                    args_summary,
+                    ..
+                } => Some((call_id, content, is_error, args_summary)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            results.len(),
+            1,
+            "duplicate tool results survived: {view:?}"
+        );
+        assert_eq!(results[0].0, "toolu_abc");
+        assert!(results[0].1.contains("first child result"));
+        assert!(results[0].1.contains("rollback notice"));
+        assert!(*results[0].2);
+        assert_eq!(results[0].3.as_deref(), Some("batch"));
+    }
+
+    #[test]
+    fn provider_sanitized_duplicate_tool_results_do_not_orphan_assistant_tool_use() {
+        let mut conv = ConversationState::new();
+        conv.push_user("run tools".into());
+        push_matching_assistant(&mut conv, "toolu_abc.bad|fc_1");
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "toolu_abc.bad|result_1".into(),
+            tool_name: "multi_tool_use.parallel".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "first child result".into(),
+            }],
+            is_error: false,
+            args_summary: None,
+        });
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "toolu_abc_bad|result_2".into(),
+            tool_name: "multi_tool_use.parallel".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "second child result".into(),
+            }],
+            is_error: false,
+            args_summary: None,
+        });
+
+        let view = conv.build_llm_view();
+        let assistant_calls: Vec<_> = view
+            .iter()
+            .filter_map(|msg| match msg {
+                LlmMessage::Assistant { tool_calls, .. } => Some(tool_calls),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(assistant_calls.len(), 1, "assistant was stripped: {view:?}");
+        assert_eq!(
+            assistant_calls[0].len(),
+            1,
+            "tool call was stripped: {view:?}"
+        );
+
+        let results: Vec<_> = view
+            .iter()
+            .filter_map(|msg| match msg {
+                LlmMessage::ToolResult { content, .. } => Some(content),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "duplicate tool results survived: {view:?}"
+        );
+        assert!(results[0].contains("first child result"));
+        assert!(results[0].contains("second child result"));
     }
 
     #[test]

@@ -15,9 +15,10 @@ use super::inline_render::DETAILS_HINT_LABEL;
 use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
-    ConversationSegmentProjection, ImageSegment, LifecycleSegment, OperatorCopySegment, PeerAgentSegment,
-    PeerAgentSource, PeerAgentStatus, ProjectConversationSegment, SegmentCopyPolicy,
-    SegmentPresentation, SegmentRole, SkillEventSegment, SystemSegment, ToolSegment, UserSegment,
+    ConversationSegmentProjection, ImageSegment, LifecycleSegment, OperatorCopySegment,
+    PeerAgentSegment, PeerAgentSource, PeerAgentStatus, ProjectConversationSegment,
+    SegmentCopyPolicy, SegmentPresentation, SegmentRole, SkillEventSegment, SystemSegment,
+    ToolSegment, UserSegment,
 };
 
 const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
@@ -2059,7 +2060,10 @@ status: {}
                 copy_attempt,
                 ..
             } => {
-                let status = copy_attempt.as_ref().map(|s| s.label()).unwrap_or_else(|| "copy available".to_string());
+                let status = copy_attempt
+                    .as_ref()
+                    .map(|s| s.label())
+                    .unwrap_or_else(|| "copy available".to_string());
                 let rendered = format!("{label} · {status}\n{text}");
                 super::segment_components::system::render(
                     super::segment_components::system::SystemRenderProps {

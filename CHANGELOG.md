@@ -16,6 +16,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+- Added an A3 evidence ledger for harness guidance so discovery novelty and low-novelty revisits, not scalar file counts alone, drive evidence convergence pressure.
+- Added a guidance task-mode channel (implementation vs research) inferred from the operator prompt, with explicit `/mode ...` / `[mode: ...]` markers, so research/Q&A sessions relax execution and orientation-churn pressure while failure-driven pressure stays active.
+- Added a unified observation normalizer for harness guidance so capability-catalog tools and conservative bash read/search/validation/commit/minimal-mutation commands feed intent evidence consistently.
+- Made git guidance and validation recommendations document-aware so Markdown-only human documents/knowledge notes are not framed as code changes.
+
+### Fixed
+- Replaced the `files_read <= 2` actionability shortcut with novelty-decay-based local evidence sufficiency, preventing first targeted reads from forcing premature convergence.
+- Suppressed anti-orientation drift and read-only evidence convergence in research mode unless validation or mutation evidence makes the target actionable.
+- Required matching successful tool results before normalized observations create positive guidance evidence, so orphaned/missing tool results no longer look like successful reads or mutations.
+- Routed StuckDetector file/churn tracking through normalized observation events so bash/view/search evidence shares the same validation and mutation reset semantics as structured tool calls.
+- Gated live OpenAI-compatible provider endpoint probes behind `OMEGON_LIVE_ENDPOINT_PROBES=1` so default test runs do not fail or stall on external network availability.
+- Serialized current-directory-mutating tests on a shared CWD test lock so the default parallel `cargo test -p omegon` run no longer observes deleted temporary working directories.
+- Coalesced duplicate tool results after provider-compatible ID sanitization so wrapper-tool rollback/no-op paths cannot poison Anthropic history with multiple `tool_result` blocks.
+
 ## [0.27.3] - 2026-07-07
 
 0.27.3 makes GitHub Copilot a first-class provider path, including Copilot OAuth, semantic route selection, model catalog metadata, tool-call support, and the `gpt-5.5` Responses API transport required by current Copilot models.

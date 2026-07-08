@@ -482,11 +482,12 @@ impl WorkspaceBoundary {
 
     /// Record a directory as approved for this session.
     pub fn approve_directory(&self, dir: PathBuf) {
+        let canonical = canonicalize_existing_parent(&dir);
         if let Ok(mut approved) = self.session_approved.lock()
-            && !approved.iter().any(|d| d == &dir)
+            && !approved.iter().any(|d| d == &canonical)
         {
-            tracing::info!(dir = %dir.display(), count = approved.len() + 1, "session directory approved");
-            approved.push(dir);
+            tracing::info!(dir = %canonical.display(), count = approved.len() + 1, "session directory approved");
+            approved.push(canonical);
         }
     }
 

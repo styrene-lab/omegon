@@ -2251,7 +2251,11 @@ fn copilot_model_requires_responses_api(model: &str) -> bool {
     matches!(model.trim(), "gpt-5.5")
 }
 
-fn build_copilot_chat_completions_body(model: &str, wire_msgs: &[Value], wire_tools: &[Value]) -> Value {
+fn build_copilot_chat_completions_body(
+    model: &str,
+    wire_msgs: &[Value],
+    wire_tools: &[Value],
+) -> Value {
     let mut body = json!({
         "model": model,
         "messages": wire_msgs,
@@ -2304,16 +2308,16 @@ fn copilot_responses_input_from_chat_messages(messages: &[Value]) -> Vec<Value> 
             .unwrap_or("user");
         match role {
             "assistant" => {
-                if let Some(content) = message.get("content").and_then(Value::as_str) {
-                    if !content.trim().is_empty() {
-                        input.push(json!({
-                            "role": "assistant",
-                            "content": [{"type": "output_text", "text": content, "annotations": []}],
-                            "id": "msg_123",
-                            "status": "completed",
-                            "type": "message",
-                        }));
-                    }
+                if let Some(content) = message.get("content").and_then(Value::as_str)
+                    && !content.trim().is_empty()
+                {
+                    input.push(json!({
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": content, "annotations": []}],
+                        "id": "msg_123",
+                        "status": "completed",
+                        "type": "message",
+                    }));
                 }
                 if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
                     for call in tool_calls {
@@ -2460,10 +2464,12 @@ fn parse_copilot_responses_completion(value: &Value) -> anyhow::Result<CopilotPa
             Some("message") => {
                 if let Some(parts) = item.get("content").and_then(Value::as_array) {
                     for part in parts {
-                        if matches!(part.get("type").and_then(Value::as_str), Some("output_text")) {
-                            if let Some(text) = part.get("text").and_then(Value::as_str) {
-                                content_parts.push(text.to_string());
-                            }
+                        if matches!(
+                            part.get("type").and_then(Value::as_str),
+                            Some("output_text")
+                        ) && let Some(text) = part.get("text").and_then(Value::as_str)
+                        {
+                            content_parts.push(text.to_string());
                         }
                     }
                 }
@@ -4428,7 +4434,10 @@ mod tests {
     fn model_id_from_spec_or_default_handles_empty_copilot_routes() {
         assert_eq!(model_id_from_spec("github-copilot:gpt-5.4"), "gpt-5.4");
         assert_eq!(model_id_from_spec_or_default(None, "gpt-5.4"), "gpt-5.4");
-        assert_eq!(model_id_from_spec_or_default(Some(""), "gpt-5.4"), "gpt-5.4");
+        assert_eq!(
+            model_id_from_spec_or_default(Some(""), "gpt-5.4"),
+            "gpt-5.4"
+        );
         assert_eq!(
             model_id_from_spec_or_default(Some("github-copilot:"), "gpt-5.4"),
             "gpt-5.4"
@@ -6182,8 +6191,15 @@ mod tests {
 
     #[tokio::test]
     async fn compat_endpoints_are_reachable_and_speak_openai_protocol() {
+        if std::env::var_os("OMEGON_LIVE_ENDPOINT_PROBES").is_none() {
+            eprintln!(
+                "skipping live compat endpoint probes; set OMEGON_LIVE_ENDPOINT_PROBES=1 to run"
+            );
+            return;
+        }
+
         // Probe every non-local OpenAI-compatible endpoint without auth.
-        // This is a free validation that base URLs are correct.
+        // This is a live validation that base URLs are correct.
         // HuggingFace excluded: returns HTML on 401 (auth page).
         // Perplexity excluded: returns 404 on unauthenticated probe.
         // Both work correctly with valid tokens.

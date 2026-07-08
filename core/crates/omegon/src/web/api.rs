@@ -2502,10 +2502,8 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn workspace_leases_status_reports_active_instance_leases() {
-        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
         let dir = tempfile::tempdir().unwrap();
-        let previous_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd = crate::test_support::cwd::CurrentDirGuard::enter_async(dir.path()).await;
         let lease = crate::workspace::types::WorkspaceLease {
             project_id: "project".into(),
             workspace_id: crate::workspace::runtime::workspace_id_from_path(dir.path()),
@@ -2531,7 +2529,6 @@ required = ["MISSING_REQUIRED_TOKEN"]
         crate::workspace::runtime::write_workspace_lease(dir.path(), "test-1", &lease).unwrap();
 
         let response = get_workspace_leases_status().await.unwrap().0;
-        std::env::set_current_dir(previous_cwd).unwrap();
 
         assert_eq!(response.schema_version, 1);
         assert_eq!(response.leases.len(), 1);
@@ -2587,10 +2584,8 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn web_attachments_stage_and_read_browser_payload() {
-        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
-        let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(home.path()).unwrap();
+        let _cwd = crate::test_support::cwd::CurrentDirGuard::enter_async(home.path()).await;
 
         let (status, created) = post_web_attachment(Json(WebAttachmentCreateRequest {
             filename: "note.txt".to_string(),
@@ -2612,8 +2607,6 @@ required = ["MISSING_REQUIRED_TOKEN"]
             fetched.data_base64,
             base64::engine::general_purpose::STANDARD.encode(b"hello")
         );
-
-        std::env::set_current_dir(cwd).unwrap();
     }
 
     #[tokio::test]
@@ -2935,14 +2928,11 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn web_sessions_endpoint_lists_default_session() {
-        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
-        let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(home.path()).unwrap();
+        let _cwd = crate::test_support::cwd::CurrentDirGuard::enter_async(home.path()).await;
 
         let response = get_web_sessions().await.unwrap().0;
 
-        std::env::set_current_dir(cwd).unwrap();
         assert_eq!(response.sessions.len(), 1);
         assert_eq!(response.sessions[0].session_id, "default");
         assert!(response.sessions[0].current);
@@ -2978,10 +2968,8 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn web_session_endpoint_404s_missing_session() {
-        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
-        let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(home.path()).unwrap();
+        let _cwd = crate::test_support::cwd::CurrentDirGuard::enter_async(home.path()).await;
 
         let response = get_web_session(
             axum::extract::State(test_state()),
@@ -2989,7 +2977,6 @@ required = ["MISSING_REQUIRED_TOKEN"]
         )
         .await;
 
-        std::env::set_current_dir(cwd).unwrap();
         assert!(matches!(response, Err(StatusCode::NOT_FOUND)));
     }
 
@@ -3149,31 +3136,25 @@ required = ["MISSING_REQUIRED_TOKEN"]
 
     #[tokio::test]
     async fn assistant_runs_endpoint_returns_empty_runtime_projection() {
-        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
-        let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(home.path()).unwrap();
+        let _cwd = crate::test_support::cwd::CurrentDirGuard::enter_async(home.path()).await;
         let response = get_assistant_runs(axum::extract::State(test_state()))
             .await
             .unwrap()
             .0;
-        std::env::set_current_dir(cwd).unwrap();
         assert!(response.runs.is_empty());
     }
 
     #[tokio::test]
     async fn assistant_run_endpoint_404s_missing_runtime_run() {
-        let _guard = crate::GLOBAL_TEST_ENV_LOCK.lock().await;
-        let cwd = std::env::current_dir().unwrap();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(home.path()).unwrap();
+        let _cwd = crate::test_support::cwd::CurrentDirGuard::enter_async(home.path()).await;
         let err = get_assistant_run(
             axum::extract::State(test_state()),
             axum::extract::Path("missing".into()),
         )
         .await
         .unwrap_err();
-        std::env::set_current_dir(cwd).unwrap();
         assert_eq!(err, StatusCode::NOT_FOUND);
     }
 

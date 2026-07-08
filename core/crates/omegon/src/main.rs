@@ -23,8 +23,8 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 #[cfg(test)]
-pub(crate) static GLOBAL_TEST_ENV_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
-    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+pub(crate) static GLOBAL_TEST_ENV_LOCK: std::sync::LazyLock<&'static tokio::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| &crate::test_support::cwd::CWD_LOCK);
 
 #[allow(clippy::await_holding_refcell_ref)] // single-threaded LocalSet — no concurrent mutations
 mod acp;
@@ -61,6 +61,7 @@ mod ipc;
 #[cfg(feature = "local-embeddings")]
 mod local_embedding;
 mod migrate;
+mod observation;
 mod shadow_context;
 mod skills;
 mod smoke;
@@ -10794,8 +10795,7 @@ mod tests {
     #[test]
     fn plan_list_renders_visible_completed_and_openspec_sections() {
         let cwd = tempfile::tempdir().unwrap();
-        let previous_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(cwd.path()).unwrap();
+        let _cwd = crate::test_support::cwd::CurrentDirGuard::enter(cwd.path());
         std::fs::create_dir_all("openspec/changes/example/specs/lifecycle").unwrap();
         std::fs::write("openspec/changes/example/proposal.md", "# Example\n").unwrap();
         std::fs::write(
@@ -10815,7 +10815,6 @@ mod tests {
             .set_work_plan(vec!["visible work".into()]);
 
         let output = render_plan_list(&runtime_state);
-        std::env::set_current_dir(previous_cwd).unwrap();
 
         assert!(output.contains("Visible"), "{output}");
         assert!(output.contains("visible work"), "{output}");

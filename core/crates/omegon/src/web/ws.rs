@@ -2324,7 +2324,12 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "event_name": "system.notification",
             "message": escape_html(message),
         }),
-        AgentEvent::OperatorCopyBlock { label, text, kind, copy_attempt } => json!({
+        AgentEvent::OperatorCopyBlock {
+            label,
+            text,
+            kind,
+            copy_attempt,
+        } => json!({
             "type": "operator_copy_block",
             "event_name": "operator.copy_block",
             "label": escape_html(label),

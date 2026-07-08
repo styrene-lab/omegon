@@ -2653,14 +2653,15 @@ pub async fn auth_login_response(
             }
             "github-copilot" | "copilot" => {
                 let copy_tx = events_tx_clone.clone();
-                let copy_block: auth::LoginCopyBlock = Box::new(move |label, text, kind, copy_attempt| {
-                    let _ = copy_tx.send(AgentEvent::OperatorCopyBlock {
-                        label,
-                        text,
-                        kind,
-                        copy_attempt,
+                let copy_block: auth::LoginCopyBlock =
+                    Box::new(move |label, text, kind, copy_attempt| {
+                        let _ = copy_tx.send(AgentEvent::OperatorCopyBlock {
+                            label,
+                            text,
+                            kind,
+                            copy_attempt,
+                        });
                     });
-                });
                 auth::login_github_copilot_with_copy_callback(progress, prompt, copy_block).await
             }
             "openai" => Err(anyhow::anyhow!(auth::operator_api_key_login_guidance(

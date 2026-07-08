@@ -15,14 +15,11 @@ use crate::web::WebDaemonStatus;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
 use tokio::sync::mpsc;
-
-static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
 
 struct CurrentDirGuard {
     prev: PathBuf,
-    _guard: MutexGuard<'static, ()>,
+    _guard: tokio::sync::MutexGuard<'static, ()>,
 }
 
 impl Drop for CurrentDirGuard {
@@ -32,7 +29,7 @@ impl Drop for CurrentDirGuard {
 }
 
 fn push_current_dir(path: &Path) -> CurrentDirGuard {
-    let guard = CURRENT_DIR_LOCK.lock().expect("current dir lock");
+    let guard = crate::test_support::cwd::lock();
     let prev = std::env::current_dir().expect("current dir");
     std::env::set_current_dir(path).expect("set current dir");
     CurrentDirGuard {
@@ -7043,7 +7040,7 @@ fn slash_logout_usage_lists_supported_remote_logout_providers() {
     assert!(message.contains("openai"), "got: {message}");
     assert!(message.contains("openai-codex"), "got: {message}");
     assert!(message.contains("openrouter"), "got: {message}");
-    assert!(message.contains("ollama-cloud"), "got: {message}");
+    assert!(!message.contains("ollama-cloud"), "got: {message}");
     assert!(!message.contains("ollama,"), "got: {message}");
 }
 

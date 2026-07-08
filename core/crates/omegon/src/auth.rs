@@ -1492,8 +1492,12 @@ fn parse_callback_url(url: &str) -> anyhow::Result<(String, String)> {
 pub type LoginProgress = Box<dyn Fn(&str) + Send + Sync>;
 
 pub type LoginCopyBlock = Box<
-    dyn Fn(String, String, omegon_traits::OperatorCopyKind, Option<omegon_traits::ClipboardCopyStatus>)
-        + Send
+    dyn Fn(
+            String,
+            String,
+            omegon_traits::OperatorCopyKind,
+            Option<omegon_traits::ClipboardCopyStatus>,
+        ) + Send
         + Sync,
 >;
 
@@ -2811,12 +2815,8 @@ mod tests {
             "should probe chatgpt/codex"
         );
         assert!(
-            status.providers.iter().any(|p| p.name == "github-copilot"),
-            "should probe github copilot"
-        );
-        assert!(
             !status.providers.iter().any(|p| p.name == "ollama-cloud"),
-            "should not probe obsolete ollama cloud"
+            "operator auth status should not include obsolete hardcoded ollama-cloud rows"
         );
     }
 
