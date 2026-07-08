@@ -1772,12 +1772,26 @@ open_questions:
 
     #[test]
     fn path_traversal_blocked() {
-        let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
-        // Attempting to escape the workspace via ../
-        let result = tools.resolve_path("../../../etc/passwd");
+        let root = std::env::current_dir()
+            .unwrap()
+            .join(".tmp/path-traversal-blocked-test");
+        let workspace = root.join("workspace");
+        let outside = root.join("outside/secret.txt");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
+        std::fs::write(&outside, "secret").unwrap();
+
+        let tools = CoreTools::new(workspace);
+        // Attempting to escape the workspace via ../ into a non-temp child
+        // path should still be blocked. Using /tmp directly is not a valid
+        // traversal assertion because temp paths are intentionally allowlisted
+        // for test/log artifacts.
+        let result = tools.resolve_path("../outside/secret.txt");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("PERMISSION REQUIRED"), "error: {err}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
