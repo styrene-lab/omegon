@@ -5744,7 +5744,7 @@ fn build_tui_secret_readiness_snapshot(
                                     slow_turn_notifications,
                                     "interactive active turn worker is still running after visible turn start; queued prompts remain blocked until worker returns"
                                 );
-                                if slow_turn_notifications == 1 || slow_turn_notifications % 6 == 0 {
+                                if slow_turn_notifications == 1 || slow_turn_notifications.is_multiple_of(6) {
                                     let _ = events_tx.send(AgentEvent::RuntimeTurnLifecycleUpdated {
                                         snapshot_json: lifecycle.snapshot(runtime.queue_depth()),
                                     });
