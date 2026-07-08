@@ -41,7 +41,7 @@ impl<'a> ObservationNormalizer<'a> {
     ) -> Vec<ObservationEvent> {
         let mut events = Vec::new();
         for call in calls {
-            if call_failed(call, results) {
+            if !call_succeeded(call, results) {
                 continue;
             }
             if call.name == "bash" {
@@ -107,10 +107,10 @@ impl<'a> ObservationNormalizer<'a> {
     }
 }
 
-fn call_failed(call: &ToolCall, results: &[ToolResultEntry]) -> bool {
+fn call_succeeded(call: &ToolCall, results: &[ToolResultEntry]) -> bool {
     results
         .iter()
-        .any(|result| result.call_id == call.id && result.is_error)
+        .any(|result| result.call_id == call.id && !result.is_error)
 }
 
 fn mutation_paths(call: &ToolCall) -> Vec<PathBuf> {
@@ -187,10 +187,54 @@ fn classify_bash_segment(segment: &str) -> Vec<ObservationEvent> {
                 })
                 .collect()
         }
-        _ => Vec::new(),
+        "touch" | "rm" => mutation_paths_from_tokens(&tokens)
+            .into_iter()
+            .map(|path| ObservationEvent::FileMutated {
+                source_tool: format!("bash:{program}"),
+                path,
+            })
+            .collect(),
+        "mv" | "cp" => tokens
+            .last()
+            .filter(|path| !path.starts_with('-'))
+            .map(|path| {
+                vec![ObservationEvent::FileMutated {
+                    source_tool: format!("bash:{program}"),
+                    path: PathBuf::from(path),
+                }]
+            })
+            .unwrap_or_default(),
+        _ => redirect_mutation_targets(&tokens)
+            .into_iter()
+            .map(|path| ObservationEvent::FileMutated {
+                source_tool: "bash:redirection".into(),
+                path,
+            })
+            .collect(),
     }
 }
 
+fn mutation_paths_from_tokens(tokens: &[String]) -> Vec<PathBuf> {
+    tokens
+        .iter()
+        .skip(1)
+        .filter(|token| !token.starts_with('-'))
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn redirect_mutation_targets(tokens: &[String]) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut iter = tokens.iter();
+    while let Some(token) = iter.next() {
+        if (token == ">" || token == ">>")
+            && let Some(path) = iter.next()
+        {
+            paths.push(PathBuf::from(path));
+        }
+    }
+    paths
+}
 fn read_paths_from_tokens(tokens: &[String]) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let mut skip_next = false;
@@ -332,6 +376,43 @@ mod tests {
             &[error_result()],
         );
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn missing_result_records_no_positive_evidence() {
+        let catalog = catalog(vec![("view", vec![ToolCapability::TargetedRepoInspection])]);
+        let events = ObservationNormalizer::new(&catalog)
+            .normalize(&[call("view", json!({"path": "docs/a.md"}))], &[]);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn bash_mutation_commands_are_observed() {
+        let catalog = catalog(vec![]);
+        let events = ObservationNormalizer::new(&catalog).normalize(
+            &[call(
+                "bash",
+                json!({"command": "touch docs/a.md && mv docs/a.md docs/b.md && echo hi > docs/c.md"}),
+            )],
+            &[ok_result()],
+        );
+        assert_eq!(
+            events,
+            vec![
+                ObservationEvent::FileMutated {
+                    source_tool: "bash:touch".into(),
+                    path: PathBuf::from("docs/a.md"),
+                },
+                ObservationEvent::FileMutated {
+                    source_tool: "bash:mv".into(),
+                    path: PathBuf::from("docs/b.md"),
+                },
+                ObservationEvent::FileMutated {
+                    source_tool: "bash:redirection".into(),
+                    path: PathBuf::from("docs/c.md"),
+                },
+            ]
+        );
     }
 
     #[test]

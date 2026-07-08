@@ -6,8 +6,8 @@
 - [x] 1.1 Add `core/crates/omegon/src/observation.rs` and `mod observation;`.
 - [x] 1.2 Define `ObservationEvent` variants for file reads, mutations, searches, validations, and progress boundaries.
 - [x] 1.3 Implement non-bash normalization from `ToolCapabilityCatalog` and successful `ToolResultEntry` matching.
-- [x] 1.4 Implement conservative bash classification for read/search/validation/commit commands.
-- [x] 1.5 Add unit tests for capability-catalog read/search/mutation, failed calls, bash read/search/validation/commit, and unknown bash opacity.
+- [x] 1.4 Implement conservative bash classification for read/search/validation/commit commands plus minimal mutation evidence from `touch`/`rm`/`mv`/`cp` and shell redirects.
+- [x] 1.5 Add unit tests for capability-catalog read/search/mutation, failed and missing results, bash read/search/validation/commit/mutation, and unknown bash opacity.
 
 ## 2. IntentDocument integration
 <!-- specs: harness-guidance/observation -->
@@ -30,3 +30,7 @@
 ## Implementation notes
 
 - The normalizer distinguishes progress boundaries that clear mutation state from non-commit boundaries. Structured `commit` and successful `git commit`/`jj commit` through bash clear `files_modified`; other `ProgressBoundary` tools remain observable without falsely suppressing commit nudges.
+- Positive observation evidence now requires a matching successful `ToolResultEntry`; missing results are treated as incomplete/opaque, not success.
+- A1 currently implements the `Implementation` and `Research` policy rows. `QA` and `Maintenance` remain deferred until there are policy consumers for those modes.
+- A2 intentionally keeps the minimal event schema needed by existing consumers. Novelty, search scope, and richer validation metadata are deferred to A3's evidence-ledger work.
+- Non-bash classification is catalog-first, with legacy built-in name fallbacks retained as a compatibility boundary for existing tools.

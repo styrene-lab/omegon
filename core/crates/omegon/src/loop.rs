@@ -391,13 +391,19 @@ pub async fn run(
     let mut session_used_tools: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     let mut turn: u32 = 0;
-    // Infer the guidance task mode for this operator prompt (A1). Inference
-    // never overrides a mode the operator explicitly pinned.
-    conversation
-        .intent
-        .observe_task_mode(crate::behavior::infer_task_mode_from_prompt(
-            conversation.last_user_prompt(),
-        ));
+    // Infer the guidance task mode for this operator prompt (A1). Explicit
+    // operator declarations pin the mode; otherwise inference updates it for
+    // the current task without overriding a previously pinned mode.
+    let last_user_prompt = conversation.last_user_prompt();
+    if let Some(mode) = crate::behavior::explicit_task_mode_from_prompt(last_user_prompt) {
+        conversation.intent.pin_task_mode(mode);
+    } else {
+        conversation
+            .intent
+            .observe_task_mode(crate::behavior::infer_task_mode_from_prompt(
+                last_user_prompt,
+            ));
+    }
     // Active model for this turn — updated each iteration from settings.
     // Used in TurnEnd events and error classification instead of the
     // immutable config.model which is frozen at startup. Starts from the

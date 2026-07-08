@@ -20,7 +20,22 @@ use std::collections::{BTreeSet, HashMap};
 /// errs strongly toward `Research`: a false `Implementation` classification
 /// pushes the model to invent file-writing work the user never requested,
 /// which is the worse failure mode.
+pub(crate) fn explicit_task_mode_from_prompt(prompt: &str) -> Option<TaskMode> {
+    let normalized = prompt.trim_start().to_lowercase();
+    let first_line = normalized.lines().next().unwrap_or("").trim();
+    match first_line {
+        "/mode research" | "/mode: research" | "[mode: research]" => Some(TaskMode::Research),
+        "/mode implementation" | "/mode: implementation" | "[mode: implementation]" => {
+            Some(TaskMode::Implementation)
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn infer_task_mode_from_prompt(prompt: &str) -> TaskMode {
+    if let Some(mode) = explicit_task_mode_from_prompt(prompt) {
+        return mode;
+    }
     let prompt = prompt.to_lowercase();
     let starts = |w: &str| prompt.trim_start().starts_with(w);
     let research = prompt.contains('?')
@@ -265,7 +280,10 @@ pub(crate) fn classify_drift_kind(
         .filter(|call| is_targeted_repo_inspection_tool(catalog, &call.name))
         .count();
 
-    if conversation.intent.files_modified.is_empty()
+    let research_mode = conversation.intent.task_mode == TaskMode::Research;
+
+    if !research_mode
+        && conversation.intent.files_modified.is_empty()
         && !conversation.intent.files_read.is_empty()
         && tool_calls
             .iter()
@@ -277,7 +295,8 @@ pub(crate) fn classify_drift_kind(
         return Some(DriftKind::OrientationChurn);
     }
 
-    if conversation.intent.files_modified.is_empty()
+    if !research_mode
+        && conversation.intent.files_modified.is_empty()
         && conversation.intent.files_read.is_empty()
         && turn >= 3
         && broad_orientation_calls == tool_calls.len()
@@ -767,18 +786,31 @@ pub(crate) fn assess_evidence(
                 .any(|read| read == std::path::Path::new(path))
         });
     let local_target_count = conversation.intent.files_read.len();
-    let local = if targeted_paths_known && local_target_count <= 2 {
-        EvidenceSufficiency::Actionable
-    } else if targeted_paths_known || local_target_count <= 2 {
-        EvidenceSufficiency::Targeted
-    } else {
-        EvidenceSufficiency::None
-    };
     let global = if targeted_validation
         || failed_mutation_on_known_target
         || inspection_backed_by_validation_failure
     {
         EvidenceSufficiency::Actionable
+    } else {
+        EvidenceSufficiency::None
+    };
+    if conversation.intent.task_mode == TaskMode::Research
+        && global != EvidenceSufficiency::Actionable
+    {
+        return EvidenceAssessment {
+            local: if targeted_paths_known {
+                EvidenceSufficiency::Targeted
+            } else {
+                EvidenceSufficiency::None
+            },
+            global,
+        };
+    }
+
+    let local = if targeted_paths_known && local_target_count <= 2 {
+        EvidenceSufficiency::Actionable
+    } else if targeted_paths_known || local_target_count <= 2 {
+        EvidenceSufficiency::Targeted
     } else {
         EvidenceSufficiency::None
     };
@@ -1092,6 +1124,51 @@ mod tests {
                 "prompt should infer Implementation: {prompt}"
             );
         }
+    }
+
+    #[test]
+    fn explicit_task_mode_marker_is_recognized() {
+        assert_eq!(
+            explicit_task_mode_from_prompt("/mode research\nreview the loop"),
+            Some(TaskMode::Research)
+        );
+        assert_eq!(
+            infer_task_mode_from_prompt("[mode: implementation]\nwhat file should change?"),
+            TaskMode::Implementation
+        );
+    }
+
+    #[test]
+    fn research_mode_suppresses_orientation_churn_drift() {
+        let catalog = ToolCapabilityCatalog::from_tool_defs(&[omegon_traits::ToolDefinition {
+            name: "codebase_search".into(),
+            label: String::new(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            capabilities: vec![
+                omegon_traits::ToolCapability::RepoInspection,
+                omegon_traits::ToolCapability::BroadRepoInspection,
+            ],
+        }]);
+        let call = ToolCall {
+            id: "1".into(),
+            name: "codebase_search".into(),
+            arguments: serde_json::json!({"query": "loop"}),
+        };
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert("core/crates/omegon/src/loop.rs".into());
+        assert_eq!(
+            classify_drift_kind(&catalog, 4, &conversation, std::slice::from_ref(&call), &[]),
+            Some(DriftKind::OrientationChurn)
+        );
+        conversation.intent.pin_task_mode(TaskMode::Research);
+        assert_eq!(
+            classify_drift_kind(&catalog, 4, &conversation, &[call], &[]),
+            None
+        );
     }
 
     #[test]

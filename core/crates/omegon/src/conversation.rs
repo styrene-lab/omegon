@@ -2842,7 +2842,17 @@ mod tests {
                 arguments: serde_json::json!({"command": "ls"}),
             },
         ];
-        intent.update_from_tools(&test_tool_catalog(), &calls, &[]);
+        let results: Vec<ToolResultEntry> = calls
+            .iter()
+            .map(|call| ToolResultEntry {
+                call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            })
+            .collect();
+        intent.update_from_tools(&test_tool_catalog(), &calls, &results);
         assert!(intent.files_read.contains(&PathBuf::from("src/foo.rs")));
         assert!(intent.files_modified.contains(&PathBuf::from("src/bar.rs")));
         assert!(intent.files_modified.contains(&PathBuf::from("src/new.rs")));
@@ -2860,7 +2870,14 @@ mod tests {
             arguments: serde_json::json!({"path": "README.md"}),
         }];
 
-        intent.update_from_tools(&test_tool_catalog(), &calls, &[]);
+        let results = vec![ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "view".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        }];
+        intent.update_from_tools(&test_tool_catalog(), &calls, &results);
 
         assert!(intent.files_read.contains(&PathBuf::from("README.md")));
     }
@@ -2921,7 +2938,13 @@ mod tests {
                 name: "edit".into(),
                 arguments: serde_json::json!({"path": "src/foo.rs"}),
             }],
-            &[],
+            &[ToolResultEntry {
+                call_id: "1".into(),
+                tool_name: "edit".into(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            }],
         );
         assert!(!intent.files_modified.is_empty(), "should have a mutation");
 
@@ -2932,7 +2955,13 @@ mod tests {
                 name: "commit".into(),
                 arguments: serde_json::json!({"message": "fix: foo"}),
             }],
-            &[],
+            &[ToolResultEntry {
+                call_id: "2".into(),
+                tool_name: "commit".into(),
+                content: vec![],
+                is_error: false,
+                args_summary: None,
+            }],
         );
         assert!(
             intent.files_modified.is_empty(),
@@ -3354,7 +3383,14 @@ mod tests {
                 ]
             }),
         }];
-        intent.update_from_tools(&test_tool_catalog(), &calls, &[]);
+        let results = vec![ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "change".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        }];
+        intent.update_from_tools(&test_tool_catalog(), &calls, &results);
         assert!(intent.files_modified.contains(&PathBuf::from("src/a.rs")));
         assert!(intent.files_modified.contains(&PathBuf::from("src/b.rs")));
     }
