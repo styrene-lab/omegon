@@ -37,6 +37,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Softened the stuck-loop escalation injection from an accusatory verdict to neutral repetition-pressure framing that names the exit paths (produce the deliverable, take one different action, or state the blocker).
 - Held the continuation-pressure counter when the assistant emits substantive interleaved prose alongside tool calls, so "exploring without producing output" pressure only accrues on genuinely silent tool grinding.
 - Stopped Guarded-mode dead-mouse continuation from auto-answering a trailing "want me to proceed?" when the operator prompt never authorized changes (e.g. assessment/review asks), returning that decision to the operator.
+- Accepted provider numeric-encoding variants (`4237`, `4237.0`, `"4237"`) for the `read` tool's offset/limit arguments in both local and host-delegated paths, so paging arguments are no longer silently dropped and whole large files no longer dump from line 1.
+- Suppressed platform keyring access deterministically in test executables (detected via the `target/**/deps/` path) so parallel test runs cannot race the env-var latch into live macOS keychain reads that fail in dark wake or prompt the operator.
+- Gave TDD runner tests their own temp working directory instead of the process CWD, removing an ENOENT flake when parallel tests delete the directory they chdir'd into.
 - Replaced the `files_read <= 2` actionability shortcut with novelty-decay-based local evidence sufficiency, preventing first targeted reads from forcing premature convergence.
 - Suppressed anti-orientation drift and read-only evidence convergence in research mode unless validation or mutation evidence makes the target actionable.
 - Required matching successful tool results before normalized observations create positive guidance evidence, so orphaned/missing tool results no longer look like successful reads or mutations.

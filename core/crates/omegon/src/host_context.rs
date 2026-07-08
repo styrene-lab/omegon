@@ -568,14 +568,8 @@ pub async fn try_delegate_to_host(
     match tool_name {
         "read" if ctx.caps.fs_read => {
             let path_str = args.get("path").and_then(|v| v.as_str())?;
-            let offset = args
-                .get("offset")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as usize);
-            let limit = args
-                .get("limit")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as usize);
+            let offset = crate::tools::lenient_usize_arg(args, "offset");
+            let limit = crate::tools::lenient_usize_arg(args, "limit");
             let path = match validate_delegation_path(path_str) {
                 Ok(p) => p,
                 Err(e) => return Some(Err(e)),

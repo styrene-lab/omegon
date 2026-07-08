@@ -256,6 +256,28 @@ pub fn lifecycle_plan_projection(repo_root: &Path) -> LifecyclePlanProjection {
     }
 }
 
+/// Leniently extract a numeric tool argument as `usize`.
+///
+/// Providers and models are inconsistent about numeric JSON encoding in tool
+/// calls: the same parameter can arrive as `4237`, `4237.0`, or `"4237"`
+/// across generations. A strict `.as_u64()` silently drops the string and
+/// float forms, which for `read` meant offset/limit vanished and the whole
+/// file came back from line 1.
+pub(crate) fn lenient_usize_arg(args: &serde_json::Value, key: &str) -> Option<usize> {
+    match args.get(key)? {
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .map(|n| n as usize)
+            .or_else(|| n.as_f64().filter(|f| *f >= 0.0).map(|f| f as usize)),
+        serde_json::Value::String(s) => s
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .or_else(|| s.trim().parse::<f64>().ok().filter(|f| *f >= 0.0).map(|f| f as usize)),
+        _ => None,
+    }
+}
+
 fn stable_hash(input: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
@@ -1184,8 +1206,8 @@ impl ToolProvider for CoreTools {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'path' argument"))?;
                 let path = self.resolve_path(path_str)?;
-                let offset = args["offset"].as_u64().map(|n| n as usize);
-                let limit = args["limit"].as_u64().map(|n| n as usize);
+                let offset = lenient_usize_arg(&args, "offset");
+                let limit = lenient_usize_arg(&args, "limit");
                 read::execute(&path, offset, limit).await
             }
             reg::WRITE => {
@@ -2168,6 +2190,33 @@ open_questions:
         b.approve_directory(PathBuf::from("/opt/shared"));
         // Clone should see the same approval via Arc
         assert!(b2.is_inside_boundary(Path::new("/opt/shared/file.txt")));
+    }
+
+    #[test]
+    fn lenient_usize_arg_accepts_provider_numeric_variants() {
+        let args = serde_json::json!({
+            "int": 4237,
+            "float": 4237.0,
+            "string": "4237",
+            "string_float": "4237.0",
+            "padded": " 42 ",
+            "negative": -5,
+            "negative_string": "-5",
+            "garbage": "abc",
+            "null": null,
+            "bool": true,
+        });
+        assert_eq!(lenient_usize_arg(&args, "int"), Some(4237));
+        assert_eq!(lenient_usize_arg(&args, "float"), Some(4237));
+        assert_eq!(lenient_usize_arg(&args, "string"), Some(4237));
+        assert_eq!(lenient_usize_arg(&args, "string_float"), Some(4237));
+        assert_eq!(lenient_usize_arg(&args, "padded"), Some(42));
+        assert_eq!(lenient_usize_arg(&args, "negative"), None);
+        assert_eq!(lenient_usize_arg(&args, "negative_string"), None);
+        assert_eq!(lenient_usize_arg(&args, "garbage"), None);
+        assert_eq!(lenient_usize_arg(&args, "null"), None);
+        assert_eq!(lenient_usize_arg(&args, "bool"), None);
+        assert_eq!(lenient_usize_arg(&args, "missing"), None);
     }
 }
 

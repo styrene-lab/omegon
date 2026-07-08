@@ -699,7 +699,11 @@ mod tests {
 
     #[test]
     fn runner_classifies_pass_and_fail() {
-        let cwd = std::env::current_dir().unwrap();
+        // Own a stable cwd. `std::env::current_dir()` races parallel tests
+        // that chdir into (and then delete) temp dirs — spawning from a
+        // deleted cwd fails with ENOENT even though the program exists.
+        let dir = tempdir().unwrap();
+        let cwd = dir.path().to_path_buf();
         let python = std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_string());
         let pass = TddCommand::new(vec![
             python.clone(),
@@ -893,7 +897,9 @@ mod tests {
 
     #[test]
     fn timeout_classifies_as_failing() {
-        let cwd = std::env::current_dir().unwrap();
+        // Stable cwd — see runner_classifies_pass_and_fail.
+        let dir = tempdir().unwrap();
+        let cwd = dir.path().to_path_buf();
         let command = TddCommand::new(vec![
             "python3".into(),
             "-c".into(),

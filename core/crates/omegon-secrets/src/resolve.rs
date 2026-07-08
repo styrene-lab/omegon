@@ -94,12 +94,22 @@ fn keyring_suppressed() -> bool {
         let explicit = std::env::var("OMEGON_NO_KEYRING")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
-        // Auto-suppress when running under cargo test (the omegon binary's
-        // tests compile omegon-secrets as a regular dep, not #[cfg(test)],
-        // so the in-memory mock doesn't apply).
+        // Auto-suppress when running under cargo test. The env checks are
+        // unreliable (`CARGO_TARGET_DIR` is only present when the operator
+        // sets it), and env-var-based suppression from test setup races this
+        // process-wide latch under parallel test execution — whichever test
+        // touches the keyring first wins for the whole run. Test executables
+        // always run from `target/**/deps/`, so detect that deterministically.
         let in_test = std::env::var("CARGO_TARGET_DIR").is_ok()
             || std::env::var("NEXTEST").is_ok()
-            || std::env::var("OMEGON_CHILD").is_ok();
+            || std::env::var("OMEGON_CHILD").is_ok()
+            || std::env::current_exe()
+                .ok()
+                .and_then(|p| {
+                    p.to_str()
+                        .map(|s| s.contains("/deps/") || s.contains("\\deps\\"))
+                })
+                .unwrap_or(false);
         let suppressed = explicit || in_test;
         if suppressed {
             tracing::info!(
