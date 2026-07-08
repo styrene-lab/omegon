@@ -14168,6 +14168,19 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
+    fn auth_provider_ids_are_nested_login_logout_arguments() {
+        assert_eq!(canonical_slash_command("auth", "openai-codex"), None);
+        assert_eq!(
+            canonical_slash_command("auth", "login openai-codex"),
+            Some(CanonicalSlashCommand::AuthLogin("openai-codex".into()))
+        );
+        assert_eq!(
+            canonical_slash_command("auth", "logout openai-codex"),
+            Some(CanonicalSlashCommand::AuthLogout("openai-codex".into()))
+        );
+    }
+
+    #[test]
     fn profile_commands_parse() {
         assert_eq!(canonical_slash_command("profile", ""), None);
         assert_eq!(

@@ -63,6 +63,50 @@ impl CommandMenuProjection {
         } else {
             let name = parts[0];
             let sub_prefix = parts.get(1).copied().unwrap_or("");
+            if name == "auth" {
+                let nested_parts: Vec<&str> = sub_prefix.splitn(2, ' ').collect();
+                if matches!(nested_parts.first().copied(), Some("login" | "logout"))
+                    && sub_prefix.contains(' ')
+                {
+                    let action = nested_parts[0];
+                    let provider_prefix = nested_parts.get(1).copied().unwrap_or("");
+                    return crate::auth::operator_auth_provider_ids()
+                        .into_iter()
+                        .filter(|provider| provider.starts_with(provider_prefix))
+                        .map(|provider| {
+                            let mut sub_row = self
+                                .rows
+                                .iter()
+                                .find(|row| row.name == name)
+                                .cloned()
+                                .unwrap_or_else(|| CommandMenuRowProjection {
+                                    name: name.to_string(),
+                                    command: format!("/{name}"),
+                                    description: String::new(),
+                                    subcommands: Vec::new(),
+                                    source: CommandMenuSource::Builtin,
+                                    availability: CommandAvailabilityProjection {
+                                        tui: true,
+                                        cli: true,
+                                        acp: true,
+                                    },
+                                    safety: CommandSafetyProjection {
+                                        class: CommandSafetyClass::ExternalSideEffect,
+                                        requires_confirmation: false,
+                                        prompt_injection_sensitive: false,
+                                    },
+                                    badges: Vec::new(),
+                                    metadata: Vec::new(),
+                                });
+                            sub_row.command = format!("/{name} {action} {provider}");
+                            sub_row.description.clear();
+                            sub_row.badges.clear();
+                            sub_row.metadata.clear();
+                            sub_row
+                        })
+                        .collect();
+                }
+            }
             let Some(row) = self.rows.iter().find(|row| row.name == name) else {
                 return Vec::new();
             };
@@ -283,5 +327,34 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].command, "/context status");
         assert!(rows[0].description.is_empty());
+    }
+
+    #[test]
+    fn matching_projects_nested_auth_provider_arguments() {
+        let projection = command_menu_projection(
+            [command(
+                "auth",
+                "authentication",
+                &["status", "login", "logout"],
+                CommandAvailability::ALL,
+                CommandSafety::EXTERNAL_SIDE_EFFECT,
+            )],
+            [],
+            &[],
+        );
+
+        let direct = projection.matching("/auth openai");
+        assert!(
+            direct.is_empty(),
+            "provider ids must not be projected as direct /auth subcommands: {direct:?}"
+        );
+
+        let login = projection.matching("/auth login openai-c");
+        assert_eq!(login.len(), 1);
+        assert_eq!(login[0].command, "/auth login openai-codex");
+
+        let logout = projection.matching("/auth logout github-c");
+        assert_eq!(logout.len(), 1);
+        assert_eq!(logout[0].command, "/auth logout github-copilot");
     }
 }

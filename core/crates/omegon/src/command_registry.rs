@@ -458,19 +458,7 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::with_metadata(
         "auth",
         "authentication management",
-        &[
-            "status",
-            "unlock",
-            "login",
-            "logout",
-            "anthropic",
-            "openai",
-            "openai-codex",
-            "github-copilot",
-            "openrouter",
-            "ollama-cloud",
-            "github",
-        ],
+        &["status", "unlock", "login", "logout"],
         BuiltinCommandSpec::TUI_CLI_AND_ACP,
         omegon_traits::CommandSafety::EXTERNAL_SIDE_EFFECT,
     ),
@@ -654,7 +642,19 @@ mod tests {
         assert!(
             auth.subcommands
                 .iter()
-                .any(|subcommand| subcommand == "github-copilot")
+                .any(|subcommand| subcommand == "login")
+        );
+        assert!(
+            auth.subcommands
+                .iter()
+                .any(|subcommand| subcommand == "logout")
+        );
+        assert!(
+            !auth
+                .subcommands
+                .iter()
+                .any(|subcommand| subcommand == "github-copilot"),
+            "provider ids are arguments to /auth login|logout, not direct /auth subcommands"
         );
     }
 }

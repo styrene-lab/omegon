@@ -16,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Align `/auth` command registry and autocomplete with the executable grammar: provider IDs complete under `/auth login` and `/auth logout`, not as invalid direct `/auth <provider>` commands.
 - Clarify slow active-turn notification wording so it does not imply the worker is in cleanup unless lifecycle telemetry proves that separately.
 - Propagate cancellation and timeout handling through extension tool retry paths after transport reconnects.
 - Extend runtime turn lifecycle telemetry into worker-side phases so diagnostics can distinguish inner loop execution from post-loop cleanup stalls.
