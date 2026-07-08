@@ -759,7 +759,9 @@ pub enum CanonicalSlashCommand {
     NewSession,
     ListSessions,
     ResumeSession(String),
+    AuthView,
     AuthStatus,
+    AuthUnlock,
     AuthLogin(String),
     AuthLogout(String),
     SkillsView,
@@ -1098,8 +1100,9 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             (!id.is_empty()).then(|| CanonicalSlashCommand::ResumeSession(id.to_string()))
         }
         "auth" => match args {
-            "" | "status" => Some(CanonicalSlashCommand::AuthStatus),
-            "list" => Some(CanonicalSlashCommand::AuthStatus),
+            "" => Some(CanonicalSlashCommand::AuthView),
+            "status" | "list" => Some(CanonicalSlashCommand::AuthStatus),
+            "unlock" => Some(CanonicalSlashCommand::AuthUnlock),
             _ if args.starts_with("login ") => {
                 let provider = args.trim_start_matches("login ").trim();
                 (!provider.is_empty())
@@ -9436,7 +9439,7 @@ Scroll transcript:
             }
 
             "auth" => match canonical_slash_command("auth", args) {
-                Some(CanonicalSlashCommand::AuthStatus) if args.trim().is_empty() => {
+                Some(CanonicalSlashCommand::AuthView) => {
                     self.open_auth_menu();
                     SlashResult::Handled
                 }
@@ -9458,8 +9461,12 @@ Scroll transcript:
                     });
                     SlashResult::Handled
                 }
+                Some(CanonicalSlashCommand::AuthUnlock) => {
+                    let _ = tx.try_send(TuiCommand::AuthUnlock { respond_to: None });
+                    SlashResult::Handled
+                }
                 _ => SlashResult::Display(format!(
-                    "Unknown auth command: {args}\n\nUsage:\n  /auth status\n  /auth login <provider>\n  /auth logout <provider>"
+                    "Unknown auth command: {args}\n\nUsage:\n  /auth\n  /auth status\n  /auth unlock\n  /auth login <provider>\n  /auth logout <provider>"
                 )),
             },
 
@@ -14164,6 +14171,18 @@ mod slash_command_parsing_tests {
         assert_eq!(
             canonical_slash_command("auth", "list"),
             Some(CanonicalSlashCommand::AuthStatus)
+        );
+    }
+
+    #[test]
+    fn auth_root_opens_menu_and_unlock_is_executable() {
+        assert_eq!(
+            canonical_slash_command("auth", ""),
+            Some(CanonicalSlashCommand::AuthView)
+        );
+        assert_eq!(
+            canonical_slash_command("auth", "unlock"),
+            Some(CanonicalSlashCommand::AuthUnlock)
         );
     }
 

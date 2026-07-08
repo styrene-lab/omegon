@@ -411,8 +411,14 @@ pub fn classify_slash_command(name: &str, args: &str) -> ClassifiedAction {
         "new" => (CanonicalAction::SessionNew, ControlRole::Edit, true),
         "sessions" => (CanonicalAction::SessionList, ControlRole::Read, false),
         "auth" => match canonical_slash_command("auth", args) {
-            Some(crate::tui::CanonicalSlashCommand::AuthStatus) => {
+            Some(crate::tui::CanonicalSlashCommand::AuthView)
+            | Some(crate::tui::CanonicalSlashCommand::AuthStatus) => {
                 (CanonicalAction::AuthStatus, ControlRole::Read, true)
+            }
+            Some(crate::tui::CanonicalSlashCommand::AuthUnlock)
+            | Some(crate::tui::CanonicalSlashCommand::AuthLogin(_))
+            | Some(crate::tui::CanonicalSlashCommand::AuthLogout(_)) => {
+                (CanonicalAction::AuthLogin, ControlRole::Admin, false)
             }
             _ => (CanonicalAction::Unknown, ControlRole::Admin, false),
         },
@@ -604,6 +610,34 @@ mod tests {
         let action = classify_slash_command("login", "anthropic");
         assert_eq!(action.action, CanonicalAction::AuthLogin);
         assert_eq!(action.role, ControlRole::Admin);
+    }
+
+    #[test]
+    fn classifies_nested_auth_commands() {
+        let view = classify_slash_command("auth", "");
+        assert_eq!(view.action, CanonicalAction::AuthStatus);
+        assert_eq!(view.role, ControlRole::Read);
+        assert!(view.remote_safe);
+
+        let status = classify_slash_command("auth", "status");
+        assert_eq!(status.action, CanonicalAction::AuthStatus);
+        assert_eq!(status.role, ControlRole::Read);
+        assert!(status.remote_safe);
+
+        let unlock = classify_slash_command("auth", "unlock");
+        assert_eq!(unlock.action, CanonicalAction::AuthLogin);
+        assert_eq!(unlock.role, ControlRole::Admin);
+        assert!(!unlock.remote_safe);
+
+        let login = classify_slash_command("auth", "login anthropic");
+        assert_eq!(login.action, CanonicalAction::AuthLogin);
+        assert_eq!(login.role, ControlRole::Admin);
+        assert!(!login.remote_safe);
+
+        let logout = classify_slash_command("auth", "logout anthropic");
+        assert_eq!(logout.action, CanonicalAction::AuthLogin);
+        assert_eq!(logout.role, ControlRole::Admin);
+        assert!(!logout.remote_safe);
     }
 
     #[test]

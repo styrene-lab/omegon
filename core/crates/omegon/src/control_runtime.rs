@@ -379,7 +379,9 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::ResumeSession(id) => {
             ControlRequest::ResumeSession { id: id.clone() }
         }
+        crate::tui::CanonicalSlashCommand::AuthView => return None,
         crate::tui::CanonicalSlashCommand::AuthStatus => ControlRequest::AuthStatus,
+        crate::tui::CanonicalSlashCommand::AuthUnlock => ControlRequest::AuthUnlock,
         crate::tui::CanonicalSlashCommand::AuthLogin(provider) => ControlRequest::AuthLogin {
             provider: provider.clone(),
         },

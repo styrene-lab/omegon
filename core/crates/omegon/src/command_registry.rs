@@ -650,6 +650,11 @@ mod tests {
                 .any(|subcommand| subcommand == "logout")
         );
         assert!(
+            auth.subcommands
+                .iter()
+                .any(|subcommand| subcommand == "unlock")
+        );
+        assert!(
             !auth
                 .subcommands
                 .iter()

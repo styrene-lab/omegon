@@ -16,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Make `/auth` parser semantics match TUI intent by treating bare `/auth` as the auth menu and wiring advertised `/auth unlock` to the unlock command.
 - Align `/auth` command registry and autocomplete with the executable grammar: provider IDs complete under `/auth login` and `/auth logout`, not as invalid direct `/auth <provider>` commands.
 - Clarify slow active-turn notification wording so it does not imply the worker is in cleanup unless lifecycle telemetry proves that separately.
 - Propagate cancellation and timeout handling through extension tool retry paths after transport reconnects.
