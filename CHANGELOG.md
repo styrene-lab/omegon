@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- `scripts/release_branch.py merge-forward` no longer regresses main's workspace version when main is behind the just-released version: version state is only preserved from main when main's version is >= the release branch's version; otherwise the release branch's version state is taken and the decision is logged.
+
 ## [0.27.4] - 2026-07-08
 
 0.27.4 refines the harness guidance loop: an evidence ledger drives convergence pressure from discovery novelty instead of raw file counts, a task-mode channel relaxes pressure for research sessions, and a unified observation normalizer feeds structured-tool and bash evidence through one path.

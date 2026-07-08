@@ -74,6 +74,16 @@ def stable_version(version: str) -> str:
     return version
 
 
+def version_sort_key(version: str) -> tuple[int, int, int, int]:
+    """Sortable key for workspace versions; stable ranks above its prereleases."""
+    core, _, prerelease = version.partition("-")
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", core)
+    if not match:
+        raise ReleaseBranchError(f"could not parse workspace version {version!r}")
+    major, minor, patch = (int(part) for part in match.groups())
+    return (major, minor, patch, 0 if prerelease else 1)
+
+
 def release_branch_for_version(version: str) -> str:
     stable = stable_version(version)
     parts = stable.split(".")
@@ -154,12 +164,25 @@ def merge_forward(repo_root: Path, release_branch: str | None) -> None:
     run(repo_root, "switch", branch)
     ensure_clean(repo_root)
     run(repo_root, "merge", "--ff-only", f"origin/{branch}")
+    release_version = read_workspace_version(repo_root)
 
     with tempfile.TemporaryDirectory(prefix="omegon-main-version-state-") as temp:
         temp_dir = Path(temp)
         for path in VERSION_STATE_PATHS:
             (temp_dir / path.replace("/", "__")).write_bytes(
                 subprocess.check_output(["git", "show", f"origin/main:{path}"], cwd=repo_root)
+            )
+
+        main_cargo = (temp_dir / "Cargo.toml").read_text()
+        main_match = VERSION_RE.search(main_cargo)
+        if not main_match:
+            raise ReleaseBranchError("could not read workspace version from origin/main Cargo.toml")
+        main_version = main_match.group(1)
+        preserve_main_state = version_sort_key(main_version) >= version_sort_key(release_version)
+        if not preserve_main_state:
+            print(
+                f"main workspace version {main_version} is behind release version "
+                f"{release_version}; taking release-branch version state instead of preserving main's"
             )
 
         run(repo_root, "switch", "main")
@@ -184,10 +207,11 @@ def merge_forward(repo_root: Path, release_branch: str | None) -> None:
             run(repo_root, "switch", branch)
             return
 
-        for path in VERSION_STATE_PATHS:
-            target = repo_root / path
-            target.write_bytes((temp_dir / path.replace("/", "__")).read_bytes())
-            run(repo_root, "add", path)
+        if preserve_main_state:
+            for path in VERSION_STATE_PATHS:
+                target = repo_root / path
+                target.write_bytes((temp_dir / path.replace("/", "__")).read_bytes())
+                run(repo_root, "add", path)
 
         staged = run(repo_root, "diff", "--cached", "--name-only", capture=True)
         if not staged:
