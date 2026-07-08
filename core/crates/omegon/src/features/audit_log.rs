@@ -21,6 +21,7 @@
 use async_trait::async_trait;
 use omegon_traits::{BusEvent, BusRequest, ContentBlock, Feature};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -79,6 +80,17 @@ pub struct AuditLog {
     bytes_written: u64,
     /// Checked once at startup to seed bytes_written.
     size_checked: bool,
+    tool_starts: HashMap<String, u64>,
+    tool_updates: HashMap<String, ToolUpdateStats>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct ToolUpdateStats {
+    count: u64,
+    heartbeat_count: u64,
+    first_update_ms: Option<u64>,
+    last_update_ms: Option<u64>,
+    max_tail_chars: usize,
 }
 
 impl AuditLog {
@@ -90,6 +102,8 @@ impl AuditLog {
             session_id: session_id.to_string(),
             bytes_written: 0,
             size_checked: false,
+            tool_starts: HashMap::new(),
+            tool_updates: HashMap::new(),
         }
     }
 
@@ -197,6 +211,102 @@ impl AuditLog {
         }
         serde_json::Value::Object(summary)
     }
+
+    fn structured_agent_event(
+        event: &omegon_traits::AgentEvent,
+    ) -> Option<(&'static str, serde_json::Value)> {
+        match event {
+            omegon_traits::AgentEvent::RuntimeQueueUpdated { snapshot_json } => Some((
+                "runtime_queue",
+                serde_json::json!({
+                    "snapshot": snapshot_json,
+                }),
+            )),
+            omegon_traits::AgentEvent::RuntimePromptStarted { text, image_paths } => Some((
+                "runtime_prompt_started",
+                serde_json::json!({
+                    "text_chars": text.chars().count(),
+                    "attachments": image_paths.len(),
+                    "preview": Self::str_preview(text, 120),
+                }),
+            )),
+            omegon_traits::AgentEvent::ContextUpdated {
+                tokens,
+                context_window,
+                context_class,
+                thinking_level,
+            } => Some((
+                "context_updated",
+                serde_json::json!({
+                    "tokens": tokens,
+                    "context_window": context_window,
+                    "usage_percent": if *context_window == 0 { 0 } else { tokens.saturating_mul(100) / context_window },
+                    "context_class": context_class,
+                    "thinking_level": thinking_level,
+                }),
+            )),
+            omegon_traits::AgentEvent::AgentEnd => Some(("agent_end", serde_json::json!({}))),
+            omegon_traits::AgentEvent::StreamIdle {
+                provider,
+                model,
+                phase,
+                idle_secs,
+                ambiguous,
+                message,
+            } => Some((
+                "stream_idle",
+                serde_json::json!({
+                    "provider": provider,
+                    "model": model,
+                    "phase": phase,
+                    "idle_secs": idle_secs,
+                    "ambiguous": ambiguous,
+                    "message": message,
+                }),
+            )),
+            omegon_traits::AgentEvent::ProviderRetry {
+                provider,
+                model,
+                attempt,
+                delay_ms,
+                reason,
+                message,
+                recoverable,
+            } => Some((
+                "provider_retry",
+                serde_json::json!({
+                    "provider": provider,
+                    "model": model,
+                    "attempt": attempt,
+                    "delay_ms": delay_ms,
+                    "reason": reason,
+                    "message": message,
+                    "recoverable": recoverable,
+                }),
+            )),
+            omegon_traits::AgentEvent::ProviderFailure {
+                provider,
+                model,
+                reason,
+                attempts,
+                message,
+                retryable,
+                recommended_action,
+            } => Some((
+                "provider_failure",
+                serde_json::json!({
+                    "provider": provider,
+                    "model": model,
+                    "reason": reason,
+                    "attempts": attempts,
+                    "message": message,
+                    "retryable": retryable,
+                    "recommended_action": recommended_action,
+                }),
+            )),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -281,6 +391,8 @@ impl Feature for AuditLog {
             }
 
             BusEvent::ToolStart { id, name, args, .. } => {
+                self.tool_starts.insert(id.clone(), ts);
+                self.tool_updates.remove(id);
                 self.append(&AuditEntry {
                     ts,
                     session,
@@ -299,6 +411,11 @@ impl Feature for AuditLog {
                 result,
                 is_error,
             } => {
+                let duration_ms = self
+                    .tool_starts
+                    .remove(id)
+                    .map(|started| ts.saturating_sub(started));
+                let update_stats = self.tool_updates.remove(id).unwrap_or_default();
                 self.append(&AuditEntry {
                     ts,
                     session,
@@ -307,6 +424,12 @@ impl Feature for AuditLog {
                         "id": id,
                         "tool": name,
                         "error": is_error,
+                        "duration_ms": duration_ms,
+                        "updates": update_stats.count,
+                        "heartbeat_updates": update_stats.heartbeat_count,
+                        "first_update_latency_ms": update_stats.first_update_ms.zip(duration_ms).map(|(first, _)| first),
+                        "last_update_age_ms": update_stats.last_update_ms.map(|last| ts.saturating_sub(last)),
+                        "max_tail_chars": update_stats.max_tail_chars,
                         "preview": Self::text_preview(result, 200),
                         "details": result.details,
                     }),
@@ -364,6 +487,21 @@ impl Feature for AuditLog {
 
             BusEvent::AgentEventEmitted { event } => {
                 let event_kind = agent_event_kind(event);
+                if let omegon_traits::AgentEvent::ToolUpdate { id, partial } = event.as_ref() {
+                    let stats = self.tool_updates.entry(id.clone()).or_default();
+                    stats.count = stats.count.saturating_add(1);
+                    if partial.progress.heartbeat {
+                        stats.heartbeat_count = stats.heartbeat_count.saturating_add(1);
+                    }
+                    if stats.first_update_ms.is_none() {
+                        stats.first_update_ms = self
+                            .tool_starts
+                            .get(id)
+                            .map(|started| ts.saturating_sub(*started));
+                    }
+                    stats.last_update_ms = Some(ts);
+                    stats.max_tail_chars = stats.max_tail_chars.max(partial.tail.chars().count());
+                }
                 self.append(&AuditEntry {
                     ts,
                     session: session.clone(),
@@ -373,6 +511,14 @@ impl Feature for AuditLog {
                         "event_debug": format!("{event:?}"),
                     }),
                 });
+                if let Some((kind, data)) = Self::structured_agent_event(event) {
+                    self.append(&AuditEntry {
+                        ts,
+                        session: session.clone(),
+                        kind: kind.into(),
+                        data,
+                    });
+                }
                 if let omegon_traits::AgentEvent::SkillActivation { event } = event.as_ref() {
                     self.append(&AuditEntry {
                         ts,

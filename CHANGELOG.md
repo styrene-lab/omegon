@@ -17,6 +17,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 - Add interactive-turn telemetry for post-turn cleanup phases and slow active-turn workers so logs and operator notifications can identify where queued prompts are blocked after visible completion.
+- Add runtime queue wait/elapsed timings and queue-blocked prompt log fields for active-turn diagnostics.
+- Add audit-log tool duration/progress cadence summaries plus structured runtime queue, prompt-start, context, stream-idle, and provider retry/failure projections.
 - Fix TUI interrupt input suppression so an interrupted turn that never emits `AgentEnd` no longer leaves the composer permanently unable to accept typing or `/exit`.
 - Treat terminal `TurnEnd` events as authoritative for releasing the TUI active-turn gate, preventing the activity row from showing `active turn` while the footer says `turn done`.
 

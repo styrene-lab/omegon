@@ -285,15 +285,13 @@ fn classify_bash_segment(segment: &str) -> Vec<ObservationEvent> {
             query: search_query(program, &tokens),
             roots: search_roots_from_tokens(program, &tokens),
         }],
-        _ if is_read_program(program) => {
-            read_paths_from_tokens(&tokens)
-                .into_iter()
-                .map(|path| ObservationEvent::FileRead {
-                    source_tool: format!("bash:{program}"),
-                    path,
-                })
-                .collect()
-        }
+        _ if is_read_program(program) => read_paths_from_tokens(&tokens)
+            .into_iter()
+            .map(|path| ObservationEvent::FileRead {
+                source_tool: format!("bash:{program}"),
+                path,
+            })
+            .collect(),
         "touch" | "rm" => mutation_paths_from_tokens(&tokens)
             .into_iter()
             .map(|path| ObservationEvent::FileMutated {

@@ -1700,7 +1700,8 @@ fn interrupt_suppresses_terminal_protocol_fragments_from_editor() {
         "raw CSI-u fragments from Ctrl+C must not enter the composer during the debounce window"
     );
 
-    app.suppress_editor_input_until = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
+    app.suppress_editor_input_until =
+        Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
     assert!(
         !app.should_discard_key_after_interrupt(&protocol_fragment),
         "pending interrupts must not suppress all composer input indefinitely if the agent never emits AgentEnd"
@@ -2208,7 +2209,10 @@ fn slim_status_line_marks_turn_state() {
         "terminal TurnEnd must release the TUI-local active-turn gate even if AgentEnd is delayed"
     );
     let done_before_agent_end = render_app_to_string(&mut app, 140, 18);
-    assert!(done_before_agent_end.contains("turn done"), "{done_before_agent_end}");
+    assert!(
+        done_before_agent_end.contains("turn done"),
+        "{done_before_agent_end}"
+    );
     assert!(
         !done_before_agent_end.contains("active turn"),
         "activity row must not disagree with terminal turn state: {done_before_agent_end}"

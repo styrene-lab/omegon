@@ -269,11 +269,13 @@ pub(crate) fn lenient_usize_arg(args: &serde_json::Value, key: &str) -> Option<u
             .as_u64()
             .map(|n| n as usize)
             .or_else(|| n.as_f64().filter(|f| *f >= 0.0).map(|f| f as usize)),
-        serde_json::Value::String(s) => s
-            .trim()
-            .parse::<usize>()
-            .ok()
-            .or_else(|| s.trim().parse::<f64>().ok().filter(|f| *f >= 0.0).map(|f| f as usize)),
+        serde_json::Value::String(s) => s.trim().parse::<usize>().ok().or_else(|| {
+            s.trim()
+                .parse::<f64>()
+                .ok()
+                .filter(|f| *f >= 0.0)
+                .map(|f| f as usize)
+        }),
         _ => None,
     }
 }

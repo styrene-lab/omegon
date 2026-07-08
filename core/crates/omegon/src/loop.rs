@@ -4502,8 +4502,7 @@ impl StuckDetector {
             if *hash == validation_marker || *hash == progress_marker {
                 continue;
             }
-            if is_repo_inspection_tool(catalog, name) || crate::observation::is_read_program(name)
-            {
+            if is_repo_inspection_tool(catalog, name) || crate::observation::is_read_program(name) {
                 continue;
             }
             // Mutation entries are path-normalized too (FileMutated hashes the

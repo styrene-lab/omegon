@@ -5671,6 +5671,14 @@ fn build_tui_secret_readiness_snapshot(
                     }));
 
                 if runtime.is_busy() {
+                    tracing::info!(
+                        prompt_id,
+                        queue_depth = runtime.queue_depth(),
+                        active_turn_id = runtime.active_turn.as_ref().map(|active| active.runtime_turn_id),
+                        submitted_by = prompt.submitted_by,
+                        via = prompt.via,
+                        "prompt queued behind active interactive turn"
+                    );
                     emit_runtime_queue_notification(&runtime, &events_tx, prompt_id);
                     continue;
                 }
@@ -6150,6 +6158,7 @@ struct PromptEnvelope {
     via: ControlSurface,
     metadata: tui::PromptMetadata,
     queue_mode: QueueMode,
+    queued_at: std::time::Instant,
 }
 
 impl PromptEnvelope {
@@ -6175,6 +6184,7 @@ struct ActiveTurnMeta {
     runtime_turn_id: u64,
     prompt: PromptEnvelope,
     phase: ActiveTurnPhase,
+    started_at: std::time::Instant,
 }
 
 fn runtime_actor_kind_from_via(via: &str) -> RuntimeActorKind {
@@ -6655,6 +6665,7 @@ impl InteractiveRuntimeSupervisor {
             via,
             metadata,
             queue_mode: queue_mode.unwrap_or(self.default_queue_mode),
+            queued_at: std::time::Instant::now(),
         });
         prompt_id
     }
@@ -6706,6 +6717,8 @@ impl InteractiveRuntimeSupervisor {
                     ActiveTurnPhase::Running => "running",
                     ActiveTurnPhase::Cancelling { .. } => "cancelling",
                 },
+                "elapsed_ms": active.started_at.elapsed().as_millis() as u64,
+                "queued_wait_ms": active.started_at.saturating_duration_since(active.prompt.queued_at).as_millis() as u64,
             })),
             "items": self.queue.iter().map(|prompt| serde_json::json!({
                 "id": prompt.id,
@@ -6719,6 +6732,7 @@ impl InteractiveRuntimeSupervisor {
                 "preview": prompt.text.chars().take(80).collect::<String>(),
                 "attachments": prompt.image_paths.len(),
                 "voice": prompt.metadata.voice.is_some(),
+                "wait_ms": prompt.queued_at.elapsed().as_millis() as u64,
             })).collect::<Vec<_>>(),
             "previews": self.queue_preview(),
         })
@@ -6738,6 +6752,7 @@ impl InteractiveRuntimeSupervisor {
             runtime_turn_id: self.next_runtime_turn_id,
             prompt,
             phase: ActiveTurnPhase::Running,
+            started_at: std::time::Instant::now(),
         };
         self.active_turn = Some(active.clone());
         Some(active)
