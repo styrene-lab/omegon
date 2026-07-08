@@ -3261,6 +3261,15 @@ impl App {
                 rows: self.secret_readiness_rows(),
             }],
         }, MenuTabProjection {
+            id: "capabilities".into(),
+            label: "Capabilities".into(),
+            groups: vec![MenuGroupProjection {
+                id: "secrets.capabilities".into(),
+                label: "Harness capability readiness".into(),
+                description: Some("First-party harness capabilities grouped by the secret bindings that make them available or degraded.".into()),
+                rows: self.secret_harness_capability_rows(),
+            }],
+        }, MenuTabProjection {
             id: "actions".into(),
             label: "Actions".into(),
             groups: vec![MenuGroupProjection {
@@ -3363,6 +3372,111 @@ impl App {
             }],
         }];
         menu
+    }
+
+    fn secret_harness_capability_rows(&self) -> Vec<crate::surfaces::menu::MenuRowProjection> {
+        use crate::capabilities::secrets::HarnessCapabilityReadinessStatus;
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuRowKind,
+            MenuRowProjection,
+        };
+
+        let Some(snapshot) = self.secret_readiness.as_ref() else {
+            return vec![MenuRowProjection {
+                id: "secrets.capabilities.unavailable".into(),
+                label: "No harness capability readiness snapshot loaded".into(),
+                description:
+                    "No first-party secret-backed capability readiness is currently available."
+                        .into(),
+                value: None,
+                kind: MenuRowKind::Object,
+                badges: vec![MenuBadgeProjection {
+                    label: "metadata only".into(),
+                    tone: MenuBadgeTone::Neutral,
+                }],
+                metadata: vec!["values never displayed".into()],
+                primary_action: None,
+                actions: vec![],
+                safety: None,
+                availability: None,
+            }];
+        };
+
+        if snapshot.harness_capabilities.is_empty() {
+            return vec![MenuRowProjection {
+                id: "secrets.capabilities.empty".into(),
+                label: "No first-party secret-backed capabilities discovered".into(),
+                description: "The first-party secret catalog did not expose any grouped harness capabilities.".into(),
+                value: None,
+                kind: MenuRowKind::Object,
+                badges: vec![MenuBadgeProjection { label: "empty".into(), tone: MenuBadgeTone::Neutral }],
+                metadata: vec!["values never displayed".into()],
+                primary_action: None,
+                actions: vec![],
+                safety: None,
+                availability: None,
+            }];
+        }
+
+        snapshot
+            .harness_capabilities
+            .iter()
+            .map(|capability| {
+                let (status_label, status_tone) = match capability.status {
+                    HarnessCapabilityReadinessStatus::Ready => ("ready", MenuBadgeTone::Success),
+                    HarnessCapabilityReadinessStatus::Partial => {
+                        ("partial", MenuBadgeTone::Warning)
+                    }
+                    HarnessCapabilityReadinessStatus::Missing => ("missing", MenuBadgeTone::Danger),
+                };
+                let mut metadata = vec![format!(
+                    "{} configured · {} missing",
+                    capability.configured_count, capability.missing_count
+                )];
+                metadata.push(format!("category: {:?}", capability.category));
+                metadata.extend(
+                    capability
+                        .secret_names
+                        .iter()
+                        .map(|name| format!("secret: {name}")),
+                );
+                let primary_secret = capability.secret_names.first().cloned().unwrap_or_default();
+                MenuRowProjection {
+                    id: format!("secrets.capabilities.{}", capability.id),
+                    label: capability.label.clone(),
+                    description: capability.description.clone(),
+                    value: Some(status_label.into()),
+                    kind: MenuRowKind::Object,
+                    badges: vec![MenuBadgeProjection {
+                        label: status_label.into(),
+                        tone: status_tone,
+                    }],
+                    metadata,
+                    primary_action: (!primary_secret.is_empty()).then(|| {
+                        MenuActionProjection::prime_editor(
+                            format!("secrets.capability.configure.{}", capability.id),
+                            "Configure",
+                            format!("/secrets set {primary_secret}"),
+                            "Replace the suggested secret name if you prefer a different provider",
+                        )
+                    }),
+                    actions: capability
+                        .secret_names
+                        .iter()
+                        .map(|name| {
+                            MenuActionProjection::prime_editor(
+                                format!("secrets.capability.configure.{}.{}", capability.id, name),
+                                format!("Set {name}"),
+                                format!("/secrets set {name}"),
+                                "Press Enter to capture a value with hidden input",
+                            )
+                        })
+                        .collect(),
+                    safety: None,
+                    availability: None,
+                }
+            })
+            .collect()
     }
 
     fn secret_readiness_rows(&self) -> Vec<crate::surfaces::menu::MenuRowProjection> {

@@ -8,6 +8,35 @@ use super::extensions::ExtensionCapabilitySummary;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecretReadinessSnapshot {
     pub secrets: Vec<SecretReadiness>,
+    pub harness_capabilities: Vec<HarnessCapabilitySecretReadiness>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HarnessCapabilitySecretReadiness {
+    pub id: String,
+    pub label: String,
+    pub category: HarnessCapabilityCategory,
+    pub description: String,
+    pub secret_names: Vec<String>,
+    pub configured_count: usize,
+    pub missing_count: usize,
+    pub status: HarnessCapabilityReadinessStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessCapabilityCategory {
+    LlmProvider,
+    Research,
+    Forge,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessCapabilityReadinessStatus {
+    Ready,
+    Partial,
+    Missing,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -125,7 +154,7 @@ pub fn build_secret_readiness_snapshot(
         requirements.entry(name.clone()).or_default();
     }
 
-    let secrets = requirements
+    let secrets: Vec<_> = requirements
         .into_iter()
         .map(|(name, requirement)| {
             let warmed = warmed.contains(&name);
@@ -155,7 +184,12 @@ pub fn build_secret_readiness_snapshot(
         })
         .collect();
 
-    SecretReadinessSnapshot { secrets }
+    let harness_capabilities = build_harness_capability_readiness(&secrets);
+
+    SecretReadinessSnapshot {
+        secrets,
+        harness_capabilities,
+    }
 }
 
 #[derive(Default)]
@@ -165,30 +199,147 @@ struct SecretRequirementAccumulator {
     consumers: BTreeSet<(SecretConsumerKind, String)>,
 }
 
-const FIRST_PARTY_SECRET_CATALOG: &[(&str, &str)] = &[
-    ("ANTHROPIC_API_KEY", "llm_provider"),
-    ("OPENAI_API_KEY", "llm_provider"),
-    ("OPENROUTER_API_KEY", "llm_provider"),
-    ("BRAVE_API_KEY", "web_search"),
-    ("TAVILY_API_KEY", "web_search"),
-    ("SERPER_API_KEY", "web_search"),
-    ("FIRECRAWL_API_KEY", "web_search"),
-    ("GITHUB_TOKEN", "forge"),
-    ("GH_TOKEN", "forge"),
-    ("GITLAB_TOKEN", "forge"),
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FirstPartySecretCatalogEntry {
+    name: &'static str,
+    capability_id: &'static str,
+    capability_label: &'static str,
+    category: HarnessCapabilityCategory,
+    description: &'static str,
+}
+
+const FIRST_PARTY_SECRET_CATALOG: &[FirstPartySecretCatalogEntry] = &[
+    FirstPartySecretCatalogEntry {
+        name: "ANTHROPIC_API_KEY",
+        capability_id: "llm_provider",
+        capability_label: "LLM provider API keys",
+        category: HarnessCapabilityCategory::LlmProvider,
+        description: "API-key credentials for built-in LLM provider routes when OAuth is not used.",
+    },
+    FirstPartySecretCatalogEntry {
+        name: "OPENAI_API_KEY",
+        capability_id: "llm_provider",
+        capability_label: "LLM provider API keys",
+        category: HarnessCapabilityCategory::LlmProvider,
+        description: "API-key credentials for built-in LLM provider routes when OAuth is not used.",
+    },
+    FirstPartySecretCatalogEntry {
+        name: "OPENROUTER_API_KEY",
+        capability_id: "llm_provider",
+        capability_label: "LLM provider API keys",
+        category: HarnessCapabilityCategory::LlmProvider,
+        description: "API-key credentials for built-in LLM provider routes when OAuth is not used.",
+    },
+    FirstPartySecretCatalogEntry {
+        name: "BRAVE_API_KEY",
+        capability_id: "web_search",
+        capability_label: "Web search and external evidence",
+        category: HarnessCapabilityCategory::Research,
+        description: "Search provider credentials for first-party external research tools.",
+    },
+    FirstPartySecretCatalogEntry {
+        name: "TAVILY_API_KEY",
+        capability_id: "web_search",
+        capability_label: "Web search and external evidence",
+        category: HarnessCapabilityCategory::Research,
+        description: "Search provider credentials for first-party external research tools.",
+    },
+    FirstPartySecretCatalogEntry {
+        name: "SERPER_API_KEY",
+        capability_id: "web_search",
+        capability_label: "Web search and external evidence",
+        category: HarnessCapabilityCategory::Research,
+        description: "Search provider credentials for first-party external research tools.",
+    },
+    FirstPartySecretCatalogEntry {
+        name: "FIRECRAWL_API_KEY",
+        capability_id: "web_search",
+        capability_label: "Web search and external evidence",
+        category: HarnessCapabilityCategory::Research,
+        description: "Search provider credentials for first-party external research tools.",
+    },
+    FirstPartySecretCatalogEntry {
+        name: "GITHUB_TOKEN",
+        capability_id: "forge",
+        capability_label: "Forge and source-control integration",
+        category: HarnessCapabilityCategory::Forge,
+        description: "Tokens for first-party forge, issue, PR, and repository workflows.",
+    },
+    FirstPartySecretCatalogEntry {
+        name: "GH_TOKEN",
+        capability_id: "forge",
+        capability_label: "Forge and source-control integration",
+        category: HarnessCapabilityCategory::Forge,
+        description: "Tokens for first-party forge, issue, PR, and repository workflows.",
+    },
+    FirstPartySecretCatalogEntry {
+        name: "GITLAB_TOKEN",
+        capability_id: "forge",
+        capability_label: "Forge and source-control integration",
+        category: HarnessCapabilityCategory::Forge,
+        description: "Tokens for first-party forge, issue, PR, and repository workflows.",
+    },
 ];
 
 fn seed_first_party_secret_catalog(
     requirements: &mut BTreeMap<String, SecretRequirementAccumulator>,
 ) {
-    for (name, capability) in FIRST_PARTY_SECRET_CATALOG {
-        let requirement = requirements.entry((*name).to_string()).or_default();
+    for entry in FIRST_PARTY_SECRET_CATALOG {
+        let requirement = requirements.entry(entry.name.to_string()).or_default();
         requirement.optional = true;
         requirement.consumers.insert((
             SecretConsumerKind::HarnessCapability,
-            (*capability).to_string(),
+            entry.capability_id.to_string(),
         ));
     }
+}
+
+fn build_harness_capability_readiness(
+    secrets: &[SecretReadiness],
+) -> Vec<HarnessCapabilitySecretReadiness> {
+    let secrets_by_name: BTreeMap<_, _> = secrets
+        .iter()
+        .map(|secret| (secret.name.as_str(), secret))
+        .collect();
+    let mut capabilities: BTreeMap<&'static str, HarnessCapabilitySecretReadiness> =
+        BTreeMap::new();
+
+    for entry in FIRST_PARTY_SECRET_CATALOG {
+        let capability = capabilities.entry(entry.capability_id).or_insert_with(|| {
+            HarnessCapabilitySecretReadiness {
+                id: entry.capability_id.to_string(),
+                label: entry.capability_label.to_string(),
+                category: entry.category.clone(),
+                description: entry.description.to_string(),
+                secret_names: Vec::new(),
+                configured_count: 0,
+                missing_count: 0,
+                status: HarnessCapabilityReadinessStatus::Missing,
+            }
+        });
+        capability.secret_names.push(entry.name.to_string());
+
+        match secrets_by_name.get(entry.name).map(|secret| &secret.status) {
+            Some(SecretReadinessStatus::Warmed | SecretReadinessStatus::Configured) => {
+                capability.configured_count += 1;
+            }
+            Some(SecretReadinessStatus::Deferred | SecretReadinessStatus::Missing) | None => {
+                capability.missing_count += 1;
+            }
+        }
+    }
+
+    for capability in capabilities.values_mut() {
+        capability.status = if capability.configured_count == 0 {
+            HarnessCapabilityReadinessStatus::Missing
+        } else if capability.missing_count == 0 {
+            HarnessCapabilityReadinessStatus::Ready
+        } else {
+            HarnessCapabilityReadinessStatus::Partial
+        };
+    }
+
+    capabilities.into_values().collect()
 }
 
 impl Ord for SecretConsumerKind {
@@ -238,6 +389,34 @@ mod tests {
                 consumer.kind == SecretConsumerKind::HarnessCapability && consumer.id == capability
             }));
         }
+    }
+
+    #[test]
+    fn harness_capability_readiness_groups_first_party_secret_catalog() {
+        let snapshot = build_secret_readiness_snapshot(
+            &[],
+            &[],
+            SecretReadinessInputs {
+                session_diagnostics: Vec::new(),
+                recipe_descriptors: vec![SecretRecipeDescriptorSummary {
+                    name: "BRAVE_API_KEY".into(),
+                    kind: "env".into(),
+                }],
+            },
+        );
+
+        let web_search = snapshot
+            .harness_capabilities
+            .iter()
+            .find(|capability| capability.id == "web_search")
+            .expect("web_search harness capability readiness");
+        assert_eq!(web_search.label, "Web search and external evidence");
+        assert_eq!(web_search.category, HarnessCapabilityCategory::Research);
+        assert_eq!(web_search.configured_count, 1);
+        assert_eq!(web_search.missing_count, 3);
+        assert_eq!(web_search.status, HarnessCapabilityReadinessStatus::Partial);
+        assert!(web_search.secret_names.contains(&"BRAVE_API_KEY".into()));
+        assert!(web_search.secret_names.contains(&"TAVILY_API_KEY".into()));
     }
 
     #[test]

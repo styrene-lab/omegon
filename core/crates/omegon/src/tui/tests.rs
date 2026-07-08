@@ -8934,6 +8934,7 @@ fn secrets_menu_inventory_rows_offer_safe_crud_actions() {
             recipe_kind: Some("env".into()),
             warmed: false,
         }],
+        harness_capabilities: vec![],
     });
 
     app.open_secrets_menu();
@@ -9033,6 +9034,62 @@ fn secrets_menu_inventory_includes_first_party_catalog_rows() {
             "missing safe secret action for {expected}"
         );
     }
+}
+
+#[test]
+fn secrets_menu_capabilities_tab_groups_first_party_secret_readiness() {
+    let mut app = test_app();
+    app.secret_readiness = Some(
+        crate::capabilities::secrets::build_secret_readiness_snapshot(
+            &[],
+            &[],
+            crate::capabilities::secrets::SecretReadinessInputs {
+                session_diagnostics: Vec::new(),
+                recipe_descriptors: vec![
+                    crate::capabilities::secrets::SecretRecipeDescriptorSummary {
+                        name: "BRAVE_API_KEY".into(),
+                        kind: "env".into(),
+                    },
+                ],
+            },
+        ),
+    );
+
+    app.open_secrets_menu();
+    let menu = app.active_menu.as_ref().expect("secrets menu");
+    let capabilities = menu
+        .projection
+        .tabs
+        .iter()
+        .find(|tab| tab.id == "capabilities")
+        .expect("capabilities tab");
+    let row = capabilities.groups[0]
+        .rows
+        .iter()
+        .find(|row| row.id == "secrets.capabilities.web_search")
+        .expect("web_search capability row");
+
+    assert_eq!(row.label, "Web search and external evidence");
+    assert_eq!(row.value.as_deref(), Some("partial"));
+    assert!(
+        row.metadata
+            .iter()
+            .any(|item| item == "1 configured · 3 missing")
+    );
+    assert!(
+        row.metadata
+            .iter()
+            .any(|item| item == "secret: BRAVE_API_KEY")
+    );
+    assert!(
+        row.metadata
+            .iter()
+            .any(|item| item == "secret: TAVILY_API_KEY")
+    );
+    assert!(row.actions.iter().any(|action| {
+        action.label == "Set BRAVE_API_KEY"
+            && action.editor_text.as_deref() == Some("/secrets set BRAVE_API_KEY")
+    }));
 }
 
 #[test]

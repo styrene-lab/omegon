@@ -16,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Add grouped first-party harness capability readiness over the secret catalog, so `/secrets` can show LLM provider, web-search, and forge readiness beyond per-secret consumers.
 - Surface first-party harness secret catalog entries in `/secrets` readiness, including LLM provider, web-search, and forge credentials, and include configured/warmed undeclared secrets without resolving values.
 - Make `/auth` parser semantics match TUI intent by treating bare `/auth` as the auth menu and wiring advertised `/auth unlock` to the unlock command.
 - Align `/auth` command registry and autocomplete with the executable grammar: provider IDs complete under `/auth login` and `/auth logout`, not as invalid direct `/auth <provider>` commands.
