@@ -785,7 +785,10 @@ pub(crate) fn assess_evidence(
                 .iter()
                 .any(|read| read == std::path::Path::new(path))
         });
-    let local_target_count = conversation.intent.files_read.len();
+    let low_novelty_revisit_streak = conversation
+        .intent
+        .evidence_ledger
+        .low_novelty_revisit_streak();
     let global = if targeted_validation
         || failed_mutation_on_known_target
         || inspection_backed_by_validation_failure
@@ -807,9 +810,9 @@ pub(crate) fn assess_evidence(
         };
     }
 
-    let local = if targeted_paths_known && local_target_count <= 2 {
+    let local = if targeted_paths_known && low_novelty_revisit_streak >= 2 {
         EvidenceSufficiency::Actionable
-    } else if targeted_paths_known || local_target_count <= 2 {
+    } else if targeted_paths_known || !conversation.intent.files_read.is_empty() {
         EvidenceSufficiency::Targeted
     } else {
         EvidenceSufficiency::None
@@ -1124,6 +1127,78 @@ mod tests {
                 "prompt should infer Implementation: {prompt}"
             );
         }
+    }
+
+    #[test]
+    fn first_targeted_read_is_targeted_not_actionable() {
+        let catalog = ToolCapabilityCatalog::from_tool_defs(&[omegon_traits::ToolDefinition {
+            name: "read".into(),
+            label: String::new(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            capabilities: vec![omegon_traits::ToolCapability::RepoInspection],
+        }]);
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert("core/crates/omegon/src/behavior.rs".into());
+        let call = ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/crates/omegon/src/behavior.rs"}),
+        };
+        let evidence = assess_evidence(&conversation, &catalog, &[call], &[]);
+        assert_eq!(evidence.local, EvidenceSufficiency::Targeted);
+        assert_eq!(evidence.global, EvidenceSufficiency::None);
+    }
+
+    #[test]
+    fn repeated_low_novelty_revisits_make_known_target_actionable() {
+        let catalog = ToolCapabilityCatalog::from_tool_defs(&[omegon_traits::ToolDefinition {
+            name: "read".into(),
+            label: String::new(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            capabilities: vec![
+                omegon_traits::ToolCapability::RepoInspection,
+                omegon_traits::ToolCapability::TargetedRepoInspection,
+            ],
+        }]);
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert("core/crates/omegon/src/behavior.rs".into());
+        conversation
+            .intent
+            .evidence_ledger
+            .turns
+            .push(crate::conversation::EvidenceTurn {
+                observations: 1,
+                novel_paths: 0,
+                revisits: 1,
+                searches: 0,
+                mutation_or_validation: false,
+            });
+        conversation
+            .intent
+            .evidence_ledger
+            .turns
+            .push(crate::conversation::EvidenceTurn {
+                observations: 1,
+                novel_paths: 0,
+                revisits: 1,
+                searches: 0,
+                mutation_or_validation: false,
+            });
+        let call = ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/crates/omegon/src/behavior.rs"}),
+        };
+        let evidence = assess_evidence(&conversation, &catalog, &[call], &[]);
+        assert_eq!(evidence.local, EvidenceSufficiency::Actionable);
     }
 
     #[test]

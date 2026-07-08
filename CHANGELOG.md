@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added first-class operator copy blocks for auth/device-code flows, including best-effort host clipboard copy for GitHub Copilot device codes and exact copy/export payloads in conversation surfaces.
 
 ### Added
+- Added an A3 evidence ledger for harness guidance so discovery novelty and low-novelty revisits, not scalar file counts alone, drive evidence convergence pressure.
 - Added a guidance task-mode channel (implementation vs research) inferred from the operator prompt, with explicit `/mode ...` / `[mode: ...]` markers, so research/Q&A sessions relax execution and orientation-churn pressure while failure-driven pressure stays active.
 - Added a unified observation normalizer for harness guidance so capability-catalog tools and conservative bash read/search/validation/commit/minimal-mutation commands feed intent evidence consistently.
 - Made git guidance and validation recommendations document-aware so Markdown-only human documents/knowledge notes are not framed as code changes.
@@ -33,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added additive conceptual model IDs to the model registry so multiple provider routes can map to the same semantic model class ahead of first-class GitHub Copilot routing.
 
 ### Fixed
+- Replaced the `files_read <= 2` actionability shortcut with novelty-decay-based local evidence sufficiency, preventing first targeted reads from forcing premature convergence.
 - Suppressed anti-orientation drift and read-only evidence convergence in research mode unless validation or mutation evidence makes the target actionable.
 - Required matching successful tool results before normalized observations create positive guidance evidence, so orphaned/missing tool results no longer look like successful reads or mutations.
 - Routed StuckDetector file/churn tracking through normalized observation events so bash/view/search evidence shares the same validation and mutation reset semantics as structured tool calls.

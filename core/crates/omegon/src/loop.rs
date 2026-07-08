@@ -7591,7 +7591,7 @@ This is the right first slice."#;
             args_summary: None,
         }];
         let evidence = assess_evidence(&conversation, &test_tool_catalog(), &tool_calls, &results);
-        assert_eq!(evidence.local, EvidenceSufficiency::Actionable);
+        assert_eq!(evidence.local, EvidenceSufficiency::Targeted);
         assert_eq!(evidence.global, EvidenceSufficiency::None);
     }
 

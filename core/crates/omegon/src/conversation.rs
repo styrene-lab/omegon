@@ -153,6 +153,10 @@ pub struct IntentDocument {
 
     pub files_read: IndexSet<PathBuf>,
     pub files_modified: IndexSet<PathBuf>,
+    /// Per-session discovery ledger for A3 guidance. Tracks novelty and
+    /// revisit pressure separately from scalar file counts.
+    #[serde(default)]
+    pub evidence_ledger: EvidenceLedger,
     /// Set to true after the agent has been nudged to commit once.
     /// Persists across loop invocations (TUI re-enters run() per user turn)
     /// to prevent the nudge from firing every turn in the same session.
@@ -210,6 +214,102 @@ pub struct IntentDocument {
     pub open_questions: Vec<String>,
 
     pub stats: SessionStatsAccumulator,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvidenceLedger {
+    #[serde(default)]
+    pub seen_paths: IndexSet<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turns: Vec<EvidenceTurn>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EvidenceTurn {
+    pub observations: u32,
+    pub novel_paths: u32,
+    pub revisits: u32,
+    pub searches: u32,
+    pub mutation_or_validation: bool,
+}
+
+impl EvidenceTurn {
+    pub fn novelty_rate(&self) -> f32 {
+        if self.observations == 0 {
+            0.0
+        } else {
+            self.novel_paths as f32 / self.observations as f32
+        }
+    }
+
+    pub fn revisit_rate(&self) -> f32 {
+        if self.observations == 0 {
+            0.0
+        } else {
+            self.revisits as f32 / self.observations as f32
+        }
+    }
+}
+
+impl EvidenceLedger {
+    const MAX_TURNS: usize = 32;
+
+    pub fn record_turn(&mut self, events: &[ObservationEvent]) {
+        let mut turn = EvidenceTurn::default();
+        for event in events {
+            match event {
+                ObservationEvent::FileRead { path, .. } => {
+                    turn.observations = turn.observations.saturating_add(1);
+                    if self.seen_paths.insert(path.clone()) {
+                        turn.novel_paths = turn.novel_paths.saturating_add(1);
+                    } else {
+                        turn.revisits = turn.revisits.saturating_add(1);
+                    }
+                }
+                ObservationEvent::SearchPerformed { .. } => {
+                    turn.observations = turn.observations.saturating_add(1);
+                    turn.searches = turn.searches.saturating_add(1);
+                }
+                ObservationEvent::FileMutated { path, .. } => {
+                    turn.observations = turn.observations.saturating_add(1);
+                    turn.mutation_or_validation = true;
+                    self.seen_paths.insert(path.clone());
+                }
+                ObservationEvent::ValidationRun { .. } => {
+                    turn.observations = turn.observations.saturating_add(1);
+                    turn.mutation_or_validation = true;
+                }
+                ObservationEvent::ProgressBoundary { .. } => {
+                    turn.observations = turn.observations.saturating_add(1);
+                }
+            }
+        }
+        if turn.observations == 0 {
+            return;
+        }
+        self.turns.push(turn);
+        if self.turns.len() > Self::MAX_TURNS {
+            let excess = self.turns.len() - Self::MAX_TURNS;
+            self.turns.drain(..excess);
+        }
+    }
+
+    pub fn low_novelty_revisit_streak(&self) -> u32 {
+        let mut streak = 0u32;
+        for turn in self.turns.iter().rev() {
+            if turn.mutation_or_validation {
+                break;
+            }
+            if turn.observations > 0 && turn.novelty_rate() < 0.34 && turn.revisit_rate() >= 0.5 {
+                streak = streak.saturating_add(1);
+            } else {
+                break;
+            }
+        }
+        streak
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -400,7 +500,10 @@ impl IntentDocument {
     ) {
         self.stats.tool_calls += calls.len() as u32;
 
-        for event in ObservationNormalizer::new(catalog).normalize(calls, results) {
+        let observations = ObservationNormalizer::new(catalog).normalize(calls, results);
+        self.evidence_ledger.record_turn(&observations);
+
+        for event in observations {
             match event {
                 ObservationEvent::FileRead { path, .. } => {
                     self.files_read.insert(path);
@@ -2815,6 +2918,47 @@ mod tests {
         assert!(block.contains("30-minute TTL"));
         assert!(block.contains("Direct replacement"));
         assert!(block.contains("Cache holds stale refs"));
+    }
+
+    #[test]
+    fn evidence_ledger_tracks_novel_revisit_and_boundary() {
+        let mut intent = IntentDocument::default();
+        let read_call = ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "src/foo.rs"}),
+        };
+        let read_result = ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "read".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        intent.update_from_tools(
+            &test_tool_catalog(),
+            std::slice::from_ref(&read_call),
+            std::slice::from_ref(&read_result),
+        );
+        assert_eq!(intent.evidence_ledger.turns.last().unwrap().novel_paths, 1);
+        intent.update_from_tools(&test_tool_catalog(), &[read_call], &[read_result]);
+        assert_eq!(intent.evidence_ledger.turns.last().unwrap().revisits, 1);
+        assert_eq!(intent.evidence_ledger.low_novelty_revisit_streak(), 1);
+
+        let validate_call = ToolCall {
+            id: "2".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({"command": "cargo test -p omegon foo --locked"}),
+        };
+        let validate_result = ToolResultEntry {
+            call_id: "2".into(),
+            tool_name: "bash".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        };
+        intent.update_from_tools(&test_tool_catalog(), &[validate_call], &[validate_result]);
+        assert_eq!(intent.evidence_ledger.low_novelty_revisit_streak(), 0);
     }
 
     #[test]
