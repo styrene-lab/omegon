@@ -16,13 +16,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Added first-class operator copy blocks for auth/device-code flows, including best-effort host clipboard copy for GitHub Copilot device codes and exact copy/export payloads in conversation surfaces.
+## [0.27.4] - 2026-07-08
+
+0.27.4 refines the harness guidance loop: an evidence ledger drives convergence pressure from discovery novelty instead of raw file counts, a task-mode channel relaxes pressure for research sessions, and a unified observation normalizer feeds structured-tool and bash evidence through one path.
 
 ### Added
 - Added an A3 evidence ledger for harness guidance so discovery novelty and low-novelty revisits, not scalar file counts alone, drive evidence convergence pressure.
 - Added a guidance task-mode channel (implementation vs research) inferred from the operator prompt, with explicit `/mode ...` / `[mode: ...]` markers, so research/Q&A sessions relax execution and orientation-churn pressure while failure-driven pressure stays active.
 - Added a unified observation normalizer for harness guidance so capability-catalog tools and conservative bash read/search/validation/commit/minimal-mutation commands feed intent evidence consistently.
 - Made git guidance and validation recommendations document-aware so Markdown-only human documents/knowledge notes are not framed as code changes.
+
+### Fixed
+- Replaced the `files_read <= 2` actionability shortcut with novelty-decay-based local evidence sufficiency, preventing first targeted reads from forcing premature convergence.
+- Suppressed anti-orientation drift and read-only evidence convergence in research mode unless validation or mutation evidence makes the target actionable.
+- Required matching successful tool results before normalized observations create positive guidance evidence, so orphaned/missing tool results no longer look like successful reads or mutations.
+- Routed StuckDetector file/churn tracking through normalized observation events so bash/view/search evidence shares the same validation and mutation reset semantics as structured tool calls.
+- Gated live OpenAI-compatible provider endpoint probes behind `OMEGON_LIVE_ENDPOINT_PROBES=1` so default test runs do not fail or stall on external network availability.
+- Serialized current-directory-mutating tests on a shared CWD test lock so the default parallel `cargo test -p omegon` run no longer observes deleted temporary working directories.
+- Coalesced duplicate tool results after provider-compatible ID sanitization so wrapper-tool rollback/no-op paths cannot poison Anthropic history with multiple `tool_result` blocks.
+
+## [0.27.3] - 2026-07-07
+
+0.27.3 makes GitHub Copilot a first-class provider path, including Copilot OAuth, semantic route selection, model catalog metadata, tool-call support, and the `gpt-5.5` Responses API transport required by current Copilot models.
+
+### Added
+- Added first-class operator copy blocks for auth/device-code flows, including best-effort host clipboard copy for GitHub Copilot device codes and exact copy/export payloads in conversation surfaces.
+- Added a GitHub Copilot provider bridge with OpenAI-compatible tool-call support, Copilot OAuth token exchange, and `/chat/completions` requests using VS Code-compatible integration headers.
 - Added a redacted GitHub Copilot tools contract probe that verifies OpenAI-style `tools`, returned `tool_calls`, and tool-result continuation against the live Copilot endpoint.
 - Added GitHub Copilot device OAuth login plus a redacted inventory probe that verifies Copilot token exchange and `/models` access using VS Code-compatible integration headers.
 - Added a non-UI redacted GitHub Copilot contract probe helper for token exchange and model-list endpoint verification without exposing token values.
@@ -34,13 +53,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added additive conceptual model IDs to the model registry so multiple provider routes can map to the same semantic model class ahead of first-class GitHub Copilot routing.
 
 ### Fixed
-- Replaced the `files_read <= 2` actionability shortcut with novelty-decay-based local evidence sufficiency, preventing first targeted reads from forcing premature convergence.
-- Suppressed anti-orientation drift and read-only evidence convergence in research mode unless validation or mutation evidence makes the target actionable.
-- Required matching successful tool results before normalized observations create positive guidance evidence, so orphaned/missing tool results no longer look like successful reads or mutations.
-- Routed StuckDetector file/churn tracking through normalized observation events so bash/view/search evidence shares the same validation and mutation reset semantics as structured tool calls.
-- Gated live OpenAI-compatible provider endpoint probes behind `OMEGON_LIVE_ENDPOINT_PROBES=1` so default test runs do not fail or stall on external network availability.
-- Serialized current-directory-mutating tests on a shared CWD test lock so the default parallel `cargo test -p omegon` run no longer observes deleted temporary working directories.
-- Coalesced duplicate tool results after provider-compatible ID sanitization so wrapper-tool rollback/no-op paths cannot poison Anthropic history with multiple `tool_result` blocks.
 - Routed GitHub Copilot `gpt-5.5` through Copilot's `/responses` endpoint instead of the unsupported `/chat/completions` path and made Copilot runtime errors name the failing endpoint.
 - Prevented GitHub Copilot routes with an empty effective model from sending blank `model` values to the Copilot API and reject explicit empty model switches such as `github-copilot:`.
 - Added `github-copilot` to `/auth` command suggestions so Copilot login is discoverable from the TUI command picker.
