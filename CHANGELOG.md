@@ -16,20 +16,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Align `/secrets` menu and text status copy with the first-party secret catalog, including search-provider keys and the correct `OPENROUTER_API_KEY` spelling.
-- Add grouped first-party harness capability readiness over the secret catalog, so `/secrets` can show LLM provider, web-search, and forge readiness beyond per-secret consumers.
-- Surface first-party harness secret catalog entries in `/secrets` readiness, including LLM provider, web-search, and forge credentials, and include configured/warmed undeclared secrets without resolving values.
-- Make `/auth` parser semantics match TUI intent by treating bare `/auth` as the auth menu and wiring advertised `/auth unlock` to the unlock command.
-- Align `/auth` command registry and autocomplete with the executable grammar: provider IDs complete under `/auth login` and `/auth logout`, not as invalid direct `/auth <provider>` commands.
-- Clarify slow active-turn notification wording so it does not imply the worker is in cleanup unless lifecycle telemetry proves that separately.
-- Propagate cancellation and timeout handling through extension tool retry paths after transport reconnects.
-- Extend runtime turn lifecycle telemetry into worker-side phases so diagnostics can distinguish inner loop execution from post-loop cleanup stalls.
-- Add runtime turn lifecycle events wired through the supervisor tick/event loop, audit log, WebSocket serialization, and daemon SSE stream.
-- Add interactive-turn telemetry for post-turn cleanup phases and slow active-turn workers so logs and operator notifications can identify where queued prompts are blocked after visible completion.
-- Add runtime queue wait/elapsed timings and queue-blocked prompt log fields for active-turn diagnostics.
+## [0.27.7] - 2026-07-08
+
+0.27.7 hardens turn-completion diagnostics, auth command routing, and the secrets readiness surface. It adds first-party secret capability inventory for LLM, search, and forge integrations while preserving value-redaction guarantees.
+
+### Added
 - Add audit-log tool duration/progress cadence summaries plus structured runtime queue, prompt-start, context, stream-idle, and provider retry/failure projections.
-- Fix TUI interrupt input suppression so an interrupted turn that never emits `AgentEnd` no longer leaves the composer permanently unable to accept typing or `/exit`.
+- Add runtime queue wait/elapsed timings and queue-blocked prompt log fields for active-turn diagnostics.
+- Add interactive-turn telemetry for post-turn cleanup phases and slow active-turn workers so logs and operator notifications can identify where queued prompts are blocked after visible completion.
+- Add runtime turn lifecycle events wired through the supervisor tick/event loop, audit log, WebSocket serialization, and daemon SSE stream.
+- Extend runtime turn lifecycle telemetry into worker-side phases so diagnostics can distinguish inner loop execution from post-loop cleanup stalls.
+- Surface first-party harness secret catalog entries in `/secrets` readiness, including LLM provider, web-search, and forge credentials, and include configured/warmed undeclared secrets without resolving values.
+- Add grouped first-party harness capability readiness over the secret catalog, so `/secrets` can show LLM provider, web-search, and forge readiness beyond per-secret consumers.
+
+### Fixed
 - Treat terminal `TurnEnd` events as authoritative for releasing the TUI active-turn gate, preventing the activity row from showing `active turn` while the footer says `turn done`.
+- Fix TUI interrupt input suppression so an interrupted turn that never emits `AgentEnd` no longer leaves the composer permanently unable to accept typing or `/exit`.
+- Propagate cancellation and timeout handling through extension tool retry paths after transport reconnects.
+- Clarify slow active-turn notification wording so it does not imply the worker is in cleanup unless lifecycle telemetry proves that separately.
+- Align `/auth` command registry and autocomplete with the executable grammar: provider IDs complete under `/auth login` and `/auth logout`, not as invalid direct `/auth <provider>` commands.
+- Make `/auth` parser semantics match TUI intent by treating bare `/auth` as the auth menu and wiring advertised `/auth unlock` to the unlock command.
+- Align `/secrets` menu and text status copy with the first-party secret catalog, including search-provider keys and the correct `OPENROUTER_API_KEY` spelling.
 
 ## [0.27.5] - 2026-07-08
 
