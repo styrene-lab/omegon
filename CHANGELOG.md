@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Suppressed platform keyring access deterministically in test executables (detected via the `target/**/deps/` path) so parallel test runs cannot race the env-var latch into live macOS keychain reads that fail in dark wake or prompt the operator.
 - Gave TDD runner tests their own temp working directory instead of the process CWD, removing an ENOENT flake when parallel tests delete the directory they chdir'd into.
 - Fixed the path-traversal boundary test to assert escaping into a non-temp sibling, not `/tmp`; temp roots are intentionally allowlisted for logs/test artifacts, which made the CI Linux assertion invalid.
+- Kept the auth default-path test's environment mutation under the shared auth env lock, removing a parallel-test race that could clear `OMEGON_AUTH_JSON_PATH` while another test was writing its override auth file.
 - `scripts/release_branch.py merge-forward` no longer regresses main's workspace version when main is behind the just-released version: version state is only preserved from main when main's version is >= the release branch's version; otherwise the release branch's version state is taken and the decision is logged.
 
 ## [0.27.4] - 2026-07-08

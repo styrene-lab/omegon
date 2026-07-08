@@ -2992,16 +2992,13 @@ mod tests {
             assert_eq!(auth_json_path().as_deref(), Some(override_path.as_path()));
         });
 
-        let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
-        unsafe { std::env::remove_var("OMEGON_AUTH_JSON_PATH") };
-        let path = auth_json_path().expect("default auth path");
-        unsafe {
-            match original {
-                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
-                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
-            }
-        }
-        assert!(path.ends_with(".config/omegon/auth.json"));
+        // Keep the env mutation under the shared test lock. Doing this by
+        // hand races tests that rely on OMEGON_AUTH_JSON_PATH staying set
+        // inside their own locked closure.
+        with_auth_json_path_env(None, || {
+            let path = auth_json_path().expect("default auth path");
+            assert!(path.ends_with(".config/omegon/auth.json"));
+        });
     }
 
     #[test]
