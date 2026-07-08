@@ -6817,9 +6817,6 @@ warning: {warning}"
     }
 
     fn editor_input_suppressed_now(&self) -> bool {
-        if self.interrupt_pending {
-            return true;
-        }
         self.suppress_editor_input_until
             .is_some_and(|until| std::time::Instant::now() < until)
     }

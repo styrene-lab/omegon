@@ -1697,7 +1697,13 @@ fn interrupt_suppresses_terminal_protocol_fragments_from_editor() {
     );
     assert!(
         app.should_discard_key_after_interrupt(&protocol_fragment),
-        "raw CSI-u fragments from Ctrl+C must not enter the composer"
+        "raw CSI-u fragments from Ctrl+C must not enter the composer during the debounce window"
+    );
+
+    app.suppress_editor_input_until = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
+    assert!(
+        !app.should_discard_key_after_interrupt(&protocol_fragment),
+        "pending interrupts must not suppress all composer input indefinitely if the agent never emits AgentEnd"
     );
 
     let ctrl_c = crossterm::event::KeyEvent::new(

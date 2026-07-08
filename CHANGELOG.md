@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Fix TUI interrupt input suppression so an interrupted turn that never emits `AgentEnd` no longer leaves the composer permanently unable to accept typing or `/exit`.
+
 ## [0.27.5] - 2026-07-08
 
 0.27.5 hardens the 0.27.4 guidance loop from field evidence: the stuck detector no longer fires false repetition warnings on healthy exploration, continuation pressure recognizes interleaved analysis as output, Guarded mode returns trailing decision questions to the operator, and environment-flaky test/tool paths (keyring, read paging, spawn cwd) are made deterministic.
