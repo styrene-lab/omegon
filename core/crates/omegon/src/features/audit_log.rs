@@ -340,6 +340,8 @@ impl Feature for AuditLog {
         match event {
             BusEvent::SessionStart { session_id, cwd } => {
                 self.session_id = session_id.clone();
+                self.tool_starts.clear();
+                self.tool_updates.clear();
                 self.append(&AuditEntry {
                     ts,
                     session: session_id.clone(),
@@ -363,6 +365,8 @@ impl Feature for AuditLog {
                         "turns": turns,
                         "tool_calls": tool_calls,
                         "duration_secs": duration_secs,
+                        "open_tools": self.tool_starts.len(),
+                        "tools_with_updates": self.tool_updates.len(),
                         "initial_prompt": initial_prompt.as_deref().map(|s| Self::str_preview(s, 200)),
                         "outcome": outcome_summary.as_deref().map(|s| Self::str_preview(s, 200)),
                     }),

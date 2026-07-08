@@ -5707,6 +5707,7 @@ fn build_tui_secret_readiness_snapshot(
                         pending_compact.clone(),
                         events_tx.clone(),
                         active,
+                        lifecycle.clone(),
                     ));
                     let active_wait_started_at = std::time::Instant::now();
                     let mut slow_turn_probe = Box::pin(tokio::time::sleep(std::time::Duration::from_secs(10)));
@@ -6199,6 +6200,8 @@ struct ActiveTurnMeta {
     started_at: std::time::Instant,
 }
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 #[derive(Debug, Clone)]
 struct RuntimeTurnLifecycle {
     runtime_turn_id: u64,
@@ -6206,7 +6209,7 @@ struct RuntimeTurnLifecycle {
     phase: &'static str,
     phase_started_at: std::time::Instant,
     turn_started_at: std::time::Instant,
-    sequence: u64,
+    sequence: Arc<AtomicU64>,
 }
 
 impl RuntimeTurnLifecycle {
@@ -6218,7 +6221,7 @@ impl RuntimeTurnLifecycle {
             phase,
             phase_started_at: now,
             turn_started_at: active.started_at,
-            sequence: 0,
+            sequence: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -6229,16 +6232,32 @@ impl RuntimeTurnLifecycle {
         events_tx: &broadcast::Sender<AgentEvent>,
     ) {
         let now = std::time::Instant::now();
-        self.sequence = self.sequence.saturating_add(1);
         self.phase = phase;
         self.phase_started_at = now;
+        self.emit_phase(phase, 0, queue_depth, events_tx, "supervisor");
+    }
+
+    fn emit_phase(
+        &self,
+        phase: &'static str,
+        phase_elapsed_ms: u64,
+        queue_depth: usize,
+        events_tx: &broadcast::Sender<AgentEvent>,
+        source: &'static str,
+    ) {
+        let now = std::time::Instant::now();
+        let sequence = self
+            .sequence
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
         let _ = events_tx.send(AgentEvent::RuntimeTurnLifecycleUpdated {
             snapshot_json: serde_json::json!({
                 "turn_id": self.runtime_turn_id,
                 "prompt_id": self.prompt_id,
-                "phase": self.phase,
-                "sequence": self.sequence,
-                "phase_elapsed_ms": 0u64,
+                "phase": phase,
+                "source": source,
+                "sequence": sequence,
+                "phase_elapsed_ms": phase_elapsed_ms,
                 "turn_elapsed_ms": now.saturating_duration_since(self.turn_started_at).as_millis() as u64,
                 "queue_depth": queue_depth,
             }),
@@ -6251,7 +6270,8 @@ impl RuntimeTurnLifecycle {
             "turn_id": self.runtime_turn_id,
             "prompt_id": self.prompt_id,
             "phase": self.phase,
-            "sequence": self.sequence,
+            "source": "supervisor",
+            "sequence": self.sequence.load(Ordering::Relaxed),
             "phase_elapsed_ms": now.saturating_duration_since(self.phase_started_at).as_millis() as u64,
             "turn_elapsed_ms": now.saturating_duration_since(self.turn_started_at).as_millis() as u64,
             "queue_depth": queue_depth,
@@ -6463,6 +6483,7 @@ async fn run_interactive_active_turn(
     pending_compact: Arc<std::sync::atomic::AtomicBool>,
     events_tx: broadcast::Sender<AgentEvent>,
     active: ActiveTurnMeta,
+    lifecycle: RuntimeTurnLifecycle,
 ) -> InteractiveAgentState {
     let cancel_keeps_prompt = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut loop_config =
@@ -6500,12 +6521,15 @@ async fn run_interactive_active_turn(
             .push_user_with_images(active.prompt.text.clone(), images);
     }
 
+    lifecycle.emit_phase("conversation_updated", 0, 0, &events_tx, "worker");
+
     let cancel = CancellationToken::new();
     if let Ok(mut guard) = shared_cancel.lock() {
         *guard = Some(cancel.clone());
     }
 
     let loop_started_at = std::time::Instant::now();
+    lifecycle.emit_phase("loop_running", 0, 0, &events_tx, "worker");
     let run_result = {
         let bridge_guard = bridge.read().await;
         let mut run = std::pin::pin!(r#loop::run(
@@ -6536,6 +6560,7 @@ async fn run_interactive_active_turn(
         }
     };
     let cleanup_started_at = std::time::Instant::now();
+    lifecycle.emit_phase("post_loop_cleanup", 0, 0, &events_tx, "worker");
     tracing::info!(
         runtime_turn_id = active.runtime_turn_id,
         loop_elapsed_ms = loop_started_at.elapsed().as_millis() as u64,
@@ -6584,6 +6609,13 @@ async fn run_interactive_active_turn(
         guard.take();
     }
     let cancel_lock_elapsed = cancel_lock_started_at.elapsed();
+    lifecycle.emit_phase(
+        "cleanup_cancel_token_cleared",
+        cancel_lock_elapsed.as_millis() as u64,
+        0,
+        &events_tx,
+        "worker",
+    );
     if cancel_lock_elapsed > std::time::Duration::from_millis(250) {
         tracing::warn!(
             runtime_turn_id = active.runtime_turn_id,
@@ -6601,6 +6633,13 @@ async fn run_interactive_active_turn(
     let estimate_started_at = std::time::Instant::now();
     let est = runtime_state.conversation.estimate_tokens();
     let estimate_elapsed = estimate_started_at.elapsed();
+    lifecycle.emit_phase(
+        "cleanup_tokens_estimated",
+        estimate_elapsed.as_millis() as u64,
+        0,
+        &events_tx,
+        "worker",
+    );
     if estimate_elapsed > std::time::Duration::from_millis(250) {
         tracing::warn!(
             runtime_turn_id = active.runtime_turn_id,
@@ -6620,6 +6659,13 @@ async fn run_interactive_active_turn(
     let settings_lock_started_at = std::time::Instant::now();
     let settings = shared_settings.lock().unwrap();
     let settings_lock_elapsed = settings_lock_started_at.elapsed();
+    lifecycle.emit_phase(
+        "cleanup_settings_acquired",
+        settings_lock_elapsed.as_millis() as u64,
+        0,
+        &events_tx,
+        "worker",
+    );
     if settings_lock_elapsed > std::time::Duration::from_millis(250) {
         tracing::warn!(
             runtime_turn_id = active.runtime_turn_id,
@@ -6642,6 +6688,13 @@ async fn run_interactive_active_turn(
         metrics.update(est, context_window, &context_class, &thinking_level);
     }
     let metrics_lock_elapsed = metrics_lock_started_at.elapsed();
+    lifecycle.emit_phase(
+        "cleanup_metrics_updated",
+        metrics_lock_elapsed.as_millis() as u64,
+        0,
+        &events_tx,
+        "worker",
+    );
     if metrics_lock_elapsed > std::time::Duration::from_millis(250) {
         tracing::warn!(
             runtime_turn_id = active.runtime_turn_id,
@@ -6665,6 +6718,13 @@ async fn run_interactive_active_turn(
         runtime_turn_id = active.runtime_turn_id,
         cleanup_elapsed_ms = cleanup_started_at.elapsed().as_millis() as u64,
         "interactive active turn post-turn cleanup finished"
+    );
+    lifecycle.emit_phase(
+        "worker_returning",
+        cleanup_started_at.elapsed().as_millis() as u64,
+        0,
+        &events_tx,
+        "worker",
     );
 
     runtime_state
@@ -9751,6 +9811,7 @@ mod tests {
                 }),
             },
             queue_mode: QueueMode::UntilReady,
+            queued_at: std::time::Instant::now(),
         };
         assert!(prompt.requests_voice_close());
 
