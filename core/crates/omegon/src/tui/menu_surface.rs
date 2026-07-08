@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
 use crate::surfaces::menu::{MenuBadgeTone, MenuProjection, MenuRowKind, MenuRowProjection};
@@ -99,7 +99,6 @@ fn menu_paragraph<'a>(
     Paragraph::new(lines)
         .block(block)
         .alignment(Alignment::Left)
-        .wrap(Wrap { trim: true })
 }
 
 fn menu_lines<'a>(
@@ -174,8 +173,7 @@ fn menu_lines<'a>(
 
     let rows = state.visible_rows(projection);
     let reserved = 6usize;
-    let capacity = usize::from(inner_height).saturating_sub(reserved).max(1);
-    let window = menu_visible_window(state.selected_row, rows.len(), capacity);
+    let body_budget = usize::from(inner_height).saturating_sub(reserved).max(1);
     let mut previous_group: Option<&str> = None;
 
     if rows.is_empty() {
@@ -184,14 +182,37 @@ fn menu_lines<'a>(
             Style::default().fg(theme.muted()),
         )));
     } else {
-        if window.start > 0 {
+        let selected = state.selected_row.min(rows.len().saturating_sub(1));
+        let selected_height = menu_row_render_height(&rows, selected, true);
+        let mut start = selected;
+        let mut used = selected_height;
+        while start > 0 {
+            let needed = menu_row_render_height(&rows, start - 1, start == selected);
+            if used + needed > body_budget.saturating_sub(1).max(1) {
+                break;
+            }
+            used += needed;
+            start -= 1;
+        }
+
+        let has_above = start > 0;
+        let mut used = usize::from(has_above);
+        if has_above {
             lines.push(Line::from(Span::styled(
-                format!("  ↑ {} more", window.start),
+                format!("  ↑ {} more", start),
                 Style::default().fg(theme.dim()),
             )));
         }
-        for idx in window.clone() {
-            let visible = &rows[idx];
+
+        let mut end = start;
+        while end < rows.len() {
+            let needed = menu_row_render_height(&rows, end, end == selected);
+            let needs_more_indicator = end + 1 < rows.len();
+            let reserved_for_more = usize::from(needs_more_indicator);
+            if used + needed + reserved_for_more > body_budget && end != selected {
+                break;
+            }
+            let visible = &rows[end];
             if previous_group != Some(visible.group_id) {
                 previous_group = Some(visible.group_id);
                 lines.push(Line::from(Span::styled(
@@ -201,17 +222,16 @@ fn menu_lines<'a>(
                         .add_modifier(Modifier::BOLD),
                 )));
             }
-            lines.push(menu_row_line(theme, visible.row, idx == state.selected_row));
-            if !visible.row.description.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    format!("    {}", visible.row.description),
-                    Style::default().fg(theme.muted()),
-                )));
+            lines.push(menu_row_line(theme, visible.row, end == selected));
+            if end == selected && !visible.row.description.is_empty() {
+                lines.push(menu_description_line(theme, &visible.row.description));
             }
+            used += needed;
+            end += 1;
         }
-        if window.end < rows.len() {
+        if end < rows.len() {
             lines.push(Line::from(Span::styled(
-                format!("  ↓ {} more", rows.len() - window.end),
+                format!("  ↓ {} more", rows.len() - end),
                 Style::default().fg(theme.dim()),
             )));
         }
@@ -227,6 +247,34 @@ fn menu_lines<'a>(
         Style::default().fg(theme.dim()),
     )));
     lines
+}
+
+fn menu_row_render_height(rows: &[VisibleMenuRow<'_>], idx: usize, selected: bool) -> usize {
+    let mut height = 1usize;
+    if idx == 0 || rows[idx - 1].group_id != rows[idx].group_id {
+        height += 1;
+    }
+    if selected && !rows[idx].row.description.is_empty() {
+        height += 1;
+    }
+    height
+}
+
+fn menu_description_line<'a>(theme: &dyn Theme, description: &'a str) -> Line<'a> {
+    Line::from(Span::styled(
+        format!("    {}", truncate_menu_text(description, 160)),
+        Style::default().fg(theme.muted()),
+    ))
+}
+
+fn truncate_menu_text(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
 }
 
 fn menu_row_line<'a>(theme: &dyn Theme, row: &'a MenuRowProjection, selected: bool) -> Line<'a> {
@@ -670,8 +718,7 @@ mod tests {
                 label: "project".into(),
                 tone: MenuBadgeTone::Info,
             });
-        let mut state = MenuState::new(&projection);
-        state.selected_row = 1;
+        let state = MenuState::new(&projection);
 
         let theme = Alpharius;
         let text = menu_lines(&theme, &projection, &state, 8)
@@ -691,5 +738,94 @@ mod tests {
         assert!(text.contains("[project]"), "{text}");
         assert!(text.contains("↓"), "{text}");
         assert!(text.contains("Enter run"), "{text}");
+    }
+
+    #[test]
+    fn rendered_lines_keep_selected_tail_row_visible_with_descriptions() {
+        let mut projection = projection();
+        projection.tabs[0].groups[0].rows = (0..10)
+            .map(|idx| {
+                let id = format!("row-{idx}");
+                let label = format!("Row {idx}");
+                let command = format!("/test {idx}");
+                let mut row = row(&id, &label, &command);
+                row.description = format!("description {idx}");
+                row
+            })
+            .collect();
+        let mut state = MenuState::new(&projection);
+        state.selected_row = 9;
+
+        let theme = Alpharius;
+        let text = menu_lines(&theme, &projection, &state, 16)
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Row 9"), "{text}");
+        assert!(text.contains("description 9"), "{text}");
+        assert!(!text.contains("Row 0"), "{text}");
+        assert!(text.contains("↑"), "{text}");
+    }
+
+    #[test]
+    fn rendered_lines_scroll_vertical_row_overflow_with_more_indicators() {
+        let mut projection = projection();
+        projection.tabs[0].groups[0].rows = (0..30)
+            .map(|idx| {
+                let id = format!("row-{idx}");
+                let label = format!("Row {idx}");
+                let command = format!("/test {idx}");
+                row(&id, &label, &command)
+            })
+            .collect();
+        let mut state = MenuState::new(&projection);
+        state.selected_row = 20;
+
+        let theme = Alpharius;
+        let text = menu_lines(&theme, &projection, &state, 14)
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("› Row 20"), "{text}");
+        assert!(!text.contains("Row 0"), "{text}");
+        assert!(!text.contains("Row 29"), "{text}");
+        assert!(text.contains("↑"), "{text}");
+        assert!(text.contains("↓"), "{text}");
+    }
+
+    #[test]
+    fn rendered_lines_disable_wrapping_and_truncate_long_selected_description() {
+        let mut projection = projection();
+        projection.tabs[0].groups[0].rows[0].description = "x".repeat(240);
+        let state = MenuState::new(&projection);
+
+        let theme = Alpharius;
+        let text = menu_lines(&theme, &projection, &state, 12)
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains(&format!("{}…", "x".repeat(160))), "{text}");
+        assert!(!text.contains(&"x".repeat(200)), "{text}");
     }
 }

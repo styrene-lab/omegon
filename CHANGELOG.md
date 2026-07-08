@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Ensure structured menu rendering keeps the selected row visible on long menus by windowing against rendered line height and showing descriptions only for the selected row.
+
 ## [0.27.7] - 2026-07-08
 
 0.27.7 hardens turn-completion diagnostics, auth command routing, and the secrets readiness surface. It adds first-party secret capability inventory for LLM, search, and forge integrations while preserving value-redaction guarantees.
