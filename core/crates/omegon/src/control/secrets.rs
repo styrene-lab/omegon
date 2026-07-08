@@ -14,13 +14,30 @@ pub async fn secrets_view_response(
         }
         out.push('\n');
     }
-    out.push_str("Common secrets:\n");
+    out.push_str("Common first-party secrets:\n");
+    out.push_str("  /secrets set BRAVE_API_KEY          hidden input prompt for web search\n");
+    out.push_str("  /secrets set TAVILY_API_KEY         hidden input prompt for web search\n");
+    out.push_str("  /secrets set SERPER_API_KEY         hidden input prompt for web search\n");
+    out.push_str("  /secrets set FIRECRAWL_API_KEY      hidden input prompt for web search\n");
+    out.push_str(
+        "  /secrets set ANTHROPIC_API_KEY      hidden input prompt for provider API key\n",
+    );
+    out.push_str(
+        "  /secrets set OPENAI_API_KEY         hidden input prompt for provider API key\n",
+    );
+    out.push_str(
+        "  /secrets set OPENROUTER_API_KEY     hidden input prompt for provider API key\n",
+    );
     out.push_str("  /secrets set GITHUB_TOKEN cmd:gh auth token    always fresh from CLI\n");
+    out.push_str("  /secrets set GH_TOKEN cmd:gh auth token        GitHub CLI-compatible alias\n");
+    out.push_str(
+        "  /secrets set GITLAB_TOKEN           hidden input prompt for GitLab forge workflows\n\n",
+    );
+    out.push_str("Other recipe examples:\n");
     out.push_str("  /secrets set NPM_TOKEN cmd:npm token get       always fresh from CLI\n");
-    out.push_str("  /secrets set AWS_SECRET env:AWS_SECRET_ACCESS_KEY  from environment\n\n");
-    out.push_str("API keys (no CLI available — store directly):\n");
-    out.push_str("  /secrets set OPENROUTER_KEY                   hidden input prompt\n");
-    out.push_str("  /secrets set ANTHROPIC_API_KEY                hidden input prompt\n\n");
+    out.push_str(
+        "  /secrets set AWS_SECRET_ACCESS_KEY env:AWS_SECRET_ACCESS_KEY  from environment\n\n",
+    );
     out.push_str("Check or clear local binding:\n");
     out.push_str("  /secrets get GITHUB_TOKEN       checks resolution, never prints value\n");
     out.push_str("  /secrets delete GITHUB_TOKEN    clears local value/recipe binding");
@@ -78,7 +95,7 @@ pub async fn secrets_get_response(
         None => SlashCommandResponse {
             accepted: false,
             output: Some(format!(
-                "Secret '{name}' not found.\n  Use /secrets to see stored secrets."
+                "Secret '{name}' not found.\n  Use /secrets for the known inventory and /secrets status for stored bindings."
             )),
         },
     }
@@ -105,6 +122,49 @@ pub async fn secrets_delete_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn secrets_view_response_lists_first_party_catalog_examples() {
+        let tmp = tempfile::tempdir().unwrap();
+        let secrets = omegon_secrets::SecretsManager::new(tmp.path()).unwrap();
+
+        let response = secrets_view_response(&secrets).await;
+
+        assert!(response.accepted);
+        let output = response.output.unwrap_or_default();
+        for expected in [
+            "BRAVE_API_KEY",
+            "TAVILY_API_KEY",
+            "SERPER_API_KEY",
+            "FIRECRAWL_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "GITLAB_TOKEN",
+        ] {
+            assert!(output.contains(expected), "missing {expected} in {output}");
+        }
+        assert!(!output.contains("OPENROUTER_KEY"), "{output}");
+        assert!(!output.contains("AWS_SECRET env:"), "{output}");
+    }
+
+    #[tokio::test]
+    async fn secrets_get_missing_points_to_inventory_and_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let secrets = omegon_secrets::SecretsManager::new(tmp.path()).unwrap();
+
+        let response = secrets_get_response(&secrets, "BRAVE_API_KEY").await;
+
+        assert!(!response.accepted);
+        let output = response.output.unwrap_or_default();
+        assert!(
+            output.contains("Use /secrets for the known inventory"),
+            "{output}"
+        );
+        assert!(output.contains("/secrets status"), "{output}");
+    }
 
     #[tokio::test]
     async fn secrets_delete_response_says_binding_cleared() {

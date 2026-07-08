@@ -3438,10 +3438,11 @@ impl App {
                     }
                 };
                 let mut metadata = vec![format!(
-                    "{} configured · {} deferred · {} known providers",
+                    "{} configured · {} deferred · {} known {}",
                     capability.configured_count,
                     capability.deferred_count,
-                    capability.candidate_count
+                    capability.candidate_count,
+                    capability.candidate_label
                 )];
                 metadata.push(format!("policy: {policy_label}"));
                 metadata.push(format!("category: {}", capability.category.label()));

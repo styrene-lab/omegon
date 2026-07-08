@@ -16,7 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Refine first-party secret capability readiness with explicit any-of/all-of policy, deferred counts, provider candidate counts, preferred secrets, operator-facing category labels, and split GitHub/GitLab forge groups.
+- Align `/secrets` menu and text status copy with the first-party secret catalog, including search-provider keys and the correct `OPENROUTER_API_KEY` spelling.
 - Add grouped first-party harness capability readiness over the secret catalog, so `/secrets` can show LLM provider, web-search, and forge readiness beyond per-secret consumers.
 - Surface first-party harness secret catalog entries in `/secrets` readiness, including LLM provider, web-search, and forge credentials, and include configured/warmed undeclared secrets without resolving values.
 - Make `/auth` parser semantics match TUI intent by treating bare `/auth` as the auth menu and wiring advertised `/auth unlock` to the unlock command.

@@ -5508,7 +5508,8 @@ fn secrets_menu_separates_inventory_from_actions() {
     let menu = app.active_menu.as_ref().expect("secrets menu");
     assert_eq!(menu.projection.id, "secrets");
     assert_eq!(menu.projection.tabs[0].id, "inventory");
-    assert_eq!(menu.projection.tabs[1].id, "actions");
+    assert_eq!(menu.projection.tabs[1].id, "capabilities");
+    assert_eq!(menu.projection.tabs[2].id, "actions");
     let inventory_rows = &menu.projection.tabs[0].groups[0].rows;
     assert_eq!(inventory_rows[0].id, "secrets.inventory.unavailable");
     assert!(
