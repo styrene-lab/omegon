@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.27.4] - 2026-07-08
+
+0.27.4 refines the harness guidance loop: an evidence ledger drives convergence pressure from discovery novelty instead of raw file counts, a task-mode channel relaxes pressure for research sessions, and a unified observation normalizer feeds structured-tool and bash evidence through one path.
+
 ### Added
 - Added an A3 evidence ledger for harness guidance so discovery novelty and low-novelty revisits, not scalar file counts alone, drive evidence convergence pressure.
 - Added a guidance task-mode channel (implementation vs research) inferred from the operator prompt, with explicit `/mode ...` / `[mode: ...]` markers, so research/Q&A sessions relax execution and orientation-churn pressure while failure-driven pressure stays active.
