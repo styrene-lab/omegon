@@ -8976,11 +8976,16 @@ fn secrets_menu_inventory_rows_offer_safe_crud_actions() {
     assert_eq!(
         row.primary_action
             .as_ref()
-            .and_then(|action| action.command.as_deref()),
-        Some("/secrets get GITHUB_TOKEN")
+            .and_then(|action| action.editor_text.as_deref()),
+        Some("/secrets set GITHUB_TOKEN")
+    );
+    assert!(
+        row.actions
+            .iter()
+            .any(|action| action.command.as_deref() == Some("/secrets get GITHUB_TOKEN")),
+        "missing redacted resolution check action"
     );
     for expected in [
-        "/secrets set GITHUB_TOKEN",
         "/secrets set GITHUB_TOKEN env:",
         "/secrets set GITHUB_TOKEN cmd:",
         "/secrets set GITHUB_TOKEN vault:",

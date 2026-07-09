@@ -3253,11 +3253,11 @@ impl App {
         menu.footer = Some("↑/↓ navigate · Enter prepare action · / filter · Esc close · /secrets status for text readout".into());
         menu.tabs = vec![MenuTabProjection {
             id: "inventory".into(),
-            label: "Inventory".into(),
+            label: "Manage".into(),
             groups: vec![MenuGroupProjection {
                 id: "secrets.inventory".into(),
-                label: "Secret inventory".into(),
-                description: Some("Known and declared secret bindings from first-party harness capabilities and extension/agent metadata. Values are never resolved while rendering this menu.".into()),
+                label: "Manage secret bindings".into(),
+                description: Some("Known and declared secret bindings from first-party harness capabilities and extension/agent metadata. Enter sets or replaces the selected binding; values are never resolved while rendering this menu.".into()),
                 rows: self.secret_readiness_rows(),
             }],
         }, MenuTabProjection {
@@ -3271,16 +3271,16 @@ impl App {
             }],
         }, MenuTabProjection {
             id: "actions".into(),
-            label: "Actions".into(),
+            label: "Templates".into(),
             groups: vec![MenuGroupProjection {
                 id: "secrets.actions".into(),
-                label: "Secret actions".into(),
+                label: "Secret command templates".into(),
                 description: Some("Prepare safe secret commands without exposing values in the menu.".into()),
                 rows: vec![
                     MenuRowProjection {
                         id: "secrets.status".into(),
-                        label: "List configured secrets".into(),
-                        description: "Show configured secret names and recipes; never prints resolved values.".into(),
+                        label: "List secret bindings".into(),
+                        description: "Show configured and declared secret bindings; never prints resolved values.".into(),
                         value: None,
                         kind: MenuRowKind::Action,
                         badges: vec![MenuBadgeProjection { label: "safe".into(), tone: MenuBadgeTone::Success }],
@@ -3542,6 +3542,7 @@ impl App {
                     SecretReadinessStatus::Warmed => ("warmed", MenuBadgeTone::Success),
                     SecretReadinessStatus::Configured => ("configured", MenuBadgeTone::Info),
                     SecretReadinessStatus::Deferred => ("deferred", MenuBadgeTone::Warning),
+                    SecretReadinessStatus::Unchecked => ("not checked", MenuBadgeTone::Neutral),
                     SecretReadinessStatus::Missing => ("missing", MenuBadgeTone::Danger),
                 };
                 let mut badges = vec![MenuBadgeProjection {
@@ -3574,23 +3575,23 @@ impl App {
                     id: format!("secrets.inventory.{}", secret.name),
                     label: secret.name.clone(),
                     description:
-                        "Secret readiness metadata only; value is never resolved or displayed."
+                        "Manage this secret binding; readiness is metadata-only and values are never resolved or displayed while rendering this menu."
                             .into(),
                     value: Some(status_label.into()),
                     kind: MenuRowKind::Object,
                     badges,
                     metadata,
-                    primary_action: Some(MenuActionProjection::command(
-                        format!("secrets.get.{}", secret.name),
-                        "Check",
-                        format!("/secrets get {}", secret.name),
+                    primary_action: Some(MenuActionProjection::prime_editor(
+                        format!("secrets.set.hidden.{}", secret.name),
+                        "Set / replace",
+                        format!("/secrets set {}", secret.name),
+                        "Press Enter to capture a value with hidden input",
                     )),
                     actions: vec![
-                        MenuActionProjection::prime_editor(
-                            format!("secrets.set.hidden.{}", secret.name),
-                            "Replace hidden value",
-                            format!("/secrets set {}", secret.name),
-                            "Press Enter to capture a replacement value with hidden input",
+                        MenuActionProjection::command(
+                            format!("secrets.get.{}", secret.name),
+                            "Check resolution",
+                            format!("/secrets get {}", secret.name),
                         ),
                         MenuActionProjection::prime_editor(
                             format!("secrets.recipe.env.{}", secret.name),

@@ -92,6 +92,7 @@ pub enum SecretReadinessStatus {
     Warmed,
     Configured,
     Deferred,
+    Unchecked,
     Missing,
 }
 
@@ -187,8 +188,10 @@ pub fn build_secret_readiness_snapshot(
                 SecretReadinessStatus::Deferred
             } else if recipe_kind.is_some() {
                 SecretReadinessStatus::Configured
-            } else {
+            } else if requirement.required {
                 SecretReadinessStatus::Missing
+            } else {
+                SecretReadinessStatus::Unchecked
             };
             SecretReadiness {
                 name,
@@ -390,7 +393,7 @@ fn build_harness_capability_readiness(
             Some(SecretReadinessStatus::Deferred) => {
                 capability.deferred_count += 1;
             }
-            Some(SecretReadinessStatus::Missing) | None => {
+            Some(SecretReadinessStatus::Unchecked | SecretReadinessStatus::Missing) | None => {
                 capability.missing_count += 1;
             }
         }
@@ -449,7 +452,7 @@ mod tests {
                 .iter()
                 .find(|secret| secret.name == name)
                 .unwrap_or_else(|| panic!("missing first-party secret catalog entry for {name}"));
-            assert_eq!(secret.status, SecretReadinessStatus::Missing);
+            assert_eq!(secret.status, SecretReadinessStatus::Unchecked);
             assert!(!secret.required);
             assert!(secret.optional);
             assert!(secret.consumers.iter().any(|consumer| {
@@ -605,12 +608,12 @@ mod tests {
         assert_eq!(vault.status, SecretReadinessStatus::Deferred);
         assert_eq!(vault.recipe_kind.as_deref(), Some("vault"));
 
-        let missing = snapshot
+        let unchecked = snapshot
             .secrets
             .iter()
             .find(|secret| secret.name == "MISSING_OPTIONAL")
             .unwrap();
-        assert_eq!(missing.status, SecretReadinessStatus::Missing);
-        assert!(missing.optional);
+        assert_eq!(unchecked.status, SecretReadinessStatus::Unchecked);
+        assert!(unchecked.optional);
     }
 }
