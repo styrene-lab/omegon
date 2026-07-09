@@ -629,12 +629,39 @@ pub(crate) fn extract_shell_fs_intents_with_dialect(
 ) -> Vec<FsIntent> {
     let mut intents = Vec::new();
 
-    // Pattern 1: Output redirects — > /path, >> /path, 2> /path
-    for cap in regex_lite::Regex::new(r"([012]?>>?)\s*([^\s;|&]+)")
+    // Pattern 1a: Output redirects to quoted paths — > '/path with spaces'.
+    for cap in regex_lite::Regex::new(r#"([012]?>>?)\s*('[^']*'|\"[^\"]*\")"#)
         .unwrap()
         .captures_iter(command)
     {
         if let (Some(op_match), Some(path_match)) = (cap.get(1), cap.get(2)) {
+            push_shell_intent(
+                &mut intents,
+                if op_match.as_str().contains(">>") {
+                    FsOperation::Append
+                } else {
+                    FsOperation::Write
+                },
+                path_match.as_str(),
+                IntentSource::ShellRedirect {
+                    command_excerpt: command_excerpt(command, path_match.start(), path_match.end()),
+                    redirect_op: op_match.as_str().to_string(),
+                },
+                IntentConfidence::Heuristic,
+                dialect,
+            );
+        }
+    }
+
+    // Pattern 1: Output redirects — > /path, >> /path, 2> /path
+    for cap in regex_lite::Regex::new(r"([012]?>>?)\s*((?:\\.|[^\s;|&])+)")
+        .unwrap()
+        .captures_iter(command)
+    {
+        if let (Some(op_match), Some(path_match)) = (cap.get(1), cap.get(2)) {
+            if path_match.as_str().starts_with(['\'', '"']) {
+                continue;
+            }
             push_shell_intent(
                 &mut intents,
                 if op_match.as_str().contains(">>") {
@@ -756,7 +783,8 @@ fn push_shell_intent(
     confidence: IntentConfidence,
     dialect: PathDialect,
 ) {
-    let target = PathTarget::classify_with_dialect(raw_path, dialect);
+    let normalized_path = normalize_shell_path_token(raw_path);
+    let target = PathTarget::classify_with_dialect(&normalized_path, dialect);
     match target {
         PathTarget::PosixAbsolute { .. }
         | PathTarget::WorkspaceRelative { .. }
@@ -769,6 +797,7 @@ fn push_shell_intent(
         | PathTarget::WindowsUnc { .. }
         | PathTarget::WindowsVerbatim { .. }
         | PathTarget::WindowsDevice { .. }
+        | PathTarget::DynamicShell { .. }
         | PathTarget::WslDriveMount { .. }
         | PathTarget::MsysDriveMount { .. }
         | PathTarget::CygwinDriveMount { .. } => intents.push(FsIntent {
@@ -780,6 +809,29 @@ fn push_shell_intent(
         }),
         PathTarget::Unknown { .. } => {}
     }
+}
+
+fn normalize_shell_path_token(raw_path: &str) -> String {
+    let trimmed = raw_path.trim();
+    if let Some(mut parts) = shlex::split(trimmed)
+        && parts.len() == 1
+    {
+        return parts.remove(0);
+    }
+
+    let without_matching_quotes = if trimmed.len() >= 2 {
+        let first = trimmed.as_bytes()[0];
+        let last = trimmed.as_bytes()[trimmed.len() - 1];
+        if (first == b'\'' && last == b'\'') || (first == b'"' && last == b'"') {
+            &trimmed[1..trimmed.len() - 1]
+        } else {
+            trimmed
+        }
+    } else {
+        trimmed
+    };
+
+    without_matching_quotes.replace(r"\ ", " ")
 }
 
 fn command_excerpt(command: &str, start: usize, end: usize) -> String {
@@ -851,6 +903,10 @@ fn permission_warning_text(
             )),
             PathWarning::ShortRootPath => lines.push(format!(
                 "Warning: `{}` is a short root path that may be a malformed or truncated token.",
+                resolved.raw
+            )),
+            PathWarning::DynamicShellPath => lines.push(format!(
+                "Warning: `{}` contains shell expansion or substitution, so the runtime path cannot be proven before execution.",
                 resolved.raw
             )),
             PathWarning::WindowsDriveRelative => lines.push(format!(
@@ -1413,6 +1469,66 @@ mod tests {
         let text = result.content[0].as_text().unwrap();
         assert!(text.contains("/Ig"));
         assert!(text.contains("malformed or truncated"));
+    }
+
+    #[tokio::test]
+    async fn bash_dynamic_shell_redirect_is_diagnostic_block() {
+        let b = test_boundary("/tmp/workspace");
+        let result = execute_streaming(
+            "echo secret > $OUT",
+            Path::new("/tmp/workspace"),
+            Some(1),
+            CancellationToken::new(),
+            ToolProgressSink::noop(),
+            Some(b),
+        )
+        .await
+        .expect("dynamic shell paths should return a blocked tool result");
+
+        assert_eq!(result.details["blocked"], true);
+        assert_eq!(result.details["reason"], "suspicious_filesystem_intent");
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("$OUT"));
+        assert!(text.contains("shell expansion or substitution"));
+    }
+
+    #[tokio::test]
+    async fn bash_command_substitution_redirect_is_diagnostic_block() {
+        let b = test_boundary("/tmp/workspace");
+        let result = execute_streaming(
+            "echo secret > $(mktemp)",
+            Path::new("/tmp/workspace"),
+            Some(1),
+            CancellationToken::new(),
+            ToolProgressSink::noop(),
+            Some(b),
+        )
+        .await
+        .expect("command-substitution paths should return a blocked tool result");
+
+        assert_eq!(result.details["blocked"], true);
+        assert_eq!(result.details["reason"], "suspicious_filesystem_intent");
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("$(mktemp)"));
+        assert!(text.contains("runtime path cannot be proven"));
+    }
+
+    #[test]
+    fn shell_intent_extraction_uses_shlex_for_quoted_paths() {
+        let intents = extract_shell_fs_intents("echo secret > '/etc/evil file.txt'");
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].raw_path(), "/etc/evil file.txt");
+        assert!(matches!(
+            intents[0].target,
+            crate::tools::permissions::PathTarget::PosixAbsolute { .. }
+        ));
+    }
+
+    #[test]
+    fn shell_intent_extraction_unescapes_space_paths() {
+        let intents = extract_shell_fs_intents(r"echo secret > /etc/evil\ file.txt");
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].raw_path(), "/etc/evil file.txt");
     }
 
     #[test]

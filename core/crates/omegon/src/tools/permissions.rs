@@ -72,6 +72,7 @@ pub enum PathTarget {
     WindowsUnc { raw: String },
     WindowsVerbatim { raw: String },
     WindowsDevice { raw: String },
+    DynamicShell { raw: String },
     WslDriveMount { raw: String, drive: char },
     MsysDriveMount { raw: String, drive: char },
     CygwinDriveMount { raw: String, drive: char },
@@ -92,6 +93,11 @@ impl PathTarget {
             };
         }
 
+        if is_dynamic_shell_path(raw) {
+            return Self::DynamicShell {
+                raw: raw.to_string(),
+            };
+        }
         if is_posix_special_device(raw) || is_windows_null_device(raw) {
             return Self::SpecialDevice {
                 raw: raw.to_string(),
@@ -182,6 +188,7 @@ impl PathTarget {
             | Self::WindowsUnc { raw }
             | Self::WindowsVerbatim { raw }
             | Self::WindowsDevice { raw }
+            | Self::DynamicShell { raw }
             | Self::WslDriveMount { raw, .. }
             | Self::MsysDriveMount { raw, .. }
             | Self::CygwinDriveMount { raw, .. }
@@ -190,6 +197,15 @@ impl PathTarget {
             | Self::Unknown { raw } => raw,
         }
     }
+}
+
+fn is_dynamic_shell_path(raw: &str) -> bool {
+    raw.starts_with('$')
+        || raw.contains("${")
+        || raw.contains("$(")
+        || raw.contains('`')
+        || raw.contains("<(")
+        || raw.contains(">(")
 }
 
 fn is_posix_special_device(raw: &str) -> bool {
@@ -384,6 +400,7 @@ pub enum PathWarning {
         suggested_workspace_relative: String,
     },
     ShortRootPath,
+    DynamicShellPath,
     WindowsDriveAbsolutePath,
     WindowsDriveRelative,
     WindowsRootRelative,
@@ -426,6 +443,7 @@ pub fn classify_path_warnings(target: &PathTarget, _dialect: PathDialect) -> Vec
     }
 
     match target {
+        PathTarget::DynamicShell { .. } => warnings.push(PathWarning::DynamicShellPath),
         PathTarget::WindowsDriveRelative { .. } => warnings.push(PathWarning::WindowsDriveRelative),
         PathTarget::WindowsDriveAbsolute { .. } => {
             warnings.push(PathWarning::WindowsDriveAbsolutePath)
@@ -486,6 +504,7 @@ fn expanded_path_for_target(target: &PathTarget, cwd: &Path) -> PathBuf {
         | PathTarget::WindowsUnc { raw }
         | PathTarget::WindowsVerbatim { raw }
         | PathTarget::WindowsDevice { raw }
+        | PathTarget::DynamicShell { raw }
         | PathTarget::Unknown { raw } => PathBuf::from(raw),
     }
 }
@@ -509,10 +528,12 @@ pub fn suspicious_low_confidence_shell_path(
     ) && matches!(
         intent.source,
         IntentSource::ShellRedirect { .. } | IntentSource::ShellCommandArgument { .. }
-    ) && resolved
-        .warnings
-        .iter()
-        .any(|w| matches!(w, PathWarning::ShortRootPath))
+    ) && resolved.warnings.iter().any(|w| {
+        matches!(
+            w,
+            PathWarning::ShortRootPath | PathWarning::DynamicShellPath
+        )
+    })
 }
 
 #[cfg(test)]

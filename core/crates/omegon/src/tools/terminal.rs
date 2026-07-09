@@ -865,6 +865,10 @@ fn terminal_warning_text(resolved: &crate::tools::permissions::ResolvedFsTarget)
                 "Warning: `{}` is a short root path that may be a malformed or truncated token.",
                 resolved.raw
             )),
+            PathWarning::DynamicShellPath => lines.push(format!(
+                "Warning: `{}` contains shell expansion or substitution, so the runtime path cannot be proven before execution.",
+                resolved.raw
+            )),
             PathWarning::WindowsDriveRelative => lines.push(format!(
                 "Warning: `{}` is Windows drive-relative (`C:foo`), not drive-absolute (`C:\\foo`).",
                 resolved.raw
