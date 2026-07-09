@@ -3586,17 +3586,17 @@ impl App {
                     kind: MenuRowKind::Object,
                     badges,
                     metadata,
-                    primary_action: Some(MenuActionProjection::prime_editor(
-                        format!("secrets.set.hidden.{}", secret.name),
-                        "Set / replace",
-                        format!("/secrets set {}", secret.name),
-                        "Press Enter to capture a value with hidden input",
+                    primary_action: Some(MenuActionProjection::command(
+                        format!("secrets.get.{}", secret.name),
+                        "Check resolution",
+                        format!("/secrets get {}", secret.name),
                     )),
                     actions: vec![
-                        MenuActionProjection::command(
-                            format!("secrets.get.{}", secret.name),
-                            "Check resolution",
-                            format!("/secrets get {}", secret.name),
+                        MenuActionProjection::prime_editor(
+                            format!("secrets.set.hidden.{}", secret.name),
+                            "Set / replace",
+                            format!("/secrets set {}", secret.name),
+                            "Capture a value with hidden input after you choose to set it",
                         ),
                         MenuActionProjection::prime_editor(
                             format!("secrets.recipe.env.{}", secret.name),
