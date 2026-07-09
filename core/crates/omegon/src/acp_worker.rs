@@ -491,6 +491,7 @@ async fn worker_loop(
                     permission_policy: None,
                     permission_role: None,
                     cancel_keeps_prompt: None,
+                    drain_post_loop_requests: false,
                 };
 
                 let result = crate::r#loop::run(

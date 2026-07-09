@@ -6491,6 +6491,7 @@ async fn run_interactive_active_turn(
     let mut loop_config =
         build_interactive_loop_config(&runtime, &shared_settings, &pending_compact);
     loop_config.cancel_keeps_prompt = Some(cancel_keeps_prompt.clone());
+    loop_config.drain_post_loop_requests = false;
 
     if active.prompt.image_paths.is_empty() {
         runtime_state

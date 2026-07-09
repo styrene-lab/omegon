@@ -85,6 +85,10 @@ pub struct LoopConfig {
     /// Set once the turn has produced assistant/tool-visible effects that should
     /// keep the submitted prompt in replay even if the operator interrupts.
     pub cancel_keeps_prompt: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Whether to drain late bus requests after AgentEnd. Headless runs keep this
+    /// for best-effort lifecycle persistence; interactive turns disable it so
+    /// post-answer side work cannot hold the active-turn gate after TurnEnd.
+    pub drain_post_loop_requests: bool,
 }
 
 impl Default for LoopConfig {
@@ -110,6 +114,7 @@ impl Default for LoopConfig {
             permission_policy: None,
             permission_role: None,
             cancel_keeps_prompt: None,
+            drain_post_loop_requests: true,
         }
     }
 }
@@ -1789,49 +1794,54 @@ pub async fn run(
 
     // Process any pending bus requests (e.g. auto-compact notifications,
     // auto-store facts from lifecycle transitions, episode storage).
-    // AutoStoreFact requests are now executed rather than dropped —
-    // design_tree decisions/transitions enqueued late in the session
-    // (or from SessionEnd handlers) are persisted to memory.
-    for request in bus.drain_requests() {
-        match request {
-            omegon_traits::BusRequest::Notify { message, level } => {
-                tracing::info!(level = ?level, "Bus notification: {message}");
-            }
-            omegon_traits::BusRequest::InjectSystemMessage { content } => {
-                tracing::debug!("post-loop InjectSystemMessage ignored (loop complete): {content}");
-            }
-            omegon_traits::BusRequest::RequestCompaction
-            | omegon_traits::BusRequest::RequestAggressiveDecay => {
-                tracing::info!("Bus requested compaction (post-loop — ignored)");
-            }
-            omegon_traits::BusRequest::RefreshHarnessStatus => {}
-            omegon_traits::BusRequest::AutoStoreFact {
-                section,
-                content,
-                source,
-            } => {
-                let args = serde_json::json!({ "content": content, "section": section });
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(5),
-                    bus.execute_tool(
-                        "memory_store",
-                        "post_loop_auto_ingest",
-                        args,
-                        cancel.clone(),
-                    ),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(e)) => tracing::debug!(source, "post-loop auto-store fact skipped: {e}"),
-                    Err(_) => tracing::warn!(
-                        source,
-                        "post-loop auto-store fact timed out; continuing turn completion"
-                    ),
+    // AutoStoreFact requests are now executed rather than dropped in headless
+    // runs, but interactive turns disable this drain: terminal TurnEnd/AgentEnd
+    // already reached the operator surface, and late side work must not keep the
+    // active-turn worker alive while the composer is waiting to accept input.
+    if config.drain_post_loop_requests {
+        for request in bus.drain_requests() {
+            match request {
+                omegon_traits::BusRequest::Notify { message, level } => {
+                    tracing::info!(level = ?level, "Bus notification: {message}");
                 }
-            }
-            omegon_traits::BusRequest::EmitAgentEvent { event } => {
-                let _ = events.send(*event);
+                omegon_traits::BusRequest::InjectSystemMessage { content } => {
+                    tracing::debug!("post-loop InjectSystemMessage ignored (loop complete): {content}");
+                }
+                omegon_traits::BusRequest::RequestCompaction
+                | omegon_traits::BusRequest::RequestAggressiveDecay => {
+                    tracing::info!("Bus requested compaction (post-loop — ignored)");
+                }
+                omegon_traits::BusRequest::RefreshHarnessStatus => {}
+                omegon_traits::BusRequest::AutoStoreFact {
+                    section,
+                    content,
+                    source,
+                } => {
+                    let args = serde_json::json!({ "content": content, "section": section });
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        bus.execute_tool(
+                            "memory_store",
+                            "post_loop_auto_ingest",
+                            args,
+                            cancel.clone(),
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => {
+                            tracing::debug!(source, "post-loop auto-store fact skipped: {e}")
+                        }
+                        Err(_) => tracing::warn!(
+                            source,
+                            "post-loop auto-store fact timed out; continuing turn completion"
+                        ),
+                    }
+                }
+                omegon_traits::BusRequest::EmitAgentEvent { event } => {
+                    let _ = events.send(*event);
+                }
             }
         }
     }
@@ -6453,6 +6463,7 @@ mod tests {
             permission_policy: None,
             permission_role: None,
             cancel_keeps_prompt: None,
+            drain_post_loop_requests: true,
         };
         // soft_limit_turns=0 → loop should compute 2/3 of max_turns (40)
         assert_eq!(config.soft_limit_turns, 0, "0 = auto-calculate in run()");
