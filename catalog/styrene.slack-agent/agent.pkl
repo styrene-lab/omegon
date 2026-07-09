@@ -28,6 +28,5 @@ settings {
 }
 
 secrets {
-  required { "ANTHROPIC_API_KEY" }
   optional { "VOX_SLACK_BOT_TOKEN"; "VOX_SLACK_APP_TOKEN"; "GITHUB_TOKEN" }
 }

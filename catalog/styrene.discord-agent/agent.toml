@@ -20,5 +20,4 @@ context_class = "squad"
 max_turns = 50
 
 [secrets]
-required = ["ANTHROPIC_API_KEY"]
 optional = ["VOX_DISCORD_BOT_TOKEN", "GITHUB_TOKEN"]

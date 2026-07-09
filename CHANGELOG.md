@@ -16,7 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Hardened `/secrets` menu UX so inventory rows make resolution the primary action: Enter now runs `/secrets get <NAME>` for redacted existence/status knowledge, set/replace remains an explicit secondary action, and the TUI warms every discovered secret before building the menu snapshot so rows open as known `resolved`, `configured`, `deferred`, or `missing` instead of `not checked`.
+- Hardened `/secrets` menu UX so inventory rows make resolution the primary action: Enter now runs `/secrets get <NAME>` for redacted existence/status knowledge, set/replace remains an explicit secondary action, the TUI warms every discovered secret before building the menu snapshot so rows open as known `resolved`, `configured`, `deferred`, or `missing` instead of `not checked`, and bundled catalog agents no longer mark `ANTHROPIC_API_KEY` as globally required.
 - Hardened `/variables` menu UX to match the management-first `/secrets` posture: the inventory tab is now `Manage`, Enter updates the selected variable, empty state primes `/variables set`, and read-only value display moved to a secondary action.
 - 0.27.8 was not published as a usable artifact release; 0.28.0 supersedes it as the next installable release line.
 

@@ -33,7 +33,6 @@ workflow {
 }
 
 secrets {
-  required { "ANTHROPIC_API_KEY" }
   optional { "GOOGLE_OAUTH_TOKEN"; "GITHUB_TOKEN"; "VOX_SLACK_BOT_TOKEN" }
 }
 

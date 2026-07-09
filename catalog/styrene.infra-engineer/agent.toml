@@ -38,7 +38,6 @@ max_turns = 30
 thinking_level = "medium"
 
 [secrets]
-required = ["ANTHROPIC_API_KEY"]
 optional = ["GITHUB_TOKEN", "VOX_SLACK_BOT_TOKEN", "VOX_DISCORD_BOT_TOKEN"]
 
 [[triggers]]
