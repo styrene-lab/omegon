@@ -52,6 +52,10 @@ pub enum ControlRequest {
         target: settings::ProfileSaveTarget,
     },
     ProfileApply,
+    ProfileUse {
+        id: String,
+        scope: Option<String>,
+    },
     ProfileSetMqtt {
         enabled: Option<bool>,
     },
@@ -281,6 +285,10 @@ pub fn control_request_from_slash(
             ControlRequest::ProfileCapture { target: *target }
         }
         crate::tui::CanonicalSlashCommand::ProfileApply => ControlRequest::ProfileApply,
+        crate::tui::CanonicalSlashCommand::ProfileUse { id, scope } => ControlRequest::ProfileUse {
+            id: id.clone(),
+            scope: scope.clone(),
+        },
         crate::tui::CanonicalSlashCommand::ProfileSetMqtt(enabled) => {
             ControlRequest::ProfileSetMqtt { enabled: *enabled }
         }
@@ -696,6 +704,33 @@ pub async fn execute_control(
             )
             .await
         }
+        ControlRequest::ProfileUse { id, scope } => {
+            if let Err(error) = settings::save_project_active_profile_selection(
+                &ctx.agent.cwd,
+                &settings::ActiveProfileSelection {
+                    id: id.clone(),
+                    scope: scope.clone(),
+                },
+            ) {
+                SlashCommandResponse {
+                    accepted: false,
+                    output: Some(format!("Failed to select profile: {error}")),
+                }
+            } else {
+                let mut response = profile_apply_response(
+                    ctx.agent,
+                    ctx.runtime_state,
+                    ctx.shared_settings,
+                    ctx.bridge,
+                    ctx.events_tx,
+                )
+                .await;
+                if let Some(output) = response.output.as_mut() {
+                    output.insert_str(0, &format!("Profile selected: `{id}`.\n\n"));
+                }
+                response
+            }
+        }
         ControlRequest::StatusView => {
             status_view_response(ctx.runtime_state, ctx.agent, ctx.shared_settings).await
         }
@@ -874,6 +909,7 @@ pub async fn execute_daemon_control(
             | ControlRequest::SetRuntimeMode { .. }
             | ControlRequest::SetMaxTurns { .. }
             | ControlRequest::ProfileApply
+            | ControlRequest::ProfileUse { .. }
             | ControlRequest::ProfileCapture { .. }
             | ControlRequest::ProfileSetMqtt { .. }
             | ControlRequest::ProfileExtensionAllow { .. }
@@ -909,8 +945,22 @@ pub async fn execute_daemon_control(
             ControlRequest::SetRuntimeMode { slim } => {
                 set_runtime_mode_daemon_response(shared_settings, cwd, slim).await
             }
-            ControlRequest::ProfileApply => {
-                profile_apply_daemon_response(shared_settings, cwd).await
+            ControlRequest::ProfileApply => profile_apply_daemon_response(shared_settings, cwd).await,
+            ControlRequest::ProfileUse { id, scope } => {
+                let selection = settings::ActiveProfileSelection { id, scope };
+                match settings::save_project_active_profile_selection(cwd, &selection) {
+                    Ok(_) => {
+                        let mut response = profile_apply_daemon_response(shared_settings, cwd).await;
+                        if let Some(output) = response.output.as_mut() {
+                            output.insert_str(0, &format!("Profile selected: `{}`.\n\n", selection.id));
+                        }
+                        response
+                    }
+                    Err(error) => SlashCommandResponse {
+                        accepted: false,
+                        output: Some(format!("Failed to select profile: {error}")),
+                    },
+                }
             }
             ControlRequest::AuthLogin { provider } => auth_login_daemon_response(&provider).await,
             ControlRequest::ListSessions => {

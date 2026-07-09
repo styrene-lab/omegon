@@ -707,6 +707,10 @@ pub enum CanonicalSlashCommand {
     ProfileExport,
     ProfileCapture(crate::settings::ProfileSaveTarget),
     ProfileApply,
+    ProfileUse {
+        id: String,
+        scope: Option<String>,
+    },
     ProfileSetMqtt(Option<bool>),
     ProfileExtensionAllow(String),
     ProfileExtensionDeny(String),
@@ -933,6 +937,17 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 Some(CanonicalSlashCommand::ProfileExtensionDeny(
                     name.to_string(),
                 ))
+            } else if let Some(rest) = args
+                .strip_prefix("use ")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let mut parts = rest.split_whitespace();
+                let id = parts.next()?.to_string();
+                let scope = parts
+                    .next()
+                    .map(|value| value.trim_start_matches("--scope=").to_string());
+                Some(CanonicalSlashCommand::ProfileUse { id, scope })
             } else if let Some(name) = args.strip_prefix("persona ").map(str::trim) {
                 Some(CanonicalSlashCommand::ProfileSetPersona(
                     (!name.is_empty() && name != "off" && name != "clear")
@@ -2796,165 +2811,167 @@ impl App {
             safety: None,
             availability: None,
         };
-        menu.tabs = vec![MenuTabProjection {
-            id: "ui".into(),
-            label: "UI".into(),
-            groups: vec![
-                MenuGroupProjection {
-                    id: "ui.presets".into(),
-                    label: "Presets".into(),
-                    description: Some("Switch coarse TUI surface presets.".into()),
-                    rows: vec![
-                        MenuRowProjection {
-                            id: "ui.preset.lean".into(),
-                            label: "Lean preset".into(),
-                            description: "Conversation + activity, no dashboard chrome.".into(),
-                            value: Some(
-                                if surfaces.preset_name() == "lean" {
-                                    "active"
-                                } else {
-                                    ""
-                                }
-                                .into(),
+        menu.tabs = vec![
+            MenuTabProjection {
+                id: "ui".into(),
+                label: "UI".into(),
+                groups: vec![
+                    MenuGroupProjection {
+                        id: "ui.presets".into(),
+                        label: "Presets".into(),
+                        description: Some("Switch coarse TUI surface presets.".into()),
+                        rows: vec![
+                            MenuRowProjection {
+                                id: "ui.preset.lean".into(),
+                                label: "Lean preset".into(),
+                                description: "Conversation + activity, no dashboard chrome.".into(),
+                                value: Some(
+                                    if surfaces.preset_name() == "lean" {
+                                        "active"
+                                    } else {
+                                        ""
+                                    }
+                                    .into(),
+                                ),
+                                kind: MenuRowKind::Action,
+                                badges: vec![MenuBadgeProjection {
+                                    label: if surfaces.preset_name() == "lean" {
+                                        "active".into()
+                                    } else {
+                                        "preset".into()
+                                    },
+                                    tone: if surfaces.preset_name() == "lean" {
+                                        MenuBadgeTone::Success
+                                    } else {
+                                        MenuBadgeTone::Info
+                                    },
+                                }],
+                                metadata: vec!["/ui lean".into()],
+                                primary_action: Some({
+                                    let mut action = MenuActionProjection::command(
+                                        "ui.preset.lean.primary",
+                                        "Lean",
+                                        "/ui lean",
+                                    );
+                                    action.close_policy =
+                                        crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                    action
+                                }),
+                                actions: vec![{
+                                    let mut action = MenuActionProjection::command(
+                                        "ui.preset.lean.action",
+                                        "Lean",
+                                        "/ui lean",
+                                    );
+                                    action.key = Some("l".into());
+                                    action.close_policy =
+                                        crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                    action
+                                }],
+                                safety: None,
+                                availability: None,
+                            },
+                            MenuRowProjection {
+                                id: "ui.preset.full".into(),
+                                label: "Full preset".into(),
+                                description: "Dashboard, instruments, footer, and activity.".into(),
+                                value: Some(
+                                    if surfaces.preset_name() == "full" {
+                                        "active"
+                                    } else {
+                                        ""
+                                    }
+                                    .into(),
+                                ),
+                                kind: MenuRowKind::Action,
+                                badges: vec![MenuBadgeProjection {
+                                    label: if surfaces.preset_name() == "full" {
+                                        "active".into()
+                                    } else {
+                                        "preset".into()
+                                    },
+                                    tone: if surfaces.preset_name() == "full" {
+                                        MenuBadgeTone::Success
+                                    } else {
+                                        MenuBadgeTone::Info
+                                    },
+                                }],
+                                metadata: vec!["/ui full".into()],
+                                primary_action: Some({
+                                    let mut action = MenuActionProjection::command(
+                                        "ui.preset.full.primary",
+                                        "Full",
+                                        "/ui full",
+                                    );
+                                    action.close_policy =
+                                        crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                    action
+                                }),
+                                actions: vec![{
+                                    let mut action = MenuActionProjection::command(
+                                        "ui.preset.full.action",
+                                        "Full",
+                                        "/ui full",
+                                    );
+                                    action.key = Some("f".into());
+                                    action.close_policy =
+                                        crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                    action
+                                }],
+                                safety: None,
+                                availability: None,
+                            },
+                        ],
+                    },
+                    MenuGroupProjection {
+                        id: "ui.surfaces".into(),
+                        label: "Surfaces".into(),
+                        description: Some("Toggle individual TUI surfaces.".into()),
+                        rows: vec![
+                            surface_row(
+                                "dashboard",
+                                "Dashboard",
+                                surfaces.dashboard,
+                                "/ui toggle dashboard",
                             ),
-                            kind: MenuRowKind::Action,
-                            badges: vec![MenuBadgeProjection {
-                                label: if surfaces.preset_name() == "lean" {
-                                    "active".into()
-                                } else {
-                                    "preset".into()
-                                },
-                                tone: if surfaces.preset_name() == "lean" {
-                                    MenuBadgeTone::Success
-                                } else {
-                                    MenuBadgeTone::Info
-                                },
-                            }],
-                            metadata: vec!["/ui lean".into()],
-                            primary_action: Some({
-                                let mut action = MenuActionProjection::command(
-                                    "ui.preset.lean.primary",
-                                    "Lean",
-                                    "/ui lean",
-                                );
-                                action.close_policy =
-                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
-                                action
-                            }),
-                            actions: vec![{
-                                let mut action = MenuActionProjection::command(
-                                    "ui.preset.lean.action",
-                                    "Lean",
-                                    "/ui lean",
-                                );
-                                action.key = Some("l".into());
-                                action.close_policy =
-                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
-                                action
-                            }],
-                            safety: None,
-                            availability: None,
-                        },
-                        MenuRowProjection {
-                            id: "ui.preset.full".into(),
-                            label: "Full preset".into(),
-                            description: "Dashboard, instruments, footer, and activity.".into(),
-                            value: Some(
-                                if surfaces.preset_name() == "full" {
-                                    "active"
-                                } else {
-                                    ""
-                                }
-                                .into(),
+                            surface_row(
+                                "instruments",
+                                "Instruments",
+                                surfaces.instruments,
+                                "/ui toggle instruments",
                             ),
-                            kind: MenuRowKind::Action,
-                            badges: vec![MenuBadgeProjection {
-                                label: if surfaces.preset_name() == "full" {
-                                    "active".into()
-                                } else {
-                                    "preset".into()
-                                },
-                                tone: if surfaces.preset_name() == "full" {
-                                    MenuBadgeTone::Success
-                                } else {
-                                    MenuBadgeTone::Info
-                                },
-                            }],
-                            metadata: vec!["/ui full".into()],
-                            primary_action: Some({
-                                let mut action = MenuActionProjection::command(
-                                    "ui.preset.full.primary",
-                                    "Full",
-                                    "/ui full",
-                                );
-                                action.close_policy =
-                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
-                                action
-                            }),
-                            actions: vec![{
-                                let mut action = MenuActionProjection::command(
-                                    "ui.preset.full.action",
-                                    "Full",
-                                    "/ui full",
-                                );
-                                action.key = Some("f".into());
-                                action.close_policy =
-                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
-                                action
-                            }],
-                            safety: None,
-                            availability: None,
-                        },
-                    ],
-                },
-                MenuGroupProjection {
-                    id: "ui.surfaces".into(),
-                    label: "Surfaces".into(),
-                    description: Some("Toggle individual TUI surfaces.".into()),
-                    rows: vec![
-                        surface_row(
-                            "dashboard",
-                            "Dashboard",
-                            surfaces.dashboard,
-                            "/ui toggle dashboard",
-                        ),
-                        surface_row(
-                            "instruments",
-                            "Instruments",
-                            surfaces.instruments,
-                            "/ui toggle instruments",
-                        ),
-                        surface_row("footer", "Footer", surfaces.footer, "/ui toggle footer"),
-                        surface_row(
-                            "activity",
-                            "Activity",
-                            surfaces.activity,
-                            "/ui toggle activity",
-                        ),
-                        MenuRowProjection {
-                            id: "ui.detail".into(),
-                            label: "Tool output detail".into(),
-                            description: "Adjust tool output density/detail level.".into(),
-                            value: Some(self.settings().tool_detail.as_str().into()),
-                            kind: MenuRowKind::Action,
-                            badges: vec![MenuBadgeProjection {
-                                label: "density".into(),
-                                tone: MenuBadgeTone::Neutral,
-                            }],
-                            metadata: vec!["/ui detail".into(), "/detail".into()],
-                            primary_action: Some(MenuActionProjection::command(
-                                "ui.detail.primary",
-                                "Detail",
-                                "/ui detail",
-                            )),
-                            actions: vec![],
-                            safety: None,
-                            availability: None,
-                        },
-                    ],
-                },
-            ],
-        }];
+                            surface_row("footer", "Footer", surfaces.footer, "/ui toggle footer"),
+                            surface_row(
+                                "activity",
+                                "Activity",
+                                surfaces.activity,
+                                "/ui toggle activity",
+                            ),
+                            MenuRowProjection {
+                                id: "ui.detail".into(),
+                                label: "Tool output detail".into(),
+                                description: "Adjust tool output density/detail level.".into(),
+                                value: Some(self.settings().tool_detail.as_str().into()),
+                                kind: MenuRowKind::Action,
+                                badges: vec![MenuBadgeProjection {
+                                    label: "density".into(),
+                                    tone: MenuBadgeTone::Neutral,
+                                }],
+                                metadata: vec!["/ui detail".into(), "/detail".into()],
+                                primary_action: Some(MenuActionProjection::command(
+                                    "ui.detail.primary",
+                                    "Detail",
+                                    "/ui detail",
+                                )),
+                                actions: vec![],
+                                safety: None,
+                                availability: None,
+                            },
+                        ],
+                    },
+                ],
+            },
+        ];
         menu
     }
 
@@ -4137,6 +4154,90 @@ impl App {
             "Persisted profile controls. {source_line}; runtime drift: {drift_value}."
         ));
         menu.footer = Some("↑/↓ navigate · / filter · Enter run · s save · explicit /profile apply to apply · Esc close".into());
+        let registry = crate::settings::ProfileRegistry::discover(self.cwd());
+        let active_source = drift.source.clone();
+        let mut registry_rows: Vec<MenuRowProjection> = registry
+            .entries
+            .iter()
+            .map(|entry| {
+                let is_active = entry
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| match &active_source {
+                        crate::settings::ProfileSource::Project(active)
+                        | crate::settings::ProfileSource::User(active) => active == path,
+                        crate::settings::ProfileSource::BuiltInDefault => {
+                            entry.source_kind
+                                == crate::settings::ProfileRegistrySourceKind::BuiltInDefault
+                        }
+                    });
+                let mut badges = vec![MenuBadgeProjection {
+                    label: entry.scope.as_str().into(),
+                    tone: MenuBadgeTone::Info,
+                }];
+                if is_active {
+                    badges.push(MenuBadgeProjection {
+                        label: "active".into(),
+                        tone: MenuBadgeTone::Success,
+                    });
+                }
+                if entry.source_kind == crate::settings::ProfileRegistrySourceKind::LegacySingleton
+                {
+                    badges.push(MenuBadgeProjection {
+                        label: "legacy".into(),
+                        tone: MenuBadgeTone::Neutral,
+                    });
+                }
+                MenuRowProjection {
+                    id: format!("profile.registry.{}.{}", entry.scope.as_str(), entry.id),
+                    label: entry.id.clone(),
+                    description: entry
+                        .profile
+                        .compact_label()
+                        .unwrap_or("Profile registry entry")
+                        .to_string(),
+                    value: Some(entry.scope.as_str().into()),
+                    kind: MenuRowKind::Object,
+                    badges,
+                    metadata: vec![
+                        format!("source: {:?}", entry.source_kind),
+                        entry
+                            .path
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "built-in".into()),
+                    ],
+                    primary_action: (!is_active).then(|| {
+                        MenuActionProjection::command(
+                            format!("profile.use.{}.{}", entry.scope.as_str(), entry.id),
+                            "Use",
+                            format!("/profile use {} {}", entry.id, entry.scope.as_str()),
+                        )
+                    }),
+                    actions: vec![],
+                    safety: None,
+                    availability: None,
+                }
+            })
+            .collect();
+        if registry_rows.is_empty() {
+            registry_rows.push(MenuRowProjection {
+                id: "profile.registry.empty".into(),
+                label: "No profiles discovered".into(),
+                description: "Create a project or user profile to switch dynamically.".into(),
+                value: None,
+                kind: MenuRowKind::Object,
+                badges: vec![MenuBadgeProjection {
+                    label: "empty".into(),
+                    tone: MenuBadgeTone::Neutral,
+                }],
+                metadata: vec![],
+                primary_action: None,
+                actions: vec![],
+                safety: None,
+                availability: None,
+            });
+        }
         menu.tabs = vec![MenuTabProjection {
             id: "profile".into(),
             label: "Profile".into(),
