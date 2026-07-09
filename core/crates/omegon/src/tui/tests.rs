@@ -8920,10 +8920,7 @@ fn variables_menu_inventory_rows_offer_update_and_delete() {
         .and_then(|tab| tab.groups[0].rows.iter().find(|row| row.id == row_id))
         .expect("variable inventory row");
 
-    let update = row
-        .primary_action
-        .as_ref()
-        .expect("update primary action");
+    let update = row.primary_action.as_ref().expect("update primary action");
     assert_eq!(update.label, "Update");
     assert_eq!(
         update.editor_text.as_deref(),
@@ -9092,6 +9089,7 @@ fn secrets_menu_capabilities_tab_groups_first_party_secret_readiness() {
                         kind: "env".into(),
                     },
                 ],
+                checked_names: Vec::new(),
             },
         ),
     );

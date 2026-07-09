@@ -3073,7 +3073,10 @@ impl App {
                     label: "set".into(),
                     tone: MenuBadgeTone::Info,
                 }],
-                metadata: vec!["/variables set NAME VALUE".into(), "use /secrets for credentials".into()],
+                metadata: vec![
+                    "/variables set NAME VALUE".into(),
+                    "use /secrets for credentials".into(),
+                ],
                 primary_action: Some(MenuActionProjection::prime_editor(
                     "variables.inventory.empty.set",
                     "Set variable",
@@ -3254,15 +3257,15 @@ impl App {
             MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
         };
         let mut menu = MenuProjection::new("secrets", "Secrets");
-        menu.summary = Some("Secret configuration surface. Values are never displayed; setting plaintext secrets always uses hidden input.".into());
-        menu.footer = Some("↑/↓ navigate · Enter prepare action · / filter · Esc close · /secrets status for text readout".into());
+        menu.summary = Some("Secret configuration surface. Statuses are checked before the menu opens; values are never displayed and setting plaintext secrets always uses hidden input.".into());
+        menu.footer = Some("↑/↓ navigate · Enter check resolution · / filter · Esc close · set/replace is an explicit row action".into());
         menu.tabs = vec![MenuTabProjection {
             id: "inventory".into(),
             label: "Manage".into(),
             groups: vec![MenuGroupProjection {
                 id: "secrets.inventory".into(),
                 label: "Manage secret bindings".into(),
-                description: Some("Known and declared secret bindings from first-party harness capabilities and extension/agent metadata. Enter sets or replaces the selected binding; values are never resolved while rendering this menu.".into()),
+                description: Some("Known and declared secret bindings from first-party harness capabilities and extension/agent metadata. Status is checked before the menu opens; Enter checks redacted resolution and set/replace is explicit.".into()),
                 rows: self.secret_readiness_rows(),
             }],
         }, MenuTabProjection {

@@ -4297,29 +4297,52 @@ fn build_tui_secret_readiness_snapshot(
         armory_root,
         catalog_dir: &home.join("catalog"),
     };
-    let secret_inputs = crate::capabilities::secrets::SecretReadinessInputs {
-        session_diagnostics: agent
-            .secrets
-            .session_diagnostics()
-            .into_iter()
-            .map(|diag| crate::capabilities::secrets::SecretSessionDiagnostic {
-                name: diag.name,
-                warmed: diag.warmed,
-            })
-            .collect(),
-        recipe_descriptors: agent
-            .secrets
-            .list_recipe_descriptors()
-            .into_iter()
-            .map(|descriptor| crate::capabilities::secrets::SecretRecipeDescriptorSummary {
-                name: descriptor.name,
-                kind: descriptor.kind,
-            })
-            .collect(),
+    let build_secret_inputs = |checked_names: Vec<String>| {
+        crate::capabilities::secrets::SecretReadinessInputs {
+            session_diagnostics: agent
+                .secrets
+                .session_diagnostics()
+                .into_iter()
+                .map(|diag| crate::capabilities::secrets::SecretSessionDiagnostic {
+                    name: diag.name,
+                    warmed: diag.warmed,
+                })
+                .collect(),
+            recipe_descriptors: agent
+                .secrets
+                .list_recipe_descriptors()
+                .into_iter()
+                .map(|descriptor| crate::capabilities::secrets::SecretRecipeDescriptorSummary {
+                    name: descriptor.name,
+                    kind: descriptor.kind,
+                })
+                .collect(),
+            checked_names,
+        }
     };
+    let preliminary = crate::capabilities::inventory::build_capability_inventory_snapshot_with_secrets(
+        roots,
+        build_secret_inputs(Vec::new()),
+    )
+    .map_err(|error| {
+        tracing::warn!(?error, "failed to build preliminary TUI secret readiness snapshot");
+        error
+    })
+    .ok()?;
+    let known_secret_names: Vec<String> = preliminary
+        .secret_readiness
+        .secrets
+        .iter()
+        .map(|secret| secret.name.clone())
+        .collect();
+    for name in &known_secret_names {
+        agent
+            .secrets
+            .warm_secret(name, omegon_secrets::SecretUse::Other, false);
+    }
     crate::capabilities::inventory::build_capability_inventory_snapshot_with_secrets(
         roots,
-        secret_inputs,
+        build_secret_inputs(known_secret_names),
     )
     .map(|snapshot| snapshot.secret_readiness)
     .map_err(|error| {

@@ -100,6 +100,7 @@ pub enum SecretReadinessStatus {
 pub struct SecretReadinessInputs {
     pub session_diagnostics: Vec<SecretSessionDiagnostic>,
     pub recipe_descriptors: Vec<SecretRecipeDescriptorSummary>,
+    pub checked_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,13 +168,14 @@ pub fn build_secret_readiness_snapshot(
         .filter(|diag| diag.warmed)
         .map(|diag| diag.name)
         .collect();
+    let checked: BTreeSet<_> = inputs.checked_names.into_iter().collect();
     let recipes: BTreeMap<_, _> = inputs
         .recipe_descriptors
         .into_iter()
         .map(|descriptor| (descriptor.name, descriptor.kind))
         .collect();
 
-    for name in warmed.iter().chain(recipes.keys()) {
+    for name in warmed.iter().chain(recipes.keys()).chain(checked.iter()) {
         requirements.entry(name.clone()).or_default();
     }
 
@@ -188,7 +190,7 @@ pub fn build_secret_readiness_snapshot(
                 SecretReadinessStatus::Deferred
             } else if recipe_kind.is_some() {
                 SecretReadinessStatus::Configured
-            } else if requirement.required {
+            } else if checked.contains(&name) || requirement.required {
                 SecretReadinessStatus::Missing
             } else {
                 SecretReadinessStatus::Unchecked
@@ -462,6 +464,33 @@ mod tests {
     }
 
     #[test]
+    fn checked_secret_names_are_known_missing_when_unresolved() {
+        let snapshot = build_secret_readiness_snapshot(
+            &[],
+            &[],
+            SecretReadinessInputs {
+                session_diagnostics: Vec::new(),
+                recipe_descriptors: Vec::new(),
+                checked_names: vec!["BRAVE_API_KEY".into()],
+            },
+        );
+
+        let brave = snapshot
+            .secrets
+            .iter()
+            .find(|secret| secret.name == "BRAVE_API_KEY")
+            .expect("BRAVE_API_KEY catalog entry");
+        assert_eq!(brave.status, SecretReadinessStatus::Missing);
+
+        let tavily = snapshot
+            .secrets
+            .iter()
+            .find(|secret| secret.name == "TAVILY_API_KEY")
+            .expect("TAVILY_API_KEY catalog entry");
+        assert_eq!(tavily.status, SecretReadinessStatus::Unchecked);
+    }
+
+    #[test]
     fn harness_capability_readiness_groups_first_party_secret_catalog() {
         let snapshot = build_secret_readiness_snapshot(
             &[],
@@ -472,6 +501,7 @@ mod tests {
                     name: "BRAVE_API_KEY".into(),
                     kind: "env".into(),
                 }],
+                checked_names: Vec::new(),
             },
         );
 
@@ -507,6 +537,7 @@ mod tests {
                     name: "BRAVE_API_KEY".into(),
                     kind: "vault".into(),
                 }],
+                checked_names: Vec::new(),
             },
         );
 
@@ -535,6 +566,7 @@ mod tests {
                     name: "CUSTOM_RECIPE_SECRET".into(),
                     kind: "env".into(),
                 }],
+                checked_names: Vec::new(),
             },
         );
 
@@ -588,6 +620,7 @@ mod tests {
                     name: "VAULT_TOKEN".into(),
                     kind: "vault".into(),
                 }],
+                checked_names: Vec::new(),
             },
         );
 

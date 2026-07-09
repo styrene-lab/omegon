@@ -2507,6 +2507,7 @@ impl OmegonAcpAgent {
                                     }
                                 })
                                 .collect(),
+                            checked_names: Vec::new(),
                         },
                     )
                     .unwrap_or_default();
@@ -2568,6 +2569,7 @@ impl OmegonAcpAgent {
                                     }
                                 })
                                 .collect(),
+                            checked_names: Vec::new(),
                         },
                     )
                     .unwrap_or_default();
@@ -2622,6 +2624,7 @@ impl OmegonAcpAgent {
                                     }
                                 })
                                 .collect(),
+                            checked_names: Vec::new(),
                         },
                     )
                     .unwrap_or_default();

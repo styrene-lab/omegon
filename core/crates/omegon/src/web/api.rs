@@ -673,6 +673,7 @@ fn capability_inventory_snapshot(
                         },
                     )
                     .collect(),
+                checked_names: Vec::new(),
             },
         )
         .unwrap_or_default();
