@@ -1300,6 +1300,11 @@ pub struct ProfilePermissions {
     /// per-operation confirmation. Paths are expanded at runtime (~ → $HOME).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trusted_directories: Vec<String>,
+    /// Mount/environment identities observed when trusted directories were granted.
+    /// Legacy profiles may contain only `trustedDirectories`; this sidecar is
+    /// advisory and never grants access without the path prefix above.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_directory_grants: Vec<ProfileTrustGrant>,
     /// Per-tool permission policy. Keys are tool names such as `bash`, `write`,
     /// or `edit`; values are allow/prompt/deny rules with optional patterns.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -1310,9 +1315,30 @@ pub struct ProfilePermissions {
     pub role: Option<String>,
 }
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileTrustGrant {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mount_identity: Option<ProfileMountIdentity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileMountIdentity {
+    pub fs_type: String,
+    pub source: String,
+    pub mount_point: String,
+}
+
 impl ProfilePermissions {
     pub fn is_empty(&self) -> bool {
-        self.trusted_directories.is_empty() && self.tools.is_empty() && self.role.is_none()
+        self.trusted_directories.is_empty()
+            && self.trusted_directory_grants.is_empty()
+            && self.tools.is_empty()
+            && self.role.is_none()
     }
 }
 
@@ -1537,20 +1563,43 @@ impl Profile {
     }
 
     pub fn add_trusted_directory(&mut self, dir: String) {
+        self.add_trusted_directory_grant(dir, None, None);
+    }
+
+    pub fn add_trusted_directory_grant(
+        &mut self,
+        dir: String,
+        mount_identity: Option<ProfileMountIdentity>,
+        environment: Option<String>,
+    ) {
         let mut dirs = self.effective_trusted_directories();
         push_unique(&mut dirs, &dir);
         self.set_trusted_directories(dirs);
+        self.permissions
+            .trusted_directory_grants
+            .retain(|grant| !grant.path.eq_ignore_ascii_case(&dir));
+        self.permissions.trusted_directory_grants.push(ProfileTrustGrant {
+            path: dir,
+            mount_identity,
+            environment,
+        });
     }
 
     pub fn remove_trusted_directory(&mut self, dir: &str) {
         let mut dirs = self.effective_trusted_directories();
         retain_not_equal(&mut dirs, dir);
         self.set_trusted_directories(dirs);
+        self.permissions
+            .trusted_directory_grants
+            .retain(|grant| !grant.path.eq_ignore_ascii_case(dir));
     }
 
     fn normalize_permissions(&mut self) {
         let dirs = self.effective_trusted_directories();
-        self.set_trusted_directories(dirs);
+        self.set_trusted_directories(dirs.clone());
+        self.permissions
+            .trusted_directory_grants
+            .retain(|grant| dirs.iter().any(|dir| dir.eq_ignore_ascii_case(&grant.path)));
     }
 
     /// Apply profile to settings (called at startup).

@@ -284,7 +284,9 @@ async fn start(
             let resolved = resolve_intent_target(intent, cwd, boundary);
             if matches!(
                 resolved.relation,
-                WorkspaceRelation::InsideWorkspace | WorkspaceRelation::SpecialAllowed
+                WorkspaceRelation::InsideWorkspace
+                    | WorkspaceRelation::TrustedExternal
+                    | WorkspaceRelation::SpecialAllowed
             ) {
                 continue;
             }
@@ -906,7 +908,14 @@ fn terminal_warning_text(resolved: &crate::tools::permissions::ResolvedFsTarget)
                 "Warning: `{}` is a Cygwin Windows-drive mount path; verify whether you intended POSIX workspace storage or Windows host storage.",
                 resolved.raw
             )),
+            other => lines.push(format!(
+                "Warning: `{}` has permission context warning: {:?}.",
+                resolved.raw, other
+            )),
         }
+    }
+    if !resolved.risks.is_empty() {
+        lines.push(format!("Risks: {:?}", resolved.risks));
     }
     lines.join("\n")
 }

@@ -83,7 +83,7 @@ pub async fn execute_streaming(
     // separately below because BatchMode=yes makes it explicitly non-interactive.
     let trimmed = command.trim_start();
     if let Some(privilege) = classify_privilege_intent(trimmed) {
-        if privilege.mode != PrivilegeMode::NonInteractive {
+        if privilege.mode != PrivilegeMode::NonInteractive && command_is_privilege_invocation(trimmed) {
             return Ok(blocked_privilege_escalation_result(&privilege));
         }
     }
@@ -104,7 +104,9 @@ pub async fn execute_streaming(
             let resolved = resolve_intent_target(intent, cwd, boundary);
             if matches!(
                 resolved.relation,
-                WorkspaceRelation::InsideWorkspace | WorkspaceRelation::SpecialAllowed
+                WorkspaceRelation::InsideWorkspace
+                    | WorkspaceRelation::TrustedExternal
+                    | WorkspaceRelation::SpecialAllowed
             ) {
                 continue;
             }
@@ -616,7 +618,9 @@ pub(crate) fn scan_boundary_violations(
             let resolved = resolve_intent_target(&intent, cwd, boundary);
             if matches!(
                 resolved.relation,
-                WorkspaceRelation::InsideWorkspace | WorkspaceRelation::SpecialAllowed
+                WorkspaceRelation::InsideWorkspace
+                    | WorkspaceRelation::TrustedExternal
+                    | WorkspaceRelation::SpecialAllowed
             ) {
                 None
             } else {
@@ -873,6 +877,13 @@ fn permission_error_for_intent(
     }
 }
 
+fn command_is_privilege_invocation(command: &str) -> bool {
+    let Some(first) = shlex::split(command).and_then(|tokens| tokens.into_iter().next()) else {
+        return false;
+    };
+    matches!(first.rsplit(['/', '\\']).next().unwrap_or(&first), "sudo" | "doas" | "su" | "pkexec" | "env" | "bash" | "sh" | "zsh" | "dash")
+}
+
 fn blocked_suspicious_intent_result(
     intent: &FsIntent,
     resolved: &crate::tools::permissions::ResolvedFsTarget,
@@ -955,7 +966,14 @@ fn permission_warning_text(
                 "Warning: `{}` is a Cygwin Windows-drive mount path; verify whether you intended POSIX workspace storage or Windows host storage.",
                 resolved.raw
             )),
+            other => lines.push(format!(
+                "Warning: `{}` has permission context warning: {:?}.",
+                resolved.raw, other
+            )),
         }
+    }
+    if !resolved.risks.is_empty() {
+        lines.push(format!("Risks: {:?}", resolved.risks));
     }
     lines.join("\n")
 }
@@ -1072,7 +1090,10 @@ mod tests {
         let text = result.content[0].as_text().unwrap();
         assert!(text.contains("Blocked"), "should block sudo: {text}");
         assert_eq!(result.details["blocked"], true);
-        assert_eq!(result.details["reason"], "interactive_input_required");
+        assert_eq!(
+            result.details["reason"],
+            "privilege_escalation_requires_operator_mediation"
+        );
     }
 
     #[tokio::test]

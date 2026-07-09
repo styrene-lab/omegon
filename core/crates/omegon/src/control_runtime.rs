@@ -3505,11 +3505,13 @@ pub async fn permission_trust_add_response(
     if path.is_empty() {
         return usage_response("Usage: /permissions add <path>");
     }
+    let mount_identity = crate::tools::permissions::profile_mount_identity_for_path(Path::new(path));
+    let environment = crate::tools::permissions::profile_environment_for_current_process();
     if let Ok(mut s) = shared_settings.lock() {
         push_unique(&mut s.trusted_directories, path);
     }
     let mut profile = settings::Profile::load(cwd);
-    profile.add_trusted_directory(path.to_string());
+    profile.add_trusted_directory_grant(path.to_string(), mount_identity, environment);
     save_profile_response(
         cwd,
         profile,

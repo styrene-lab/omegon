@@ -452,6 +452,86 @@ pub enum PathWarning {
     WslWindowsDriveMount,
     MsysWindowsDriveMount,
     CygwinWindowsDriveMount,
+    PotentialHostBridge,
+    ContainerRuntimeSocket,
+    KubernetesServiceAccountToken,
+    ProjectedSecretVolume,
+    ClusterIdentityMaterial,
+    XdgDocumentPortal,
+    SandboxPrivateStorage,
+    PrivilegedKernelMaterial,
+    VmSharedFolder { fs_type: String, mount_point: PathBuf },
+    TrustedMountIdentityChanged { mount_point: PathBuf },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathRisk {
+    Normal,
+    SuspiciousSyntax,
+    AmbiguousDialect,
+    HostBridge,
+    SecretMaterial,
+    RuntimeControlSocket,
+    SandboxPortal,
+    PrivilegedKernelMaterial,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeEnvironment {
+    Host,
+    DockerLike,
+    KubernetesPod,
+    DevContainer,
+    Wsl,
+    Flatpak,
+    Snap,
+    VmGuest,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvironmentContext {
+    pub runtime: RuntimeEnvironment,
+    pub detected_by: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvironmentMountKind {
+    Ordinary,
+    ContainerOverlay,
+    BindMount,
+    DockerVolume,
+    KubernetesProjected,
+    KubernetesSecret,
+    KubernetesConfigMap,
+    ServiceAccountToken,
+    VirtioFs,
+    NineP,
+    VBoxSharedFolder,
+    VmHgfs,
+    ParallelsSharedFolder,
+    Fuse,
+    XdgDocumentPortal,
+    UnknownSpecial,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountIdentity {
+    pub fs_type: String,
+    pub source: String,
+    pub mount_point: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountContext {
+    pub mount_point: PathBuf,
+    pub fs_type: String,
+    pub source: String,
+    pub options: Vec<String>,
+    pub super_options: Vec<String>,
+    pub kind: EnvironmentMountKind,
+    pub read_only: bool,
+    pub identity: Option<MountIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -461,6 +541,9 @@ pub struct ResolvedFsTarget {
     pub canonical: PathBuf,
     pub relation: WorkspaceRelation,
     pub warnings: Vec<PathWarning>,
+    pub risks: Vec<PathRisk>,
+    pub environment: Option<EnvironmentContext>,
+    pub mount: Option<MountContext>,
 }
 
 pub fn classify_path_warnings(target: &PathTarget, _dialect: PathDialect) -> Vec<PathWarning> {
@@ -500,9 +583,147 @@ pub fn classify_path_warnings(target: &PathTarget, _dialect: PathDialect) -> Vec
         _ => {}
     }
 
+    sort_dedup_warnings(&mut warnings);
+    warnings
+}
+
+fn sort_dedup_warnings(warnings: &mut Vec<PathWarning>) {
     warnings.sort_by_key(|warning| format!("{warning:?}"));
     warnings.dedup();
-    warnings
+}
+
+fn sort_dedup_risks(risks: &mut Vec<PathRisk>) {
+    risks.sort_by_key(|risk| format!("{risk:?}"));
+    risks.dedup();
+    if risks.len() > 1 {
+        risks.retain(|risk| !matches!(risk, PathRisk::Normal));
+    }
+}
+
+fn classify_path_risks(
+    canonical: &Path,
+    target: &PathTarget,
+    mount: Option<&MountContext>,
+) -> Vec<PathRisk> {
+    let mut risks = Vec::new();
+    match target {
+        PathTarget::DynamicShell { .. } => risks.push(PathRisk::SuspiciousSyntax),
+        PathTarget::WindowsDriveRelative { .. }
+        | PathTarget::WindowsRootRelative { .. }
+        | PathTarget::WindowsVerbatim { .. }
+        | PathTarget::WindowsUnc { .. }
+        | PathTarget::WindowsDevice { .. } => risks.push(PathRisk::AmbiguousDialect),
+        PathTarget::WindowsDriveAbsolute { .. }
+        | PathTarget::WslDriveMount { .. }
+        | PathTarget::MsysDriveMount { .. }
+        | PathTarget::CygwinDriveMount { .. } => risks.push(PathRisk::HostBridge),
+        _ => {}
+    }
+    if let Some(mount) = mount {
+        match mount.kind {
+            EnvironmentMountKind::KubernetesProjected
+            | EnvironmentMountKind::KubernetesSecret
+            | EnvironmentMountKind::KubernetesConfigMap
+            | EnvironmentMountKind::ServiceAccountToken => risks.push(PathRisk::SecretMaterial),
+            EnvironmentMountKind::VirtioFs
+            | EnvironmentMountKind::NineP
+            | EnvironmentMountKind::VBoxSharedFolder
+            | EnvironmentMountKind::VmHgfs
+            | EnvironmentMountKind::ParallelsSharedFolder => risks.push(PathRisk::HostBridge),
+            EnvironmentMountKind::XdgDocumentPortal => risks.push(PathRisk::SandboxPortal),
+            _ => {}
+        }
+    }
+    append_sensitive_path_risks_only(canonical, &mut risks);
+    if risks.is_empty() {
+        risks.push(PathRisk::Normal);
+    }
+    sort_dedup_risks(&mut risks);
+    risks
+}
+
+fn append_sensitive_path_warnings(
+    canonical: &Path,
+    warnings: &mut Vec<PathWarning>,
+    risks: &mut Vec<PathRisk>,
+) {
+    let path = canonical.to_string_lossy();
+    if path.starts_with("/var/run/secrets/kubernetes.io/serviceaccount") {
+        warnings.push(PathWarning::KubernetesServiceAccountToken);
+        warnings.push(PathWarning::ClusterIdentityMaterial);
+        risks.push(PathRisk::SecretMaterial);
+    }
+    if path.starts_with("/var/run/secrets/tokens") || path.starts_with("/run/secrets") {
+        warnings.push(PathWarning::ProjectedSecretVolume);
+        risks.push(PathRisk::SecretMaterial);
+    }
+    if matches!(
+        path.as_ref(),
+        "/var/run/docker.sock"
+            | "/run/docker.sock"
+            | "/run/podman/podman.sock"
+            | "/run/containerd/containerd.sock"
+    ) {
+        warnings.push(PathWarning::ContainerRuntimeSocket);
+        risks.push(PathRisk::RuntimeControlSocket);
+    }
+    if path.starts_with("/proc/") && (path.contains("/root") || path.contains("/fd")) {
+        warnings.push(PathWarning::PrivilegedKernelMaterial);
+        risks.push(PathRisk::PrivilegedKernelMaterial);
+    }
+    if path.starts_with("/sys/kernel") || matches!(path.as_ref(), "/dev/mem" | "/dev/kmsg") {
+        warnings.push(PathWarning::PrivilegedKernelMaterial);
+        risks.push(PathRisk::PrivilegedKernelMaterial);
+    }
+    if is_xdg_document_portal_path(&path) {
+        warnings.push(PathWarning::XdgDocumentPortal);
+        risks.push(PathRisk::SandboxPortal);
+    }
+    if path.contains("/.var/app/") || path.starts_with("/var/lib/snapd/") {
+        warnings.push(PathWarning::SandboxPrivateStorage);
+        risks.push(PathRisk::SandboxPortal);
+    }
+}
+
+fn append_sensitive_path_risks_only(canonical: &Path, risks: &mut Vec<PathRisk>) {
+    let mut warnings = Vec::new();
+    append_sensitive_path_warnings(canonical, &mut warnings, risks);
+}
+
+fn append_mount_warnings(mount: &MountContext, warnings: &mut Vec<PathWarning>, risks: &mut Vec<PathRisk>) {
+    match mount.kind {
+        EnvironmentMountKind::XdgDocumentPortal => {
+            warnings.push(PathWarning::XdgDocumentPortal);
+            risks.push(PathRisk::SandboxPortal);
+        }
+        EnvironmentMountKind::KubernetesProjected
+        | EnvironmentMountKind::KubernetesSecret
+        | EnvironmentMountKind::KubernetesConfigMap
+        | EnvironmentMountKind::ServiceAccountToken => {
+            warnings.push(PathWarning::ProjectedSecretVolume);
+            risks.push(PathRisk::SecretMaterial);
+        }
+        EnvironmentMountKind::VirtioFs
+        | EnvironmentMountKind::NineP
+        | EnvironmentMountKind::VBoxSharedFolder
+        | EnvironmentMountKind::VmHgfs
+        | EnvironmentMountKind::ParallelsSharedFolder => {
+            warnings.push(PathWarning::VmSharedFolder {
+                fs_type: mount.fs_type.clone(),
+                mount_point: mount.mount_point.clone(),
+            });
+            risks.push(PathRisk::HostBridge);
+        }
+        EnvironmentMountKind::BindMount | EnvironmentMountKind::DockerVolume => {
+            warnings.push(PathWarning::PotentialHostBridge);
+            risks.push(PathRisk::HostBridge);
+        }
+        _ => {}
+    }
+}
+
+fn is_xdg_document_portal_path(path: &str) -> bool {
+    path.starts_with("/run/user/") && path.contains("/doc/")
 }
 
 pub fn resolve_intent_target(
@@ -513,20 +734,234 @@ pub fn resolve_intent_target(
     let raw = intent.raw_path().to_string();
     let expanded = expanded_path_for_target(&intent.target, cwd);
     let canonical = crate::tools::canonicalize_existing_parent_for_permissions(&expanded);
-    let relation = if crate::tools::is_allowed_special_path_for_permissions(&expanded) {
-        WorkspaceRelation::SpecialAllowed
-    } else if boundary.is_inside_boundary(&expanded) {
+    let cwd_canonical = boundary.cwd().canonicalize().unwrap_or_else(|_| boundary.cwd().to_path_buf());
+    let expanded_for_relation = if expanded.is_absolute() {
+        expanded.clone()
+    } else {
+        cwd.join(&expanded)
+    };
+    let relation = if matches!(
+        intent.target,
+        PathTarget::WindowsDriveAbsolute { .. }
+            | PathTarget::WindowsDriveRelative { .. }
+            | PathTarget::WindowsRootRelative { .. }
+            | PathTarget::WindowsVerbatim { .. }
+            | PathTarget::WindowsUnc { .. }
+            | PathTarget::WindowsDevice { .. }
+            | PathTarget::DynamicShell { .. }
+    ) {
+        WorkspaceRelation::OutsideWorkspace
+    } else if expanded_for_relation.starts_with(&cwd_canonical) || canonical.starts_with(&cwd_canonical) {
         WorkspaceRelation::InsideWorkspace
+    } else if boundary.is_trusted_path_for_permissions(&canonical) {
+        WorkspaceRelation::TrustedExternal
+    } else if crate::tools::is_allowed_special_path_for_permissions(&expanded) {
+        WorkspaceRelation::SpecialAllowed
     } else {
         WorkspaceRelation::OutsideWorkspace
     };
+    let environment = detect_environment_context();
+    let mount = detect_mount_context(&canonical);
+    let mut warnings = classify_path_warnings(&intent.target, PathDialect::detect_from_env());
+    let mut risks = classify_path_risks(&canonical, &intent.target, mount.as_ref());
+    append_sensitive_path_warnings(&expanded, &mut warnings, &mut risks);
+    append_sensitive_path_warnings(&canonical, &mut warnings, &mut risks);
+    if let Some(mount) = &mount {
+        append_mount_warnings(mount, &mut warnings, &mut risks);
+    }
+    if matches!(relation, WorkspaceRelation::TrustedExternal) && mount.as_ref().and_then(|m| m.identity.as_ref()).is_some() {
+        // Persistent trust grants are currently path-prefix based. Surface mount identity
+        // on every trusted external resolution so callers/prompts can distinguish a
+        // workspace path from an approved host/VM/container mount and renew trust if the
+        // observed identity changes in future profile schemas.
+        if let Some(mount) = &mount {
+            warnings.push(PathWarning::TrustedMountIdentityChanged { mount_point: mount.mount_point.clone() });
+        }
+    }
+    sort_dedup_warnings(&mut warnings);
+    sort_dedup_risks(&mut risks);
 
     ResolvedFsTarget {
         raw,
         expanded,
         canonical,
         relation,
-        warnings: classify_path_warnings(&intent.target, PathDialect::detect_from_env()),
+        warnings,
+        risks,
+        environment,
+        mount,
+    }
+}
+
+pub fn profile_mount_identity_for_path(path: &Path) -> Option<crate::settings::ProfileMountIdentity> {
+    detect_mount_context(path)
+        .and_then(|mount| mount.identity)
+        .map(|identity| crate::settings::ProfileMountIdentity {
+            fs_type: identity.fs_type,
+            source: identity.source,
+            mount_point: identity.mount_point.display().to_string(),
+        })
+}
+
+pub fn profile_environment_for_current_process() -> Option<String> {
+    detect_environment_context().map(|context| format!("{:?}", context.runtime))
+}
+
+fn detect_environment_context() -> Option<EnvironmentContext> {
+    let mut detected_by = Vec::new();
+    let runtime = if std::env::var_os("KUBERNETES_SERVICE_HOST").is_some()
+        || Path::new("/var/run/secrets/kubernetes.io/serviceaccount/token").exists()
+    {
+        detected_by.push("kubernetes-service-account".to_string());
+        RuntimeEnvironment::KubernetesPod
+    } else if std::env::var_os("DEVCONTAINER").is_some()
+        || std::env::var_os("CODESPACES").is_some()
+        || Path::new("/workspaces").exists()
+    {
+        detected_by.push("devcontainer-marker".to_string());
+        RuntimeEnvironment::DevContainer
+    } else if std::env::var_os("WSL_DISTRO_NAME").is_some()
+        || std::fs::read_to_string("/proc/version")
+            .is_ok_and(|content| content.contains("Microsoft") || content.contains("WSL"))
+    {
+        detected_by.push("wsl-marker".to_string());
+        RuntimeEnvironment::Wsl
+    } else if std::env::var_os("FLATPAK_ID").is_some() || Path::new("/.flatpak-info").exists() {
+        detected_by.push("flatpak-marker".to_string());
+        RuntimeEnvironment::Flatpak
+    } else if std::env::var_os("SNAP").is_some() || std::env::var_os("SNAP_NAME").is_some() {
+        detected_by.push("snap-marker".to_string());
+        RuntimeEnvironment::Snap
+    } else if Path::new("/.dockerenv").exists()
+        || Path::new("/run/.containerenv").exists()
+        || std::fs::read_to_string("/proc/1/cgroup").is_ok_and(|content| {
+            content.contains("kubepods")
+                || content.contains("containerd")
+                || content.contains("docker")
+                || content.contains("podman")
+        })
+    {
+        detected_by.push("container-marker".to_string());
+        RuntimeEnvironment::DockerLike
+    } else if std::fs::read_to_string("/sys/class/dmi/id/product_name").is_ok_and(|content| {
+        let lower = content.to_ascii_lowercase();
+        lower.contains("virtualbox")
+            || lower.contains("vmware")
+            || lower.contains("qemu")
+            || lower.contains("parallels")
+    }) {
+        detected_by.push("dmi-vm-marker".to_string());
+        RuntimeEnvironment::VmGuest
+    } else {
+        detected_by.push("default-host".to_string());
+        RuntimeEnvironment::Host
+    };
+    Some(EnvironmentContext { runtime, detected_by })
+}
+
+fn detect_mount_context(path: &Path) -> Option<MountContext> {
+    let content = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+    parse_mountinfo(&content, path)
+}
+
+fn parse_mountinfo(content: &str, path: &Path) -> Option<MountContext> {
+    content
+        .lines()
+        .filter_map(parse_mountinfo_line)
+        .filter(|mount| path.starts_with(&mount.mount_point))
+        .max_by(|left, right| {
+            left.mount_point
+                .components()
+                .count()
+                .cmp(&right.mount_point.components().count())
+                .then_with(|| mount_kind_specificity(left.kind).cmp(&mount_kind_specificity(right.kind)))
+        })
+}
+
+fn mount_kind_specificity(kind: EnvironmentMountKind) -> u8 {
+    match kind {
+        EnvironmentMountKind::Ordinary | EnvironmentMountKind::ContainerOverlay => 0,
+        EnvironmentMountKind::Fuse | EnvironmentMountKind::UnknownSpecial => 1,
+        EnvironmentMountKind::BindMount | EnvironmentMountKind::DockerVolume => 2,
+        EnvironmentMountKind::VirtioFs
+        | EnvironmentMountKind::NineP
+        | EnvironmentMountKind::VBoxSharedFolder
+        | EnvironmentMountKind::VmHgfs
+        | EnvironmentMountKind::ParallelsSharedFolder => 3,
+        EnvironmentMountKind::KubernetesProjected
+        | EnvironmentMountKind::KubernetesSecret
+        | EnvironmentMountKind::KubernetesConfigMap
+        | EnvironmentMountKind::ServiceAccountToken
+        | EnvironmentMountKind::XdgDocumentPortal => 4,
+    }
+}
+
+fn parse_mountinfo_line(line: &str) -> Option<MountContext> {
+    let (pre, post) = line.split_once(" - ")?;
+    let pre_fields = pre.split_whitespace().collect::<Vec<_>>();
+    let post_fields = post.split_whitespace().collect::<Vec<_>>();
+    if pre_fields.len() < 6 || post_fields.len() < 3 {
+        return None;
+    }
+    let mount_point = PathBuf::from(unescape_mountinfo_field(pre_fields[4]));
+    let options = pre_fields[5].split(',').map(ToOwned::to_owned).collect::<Vec<_>>();
+    let fs_type = post_fields[0].to_string();
+    let source = post_fields[1].to_string();
+    let super_options = post_fields[2].split(',').map(ToOwned::to_owned).collect::<Vec<_>>();
+    let read_only = options.iter().any(|o| o == "ro") || super_options.iter().any(|o| o == "ro");
+    let kind = classify_mount_kind(&mount_point, &fs_type, &source, &options, &super_options);
+    let identity = Some(MountIdentity {
+        fs_type: fs_type.clone(),
+        source: source.clone(),
+        mount_point: mount_point.clone(),
+    });
+    Some(MountContext { mount_point, fs_type, source, options, super_options, kind, read_only, identity })
+}
+
+fn unescape_mountinfo_field(value: &str) -> String {
+    value
+        .replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
+}
+
+fn classify_mount_kind(
+    mount_point: &Path,
+    fs_type: &str,
+    source: &str,
+    options: &[String],
+    super_options: &[String],
+) -> EnvironmentMountKind {
+    let mount = mount_point.to_string_lossy();
+    let all = options.iter().chain(super_options.iter()).map(String::as_str).collect::<Vec<_>>().join(",");
+    if mount.starts_with("/run/user/") && mount.contains("/doc") {
+        return EnvironmentMountKind::XdgDocumentPortal;
+    }
+    if mount.starts_with("/var/run/secrets/kubernetes.io/serviceaccount") {
+        return EnvironmentMountKind::ServiceAccountToken;
+    }
+    if all.contains("kubernetes.io~secret") || source.contains("secret") {
+        return EnvironmentMountKind::KubernetesSecret;
+    }
+    if all.contains("kubernetes.io~configmap") || source.contains("configmap") {
+        return EnvironmentMountKind::KubernetesConfigMap;
+    }
+    if all.contains("kubernetes.io~projected") || source.contains("projected") {
+        return EnvironmentMountKind::KubernetesProjected;
+    }
+    match fs_type {
+        "overlay" => EnvironmentMountKind::ContainerOverlay,
+        "virtiofs" => EnvironmentMountKind::VirtioFs,
+        "9p" => EnvironmentMountKind::NineP,
+        "vboxsf" => EnvironmentMountKind::VBoxSharedFolder,
+        "fuse.vmhgfs-fuse" => EnvironmentMountKind::VmHgfs,
+        "prl_fs" => EnvironmentMountKind::ParallelsSharedFolder,
+        ty if ty.starts_with("fuse") => EnvironmentMountKind::Fuse,
+        _ if source.starts_with("/dev/") && !mount.starts_with("/dev") => EnvironmentMountKind::BindMount,
+        _ if all.contains("bind") => EnvironmentMountKind::BindMount,
+        _ if source.starts_with("volume-") || source.contains("docker/volumes") => EnvironmentMountKind::DockerVolume,
+        _ => EnvironmentMountKind::Ordinary,
     }
 }
 
@@ -971,5 +1406,56 @@ mod tests {
                 .warnings
                 .contains(&PathWarning::WslWindowsDriveMount)
         );
+        assert!(resolved.risks.contains(&PathRisk::HostBridge));
+    }
+
+    #[test]
+    fn sensitive_paths_carry_risk_warnings() {
+        let cwd = Path::new("/tmp/workspace");
+        let boundary = crate::tools::WorkspaceBoundary::new(cwd.to_path_buf());
+        let token = resolve_intent_target(
+            &write_intent("/var/run/secrets/kubernetes.io/serviceaccount/token"),
+            cwd,
+            &boundary,
+        );
+        assert!(token.warnings.contains(&PathWarning::KubernetesServiceAccountToken));
+        assert!(token.warnings.contains(&PathWarning::ClusterIdentityMaterial));
+        assert!(token.risks.contains(&PathRisk::SecretMaterial));
+
+        let socket = resolve_intent_target(&write_intent("/var/run/docker.sock"), cwd, &boundary);
+        assert!(socket.warnings.contains(&PathWarning::ContainerRuntimeSocket));
+        assert!(socket.risks.contains(&PathRisk::RuntimeControlSocket));
+
+        let kernel = resolve_intent_target(&write_intent("/proc/1/root/etc/shadow"), cwd, &boundary);
+        assert!(kernel.warnings.contains(&PathWarning::PrivilegedKernelMaterial));
+        assert!(kernel.risks.contains(&PathRisk::PrivilegedKernelMaterial));
+    }
+
+    #[test]
+    fn parses_mountinfo_and_classifies_special_mounts() {
+        let mountinfo = "36 29 0:32 / / rw,relatime - overlay overlay rw,lowerdir=/x\n\
+                         37 36 0:33 / /run/user/501/doc rw,nosuid,nodev - fuse.portal portal rw\n\
+                         38 36 0:34 / /mnt/shared rw,relatime - virtiofs hostshare rw";
+        let portal = parse_mountinfo(mountinfo, Path::new("/run/user/501/doc/file.txt")).unwrap();
+        assert_eq!(portal.kind, EnvironmentMountKind::XdgDocumentPortal);
+        let shared = parse_mountinfo(mountinfo, Path::new("/mnt/shared/project/file.txt")).unwrap();
+        assert_eq!(shared.kind, EnvironmentMountKind::VirtioFs);
+        assert_eq!(shared.identity.as_ref().unwrap().source, "hostshare");
+    }
+
+    #[test]
+    fn trusted_external_relation_is_distinct_from_workspace() {
+        let cwd = tempfile::tempdir().unwrap();
+        let trusted = tempfile::tempdir().unwrap();
+        let settings = std::sync::Arc::new(std::sync::Mutex::new(crate::settings::Settings {
+            trusted_directories: vec![trusted.path().display().to_string()],
+            ..Default::default()
+        }));
+        let boundary = crate::tools::WorkspaceBoundary::new(cwd.path().to_path_buf()).with_settings(settings);
+        let target = trusted.path().join("out.txt");
+        std::fs::write(&target, "ok").unwrap();
+        let intent = write_intent(&target.display().to_string());
+        let resolved = resolve_intent_target(&intent, cwd.path(), &boundary);
+        assert_eq!(resolved.relation, WorkspaceRelation::TrustedExternal);
     }
 }

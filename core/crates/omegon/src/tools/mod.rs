@@ -518,6 +518,12 @@ impl WorkspaceBoundary {
 
     /// Check if a path is within a trusted directory (from settings or
     /// session-level approvals).
+    pub(crate) fn is_trusted_path_for_permissions(&self, path: &Path) -> bool {
+        self.is_trusted_path(path)
+    }
+
+    /// Check if a path is within a trusted directory (from settings or
+    /// session-level approvals).
     fn is_trusted_path(&self, path: &Path) -> bool {
         // Check session-level approvals
         if let Ok(approved) = self.session_approved.lock() {
