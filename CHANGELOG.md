@@ -16,16 +16,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Make permissions intent architecture the primary 0.27.8 release target: filesystem access is moving toward structured intent, provenance-rich path diagnostics, and confidence-aware mediation for suspicious shell-derived paths such as `/Ig` and mistaken root-dot paths such as `/.omegon`.
+- 0.27.8 was not published as a usable artifact release; 0.28.0 supersedes it as the next installable release line.
+
+## [0.28.0] - 2026-07-09
+
+0.28.0 completes the permissions intent architecture: filesystem mediation now carries structured intent, path dialect, environment/mount, sensitive-infrastructure, privilege-escalation, and trusted-grant context through bash and terminal preflight.
+
+### Added
+- Make permissions intent architecture the primary 0.28.0 release target: filesystem access is moving toward structured intent, provenance-rich path diagnostics, and confidence-aware mediation for suspicious shell-derived paths such as `/Ig` and mistaken root-dot paths such as `/.omegon`.
 - Added the first permissions intent slice: bash and terminal preflight now extract structured filesystem intents, block low-confidence `/Ig`-class shell artifacts diagnostically, and annotate `/.omegon`-class host-absolute paths with workspace-relative correction guidance while preserving strict boundary behavior.
 - Added the second permissions intent hardening slice: path classification now recognizes POSIX, Windows drive/root/UNC/verbatim/device forms, WSL `/mnt/<drive>` mounts, MSYS `/c/...`, and Cygwin `/cygdrive/c/...` before `PathBuf` resolution so foreign absolute paths cannot silently fall back to workspace-relative handling.
-- Expanded the permissions intent design target with path dialect, VM/container mount context, sensitive infrastructure path, and trust-grant mount-identity affordances so 0.27.8 hardening covers Windows/WSL, containers, VM shared folders, Kubernetes projected secrets, runtime sockets, and sandbox portals.
+- Expanded the permissions intent design target with path dialect, VM/container mount context, sensitive infrastructure path, and trust-grant mount-identity affordances so 0.28.0 hardening covers Windows/WSL, containers, VM shared folders, Kubernetes projected secrets, runtime sockets, and sandbox portals.
 - Added the third permissions intent hardening slice: shell dialect detection now uses WSL/MSYS/Cygwin environment markers, drive-absolute Windows paths get distinct diagnostics from verbatim paths, and Windows root-relative paths are explicitly classified instead of falling through POSIX handling.
 - Added the fourth permissions intent hardening slice: dynamic shell-expanded path targets (`$OUT`, `$(mktemp)`, process substitution) are blocked diagnostically before execution, and shell path token normalization now uses the existing `shlex` dependency for quoted/escaped redirect paths.
-- Locked in the privilege-escalation mediation model: non-interactive `bash` blocks interactive sudo/doas/su/pkexec paths and directs elevation through the operator-visible terminal surface, while terminal allows operator-mediated sudo/doas by default and supports an emergency `OMEGON_DENY_PRIVILEGE_ESCALATION` blanket deny.
-- Completed the permissions intent architecture for 0.27.8: resolved filesystem targets now carry sensitive infrastructure risks, best-effort environment and mount context, trusted-external relations, and persistent trusted-directory mount/environment grant identity where available.
-- Sanitized assistant reasoning segments so provider-specific `<think>` wrappers, HTML comment artifacts, and standalone bold heading markers do not leak into the TUI transcript.
+- Completed the permissions intent architecture for 0.28.0: resolved filesystem targets now carry sensitive infrastructure risks, best-effort environment and mount context, trusted-external relations, and persistent trusted-directory mount/environment grant identity where available.
 
+### Fixed
+- Locked in the privilege-escalation mediation model: non-interactive `bash` blocks interactive sudo/doas/su/pkexec paths and directs elevation through the operator-visible terminal surface, while terminal allows operator-mediated sudo/doas by default and supports an emergency `OMEGON_DENY_PRIVILEGE_ESCALATION` blanket deny.
+- Sanitized assistant reasoning segments so provider-specific `<think>` wrappers, HTML comment artifacts, and standalone bold heading markers do not leak into the TUI transcript.
 - Fix 0.27.7 release smoke regressions in capability inventory tests, remote `/auth logout` routing, and settings menu drift rendering.
 - Reduce active-turn worker notifications to a single queued-prompt warning instead of periodic no-action status toasts while long turns are still running.
 - Bound post-loop auto-memory ingestion so late SessionEnd memory writes cannot keep the interactive worker active after a terminal TurnEnd.
