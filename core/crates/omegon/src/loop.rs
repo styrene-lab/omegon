@@ -1811,16 +1811,23 @@ pub async fn run(
                 source,
             } => {
                 let args = serde_json::json!({ "content": content, "section": section });
-                if let Err(e) = bus
-                    .execute_tool(
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    bus.execute_tool(
                         "memory_store",
                         "post_loop_auto_ingest",
                         args,
                         cancel.clone(),
-                    )
-                    .await
+                    ),
+                )
+                .await
                 {
-                    tracing::debug!(source, "post-loop auto-store fact skipped: {e}");
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => tracing::debug!(source, "post-loop auto-store fact skipped: {e}"),
+                    Err(_) => tracing::warn!(
+                        source,
+                        "post-loop auto-store fact timed out; continuing turn completion"
+                    ),
                 }
             }
             omegon_traits::BusRequest::EmitAgentEvent { event } => {
