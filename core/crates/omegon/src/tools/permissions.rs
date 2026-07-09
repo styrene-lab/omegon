@@ -31,6 +31,34 @@ impl PathDialect {
             Self::Posix
         }
     }
+
+    pub fn detect_from_env() -> Self {
+        Self::detect_from_env_vars(|key| std::env::var(key).ok())
+    }
+
+    pub fn detect_from_env_vars(mut get: impl FnMut(&str) -> Option<String>) -> Self {
+        if cfg!(windows) {
+            return Self::Windows;
+        }
+
+        if get("WSL_DISTRO_NAME").is_some()
+            || get("WSL_INTEROP").is_some()
+            || get("WSLENV").is_some()
+        {
+            return Self::WslPosix;
+        }
+
+        let msystem = get("MSYSTEM").unwrap_or_default();
+        let ostype = get("OSTYPE").unwrap_or_default();
+        if !msystem.is_empty() || ostype.contains("msys") || ostype.contains("mingw") {
+            return Self::Msys;
+        }
+        if get("CYGWIN").is_some() || ostype.contains("cygwin") {
+            return Self::Cygwin;
+        }
+
+        Self::shell_default()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,7 +135,7 @@ impl PathTarget {
                 drive,
             };
         }
-        if matches!(dialect, PathDialect::Msys)
+        if matches!(dialect, PathDialect::Msys | PathDialect::WslPosix)
             && let Some(drive) = msys_drive_mount(raw)
         {
             return Self::MsysDriveMount {
@@ -356,7 +384,9 @@ pub enum PathWarning {
         suggested_workspace_relative: String,
     },
     ShortRootPath,
+    WindowsDriveAbsolutePath,
     WindowsDriveRelative,
+    WindowsRootRelative,
     WindowsVerbatimPath,
     WindowsUncPath,
     WindowsDeviceName,
@@ -374,7 +404,7 @@ pub struct ResolvedFsTarget {
     pub warnings: Vec<PathWarning>,
 }
 
-pub fn classify_path_warnings(target: &PathTarget, dialect: PathDialect) -> Vec<PathWarning> {
+pub fn classify_path_warnings(target: &PathTarget, _dialect: PathDialect) -> Vec<PathWarning> {
     let raw = target.raw();
     let mut warnings = Vec::new();
     if let Some(rest) = raw.strip_prefix("/.") {
@@ -397,15 +427,16 @@ pub fn classify_path_warnings(target: &PathTarget, dialect: PathDialect) -> Vec<
 
     match target {
         PathTarget::WindowsDriveRelative { .. } => warnings.push(PathWarning::WindowsDriveRelative),
+        PathTarget::WindowsDriveAbsolute { .. } => {
+            warnings.push(PathWarning::WindowsDriveAbsolutePath)
+        }
+        PathTarget::WindowsRootRelative { .. } => warnings.push(PathWarning::WindowsRootRelative),
         PathTarget::WindowsVerbatim { .. } => warnings.push(PathWarning::WindowsVerbatimPath),
         PathTarget::WindowsUnc { .. } => warnings.push(PathWarning::WindowsUncPath),
         PathTarget::WindowsDevice { .. } => warnings.push(PathWarning::WindowsDeviceName),
         PathTarget::WslDriveMount { .. } => warnings.push(PathWarning::WslWindowsDriveMount),
         PathTarget::MsysDriveMount { .. } => warnings.push(PathWarning::MsysWindowsDriveMount),
         PathTarget::CygwinDriveMount { .. } => warnings.push(PathWarning::CygwinWindowsDriveMount),
-        PathTarget::WindowsDriveAbsolute { .. } if !matches!(dialect, PathDialect::Windows) => {
-            warnings.push(PathWarning::WindowsVerbatimPath)
-        }
         _ => {}
     }
 
@@ -435,7 +466,7 @@ pub fn resolve_intent_target(
         expanded,
         canonical,
         relation,
-        warnings: classify_path_warnings(&intent.target, PathDialect::shell_default()),
+        warnings: classify_path_warnings(&intent.target, PathDialect::detect_from_env()),
     }
 }
 
@@ -492,6 +523,20 @@ mod tests {
         FsIntent {
             operation: FsOperation::Write,
             target: PathTarget::classify(raw),
+            actor: IntentActor::Model,
+            source: IntentSource::ShellCommandArgument {
+                command_excerpt: format!("write {raw}"),
+                command_name: "write".to_string(),
+                argv_index: 1,
+            },
+            confidence: IntentConfidence::Parsed,
+        }
+    }
+
+    fn write_intent_with_dialect(raw: &str, dialect: PathDialect) -> FsIntent {
+        FsIntent {
+            operation: FsOperation::Write,
+            target: PathTarget::classify_with_dialect(raw, dialect),
             actor: IntentActor::Model,
             source: IntentSource::ShellCommandArgument {
                 command_excerpt: format!("write {raw}"),
@@ -577,8 +622,86 @@ mod tests {
         assert!(
             resolved
                 .warnings
+                .contains(&PathWarning::WindowsDriveAbsolutePath)
+        );
+    }
+
+    #[test]
+    fn detects_shell_dialect_from_environment_markers() {
+        assert_eq!(
+            PathDialect::detect_from_env_vars(|key| match key {
+                "WSL_DISTRO_NAME" => Some("Ubuntu".to_string()),
+                _ => None,
+            }),
+            PathDialect::WslPosix
+        );
+        assert_eq!(
+            PathDialect::detect_from_env_vars(|key| match key {
+                "MSYSTEM" => Some("MINGW64".to_string()),
+                _ => None,
+            }),
+            PathDialect::Msys
+        );
+        assert_eq!(
+            PathDialect::detect_from_env_vars(|key| match key {
+                "OSTYPE" => Some("cygwin".to_string()),
+                _ => None,
+            }),
+            PathDialect::Cygwin
+        );
+    }
+
+    #[test]
+    fn windows_root_relative_is_classified_and_warned_in_windows_dialect() {
+        let target = PathTarget::classify_with_dialect(r"\Windows\System32", PathDialect::Windows);
+        assert!(matches!(target, PathTarget::WindowsRootRelative { .. }));
+        assert!(
+            classify_path_warnings(&target, PathDialect::Windows)
+                .contains(&PathWarning::WindowsRootRelative)
+        );
+    }
+
+    #[test]
+    fn windows_drive_absolute_has_distinct_warning_from_verbatim() {
+        let drive = PathTarget::classify(r"C:\Users\alice\secret.txt");
+        let verbatim = PathTarget::classify(r"\\?\C:\Users\alice\secret.txt");
+        assert!(
+            classify_path_warnings(&drive, PathDialect::Posix)
+                .contains(&PathWarning::WindowsDriveAbsolutePath)
+        );
+        assert!(
+            !classify_path_warnings(&drive, PathDialect::Posix)
                 .contains(&PathWarning::WindowsVerbatimPath)
         );
+        assert!(
+            classify_path_warnings(&verbatim, PathDialect::Posix)
+                .contains(&PathWarning::WindowsVerbatimPath)
+        );
+    }
+
+    #[test]
+    fn msys_drive_mount_requires_dialect_context() {
+        assert!(matches!(
+            PathTarget::classify("/c/Users/alice/secret.txt"),
+            PathTarget::PosixAbsolute { .. }
+        ));
+        let intent = write_intent_with_dialect("/c/Users/alice/secret.txt", PathDialect::Msys);
+        assert!(matches!(
+            intent.target,
+            PathTarget::MsysDriveMount { drive: 'C', .. }
+        ));
+        let warnings = classify_path_warnings(&intent.target, PathDialect::Msys);
+        assert!(warnings.contains(&PathWarning::MsysWindowsDriveMount));
+    }
+
+    #[test]
+    fn wsl_dialect_accepts_msys_style_drive_mount_as_bridge_warning() {
+        let target =
+            PathTarget::classify_with_dialect("/c/Users/alice/secret.txt", PathDialect::WslPosix);
+        assert!(matches!(
+            target,
+            PathTarget::MsysDriveMount { drive: 'C', .. }
+        ));
     }
 
     #[test]

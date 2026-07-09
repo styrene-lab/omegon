@@ -1,8 +1,8 @@
 //! Bash tool — execute shell commands with output capture.
 
 use crate::tools::permissions::{
-    FsIntent, FsOperation, IntentActor, IntentConfidence, IntentSource, PathTarget, PathWarning,
-    WorkspaceRelation, resolve_intent_target, suspicious_low_confidence_shell_path,
+    FsIntent, FsOperation, IntentActor, IntentConfidence, IntentSource, PathDialect, PathTarget,
+    PathWarning, WorkspaceRelation, resolve_intent_target, suspicious_low_confidence_shell_path,
 };
 use anyhow::Result;
 use omegon_traits::{
@@ -620,6 +620,13 @@ pub(crate) fn scan_boundary_violations(
 }
 
 pub(crate) fn extract_shell_fs_intents(command: &str) -> Vec<FsIntent> {
+    extract_shell_fs_intents_with_dialect(command, PathDialect::detect_from_env())
+}
+
+pub(crate) fn extract_shell_fs_intents_with_dialect(
+    command: &str,
+    dialect: PathDialect,
+) -> Vec<FsIntent> {
     let mut intents = Vec::new();
 
     // Pattern 1: Output redirects — > /path, >> /path, 2> /path
@@ -641,6 +648,7 @@ pub(crate) fn extract_shell_fs_intents(command: &str) -> Vec<FsIntent> {
                     redirect_op: op_match.as_str().to_string(),
                 },
                 IntentConfidence::Heuristic,
+                dialect,
             );
         }
     }
@@ -665,6 +673,7 @@ pub(crate) fn extract_shell_fs_intents(command: &str) -> Vec<FsIntent> {
                     argv_index: if cap.get(1).is_some() { 2 } else { 1 },
                 },
                 IntentConfidence::Heuristic,
+                dialect,
             );
         }
     }
@@ -689,6 +698,7 @@ pub(crate) fn extract_shell_fs_intents(command: &str) -> Vec<FsIntent> {
                     argv_index: 2,
                 },
                 IntentConfidence::Heuristic,
+                dialect,
             );
         }
     }
@@ -709,6 +719,7 @@ pub(crate) fn extract_shell_fs_intents(command: &str) -> Vec<FsIntent> {
                     argv_index: 1,
                 },
                 IntentConfidence::Heuristic,
+                dialect,
             );
         }
     }
@@ -729,6 +740,7 @@ pub(crate) fn extract_shell_fs_intents(command: &str) -> Vec<FsIntent> {
                     argv_index: 1,
                 },
                 IntentConfidence::Heuristic,
+                dialect,
             );
         }
     }
@@ -742,8 +754,9 @@ fn push_shell_intent(
     raw_path: &str,
     source: IntentSource,
     confidence: IntentConfidence,
+    dialect: PathDialect,
 ) {
-    let target = PathTarget::classify(raw_path);
+    let target = PathTarget::classify_with_dialect(raw_path, dialect);
     match target {
         PathTarget::PosixAbsolute { .. }
         | PathTarget::WorkspaceRelative { .. }
@@ -842,6 +855,14 @@ fn permission_warning_text(
             )),
             PathWarning::WindowsDriveRelative => lines.push(format!(
                 "Warning: `{}` is Windows drive-relative (`C:foo`), not drive-absolute (`C:\\foo`).",
+                resolved.raw
+            )),
+            PathWarning::WindowsDriveAbsolutePath => lines.push(format!(
+                "Warning: `{}` is a Windows drive-absolute path; it requires exact host-boundary approval and is not treated as workspace-relative.",
+                resolved.raw
+            )),
+            PathWarning::WindowsRootRelative => lines.push(format!(
+                "Warning: `{}` is Windows root-relative on the current drive and is not treated as workspace-relative.",
                 resolved.raw
             )),
             PathWarning::WindowsVerbatimPath => lines.push(format!(

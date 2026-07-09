@@ -869,6 +869,14 @@ fn terminal_warning_text(resolved: &crate::tools::permissions::ResolvedFsTarget)
                 "Warning: `{}` is Windows drive-relative (`C:foo`), not drive-absolute (`C:\\foo`).",
                 resolved.raw
             )),
+            PathWarning::WindowsDriveAbsolutePath => lines.push(format!(
+                "Warning: `{}` is a Windows drive-absolute path; it requires exact host-boundary approval and is not treated as workspace-relative.",
+                resolved.raw
+            )),
+            PathWarning::WindowsRootRelative => lines.push(format!(
+                "Warning: `{}` is Windows root-relative on the current drive and is not treated as workspace-relative.",
+                resolved.raw
+            )),
             PathWarning::WindowsVerbatimPath => lines.push(format!(
                 "Warning: `{}` is a Windows absolute/verbatim path; it requires exact host-boundary approval and is not treated as workspace-relative.",
                 resolved.raw
