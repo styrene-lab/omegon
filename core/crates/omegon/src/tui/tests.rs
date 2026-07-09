@@ -5097,7 +5097,13 @@ fn slash_skills_menu_rows_have_operator_expected_labels_and_values() {
         None
     );
     assert_eq!(
-        code_act.row.primary_action.as_ref().unwrap().target_row_id.as_deref(),
+        code_act
+            .row
+            .primary_action
+            .as_ref()
+            .unwrap()
+            .target_row_id
+            .as_deref(),
         Some("skills.code-act")
     );
     assert!(
@@ -5120,7 +5126,10 @@ fn slash_skills_menu_rows_have_operator_expected_labels_and_values() {
         .iter()
         .find(|action| action.key.as_deref() == Some("g"))
         .expect("full inspect shortcut");
-    assert_eq!(full_inspect.command.as_deref(), Some("/skills get code-act"));
+    assert_eq!(
+        full_inspect.command.as_deref(),
+        Some("/skills get code-act")
+    );
 }
 
 #[test]

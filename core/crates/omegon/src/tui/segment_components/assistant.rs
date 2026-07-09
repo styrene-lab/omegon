@@ -144,12 +144,61 @@ fn push_meta_line<'a>(
     )));
 }
 
+fn is_reasoning_artifact_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    matches!(
+        trimmed.to_ascii_lowercase().as_str(),
+        "<think>" | "</think>" | "<thinking>" | "</thinking>"
+    ) || (trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
+}
+
+fn strip_reasoning_inline_markup(text: &str) -> String {
+    let cleaned = clean_inline_text(text);
+    let trimmed = cleaned.trim();
+    if trimmed.len() >= 4 && trimmed.starts_with("**") && trimmed.ends_with("**") {
+        trimmed
+            .trim_start_matches('*')
+            .trim_end_matches('*')
+            .trim()
+            .to_string()
+    } else {
+        cleaned
+    }
+}
+
+pub fn sanitized_reasoning_lines(thinking: &str) -> Vec<String> {
+    split_trimmed_trailing_empty_lines(thinking)
+        .into_iter()
+        .filter_map(|line| {
+            if is_reasoning_artifact_line(line) {
+                return None;
+            }
+            let cleaned = strip_reasoning_inline_markup(line.trim());
+            if cleaned.trim().is_empty() {
+                None
+            } else {
+                Some(cleaned)
+            }
+        })
+        .collect()
+}
+
+fn sanitized_reasoning_display_lines(thinking: &str) -> Vec<String> {
+    sanitized_reasoning_lines(thinking)
+        .into_iter()
+        .filter(|line| !line.trim().is_empty())
+        .collect()
+}
+
 pub fn slim_reasoning_detail_rows(
     thinking: &str,
     complete: bool,
     max_completed_lines: usize,
 ) -> Vec<String> {
-    let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(thinking);
+    let think_lines = sanitized_reasoning_display_lines(thinking);
     let show = if complete {
         think_lines.len().min(max_completed_lines)
     } else {
@@ -161,12 +210,7 @@ pub fn slim_reasoning_detail_rows(
         think_lines.len(),
         if think_lines.len() == 1 { "" } else { "s" }
     ));
-    detail_rows.extend(
-        think_lines
-            .iter()
-            .take(show)
-            .map(|line| clean_inline_text(line.trim())),
-    );
+    detail_rows.extend(think_lines.iter().take(show).cloned());
     if complete && think_lines.len() > show {
         detail_rows.push(format!("⋯ {} more", think_lines.len() - show));
     }
@@ -220,7 +264,7 @@ fn push_reasoning_lines<'a>(
         AssistantReasoning::Expanded {
             max_completed_lines,
         } => {
-            let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(props.thinking);
+            let think_lines = sanitized_reasoning_display_lines(props.thinking);
             let show = if props.complete {
                 think_lines.len().min(max_completed_lines)
             } else {
@@ -659,6 +703,69 @@ I need to take a closer look at the actual prefix widths and current assumptions
             .position(|line| line.contains("final answer"))
             .expect("answer row");
         assert!(answer_row >= 2, "answer overlapped reasoning: {lines:?}");
+    }
+
+    #[test]
+    fn sanitized_reasoning_lines_remove_provider_artifacts() {
+        let lines = sanitized_reasoning_lines(
+            "**Planning detailed row expansion**\n\n<!-- -->\n\n<think>\n**Designing info detail rows with key focus**\n</think>",
+        );
+
+        assert_eq!(
+            lines,
+            vec![
+                "Planning detailed row expansion".to_string(),
+                "Designing info detail rows with key focus".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn full_reasoning_renderer_sanitizes_markdown_and_html_artifacts() {
+        let meta = SegmentMeta::default();
+        let presentation = SegmentPresentation {
+            role: SegmentRole::Assistant,
+            sigil: "Ω",
+            emphasis: SegmentEmphasis::Normal,
+            tool_category: None,
+        };
+        let area = Rect::new(0, 0, 76, 14);
+        let mut buf = Buffer::empty(area);
+        render(
+            AssistantRenderProps {
+                text: "done",
+                thinking: "**Planning detailed row expansion**\n\n<!-- -->\n\n**Designing info detail rows with key focus**",
+                complete: true,
+                meta: &meta,
+                presentation: &presentation,
+                surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                    surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                    copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                    selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+                },
+                mode: SegmentRenderMode::Full,
+            },
+            area,
+            &mut buf,
+            &SegmentRenderContext::new(&Alpharius, crate::tui::segments::SegmentRenderMode::Full),
+        );
+        let text = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Planning detailed row expansion"), "{text}");
+        assert!(
+            text.contains("Designing info detail rows with key focus"),
+            "{text}"
+        );
+        assert!(!text.contains("<!--"), "{text}");
+        assert!(!text.contains("-->"), "{text}");
+        assert!(!text.contains("**"), "{text}");
     }
 
     #[test]

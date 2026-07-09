@@ -3473,10 +3473,10 @@ mod tests {
         };
         assert_eq!(
             seg.height_in_mode(80, &Alpharius, SegmentRenderMode::Slim),
-            4
+            3
         );
 
-        let (area, mut buf) = make_buf(80, 4);
+        let (area, mut buf) = make_buf(80, 3);
         seg.render(
             area,
             &mut buf,
@@ -3486,7 +3486,7 @@ mod tests {
         );
         let text = buf_text(&buf, area);
         assert!(text.contains("reasoning"), "{text}");
-        assert!(text.contains("3 lines"), "{text}");
+        assert!(text.contains("2 lines"), "{text}");
         assert!(text.contains("Considering documentation needs"), "{text}");
         assert!(text.contains("I need to modify documents"), "{text}");
     }

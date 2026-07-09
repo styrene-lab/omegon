@@ -16,7 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Changed the `/skills` TUI menu so Enter focuses bounded row details instead of dumping `/skills get` output; `g` now opens the full inspect output explicitly.
+- Sanitized assistant reasoning segments so provider-specific `<think>` wrappers, HTML comment artifacts, and standalone bold heading markers do not leak into the TUI transcript.
 
 - Fix 0.27.7 release smoke regressions in capability inventory tests, remote `/auth logout` routing, and settings menu drift rendering.
 - Reduce active-turn worker notifications to a single queued-prompt warning instead of periodic no-action status toasts while long turns are still running.

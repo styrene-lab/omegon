@@ -1805,7 +1805,9 @@ pub async fn run(
                     tracing::info!(level = ?level, "Bus notification: {message}");
                 }
                 omegon_traits::BusRequest::InjectSystemMessage { content } => {
-                    tracing::debug!("post-loop InjectSystemMessage ignored (loop complete): {content}");
+                    tracing::debug!(
+                        "post-loop InjectSystemMessage ignored (loop complete): {content}"
+                    );
                 }
                 omegon_traits::BusRequest::RequestCompaction
                 | omegon_traits::BusRequest::RequestAggressiveDecay => {
