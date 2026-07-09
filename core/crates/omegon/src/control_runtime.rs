@@ -3754,7 +3754,7 @@ pub(crate) fn skills_menu_projection(
                 id: format!("skills.{}", entry.name),
                 label: entry.name.clone(),
                 description,
-                value: Some("Enter: inspect · i: install/refresh".into()),
+                value: Some("Enter: details · i: install/refresh · g: full inspect".into()),
                 kind: MenuRowKind::Object,
                 badges: vec![
                     MenuBadgeProjection {
@@ -3781,20 +3781,31 @@ pub(crate) fn skills_menu_projection(
                     },
                 ],
                 metadata: skill_palette_metadata(entry),
-                primary_action: Some(MenuActionProjection::command(
-                    format!("skills.get.{}", entry.name),
-                    "Inspect",
-                    format!("/skills get {}", entry.name),
+                primary_action: Some(MenuActionProjection::focus_row(
+                    format!("skills.details.{}", entry.name),
+                    "Details",
+                    format!("skills.{}", entry.name),
                 )),
-                actions: vec![{
-                    let mut action = MenuActionProjection::command(
-                        format!("skills.install.{}", entry.name),
-                        "Install/refresh",
-                        format!("/skills install {}", entry.name),
-                    );
-                    action.key = Some("i".into());
-                    action
-                }],
+                actions: vec![
+                    {
+                        let mut action = MenuActionProjection::command(
+                            format!("skills.install.{}", entry.name),
+                            "Install/refresh",
+                            format!("/skills install {}", entry.name),
+                        );
+                        action.key = Some("i".into());
+                        action
+                    },
+                    {
+                        let mut action = MenuActionProjection::command(
+                            format!("skills.get.{}", entry.name),
+                            "Full inspect",
+                            format!("/skills get {}", entry.name),
+                        );
+                        action.key = Some("g".into());
+                        action
+                    },
+                ],
                 safety: None,
                 availability: None,
             }
@@ -3882,7 +3893,7 @@ pub(crate) fn skills_menu_projection(
                     id: "skills".into(),
                     label: "Installed and available skills".into(),
                     description: Some(
-                        "Enter inspects the selected skill; filter by name, source, state, tag, or profile."
+                        "Enter shows bounded skill details; use g for full `/skills get` output; filter by name, source, state, tag, or profile."
                             .into(),
                     ),
                     rows: skill_rows,
@@ -3897,7 +3908,7 @@ pub(crate) fn skills_menu_projection(
         }],
         actions: Vec::new(),
         footer: Some(
-            "↑/↓ navigate · Enter inspect/run · i install selected skill · / filter · `/skills --help` syntax · Esc close"
+            "↑/↓ navigate · Enter details · g full inspect · i install selected skill · / filter · `/skills --help` syntax · Esc close"
                 .into(),
         ),
     }
@@ -5171,16 +5182,16 @@ mod tests {
         assert!(rendered.starts_with("## Skills"));
         assert!(rendered.contains("### Actions"));
         assert!(rendered.contains("### Installed and available skills"));
-        assert!(rendered.contains("Enter: `/skills get rust`"));
-        assert!(rendered.contains("i: `/skills install rust`"));
+        assert!(rendered.contains("Enter: details"));
+        assert!(rendered.contains("g: `/skills get rust`"));
         assert!(rendered.contains("### Actions"));
         assert!(rendered.contains("Enter: `/skills reload`"));
         assert!(rendered.contains("Enter: `/skills create --project`"));
         assert!(rendered.contains(
-            "- `rust` — Enter: inspect · i: install/refresh · bundled · available · project_detected · profile:coding · tags:lang · read-only"
+            "- `rust` — Enter: details · i: install/refresh · g: full inspect · bundled · available · project_detected · profile:coding · tags:lang · read-only"
         ));
         assert!(rendered.contains(
-            "- `team` — Enter: inspect · i: install/refresh · project · local · always · editable · reloadable · shadows:bundled · conflicts:bundled/rust · resolve:merge-recommended"
+            "- `team` — Enter: details · i: install/refresh · g: full inspect · project · local · always · editable · reloadable · shadows:bundled · conflicts:bundled/rust · resolve:merge-recommended"
         ));
         assert!(!rendered.contains("+ = installed"));
         assert!(rendered.contains("`/skills --help` syntax"));

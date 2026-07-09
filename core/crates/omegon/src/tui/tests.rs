@@ -5094,14 +5094,18 @@ fn slash_skills_menu_rows_have_operator_expected_labels_and_values() {
             .unwrap()
             .command
             .as_deref(),
-        Some("/skills get code-act")
+        None
+    );
+    assert_eq!(
+        code_act.row.primary_action.as_ref().unwrap().target_row_id.as_deref(),
+        Some("skills.code-act")
     );
     assert!(
         code_act
             .row
             .value
             .as_deref()
-            .is_some_and(|value| value.contains("Enter: inspect"))
+            .is_some_and(|value| value.contains("Enter: details"))
     );
     assert!(
         code_act
@@ -5110,6 +5114,13 @@ fn slash_skills_menu_rows_have_operator_expected_labels_and_values() {
             .as_deref()
             .is_some_and(|value| value.contains("i: install"))
     );
+    let full_inspect = code_act
+        .row
+        .actions
+        .iter()
+        .find(|action| action.key.as_deref() == Some("g"))
+        .expect("full inspect shortcut");
+    assert_eq!(full_inspect.command.as_deref(), Some("/skills get code-act"));
 }
 
 #[test]

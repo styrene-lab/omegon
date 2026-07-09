@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Changed the `/skills` TUI menu so Enter focuses bounded row details instead of dumping `/skills get` output; `g` now opens the full inspect output explicitly.
+
 - Fix 0.27.7 release smoke regressions in capability inventory tests, remote `/auth logout` routing, and settings menu drift rendering.
 - Reduce active-turn worker notifications to a single queued-prompt warning instead of periodic no-action status toasts while long turns are still running.
 - Bound post-loop auto-memory ingestion so late SessionEnd memory writes cannot keep the interactive worker active after a terminal TurnEnd.
