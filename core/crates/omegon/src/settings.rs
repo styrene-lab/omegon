@@ -1578,11 +1578,13 @@ impl Profile {
         self.permissions
             .trusted_directory_grants
             .retain(|grant| !grant.path.eq_ignore_ascii_case(&dir));
-        self.permissions.trusted_directory_grants.push(ProfileTrustGrant {
-            path: dir,
-            mount_identity,
-            environment,
-        });
+        self.permissions
+            .trusted_directory_grants
+            .push(ProfileTrustGrant {
+                path: dir,
+                mount_identity,
+                environment,
+            });
     }
 
     pub fn remove_trusted_directory(&mut self, dir: &str) {

@@ -460,8 +460,13 @@ pub enum PathWarning {
     XdgDocumentPortal,
     SandboxPrivateStorage,
     PrivilegedKernelMaterial,
-    VmSharedFolder { fs_type: String, mount_point: PathBuf },
-    TrustedMountIdentityChanged { mount_point: PathBuf },
+    VmSharedFolder {
+        fs_type: String,
+        mount_point: PathBuf,
+    },
+    TrustedMountIdentityChanged {
+        mount_point: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -549,22 +554,21 @@ pub struct ResolvedFsTarget {
 pub fn classify_path_warnings(target: &PathTarget, _dialect: PathDialect) -> Vec<PathWarning> {
     let raw = target.raw();
     let mut warnings = Vec::new();
-    if let Some(rest) = raw.strip_prefix("/.") {
-        if !rest.is_empty() {
-            warnings.push(PathWarning::RootDotPath {
-                suggested_workspace_relative: format!(".{rest}"),
-            });
-        }
+    if let Some(rest) = raw.strip_prefix("/.")
+        && !rest.is_empty()
+    {
+        warnings.push(PathWarning::RootDotPath {
+            suggested_workspace_relative: format!(".{rest}"),
+        });
     }
 
-    if let Some(component) = raw.strip_prefix('/') {
-        if !component.is_empty()
-            && !component.contains('/')
-            && component.chars().count() <= 3
-            && component.chars().any(|c| c.is_ascii_uppercase())
-        {
-            warnings.push(PathWarning::ShortRootPath);
-        }
+    if let Some(component) = raw.strip_prefix('/')
+        && !component.is_empty()
+        && !component.contains('/')
+        && component.chars().count() <= 3
+        && component.chars().any(|c| c.is_ascii_uppercase())
+    {
+        warnings.push(PathWarning::ShortRootPath);
     }
 
     match target {
@@ -690,7 +694,11 @@ fn append_sensitive_path_risks_only(canonical: &Path, risks: &mut Vec<PathRisk>)
     append_sensitive_path_warnings(canonical, &mut warnings, risks);
 }
 
-fn append_mount_warnings(mount: &MountContext, warnings: &mut Vec<PathWarning>, risks: &mut Vec<PathRisk>) {
+fn append_mount_warnings(
+    mount: &MountContext,
+    warnings: &mut Vec<PathWarning>,
+    risks: &mut Vec<PathRisk>,
+) {
     match mount.kind {
         EnvironmentMountKind::XdgDocumentPortal => {
             warnings.push(PathWarning::XdgDocumentPortal);
@@ -734,7 +742,10 @@ pub fn resolve_intent_target(
     let raw = intent.raw_path().to_string();
     let expanded = expanded_path_for_target(&intent.target, cwd);
     let canonical = crate::tools::canonicalize_existing_parent_for_permissions(&expanded);
-    let cwd_canonical = boundary.cwd().canonicalize().unwrap_or_else(|_| boundary.cwd().to_path_buf());
+    let cwd_canonical = boundary
+        .cwd()
+        .canonicalize()
+        .unwrap_or_else(|_| boundary.cwd().to_path_buf());
     let expanded_for_relation = if expanded.is_absolute() {
         expanded.clone()
     } else {
@@ -751,7 +762,9 @@ pub fn resolve_intent_target(
             | PathTarget::DynamicShell { .. }
     ) {
         WorkspaceRelation::OutsideWorkspace
-    } else if expanded_for_relation.starts_with(&cwd_canonical) || canonical.starts_with(&cwd_canonical) {
+    } else if expanded_for_relation.starts_with(&cwd_canonical)
+        || canonical.starts_with(&cwd_canonical)
+    {
         WorkspaceRelation::InsideWorkspace
     } else if boundary.is_trusted_path_for_permissions(&canonical) {
         WorkspaceRelation::TrustedExternal
@@ -769,14 +782,13 @@ pub fn resolve_intent_target(
     if let Some(mount) = &mount {
         append_mount_warnings(mount, &mut warnings, &mut risks);
     }
-    if matches!(relation, WorkspaceRelation::TrustedExternal) && mount.as_ref().and_then(|m| m.identity.as_ref()).is_some() {
-        // Persistent trust grants are currently path-prefix based. Surface mount identity
-        // on every trusted external resolution so callers/prompts can distinguish a
-        // workspace path from an approved host/VM/container mount and renew trust if the
-        // observed identity changes in future profile schemas.
-        if let Some(mount) = &mount {
-            warnings.push(PathWarning::TrustedMountIdentityChanged { mount_point: mount.mount_point.clone() });
-        }
+    if matches!(relation, WorkspaceRelation::TrustedExternal)
+        && trusted_grant_mount_identity_changed(cwd, &canonical, mount.as_ref())
+        && let Some(mount) = &mount
+    {
+        warnings.push(PathWarning::TrustedMountIdentityChanged {
+            mount_point: mount.mount_point.clone(),
+        });
     }
     sort_dedup_warnings(&mut warnings);
     sort_dedup_risks(&mut risks);
@@ -793,7 +805,51 @@ pub fn resolve_intent_target(
     }
 }
 
-pub fn profile_mount_identity_for_path(path: &Path) -> Option<crate::settings::ProfileMountIdentity> {
+fn trusted_grant_mount_identity_changed(
+    cwd: &Path,
+    canonical: &Path,
+    mount: Option<&MountContext>,
+) -> bool {
+    let Some(current) = mount.and_then(|mount| mount.identity.as_ref()) else {
+        return false;
+    };
+    let profile = crate::settings::Profile::load(cwd);
+    trusted_grant_mount_identity_changed_in_profile(&profile, cwd, canonical, current)
+}
+
+fn trusted_grant_mount_identity_changed_in_profile(
+    profile: &crate::settings::Profile,
+    cwd: &Path,
+    canonical: &Path,
+    current: &MountIdentity,
+) -> bool {
+    let canonical = crate::tools::canonicalize_existing_parent_for_permissions(canonical);
+    profile
+        .permissions
+        .trusted_directory_grants
+        .iter()
+        .filter(|grant| {
+            let grant_path = PathBuf::from(&grant.path);
+            let expanded = if grant_path.is_absolute() {
+                grant_path
+            } else {
+                cwd.join(grant_path)
+            };
+            let grant_canonical =
+                crate::tools::canonicalize_existing_parent_for_permissions(&expanded);
+            canonical.starts_with(&grant_canonical)
+        })
+        .filter_map(|grant| grant.mount_identity.as_ref())
+        .any(|recorded| {
+            recorded.fs_type != current.fs_type
+                || recorded.source != current.source
+                || recorded.mount_point != current.mount_point.display().to_string()
+        })
+}
+
+pub fn profile_mount_identity_for_path(
+    path: &Path,
+) -> Option<crate::settings::ProfileMountIdentity> {
     detect_mount_context(path)
         .and_then(|mount| mount.identity)
         .map(|identity| crate::settings::ProfileMountIdentity {
@@ -856,7 +912,10 @@ fn detect_environment_context() -> Option<EnvironmentContext> {
         detected_by.push("default-host".to_string());
         RuntimeEnvironment::Host
     };
-    Some(EnvironmentContext { runtime, detected_by })
+    Some(EnvironmentContext {
+        runtime,
+        detected_by,
+    })
 }
 
 fn detect_mount_context(path: &Path) -> Option<MountContext> {
@@ -874,7 +933,9 @@ fn parse_mountinfo(content: &str, path: &Path) -> Option<MountContext> {
                 .components()
                 .count()
                 .cmp(&right.mount_point.components().count())
-                .then_with(|| mount_kind_specificity(left.kind).cmp(&mount_kind_specificity(right.kind)))
+                .then_with(|| {
+                    mount_kind_specificity(left.kind).cmp(&mount_kind_specificity(right.kind))
+                })
         })
 }
 
@@ -904,10 +965,16 @@ fn parse_mountinfo_line(line: &str) -> Option<MountContext> {
         return None;
     }
     let mount_point = PathBuf::from(unescape_mountinfo_field(pre_fields[4]));
-    let options = pre_fields[5].split(',').map(ToOwned::to_owned).collect::<Vec<_>>();
+    let options = pre_fields[5]
+        .split(',')
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
     let fs_type = post_fields[0].to_string();
     let source = post_fields[1].to_string();
-    let super_options = post_fields[2].split(',').map(ToOwned::to_owned).collect::<Vec<_>>();
+    let super_options = post_fields[2]
+        .split(',')
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
     let read_only = options.iter().any(|o| o == "ro") || super_options.iter().any(|o| o == "ro");
     let kind = classify_mount_kind(&mount_point, &fs_type, &source, &options, &super_options);
     let identity = Some(MountIdentity {
@@ -915,7 +982,16 @@ fn parse_mountinfo_line(line: &str) -> Option<MountContext> {
         source: source.clone(),
         mount_point: mount_point.clone(),
     });
-    Some(MountContext { mount_point, fs_type, source, options, super_options, kind, read_only, identity })
+    Some(MountContext {
+        mount_point,
+        fs_type,
+        source,
+        options,
+        super_options,
+        kind,
+        read_only,
+        identity,
+    })
 }
 
 fn unescape_mountinfo_field(value: &str) -> String {
@@ -934,7 +1010,12 @@ fn classify_mount_kind(
     super_options: &[String],
 ) -> EnvironmentMountKind {
     let mount = mount_point.to_string_lossy();
-    let all = options.iter().chain(super_options.iter()).map(String::as_str).collect::<Vec<_>>().join(",");
+    let all = options
+        .iter()
+        .chain(super_options.iter())
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(",");
     if mount.starts_with("/run/user/") && mount.contains("/doc") {
         return EnvironmentMountKind::XdgDocumentPortal;
     }
@@ -958,9 +1039,13 @@ fn classify_mount_kind(
         "fuse.vmhgfs-fuse" => EnvironmentMountKind::VmHgfs,
         "prl_fs" => EnvironmentMountKind::ParallelsSharedFolder,
         ty if ty.starts_with("fuse") => EnvironmentMountKind::Fuse,
-        _ if source.starts_with("/dev/") && !mount.starts_with("/dev") => EnvironmentMountKind::BindMount,
+        _ if source.starts_with("/dev/") && !mount.starts_with("/dev") => {
+            EnvironmentMountKind::BindMount
+        }
         _ if all.contains("bind") => EnvironmentMountKind::BindMount,
-        _ if source.starts_with("volume-") || source.contains("docker/volumes") => EnvironmentMountKind::DockerVolume,
+        _ if source.starts_with("volume-") || source.contains("docker/volumes") => {
+            EnvironmentMountKind::DockerVolume
+        }
         _ => EnvironmentMountKind::Ordinary,
     }
 }
@@ -1021,14 +1106,13 @@ pub fn classify_privilege_intent(command: &str) -> Option<PrivilegeIntent> {
         if let Some(program) = privilege_program(name) {
             return Some(build_privilege_intent(program, &tokens[idx..], command));
         }
-        if matches!(name, "sh" | "bash" | "zsh" | "dash") {
-            if let Some(nested) = nested_shell_command(&tokens[idx..]) {
-                if let Some(mut intent) = classify_privilege_intent(nested) {
-                    intent.nested_shell = true;
-                    intent.command_excerpt = command.to_string();
-                    return Some(intent);
-                }
-            }
+        if matches!(name, "sh" | "bash" | "zsh" | "dash")
+            && let Some(nested) = nested_shell_command(&tokens[idx..])
+            && let Some(mut intent) = classify_privilege_intent(nested)
+        {
+            intent.nested_shell = true;
+            intent.command_excerpt = command.to_string();
+            return Some(intent);
         }
         idx += 1;
     }
@@ -1418,16 +1502,33 @@ mod tests {
             cwd,
             &boundary,
         );
-        assert!(token.warnings.contains(&PathWarning::KubernetesServiceAccountToken));
-        assert!(token.warnings.contains(&PathWarning::ClusterIdentityMaterial));
+        assert!(
+            token
+                .warnings
+                .contains(&PathWarning::KubernetesServiceAccountToken)
+        );
+        assert!(
+            token
+                .warnings
+                .contains(&PathWarning::ClusterIdentityMaterial)
+        );
         assert!(token.risks.contains(&PathRisk::SecretMaterial));
 
         let socket = resolve_intent_target(&write_intent("/var/run/docker.sock"), cwd, &boundary);
-        assert!(socket.warnings.contains(&PathWarning::ContainerRuntimeSocket));
+        assert!(
+            socket
+                .warnings
+                .contains(&PathWarning::ContainerRuntimeSocket)
+        );
         assert!(socket.risks.contains(&PathRisk::RuntimeControlSocket));
 
-        let kernel = resolve_intent_target(&write_intent("/proc/1/root/etc/shadow"), cwd, &boundary);
-        assert!(kernel.warnings.contains(&PathWarning::PrivilegedKernelMaterial));
+        let kernel =
+            resolve_intent_target(&write_intent("/proc/1/root/etc/shadow"), cwd, &boundary);
+        assert!(
+            kernel
+                .warnings
+                .contains(&PathWarning::PrivilegedKernelMaterial)
+        );
         assert!(kernel.risks.contains(&PathRisk::PrivilegedKernelMaterial));
     }
 
@@ -1451,11 +1552,65 @@ mod tests {
             trusted_directories: vec![trusted.path().display().to_string()],
             ..Default::default()
         }));
-        let boundary = crate::tools::WorkspaceBoundary::new(cwd.path().to_path_buf()).with_settings(settings);
+        let boundary =
+            crate::tools::WorkspaceBoundary::new(cwd.path().to_path_buf()).with_settings(settings);
         let target = trusted.path().join("out.txt");
         std::fs::write(&target, "ok").unwrap();
         let intent = write_intent(&target.display().to_string());
         let resolved = resolve_intent_target(&intent, cwd.path(), &boundary);
         assert_eq!(resolved.relation, WorkspaceRelation::TrustedExternal);
+    }
+
+    #[test]
+    fn trusted_grant_warning_requires_identity_mismatch() {
+        let cwd = tempfile::tempdir().unwrap();
+        std::fs::write(cwd.path().join("AGENTS.md"), "test").unwrap();
+        std::fs::create_dir(cwd.path().join(".git")).unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let current = MountContext {
+            mount_point: target.path().to_path_buf(),
+            fs_type: "virtiofs".to_string(),
+            source: "hostshare".to_string(),
+            options: Vec::new(),
+            super_options: Vec::new(),
+            kind: EnvironmentMountKind::VirtioFs,
+            read_only: false,
+            identity: Some(MountIdentity {
+                fs_type: "virtiofs".to_string(),
+                source: "hostshare".to_string(),
+                mount_point: target.path().to_path_buf(),
+            }),
+        };
+        let mut profile = crate::settings::Profile::default();
+        profile.add_trusted_directory_grant(
+            target.path().display().to_string(),
+            Some(crate::settings::ProfileMountIdentity {
+                fs_type: "virtiofs".to_string(),
+                source: "hostshare".to_string(),
+                mount_point: target.path().display().to_string(),
+            }),
+            Some("Host".to_string()),
+        );
+        profile.save(cwd.path()).unwrap();
+        assert!(!trusted_grant_mount_identity_changed_in_profile(
+            &profile,
+            cwd.path(),
+            &target.path().join("file.txt"),
+            current.identity.as_ref().unwrap()
+        ));
+
+        let mut changed = current.clone();
+        changed.source = "different-hostshare".to_string();
+        changed.identity = Some(MountIdentity {
+            fs_type: "virtiofs".to_string(),
+            source: "different-hostshare".to_string(),
+            mount_point: target.path().to_path_buf(),
+        });
+        assert!(trusted_grant_mount_identity_changed_in_profile(
+            &profile,
+            cwd.path(),
+            &target.path().join("file.txt"),
+            changed.identity.as_ref().unwrap()
+        ));
     }
 }

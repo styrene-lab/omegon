@@ -82,10 +82,11 @@ pub async fn execute_streaming(
     // the common footguns before they wedge the process. SSH is treated
     // separately below because BatchMode=yes makes it explicitly non-interactive.
     let trimmed = command.trim_start();
-    if let Some(privilege) = classify_privilege_intent(trimmed) {
-        if privilege.mode != PrivilegeMode::NonInteractive && command_is_privilege_invocation(trimmed) {
-            return Ok(blocked_privilege_escalation_result(&privilege));
-        }
+    if let Some(privilege) = classify_privilege_intent(trimmed)
+        && privilege.mode != PrivilegeMode::NonInteractive
+        && command_is_privilege_invocation(trimmed)
+    {
+        return Ok(blocked_privilege_escalation_result(&privilege));
     }
     if let Some(blocked) = blocked_interactive_command(trimmed) {
         return Ok(blocked_interactive_result(blocked));
@@ -863,7 +864,7 @@ fn permission_error_for_intent(
 ) -> super::PathPermissionError {
     let mut requested_path = intent.raw_path().to_string();
     if !resolved.warnings.is_empty() {
-        requested_path.push_str("\n");
+        requested_path.push('\n');
         requested_path.push_str(&permission_warning_text(intent, resolved));
     }
     super::PathPermissionError {
@@ -881,7 +882,10 @@ fn command_is_privilege_invocation(command: &str) -> bool {
     let Some(first) = shlex::split(command).and_then(|tokens| tokens.into_iter().next()) else {
         return false;
     };
-    matches!(first.rsplit(['/', '\\']).next().unwrap_or(&first), "sudo" | "doas" | "su" | "pkexec" | "env" | "bash" | "sh" | "zsh" | "dash")
+    matches!(
+        first.rsplit(['/', '\\']).next().unwrap_or(&first),
+        "sudo" | "doas" | "su" | "pkexec" | "env" | "bash" | "sh" | "zsh" | "dash"
+    )
 }
 
 fn blocked_suspicious_intent_result(

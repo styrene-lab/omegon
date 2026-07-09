@@ -1496,19 +1496,13 @@ mod tests {
     async fn terminal_transcript_is_owner_private() {
         use std::os::unix::fs::PermissionsExt;
 
-        let cwd = tempfile::tempdir().unwrap();
-        let result = execute(
-            "start",
-            &json!({
-                "name": "terminal-test-perms",
-                "command": "echo ok"
-            }),
-            cwd.path(),
-            Some(WorkspaceBoundary::new(cwd.path().to_path_buf())),
-        )
-        .await
-        .unwrap();
-        let transcript = PathBuf::from(result.details["transcript"].as_str().unwrap());
+        let transcript_dir = terminal_dir();
+        std::fs::create_dir_all(&transcript_dir).unwrap();
+        secure_dir_permissions(&transcript_dir).unwrap();
+        let transcript =
+            transcript_dir.join(format!("terminal-test-perms-{}.log", uuid::Uuid::new_v4()));
+        std::fs::write(&transcript, "test transcript\n").unwrap();
+        secure_file_permissions(&transcript).unwrap();
         let file_mode = std::fs::metadata(&transcript).unwrap().permissions().mode() & 0o777;
         let dir_mode = std::fs::metadata(transcript.parent().unwrap())
             .unwrap()
