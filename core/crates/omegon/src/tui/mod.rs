@@ -4347,11 +4347,11 @@ impl App {
         let profile_source_line = settings_profile_source_line(&profile_drift.source);
         let drift_line = if profile_drift.changed_count > 0 {
             format!(
-                "{profile_source_line} · runtime drift: Δ{} · /profile save or /profile apply",
+                "runtime drift: Δ{} · /profile save or /profile apply · {profile_source_line}",
                 profile_drift.changed_count
             )
         } else {
-            format!("{profile_source_line} · runtime drift: clean")
+            format!("runtime drift: clean · {profile_source_line}")
         };
         let mut menu = MenuProjection::new("settings", "Settings");
         menu.summary = Some(format!(

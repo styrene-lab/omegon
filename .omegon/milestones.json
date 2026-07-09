@@ -1157,5 +1157,14 @@
     "opened": "2026-07-08T23:27:24Z",
     "released": "2026-07-08T23:27:24Z",
     "notes": []
+  },
+  "0.27.8": {
+    "status": "open",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": false,
+    "opened": "2026-07-09T00:04:28Z",
+    "released": null,
+    "notes": []
   }
 }

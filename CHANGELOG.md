@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Fix 0.27.7 release smoke regressions in capability inventory tests, remote `/auth logout` routing, and settings menu drift rendering.
+- Reduce active-turn worker notifications to a single queued-prompt warning instead of periodic no-action status toasts while long turns are still running.
 - Make `just link` install bundled catalog agents offline by default so local build/link loops do not repeatedly hit unauthenticated GitHub raw catalog endpoints.
 - Ensure structured menu rendering keeps the selected row visible on long menus by windowing against rendered line height and showing descriptions only for the selected row.
 

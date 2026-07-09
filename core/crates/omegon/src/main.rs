@@ -5712,6 +5712,7 @@ fn build_tui_secret_readiness_snapshot(
                     let active_wait_started_at = std::time::Instant::now();
                     let mut slow_turn_probe = Box::pin(tokio::time::sleep(std::time::Duration::from_secs(10)));
                     let mut slow_turn_notifications: u32 = 0;
+                    let mut notified_blocked_prompt_queue = false;
 
                     loop {
                         tokio::select! {
@@ -5744,13 +5745,14 @@ fn build_tui_secret_readiness_snapshot(
                                     slow_turn_notifications,
                                     "interactive active turn worker is still running after visible turn start; queued prompts remain blocked until worker returns"
                                 );
-                                if slow_turn_notifications == 1 || slow_turn_notifications.is_multiple_of(6) {
+                                if runtime.queue_depth() > 0 && !notified_blocked_prompt_queue {
+                                    notified_blocked_prompt_queue = true;
                                     let _ = events_tx.send(AgentEvent::RuntimeTurnLifecycleUpdated {
                                         snapshot_json: lifecycle.snapshot(runtime.queue_depth()),
                                     });
                                     let _ = events_tx.send(AgentEvent::SystemNotification {
                                         message: format!(
-                                            "Active turn worker has been running for {}s; latest lifecycle state is recorded in the agent log. New prompts remain queued until this turn's worker returns.",
+                                            "Prompt queued behind active turn after {}s. Latest lifecycle state is recorded in the agent log; queued prompts will start when this turn's worker returns.",
                                             elapsed.as_secs()
                                         ),
                                     });
@@ -8068,8 +8070,8 @@ fn remote_builtin_policy(
         crate::tui::CanonicalSlashCommand::AuthView
         | crate::tui::CanonicalSlashCommand::AuthStatus => RemoteBuiltinPolicy::Allow,
         crate::tui::CanonicalSlashCommand::AuthUnlock
-        | crate::tui::CanonicalSlashCommand::AuthLogin(_)
-        | crate::tui::CanonicalSlashCommand::AuthLogout(_) => RemoteBuiltinPolicy::RequiresBypass,
+        | crate::tui::CanonicalSlashCommand::AuthLogin(_) => RemoteBuiltinPolicy::RequiresBypass,
+        crate::tui::CanonicalSlashCommand::AuthLogout(_) => RemoteBuiltinPolicy::Allow,
         _ if definition.safety.requires_confirmation => RemoteBuiltinPolicy::RequiresBypass,
         _ => RemoteBuiltinPolicy::Allow,
     }
@@ -10306,7 +10308,7 @@ mod tests {
                 "auth",
                 &crate::tui::CanonicalSlashCommand::AuthLogout("anthropic".into()),
             ),
-            RemoteBuiltinPolicy::RequiresBypass
+            RemoteBuiltinPolicy::Allow
         );
         assert_eq!(
             remote_builtin_policy("auth", &crate::tui::CanonicalSlashCommand::AuthUnlock,),

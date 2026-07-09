@@ -385,7 +385,20 @@ mod tests {
         assert!(snapshot.armory_profiles.is_empty());
         assert!(snapshot.agent_bundles.is_empty());
         assert!(snapshot.assistant_profiles.is_empty());
-        assert!(snapshot.secret_readiness.secrets.is_empty());
+        assert!(
+            snapshot
+                .secret_readiness
+                .secrets
+                .iter()
+                .any(|secret| secret.name == "ANTHROPIC_API_KEY")
+        );
+        assert!(
+            snapshot
+                .secret_readiness
+                .harness_capabilities
+                .iter()
+                .any(|capability| capability.id == "llm_provider_api_keys")
+        );
         assert!(snapshot.graph.nodes.is_empty());
         assert!(snapshot.graph.edges.is_empty());
     }
