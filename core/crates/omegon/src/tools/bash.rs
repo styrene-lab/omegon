@@ -2,7 +2,8 @@
 
 use crate::tools::permissions::{
     FsIntent, FsOperation, IntentActor, IntentConfidence, IntentSource, PathDialect, PathTarget,
-    PathWarning, WorkspaceRelation, resolve_intent_target, suspicious_low_confidence_shell_path,
+    PathWarning, PrivilegeMode, WorkspaceRelation, classify_privilege_intent,
+    resolve_intent_target, suspicious_low_confidence_shell_path,
 };
 use anyhow::Result;
 use omegon_traits::{
@@ -80,31 +81,14 @@ pub async fn execute_streaming(
     // This is best-effort — programs can prompt from anywhere — but catches
     // the common footguns before they wedge the process. SSH is treated
     // separately below because BatchMode=yes makes it explicitly non-interactive.
-    static INTERACTIVE_PREFIXES: &[&str] = &["sudo ", "sudo\t", "passwd", "su ", "su\t", "kinit"];
     let trimmed = command.trim_start();
+    if let Some(privilege) = classify_privilege_intent(trimmed) {
+        if privilege.mode != PrivilegeMode::NonInteractive {
+            return Ok(blocked_privilege_escalation_result(&privilege));
+        }
+    }
     if let Some(blocked) = blocked_interactive_command(trimmed) {
         return Ok(blocked_interactive_result(blocked));
-    }
-    for prefix in INTERACTIVE_PREFIXES {
-        if trimmed.starts_with(prefix) || trimmed == prefix.trim() {
-            return Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: format!(
-                        "Blocked: `{}` requires interactive input (password/passphrase) \
-                         which the agent cannot provide.\n\n\
-                         Ask the operator to run this command in their terminal, \
-                         then retry the dependent step.",
-                        trimmed.split_whitespace().next().unwrap_or(trimmed)
-                    ),
-                }],
-                details: serde_json::json!({
-                    "exitCode": -1,
-                    "durationMs": 0,
-                    "blocked": true,
-                    "reason": "interactive_input_required",
-                }),
-            });
-        }
     }
 
     // ─── Workspace boundary heuristic scan ─────────────────────────
@@ -333,6 +317,32 @@ fn blocked_interactive_result(command_name: &str) -> ToolResult {
             "durationMs": 0,
             "blocked": true,
             "reason": "interactive_input_required",
+        }),
+    }
+}
+
+fn blocked_privilege_escalation_result(
+    intent: &crate::tools::permissions::PrivilegeIntent,
+) -> ToolResult {
+    ToolResult {
+        content: vec![ContentBlock::Text {
+            text: format!(
+                "Blocked: `{}` requests privilege escalation.\n\nCommand: {}\nMode: {:?}\n\nUse the interactive terminal tool for operator-mediated elevation, or run `{}` with non-interactive/no-prompt semantics if the policy explicitly allows that. The agent will not collect or pipe passwords through bash.",
+                intent.program_name(),
+                intent.command_excerpt,
+                intent.mode,
+                intent.program_name()
+            ),
+        }],
+        details: serde_json::json!({
+            "exitCode": -1,
+            "durationMs": 0,
+            "blocked": true,
+            "reason": "privilege_escalation_requires_operator_mediation",
+            "program": intent.program_name(),
+            "mode": format!("{:?}", intent.mode),
+            "preserveEnv": intent.preserve_env,
+            "nestedShell": intent.nested_shell,
         }),
     }
 }

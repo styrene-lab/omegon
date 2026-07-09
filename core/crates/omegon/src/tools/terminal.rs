@@ -16,7 +16,8 @@ use std::time::{Duration, Instant};
 
 use super::{WorkspaceBoundary, bash};
 use crate::tools::permissions::{
-    PathWarning, WorkspaceRelation, resolve_intent_target, suspicious_low_confidence_shell_path,
+    PathWarning, WorkspaceRelation, classify_privilege_intent, resolve_intent_target,
+    suspicious_low_confidence_shell_path,
 };
 
 const MAX_TAIL_BYTES: usize = 64 * 1024;
@@ -951,12 +952,20 @@ fn tail_bytes(text: &str, max_bytes: usize) -> String {
 
 fn blocked_interactive_command(command: &str) -> Option<String> {
     let trimmed = command.trim_start();
+    if let Some(privilege) = classify_privilege_intent(trimmed) {
+        return truthy_env("OMEGON_DENY_PRIVILEGE_ESCALATION").then(|| {
+            format!(
+                "{} privilege escalation (blocked by OMEGON_DENY_PRIVILEGE_ESCALATION)",
+                privilege.program_name()
+            )
+        });
+    }
     if let Some(blocked) = credential_command_token(trimmed) {
         return Some(blocked);
     }
     let command = command_after_env_assignments(trimmed)?;
     match command.as_str() {
-        "sudo" | "doas" | "passwd" | "su" | "kinit" => Some(command),
+        "passwd" | "kinit" => Some(command),
         "ssh" if !ssh_batch_mode_enabled(trimmed) => Some("ssh".into()),
         _ => None,
     }
@@ -1013,7 +1022,8 @@ fn credential_command_token(command: &str) -> Option<String> {
             (!token.is_empty()).then_some(command_basename(token))
         })
         .find_map(|name| match name {
-            "sudo" | "doas" | "passwd" | "su" | "kinit" => Some(name.to_string()),
+            "sudo" | "doas" | "su" => None,
+            "passwd" | "kinit" => Some(name.to_string()),
             "ssh" if !ssh_batch_mode_enabled(command) => Some("ssh".into()),
             _ => None,
         })
@@ -1371,14 +1381,28 @@ mod tests {
         let _ = wait_for_session_exit(&id).await;
     }
 
+    #[test]
+    fn terminal_allows_operator_mediated_privilege_commands_by_default() {
+        for command in [
+            "sudo true",
+            "/usr/bin/sudo true",
+            "env FOO=bar sudo true",
+            "/usr/bin/env -i /usr/bin/sudo true",
+            "exec doas true",
+            "bash -lc 'sudo true'",
+        ] {
+            assert_eq!(blocked_interactive_command(command), None, "{command}");
+        }
+    }
+
     #[tokio::test]
-    async fn terminal_blocks_credential_prompt_commands() {
+    async fn terminal_still_blocks_non_privilege_credential_prompt_commands() {
         let cwd = tempfile::tempdir().unwrap();
         let result = execute(
             "start",
             &json!({
-                "name": "blocked-sudo-terminal-test",
-                "command": "sudo true"
+                "name": "blocked-kinit-terminal-test",
+                "command": "kinit"
             }),
             cwd.path(),
             Some(WorkspaceBoundary::new(cwd.path().to_path_buf())),
@@ -1394,42 +1418,6 @@ mod tests {
             result.details.get("reason").and_then(|v| v.as_str()),
             Some("credential_prompt_risk")
         );
-    }
-
-    #[tokio::test]
-    async fn terminal_blocks_path_qualified_and_env_wrapped_credential_commands() {
-        let cwd = tempfile::tempdir().unwrap();
-        for command in [
-            "/usr/bin/sudo true",
-            "env FOO=bar sudo true",
-            "/usr/bin/env -i /usr/bin/sudo true",
-            "exec doas true",
-            "echo ok; sudo true",
-            "bash -lc 'sudo true'",
-        ] {
-            let result = execute(
-                "start",
-                &json!({
-                    "name": "blocked-credential-terminal-test",
-                    "command": command
-                }),
-                cwd.path(),
-                Some(WorkspaceBoundary::new(cwd.path().to_path_buf())),
-            )
-            .await
-            .unwrap();
-
-            assert_eq!(
-                result.details.get("blocked").and_then(|v| v.as_bool()),
-                Some(true),
-                "{command}"
-            );
-            assert_eq!(
-                result.details.get("reason").and_then(|v| v.as_str()),
-                Some("credential_prompt_risk"),
-                "{command}"
-            );
-        }
     }
 
     #[tokio::test]

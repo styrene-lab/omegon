@@ -387,6 +387,48 @@ impl FsIntent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivilegeProgram {
+    Sudo,
+    Doas,
+    Su,
+    Pkexec,
+}
+
+impl PrivilegeProgram {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sudo => "sudo",
+            Self::Doas => "doas",
+            Self::Su => "su",
+            Self::Pkexec => "pkexec",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivilegeMode {
+    InteractivePossible,
+    NonInteractive,
+    PasswordFromStdin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrivilegeIntent {
+    pub program: PrivilegeProgram,
+    pub mode: PrivilegeMode,
+    pub preserve_env: bool,
+    pub nested_shell: bool,
+    pub command_excerpt: String,
+    pub confidence: IntentConfidence,
+}
+
+impl PrivilegeIntent {
+    pub fn program_name(&self) -> &'static str {
+        self.program.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceRelation {
     InsideWorkspace,
     OutsideWorkspace,
@@ -536,6 +578,170 @@ pub fn suspicious_low_confidence_shell_path(
     })
 }
 
+pub fn classify_privilege_intent(command: &str) -> Option<PrivilegeIntent> {
+    let tokens = shell_tokens(command);
+    let mut idx = first_command_index(&tokens)?;
+    while idx < tokens.len() {
+        let name = command_basename(&tokens[idx]);
+        if let Some(program) = privilege_program(name) {
+            return Some(build_privilege_intent(program, &tokens[idx..], command));
+        }
+        if matches!(name, "sh" | "bash" | "zsh" | "dash") {
+            if let Some(nested) = nested_shell_command(&tokens[idx..]) {
+                if let Some(mut intent) = classify_privilege_intent(nested) {
+                    intent.nested_shell = true;
+                    intent.command_excerpt = command.to_string();
+                    return Some(intent);
+                }
+            }
+        }
+        idx += 1;
+    }
+    None
+}
+
+fn build_privilege_intent(
+    program: PrivilegeProgram,
+    tokens: &[String],
+    command: &str,
+) -> PrivilegeIntent {
+    let mut mode = PrivilegeMode::InteractivePossible;
+    let mut preserve_env = false;
+    let mut nested_shell = false;
+    for token in tokens.iter().skip(1) {
+        if !token.starts_with('-') {
+            let name = command_basename(token);
+            if matches!(name, "sh" | "bash" | "zsh" | "dash") {
+                nested_shell = true;
+            }
+            continue;
+        }
+        if token == "-n"
+            || token == "--non-interactive"
+            || token == "--non-interactive=true"
+            || (token.starts_with('-') && !token.starts_with("--") && token.contains('n'))
+        {
+            mode = PrivilegeMode::NonInteractive;
+        }
+        if token == "-S"
+            || token == "--stdin"
+            || (token.starts_with('-') && !token.starts_with("--") && token.contains('S'))
+        {
+            mode = PrivilegeMode::PasswordFromStdin;
+        }
+        if token == "-E"
+            || token == "--preserve-env"
+            || token.starts_with("--preserve-env=")
+            || (token.starts_with('-') && !token.starts_with("--") && token.contains('E'))
+        {
+            preserve_env = true;
+        }
+    }
+    PrivilegeIntent {
+        program,
+        mode,
+        preserve_env,
+        nested_shell,
+        command_excerpt: command.to_string(),
+        confidence: IntentConfidence::Heuristic,
+    }
+}
+
+fn nested_shell_command(tokens: &[String]) -> Option<&str> {
+    let mut expect_command = false;
+    for token in tokens.iter().skip(1) {
+        if expect_command {
+            return Some(token.as_str());
+        }
+        if token == "-c" || token == "-lc" {
+            expect_command = true;
+            continue;
+        }
+        if let Some(short_flags) = token.strip_prefix('-')
+            && !token.starts_with("--")
+            && short_flags.contains('c')
+        {
+            expect_command = true;
+        }
+    }
+    None
+}
+
+fn first_command_index(tokens: &[String]) -> Option<usize> {
+    let mut idx = 0;
+    let mut after_env = false;
+    while idx < tokens.len() {
+        let name = command_basename(&tokens[idx]);
+        if matches!(
+            name,
+            "env" | "exec" | "command" | "builtin" | "time" | "nohup"
+        ) {
+            after_env = after_env || name == "env";
+            idx += 1;
+            continue;
+        }
+        if after_env {
+            if matches!(tokens[idx].as_str(), "-u" | "--unset" | "-C" | "--chdir") {
+                idx += 2;
+                continue;
+            }
+            if tokens[idx].starts_with("--unset=")
+                || tokens[idx].starts_with("--chdir=")
+                || tokens[idx].starts_with('-')
+            {
+                idx += 1;
+                continue;
+            }
+        }
+        if looks_like_env_assignment(&tokens[idx]) {
+            idx += 1;
+            continue;
+        }
+        return Some(idx);
+    }
+    None
+}
+
+fn shell_tokens(command: &str) -> Vec<String> {
+    shlex::split(command).unwrap_or_else(|| {
+        command
+            .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | '&' | '|' | '(' | ')'))
+            .filter(|token| !token.is_empty())
+            .map(|token| {
+                token
+                    .trim_matches(|ch| matches!(ch, '"' | '\'' | '`'))
+                    .to_string()
+            })
+            .filter(|token| !token.is_empty())
+            .collect()
+    })
+}
+
+fn looks_like_env_assignment(token: &str) -> bool {
+    let Some((name, _value)) = token.split_once('=') else {
+        return false;
+    };
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        && !name.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+}
+
+fn command_basename(token: &str) -> &str {
+    token.rsplit(['/', '\\']).next().unwrap_or(token)
+}
+
+fn privilege_program(name: &str) -> Option<PrivilegeProgram> {
+    match name {
+        "sudo" => Some(PrivilegeProgram::Sudo),
+        "doas" => Some(PrivilegeProgram::Doas),
+        "su" => Some(PrivilegeProgram::Su),
+        "pkexec" => Some(PrivilegeProgram::Pkexec),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -566,6 +772,34 @@ mod tests {
             },
             confidence: IntentConfidence::Parsed,
         }
+    }
+
+    #[test]
+    fn privilege_classifier_detects_shell_compound_c_flag() {
+        let intent = classify_privilege_intent("bash -euxc 'sudo true'").unwrap();
+        assert_eq!(intent.program, PrivilegeProgram::Sudo);
+        assert!(intent.nested_shell);
+    }
+
+    #[test]
+    fn privilege_classifier_detects_shell_dash_lc_flag() {
+        let intent = classify_privilege_intent("zsh -lc 'doas true'").unwrap();
+        assert_eq!(intent.program, PrivilegeProgram::Doas);
+        assert!(intent.nested_shell);
+    }
+
+    #[test]
+    fn privilege_classifier_respects_non_interactive_sudo() {
+        let intent = classify_privilege_intent("sudo -n true").unwrap();
+        assert_eq!(intent.program, PrivilegeProgram::Sudo);
+        assert_eq!(intent.mode, PrivilegeMode::NonInteractive);
+    }
+
+    #[test]
+    fn privilege_classifier_detects_password_from_stdin() {
+        let intent = classify_privilege_intent("sudo -S true").unwrap();
+        assert_eq!(intent.program, PrivilegeProgram::Sudo);
+        assert_eq!(intent.mode, PrivilegeMode::PasswordFromStdin);
     }
 
     #[test]
