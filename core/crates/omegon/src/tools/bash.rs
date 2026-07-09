@@ -745,11 +745,20 @@ fn push_shell_intent(
 ) {
     let target = PathTarget::classify(raw_path);
     match target {
-        PathTarget::HostAbsolute { .. }
+        PathTarget::PosixAbsolute { .. }
         | PathTarget::WorkspaceRelative { .. }
-        | PathTarget::HomeRelative { .. }
+        | PathTarget::PosixHomeRelative { .. }
         | PathTarget::SpecialDevice { .. }
-        | PathTarget::FileDescriptor { .. } => intents.push(FsIntent {
+        | PathTarget::FileDescriptor { .. }
+        | PathTarget::WindowsDriveAbsolute { .. }
+        | PathTarget::WindowsDriveRelative { .. }
+        | PathTarget::WindowsRootRelative { .. }
+        | PathTarget::WindowsUnc { .. }
+        | PathTarget::WindowsVerbatim { .. }
+        | PathTarget::WindowsDevice { .. }
+        | PathTarget::WslDriveMount { .. }
+        | PathTarget::MsysDriveMount { .. }
+        | PathTarget::CygwinDriveMount { .. } => intents.push(FsIntent {
             operation,
             target,
             actor: IntentActor::Model,
@@ -829,6 +838,34 @@ fn permission_warning_text(
             )),
             PathWarning::ShortRootPath => lines.push(format!(
                 "Warning: `{}` is a short root path that may be a malformed or truncated token.",
+                resolved.raw
+            )),
+            PathWarning::WindowsDriveRelative => lines.push(format!(
+                "Warning: `{}` is Windows drive-relative (`C:foo`), not drive-absolute (`C:\\foo`).",
+                resolved.raw
+            )),
+            PathWarning::WindowsVerbatimPath => lines.push(format!(
+                "Warning: `{}` is a Windows absolute/verbatim path; it requires exact host-boundary approval and is not treated as workspace-relative.",
+                resolved.raw
+            )),
+            PathWarning::WindowsUncPath => lines.push(format!(
+                "Warning: `{}` is a Windows UNC/network path; it requires exact host-boundary approval.",
+                resolved.raw
+            )),
+            PathWarning::WindowsDeviceName => lines.push(format!(
+                "Warning: `{}` is a Windows device name and is blocked unless explicitly supported.",
+                resolved.raw
+            )),
+            PathWarning::WslWindowsDriveMount => lines.push(format!(
+                "Warning: `{}` is a WSL Windows-drive mount path; verify whether you intended Linux workspace storage or Windows host storage.",
+                resolved.raw
+            )),
+            PathWarning::MsysWindowsDriveMount => lines.push(format!(
+                "Warning: `{}` is an MSYS/Git-Bash Windows-drive mount path; verify whether you intended POSIX workspace storage or Windows host storage.",
+                resolved.raw
+            )),
+            PathWarning::CygwinWindowsDriveMount => lines.push(format!(
+                "Warning: `{}` is a Cygwin Windows-drive mount path; verify whether you intended POSIX workspace storage or Windows host storage.",
                 resolved.raw
             )),
         }
@@ -1374,7 +1411,7 @@ mod tests {
         assert_eq!(intents.len(), 1);
         assert!(matches!(
             intents[0].target,
-            crate::tools::permissions::PathTarget::HostAbsolute { .. }
+            crate::tools::permissions::PathTarget::PosixAbsolute { .. }
         ));
         assert_eq!(intents[0].raw_path(), "/.omegon/runtime");
     }

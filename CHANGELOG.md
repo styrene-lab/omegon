@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Make permissions intent architecture the primary 0.27.8 release target: filesystem access is moving toward structured intent, provenance-rich path diagnostics, and confidence-aware mediation for suspicious shell-derived paths such as `/Ig` and mistaken root-dot paths such as `/.omegon`.
 - Added the first permissions intent slice: bash and terminal preflight now extract structured filesystem intents, block low-confidence `/Ig`-class shell artifacts diagnostically, and annotate `/.omegon`-class host-absolute paths with workspace-relative correction guidance while preserving strict boundary behavior.
+- Added the second permissions intent hardening slice: path classification now recognizes POSIX, Windows drive/root/UNC/verbatim/device forms, WSL `/mnt/<drive>` mounts, MSYS `/c/...`, and Cygwin `/cygdrive/c/...` before `PathBuf` resolution so foreign absolute paths cannot silently fall back to workspace-relative handling.
+- Expanded the permissions intent design target with path dialect, VM/container mount context, sensitive infrastructure path, and trust-grant mount-identity affordances so 0.27.8 hardening covers Windows/WSL, containers, VM shared folders, Kubernetes projected secrets, runtime sockets, and sandbox portals.
 - Sanitized assistant reasoning segments so provider-specific `<think>` wrappers, HTML comment artifacts, and standalone bold heading markers do not leak into the TUI transcript.
 
 - Fix 0.27.7 release smoke regressions in capability inventory tests, remote `/auth logout` routing, and settings menu drift rendering.

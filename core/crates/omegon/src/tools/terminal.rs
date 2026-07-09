@@ -865,6 +865,34 @@ fn terminal_warning_text(resolved: &crate::tools::permissions::ResolvedFsTarget)
                 "Warning: `{}` is a short root path that may be a malformed or truncated token.",
                 resolved.raw
             )),
+            PathWarning::WindowsDriveRelative => lines.push(format!(
+                "Warning: `{}` is Windows drive-relative (`C:foo`), not drive-absolute (`C:\\foo`).",
+                resolved.raw
+            )),
+            PathWarning::WindowsVerbatimPath => lines.push(format!(
+                "Warning: `{}` is a Windows absolute/verbatim path; it requires exact host-boundary approval and is not treated as workspace-relative.",
+                resolved.raw
+            )),
+            PathWarning::WindowsUncPath => lines.push(format!(
+                "Warning: `{}` is a Windows UNC/network path; it requires exact host-boundary approval.",
+                resolved.raw
+            )),
+            PathWarning::WindowsDeviceName => lines.push(format!(
+                "Warning: `{}` is a Windows device name and is blocked unless explicitly supported.",
+                resolved.raw
+            )),
+            PathWarning::WslWindowsDriveMount => lines.push(format!(
+                "Warning: `{}` is a WSL Windows-drive mount path; verify whether you intended Linux workspace storage or Windows host storage.",
+                resolved.raw
+            )),
+            PathWarning::MsysWindowsDriveMount => lines.push(format!(
+                "Warning: `{}` is an MSYS/Git-Bash Windows-drive mount path; verify whether you intended POSIX workspace storage or Windows host storage.",
+                resolved.raw
+            )),
+            PathWarning::CygwinWindowsDriveMount => lines.push(format!(
+                "Warning: `{}` is a Cygwin Windows-drive mount path; verify whether you intended POSIX workspace storage or Windows host storage.",
+                resolved.raw
+            )),
         }
     }
     lines.join("\n")
