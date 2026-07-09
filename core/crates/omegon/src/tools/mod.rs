@@ -16,6 +16,7 @@ pub mod openapi;
 pub mod openapi_config;
 pub mod openapi_resolve;
 pub(crate) mod output_filter;
+pub mod permissions;
 pub mod read;
 pub mod render;
 pub mod serve;
@@ -557,6 +558,14 @@ impl WorkspaceBoundary {
         }
         false
     }
+}
+
+pub(crate) fn is_allowed_special_path_for_permissions(path: &Path) -> bool {
+    is_allowed_special_path(path)
+}
+
+pub(crate) fn canonicalize_existing_parent_for_permissions(path: &Path) -> PathBuf {
+    canonicalize_existing_parent(path)
 }
 
 fn is_allowed_special_path(path: &Path) -> bool {

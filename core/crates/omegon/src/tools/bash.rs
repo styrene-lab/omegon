@@ -1,5 +1,9 @@
 //! Bash tool — execute shell commands with output capture.
 
+use crate::tools::permissions::{
+    FsIntent, FsOperation, IntentActor, IntentConfidence, IntentSource, PathTarget, PathWarning,
+    WorkspaceRelation, resolve_intent_target, suspicious_low_confidence_shell_path,
+};
 use anyhow::Result;
 use omegon_traits::{
     ContentBlock, PartialToolResult, ProgressUnits, ToolProgress, ToolProgressSink, ToolResult,
@@ -111,23 +115,19 @@ pub async fn execute_streaming(
     // typed permission mediation path as read/write/edit instead of becoming
     // ad hoc bash-local blocks that the agent can route around.
     if let Some(ref boundary) = boundary {
-        let violations = scan_boundary_violations(trimmed, boundary, cwd);
-        if let Some(path) = violations.first() {
-            let resolved = if path.starts_with('/') || path.starts_with('~') {
-                super::expand_tilde(path)
-            } else {
-                cwd.join(path)
-            };
-            let directory = resolved
-                .parent()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default();
-            return Err(super::PathPermissionError {
-                requested_path: path.clone(),
-                directory,
-                workspace: boundary.cwd().display().to_string(),
+        let intents = extract_shell_fs_intents(trimmed);
+        for intent in &intents {
+            let resolved = resolve_intent_target(intent, cwd, boundary);
+            if matches!(
+                resolved.relation,
+                WorkspaceRelation::InsideWorkspace | WorkspaceRelation::SpecialAllowed
+            ) {
+                continue;
             }
-            .into());
+            if suspicious_low_confidence_shell_path(intent, &resolved) {
+                return Ok(blocked_suspicious_intent_result(intent, &resolved));
+            }
+            return Err(permission_error_for_intent(intent, &resolved, boundary).into());
         }
     }
 
@@ -600,78 +600,240 @@ pub(crate) fn scan_boundary_violations(
     boundary: &super::WorkspaceBoundary,
     cwd: &Path,
 ) -> Vec<String> {
-    let mut violations = Vec::new();
-
-    // Pattern 1: Output redirects — > /path, >> /path, 2> /path
-    for cap in regex_lite::Regex::new(r"[012]?>>?\s*(/[^\s;|&]+)")
-        .unwrap()
-        .captures_iter(command)
-    {
-        if let Some(path_match) = cap.get(1) {
-            check_path_violation(path_match.as_str(), boundary, cwd, &mut violations);
-        }
-    }
-
-    // Pattern 2: tee to absolute path — tee /path, tee -a /path
-    for cap in regex_lite::Regex::new(r"\btee\s+(?:-a\s+)?(/[^\s;|&]+)")
-        .unwrap()
-        .captures_iter(command)
-    {
-        if let Some(path_match) = cap.get(1) {
-            check_path_violation(path_match.as_str(), boundary, cwd, &mut violations);
-        }
-    }
-
-    // Pattern 3: cp/mv/install destination — last arg if absolute
-    for cap in regex_lite::Regex::new(r"\b(?:cp|mv|install)\s+(?:[^\s]+\s+)+(/[^\s;|&]+)")
-        .unwrap()
-        .captures_iter(command)
-    {
-        if let Some(path_match) = cap.get(1) {
-            check_path_violation(path_match.as_str(), boundary, cwd, &mut violations);
-        }
-    }
-
-    // Pattern 4: mkdir on absolute path
-    for cap in regex_lite::Regex::new(r"\bmkdir\s+(?:-p\s+)?(/[^\s;|&]+)")
-        .unwrap()
-        .captures_iter(command)
-    {
-        if let Some(path_match) = cap.get(1) {
-            check_path_violation(path_match.as_str(), boundary, cwd, &mut violations);
-        }
-    }
-
-    // Pattern 5: rm on absolute path
-    for cap in regex_lite::Regex::new(r"\brm\s+(?:-[rRf]+\s+)*(/[^\s;|&]+)")
-        .unwrap()
-        .captures_iter(command)
-    {
-        if let Some(path_match) = cap.get(1) {
-            check_path_violation(path_match.as_str(), boundary, cwd, &mut violations);
-        }
-    }
-
+    let mut violations = extract_shell_fs_intents(command)
+        .into_iter()
+        .filter_map(|intent| {
+            let resolved = resolve_intent_target(&intent, cwd, boundary);
+            if matches!(
+                resolved.relation,
+                WorkspaceRelation::InsideWorkspace | WorkspaceRelation::SpecialAllowed
+            ) {
+                None
+            } else {
+                Some(intent.raw_path().to_string())
+            }
+        })
+        .collect::<Vec<_>>();
     violations.sort();
     violations.dedup();
     violations
 }
 
-fn check_path_violation(
-    path_str: &str,
-    boundary: &super::WorkspaceBoundary,
-    cwd: &Path,
-    violations: &mut Vec<String>,
-) {
-    // Always-allowed paths (device files, etc.)
-    if ALLOWED_PATHS.contains(&path_str) {
-        return;
+pub(crate) fn extract_shell_fs_intents(command: &str) -> Vec<FsIntent> {
+    let mut intents = Vec::new();
+
+    // Pattern 1: Output redirects — > /path, >> /path, 2> /path
+    for cap in regex_lite::Regex::new(r"([012]?>>?)\s*([^\s;|&]+)")
+        .unwrap()
+        .captures_iter(command)
+    {
+        if let (Some(op_match), Some(path_match)) = (cap.get(1), cap.get(2)) {
+            push_shell_intent(
+                &mut intents,
+                if op_match.as_str().contains(">>") {
+                    FsOperation::Append
+                } else {
+                    FsOperation::Write
+                },
+                path_match.as_str(),
+                IntentSource::ShellRedirect {
+                    command_excerpt: command_excerpt(command, path_match.start(), path_match.end()),
+                    redirect_op: op_match.as_str().to_string(),
+                },
+                IntentConfidence::Heuristic,
+            );
+        }
     }
 
-    let path = cwd.join(path_str);
-    if !boundary.is_inside_boundary(&path) {
-        violations.push(path_str.to_string());
+    // Pattern 2: tee to path — tee /path, tee -a /path
+    for cap in regex_lite::Regex::new(r"\btee\s+(-a\s+)?([^\s;|&]+)")
+        .unwrap()
+        .captures_iter(command)
+    {
+        if let Some(path_match) = cap.get(2) {
+            push_shell_intent(
+                &mut intents,
+                if cap.get(1).is_some() {
+                    FsOperation::Append
+                } else {
+                    FsOperation::Write
+                },
+                path_match.as_str(),
+                IntentSource::ShellCommandArgument {
+                    command_excerpt: command_excerpt(command, path_match.start(), path_match.end()),
+                    command_name: "tee".to_string(),
+                    argv_index: if cap.get(1).is_some() { 2 } else { 1 },
+                },
+                IntentConfidence::Heuristic,
+            );
+        }
     }
+
+    // Pattern 3: cp/mv/install destination — last arg if path-like
+    for cap in regex_lite::Regex::new(r"\b(cp|mv|install)\s+(?:[^\s]+\s+)+([^\s;|&]+)")
+        .unwrap()
+        .captures_iter(command)
+    {
+        if let (Some(cmd_match), Some(path_match)) = (cap.get(1), cap.get(2)) {
+            let operation = match cmd_match.as_str() {
+                "mv" => FsOperation::Move,
+                _ => FsOperation::Copy,
+            };
+            push_shell_intent(
+                &mut intents,
+                operation,
+                path_match.as_str(),
+                IntentSource::ShellCommandArgument {
+                    command_excerpt: command_excerpt(command, path_match.start(), path_match.end()),
+                    command_name: cmd_match.as_str().to_string(),
+                    argv_index: 2,
+                },
+                IntentConfidence::Heuristic,
+            );
+        }
+    }
+
+    // Pattern 4: mkdir on path
+    for cap in regex_lite::Regex::new(r"\bmkdir\s+(?:-p\s+)?([^\s;|&]+)")
+        .unwrap()
+        .captures_iter(command)
+    {
+        if let Some(path_match) = cap.get(1) {
+            push_shell_intent(
+                &mut intents,
+                FsOperation::CreateDir,
+                path_match.as_str(),
+                IntentSource::ShellCommandArgument {
+                    command_excerpt: command_excerpt(command, path_match.start(), path_match.end()),
+                    command_name: "mkdir".to_string(),
+                    argv_index: 1,
+                },
+                IntentConfidence::Heuristic,
+            );
+        }
+    }
+
+    // Pattern 5: rm on path
+    for cap in regex_lite::Regex::new(r"\brm\s+(?:-[rRf]+\s+)*([^\s;|&]+)")
+        .unwrap()
+        .captures_iter(command)
+    {
+        if let Some(path_match) = cap.get(1) {
+            push_shell_intent(
+                &mut intents,
+                FsOperation::Delete,
+                path_match.as_str(),
+                IntentSource::ShellCommandArgument {
+                    command_excerpt: command_excerpt(command, path_match.start(), path_match.end()),
+                    command_name: "rm".to_string(),
+                    argv_index: 1,
+                },
+                IntentConfidence::Heuristic,
+            );
+        }
+    }
+
+    intents
+}
+
+fn push_shell_intent(
+    intents: &mut Vec<FsIntent>,
+    operation: FsOperation,
+    raw_path: &str,
+    source: IntentSource,
+    confidence: IntentConfidence,
+) {
+    let target = PathTarget::classify(raw_path);
+    match target {
+        PathTarget::HostAbsolute { .. }
+        | PathTarget::WorkspaceRelative { .. }
+        | PathTarget::HomeRelative { .. }
+        | PathTarget::SpecialDevice { .. }
+        | PathTarget::FileDescriptor { .. } => intents.push(FsIntent {
+            operation,
+            target,
+            actor: IntentActor::Model,
+            source,
+            confidence,
+        }),
+        PathTarget::Unknown { .. } => {}
+    }
+}
+
+fn command_excerpt(command: &str, start: usize, end: usize) -> String {
+    let excerpt_start = command[..start].rfind(['\n', ';']).map_or(0, |idx| idx + 1);
+    let excerpt_end = command[end..]
+        .find(['\n', ';'])
+        .map_or(command.len(), |idx| end + idx);
+    command[excerpt_start..excerpt_end].trim().to_string()
+}
+
+fn permission_error_for_intent(
+    intent: &FsIntent,
+    resolved: &crate::tools::permissions::ResolvedFsTarget,
+    boundary: &super::WorkspaceBoundary,
+) -> super::PathPermissionError {
+    let mut requested_path = intent.raw_path().to_string();
+    if !resolved.warnings.is_empty() {
+        requested_path.push_str("\n");
+        requested_path.push_str(&permission_warning_text(intent, resolved));
+    }
+    super::PathPermissionError {
+        requested_path,
+        directory: resolved
+            .canonical
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+        workspace: boundary.cwd().display().to_string(),
+    }
+}
+
+fn blocked_suspicious_intent_result(
+    intent: &FsIntent,
+    resolved: &crate::tools::permissions::ResolvedFsTarget,
+) -> ToolResult {
+    ToolResult {
+        content: vec![ContentBlock::Text {
+            text: format!(
+                "BLOCKED: suspicious filesystem intent\n\nPath: {}\nOperation: {:?}\nSource: {}\nConfidence: {:?}\n{}\n\nThis low-confidence shell extraction looks malformed or truncated. Rewrite the command with an explicit valid path.",
+                intent.raw_path(),
+                intent.operation,
+                intent.source.description(),
+                intent.confidence,
+                permission_warning_text(intent, resolved),
+            ),
+        }],
+        details: serde_json::json!({
+            "exitCode": -1,
+            "blocked": true,
+            "reason": "suspicious_filesystem_intent",
+            "path": intent.raw_path(),
+            "operation": format!("{:?}", intent.operation),
+            "source": intent.source.description(),
+            "confidence": format!("{:?}", intent.confidence),
+        }),
+    }
+}
+
+fn permission_warning_text(
+    _intent: &FsIntent,
+    resolved: &crate::tools::permissions::ResolvedFsTarget,
+) -> String {
+    let mut lines = Vec::new();
+    for warning in &resolved.warnings {
+        match warning {
+            PathWarning::RootDotPath { suggested_workspace_relative } => lines.push(format!(
+                "Warning: `{}` is host-absolute and looks like workspace-relative `{}` with an accidental leading slash.",
+                resolved.raw, suggested_workspace_relative
+            )),
+            PathWarning::ShortRootPath => lines.push(format!(
+                "Warning: `{}` is a short root path that may be a malformed or truncated token.",
+                resolved.raw
+            )),
+        }
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -1141,7 +1303,80 @@ mod tests {
             .downcast_ref::<crate::tools::PathPermissionError>()
             .expect("bash boundary hits must use PathPermissionError");
         assert_eq!(permission.requested_path, "/etc/evil.txt");
-        assert_eq!(permission.directory, "/etc");
+        assert!(
+            permission.directory.ends_with("/etc"),
+            "unexpected directory: {}",
+            permission.directory
+        );
+    }
+
+    #[tokio::test]
+    async fn bash_root_dot_path_permission_error_carries_diagnostic() {
+        let b = test_boundary("/tmp/workspace");
+        let err = execute_streaming(
+            "mkdir -p /.omegon/runtime",
+            Path::new("/tmp/workspace"),
+            Some(1),
+            CancellationToken::new(),
+            ToolProgressSink::noop(),
+            Some(b),
+        )
+        .await
+        .expect_err("root-dot paths should still hit the boundary");
+
+        let permission = err
+            .downcast_ref::<crate::tools::PathPermissionError>()
+            .expect("root-dot boundary hits must use PathPermissionError");
+        assert!(permission.requested_path.contains("/.omegon/runtime"));
+        assert!(permission.requested_path.contains(".omegon/runtime"));
+        assert!(
+            permission
+                .requested_path
+                .contains("accidental leading slash")
+        );
+    }
+
+    #[tokio::test]
+    async fn bash_short_root_path_is_diagnostic_block_not_permission_prompt() {
+        let b = test_boundary("/tmp/workspace");
+        let result = execute_streaming(
+            "echo secret > /Ig",
+            Path::new("/tmp/workspace"),
+            Some(1),
+            CancellationToken::new(),
+            ToolProgressSink::noop(),
+            Some(b),
+        )
+        .await
+        .expect("suspicious shell paths should return a blocked tool result");
+
+        assert_eq!(result.details["blocked"], true);
+        assert_eq!(result.details["reason"], "suspicious_filesystem_intent");
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("/Ig"));
+        assert!(text.contains("malformed or truncated"));
+    }
+
+    #[test]
+    fn shell_intent_extraction_keeps_relative_omegon_workspace_relative() {
+        let intents = extract_shell_fs_intents("mkdir -p .omegon/runtime");
+        assert_eq!(intents.len(), 1);
+        assert!(matches!(
+            intents[0].target,
+            crate::tools::permissions::PathTarget::WorkspaceRelative { .. }
+        ));
+        assert_eq!(intents[0].raw_path(), ".omegon/runtime");
+    }
+
+    #[test]
+    fn shell_intent_extraction_marks_root_dot_host_absolute() {
+        let intents = extract_shell_fs_intents("mkdir -p /.omegon/runtime");
+        assert_eq!(intents.len(), 1);
+        assert!(matches!(
+            intents[0].target,
+            crate::tools::permissions::PathTarget::HostAbsolute { .. }
+        ));
+        assert_eq!(intents[0].raw_path(), "/.omegon/runtime");
     }
 
     #[test]
@@ -1245,5 +1480,21 @@ mod tests {
             Path::new("/tmp/workspace"),
         );
         assert!(v.is_empty(), "trusted directory should be allowed: {:?}", v);
+    }
+
+    #[test]
+    fn scanner_allows_temp_directory_redirect() {
+        let b = test_boundary("/tmp/workspace");
+        let temp_file = std::env::temp_dir().join("omegon-permission-intent-test.log");
+        let command = format!("echo x > {}", temp_file.display());
+        let v = scan_boundary_violations(&command, &b, Path::new("/tmp/workspace"));
+        assert!(v.is_empty(), "temp directory should remain allowed: {v:?}");
+    }
+
+    #[test]
+    fn scanner_preserves_legitimate_etc_boundary_violation() {
+        let b = test_boundary("/tmp/workspace");
+        let v = scan_boundary_violations("echo x > /etc/hosts", &b, Path::new("/tmp/workspace"));
+        assert_eq!(v, vec!["/etc/hosts".to_string()]);
     }
 }

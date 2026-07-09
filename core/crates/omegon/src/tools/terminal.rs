@@ -15,6 +15,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use super::{WorkspaceBoundary, bash};
+use crate::tools::permissions::{
+    PathWarning, WorkspaceRelation, resolve_intent_target, suspicious_low_confidence_shell_path,
+};
 
 const MAX_TAIL_BYTES: usize = 64 * 1024;
 const DEFAULT_READ_BYTES: usize = 16 * 1024;
@@ -274,7 +277,47 @@ async fn start(
     }
 
     if let Some(boundary) = boundary {
-        let violations = bash::scan_boundary_violations(command, boundary, cwd);
+        let intents = bash::extract_shell_fs_intents(command);
+        let mut violations = Vec::new();
+        for intent in &intents {
+            let resolved = resolve_intent_target(intent, cwd, boundary);
+            if matches!(
+                resolved.relation,
+                WorkspaceRelation::InsideWorkspace | WorkspaceRelation::SpecialAllowed
+            ) {
+                continue;
+            }
+            if suspicious_low_confidence_shell_path(intent, &resolved) {
+                return Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: format!(
+                            "BLOCKED: suspicious terminal filesystem intent\n\nPath: {}\nOperation: {:?}\nSource: {}\nConfidence: {:?}\n{}\n\nThis low-confidence shell extraction looks malformed or truncated. Rewrite the command with an explicit valid path.",
+                            intent.raw_path(),
+                            intent.operation,
+                            intent.source.description(),
+                            intent.confidence,
+                            terminal_warning_text(&resolved),
+                        ),
+                    }],
+                    details: json!({
+                        "is_error": true,
+                        "blocked": true,
+                        "reason": "suspicious_filesystem_intent",
+                        "path": intent.raw_path(),
+                    }),
+                });
+            }
+            let warning_text = terminal_warning_text(&resolved);
+            violations.push(if warning_text.is_empty() {
+                intent.raw_path().to_string()
+            } else {
+                format!(
+                    "{}\n    {}",
+                    intent.raw_path(),
+                    warning_text.replace('\n', "\n    ")
+                )
+            });
+        }
         if !violations.is_empty() {
             return Ok(ToolResult {
                 content: vec![ContentBlock::Text {
@@ -810,6 +853,23 @@ fn err(text: String) -> Result<ToolResult> {
     })
 }
 
+fn terminal_warning_text(resolved: &crate::tools::permissions::ResolvedFsTarget) -> String {
+    let mut lines = Vec::new();
+    for warning in &resolved.warnings {
+        match warning {
+            PathWarning::RootDotPath { suggested_workspace_relative } => lines.push(format!(
+                "Warning: `{}` is host-absolute and looks like workspace-relative `{}` with an accidental leading slash.",
+                resolved.raw, suggested_workspace_relative
+            )),
+            PathWarning::ShortRootPath => lines.push(format!(
+                "Warning: `{}` is a short root path that may be a malformed or truncated token.",
+                resolved.raw
+            )),
+        }
+    }
+    lines.join("\n")
+}
+
 fn sanitize_name(name: &str) -> String {
     name.replace(['/', '\\'], "")
         .replace("..", "")
@@ -1135,6 +1195,140 @@ mod tests {
             Some(true)
         );
         assert!(text(&result).contains("BLOCKED"));
+    }
+
+    #[tokio::test]
+    async fn terminal_short_root_path_is_diagnostic_block() {
+        let cwd = tempfile::tempdir().unwrap();
+        let result = execute(
+            "start",
+            &json!({
+                "name": "blocked-short-root-terminal-test",
+                "command": "echo no > /Ig"
+            }),
+            cwd.path(),
+            Some(WorkspaceBoundary::new(cwd.path().to_path_buf())),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.details.get("blocked").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            result.details.get("reason").and_then(|v| v.as_str()),
+            Some("suspicious_filesystem_intent")
+        );
+        let body = text(&result);
+        assert!(body.contains("/Ig"));
+        assert!(body.contains("malformed or truncated"));
+    }
+
+    #[tokio::test]
+    async fn terminal_root_dot_path_includes_workspace_relative_diagnostic() {
+        let cwd = tempfile::tempdir().unwrap();
+        let result = execute(
+            "start",
+            &json!({
+                "name": "blocked-root-dot-terminal-test",
+                "command": "mkdir -p /.omegon/runtime"
+            }),
+            cwd.path(),
+            Some(WorkspaceBoundary::new(cwd.path().to_path_buf())),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result.details.get("blocked").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        let body = text(&result);
+        assert!(body.contains("/.omegon/runtime"));
+        assert!(body.contains(".omegon/runtime"));
+        assert!(body.contains("accidental leading slash"));
+    }
+
+    #[tokio::test]
+    async fn terminal_allows_temp_directory_redirect() {
+        let cwd = tempfile::tempdir().unwrap();
+        let temp_file = std::env::temp_dir().join(format!(
+            "omegon-terminal-permission-intent-{}.log",
+            uuid::Uuid::new_v4()
+        ));
+        let result = execute(
+            "start",
+            &json!({
+                "name": "allowed-temp-terminal-test",
+                "command": format!("echo temp-ok > {}", temp_file.display())
+            }),
+            cwd.path(),
+            Some(WorkspaceBoundary::new(cwd.path().to_path_buf())),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.details["session_id"].as_str().is_some(),
+            "temp redirect should be allowed: {}",
+            text(&result)
+        );
+        let id = result.details["session_id"].as_str().unwrap().to_string();
+        let _ = wait_for_session_exit(&id).await;
+        let _ = std::fs::remove_file(temp_file);
+    }
+
+    #[tokio::test]
+    async fn terminal_allows_trusted_directory_redirect() {
+        let cwd = tempfile::tempdir().unwrap();
+        let trusted = tempfile::tempdir().unwrap();
+        let target = trusted.path().join("trusted.log");
+        let boundary = WorkspaceBoundary::new(cwd.path().to_path_buf());
+        boundary.approve_directory(trusted.path().to_path_buf());
+        let result = execute(
+            "start",
+            &json!({
+                "name": "allowed-trusted-terminal-test",
+                "command": format!("echo trusted-ok > {}", target.display())
+            }),
+            cwd.path(),
+            Some(boundary),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.details["session_id"].as_str().is_some(),
+            "trusted redirect should be allowed: {}",
+            text(&result)
+        );
+        let id = result.details["session_id"].as_str().unwrap().to_string();
+        let _ = wait_for_session_exit(&id).await;
+    }
+
+    #[tokio::test]
+    async fn terminal_allows_standard_fd_redirect() {
+        let cwd = tempfile::tempdir().unwrap();
+        let result = execute(
+            "start",
+            &json!({
+                "name": "allowed-fd-terminal-test",
+                "command": "echo fd-ok > /dev/stdout"
+            }),
+            cwd.path(),
+            Some(WorkspaceBoundary::new(cwd.path().to_path_buf())),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.details["session_id"].as_str().is_some(),
+            "standard fd redirect should be allowed: {}",
+            text(&result)
+        );
+        let id = result.details["session_id"].as_str().unwrap().to_string();
+        let _ = wait_for_session_exit(&id).await;
     }
 
     #[tokio::test]

@@ -16,7 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Make permissions intent architecture the primary 0.27.8 release target: filesystem access will move toward structured intent, provenance-rich path diagnostics, and confidence-aware mediation for suspicious shell-derived paths such as `/Ig` and mistaken root-dot paths such as `/.omegon`.
+- Make permissions intent architecture the primary 0.27.8 release target: filesystem access is moving toward structured intent, provenance-rich path diagnostics, and confidence-aware mediation for suspicious shell-derived paths such as `/Ig` and mistaken root-dot paths such as `/.omegon`.
+- Added the first permissions intent slice: bash and terminal preflight now extract structured filesystem intents, block low-confidence `/Ig`-class shell artifacts diagnostically, and annotate `/.omegon`-class host-absolute paths with workspace-relative correction guidance while preserving strict boundary behavior.
 - Sanitized assistant reasoning segments so provider-specific `<think>` wrappers, HTML comment artifacts, and standalone bold heading markers do not leak into the TUI transcript.
 
 - Fix 0.27.7 release smoke regressions in capability inventory tests, remote `/auth logout` routing, and settings menu drift rendering.
