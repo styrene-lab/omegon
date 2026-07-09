@@ -110,7 +110,7 @@ pub fn agent_bundle_summary_from_dir(bundle_dir: &Path) -> anyhow::Result<AgentB
     Ok(agent_bundle_summary(resolved))
 }
 
-fn agent_bundle_summary(resolved: ResolvedManifest) -> AgentBundleSummary {
+pub(crate) fn agent_bundle_summary(resolved: ResolvedManifest) -> AgentBundleSummary {
     let manifest = resolved.manifest;
     let persona = manifest.persona.as_ref();
 

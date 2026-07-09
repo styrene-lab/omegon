@@ -4282,21 +4282,18 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let widget_receivers = std::mem::take(&mut agent.widget_receivers);
 fn build_tui_secret_readiness_snapshot(
     agent: &setup::AgentSetup,
+    active_agent: Option<&crate::capabilities::agents::AgentBundleSummary>,
 ) -> Option<crate::capabilities::secrets::SecretReadinessSnapshot> {
     let home = crate::paths::omegon_home().ok()?;
-    let armory_home = home.join("armory");
-    let project_armory = agent.cwd.join("../omegon-armory");
-    let armory_root =
-        if !armory_home.join("profiles").exists() && project_armory.join("profiles").exists() {
-            project_armory.as_path()
-        } else {
-            armory_home.as_path()
-        };
-    let roots = crate::capabilities::inventory::CapabilityInventoryRoots {
-        extensions_dir: &home.join("extensions"),
-        armory_root,
-        catalog_dir: &home.join("catalog"),
-    };
+    let extensions = crate::capabilities::extensions::list_installed_extension_capabilities_from_dir(
+        &home.join("extensions"),
+    )
+    .map_err(|error| {
+        tracing::warn!(?error, "failed to list extensions for TUI secret readiness snapshot");
+        error
+    })
+    .ok()?;
+    let active_agents: Vec<_> = active_agent.iter().cloned().cloned().collect();
     let build_secret_inputs = |checked_names: Vec<String>| {
         crate::capabilities::secrets::SecretReadinessInputs {
             session_diagnostics: agent
@@ -4320,17 +4317,12 @@ fn build_tui_secret_readiness_snapshot(
             checked_names,
         }
     };
-    let preliminary = crate::capabilities::inventory::build_capability_inventory_snapshot_with_secrets(
-        roots,
+    let preliminary = crate::capabilities::secrets::build_secret_readiness_snapshot(
+        &extensions,
+        &active_agents,
         build_secret_inputs(Vec::new()),
-    )
-    .map_err(|error| {
-        tracing::warn!(?error, "failed to build preliminary TUI secret readiness snapshot");
-        error
-    })
-    .ok()?;
+    );
     let known_secret_names: Vec<String> = preliminary
-        .secret_readiness
         .secrets
         .iter()
         .map(|secret| secret.name.clone())
@@ -4340,16 +4332,11 @@ fn build_tui_secret_readiness_snapshot(
             .secrets
             .warm_secret(name, omegon_secrets::SecretUse::Other, false);
     }
-    crate::capabilities::inventory::build_capability_inventory_snapshot_with_secrets(
-        roots,
+    Some(crate::capabilities::secrets::build_secret_readiness_snapshot(
+        &extensions,
+        &active_agents,
         build_secret_inputs(known_secret_names),
-    )
-    .map(|snapshot| snapshot.secret_readiness)
-    .map_err(|error| {
-        tracing::warn!(?error, "failed to build TUI secret readiness snapshot");
-        error
-    })
-    .ok()
+    ))
 }
 
     let voice_notification_receivers = std::mem::take(&mut agent.voice_notification_receivers);
@@ -4365,7 +4352,7 @@ fn build_tui_secret_readiness_snapshot(
         bus_commands,
         runtime_generation,
         runtime_inventory,
-        secret_readiness: build_tui_secret_readiness_snapshot(&agent),
+        secret_readiness: build_tui_secret_readiness_snapshot(&agent, None),
         startup_skill_activation_events,
         dashboard_handles: agent.dashboard_handles.clone(),
         initial_prompt,
