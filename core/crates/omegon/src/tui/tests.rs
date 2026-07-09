@@ -9053,11 +9053,16 @@ fn secrets_menu_inventory_includes_first_party_catalog_rows() {
     assert_eq!(
         row.primary_action
             .as_ref()
-            .and_then(|action| action.command.as_deref()),
-        Some("/secrets get BRAVE_API_KEY")
+            .and_then(|action| action.editor_text.as_deref()),
+        Some("/secrets set BRAVE_API_KEY")
+    );
+    assert!(
+        row.actions
+            .iter()
+            .any(|action| action.command.as_deref() == Some("/secrets get BRAVE_API_KEY")),
+        "missing redacted resolution check action"
     );
     for expected in [
-        "/secrets set BRAVE_API_KEY",
         "/secrets set BRAVE_API_KEY env:",
         "/secrets set BRAVE_API_KEY cmd:",
         "/secrets set BRAVE_API_KEY vault:",
