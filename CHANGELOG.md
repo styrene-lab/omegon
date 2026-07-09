@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 - Hardened `/secrets` menu UX so inventory rows are management-first: Enter now prepares hidden set/replace for the selected secret, resolution checks are secondary actions, and optional undeclared bindings render as `not checked` instead of falsely `missing`.
+- Hardened `/variables` menu UX to match the management-first `/secrets` posture: the inventory tab is now `Manage`, Enter updates the selected variable, empty state primes `/variables set`, and read-only value display moved to a secondary action.
 - 0.27.8 was not published as a usable artifact release; 0.28.0 supersedes it as the next installable release line.
 
 ## [0.28.0] - 2026-07-09

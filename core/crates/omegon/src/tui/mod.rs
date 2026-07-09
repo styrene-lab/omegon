@@ -3058,23 +3058,28 @@ impl App {
         };
 
         let mut menu = MenuProjection::new("variables", "Variables");
-        menu.summary = Some("Session-scoped runtime configuration. Values are printable by design; put credentials in /secrets instead.".into());
-        menu.footer = Some("↑/↓ navigate · Enter run/prepare action · / filter · Esc close · /variables status for text readout".into());
+        menu.summary = Some("Manage session-scoped runtime configuration. Values are printable by design; put credentials in /secrets instead.".into());
+        menu.footer = Some("↑/↓ navigate · Enter set/update · / filter · Esc close · /variables status for text readout".into());
 
         let snapshot = crate::control::variables::variables_snapshot();
         let variable_rows = if snapshot.is_empty() {
             vec![MenuRowProjection {
                 id: "variables.inventory.empty".into(),
                 label: "No session variables set".into(),
-                description: "Use Actions to set printable runtime config for this session.".into(),
+                description: "Press Enter to set printable runtime config for this session.".into(),
                 value: None,
-                kind: MenuRowKind::Object,
+                kind: MenuRowKind::Action,
                 badges: vec![MenuBadgeProjection {
-                    label: "empty".into(),
-                    tone: MenuBadgeTone::Neutral,
+                    label: "set".into(),
+                    tone: MenuBadgeTone::Info,
                 }],
-                metadata: vec!["session scope".into(), "printable".into()],
-                primary_action: None,
+                metadata: vec!["/variables set NAME VALUE".into(), "use /secrets for credentials".into()],
+                primary_action: Some(MenuActionProjection::prime_editor(
+                    "variables.inventory.empty.set",
+                    "Set variable",
+                    "/variables set ",
+                    "Type NAME VALUE; use /secrets for credentials",
+                )),
                 actions: Vec::new(),
                 safety: None,
                 availability: None,
@@ -3112,17 +3117,17 @@ impl App {
                         kind: MenuRowKind::Object,
                         badges,
                         metadata,
-                        primary_action: Some(MenuActionProjection::command(
-                            format!("variables.get.{name}"),
-                            "Get",
-                            format!("/variables get {name}"),
+                        primary_action: Some(MenuActionProjection::prime_editor(
+                            format!("variables.set.{name}"),
+                            "Update",
+                            format!("/variables set {name} "),
+                            "Type the replacement printable value for this session variable",
                         )),
                         actions: vec![
-                            MenuActionProjection::prime_editor(
-                                format!("variables.set.{name}"),
-                                "Update",
-                                format!("/variables set {name} "),
-                                "Type the replacement printable value for this session variable",
+                            MenuActionProjection::command(
+                                format!("variables.get.{name}"),
+                                "Show value",
+                                format!("/variables get {name}"),
                             ),
                             MenuActionProjection::prime_editor(
                                 format!("variables.delete.{name}"),
@@ -3140,19 +3145,19 @@ impl App {
 
         menu.tabs = vec![MenuTabProjection {
             id: "inventory".into(),
-            label: "Inventory".into(),
+            label: "Manage".into(),
             groups: vec![MenuGroupProjection {
                 id: "variables.inventory".into(),
-                label: "Session variables".into(),
-                description: Some("Printable runtime config currently available to Omegon-managed process launches.".into()),
+                label: "Manage session variables".into(),
+                description: Some("Printable runtime config available to Omegon-managed process launches. Enter updates the selected variable; values are intentionally visible.".into()),
                 rows: variable_rows,
             }],
         }, MenuTabProjection {
             id: "actions".into(),
-            label: "Actions".into(),
+            label: "Templates".into(),
             groups: vec![MenuGroupProjection {
                 id: "variables.actions".into(),
-                label: "Variable actions".into(),
+                label: "Variable command templates".into(),
                 description: Some("Prepare variable commands. Values entered here are not secret and may be displayed.".into()),
                 rows: vec![
                     MenuRowProjection {

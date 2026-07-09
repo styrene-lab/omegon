@@ -8921,13 +8921,23 @@ fn variables_menu_inventory_rows_offer_update_and_delete() {
         .expect("variable inventory row");
 
     let update = row
-        .actions
-        .iter()
-        .find(|action| action.label == "Update")
-        .expect("update action");
+        .primary_action
+        .as_ref()
+        .expect("update primary action");
+    assert_eq!(update.label, "Update");
     assert_eq!(
         update.editor_text.as_deref(),
         Some(format!("/variables set {name} ").as_str())
+    );
+
+    let get = row
+        .actions
+        .iter()
+        .find(|action| action.label == "Show value")
+        .expect("show value action");
+    assert_eq!(
+        get.command.as_deref(),
+        Some(format!("/variables get {name}").as_str())
     );
 
     let delete = row
