@@ -1192,7 +1192,22 @@ async fn resolve_current_model_intent_route(
             intent.exact_model_override.as_deref(),
         )
         .await;
-    let bridge = providers::auto_detect_bridge(&target).await?;
+    let preferred = inference_runtime
+        .inventory_route_preference(
+            intent.to_capability_request().grade,
+            &only_providers,
+            intent.exact_model_override.as_deref(),
+        )
+        .await;
+    let selected_target = preferred
+        .as_ref()
+        .map(|preference| preference.offering.as_str())
+        .unwrap_or(&target);
+    let bridge = match providers::auto_detect_bridge(selected_target).await {
+        Some(bridge) => bridge,
+        None if preferred.is_some() => providers::auto_detect_bridge(&target).await?,
+        None => return None,
+    };
     route_controller
         .resolve_route_from_intent_candidate(candidate, bridge)
         .await

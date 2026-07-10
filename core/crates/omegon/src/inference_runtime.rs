@@ -7,6 +7,28 @@ use crate::inference_inventory::{
 use crate::inference_manifest::{InferenceManifestLoader, ManifestDiagnostic, ManifestSource};
 use crate::model_registry::ModelRegistry;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InventoryRoutePolicy {
+    #[default]
+    Shadow,
+    Prefer,
+}
+
+impl InventoryRoutePolicy {
+    pub fn from_env() -> Self {
+        match std::env::var("OMEGON_INFERENCE_ROUTE_POLICY") {
+            Ok(value) if value.eq_ignore_ascii_case("inventory_prefer") => Self::Prefer,
+            _ => Self::Shadow,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InventoryRoutePreference {
+    pub offering: String,
+    pub generation: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InferenceRefreshReport {
     pub previous_generation: u64,
@@ -261,6 +283,40 @@ fn classify_route_shadow(
     RouteShadowAgreement::Divergence
 }
 
+fn provider_allowed(offering: &str, only_providers: &[String]) -> bool {
+    only_providers.is_empty()
+        || only_providers.iter().any(|provider| {
+            normalize_route_id(&format!("{provider}:placeholder"))
+                .split_once(':')
+                .is_some_and(|(normalized, _)| {
+                    normalize_route_id(offering)
+                        .split_once(':')
+                        .is_some_and(|(candidate, _)| candidate == normalized)
+                })
+        })
+}
+
+fn route_supported_by_compiled_bridge(offering: &str) -> bool {
+    normalize_route_id(offering)
+        .split_once(':')
+        .is_some_and(|(provider, _)| {
+            matches!(
+                provider,
+                "anthropic"
+                    | "openai"
+                    | "openai-codex"
+                    | "github-copilot"
+                    | "google"
+                    | "google-antigravity"
+                    | "ollama"
+                    | "openrouter"
+                    | "xai"
+                    | "mistral"
+                    | "huggingface"
+            )
+        })
+}
+
 fn shadow_grade_floor(grade: crate::routing::CapabilityGradeBand) -> Option<CapabilityGrade> {
     match grade {
         crate::routing::CapabilityGradeBand::Max => Some(CapabilityGrade::S),
@@ -330,6 +386,49 @@ impl InferenceRuntimeState {
         }
     }
 
+    pub async fn preferred_route(
+        &self,
+        grade: crate::routing::CapabilityGradeBand,
+        only_providers: &[String],
+        exact_offering: Option<&str>,
+    ) -> Option<InventoryRoutePreference> {
+        if InventoryRoutePolicy::from_env() != InventoryRoutePolicy::Prefer {
+            return None;
+        }
+        let projection = self.projection().await;
+        let current: Vec<_> = projection
+            .route_shadow_observations
+            .iter()
+            .filter(|observation| observation.generation == projection.generation)
+            .collect();
+        if summarize_observations(current.into_iter()).readiness()
+            != RouteAuthorityReadiness::ReadyForReview
+        {
+            return None;
+        }
+        let snapshot = self.store.snapshot().await;
+        let mut request = CompatibilityRequest {
+            exact_offering: exact_offering
+                .map(|id| crate::inference_inventory::OfferingId(normalize_route_id(id))),
+            ..Default::default()
+        };
+        if let Some(minimum) = shadow_grade_floor(grade) {
+            request.minimum_grades.insert("agentic".into(), minimum);
+        }
+        let offering = snapshot
+            .compatible_offerings(&request)
+            .into_iter()
+            .find(|result| {
+                result.is_compatible()
+                    && provider_allowed(&result.offering.id.0, only_providers)
+                    && route_supported_by_compiled_bridge(&result.offering.id.0)
+            })?;
+        Some(InventoryRoutePreference {
+            offering: offering.offering.id.0.clone(),
+            generation: snapshot.generation,
+        })
+    }
+
     pub async fn observe_route_shadow(
         &self,
         grade: crate::routing::CapabilityGradeBand,
@@ -350,18 +449,7 @@ impl InferenceRuntimeState {
             .compatible_offerings(&request)
             .into_iter()
             .filter(|result| result.is_compatible())
-            .filter(|result| {
-                only_providers.is_empty()
-                    || only_providers.iter().any(|provider| {
-                        normalize_route_id(&format!("{provider}:placeholder"))
-                            .split_once(':')
-                            .is_some_and(|(normalized, _)| {
-                                normalize_route_id(&result.offering.id.0)
-                                    .split_once(':')
-                                    .is_some_and(|(candidate, _)| candidate == normalized)
-                            })
-                    })
-            })
+            .filter(|result| provider_allowed(&result.offering.id.0, only_providers))
             .map(|result| result.offering.id.0.clone())
             .collect();
         let authoritative = authoritative.map(str::to_owned);
@@ -380,6 +468,47 @@ impl InferenceRuntimeState {
             observations.drain(..excess);
         }
         observation
+    }
+
+    pub async fn inventory_route_preference(
+        &self,
+        grade: crate::routing::CapabilityGradeBand,
+        only_providers: &[String],
+        exact_offering: Option<&str>,
+    ) -> Option<InventoryRoutePreference> {
+        if InventoryRoutePolicy::from_env() != InventoryRoutePolicy::Prefer {
+            return None;
+        }
+        let snapshot = self.store.snapshot().await;
+        let observations = self.route_shadow_observations.read().await;
+        let current = summarize_observations(
+            observations
+                .iter()
+                .filter(|observation| observation.generation == snapshot.generation),
+        );
+        if current.readiness() != RouteAuthorityReadiness::ReadyForReview {
+            return None;
+        }
+        let mut request = CompatibilityRequest {
+            exact_offering: exact_offering
+                .map(|id| crate::inference_inventory::OfferingId(normalize_route_id(id))),
+            ..Default::default()
+        };
+        if let Some(minimum) = shadow_grade_floor(grade) {
+            request.minimum_grades.insert("agentic".into(), minimum);
+        }
+        snapshot
+            .compatible_offerings(&request)
+            .into_iter()
+            .find(|result| {
+                result.is_compatible()
+                    && provider_allowed(&result.offering.id.0, only_providers)
+                    && route_supported_by_compiled_bridge(&result.offering.id.0)
+            })
+            .map(|result| InventoryRoutePreference {
+                offering: normalize_route_id(&result.offering.id.0),
+                generation: snapshot.generation,
+            })
     }
 
     pub async fn record_refresh_report(&self, report: &InferenceRefreshReport) {
