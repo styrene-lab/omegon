@@ -568,7 +568,10 @@ impl PlanSurfaceInputs {
         intent: &crate::conversation::IntentDocument,
     ) -> Option<omegon_traits::PlanLaneProjection> {
         let visible = self.visible.as_ref()?;
-        if visible.progress.total == 0 {
+        if visible.progress.total == 0
+            || matches!(visible.status, PlanStatus::Completed | PlanStatus::Archived)
+            || intent.work_plan_complete()
+        {
             return None;
         }
         let visible_plan = intent.visible_plan.as_ref();
@@ -1681,6 +1684,25 @@ pub fn render_plan_list_text(
 mod render_tests {
     use super::*;
     use crate::conversation::IntentDocument;
+
+    #[test]
+    fn completed_session_plan_leaves_history_without_visible_lane() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["finish validation".into()]);
+        intent.approve_work_plan();
+        intent.execute_work_plan();
+        intent.work_plan[0].completion_policy = crate::conversation::TaskCompletionPolicy::Manual;
+        intent.complete_work_item(0);
+
+        assert!(intent.work_plan_complete());
+        assert!(intent.visible_plan.is_some());
+        assert_eq!(intent.plan_mode, crate::conversation::PlanMode::Complete);
+        assert_eq!(intent.last_completed_work_plan().unwrap().items.len(), 1);
+        let projection = PlanSurfaceInputs::from_intent(&intent, dir.path());
+        assert!(projection.active_lane(&intent).is_none());
+        assert_eq!(projection.completed_session.unwrap().completed, 1);
+    }
 
     #[test]
     fn render_plan_list_text_includes_visible_and_lifecycle_sections() {

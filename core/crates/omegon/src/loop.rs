@@ -5652,8 +5652,13 @@ mod tests {
         assert!(notification.contains("Plan mode: complete"));
         assert!(notification.contains("Progress: 1/1"));
         assert!(notification.contains("● Only item"));
-        assert_eq!(intent.work_plan_snapshot_json()["total"], 1);
-        assert_eq!(intent.work_plan_snapshot_json()["mode"], "complete");
+        let completed = intent
+            .last_completed_work_plan()
+            .expect("completed checklist remains in the completion ledger");
+        assert_eq!(completed.items.len(), 1);
+        assert_eq!(completed.items[0].description, "Only item");
+        assert_eq!(intent.work_plan_snapshot_json()["total"], 0);
+        assert_eq!(intent.work_plan_snapshot_json()["mode"], "off");
     }
 
     #[test]

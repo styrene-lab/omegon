@@ -14,6 +14,8 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+- Fixed completed session plans lingering as active Workbench lanes: terminal checklists remain available through the completion ledger and immediate plan-tool notification, while semantic and legacy projections omit completed or archived lanes instead of resurrecting stale active state.
+- Fixed the completed-plan render regression test to exercise the real approved/executing/manual-completion lifecycle, preserving coverage that completed session plans remain in history without leaving a stale Workbench lane.
 - Activated cleave pre-dispatch route pinning: feature-dispatched runs now capture one shared inventory snapshot, stamp the run generation, resolve every child route from that snapshot before orchestration, and pass immutable decisions to the orchestrator for persisted dispatch provenance.
 - Hardened cleave route-provenance compatibility across persisted state, semantic operation rows, TUI dashboard/workbench/instruments, web/API surfaces, CLI fixtures, and smoke scenarios; the complete cleave-focused suite now compiles and passes with explicit generation/decision defaults instead of hidden constructor drift.
 - Began real cleave inference-runtime integration: setup now shares one `InferenceRuntimeState` across cleave and delegate, while cleave progress and child runtime summaries carry explicit inventory-generation and route-decision slots for the forthcoming pre-dispatch pinning step.
