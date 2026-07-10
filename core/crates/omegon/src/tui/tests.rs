@@ -9231,6 +9231,54 @@ fn slash_init_opens_harness_init_menu() {
 }
 
 #[test]
+fn slash_init_unknown_subcommand_is_non_mutating_usage_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo = tmp.path().join("repo");
+    let nested = repo.join("src/nested");
+    std::fs::create_dir_all(&nested).expect("nested project path");
+    std::fs::write(repo.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("cargo");
+    let _cwd = push_current_dir(&nested);
+    let mut app = test_app();
+    app.footer_data.cwd = nested.display().to_string();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/init typo", &tx);
+
+    match result {
+        SlashResult::Display(message) => {
+            assert!(message.contains("Usage: /init"), "{message}");
+            assert!(message.contains("Unknown subcommand: typo"), "{message}");
+        }
+        other => panic!("expected init usage error, got {other:?}"),
+    }
+    assert!(!repo.join(".omegon").exists());
+    assert!(!repo.join("ai/memory").exists());
+    assert!(!nested.join(".omegon").exists());
+    assert!(!nested.join("ai/memory").exists());
+}
+
+#[test]
+fn slash_init_scan_targets_detected_project_root() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo = tmp.path().join("repo");
+    let nested = repo.join("src/nested");
+    std::fs::create_dir_all(&nested).expect("nested project path");
+    std::fs::write(repo.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("cargo");
+    let _cwd = push_current_dir(&nested);
+    let mut app = test_app();
+    app.footer_data.cwd = nested.display().to_string();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/init scan", &tx);
+
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(repo.join(".omegon").is_dir());
+    assert!(repo.join("ai/memory").is_dir());
+    assert!(!nested.join(".omegon").exists());
+    assert!(!nested.join("ai/memory").exists());
+}
+
+#[test]
 fn init_menu_recommends_matching_user_skill_for_project_copy() {
     let _env = crate::test_support::env::lock();
     let tmp = tempfile::tempdir().expect("tempdir");

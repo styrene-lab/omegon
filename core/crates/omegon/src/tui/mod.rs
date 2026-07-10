@@ -10157,18 +10157,23 @@ Scroll transcript:
 
             "init" => {
                 let cwd = std::path::Path::new(&self.footer_data.cwd);
+                let project_root = crate::setup::find_project_root(cwd);
                 match args {
                     "" | "menu" => {
                         self.open_init_menu();
                         SlashResult::Handled
                     }
                     "scan" => {
-                        let report = crate::migrate::init_project(cwd, false);
+                        let report = crate::migrate::init_project(&project_root, false);
+                        SlashResult::Display(report)
+                    }
+                    "migrate" => {
+                        let report = crate::migrate::init_project(&project_root, true);
                         SlashResult::Display(report)
                     }
                     "profile migrate --project" | "profiles migrate --project" => {
                         match crate::migrate::migrate_legacy_profile_to_registry(
-                            cwd,
+                            &project_root,
                             crate::migrate::InitProfileScope::Project,
                         ) {
                             Ok(message) => SlashResult::Display(message),
@@ -10177,18 +10182,16 @@ Scroll transcript:
                     }
                     "profile migrate --user" | "profiles migrate --user" => {
                         match crate::migrate::migrate_legacy_profile_to_registry(
-                            cwd,
+                            &project_root,
                             crate::migrate::InitProfileScope::User,
                         ) {
                             Ok(message) => SlashResult::Display(message),
                             Err(error) => SlashResult::Display(format!("✗ {error}")),
                         }
                     }
-                    _ => {
-                        let move_all = args == "migrate";
-                        let report = crate::migrate::init_project(cwd, move_all);
-                        SlashResult::Display(report)
-                    }
+                    _ => SlashResult::Display(format!(
+                        "Usage: /init [menu|scan|migrate|profile migrate --project|profile migrate --user]\n\nUnknown subcommand: {args}"
+                    )),
                 }
             }
 
