@@ -7650,8 +7650,7 @@ warning: {warning}"
             live_activity_tools.push(crate::surfaces::activity::ActivityToolProjection {
                 episode_id: self
                     .conversation
-                    .turn_id_for_tool(id)
-                    .map(|turn| format!("turn:{turn}"))
+                    .episode_id_for_tool(id)
                     .unwrap_or_else(|| format!("tool:{id}")),
                 segment_id: id.clone(),
                 mode: crate::surfaces::activity::ActivityToolMode::Detail,
@@ -11310,7 +11309,11 @@ Scroll transcript:
         self.prune_activity_tools(std::time::Instant::now());
         self.activity_tools.retain(|tool| tool.segment_id != id);
         self.activity_tools.push_front(ActivityToolState {
-            episode_id: format!("turn:{}", self.turn),
+            episode_id: if name == "operator_shell" {
+                format!("operator-shell:{id}")
+            } else {
+                format!("turn:{}", self.turn)
+            },
             segment_id: id.to_string(),
             name: name.to_string(),
             args_summary,
@@ -14010,8 +14013,7 @@ pub async fn run_tui(
                             } else if let Some(id) = app.conversation.latest_expandable_tool_id() {
                                 let episode_id = app
                                     .conversation
-                                    .turn_id_for_tool(&id)
-                                    .map(|turn| format!("turn:{turn}"))
+                                    .episode_id_for_tool(&id)
                                     .unwrap_or_else(|| format!("tool:{id}"));
                                 app.tool_inspection_target = Some(ToolInspectionTarget::Episode {
                                     episode_id,
@@ -14067,8 +14069,7 @@ pub async fn run_tui(
                                 {
                                     let episode_id = app
                                         .conversation
-                                        .turn_id_for_tool(&id)
-                                        .map(|turn| format!("turn:{turn}"))
+                                        .episode_id_for_tool(&id)
                                         .unwrap_or_else(|| format!("tool:{id}"));
                                     app.tool_inspection_target =
                                         Some(ToolInspectionTarget::Episode {

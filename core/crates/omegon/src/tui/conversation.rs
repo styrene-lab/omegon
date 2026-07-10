@@ -1129,6 +1129,21 @@ impl ConversationView {
         })
     }
 
+    /// Resolve the authoritative episode identity for tool evidence.
+    pub fn episode_id_for_tool(&self, id: &str) -> Option<String> {
+        let segment = self.tool_segment_by_id(id)?;
+        if let Some(turn) = segment.meta.turn {
+            return Some(format!("turn:{turn}"));
+        }
+        match &segment.content {
+            SegmentContent::ToolCard { name, .. } if name == "operator_shell" => {
+                Some(format!("operator-shell:{id}"))
+            }
+            SegmentContent::ToolCard { .. } => Some(format!("tool:{id}")),
+            _ => None,
+        }
+    }
+
     pub fn turn_id_for_tool(&self, id: &str) -> Option<u32> {
         self.tool_segment_by_id(id).and_then(|segment| segment.meta.turn)
     }

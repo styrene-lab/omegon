@@ -47,6 +47,16 @@ pub fn project_conversation_segments(
     let mut projected = Vec::with_capacity(segments.len());
     let mut emitted_turn = None;
     for segment in segments {
+        if segment.meta.turn.is_none()
+            && let SegmentContent::ToolCard { name, complete: true, .. } = &segment.content
+            && name == "operator_shell"
+        {
+            let semantic = segment.project_conversation_segment();
+            if let Some(episode) = OperationEpisodeProjection::single_tool_fallback(&semantic) {
+                projected.push(outcome_segment(segment.meta.clone(), &episode));
+                continue;
+            }
+        }
         let collapsible = segment
             .meta
             .turn
@@ -127,6 +137,20 @@ mod tests {
         let source = vec![tool(Some(7), "a", "done", true)];
         let projected = project_conversation_segments(&source, UiPresentationLevel::Full);
         assert!(matches!(projected[0].content, SegmentContent::ToolCard { .. }));
+    }
+
+    #[test]
+    fn operator_shell_without_turn_uses_authoritative_single_observation_episode() {
+        let mut source = tool(None, "shell-7", "exit 0 · 12ms", true);
+        if let SegmentContent::ToolCard { name, .. } = &mut source.content {
+            *name = "operator_shell".into();
+        }
+        let projected = project_conversation_segments(&[source], UiPresentationLevel::Om);
+        assert_eq!(projected.len(), 1);
+        let SegmentContent::SystemNotification { text } = &projected[0].content else {
+            panic!("outcome")
+        };
+        assert_eq!(text, "✓ operator_shell · exit 0 · 12ms · 1 operation");
     }
 
     #[test]

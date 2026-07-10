@@ -75,7 +75,11 @@ impl OperationEpisodeProjection {
             return None;
         };
         Self::from_authoritative_boundary(
-            format!("tool:{}", tool.id.as_ref()),
+            if tool.name.as_ref() == "operator_shell" {
+                format!("operator-shell:{}", tool.id.as_ref())
+            } else {
+                format!("tool:{}", tool.id.as_ref())
+            },
             std::slice::from_ref(segment),
         )
     }
