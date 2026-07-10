@@ -2650,6 +2650,17 @@ fn codex_gpt_5_6_cli_advisory(model: &str, installed: Option<SemanticVersion>) -
     ))
 }
 
+fn codex_wire_model(model: &str) -> &str {
+    match model {
+        // The current Codex surface documents `gpt-5.6` as the operator-facing
+        // shorthand, but the reasoning selector and model catalog resolve the
+        // actual flagship route as Sol. Send the concrete native route so
+        // Omegon does not depend on Codex CLI alias expansion.
+        "gpt-5.6" => "gpt-5.6-sol",
+        other => other,
+    }
+}
+
 fn enrich_codex_error_message(model: &str, status: u16, user_msg: &str) -> String {
     let mut message = format!("Codex {status}: {user_msg}");
     let lower = user_msg.to_ascii_lowercase();
@@ -2932,11 +2943,12 @@ impl LlmBridge for CodexClient {
             })
             .unwrap_or("gpt-5.5");
 
+        let wire_model = codex_wire_model(model);
         let input = Self::build_input(messages);
         let wire_tools = Self::build_tools(tools);
 
         let mut body = json!({
-            "model": model, "store": false, "stream": true,
+            "model": wire_model, "store": false, "stream": true,
             "instructions": system_prompt, "input": input,
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
@@ -5539,6 +5551,13 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn codex_wire_model_expands_gpt_5_6_alias_without_cli_dependency() {
+        assert_eq!(super::codex_wire_model("gpt-5.6"), "gpt-5.6-sol");
+        assert_eq!(super::codex_wire_model("gpt-5.6-terra"), "gpt-5.6-terra");
+        assert_eq!(super::codex_wire_model("gpt-5.5"), "gpt-5.5");
     }
 
     #[test]

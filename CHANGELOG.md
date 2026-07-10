@@ -16,7 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Added GPT-5.6 to the OpenAI and OpenAI Codex model registry defaults, S-grade routes, and model selector entries; Codex GPT-5.6 now records upstream minimum client versions and enriches unsupported-model errors with rollout and optional client-version diagnostics without making the Codex CLI a native-dispatch dependency.
+- Added GPT-5.6 to the OpenAI and OpenAI Codex model registry defaults, S-grade routes, and model selector entries; Codex GPT-5.6 now records upstream rollout metadata, enriches unsupported-model errors with rollout diagnostics, and expands the operator-facing `gpt-5.6` alias to the concrete native `gpt-5.6-sol` route without making the Codex CLI a dispatch dependency.
 - Fixed `/skill` so the bare alias opens the structured skills menu instead of writing usage text into the conversation transcript; `/skills` and `/skills list` remain structured-menu-only inventory views.
 - Fixed structured menu width handling so `/init` and other popup menus truncate header/footer text to the actual popup width, compact overlong rows, and wrap selected-row descriptions instead of spilling past the border.
 - Added the first profile-registry slice: startup profile loading now discovers scoped project/user registry files, supports dynamic `/profile use <id> [--scope=project|user]` switching through TUI/daemon control flows, honors explicit active-profile pointer files before legacy singleton profiles, keeps existing `.omegon/profile.json` compatibility as a fallback, and upgrades `/init` into a harness initialization menu with pending substrate actions, detected compatibility prompts, and project-signal skill recommendations.
