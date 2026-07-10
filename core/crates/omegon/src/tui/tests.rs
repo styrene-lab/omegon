@@ -1833,6 +1833,7 @@ fn completed_plan_update_clears_live_operation_handles_but_keeps_workstream_summ
         crate::features::cleave::CleaveProgress {
             active: true,
             run_id: "cleave-activity".into(),
+            inventory_generation: None,
             total_children: 1,
             completed: 0,
             failed: 0,
@@ -4469,6 +4470,7 @@ fn draw_routes_active_cleave_to_workbench_without_instruments() {
     app.dashboard.cleave = Some(crate::features::cleave::CleaveProgress {
         active: true,
         run_id: "run-1".into(),
+        inventory_generation: None,
         total_children: 2,
         completed: 1,
         failed: 0,
@@ -4619,6 +4621,7 @@ fn draw_clears_stale_completed_cleave_snapshot_from_tools_panel() {
         .set_cleave_progress(Some(crate::features::cleave::CleaveProgress {
             active: false,
             run_id: "done-run".into(),
+            inventory_generation: None,
             total_children: 3,
             completed: 3,
             failed: 0,
@@ -4630,6 +4633,7 @@ fn draw_clears_stale_completed_cleave_snapshot_from_tools_panel() {
         crate::features::cleave::CleaveProgress {
             active: false,
             run_id: "done-run".into(),
+            inventory_generation: None,
             total_children: 3,
             completed: 3,
             failed: 0,
@@ -4656,6 +4660,7 @@ fn draw_hides_dashboard_for_inactive_restored_cleave_snapshot_without_other_cont
     app.dashboard.cleave = Some(crate::features::cleave::CleaveProgress {
         active: false,
         run_id: "restored-run".into(),
+        inventory_generation: None,
         total_children: 3,
         completed: 3,
         failed: 0,

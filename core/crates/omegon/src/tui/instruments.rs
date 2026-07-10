@@ -2191,6 +2191,7 @@ mod tests {
         panel.set_cleave_progress(Some(CleaveProgress {
             active: true,
             run_id: "r1".into(),
+            inventory_generation: None,
             total_children: 2,
             completed: 0,
             failed: 0,
@@ -2206,6 +2207,7 @@ mod tests {
         panel.set_cleave_progress(Some(CleaveProgress {
             active: true,
             run_id: "r2".into(),
+            inventory_generation: None,
             total_children: 2,
             completed: 0,
             failed: 0,
@@ -2228,6 +2230,7 @@ mod tests {
         panel.set_cleave_progress(Some(CleaveProgress {
             active: false, // run finished
             run_id: "done-run".into(),
+            inventory_generation: None,
             total_children: 3, // still populated — old bug would key on this
             completed: 3,
             failed: 0,
@@ -2261,6 +2264,7 @@ mod tests {
         panel.set_cleave_progress(Some(CleaveProgress {
             active: true,
             run_id: "run-1".into(),
+            inventory_generation: None,
             total_children: 1,
             completed: 1,
             failed: 0,
@@ -2313,6 +2317,7 @@ mod tests {
         panel.set_cleave_progress(Some(CleaveProgress {
             active: true,
             run_id: "run-1".into(),
+            inventory_generation: None,
             total_children: 1,
             completed: 0,
             failed: 0,
@@ -2364,6 +2369,7 @@ mod tests {
         panel.set_cleave_progress(Some(CleaveProgress {
             active: true,
             run_id: "run-1".into(),
+            inventory_generation: None,
             total_children: 3,
             completed: 1,
             failed: 0,
@@ -2972,6 +2978,7 @@ mod tests {
         panel.set_cleave_progress(Some(CleaveProgress {
             active: true,
             run_id: "ansi-run".into(),
+            inventory_generation: None,
             total_children: 1,
             completed: 0,
             failed: 0,

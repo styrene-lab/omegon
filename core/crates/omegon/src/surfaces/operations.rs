@@ -703,6 +703,7 @@ mod tests {
         let progress = CleaveProgress {
             active: true,
             run_id: "smoke".into(),
+            inventory_generation: None,
             total_children: 2,
             completed: 0,
             failed: 0,
@@ -756,6 +757,7 @@ mod tests {
         let progress = CleaveProgress {
             active: false,
             run_id: "cleave-docs-research".into(),
+            inventory_generation: None,
             total_children: 2,
             completed: 1,
             failed: 1,
@@ -979,6 +981,7 @@ mod tests {
             let projection = OperationWorkbenchProjection::from_cleave(&CleaveProgress {
                 active: true,
                 run_id: "run-typed".into(),
+                inventory_generation: None,
                 total_children: 1,
                 completed: 0,
                 failed: 1,
@@ -998,6 +1001,7 @@ mod tests {
         let projection = OperationWorkbenchProjection::from_cleave(&CleaveProgress {
             active: true,
             run_id: "run-legacy".into(),
+            inventory_generation: None,
             total_children: 1,
             completed: 0,
             failed: 1,
@@ -1039,6 +1043,7 @@ mod tests {
         let projection = OperationWorkbenchProjection::from_cleave(&CleaveProgress {
             active: true,
             run_id: "run-1".into(),
+            inventory_generation: None,
             total_children: 2,
             completed: 1,
             failed: 1,

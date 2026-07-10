@@ -4069,6 +4069,7 @@ mod tests {
             provider_id: None,
             duration_secs: None,
             stdout: None,
+            route_decision: None,
             runtime: None,
             pid: None,
             started_at_unix_ms: None,
@@ -4299,6 +4300,7 @@ mod assessment_tests {
         let mut progress = CleaveProgress {
             active: true,
             run_id: "run-test".into(),
+            inventory_generation: None,
             total_children: 1,
             completed: 0,
             failed: 0,

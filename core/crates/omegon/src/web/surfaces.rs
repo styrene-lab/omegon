@@ -675,6 +675,7 @@ mod tests {
         state.handles.cleave = Some(Arc::new(Mutex::new(CleaveProgress {
             active: true,
             run_id: "run-9".into(),
+            inventory_generation: None,
             total_children: 2,
             completed: 1,
             failed: 0,

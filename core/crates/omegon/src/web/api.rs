@@ -3906,6 +3906,7 @@ required = ["BRAVE_API_KEY"]
     fn build_snapshot_includes_child_runtime_profile() {
         let runtime = crate::features::cleave::ChildRuntimeSummary {
             model: Some("anthropic:claude-sonnet-4-6".into()),
+            route_decision: None,
             thinking_level: Some("high".into()),
             context_class: Some("massive".into()),
             enabled_tools: vec!["read".into()],
@@ -3921,6 +3922,7 @@ required = ["BRAVE_API_KEY"]
                 crate::features::cleave::CleaveProgress {
                     active: true,
                     run_id: "run-1".into(),
+                    inventory_generation: None,
                     total_children: 1,
                     completed: 0,
                     failed: 0,

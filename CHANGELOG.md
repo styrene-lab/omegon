@@ -14,6 +14,7 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+- Hardened cleave route-provenance compatibility across persisted state, semantic operation rows, TUI dashboard/workbench/instruments, web/API surfaces, CLI fixtures, and smoke scenarios; the complete cleave-focused suite now compiles and passes with explicit generation/decision defaults instead of hidden constructor drift.
 - Began real cleave inference-runtime integration: setup now shares one `InferenceRuntimeState` across cleave and delegate, while cleave progress and child runtime summaries carry explicit inventory-generation and route-decision slots for the forthcoming pre-dispatch pinning step.
 
 - Hardened route-shadow telemetry with exact-offering, conceptual-model, provider-level, and true-divergence classifications plus generation-scoped parity metrics and an explicit 20-observation/95% normalized-parity review gate; inventory routing remains non-authoritative.

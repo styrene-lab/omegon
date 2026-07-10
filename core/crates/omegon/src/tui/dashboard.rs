@@ -1199,6 +1199,7 @@ mod tests {
         state.cleave = Some(CleaveProgress {
             active: true,
             run_id: "clv-test".into(),
+            inventory_generation: None,
             total_children: 3,
             completed: 1,
             failed: 0,
@@ -1666,6 +1667,7 @@ mod tests {
         state.cleave = Some(CleaveProgress {
             active: true,
             run_id: "test-run".into(),
+            inventory_generation: None,
             total_children: 2,
             completed: 1,
             failed: 0,
