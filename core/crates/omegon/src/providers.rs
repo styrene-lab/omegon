@@ -2636,7 +2636,7 @@ fn installed_codex_cli_version() -> Option<SemanticVersion> {
     parse_codex_cli_version(&stdout).or_else(|| parse_codex_cli_version(&stderr))
 }
 
-fn codex_gpt_5_6_preflight_error(model: &str, installed: Option<SemanticVersion>) -> Option<String> {
+fn codex_gpt_5_6_cli_advisory(model: &str, installed: Option<SemanticVersion>) -> Option<String> {
     if !model.starts_with("gpt-5.6") {
         return None;
     }
@@ -2645,9 +2645,27 @@ fn codex_gpt_5_6_preflight_error(model: &str, installed: Option<SemanticVersion>
         return None;
     }
     Some(format!(
-        "openai-codex:{model} requires Codex CLI >= 0.144.0. Installed: codex-cli {}.{}.{}. Upgrade Codex CLI, then retry, or temporarily select /model openai-codex:gpt-5.5.",
+        "Detected Codex CLI {}.{}.{}; OpenAI's official Codex CLI requires >= 0.144.0 for GPT-5.6. Omegon uses native Codex dispatch and does not require the Codex CLI, so this is advisory unless upstream rejects the request.",
         installed.major, installed.minor, installed.patch
     ))
+}
+
+fn enrich_codex_error_message(model: &str, status: u16, user_msg: &str) -> String {
+    let mut message = format!("Codex {status}: {user_msg}");
+    let lower = user_msg.to_ascii_lowercase();
+    if model.starts_with("gpt-5.6")
+        && lower.contains("not supported")
+        && lower.contains("chatgpt account")
+    {
+        message.push_str(
+            "\n\nGPT-5.6 for Codex is rolling out by ChatGPT plan, workspace, and account eligibility. Omegon's native Codex provider does not require the Codex CLI for dispatch; a local CLI version is only diagnostic context. Check account/workspace eligibility or temporarily select /model openai-codex:gpt-5.5.",
+        );
+        if let Some(advisory) = codex_gpt_5_6_cli_advisory(model, installed_codex_cli_version()) {
+            message.push_str("\n");
+            message.push_str(&advisory);
+        }
+    }
+    message
 }
 
 pub struct CodexClient {
@@ -2914,11 +2932,6 @@ impl LlmBridge for CodexClient {
             })
             .unwrap_or("gpt-5.5");
 
-        if let Some(message) = codex_gpt_5_6_preflight_error(model, installed_codex_cli_version()) {
-            let _ = tx.send(LlmEvent::Error { message }).await;
-            return Ok(rx);
-        }
-
         let input = Self::build_input(messages);
         let wire_tools = Self::build_tools(tools);
 
@@ -2992,9 +3005,10 @@ impl LlmBridge for CodexClient {
                         last_error = format!("Codex {status}: {user_msg}");
                         continue;
                     }
+                    let final_message = enrich_codex_error_message(model, status, &user_msg);
                     let _ = tx
                         .send(LlmEvent::Error {
-                            message: format!("Codex {status}: {user_msg}"),
+                            message: final_message,
                         })
                         .await;
                     return Ok(rx);
@@ -5486,8 +5500,8 @@ mod tests {
     }
 
     #[test]
-    fn codex_gpt_5_6_preflight_blocks_stale_cli() {
-        let message = super::codex_gpt_5_6_preflight_error(
+    fn codex_gpt_5_6_cli_advisory_detects_stale_cli_without_blocking() {
+        let message = super::codex_gpt_5_6_cli_advisory(
             "gpt-5.6",
             Some(super::SemanticVersion {
                 major: 0,
@@ -5495,16 +5509,16 @@ mod tests {
                 patch: 5,
             }),
         )
-        .expect("stale Codex CLI should block GPT-5.6");
-        assert!(message.contains("Codex CLI >= 0.144.0"), "{message}");
+        .expect("stale official Codex CLI should be advisory context");
+        assert!(message.contains("official Codex CLI"), "{message}");
         assert!(message.contains("0.142.5"), "{message}");
-        assert!(message.contains("openai-codex:gpt-5.5"), "{message}");
+        assert!(message.contains("does not require the Codex CLI"), "{message}");
     }
 
     #[test]
-    fn codex_gpt_5_6_preflight_allows_minimum_cli() {
+    fn codex_gpt_5_6_cli_advisory_allows_minimum_cli() {
         assert_eq!(
-            super::codex_gpt_5_6_preflight_error(
+            super::codex_gpt_5_6_cli_advisory(
                 "gpt-5.6-sol",
                 Some(super::SemanticVersion {
                     major: 0,
@@ -5515,7 +5529,7 @@ mod tests {
             None
         );
         assert_eq!(
-            super::codex_gpt_5_6_preflight_error(
+            super::codex_gpt_5_6_cli_advisory(
                 "gpt-5.5",
                 Some(super::SemanticVersion {
                     major: 0,
@@ -5525,6 +5539,18 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn codex_unsupported_gpt_5_6_error_explains_rollout_not_local_dependency() {
+        let message = super::enrich_codex_error_message(
+            "gpt-5.6",
+            400,
+            "The 'gpt-5.6' model is not supported when using Codex with a ChatGPT account.",
+        );
+        assert!(message.contains("rolling out by ChatGPT plan"), "{message}");
+        assert!(message.contains("does not require the Codex CLI"), "{message}");
+        assert!(message.contains("openai-codex:gpt-5.5"), "{message}");
     }
 
     // ── OpenAI-compat client tests ──────────────────────────────────
