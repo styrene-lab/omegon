@@ -342,6 +342,12 @@ pub struct ModelEntry {
     /// `broker-cloud`). Kept stringly typed while the policy surface settles.
     #[serde(default, rename = "executionClass")]
     pub execution_class: Option<String>,
+    /// Provider integration requirements that gate whether the model can be
+    /// reached through this route even when the model exists upstream. The
+    /// registry keeps this as raw JSON so new upstream gates can be recorded
+    /// without a schema migration.
+    #[serde(default, rename = "clientRequirements")]
+    pub client_requirements: Option<serde_json::Value>,
 }
 
 pub struct ModelRegistry {
@@ -677,6 +683,7 @@ impl ModelRegistry {
             capabilities: caps,
             description: format!("Dynamically discovered {provider} model"),
             supports_reasoning,
+            client_requirements: None,
         }
     }
 

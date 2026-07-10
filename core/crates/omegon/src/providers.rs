@@ -2593,6 +2593,62 @@ impl LlmBridge for OpenRouterClient {
 }
 
 const CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
+const GPT_5_6_CODEX_MIN_CLI_VERSION: SemanticVersion = SemanticVersion {
+    major: 0,
+    minor: 144,
+    patch: 0,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct SemanticVersion {
+    major: u64,
+    minor: u64,
+    patch: u64,
+}
+
+fn parse_codex_cli_version(output: &str) -> Option<SemanticVersion> {
+    let token = output
+        .split_whitespace()
+        .find(|part| part.chars().next().is_some_and(|ch| ch.is_ascii_digit()))?;
+    let mut parts = token.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch_part = parts.next().unwrap_or("0");
+    let patch_digits: String = patch_part
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
+    let patch = if patch_digits.is_empty() {
+        0
+    } else {
+        patch_digits.parse().ok()?
+    };
+    Some(SemanticVersion { major, minor, patch })
+}
+
+fn installed_codex_cli_version() -> Option<SemanticVersion> {
+    let output = std::process::Command::new("codex")
+        .arg("--version")
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    parse_codex_cli_version(&stdout).or_else(|| parse_codex_cli_version(&stderr))
+}
+
+fn codex_gpt_5_6_preflight_error(model: &str, installed: Option<SemanticVersion>) -> Option<String> {
+    if !model.starts_with("gpt-5.6") {
+        return None;
+    }
+    let installed = installed?;
+    if installed >= GPT_5_6_CODEX_MIN_CLI_VERSION {
+        return None;
+    }
+    Some(format!(
+        "openai-codex:{model} requires Codex CLI >= 0.144.0. Installed: codex-cli {}.{}.{}. Upgrade Codex CLI, then retry, or temporarily select /model openai-codex:gpt-5.5.",
+        installed.major, installed.minor, installed.patch
+    ))
+}
 
 pub struct CodexClient {
     client: reqwest::Client,
@@ -2857,6 +2913,11 @@ impl LlmBridge for CodexClient {
                     .or_else(|| m.strip_prefix("openai:"))
             })
             .unwrap_or("gpt-5.5");
+
+        if let Some(message) = codex_gpt_5_6_preflight_error(model, installed_codex_cli_version()) {
+            let _ = tx.send(LlmEvent::Error { message }).await;
+            return Ok(rx);
+        }
 
         let input = Self::build_input(messages);
         let wire_tools = Self::build_tools(tools);
@@ -5399,6 +5460,70 @@ mod tests {
         assert!(
             !flags.contains("claude-code"),
             "API key must NOT include CC beta"
+        );
+    }
+
+    // ── OpenAI Codex client compatibility tests ────────────────────
+
+    #[test]
+    fn codex_cli_version_parser_accepts_current_shapes() {
+        assert_eq!(
+            super::parse_codex_cli_version("codex-cli 0.142.5"),
+            Some(super::SemanticVersion {
+                major: 0,
+                minor: 142,
+                patch: 5,
+            })
+        );
+        assert_eq!(
+            super::parse_codex_cli_version("codex 0.144.0\n"),
+            Some(super::SemanticVersion {
+                major: 0,
+                minor: 144,
+                patch: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn codex_gpt_5_6_preflight_blocks_stale_cli() {
+        let message = super::codex_gpt_5_6_preflight_error(
+            "gpt-5.6",
+            Some(super::SemanticVersion {
+                major: 0,
+                minor: 142,
+                patch: 5,
+            }),
+        )
+        .expect("stale Codex CLI should block GPT-5.6");
+        assert!(message.contains("Codex CLI >= 0.144.0"), "{message}");
+        assert!(message.contains("0.142.5"), "{message}");
+        assert!(message.contains("openai-codex:gpt-5.5"), "{message}");
+    }
+
+    #[test]
+    fn codex_gpt_5_6_preflight_allows_minimum_cli() {
+        assert_eq!(
+            super::codex_gpt_5_6_preflight_error(
+                "gpt-5.6-sol",
+                Some(super::SemanticVersion {
+                    major: 0,
+                    minor: 144,
+                    patch: 0,
+                }),
+            ),
+            None
+        );
+        assert_eq!(
+            super::codex_gpt_5_6_preflight_error(
+                "gpt-5.5",
+                Some(super::SemanticVersion {
+                    major: 0,
+                    minor: 142,
+                    patch: 5,
+                }),
+            ),
+            None
         );
     }
 
