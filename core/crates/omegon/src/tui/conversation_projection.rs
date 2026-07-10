@@ -12,12 +12,41 @@ use crate::surfaces::layout::UiPresentationLevel;
 
 use super::segments::{Segment, SegmentContent, SegmentMeta};
 
-pub fn project_conversation_segments(
+#[derive(Debug, Clone)]
+pub struct ConversationProjection {
+    pub segments: Vec<Segment>,
+    /// Maps each projected row to its canonical source row. Synthetic outcome
+    /// rows point at the most relevant evidence item in their episode.
+    pub canonical_indices: Vec<usize>,
+}
+
+impl ConversationProjection {
+    pub fn projected_index_for_canonical(&self, canonical_index: usize) -> Option<usize> {
+        self.canonical_indices
+            .iter()
+            .position(|index| *index == canonical_index)
+    }
+
+    fn push_canonical(&mut self, index: usize, segment: &Segment) {
+        self.segments.push(segment.clone());
+        self.canonical_indices.push(index);
+    }
+
+    fn push_synthetic(&mut self, canonical_index: usize, segment: Segment) {
+        self.segments.push(segment);
+        self.canonical_indices.push(canonical_index);
+    }
+}
+
+pub fn project_conversation(
     segments: &[Segment],
     level: UiPresentationLevel,
-) -> Vec<Segment> {
+) -> ConversationProjection {
     if level == UiPresentationLevel::Full {
-        return segments.to_vec();
+        return ConversationProjection {
+            segments: segments.to_vec(),
+            canonical_indices: (0..segments.len()).collect(),
+        };
     }
 
     let mut complete_turn_episodes: BTreeMap<u32, OperationEpisodeProjection> = BTreeMap::new();
@@ -59,10 +88,13 @@ pub fn project_conversation_segments(
         }
     }
 
-    let mut projected = Vec::with_capacity(segments.len());
+    let mut projected = ConversationProjection {
+        segments: Vec::with_capacity(segments.len()),
+        canonical_indices: Vec::with_capacity(segments.len()),
+    };
     let mut emitted_operation: Option<String> = None;
     let mut emitted_turn = None;
-    for segment in segments {
+    for (canonical_index, segment) in segments.iter().enumerate() {
         if let Some(operation_id) = segment
             .meta
             .source_channel
@@ -79,7 +111,11 @@ pub fn project_conversation_segments(
             });
             if let Some(terminal) = terminal {
                 if emitted_operation.as_deref() != Some(operation_id) {
-                    projected.push(operation_outcome_segment(
+                    let terminal_index = segments
+                        .iter()
+                        .position(|candidate| std::ptr::eq(candidate, *terminal))
+                        .unwrap_or(canonical_index);
+                    projected.push_synthetic(terminal_index, operation_outcome_segment(
                         terminal.meta.clone(),
                         operation_id,
                         operation_segments,
@@ -95,7 +131,7 @@ pub fn project_conversation_segments(
         {
             let semantic = segment.project_conversation_segment();
             if let Some(episode) = OperationEpisodeProjection::single_tool_fallback(&semantic) {
-                projected.push(outcome_segment(segment.meta.clone(), &episode));
+                projected.push_synthetic(canonical_index, outcome_segment(segment.meta.clone(), &episode));
                 continue;
             }
         }
@@ -106,14 +142,18 @@ pub fn project_conversation_segments(
             .filter(|_| matches!(segment.content, SegmentContent::ToolCard { .. }));
         if let Some((turn, episode)) = collapsible {
             if emitted_turn != Some(turn) {
-                projected.push(outcome_segment(segment.meta.clone(), episode));
+                projected.push_synthetic(canonical_index, outcome_segment(segment.meta.clone(), episode));
                 emitted_turn = Some(turn);
             }
             continue;
         }
-        projected.push(segment.clone());
+        projected.push_canonical(canonical_index, segment);
     }
     projected
+}
+
+pub fn project_conversation_segments(segments: &[Segment], level: UiPresentationLevel) -> Vec<Segment> {
+    project_conversation(segments, level).segments
 }
 
 fn operation_outcome_segment(
