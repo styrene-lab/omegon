@@ -915,16 +915,10 @@ If blocked, say the blocker plainly.\n",
             .model
             .clone()
             .or_else(|| child_runtime.model.clone())
+            .or(session_model)
         {
             Some(model) => model,
-            None => {
-                // Inherit the parent session's model so children use the same
-                // provider the operator is actually running on.
-                match session_model {
-                    Some(m) => m,
-                    None => crate::providers::delegate_default_model().await,
-                }
-            }
+            None => crate::providers::delegate_default_model().await,
         };
         let child_config = ChildAgentSpawnConfig {
             agent_binary: self
@@ -1357,6 +1351,38 @@ impl DelegateFeature {
             inference_runtime: None,
             sandbox,
         }
+    }
+
+    async fn select_child_model(
+        &self,
+        requested: Option<String>,
+        profile_default: Option<String>,
+        session_model: Option<String>,
+    ) -> String {
+        let authoritative = match requested.or(profile_default).or(session_model) {
+            Some(model) => model,
+            None => crate::providers::delegate_default_model().await,
+        };
+        let Some(inference_runtime) = &self.inference_runtime else {
+            return authoritative;
+        };
+        inference_runtime
+            .observe_route_shadow(
+                crate::routing::infer_model_grade_band(&authoritative),
+                Some(&authoritative),
+                &[],
+                Some(&authoritative),
+            )
+            .await;
+        inference_runtime
+            .inventory_route_preference(
+                crate::routing::infer_model_grade_band(&authoritative),
+                &[],
+                Some(&authoritative),
+            )
+            .await
+            .map(|preference| preference.offering)
+            .unwrap_or(authoritative)
     }
 
     pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
@@ -1829,15 +1855,45 @@ impl Feature for DelegateFeature {
                     scope.as_deref(),
                 );
 
-                // Spawn the delegate
+                // Resolve child routing through the shared inference runtime. An explicit
+                // tool model remains authoritative; inherited/default routes may be
+                // inventory-preferred only after the shared parity gate admits them.
                 let parent_model = self.session_model.lock().ok().and_then(|s| s.clone());
+                let authoritative_model = model
+                    .clone()
+                    .or_else(|| parent_model.clone())
+                    .unwrap_or_else(|| "auto".into());
+                let selected_model = if model.is_some() {
+                    authoritative_model.clone()
+                } else if let Some(runtime) = &self.inference_runtime {
+                    runtime
+                        .observe_route_shadow(
+                            crate::routing::infer_model_grade_band(&authoritative_model),
+                            Some(&authoritative_model),
+                            &[],
+                            None,
+                        )
+                        .await;
+                    runtime
+                        .inventory_route_preference(
+                            crate::routing::infer_model_grade_band(&authoritative_model),
+                            &[],
+                            None,
+                        )
+                        .await
+                        .map(|preference| preference.offering)
+                        .unwrap_or(authoritative_model.clone())
+                } else {
+                    authoritative_model.clone()
+                };
+                let selected_model = (selected_model != "auto").then_some(selected_model);
                 self.runner.spawn_delegate(
                     task_id.clone(),
                     label.clone(),
                     agent,
                     task,
                     scope,
-                    model,
+                    selected_model,
                     thinking_level,
                     worker_profile,
                     facts,
