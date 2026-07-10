@@ -1308,6 +1308,7 @@ pub struct DelegateFeature {
     recent_parent_files: std::collections::VecDeque<String>,
     /// Live runtime settings used to resolve the selected subagent autonomy policy.
     settings: Option<crate::settings::SharedSettings>,
+    inference_runtime: Option<crate::inference_runtime::InferenceRuntimeState>,
     sandbox: bool,
 }
 
@@ -1353,12 +1354,21 @@ impl DelegateFeature {
             recent_user_prompts: std::collections::VecDeque::with_capacity(50),
             recent_parent_files: std::collections::VecDeque::with_capacity(30),
             settings: None,
+            inference_runtime: None,
             sandbox,
         }
     }
 
     pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
         self.settings = Some(settings);
+        self
+    }
+
+    pub fn with_inference_runtime(
+        mut self,
+        inference_runtime: crate::inference_runtime::InferenceRuntimeState,
+    ) -> Self {
+        self.inference_runtime = Some(inference_runtime);
         self
     }
 

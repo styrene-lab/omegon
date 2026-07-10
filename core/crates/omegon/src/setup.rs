@@ -746,6 +746,7 @@ impl AgentSetup {
         )));
 
         // ─── Delegate (subagent system) ─────────────────────────────────
+        let inference_runtime = crate::inference_runtime::InferenceRuntimeState::new(&project_root);
         let agents = crate::features::delegate::scan_agents(&cwd);
         let mut delegate_feature = features::delegate::DelegateFeature::new_with_safety(
             &cwd,
@@ -753,6 +754,7 @@ impl AgentSetup {
             sandbox,
             dangerously_bypass_permissions,
         );
+        delegate_feature = delegate_feature.with_inference_runtime(inference_runtime.clone());
         if let Some(settings) = settings.as_ref() {
             delegate_feature = delegate_feature.with_settings(settings.clone());
         }
@@ -1462,9 +1464,7 @@ impl AgentSetup {
             command_tx,
             context_manager,
             conversation,
-            inference_runtime: crate::inference_runtime::InferenceRuntimeState::new(
-                &workspace_project_root,
-            ),
+            inference_runtime,
             cwd,
             secrets: secrets.clone(),
             web_auth_state,
