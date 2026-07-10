@@ -4526,6 +4526,7 @@ fn draw_routes_active_delegate_to_workbench_without_instruments() {
             failure_kind: None,
             tasks: vec![],
             tasks_done: 0,
+            route_decision: None,
         }],
     });
 
@@ -4561,6 +4562,7 @@ fn draw_routes_failed_delegate_summary_to_workbench_without_instruments() {
             failure_kind: Some(crate::features::delegate::DelegateChildFailureKind::Unknown),
             tasks: vec![],
             tasks_done: 0,
+            route_decision: None,
         }],
     });
 
@@ -4597,6 +4599,7 @@ fn draw_truncates_failed_delegate_summary_in_workbench() {
             failure_kind: Some(crate::features::delegate::DelegateChildFailureKind::Unknown),
             tasks: vec![],
             tasks_done: 0,
+            route_decision: None,
         }],
     });
 

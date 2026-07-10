@@ -707,6 +707,7 @@ fn delegate_child(
         failure_kind: None,
         tasks: task_items(label, done, total),
         tasks_done: done,
+        route_decision: None,
     }
 }
 

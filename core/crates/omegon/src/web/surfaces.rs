@@ -468,6 +468,7 @@ mod tests {
             failure_kind: None,
             tasks: Vec::new(),
             tasks_done: 2,
+            route_decision: None,
             result_viewed: false,
         }
     }

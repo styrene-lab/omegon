@@ -63,6 +63,7 @@ pub struct DelegateProgressChild {
     pub failure_kind: Option<DelegateChildFailureKind>,
     pub tasks: Vec<ChildTaskItem>,
     pub tasks_done: usize,
+    pub route_decision: Option<crate::subagent_route::SubagentRouteDecision>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -413,6 +414,7 @@ impl DelegateResultStore {
                 },
                 tasks: task.tasks.clone(),
                 tasks_done: task.tasks.iter().filter(|t| t.done).count(),
+                route_decision: task.route_decision.clone(),
             });
         }
         progress.children.sort_by(|a, b| a.task_id.cmp(&b.task_id));
@@ -1101,6 +1103,7 @@ If blocked, say the blocker plainly.\n",
         facts: Option<Vec<String>>,
         mind: Option<String>,
         session_model: Option<String>,
+        route_decision: Option<crate::subagent_route::SubagentRouteDecision>,
         consecutive_failures: Arc<Mutex<u32>>,
         progress_handle: Arc<Mutex<DelegateProgress>>,
         event_sink: Option<BusRequestSink>,
@@ -1155,7 +1158,7 @@ If blocked, say the blocker plainly.\n",
             last_tool_activity: None,
             last_turn: None,
             tasks,
-            route_decision: None,
+            route_decision,
         };
 
         self.result_store.store_task(task_entry);
@@ -1931,6 +1934,7 @@ impl Feature for DelegateFeature {
                     facts,
                     mind,
                     parent_model,
+                    Some(route_decision),
                     self.consecutive_failures.clone(),
                     self.progress_handle.clone(),
                     self.event_slot.lock().ok().and_then(|slot| (*slot).clone()),
