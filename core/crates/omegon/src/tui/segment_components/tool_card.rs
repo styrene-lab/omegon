@@ -322,6 +322,32 @@ pub(crate) fn append_generic_result_section(
         let show = result_lines.len().min(max_lines);
         let display_text = result_lines[..show].join("\n");
 
+        if name == "bash" && !is_error && display_text.contains('\x1b') {
+            use ansi_to_tui::IntoText as _;
+            let sanitized = strip_terminal_control(&display_text);
+            let parsed = display_text
+                .into_text()
+                .or_else(|_| sanitized.as_str().into_text());
+            if let Ok(text) = parsed {
+                for line in text.lines {
+                    let spans = line
+                        .spans
+                        .into_iter()
+                        .map(|mut span| {
+                            span.style = span.style.bg(bg);
+                            if span.style.fg.is_none() {
+                                span.style = span.style.fg(t.muted());
+                            }
+                            span
+                        })
+                        .collect::<Vec<_>>();
+                    lines.push(Line::from(spans));
+                    result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                }
+                return;
+            }
+        }
+
         // Try syntax highlighting based on file extension from args
         let highlighted = if !is_error {
             try_highlight(&display_text, detail_args, name, t)

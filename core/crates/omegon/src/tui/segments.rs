@@ -2638,8 +2638,6 @@ pub(crate) fn try_highlight<'a>(
                 _ => None,
             }
         })
-    } else if tool_name == "bash" {
-        Some("Bourne Again Shell (bash)")
     } else {
         None
     }?;

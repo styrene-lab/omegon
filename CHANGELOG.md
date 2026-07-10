@@ -14,6 +14,7 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+- Operator-run `!` shell commands now enter canonical conversation and session history as explicitly attributed operator tool observations, making command, working directory, status, duration, and bounded output available to later model turns without fabricating assistant tool calls; completed ANSI output is rendered as terminal output instead of Bash source.
 - The TUI composer now visibly primes slash-command and direct-shell intent: `/` input carries registry-backed ghost completion and command chrome, while `!` input switches to high-contrast shell chrome showing the active shell, working directory, execution semantics, and pre-expanded output behavior.
 - Corrected cleave lifecycle surfaces so `cleave_assess` explicitly remains advisory, while `cleave_run` creates a durable Workbench pending-approval lane and returns concrete `/cleave approve|evidence|deny` actions instead of claiming a nonexistent transient menu.
 - Clarified the model-visible tool inventory contract: tools present in the active schema are already enabled and callable, so `manage_tools` is only needed for capabilities absent from that schema.

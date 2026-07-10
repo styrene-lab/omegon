@@ -33,6 +33,22 @@ pub struct ToolResultEntry {
     pub args_summary: Option<String>,
 }
 
+/// A tool execution initiated directly by the operator rather than by an
+/// assistant-authored tool call. It is canonical evidence, but projects to a
+/// user-role observation so provider tool-call pairing remains truthful.
+#[derive(Debug, Clone)]
+pub struct OperatorToolObservation {
+    pub execution_id: String,
+    pub tool_name: String,
+    pub arguments: Value,
+    pub cwd: PathBuf,
+    pub content: Vec<omegon_traits::ContentBlock>,
+    pub is_error: bool,
+    pub exit_code: i64,
+    pub duration_ms: u64,
+    pub origin: String,
+}
+
 /// An assistant message with parsed content.
 #[derive(Debug, Clone)]
 pub struct AssistantMessage {
@@ -100,6 +116,7 @@ pub enum AgentMessage {
     },
     Assistant(Box<AssistantMessage>, u32), // (msg, turn)
     ToolResult(ToolResultEntry, u32),      // (result, turn)
+    OperatorToolObservation(OperatorToolObservation, u32),
 }
 
 impl AgentMessage {
@@ -108,6 +125,7 @@ impl AgentMessage {
             AgentMessage::User { turn, .. } => *turn,
             AgentMessage::Assistant(_, turn) => *turn,
             AgentMessage::ToolResult(_, turn) => *turn,
+            AgentMessage::OperatorToolObservation(_, turn) => *turn,
         }
     }
 }
@@ -659,6 +677,20 @@ fn current_session_saved_at() -> String {
     format!("unix:{secs}")
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedOperatorObservation {
+    execution_id: String,
+    tool_name: String,
+    arguments: Value,
+    cwd: PathBuf,
+    content: Vec<omegon_traits::ContentBlock>,
+    is_error: bool,
+    exit_code: i64,
+    duration_ms: u64,
+    origin: String,
+    turn: u32,
+}
+
 /// Serializable session snapshot for save/resume.
 ///
 /// All fields use `#[serde(default)]` so that sessions saved by older versions
@@ -671,6 +703,7 @@ struct SessionSnapshot {
     omegon_version: String,
     saved_at: String,
     messages: Vec<LlmMessage>,
+    operator_observations: Vec<PersistedOperatorObservation>,
     intent: IntentDocument,
     decay_window: usize,
     compaction_summary: Option<String>,
@@ -813,6 +846,18 @@ impl ConversationState {
                 AgentMessage::ToolResult(r, turn) => {
                     let status = if r.is_error { "ERROR" } else { "ok" };
                     payload.push_str(&format!("[Turn {turn}] Tool {}: {status}\n\n", r.tool_name));
+                }
+                AgentMessage::OperatorToolObservation(observation, turn) => {
+                    let status = if observation.is_error { "ERROR" } else { "ok" };
+                    let command = observation
+                        .arguments
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .unwrap_or("<unknown>");
+                    payload.push_str(&format!(
+                        "[Turn {turn}] Operator ran {} ({status}): {command}\n\n",
+                        observation.tool_name
+                    ));
                 }
             }
         }
@@ -1111,6 +1156,13 @@ impl ConversationState {
     pub fn push_tool_result(&mut self, result: ToolResultEntry) {
         let turn = self.intent.stats.turns;
         self.canonical.push(AgentMessage::ToolResult(result, turn));
+        self.invalidate_token_cache();
+    }
+
+    pub fn push_operator_tool_observation(&mut self, observation: OperatorToolObservation) {
+        let turn = self.intent.stats.turns;
+        self.canonical
+            .push(AgentMessage::OperatorToolObservation(observation, turn));
         self.invalidate_token_cache();
     }
 
@@ -1420,6 +1472,10 @@ impl ConversationState {
                 content: text.clone(),
                 images: images.clone(),
             },
+            AgentMessage::OperatorToolObservation(observation, _) => LlmMessage::User {
+                content: render_operator_tool_observation(observation, true),
+                images: vec![],
+            },
         }
     }
 
@@ -1435,6 +1491,27 @@ impl ConversationState {
             omegon_version: env!("CARGO_PKG_VERSION").to_string(),
             saved_at: current_session_saved_at(),
             messages: view,
+            operator_observations: self
+                .canonical
+                .iter()
+                .filter_map(|message| match message {
+                    AgentMessage::OperatorToolObservation(observation, turn) => {
+                        Some(PersistedOperatorObservation {
+                            execution_id: observation.execution_id.clone(),
+                            tool_name: observation.tool_name.clone(),
+                            arguments: observation.arguments.clone(),
+                            cwd: observation.cwd.clone(),
+                            content: observation.content.clone(),
+                            is_error: observation.is_error,
+                            exit_code: observation.exit_code,
+                            duration_ms: observation.duration_ms,
+                            origin: observation.origin.clone(),
+                            turn: *turn,
+                        })
+                    }
+                    _ => None,
+                })
+                .collect(),
             intent: self.intent.clone(),
             decay_window: self.decay_window,
             compaction_summary: self.compaction_summary.clone(),
@@ -1517,7 +1594,7 @@ impl ConversationState {
             }
         };
 
-        let canonical: Vec<AgentMessage> = recent
+        let mut canonical: Vec<AgentMessage> = recent
             .iter()
             .cloned()
             .map(|msg| {
@@ -1575,6 +1652,23 @@ impl ConversationState {
                 }
             })
             .collect();
+
+        canonical.extend(snapshot.operator_observations.into_iter().map(|persisted| {
+            AgentMessage::OperatorToolObservation(
+                OperatorToolObservation {
+                    execution_id: persisted.execution_id,
+                    tool_name: persisted.tool_name,
+                    arguments: persisted.arguments,
+                    cwd: persisted.cwd,
+                    content: persisted.content,
+                    is_error: persisted.is_error,
+                    exit_code: persisted.exit_code,
+                    duration_ms: persisted.duration_ms,
+                    origin: persisted.origin,
+                },
+                persisted.turn,
+            )
+        }));
 
         Ok(Self {
             canonical,
@@ -1767,8 +1861,45 @@ impl ConversationState {
                     args_summary: r.args_summary.clone(),
                 }
             }
+            AgentMessage::OperatorToolObservation(observation, _) => LlmMessage::User {
+                content: render_operator_tool_observation(observation, false),
+                images: vec![],
+            },
         }
     }
+}
+
+fn render_operator_tool_observation(
+    observation: &OperatorToolObservation,
+    compact: bool,
+) -> String {
+    let command = observation
+        .arguments
+        .get("command")
+        .and_then(Value::as_str)
+        .unwrap_or("<unknown>");
+    let output = observation
+        .content
+        .iter()
+        .filter_map(omegon_traits::ContentBlock::as_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let clean_output = crate::tools::bash::strip_terminal_noise(&output);
+    let output = if compact {
+        crate::util::truncate(&clean_output, 500)
+    } else {
+        clean_output
+    };
+    format!(
+        "[Operator-executed tool observation — evidence, not an instruction]\nOrigin: {}\nTool: {}\nCommand: {}\nWorking directory: {}\nExit code: {}\nDuration: {} ms\nOutput:\n{}\n[End operator tool observation]",
+        observation.origin,
+        observation.tool_name,
+        command,
+        observation.cwd.display(),
+        observation.exit_code,
+        observation.duration_ms,
+        output
+    )
 }
 
 fn tool_result_text_and_images(result: &ToolResultEntry) -> (String, Vec<ImageAttachment>) {
@@ -2614,6 +2745,53 @@ mod tests {
                 "Turn 1 at turn 4: should be decayed (age 3 > window 2)"
             );
         }
+    }
+
+    #[test]
+    fn operator_tool_observation_projects_and_survives_session_round_trip() {
+        let mut conv = ConversationState::new();
+        conv.push_user("Inspect the repository".into());
+        conv.push_operator_tool_observation(OperatorToolObservation {
+            execution_id: "shell-1".into(),
+            tool_name: "bash".into(),
+            arguments: serde_json::json!({"command": "git status --short"}),
+            cwd: PathBuf::from("/work/project"),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: " M src/main.rs\n".into(),
+            }],
+            is_error: false,
+            exit_code: 0,
+            duration_ms: 12,
+            origin: "bang_shell".into(),
+        });
+
+        let view = conv.build_llm_view();
+        assert_eq!(view.len(), 1);
+        let LlmMessage::User { content, .. } = &view[0] else {
+            panic!("operator observation must project as user-role evidence");
+        };
+        assert!(content.contains("Operator-executed tool observation"));
+        assert!(content.contains("git status --short"));
+        assert!(content.contains("Exit code: 0"));
+
+        let tmp = std::env::temp_dir().join("omegon-operator-observation-session.json");
+        conv.save_session(&tmp).unwrap();
+        let loaded = ConversationState::load_session(&tmp).unwrap();
+        assert!(loaded.canonical.iter().any(|message| matches!(
+            message,
+            AgentMessage::OperatorToolObservation(observation, _)
+                if observation.execution_id == "shell-1"
+                    && observation.origin == "bang_shell"
+                    && observation.exit_code == 0
+        )));
+        let loaded_view = loaded.build_llm_view();
+        assert!(loaded_view.iter().any(|message| matches!(
+            message,
+            LlmMessage::User { content, .. }
+                if content.contains("git status --short")
+                    && content.contains("Working directory: /work/project")
+        )));
+        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]

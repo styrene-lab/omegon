@@ -4189,6 +4189,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let web_command_tx = command_tx.clone(); // For forwarding web dashboard commands
     let ipc_command_tx = command_tx.clone(); // For forwarding IPC commands
+    let shell_completion_tx = command_tx.clone();
 
     // Broadcast initial HarnessStatus — bridges BusEvent (emitted in setup)
     // to AgentEvent (consumed by TUI + WebSocket)
@@ -4536,6 +4537,7 @@ fn build_tui_secret_readiness_snapshot(
                 // submit new prompts / commands while this is in-flight.
                 let cwd = agent.cwd.clone();
                 let events = events_tx.clone();
+                let completion_tx = shell_completion_tx.clone();
                 let cancel = tokio_util::sync::CancellationToken::new();
 
                 // Unique ID for this command's tool card.  nanos-since-epoch
@@ -4557,6 +4559,7 @@ fn build_tui_secret_readiness_snapshot(
                 });
 
                 tokio::spawn(async move {
+                    let started_at = std::time::Instant::now();
                     // Wire execute_streaming → ToolUpdate so the live-partial
                     // region of the card refreshes every 150 ms of new output
                     // (and emits heartbeats every 5 s while silent).
@@ -4608,6 +4611,26 @@ fn build_tui_secret_readiness_snapshot(
                         is_error,
                     });
 
+                    let exit_code = tool_result
+                        .details
+                        .get("exitCode")
+                        .and_then(|value| value.as_i64())
+                        .unwrap_or(if is_error { -1 } else { 0 });
+                    let observation = crate::conversation::OperatorToolObservation {
+                        execution_id: id.clone(),
+                        tool_name: "bash".to_string(),
+                        arguments: serde_json::json!({ "command": command }),
+                        cwd,
+                        content: tool_result.content.clone(),
+                        is_error,
+                        exit_code,
+                        duration_ms: started_at.elapsed().as_millis() as u64,
+                        origin: "bang_shell".to_string(),
+                    };
+                    let _ = completion_tx
+                        .send(tui::TuiCommand::OperatorShellCompleted { observation })
+                        .await;
+
                     // Honour control-API callers that pass a respond_to channel.
                     if let Some(tx) = respond_to {
                         let output = tool_result
@@ -4625,6 +4648,21 @@ fn build_tui_secret_readiness_snapshot(
                         });
                     }
                 });
+            }
+
+            tui::TuiCommand::OperatorShellCompleted { observation } => {
+                runtime_state
+                    .conversation
+                    .push_operator_tool_observation(observation);
+                if !cli.no_session
+                    && let Err(error) = session::save_session(
+                        &runtime_state.conversation,
+                        &agent.cwd,
+                        Some(agent.session_id.as_str()),
+                    )
+                {
+                    tracing::warn!(%error, "failed to persist operator shell observation");
+                }
             }
 
             tui::TuiCommand::ShellHandoff { keyboard_enhancement } => {

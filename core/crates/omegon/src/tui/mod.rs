@@ -239,6 +239,11 @@ pub enum TuiCommand {
         command: String,
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
+    /// Internal completion returned by a spawned operator shell execution so
+    /// canonical conversation state remains single-owner.
+    OperatorShellCompleted {
+        observation: crate::conversation::OperatorToolObservation,
+    },
     /// Temporarily hand terminal control to the operator's real shell.
     /// Carries the keyboard-enhancement flag so the handler can pop/push
     /// the Kitty protocol around the subprocess without querying the
@@ -8087,16 +8092,39 @@ warning: {warning}"
             let editor_title = if shell_primed {
                 let shell = std::env::var("SHELL")
                     .ok()
-                    .and_then(|path| std::path::Path::new(&path).file_name()?.to_str().map(str::to_string))
+                    .and_then(|path| {
+                        std::path::Path::new(&path)
+                            .file_name()?
+                            .to_str()
+                            .map(str::to_string)
+                    })
                     .unwrap_or_else(|| "shell".to_string());
                 Line::from(vec![
-                    Span::styled(" ⚡ SHELL ", Style::default().fg(t.bg()).bg(t.warning()).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!(" {shell} · {} ", self.footer_data.cwd), Style::default().fg(t.warning()).bg(intent_bg)),
+                    Span::styled(
+                        " ⚡ SHELL ",
+                        Style::default()
+                            .fg(t.bg())
+                            .bg(t.warning())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" {shell} · {} ", self.footer_data.cwd),
+                        Style::default().fg(t.warning()).bg(intent_bg),
+                    ),
                 ])
             } else if command_primed {
                 Line::from(vec![
-                    Span::styled(" / COMMAND ", Style::default().fg(t.bg()).bg(t.accent_bright()).add_modifier(Modifier::BOLD)),
-                    Span::styled(" registry autocomplete ", Style::default().fg(t.accent_bright()).bg(intent_bg)),
+                    Span::styled(
+                        " / COMMAND ",
+                        Style::default()
+                            .fg(t.bg())
+                            .bg(t.accent_bright())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " registry autocomplete ",
+                        Style::default().fg(t.accent_bright()).bg(intent_bg),
+                    ),
                 ])
             } else {
                 use crate::tui::glyphs::EngineGlyphRole;
@@ -8265,9 +8293,7 @@ warning: {warning}"
                                 Span::styled(vl.to_string(), Style::default().fg(t.fg())),
                                 Span::styled(
                                     ghost,
-                                    Style::default()
-                                        .fg(t.dim())
-                                        .add_modifier(Modifier::ITALIC),
+                                    Style::default().fg(t.dim()).add_modifier(Modifier::ITALIC),
                                 ),
                             ])
                         } else if shell_primed {
