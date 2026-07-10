@@ -1,10 +1,10 @@
 +++
 id = "5805712d-90e9-4856-8501-b581112a4a16"
 kind = "document"
-title = "Slim Operator Contract"
-status = "draft"
-tags = ["tui", "slim", "operator-ux", "contract"]
-aliases = ["slim-operator-contract", "om-operator-contract"]
+title = "Om Operator Contract"
+status = "exploring"
+tags = ["tui", "om", "slim", "operator-ux", "contract"]
+aliases = ["om-operator-contract", "slim-operator-contract"]
 imported_reference = false
 
 [publication]
@@ -27,7 +27,112 @@ related = [
 ]
 +++
 
-# Slim Operator Contract
+# Om Operator Contract
+
+## Design Thesis
+
+**Om is Omegon with the machinery at rest.** It is the default terminal presentation: conversation-first, outcome-oriented, and deliberately quiet. The name is both the familiar `om` executable identity and a mnemonic for centered attention. It must be reflected in behavior rather than applied as decorative branding.
+
+Om is the first level of a progressive-disclosure ladder:
+
+```text
+/ui om       quiet outcomes and essential attention
+/ui active   bounded real-time workflow visibility
+/ui full     persistent operational evidence and diagnostics
+```
+
+`/ui slim` and `/ui lean` remain compatibility aliases for `/ui om`. Mode changes alter projection only. They never discard evidence, change runtime authority, or create a second state path.
+
+### Core law
+
+> Activity mutates in place. Outcomes enter history. Evidence stays attached but collapsed.
+
+This creates three information lifetimes:
+
+1. **Ephemeral activity** — the current operation, useful progress, elapsed time, and bounded partial output. This updates in place and does not accumulate in scrollback.
+2. **Durable outcomes** — what changed, what passed or failed, what was published, and what needs attention. This enters the semantic transcript in concise form.
+3. **Inspectable evidence** — exact commands, arguments, stdout/stderr, provenance, timestamps, and telemetry. This remains attached to the outcome and can be revealed without having dominated the default view.
+
+## Presentation Ladder
+
+| Contract | `/ui om` | `/ui active` | `/ui full` |
+| --- | --- | --- | --- |
+| Primary use | ordinary coding and conversation | builds, tests, releases, delegation | debugging and operational control |
+| Completed tools | grouped outcomes | grouped outcomes | semantic per-tool rows |
+| Current work | one transient line | bounded workflow panel | detailed live cards |
+| Workbench | only blocking/decision state | while structured work is active | persistent |
+| Telemetry | model, workspace, context or attention | current route and operation progress | provider, tokens, files, phase, provenance |
+| Raw args/output | inspect | inspect/bounded tail | detailed and expandable |
+| Dashboard/instruments | hidden | hidden | visible |
+
+### Om projection
+
+Om should answer only:
+
+- What is happening now?
+- What changed?
+- Is operator attention required?
+
+A routine sequence of reads, edits, validation, and git operations should resolve to an episode outcome such as:
+
+```text
+✓ Fixed CI path handling · 2 files · 1,842 tests passed
+```
+
+While it runs, the same area changes in place:
+
+```text
+◌ Running Rust tests…
+```
+
+Om must not permanently display turn counters, token I/O, OODA phase, transcript mechanics, files-read totals, version, or workstream ratios. Warnings, permission gates, destructive actions, failures, and stalled operations may expand locally without switching the global mode.
+
+### Active projection
+
+Active is the missing middle: more live structure without log accumulation.
+
+```text
+Release 0.27.5                              3/5 · 08:42
+├─ changelog and version                    passed
+├─ Rust tests                               passed
+├─ release build                            running
+├─ publish                                  pending
+└─ GitHub release                           pending
+```
+
+When work completes, the panel collapses into one durable outcome. Workbench state is visible only while active, blocked, awaiting review, or awaiting an operator decision.
+
+### Full projection
+
+Full exposes persistent operational surfaces and semantic evidence. It may show dashboard, instruments, detailed Workbench, provider routing, token/context telemetry, file activity, OODA phase, per-tool durations, provenance, and background terminals.
+
+Full still preserves hierarchy. “All evidence visible” does not mean “every byte inline”; raw payloads remain expandable beneath semantic operation structure.
+
+## Operation Episodes
+
+Compact per-tool rows are not sufficient for Om. They reduce line length but preserve event volume. Om groups related observations into an operator-level episode:
+
+```text
+OperationEpisode
+├─ intent
+├─ state: running | complete | failed | blocked | cancelled
+├─ outcome
+├─ tool_count
+├─ duration
+├─ affected_resources
+├─ attention_items
+└─ evidence[]
+```
+
+The first implementation should use authoritative boundaries already present in the harness—agent turn, operator shell command, plan step, delegate run, cleave run, and lifecycle operation—rather than attempting speculative semantic clustering.
+
+The same episode projects differently at each level:
+
+```text
+om      ✓ Prepared release 0.27.5 · 9 operations
+active  ◌ Preparing release 0.27.5 · 6/9, with current stages
+full    all 9 semantic tool observations beneath the episode
+```
 
 ## Purpose
 
@@ -73,15 +178,16 @@ New Slim UX should fail review if it introduces a shadow store, duplicate comman
 
 ## Layout Contract
 
-Slim uses this priority order:
+Om uses this priority order:
 
 1. conversation prose
-2. compact tool evidence
-3. pinned active plan
-4. composer
-5. status/footer hints
+2. one transient current-activity lane
+3. durable operation outcomes
+4. blocking or decision-relevant Workbench state
+5. composer
+6. one essential status line
 
-Full harness widgets, dashboards, gauges, detailed segment metadata, and operational inventories belong in full mode unless the operator explicitly asks for them.
+Active adds bounded workflow detail and active structured work. Full adds persistent harness surfaces, gauges, detailed segment metadata, and operational inventories.
 
 ### Conversation
 
@@ -89,24 +195,27 @@ Assistant prose should render as plain flowing text. It should avoid unnecessary
 
 ### Tool Evidence
 
-Completed successful tools should collapse to one-line evidence rows by default. The row grammar is:
+In Om, successful tools are inspectable evidence beneath an operation episode, not one durable transcript row per invocation. The visible outcome grammar is:
 
 ```text
-verb · target · outcome · duration
+state · operator intent/outcome · affected resources · useful result
 ```
 
 Examples:
 
 ```text
-read · src/tui/mod.rs · 86 lines
-bash · cargo test -p omegon · passed · 42s
-set · profile.permissions · persisted
-plan · item 2 complete · 3/6
-auth · OMEGON_AUTH_JSON_PATH · active
-diskutil · list /dev/disk4 · unchanged
+✓ Fixed CI path handling · 2 files · 1,842 tests passed
+✓ Updated profile permissions · persisted to project profile
+! Release prepared; GitHub Tests CI failed · inspect
 ```
 
-Rows must include enough information for the operator to understand what happened without expanding the card. Expansion remains available for raw command, arguments, stdout/stderr, structured JSON, and errors.
+Active may reveal bounded child stages while an episode runs. Full may reveal the existing semantic per-tool grammar:
+
+```text
+verb · target · outcome · duration
+```
+
+Expansion remains available in every mode for raw command, arguments, stdout/stderr, structured JSON, provenance, and errors. No mode may discard evidence that was already captured.
 
 ### Pinned Plan
 
