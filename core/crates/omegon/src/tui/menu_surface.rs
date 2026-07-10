@@ -132,7 +132,11 @@ fn menu_lines<'a>(
         .filter(|summary| !summary.is_empty())
     {
         for line in summary.lines() {
-            lines.push(clipped_line(line, width, Style::default().fg(theme.muted())));
+            lines.push(clipped_line(
+                line,
+                width,
+                Style::default().fg(theme.muted()),
+            ));
         }
     }
 
@@ -234,7 +238,11 @@ fn menu_lines<'a>(
             }
             lines.push(menu_row_line(theme, visible.row, end == selected, width));
             if end == selected && !visible.row.description.is_empty() {
-                lines.extend(menu_description_lines(theme, &visible.row.description, width));
+                lines.extend(menu_description_lines(
+                    theme,
+                    &visible.row.description,
+                    width,
+                ));
             }
             used += needed;
             end += 1;
@@ -292,9 +300,7 @@ fn menu_description_lines<'a>(
     width: usize,
 ) -> Vec<Line<'a>> {
     let indent = "    ";
-    let budget = width
-        .saturating_sub(UnicodeWidthStr::width(indent))
-        .max(1);
+    let budget = width.saturating_sub(UnicodeWidthStr::width(indent)).max(1);
     wrap_display(description, budget)
         .into_iter()
         .map(|segment| {
