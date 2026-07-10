@@ -7632,7 +7632,9 @@ warning: {warning}"
                 result_summary,
             });
         }
-        let activity_projection = if self.ui_surfaces.activity && self.ui_surfaces.is_compact() {
+        let activity_projection = if self.ui_surfaces.activity
+            && self.ui_presentation.level != UiPresentationLevel::Full
+        {
             crate::surfaces::activity::ActivitySurfaceProjection::from_parts(
                 live_activity_tools,
                 live_cleave.as_ref(),
@@ -7644,7 +7646,10 @@ warning: {warning}"
             }
         };
         let engine_status_height =
-            u16::from(self.ui_surfaces.activity && self.ui_surfaces.is_compact());
+            u16::from(
+                self.ui_surfaces.activity
+                    && self.ui_presentation.level != UiPresentationLevel::Full,
+            );
         let raw_tool_inspection_height =
             activity_preferred_height(&activity_projection, area.width)
                 .saturating_add(engine_status_height);
@@ -7654,6 +7659,7 @@ warning: {warning}"
         let layout_plan = plan_tui_layout(TuiLayoutInputs {
             area,
             surfaces: self.ui_surfaces,
+            presentation_level: self.ui_presentation.level,
             dashboard_has_content,
             editor_height,
             editor_info_height,
@@ -7698,7 +7704,7 @@ warning: {warning}"
         }
         let has_multiple_tabs = self.conversation.tabs.tabs.len() > 1;
         let show_tab_bar = has_multiple_tabs
-            && !(self.ui_surfaces.is_compact()
+            && !(self.ui_presentation.level != UiPresentationLevel::Full
                 && !self.ui_surfaces.dashboard
                 && !self.ui_surfaces.footer);
 
@@ -7729,10 +7735,10 @@ warning: {warning}"
             let (segments, conv_state, image_cache) =
                 self.conversation.segments_state_and_image_cache();
             let conv_widget = conv_widget::ConversationWidget::new(segments, t.as_ref())
-                .with_mode(if self.ui_surfaces.is_compact() {
-                    SegmentRenderMode::Slim
-                } else {
+                .with_mode(if self.ui_presentation.level == UiPresentationLevel::Full {
                     SegmentRenderMode::Full
+                } else {
+                    SegmentRenderMode::Slim
                 })
                 .with_density(density)
                 .with_pinned_segment(pinned_segment)
@@ -7818,7 +7824,7 @@ warning: {warning}"
             self.footer_data.context_window = s.context_window;
             self.footer_data.thinking_level = s.thinking.as_str().to_string();
             self.footer_data.posture = s.posture.effective.display_name().to_string();
-            self.footer_data.runtime_brand = if self.ui_surfaces.is_compact() {
+            self.footer_data.runtime_brand = if self.ui_presentation.level == UiPresentationLevel::Om {
                 "OM".to_string()
             } else {
                 "Omegon".to_string()
@@ -8003,7 +8009,7 @@ warning: {warning}"
             } else {
                 "⏎ confirm  Esc cancel ".into()
             };
-            let editor_block = if self.ui_surfaces.is_compact() {
+            let editor_block = if self.ui_presentation.level != UiPresentationLevel::Full {
                 Block::default()
                     .borders(Borders::TOP)
                     .border_style(Style::default().fg(t.border_dim()).bg(t.surface_bg()))

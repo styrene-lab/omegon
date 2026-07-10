@@ -6,12 +6,13 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-use crate::surfaces::layout::UiSurfaces;
+use crate::surfaces::layout::{UiPresentationLevel, UiSurfaces};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TuiLayoutInputs {
     pub area: Rect,
     pub surfaces: UiSurfaces,
+    pub presentation_level: UiPresentationLevel,
     pub dashboard_has_content: bool,
     pub editor_height: u16,
     pub editor_info_height: u16,
@@ -62,7 +63,7 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         1
     };
 
-    let is_slim = inputs.surfaces.is_compact();
+    let is_slim = inputs.presentation_level != UiPresentationLevel::Full;
     let session_height = if is_slim { inputs.session_height } else { 0 };
     let permission_lane_height = if is_slim && inputs.pending_permission {
         2
@@ -157,6 +158,7 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 100, 40),
             surfaces: UiSurfaces::lean(),
+            presentation_level: UiPresentationLevel::Om,
             dashboard_has_content: true,
             editor_height: 3,
             editor_info_height: 0,
@@ -178,6 +180,7 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 140, 40),
             surfaces: UiSurfaces::full(),
+            presentation_level: UiPresentationLevel::Full,
             dashboard_has_content: true,
             editor_height: 3,
             editor_info_height: 0,
@@ -204,6 +207,7 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 120, 36),
             surfaces: UiSurfaces::lean(),
+            presentation_level: UiPresentationLevel::Om,
             dashboard_has_content: false,
             editor_height: 4,
             editor_info_height: 1,
@@ -254,6 +258,7 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 100, 30),
             surfaces: UiSurfaces::lean(),
+            presentation_level: UiPresentationLevel::Om,
             dashboard_has_content: false,
             editor_height: 3,
             editor_info_height: 0,
@@ -274,6 +279,7 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 100, 32),
             surfaces: UiSurfaces::lean(),
+            presentation_level: UiPresentationLevel::Om,
             dashboard_has_content: false,
             editor_height: 3,
             editor_info_height: 0,
@@ -294,6 +300,7 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 120, 40),
             surfaces: UiSurfaces::lean(),
+            presentation_level: UiPresentationLevel::Om,
             dashboard_has_content: false,
             editor_height: 4,
             editor_info_height: 1,
@@ -318,6 +325,7 @@ mod tests {
         let plan = plan_tui_layout(TuiLayoutInputs {
             area: Rect::new(0, 0, 120, 18),
             surfaces: UiSurfaces::lean(),
+            presentation_level: UiPresentationLevel::Om,
             dashboard_has_content: false,
             editor_height: 4,
             editor_info_height: 1,
