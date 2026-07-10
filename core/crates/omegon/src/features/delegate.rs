@@ -113,6 +113,8 @@ pub struct DelegateTask {
     pub last_turn: Option<u32>,
     /// Task checklist items extracted from the delegate prompt.
     pub tasks: Vec<ChildTaskItem>,
+    /// Route selected for this child, including generation and fallback provenance.
+    pub route_decision: Option<crate::subagent_route::SubagentRouteDecision>,
 }
 
 /// Thread-safe store for delegate task results
@@ -191,6 +193,16 @@ impl DelegateResultStore {
         let mut tasks = self.tasks.lock().unwrap();
         if let Some(task) = tasks.get_mut(task_id) {
             task.result_viewed = true;
+        }
+    }
+
+    pub fn set_route_decision(
+        &self,
+        task_id: &str,
+        decision: crate::subagent_route::SubagentRouteDecision,
+    ) {
+        if let Some(task) = self.tasks.lock().unwrap().get_mut(task_id) {
+            task.route_decision = Some(decision);
         }
     }
 
@@ -1143,6 +1155,7 @@ If blocked, say the blocker plainly.\n",
             last_tool_activity: None,
             last_turn: None,
             tasks,
+            route_decision: None,
         };
 
         self.result_store.store_task(task_entry);
@@ -1863,30 +1876,49 @@ impl Feature for DelegateFeature {
                     .clone()
                     .or_else(|| parent_model.clone())
                     .unwrap_or_else(|| "auto".into());
-                let selected_model = if model.is_some() {
-                    authoritative_model.clone()
-                } else if let Some(runtime) = &self.inference_runtime {
-                    runtime
-                        .observe_route_shadow(
-                            crate::routing::infer_model_grade_band(&authoritative_model),
-                            Some(&authoritative_model),
-                            &[],
-                            None,
-                        )
-                        .await;
-                    runtime
-                        .inventory_route_preference(
-                            crate::routing::infer_model_grade_band(&authoritative_model),
-                            &[],
-                            None,
-                        )
-                        .await
-                        .map(|preference| preference.offering)
-                        .unwrap_or(authoritative_model.clone())
+                let route_decision = if let Some(runtime) = &self.inference_runtime {
+                    let snapshot = runtime.snapshot().await;
+                    crate::subagent_route::resolve_subagent_route(
+                        &crate::subagent_route::SubagentRouteRequest {
+                            profile: match worker_profile {
+                                DelegateWorkerProfile::Scout => {
+                                    crate::subagent_route::WorkerProfile::Scout
+                                }
+                                DelegateWorkerProfile::Patch => {
+                                    crate::subagent_route::WorkerProfile::Patch
+                                }
+                                DelegateWorkerProfile::Verify => {
+                                    crate::subagent_route::WorkerProfile::Verify
+                                }
+                            },
+                            explicit_model: model.as_deref(),
+                            plan_default_model: None,
+                            parent_model: &authoritative_model,
+                            only_providers: &[],
+                        },
+                        &snapshot,
+                        &authoritative_model,
+                    )
                 } else {
-                    authoritative_model.clone()
+                    crate::subagent_route::SubagentRouteDecision {
+                        selected_model: authoritative_model.clone(),
+                        requested_grade: crate::routing::infer_model_grade_band(
+                            &authoritative_model,
+                        ),
+                        parent_grade_ceiling: crate::routing::infer_model_grade_band(
+                            &authoritative_model,
+                        ),
+                        inventory_generation: 0,
+                        source: if model.is_some() {
+                            crate::subagent_route::SubagentRouteSource::ExplicitPin
+                        } else {
+                            crate::subagent_route::SubagentRouteSource::CompiledFallback
+                        },
+                        fallback_reason: Some("shared inference runtime unavailable".into()),
+                    }
                 };
-                let selected_model = (selected_model != "auto").then_some(selected_model);
+                let selected_model = (route_decision.selected_model != "auto")
+                    .then(|| route_decision.selected_model.clone());
                 self.runner.spawn_delegate(
                     task_id.clone(),
                     label.clone(),
@@ -3143,6 +3175,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
+            route_decision: None,
         });
 
         // Exact match (case-insensitive)
@@ -3182,6 +3215,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
+            route_decision: None,
         });
         assert!(
             store
@@ -3247,6 +3281,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
+            route_decision: None,
         });
 
         let result = feature
@@ -3305,6 +3340,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: Some(1),
             tasks: Vec::new(),
+            route_decision: None,
         });
 
         let snapshot = store.progress_snapshot();
@@ -3340,6 +3376,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
+            route_decision: None,
         });
         *feature.progress_handle.lock().unwrap() = feature.result_store.progress_snapshot();
         assert_eq!(feature.progress_handle.lock().unwrap().running, 1);
@@ -3386,6 +3423,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
+            route_decision: None,
         });
 
         assert_eq!(
@@ -3435,6 +3473,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
+            route_decision: None,
         });
 
         let child = store.progress_snapshot().children.pop().unwrap();
@@ -3461,6 +3500,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: None,
             tasks: extract_task_items("- [ ] Inspect files\n- [ ] Report findings"),
+            route_decision: None,
         });
         store.update_task_live_state(
             "delegate_1",
@@ -3482,6 +3522,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
+            route_decision: None,
         });
         store.store_task(DelegateTask {
             label: None,
@@ -3500,6 +3541,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
+            route_decision: None,
         });
 
         let snapshot = store.progress_snapshot();
@@ -3661,6 +3703,7 @@ This agent runs in write mode and can modify files.
             last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
+            route_decision: None,
         });
 
         let err = runner
@@ -3743,6 +3786,7 @@ exec sleep 10
             last_tool_activity: None,
             last_turn: None,
             tasks: Vec::new(),
+            route_decision: None,
         });
 
         let err = runner
