@@ -14,6 +14,7 @@ pub mod bootstrap;
 pub mod command_surfaces;
 pub mod conv_widget;
 pub mod conversation;
+pub mod conversation_projection;
 pub mod conversation_render_projection;
 pub mod dashboard;
 pub mod dashboard_projection;
@@ -7730,11 +7731,15 @@ warning: {warning}"
         if self.conversation.tabs.is_conversation_active() {
             // Render conversation widget (can mutate conv_state via frame.render_stateful_widget)
             let density = self.settings().tool_detail;
+            let projected_segments = conversation_projection::project_conversation_segments(
+                self.conversation.segments(),
+                self.ui_presentation.level,
+            );
             let pinned_segment = self.conversation.timeline_expanded_segment();
             let selected_segment = self.conversation.selected_segment_index();
-            let (segments, conv_state, image_cache) =
+            let (_, conv_state, image_cache) =
                 self.conversation.segments_state_and_image_cache();
-            let conv_widget = conv_widget::ConversationWidget::new(segments, t.as_ref())
+            let conv_widget = conv_widget::ConversationWidget::new(&projected_segments, t.as_ref())
                 .with_mode(if self.ui_presentation.level == UiPresentationLevel::Full {
                     SegmentRenderMode::Full
                 } else {
@@ -7745,10 +7750,12 @@ warning: {warning}"
                 .with_selected_segment(selected_segment)
                 .with_detail_hint_enabled(false);
             frame.render_stateful_widget(conv_widget, content_area, conv_state);
-            for (segment_idx, image_area) in conv_state.visible_image_areas(segments, content_area)
+            for (segment_idx, image_area) in
+                conv_state.visible_image_areas(&projected_segments, content_area)
             {
-                let Some(SegmentContent::Image { path, .. }) =
-                    segments.get(segment_idx).map(|segment| &segment.content)
+                let Some(SegmentContent::Image { path, .. }) = projected_segments
+                    .get(segment_idx)
+                    .map(|segment| &segment.content)
                 else {
                     continue;
                 };

@@ -14,6 +14,7 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+- Om and Active now project completed tool evidence into one deterministic operation outcome per authoritative conversation turn while Full preserves the original per-tool evidence rows; projection is frame-local, leaves canonical segments untouched, and keeps running or unbound tools visible rather than guessing boundaries.
 - Continued decoupling presentation from surface bitsets: conversation detail, live activity allocation, editor chrome, runtime branding, and TUI layout compactness now derive from semantic Om/Active/Full level, so showing or hiding a dashboard no longer silently changes evidence density.
 - Added the renderer-neutral operation-episode substrate: canonical tool evidence can now reduce under caller-supplied authoritative boundaries into stable running/complete/failed episodes with bounded deterministic outcomes, explicit evidence attachments, failure precedence, and a safe one-tool fallback when no boundary exists.
 - Hardened the first Om presentation slice after adversarial review: the UI menu now exposes Om, Active, and Full rather than stale Lean/Full controls, describes presentation density separately from surfaces, and provides direct keyboard actions for all three levels.

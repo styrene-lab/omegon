@@ -237,6 +237,7 @@ mod tests {
                 footer: true,
                 activity: true,
             },
+            presentation_level: UiPresentationLevel::Om,
             dashboard_has_content: false,
             editor_height: 3,
             editor_info_height: 0,
