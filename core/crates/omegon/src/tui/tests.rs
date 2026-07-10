@@ -4996,28 +4996,32 @@ fn skills_registry_advertises_help_aliases() {
 
 #[test]
 fn slash_skills_opens_structured_menu() {
-    let mut app = test_app();
-    let (tx, mut rx) = test_tx_with_rx();
+    for command in ["/skills", "/skills list", "/skill"] {
+        let mut app = test_app();
+        let (tx, mut rx) = test_tx_with_rx();
 
-    let result = app.handle_slash_command("/skills", &tx);
-    assert!(matches!(result, SlashResult::Handled));
-    assert!(rx.try_recv().is_err(), "skills menu is handled in-TUI");
+        let result = app.handle_slash_command(command, &tx);
+        assert!(matches!(result, SlashResult::Handled), "{command}");
+        assert!(rx.try_recv().is_err(), "{command} is handled in-TUI");
 
-    let menu = app.active_menu.as_ref().expect("skills menu opened");
-    assert_eq!(menu.projection.id, "skills");
-    assert!(
-        menu.state
-            .visible_rows(&menu.projection)
-            .iter()
-            .any(|row| row.row.label == "code-act")
-    );
-    assert!(
-        !menu
-            .state
-            .visible_rows(&menu.projection)
-            .iter()
-            .any(|row| row.row.label.contains("/skills get"))
-    );
+        let menu = app.active_menu.as_ref().expect("skills menu opened");
+        assert_eq!(menu.projection.id, "skills");
+        assert!(
+            menu.state
+                .visible_rows(&menu.projection)
+                .iter()
+                .any(|row| row.row.label == "code-act"),
+            "{command} should show skill rows"
+        );
+        assert!(
+            !menu
+                .state
+                .visible_rows(&menu.projection)
+                .iter()
+                .any(|row| row.row.label.contains("/skills get")),
+            "{command} should not render command text as inventory rows"
+        );
+    }
 }
 
 #[test]

@@ -9326,9 +9326,6 @@ Scroll transcript:
 
             "skills" | "skill" => {
                 const USAGE: &str = "Usage: /skills [list|reload|refresh|install [name|skills/name]|create|new [--project|--user]|import [--project|--user] <path>|get <name>|delete <name>]";
-                if cmd == "skill" && args.trim().is_empty() {
-                    return SlashResult::Display("Usage: /skill <skills-subcommand>\nAlias for /skills. Run /skills for the active skills menu or /skills --help for command syntax.".into());
-                }
                 if let Some(command) = canonical_slash_command("skills", args) {
                     match command {
                         CanonicalSlashCommand::SkillsView => match self.open_skills_menu() {
