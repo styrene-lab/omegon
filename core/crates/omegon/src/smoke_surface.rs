@@ -623,6 +623,7 @@ fn initial_cleave_progress(scenario: SmokeScenarioKind) -> CleaveProgress {
     CleaveProgress {
         active: true,
         run_id: scenario.id().into(),
+        inventory_generation: Some(1),
         total_children: children.len(),
         completed: 0,
         failed: 0,
@@ -672,6 +673,7 @@ fn smoke_child(label: &str, status: &str, done: usize, total: usize) -> ChildPro
         tokens_in: 0,
         tokens_out: 0,
         runtime: Some(ChildRuntimeSummary {
+            route_decision: None,
             model: Some("smoke:model".into()),
             thinking_level: Some("minimal".into()),
             context_class: Some("compact".into()),

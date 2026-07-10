@@ -145,6 +145,7 @@ pub struct OperationChildRow {
     pub progress: Option<OperationChildProgress>,
     pub result_summary: Option<String>,
     pub failure: Option<OperationFailure>,
+    pub route_decision: Option<crate::subagent_route::SubagentRouteDecision>,
 }
 
 impl OperationChildRow {
@@ -160,6 +161,12 @@ impl OperationChildRow {
             "last_tool_args_summary": self.last_activity.as_ref().and_then(|activity| activity.args_summary.as_deref()),
             "last_turn": self.last_activity.as_ref().and_then(|activity| activity.turn),
             "result_summary": self.result_summary.as_deref(),
+            "route_decision": self.route_decision.as_ref().map(|decision| json!({
+                "selected_model": decision.selected_model,
+                "inventory_generation": decision.inventory_generation,
+                "source": format!("{:?}", decision.source),
+                "fallback_reason": decision.fallback_reason,
+            })),
             "tasks_done": self.progress.as_ref().map(|progress| progress.done).unwrap_or(0),
             "tasks_total": self.progress.as_ref().map(|progress| progress.total).unwrap_or(0),
             "failure": self.failure.as_ref().map(|failure| json!({
@@ -222,6 +229,10 @@ impl OperationChildRow {
                 }
                 _ => None,
             },
+            route_decision: child
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.route_decision.clone()),
         }
     }
 
@@ -264,6 +275,7 @@ impl OperationChildRow {
             }),
             result_summary: child.result_summary.clone(),
             failure,
+            route_decision: child.route_decision.clone(),
         }
     }
 }

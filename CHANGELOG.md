@@ -14,7 +14,7 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+- Began real cleave inference-runtime integration: setup now shares one `InferenceRuntimeState` across cleave and delegate, while cleave progress and child runtime summaries carry explicit inventory-generation and route-decision slots for the forthcoming pre-dispatch pinning step.
 
 - Hardened route-shadow telemetry with exact-offering, conceptual-model, provider-level, and true-divergence classifications plus generation-scoped parity metrics and an explicit 20-observation/95% normalized-parity review gate; inventory routing remains non-authoritative.
 - Added a pure, generation-stamped subagent route resolver that preserves explicit child pins and plan defaults, applies worker-profile intent under the parent model capability ceiling, respects provider constraints, and returns a recorded compiled-fallback reason when inventory has no compatible offering; dispatch integration remains intentionally separate.

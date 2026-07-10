@@ -48,6 +48,8 @@ pub struct ChildState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<CleaveChildRuntimeProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_decision: Option<crate::subagent_route::SubagentRouteDecision>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at_unix_ms: Option<u64>,
@@ -244,6 +246,7 @@ impl CleaveState {
                     duration_secs: None,
                     stdout: None,
                     runtime: c.runtime.clone(),
+                    route_decision: None,
                     pid: None,
                     started_at_unix_ms: None,
                     last_activity_unix_ms: None,

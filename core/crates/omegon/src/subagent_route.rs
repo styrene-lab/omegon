@@ -4,7 +4,8 @@ use crate::inference_inventory::{
 use crate::inference_runtime::normalize_route_id_for_resolution;
 use crate::routing::CapabilityGradeBand;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WorkerProfile {
     Scout,
     Patch,
@@ -12,7 +13,8 @@ pub enum WorkerProfile {
     General,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SubagentRouteSource {
     ExplicitPin,
     PlanDefault,
@@ -29,7 +31,7 @@ pub struct SubagentRouteRequest<'a> {
     pub only_providers: &'a [String],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SubagentRouteDecision {
     pub selected_model: String,
     pub requested_grade: CapabilityGradeBand,

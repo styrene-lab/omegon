@@ -624,6 +624,8 @@ impl PendingCleaveApproval {
 pub struct CleaveProgress {
     pub active: bool,
     pub run_id: String,
+    /// Inventory generation pinned for the complete run.
+    pub inventory_generation: Option<u64>,
     pub total_children: usize,
     pub completed: usize,
     pub failed: usize,
@@ -637,6 +639,7 @@ pub struct CleaveProgress {
 #[derive(Default, Clone)]
 pub struct ChildRuntimeSummary {
     pub model: Option<String>,
+    pub route_decision: Option<crate::subagent_route::SubagentRouteDecision>,
     pub thinking_level: Option<String>,
     pub context_class: Option<String>,
     pub enabled_tools: Vec<String>,
@@ -701,6 +704,7 @@ fn child_runtime_summary(
 ) -> ChildRuntimeSummary {
     ChildRuntimeSummary {
         model: runtime.model.clone(),
+        route_decision: None,
         thinking_level: runtime.thinking_level.clone(),
         context_class: runtime.context_class.clone(),
         enabled_tools: runtime.enabled_tools.clone(),
@@ -887,8 +891,10 @@ pub struct CleaveFeature {
     pending_approvals: Arc<Mutex<HashMap<String, PendingCleaveApproval>>>,
     /// In-process cancel handles for active cleave children, keyed by label.
     child_cancel_tokens: Arc<Mutex<HashMap<String, tokio_util::sync::CancellationToken>>>,
-    /// Provider inventory for per-child routing.
+    /// Provider inventory for legacy per-child routing.
     pub inventory: Option<std::sync::Arc<tokio::sync::RwLock<crate::routing::ProviderInventory>>>,
+    /// Shared inference runtime used to pin and resolve one snapshot per run.
+    inference_runtime: Option<crate::inference_runtime::InferenceRuntimeState>,
     /// Startup-approved secret env inherited by child runs.
     session_secret_env: Vec<(String, String)>,
     /// Slot holding the runtime-supplied `BusRequestSink` once the
@@ -928,6 +934,7 @@ impl CleaveFeature {
             pending_approvals: Arc::new(Mutex::new(HashMap::new())),
             child_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             inventory: None,
+            inference_runtime: None,
             session_secret_env,
             bus_request_sink: Arc::new(Mutex::new(None)),
             settings: None,
@@ -937,6 +944,14 @@ impl CleaveFeature {
         feature.load_pending_approvals();
         feature.refresh_progress_from_workspace_state();
         feature
+    }
+
+    pub fn with_inference_runtime(
+        mut self,
+        runtime: crate::inference_runtime::InferenceRuntimeState,
+    ) -> Self {
+        self.inference_runtime = Some(runtime);
+        self
     }
 
     pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
@@ -3766,6 +3781,7 @@ mod tests {
         let shared = Arc::new(Mutex::new(CleaveProgress {
             active: true,
             run_id: "run-1".into(),
+            inventory_generation: None,
             total_children: 1,
             completed: 0,
             failed: 0,
@@ -3835,6 +3851,7 @@ mod tests {
         let shared = Arc::new(Mutex::new(CleaveProgress {
             active: true,
             run_id: "run-1".into(),
+            inventory_generation: None,
             total_children: 1,
             completed: 0,
             failed: 1,
@@ -3882,6 +3899,7 @@ mod tests {
         let shared = Arc::new(Mutex::new(CleaveProgress {
             active: true,
             run_id: "run-1".into(),
+            inventory_generation: None,
             total_children: 1,
             completed: 0,
             failed: 0,
@@ -3929,6 +3947,7 @@ mod tests {
         let shared = Arc::new(Mutex::new(CleaveProgress {
             active: true,
             run_id: "run-1".into(),
+            inventory_generation: None,
             total_children: 1,
             completed: 0,
             failed: 0,
@@ -3976,6 +3995,7 @@ mod tests {
         let shared = Arc::new(Mutex::new(CleaveProgress {
             active: true,
             run_id: "run-1".into(),
+            inventory_generation: None,
             total_children: 2,
             completed: 1,
             failed: 0,
