@@ -1929,19 +1929,41 @@ Directive: {}{}",
         };
         let child_cancel_tokens = Arc::clone(&self.child_cancel_tokens);
 
+        let parent_model = std::env::var("OMEGON_MODEL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(crate::providers::automation_safe_model)
+            .unwrap_or_else(|| "anthropic:claude-sonnet-4-6".into());
+        let mut route_decisions = std::collections::BTreeMap::new();
+        if let Some(runtime) = &self.inference_runtime {
+            let snapshot = runtime.snapshot().await;
+            self.progress.lock().unwrap().inventory_generation = Some(snapshot.generation);
+            for child in &plan.children {
+                let decision = crate::subagent_route::resolve_subagent_route(
+                    &crate::subagent_route::SubagentRouteRequest {
+                        profile: crate::subagent_route::WorkerProfile::General,
+                        explicit_model: child.model.as_deref(),
+                        plan_default_model: plan.default_model.as_deref(),
+                        parent_model: &parent_model,
+                        only_providers: &[],
+                    },
+                    &snapshot,
+                    &parent_model,
+                );
+                route_decisions.insert(child.label.clone(), decision);
+            }
+        }
+
         let config = cleave::orchestrator::CleaveConfig {
             agent_binary,
             bridge_path: PathBuf::new(), // Not used in native mode
             node: String::new(),
-            model: std::env::var("OMEGON_MODEL")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .or_else(crate::providers::automation_safe_model)
-                .unwrap_or_else(|| "anthropic:claude-sonnet-4-6".into()),
+            model: parent_model,
             max_parallel,
             timeout_secs: 900,
             idle_timeout_secs: 180,
             max_turns: 50,
+            route_decisions,
             inventory: self.inventory.clone().or_else(|| {
                 // Probe on demand if no inventory was injected at startup
                 Some(std::sync::Arc::new(tokio::sync::RwLock::new(

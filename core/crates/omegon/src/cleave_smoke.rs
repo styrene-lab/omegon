@@ -309,6 +309,7 @@ async fn run_scenario(cli: &Cli, scenario: &SmokeScenario) -> anyhow::Result<()>
         timeout_secs: 30,
         idle_timeout_secs: 10,
         max_turns: 2,
+        route_decisions: std::collections::BTreeMap::new(),
         inventory: None,
         inherited_env: vec![],
         injected_env,

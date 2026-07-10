@@ -3328,6 +3328,7 @@ async fn run_cleave_command(
         timeout_secs: timeout,
         idle_timeout_secs: idle_timeout,
         max_turns,
+        route_decisions: std::collections::BTreeMap::new(),
         inventory: None,
         inherited_env: agent_setup.session_secret_env.clone(),
         injected_env: Vec::new(),

@@ -54,7 +54,10 @@ pub struct CleaveConfig {
     pub timeout_secs: u64,
     pub idle_timeout_secs: u64,
     pub max_turns: u32,
-    /// Provider inventory for per-child routing. If None, all children use `model`.
+    /// Per-child decisions resolved from one inventory snapshot before dispatch.
+    pub route_decisions:
+        std::collections::BTreeMap<String, crate::subagent_route::SubagentRouteDecision>,
+    /// Provider inventory for legacy per-child routing when no pinned decision exists.
     pub inventory: Option<std::sync::Arc<tokio::sync::RwLock<crate::routing::ProviderInventory>>>,
     /// Startup-approved secret env inherited from the parent process.
     pub inherited_env: Vec<(String, String)>,
@@ -266,9 +269,21 @@ pub async fn run_cleave(
                         std::fs::write(&task_path, &task_content)?;
                     }
 
-                    // Route per-child model: explicit plan model wins; if absent, infer from scope size.
-                    // Parent model is the floor — we never route to a grade band above the parent.
-                    let model = if let Some(ref inv_lock) = config.inventory {
+                    // Feature-level decisions are resolved from one snapshot before dispatch.
+                    let model = if let Some(decision) = config.route_decisions.get(&label) {
+                        if state.children[child_idx]
+                            .route_decision
+                            .as_ref()
+                            .is_some_and(|persisted| persisted != decision)
+                        {
+                            anyhow::bail!(
+                                "cleave child '{label}' route changed while resuming inventory generation {}",
+                                decision.inventory_generation
+                            );
+                        }
+                        state.children[child_idx].route_decision = Some(decision.clone());
+                        decision.selected_model.clone()
+                    } else if let Some(ref inv_lock) = config.inventory {
                         let child_state = &state.children[child_idx];
                         if let Some(explicit) = &child_state.execute_model {
                             if explicit != &effective_model {
@@ -1335,6 +1350,7 @@ mod tests {
             timeout_secs: 900,
             idle_timeout_secs: 300, // custom: 5 minutes
             max_turns: 50,
+            route_decisions: std::collections::BTreeMap::new(),
             inventory: None,
             inherited_env: vec![],
             injected_env: vec![],
@@ -1771,6 +1787,7 @@ fn test_config(
         timeout_secs: 30,
         idle_timeout_secs: 10,
         max_turns: 3,
+        route_decisions: std::collections::BTreeMap::new(),
         inventory: None,
         inherited_env: vec![],
         injected_env: vec![],
