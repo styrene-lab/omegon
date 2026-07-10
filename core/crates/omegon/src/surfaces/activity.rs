@@ -26,6 +26,18 @@ impl ActivitySurfaceProjection {
             .any(|entry| matches!(entry.kind, ActivityEntryKind::Tool))
     }
 
+    pub fn operation_episode_id(&self) -> Option<String> {
+        self.entries.iter().find_map(|entry| {
+            let operation = entry.operation.as_ref()?;
+            let kind = match operation.operation.kind {
+                omegon_traits::OperationKind::Delegate => "delegate",
+                omegon_traits::OperationKind::Cleave => "cleave",
+            };
+            let id = operation.operation.id.as_deref().unwrap_or("active");
+            Some(format!("{kind}:{id}"))
+        })
+    }
+
     pub fn has_operation(&self) -> bool {
         self.entries
             .iter()

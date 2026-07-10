@@ -14,6 +14,7 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+- Delegate and cleave live workflow projections now expose authoritative operation IDs suitable for episode identity; single delegates use their task ID instead of the previous constant `delegate`, while cleave retains its run ID.
 - Operator-run `!` shell observations now have an authoritative `operator-shell:<observation-id>` episode boundary when they are outside an agent turn; Om/Active collapse each completed observation into one outcome while Full retains the complete command evidence.
 - Tool inspection now stores episode identity separately from its selected evidence item; Ctrl+O resolves the latest tool to `turn:<id>` (or safe `tool:<id>` fallback), and the semantic target survives Om/Active/Full reprojection without relying on screen-row indices.
 - Live activity now carries the same stable episode identity used by durable outcomes (`turn:<id>` with safe `tool:<id>` fallback), and Om selects one primary attention/operation/running entry while Active retains the bounded multi-entry workflow view.

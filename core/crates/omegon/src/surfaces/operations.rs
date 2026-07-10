@@ -97,8 +97,13 @@ impl OperationWorkbenchProjection {
     }
 
     pub fn from_delegate(progress: &DelegateProgress) -> Self {
+        let operation_id = match progress.children.as_slice() {
+            [child] => child.task_id.clone(),
+            [] => "delegate".to_string(),
+            children => format!("delegate-set:{}", children[0].task_id),
+        };
         Self {
-            operation: OperationRef::delegate("delegate"),
+            operation: OperationRef::delegate(operation_id),
             running: progress.running,
             completed: progress.completed,
             failed: progress.failed,
@@ -526,6 +531,18 @@ mod tests {
             tasks_done: 0,
             route_decision: None,
         }
+    }
+
+    #[test]
+    fn delegate_workbench_uses_child_task_as_operation_identity() {
+        let progress = DelegateProgress {
+            active: true,
+            running: 1,
+            children: vec![delegate_child("running")],
+            ..Default::default()
+        };
+        let projection = OperationWorkbenchProjection::from_delegate(&progress);
+        assert_eq!(projection.operation.id.as_deref(), Some("delegate_1"));
     }
 
     #[test]
