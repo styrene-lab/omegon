@@ -120,6 +120,7 @@ mod setup;
 mod smoke_surface;
 mod startup;
 pub mod status;
+mod subagent_route;
 mod task_tree;
 pub mod tool_registry;
 mod tools;

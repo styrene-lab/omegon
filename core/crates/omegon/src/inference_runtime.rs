@@ -217,6 +217,10 @@ impl RouteAuthorityReadiness {
     }
 }
 
+pub(crate) fn normalize_route_id_for_resolution(route: &str) -> String {
+    normalize_route_id(route)
+}
+
 fn normalize_route_id(route: &str) -> String {
     let Some((provider, model)) = route.split_once(':') else {
         return route.to_ascii_lowercase();
