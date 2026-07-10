@@ -4319,22 +4319,22 @@ fn model_selector_options_include_openai_only_when_openai_api_is_present() {
     assert!(
         options
             .iter()
-            .any(|opt| opt.value == "openai-codex:gpt-5.4"),
-        "ChatGPT/Codex-backed GPT route should be advertised honestly"
+            .any(|opt| opt.value == "openai-codex:gpt-5.6-sol"),
+        "ChatGPT/Codex-backed GPT-5.6 Sol route should be advertised honestly"
     );
 }
 
 #[test]
 fn model_selector_options_include_openai_api_choices_when_api_key_is_present() {
     let options = build_model_selector_options(
-        "openai:gpt-5.4",
+        "openai:gpt-5.6",
         None,
         Some(("sk-test".into(), false)),
         None,
     );
     assert!(
-        options.iter().any(|opt| opt.value == "openai:gpt-5.4"),
-        "OpenAI API route should be selectable when API creds exist"
+        options.iter().any(|opt| opt.value == "openai:gpt-5.6"),
+        "OpenAI API GPT-5.6 route should be selectable when API creds exist"
     );
 }
 
@@ -7294,7 +7294,7 @@ fn editor_top_line_restores_context_fill_bar() {
 
 #[test]
 fn editor_top_line_grades_actual_model_not_route_intent() {
-    let mut settings = Settings::new("openai-codex:gpt-5.5");
+    let mut settings = Settings::new("openai-codex:gpt-5.6-sol");
     settings.thinking = ThinkingLevel::Low;
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
     app.apply_ui_preset(UiSurfaces::lean());
@@ -7303,7 +7303,7 @@ fn editor_top_line_grades_actual_model_not_route_intent() {
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(
-        rendered.contains("openai-codex/gpt-5.5  󰿃 S  default   low   ctx:"),
+        rendered.contains("openai-codex/gpt-5.6  󰿃 S  default   low   ctx:"),
         "{rendered}"
     );
 }
@@ -7956,8 +7956,12 @@ fn one_shot_context_notifications_toast_without_command_panel() {
 
 #[test]
 fn settings_projection_helper_marks_runtime_profile_drift() {
+    let _env = crate::test_support::env::lock();
     let mut app = test_app();
     let tmp = tempfile::tempdir().expect("tempdir");
+    let profile_path = tmp.path().join(".omegon/profile.json");
+    std::fs::create_dir_all(profile_path.parent().unwrap()).expect("profile dir");
+    std::fs::write(&profile_path, r#"{"thinkingLevel":"medium"}"#).expect("profile");
     app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
     app.update_settings(|s| {
         s.thinking = ThinkingLevel::Minimal;

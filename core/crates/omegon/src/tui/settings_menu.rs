@@ -166,9 +166,33 @@ pub(crate) fn build_model_selector_options(
             current,
         ));
         options.push(sel_opt(
-            "openai-codex:gpt-5.4-mini",
-            "GPT-5.4 mini",
+            "openai-codex:gpt-5.6-sol",
+            "GPT-5.6 Sol",
+            &format!("ChatGPT/Codex · flagship coding · 1M · {auth}"),
+            current,
+        ));
+        options.push(sel_opt(
+            "openai-codex:gpt-5.6-terra",
+            "GPT-5.6 Terra",
+            &format!("ChatGPT/Codex · balanced coding · 1M · {auth}"),
+            current,
+        ));
+        options.push(sel_opt(
+            "openai-codex:gpt-5.6-luna",
+            "GPT-5.6 Luna",
             &format!("ChatGPT/Codex · fast coding · 1M · {auth}"),
+            current,
+        ));
+        options.push(sel_opt(
+            "openai-codex:gpt-5.5-pro",
+            "GPT-5.5 Pro",
+            &format!("ChatGPT/Codex · previous pro route · 1M · {auth}"),
+            current,
+        ));
+        options.push(sel_opt(
+            "openai-codex:gpt-5.4-nano",
+            "GPT-5.4 nano",
+            &format!("ChatGPT/Codex · low-latency fallback · 400k · {auth}"),
             current,
         ));
     }

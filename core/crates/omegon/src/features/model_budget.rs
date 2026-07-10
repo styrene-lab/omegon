@@ -398,16 +398,20 @@ mod tests {
 
     #[test]
     fn grade_resolve_openai() {
-        assert_eq!(ModelGrade::S.resolve_model("openai", ""), "gpt-5.5");
+        assert_eq!(ModelGrade::S.resolve_model("openai", ""), "gpt-5.6");
         assert!(ModelGrade::B.resolve_model("openai", "").contains("gpt"));
     }
 
     #[test]
     fn grade_resolve_openai_codex() {
-        assert_eq!(ModelGrade::B.resolve_model("openai-codex", ""), "gpt-5.4");
+        assert_eq!(ModelGrade::S.resolve_model("openai-codex", ""), "gpt-5.6");
+        assert_eq!(
+            ModelGrade::B.resolve_model("openai-codex", ""),
+            "gpt-5.6-terra"
+        );
         assert_eq!(
             ModelGrade::D.resolve_model("openai-codex", ""),
-            "gpt-5.4-mini"
+            "gpt-5.6-luna"
         );
     }
 

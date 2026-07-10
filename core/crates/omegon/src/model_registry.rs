@@ -969,16 +969,30 @@ mod tests {
             reg.context_ceiling("anthropic", "claude-opus-4-6"),
             Some(1_000_000)
         );
+        assert_eq!(reg.context_ceiling("openai", "gpt-5.6"), Some(1_000_000));
         assert_eq!(reg.context_ceiling("openai", "gpt-5.5"), Some(1_000_000));
         assert_eq!(reg.context_ceiling("openai", "gpt-5.4"), Some(1_000_000));
         assert_eq!(reg.context_ceiling("openai", "gpt-5.4-mini"), Some(400_000));
+        assert_eq!(
+            reg.context_ceiling("openai-codex", "gpt-5.6-luna"),
+            Some(1_000_000)
+        );
     }
 
     #[test]
     fn infer_grade_from_routes() {
         let reg = ModelRegistry::global();
+        assert_eq!(reg.infer_grade("openai", "gpt-5.6"), Some("S"));
         assert_eq!(reg.infer_grade("openai", "gpt-5.5"), Some("S"));
-        assert_eq!(reg.exact_grade("openai-codex", "gpt-5.5"), Some("S"));
+        assert_eq!(reg.exact_grade("openai-codex", "gpt-5.6"), Some("S"));
+        assert_eq!(
+            reg.exact_grade("openai-codex", "gpt-5.6-terra"),
+            Some("B")
+        );
+        assert_eq!(
+            reg.exact_grade("openai-codex", "gpt-5.6-luna"),
+            Some("D")
+        );
         assert_eq!(
             reg.infer_grade("anthropic", "claude-haiku-4-5-20251001"),
             Some("D")
