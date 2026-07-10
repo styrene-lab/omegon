@@ -195,6 +195,21 @@ impl RouteAuthorityReadiness {
     }
 }
 
+fn normalize_route_id(route: &str) -> String {
+    let Some((provider, model)) = route.split_once(':') else {
+        return route.to_ascii_lowercase();
+    };
+    let provider = provider.to_ascii_lowercase();
+    let provider = match provider.as_str() {
+        "local" => "ollama",
+        "copilot" => "github-copilot",
+        other => other,
+    };
+    let model = model.to_ascii_lowercase();
+    let model = model.strip_suffix(":latest").unwrap_or(&model);
+    format!("{provider}:{model}")
+}
+
 fn classify_route_shadow(
     snapshot: &InventorySnapshot,
     authoritative: Option<&str>,
@@ -206,9 +221,10 @@ fn classify_route_shadow(
     if candidates.is_empty() {
         return RouteShadowAgreement::NoInventoryCandidate;
     }
+    let authoritative_normalized = normalize_route_id(authoritative);
     if candidates
         .iter()
-        .any(|candidate| candidate == authoritative)
+        .any(|candidate| normalize_route_id(candidate) == authoritative_normalized)
     {
         return RouteShadowAgreement::ExactOffering;
     }
@@ -230,10 +246,12 @@ fn classify_route_shadow(
     {
         return RouteShadowAgreement::ConceptualModel;
     }
-    let authoritative_provider = authoritative.split_once(':').map(|(provider, _)| provider);
+    let authoritative_provider = authoritative_normalized
+        .split_once(':')
+        .map(|(provider, _)| provider);
     if authoritative_provider.is_some_and(|provider| {
         candidates.iter().any(|candidate| {
-            candidate
+            normalize_route_id(candidate)
                 .split_once(':')
                 .is_some_and(|(candidate_provider, _)| candidate_provider == provider)
         })
@@ -316,9 +334,15 @@ impl InferenceRuntimeState {
         &self,
         grade: crate::routing::CapabilityGradeBand,
         authoritative: Option<&str>,
+        only_providers: &[String],
+        exact_offering: Option<&str>,
     ) -> RouteShadowObservation {
         let snapshot = self.store.snapshot().await;
-        let mut request = CompatibilityRequest::default();
+        let mut request = CompatibilityRequest {
+            exact_offering: exact_offering
+                .map(|id| crate::inference_inventory::OfferingId(normalize_route_id(id))),
+            ..Default::default()
+        };
         if let Some(minimum) = shadow_grade_floor(grade) {
             request.minimum_grades.insert("agentic".into(), minimum);
         }
@@ -326,6 +350,18 @@ impl InferenceRuntimeState {
             .compatible_offerings(&request)
             .into_iter()
             .filter(|result| result.is_compatible())
+            .filter(|result| {
+                only_providers.is_empty()
+                    || only_providers.iter().any(|provider| {
+                        normalize_route_id(&format!("{provider}:placeholder"))
+                            .split_once(':')
+                            .is_some_and(|(normalized, _)| {
+                                normalize_route_id(&result.offering.id.0)
+                                    .split_once(':')
+                                    .is_some_and(|(candidate, _)| candidate == normalized)
+                            })
+                    })
+            })
             .map(|result| result.offering.id.0.clone())
             .collect();
         let authoritative = authoritative.map(str::to_owned);
@@ -387,5 +423,71 @@ impl InferenceRuntimeState {
                 diagnostics,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_all_route_relationships() {
+        let snapshot = InventorySnapshot::empty();
+        assert_eq!(
+            classify_route_shadow(&snapshot, Some("openai:gpt"), &["openai:gpt".into()]),
+            RouteShadowAgreement::ExactOffering
+        );
+        assert_eq!(
+            classify_route_shadow(&snapshot, Some("openai:gpt"), &["openai:other".into()]),
+            RouteShadowAgreement::Provider
+        );
+        assert_eq!(
+            classify_route_shadow(&snapshot, Some("anthropic:claude"), &["openai:gpt".into()]),
+            RouteShadowAgreement::Divergence
+        );
+        assert_eq!(
+            classify_route_shadow(&snapshot, None, &["openai:gpt".into()]),
+            RouteShadowAgreement::NoAuthoritativeCandidate
+        );
+        assert_eq!(
+            classify_route_shadow(&snapshot, Some("openai:gpt"), &[]),
+            RouteShadowAgreement::NoInventoryCandidate
+        );
+    }
+
+    #[test]
+    fn readiness_requires_volume_and_parity() {
+        let observation = |agreement| RouteShadowObservation {
+            generation: 2,
+            authoritative: None,
+            inventory_candidates: Vec::new(),
+            agreement,
+        };
+        let insufficient = vec![observation(RouteShadowAgreement::ExactOffering); 19];
+        assert_eq!(
+            summarize_observations(insufficient.iter()).readiness(),
+            RouteAuthorityReadiness::InsufficientEvidence
+        );
+        let ready = vec![observation(RouteShadowAgreement::ExactOffering); 20];
+        assert_eq!(
+            summarize_observations(ready.iter()).readiness(),
+            RouteAuthorityReadiness::ReadyForReview
+        );
+        let mut below = ready;
+        below[0].agreement = RouteShadowAgreement::Divergence;
+        below[1].agreement = RouteShadowAgreement::Divergence;
+        assert_eq!(
+            summarize_observations(below.iter()).readiness(),
+            RouteAuthorityReadiness::BelowParityThreshold
+        );
+    }
+
+    #[test]
+    fn route_normalization_handles_aliases_and_latest() {
+        assert_eq!(normalize_route_id("local:QWEN:latest"), "ollama:qwen");
+        assert_eq!(
+            normalize_route_id("copilot:GPT-5.4"),
+            "github-copilot:gpt-5.4"
+        );
     }
 }

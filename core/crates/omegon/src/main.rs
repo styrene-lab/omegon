@@ -1179,8 +1179,18 @@ async fn resolve_current_model_intent_route(
     let intent = route_controller.snapshot().await.intent;
     let candidate = route::select_candidate_for_intent(&intent, &inventory)?;
     let target = format!("{}:{}", candidate.provider_id, candidate.model_id);
+    let only_providers = match &intent.provider_selection {
+        route::ProviderSelection::Endpoint(provider) => vec![provider.clone()],
+        route::ProviderSelection::Local => vec!["ollama".into(), "local".into()],
+        route::ProviderSelection::Auto | route::ProviderSelection::Upstream => Vec::new(),
+    };
     inference_runtime
-        .observe_route_shadow(intent.to_capability_request().grade, Some(&target))
+        .observe_route_shadow(
+            intent.to_capability_request().grade,
+            Some(&target),
+            &only_providers,
+            intent.exact_model_override.as_deref(),
+        )
         .await;
     let bridge = providers::auto_detect_bridge(&target).await?;
     route_controller
