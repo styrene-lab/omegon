@@ -2779,21 +2779,28 @@ impl App {
             MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
         };
         let surfaces = self.ui_surfaces;
+        let presentation = self.ui_presentation;
         let mut menu = MenuProjection::new("ui", "UI");
         menu.summary = Some(format!(
-            "TUI surface controls. Preset: {}; dashboard: {}; instruments: {}; footer: {}; activity: {}.",
-            self.ui_presentation.preset_name(),
+            "Presentation: {}; dashboard: {}; instruments: {}; footer: {}; activity: {}.",
+            presentation.preset_name(),
             if surfaces.dashboard { "on" } else { "off" },
             if surfaces.instruments { "on" } else { "off" },
             if surfaces.footer { "on" } else { "off" },
             if surfaces.activity { "on" } else { "off" },
         ));
-        menu.footer = Some("↑/↓ navigate · / filter · Enter run · l lean · f full · Esc close · /ui status for text readout".into());
+        menu.footer = Some("↑/↓ navigate · / filter · Enter run · o om · a active · f full · Esc close · /ui status for text readout".into());
         menu.actions = vec![
             {
+                let mut action = MenuActionProjection::command("ui.global.om", "Om", "/ui om");
+                action.key = Some("o".into());
+                action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                action
+            },
+            {
                 let mut action =
-                    MenuActionProjection::command("ui.global.lean", "Lean", "/ui lean");
-                action.key = Some("l".into());
+                    MenuActionProjection::command("ui.global.active", "Active", "/ui active");
+                action.key = Some("a".into());
                 action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
                 action
             },
@@ -2839,54 +2846,54 @@ impl App {
             groups: vec![
                 MenuGroupProjection {
                     id: "ui.presets".into(),
-                    label: "Presets".into(),
-                    description: Some("Switch coarse TUI surface presets.".into()),
+                    label: "Presentation levels".into(),
+                    description: Some("Choose conversation and operational evidence density independently from surface visibility.".into()),
                     rows: vec![
                         MenuRowProjection {
-                            id: "ui.preset.lean".into(),
-                            label: "Lean preset".into(),
-                            description: "Conversation + activity, no dashboard chrome.".into(),
-                            value: Some(
-                                if self.ui_presentation.preset_name() == "lean" {
-                                    "active"
-                                } else {
-                                    ""
-                                }
-                                .into(),
-                            ),
+                            id: "ui.preset.om".into(),
+                            label: "Om".into(),
+                            description: "Quiet outcomes and essential attention.".into(),
+                            value: Some(if presentation.level == UiPresentationLevel::Om && presentation.preset_name() != "custom" { "active" } else { "" }.into()),
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection {
-                                label: if self.ui_presentation.preset_name() == "lean" {
-                                    "active".into()
-                                } else {
-                                    "preset".into()
-                                },
-                                tone: if self.ui_presentation.preset_name() == "lean" {
-                                    MenuBadgeTone::Success
-                                } else {
-                                    MenuBadgeTone::Info
-                                },
+                                label: if presentation.level == UiPresentationLevel::Om && presentation.preset_name() != "custom" { "active".into() } else { "level".into() },
+                                tone: if presentation.level == UiPresentationLevel::Om && presentation.preset_name() != "custom" { MenuBadgeTone::Success } else { MenuBadgeTone::Info },
                             }],
-                            metadata: vec!["/ui lean".into()],
+                            metadata: vec!["/ui om".into(), "/ui lean".into(), "/ui slim".into()],
                             primary_action: Some({
-                                let mut action = MenuActionProjection::command(
-                                    "ui.preset.lean.primary",
-                                    "Lean",
-                                    "/ui lean",
-                                );
-                                action.close_policy =
-                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                let mut action = MenuActionProjection::command("ui.preset.om.primary", "Om", "/ui om");
+                                action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
                                 action
                             }),
                             actions: vec![{
-                                let mut action = MenuActionProjection::command(
-                                    "ui.preset.lean.action",
-                                    "Lean",
-                                    "/ui lean",
-                                );
-                                action.key = Some("l".into());
-                                action.close_policy =
-                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                let mut action = MenuActionProjection::command("ui.preset.om.action", "Om", "/ui om");
+                                action.key = Some("o".into());
+                                action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                action
+                            }],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "ui.preset.active".into(),
+                            label: "Active".into(),
+                            description: "Bounded live workflow visibility with grouped outcomes.".into(),
+                            value: Some(if presentation.level == UiPresentationLevel::Active && presentation.preset_name() != "custom" { "active" } else { "" }.into()),
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: if presentation.level == UiPresentationLevel::Active && presentation.preset_name() != "custom" { "active".into() } else { "level".into() },
+                                tone: if presentation.level == UiPresentationLevel::Active && presentation.preset_name() != "custom" { MenuBadgeTone::Success } else { MenuBadgeTone::Info },
+                            }],
+                            metadata: vec!["/ui active".into()],
+                            primary_action: Some({
+                                let mut action = MenuActionProjection::command("ui.preset.active.primary", "Active", "/ui active");
+                                action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                action
+                            }),
+                            actions: vec![{
+                                let mut action = MenuActionProjection::command("ui.preset.active.action", "Active", "/ui active");
+                                action.key = Some("a".into());
+                                action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
                                 action
                             }],
                             safety: None,
@@ -2894,10 +2901,10 @@ impl App {
                         },
                         MenuRowProjection {
                             id: "ui.preset.full".into(),
-                            label: "Full preset".into(),
-                            description: "Dashboard, instruments, footer, and activity.".into(),
+                            label: "Full".into(),
+                            description: "Persistent operational evidence and diagnostic surfaces.".into(),
                             value: Some(
-                                if self.ui_presentation.preset_name() == "full" {
+                                if presentation.level == UiPresentationLevel::Full && presentation.preset_name() != "custom" {
                                     "active"
                                 } else {
                                     ""
@@ -2906,12 +2913,12 @@ impl App {
                             ),
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection {
-                                label: if self.ui_presentation.preset_name() == "full" {
+                                label: if presentation.level == UiPresentationLevel::Full && presentation.preset_name() != "custom" {
                                     "active".into()
                                 } else {
                                     "preset".into()
                                 },
-                                tone: if self.ui_presentation.preset_name() == "full" {
+                                tone: if presentation.level == UiPresentationLevel::Full && presentation.preset_name() != "custom" {
                                     MenuBadgeTone::Success
                                 } else {
                                     MenuBadgeTone::Info
