@@ -11,6 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::surfaces::menu::{MenuBadgeTone, MenuProjection, MenuRowKind, MenuRowProjection};
 use crate::tui::{command_surfaces, theme::Theme};
@@ -78,7 +79,7 @@ pub(crate) fn render_menu_surface(
     let popup = command_surfaces::command_modal_area(area);
     frame.render_widget(Clear, popup);
     frame.render_widget(
-        menu_paragraph(theme, projection, state, popup.height),
+        menu_paragraph(theme, projection, state, popup.width, popup.height),
         popup,
     );
 }
@@ -87,6 +88,7 @@ fn menu_paragraph<'a>(
     theme: &dyn Theme,
     projection: &'a MenuProjection,
     state: &MenuState,
+    width: u16,
     height: u16,
 ) -> Paragraph<'a> {
     let block = Block::default()
@@ -95,7 +97,14 @@ fn menu_paragraph<'a>(
         .border_style(theme.style_border())
         .title(format!(" {} ", projection.title));
 
-    let lines = menu_lines(theme, projection, state, height.saturating_sub(2));
+    let inner_width = width.saturating_sub(2);
+    let lines = menu_lines(
+        theme,
+        projection,
+        state,
+        inner_width,
+        height.saturating_sub(2),
+    );
     Paragraph::new(lines)
         .block(block)
         .alignment(Alignment::Left)
@@ -105,25 +114,25 @@ fn menu_lines<'a>(
     theme: &dyn Theme,
     projection: &'a MenuProjection,
     state: &MenuState,
+    inner_width: u16,
     inner_height: u16,
 ) -> Vec<Line<'a>> {
+    let width = usize::from(inner_width);
     let mut lines = Vec::new();
-    lines.push(Line::from(Span::styled(
+    lines.push(clipped_line(
         projection.title.clone(),
+        width,
         Style::default()
             .fg(theme.accent())
             .add_modifier(Modifier::BOLD),
-    )));
+    ));
     if let Some(summary) = projection
         .summary
         .as_deref()
         .filter(|summary| !summary.is_empty())
     {
         for line in summary.lines() {
-            lines.push(Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(theme.muted()),
-            )));
+            lines.push(clipped_line(line, width, Style::default().fg(theme.muted())));
         }
     }
 
@@ -161,14 +170,15 @@ fn menu_lines<'a>(
         MenuMode::Browse if state.filter.is_empty() => "filter: / to search".into(),
         MenuMode::Browse => format!("filter: {}", state.filter),
     };
-    lines.push(Line::from(Span::styled(
+    lines.push(clipped_line(
         filter_label,
+        width,
         Style::default().fg(if matches!(state.mode, MenuMode::Search) {
             theme.accent_bright()
         } else {
             theme.dim()
         }),
-    )));
+    ));
     lines.push(Line::from(""));
 
     let rows = state.visible_rows(projection);
@@ -183,11 +193,11 @@ fn menu_lines<'a>(
         )));
     } else {
         let selected = state.selected_row.min(rows.len().saturating_sub(1));
-        let selected_height = menu_row_render_height(&rows, selected, true);
+        let selected_height = menu_row_render_height(&rows, selected, true, width);
         let mut start = selected;
         let mut used = selected_height;
         while start > 0 {
-            let needed = menu_row_render_height(&rows, start - 1, start == selected);
+            let needed = menu_row_render_height(&rows, start - 1, start == selected, width);
             if used + needed > body_budget.saturating_sub(1).max(1) {
                 break;
             }
@@ -206,7 +216,7 @@ fn menu_lines<'a>(
 
         let mut end = start;
         while end < rows.len() {
-            let needed = menu_row_render_height(&rows, end, end == selected);
+            let needed = menu_row_render_height(&rows, end, end == selected, width);
             let needs_more_indicator = end + 1 < rows.len();
             let reserved_for_more = usize::from(needs_more_indicator);
             if used + needed + reserved_for_more > body_budget && end != selected {
@@ -222,9 +232,9 @@ fn menu_lines<'a>(
                         .add_modifier(Modifier::BOLD),
                 )));
             }
-            lines.push(menu_row_line(theme, visible.row, end == selected));
+            lines.push(menu_row_line(theme, visible.row, end == selected, width));
             if end == selected && !visible.row.description.is_empty() {
-                lines.push(menu_description_line(theme, &visible.row.description));
+                lines.extend(menu_description_lines(theme, &visible.row.description, width));
             }
             used += needed;
             end += 1;
@@ -242,42 +252,157 @@ fn menu_lines<'a>(
         MenuMode::Search => "type to filter · Backspace edit · Esc browse · Enter run",
         MenuMode::Browse => "↑/↓ navigate · Tab category · / search · Enter run · Esc close",
     });
-    lines.push(Line::from(Span::styled(
-        footer.to_string(),
+    lines.push(clipped_line(
+        footer,
+        width,
         Style::default().fg(theme.dim()),
-    )));
+    ));
     lines
 }
 
-fn menu_row_render_height(rows: &[VisibleMenuRow<'_>], idx: usize, selected: bool) -> usize {
+fn clipped_line<'a>(text: impl Into<String>, width: usize, style: Style) -> Line<'a> {
+    Line::from(Span::styled(truncate_menu_text(&text.into(), width), style))
+}
+
+fn menu_row_render_height(
+    rows: &[VisibleMenuRow<'_>],
+    idx: usize,
+    selected: bool,
+    width: usize,
+) -> usize {
     let mut height = 1usize;
     if idx == 0 || rows[idx - 1].group_id != rows[idx].group_id {
         height += 1;
     }
     if selected && !rows[idx].row.description.is_empty() {
-        height += 1;
+        height += menu_description_visual_lines(&rows[idx].row.description, width).max(1);
     }
     height
 }
 
-fn menu_description_line<'a>(theme: &dyn Theme, description: &'a str) -> Line<'a> {
-    Line::from(Span::styled(
-        format!("    {}", truncate_menu_text(description, 160)),
-        Style::default().fg(theme.muted()),
-    ))
+fn menu_description_visual_lines(description: &str, width: usize) -> usize {
+    let indent = UnicodeWidthStr::width("    ");
+    let budget = width.saturating_sub(indent).max(1);
+    wrap_display(description, budget).len()
 }
 
-fn truncate_menu_text(value: &str, max_chars: usize) -> String {
-    let mut chars = value.chars();
-    let truncated: String = chars.by_ref().take(max_chars).collect();
-    if chars.next().is_some() {
-        format!("{truncated}…")
-    } else {
-        truncated
+fn menu_description_lines<'a>(
+    theme: &dyn Theme,
+    description: &'a str,
+    width: usize,
+) -> Vec<Line<'a>> {
+    let indent = "    ";
+    let budget = width
+        .saturating_sub(UnicodeWidthStr::width(indent))
+        .max(1);
+    wrap_display(description, budget)
+        .into_iter()
+        .map(|segment| {
+            Line::from(Span::styled(
+                format!("{indent}{segment}"),
+                Style::default().fg(theme.muted()),
+            ))
+        })
+        .collect()
+}
+
+fn wrap_display(value: &str, width: usize) -> Vec<String> {
+    if value.is_empty() {
+        return vec![String::new()];
     }
+    if width == 0 {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+
+    for word in value.split_whitespace() {
+        let word_width = UnicodeWidthStr::width(word);
+        if current.is_empty() {
+            if word_width <= width {
+                current.push_str(word);
+                current_width = word_width;
+            } else {
+                lines.extend(split_long_word(word, width));
+                current_width = UnicodeWidthStr::width(current.as_str());
+            }
+        } else if current_width + 1 + word_width <= width {
+            current.push(' ');
+            current.push_str(word);
+            current_width += 1 + word_width;
+        } else {
+            lines.push(std::mem::take(&mut current));
+            if word_width <= width {
+                current.push_str(word);
+                current_width = word_width;
+            } else {
+                lines.extend(split_long_word(word, width));
+                current_width = UnicodeWidthStr::width(current.as_str());
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
-fn menu_row_line<'a>(theme: &dyn Theme, row: &'a MenuRowProjection, selected: bool) -> Line<'a> {
+fn split_long_word(word: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    for ch in word.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if !current.is_empty() && current_width + ch_width > width {
+            lines.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += ch_width;
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+fn truncate_menu_text(value: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if UnicodeWidthStr::width(value) <= max_width {
+        return value.to_string();
+    }
+    if max_width <= UnicodeWidthStr::width("…") {
+        return "…".to_string();
+    }
+    let ellipsis_width = UnicodeWidthStr::width("…");
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in value.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + ch_width + ellipsis_width > max_width {
+            break;
+        }
+        out.push(ch);
+        used += ch_width;
+    }
+    out.push('…');
+    out
+}
+
+fn menu_row_line<'a>(
+    theme: &dyn Theme,
+    row: &'a MenuRowProjection,
+    selected: bool,
+    width: usize,
+) -> Line<'a> {
     let marker = if selected { "›" } else { " " };
     let label_style = match row.kind {
         MenuRowKind::Action => Style::default().fg(theme.fg()).add_modifier(Modifier::BOLD),
@@ -312,7 +437,33 @@ fn menu_row_line<'a>(theme: &dyn Theme, row: &'a MenuRowProjection, selected: bo
     if row.primary_action.is_some() {
         spans.push(Span::styled("  ↵", Style::default().fg(theme.dim())));
     }
-    Line::from(spans)
+    let mut line = Line::from(spans);
+    if width > 0 && line.width() > width {
+        let marker_width = UnicodeWidthStr::width(marker) + 1;
+        let right_text = row
+            .badges
+            .iter()
+            .map(|badge| format!("[{}]", badge.label))
+            .chain(row.primary_action.is_some().then(|| "↵".to_string()))
+            .collect::<Vec<_>>()
+            .join("  ");
+        let suffix_width = if right_text.is_empty() {
+            0
+        } else {
+            UnicodeWidthStr::width(right_text.as_str()) + 2
+        };
+        let label_budget = width.saturating_sub(marker_width + suffix_width).max(1);
+        let mut compact_spans = vec![
+            Span::styled(format!("{marker} "), Style::default().fg(theme.accent())),
+            Span::styled(truncate_menu_text(&row.label, label_budget), label_style),
+        ];
+        if !right_text.is_empty() && marker_width + suffix_width < width {
+            compact_spans.push(Span::raw("  "));
+            compact_spans.push(Span::styled(right_text, Style::default().fg(theme.muted())));
+        }
+        line = Line::from(compact_spans);
+    }
+    line
 }
 
 impl MenuState {
@@ -721,7 +872,7 @@ mod tests {
         let state = MenuState::new(&projection);
 
         let theme = Alpharius;
-        let text = menu_lines(&theme, &projection, &state, 8)
+        let text = menu_lines(&theme, &projection, &state, 80, 8)
             .into_iter()
             .map(|line| {
                 line.spans
@@ -757,7 +908,7 @@ mod tests {
         state.selected_row = 9;
 
         let theme = Alpharius;
-        let text = menu_lines(&theme, &projection, &state, 16)
+        let text = menu_lines(&theme, &projection, &state, 80, 16)
             .into_iter()
             .map(|line| {
                 line.spans
@@ -789,7 +940,7 @@ mod tests {
         state.selected_row = 20;
 
         let theme = Alpharius;
-        let text = menu_lines(&theme, &projection, &state, 14)
+        let text = menu_lines(&theme, &projection, &state, 80, 14)
             .into_iter()
             .map(|line| {
                 line.spans
@@ -808,24 +959,38 @@ mod tests {
     }
 
     #[test]
-    fn rendered_lines_disable_wrapping_and_truncate_long_selected_description() {
+    fn rendered_lines_wrap_long_selected_description_to_menu_width() {
         let mut projection = projection();
-        projection.tabs[0].groups[0].rows[0].description = "x".repeat(240);
+        projection.summary = Some(
+            "Agent harness initialization defaults. Pending plan:\nHarness substrate is already present; repair/import actions are still available."
+                .into(),
+        );
+        projection.tabs[0].groups[0].rows[0].description =
+            "Detected Cargo.toml. Source: bundled; activation: project_detected; inspect before changing".into();
         let state = MenuState::new(&projection);
 
         let theme = Alpharius;
-        let text = menu_lines(&theme, &projection, &state, 12)
+        let lines = menu_lines(&theme, &projection, &state, 32, 16);
+        let text_lines = lines
             .into_iter()
             .map(|line| {
-                line.spans
+                let text = line
+                    .spans
                     .into_iter()
                     .map(|span| span.content.into_owned())
-                    .collect::<String>()
+                    .collect::<String>();
+                assert!(
+                    UnicodeWidthStr::width(text.as_str()) <= 32,
+                    "line exceeds menu width: {text:?}"
+                );
+                text
             })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .collect::<Vec<_>>();
+        let text = text_lines.join("\n");
 
-        assert!(text.contains(&format!("{}…", "x".repeat(160))), "{text}");
-        assert!(!text.contains(&"x".repeat(200)), "{text}");
+        assert!(text.contains("    Detected Cargo.toml. Source:"), "{text}");
+        assert!(text.contains("    bundled; activation:"), "{text}");
+        assert!(text.contains("    project_detected; inspect"), "{text}");
+        assert!(text.contains("    before changing"), "{text}");
     }
 }
