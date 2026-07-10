@@ -16,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Defined the provider-route/conceptual-model matrix architecture for dynamic inference estates: runtime endpoint deployments and offerings now have explicit provenance, modality/interface compatibility, capability-evidence, ungraded-route, atomic-refresh, policy-envelope, and benchmark-synthesis contracts, including enterprise endpoint fabrics and R&D models that must not require recompilation.
 - Added GPT-5.6 to the OpenAI and OpenAI Codex model registry defaults, S-grade routes, and model selector entries; Codex GPT-5.6 now records upstream rollout metadata, enriches unsupported-model errors with rollout diagnostics, expands the operator-facing `gpt-5.6` alias to the concrete native `gpt-5.6-sol` route without making the Codex CLI a dispatch dependency, and registers the Sol/Terra/Luna family plus GPT-5.5 Pro and GPT-5.4 Nano fallback routes.
 - Fixed `/init` execution so explicit scan, migration, and project-profile actions target the detected repository root when invoked from a nested directory, while unknown subcommands now return usage without silently initializing the project.
 - Fixed `/skill` so the bare alias opens the structured skills menu instead of writing usage text into the conversation transcript; `/skills` and `/skills list` remain structured-menu-only inventory views.
