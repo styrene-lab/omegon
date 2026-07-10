@@ -4627,11 +4627,22 @@ fn build_tui_secret_readiness_snapshot(
                         duration_ms: started_at.elapsed().as_millis() as u64,
                         origin: "bang_shell".to_string(),
                     };
-                    let _ = completion_tx
-                        .send(tui::TuiCommand::OperatorShellCompleted { observation })
-                        .await;
+                    let (committed_tx, committed_rx) = tokio::sync::oneshot::channel();
+                    if completion_tx
+                        .send(tui::TuiCommand::OperatorShellCompleted {
+                            observation,
+                            committed: committed_tx,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        tracing::warn!(execution_id = %id, "operator shell observation was not committed");
+                    } else if committed_rx.await.is_err() {
+                        tracing::warn!(execution_id = %id, "operator shell observation commit was not acknowledged");
+                    }
 
-                    // Honour control-API callers that pass a respond_to channel.
+                    // Honour control-API callers only after the canonical
+                    // observation commit has been acknowledged.
                     if let Some(tx) = respond_to {
                         let output = tool_result
                             .content
@@ -4650,7 +4661,10 @@ fn build_tui_secret_readiness_snapshot(
                 });
             }
 
-            tui::TuiCommand::OperatorShellCompleted { observation } => {
+            tui::TuiCommand::OperatorShellCompleted {
+                observation,
+                committed,
+            } => {
                 runtime_state
                     .conversation
                     .push_operator_tool_observation(observation);
@@ -4663,6 +4677,7 @@ fn build_tui_secret_readiness_snapshot(
                 {
                     tracing::warn!(%error, "failed to persist operator shell observation");
                 }
+                let _ = committed.send(());
             }
 
             tui::TuiCommand::ShellHandoff { keyboard_enhancement } => {

@@ -243,6 +243,7 @@ pub enum TuiCommand {
     /// canonical conversation state remains single-owner.
     OperatorShellCompleted {
         observation: crate::conversation::OperatorToolObservation,
+        committed: tokio::sync::oneshot::Sender<()>,
     },
     /// Temporarily hand terminal control to the operator's real shell.
     /// Carries the keyboard-enhancement flag so the handler can pop/push
