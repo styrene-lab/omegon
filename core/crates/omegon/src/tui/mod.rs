@@ -11296,7 +11296,7 @@ Scroll transcript:
         let linger_for = if is_error {
             Duration::from_secs(8)
         } else {
-            Duration::from_millis(2200)
+            Duration::ZERO
         };
         let expires_at = std::time::Instant::now() + linger_for;
         if let Some(activity_tool) = self

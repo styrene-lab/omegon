@@ -7638,7 +7638,7 @@ fn single_running_activity_tool_uses_full_live_card() {
 }
 
 #[test]
-fn activity_panel_renders_multiple_completed_tool_rows() {
+fn completed_tools_handoff_to_one_durable_outcome_without_activity_duplication() {
     let mut app = test_app();
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
@@ -7675,10 +7675,9 @@ fn activity_panel_renders_multiple_completed_tool_rows() {
 
     let rendered = render_app_to_string(&mut app, 140, 36);
 
-    assert!(rendered.contains("done bash"), "{rendered}");
-    assert!(rendered.contains("cargo check"), "{rendered}");
-    assert!(rendered.contains("done read"), "{rendered}");
-    assert!(rendered.contains("Cargo.toml"), "{rendered}");
+    assert!(rendered.contains("✓ bash · Finished dev profile · 2 operations"), "{rendered}");
+    assert!(!rendered.contains("done bash"), "{rendered}");
+    assert!(!rendered.contains("done read"), "{rendered}");
 }
 
 #[test]
