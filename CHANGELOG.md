@@ -16,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Hardened route-shadow telemetry with exact-offering, conceptual-model, provider-level, and true-divergence classifications plus generation-scoped parity metrics and an explicit 20-observation/95% normalized-parity review gate; inventory routing remains non-authoritative.
 - Added non-authoritative route shadowing: authoritative compiled-provider selections are now compared against generation-stamped inventory compatibility candidates, with bounded agreement/divergence observations exposed through shared runtime status while dispatch remains unchanged.
 - Added shared semantic inference diagnostics through `/runtime status` and `/runtime inventory`, projecting the active generation, manifest sources, endpoint/offering counts, and last rejected-refresh diagnostics from shared runtime state without frontend-local inventory ownership.
 - Routed `/runtime refresh` and extension refresh aliases through shared control runtime state, where the single inference inventory store performs atomic manifest reload and returns generation, source, endpoint, offering, and redacted diagnostic projections consistently to TUI and remote slash callers.

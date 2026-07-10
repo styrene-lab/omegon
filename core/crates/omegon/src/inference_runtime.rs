@@ -20,7 +20,9 @@ pub struct InferenceRefreshReport {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RouteShadowAgreement {
-    Agreement,
+    ExactOffering,
+    ConceptualModel,
+    Provider,
     Divergence,
     NoAuthoritativeCandidate,
     NoInventoryCandidate,
@@ -34,6 +36,33 @@ pub struct RouteShadowObservation {
     pub agreement: RouteShadowAgreement,
 }
 
+impl RouteShadowObservation {
+    fn divergence_detail(&self) -> Option<String> {
+        (self.agreement == RouteShadowAgreement::Divergence).then(|| {
+            format!(
+                "{} != {}",
+                self.authoritative.as_deref().unwrap_or("none"),
+                self.inventory_candidates
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("none")
+            )
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RouteShadowSummary {
+    pub observations: usize,
+    pub exact_matches: usize,
+    pub conceptual_matches: usize,
+    pub provider_matches: usize,
+    pub divergences: usize,
+    pub no_authoritative_candidate: usize,
+    pub no_inventory_candidate: usize,
+    pub recent_divergences: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InferenceRuntimeProjection {
     pub generation: u64,
@@ -45,6 +74,18 @@ pub struct InferenceRuntimeProjection {
 }
 
 impl InferenceRuntimeProjection {
+    pub fn route_shadow_summary(&self) -> RouteShadowSummary {
+        let mut summary = summarize_observations(self.route_shadow_observations.iter());
+        summary.recent_divergences = self
+            .route_shadow_observations
+            .iter()
+            .rev()
+            .filter_map(RouteShadowObservation::divergence_detail)
+            .take(3)
+            .collect();
+        summary
+    }
+
     pub fn render_text(&self) -> String {
         let mut output = format!(
             "Inference inventory\nGeneration: {}\nEndpoints: {}\nOfferings: {}\nActive manifest sources: {}",
@@ -64,15 +105,142 @@ impl InferenceRuntimeProjection {
                 ));
             }
         }
+        let summary = self.route_shadow_summary();
+        let current_observations: Vec<_> = self
+            .route_shadow_observations
+            .iter()
+            .filter(|observation| observation.generation == self.generation)
+            .collect();
+        let current_summary = summarize_observations(current_observations.iter().copied());
         output.push_str(&format!(
-            "\nRoute shadow observations: {}",
-            self.route_shadow_observations.len()
+            "\nRoute shadow: {} observations; {} exact, {} conceptual, {} provider, {} divergent, {} without authoritative candidate, {} without inventory candidate. Current generation {}: {} observations, {:.1}% normalized parity; authority readiness: {}",
+            summary.observations,
+            summary.exact_matches,
+            summary.conceptual_matches,
+            summary.provider_matches,
+            summary.divergences,
+            summary.no_authoritative_candidate,
+            summary.no_inventory_candidate,
+            self.generation,
+            current_summary.observations,
+            current_summary.normalized_parity_percent(),
+            current_summary.readiness().label(),
         ));
-        if let Some(last) = self.route_shadow_observations.last() {
-            output.push_str(&format!("\nLast route shadow: {:?}", last.agreement));
+        if !summary.recent_divergences.is_empty() {
+            output.push_str("\nRecent route divergences:");
+            for detail in summary.recent_divergences {
+                output.push_str(&format!("\n- {detail}"));
+            }
         }
         output
     }
+}
+
+fn summarize_observations<'a>(
+    observations: impl Iterator<Item = &'a RouteShadowObservation>,
+) -> RouteShadowSummary {
+    let mut summary = RouteShadowSummary::default();
+    for observation in observations {
+        summary.observations += 1;
+        match observation.agreement {
+            RouteShadowAgreement::ExactOffering => summary.exact_matches += 1,
+            RouteShadowAgreement::ConceptualModel => summary.conceptual_matches += 1,
+            RouteShadowAgreement::Provider => summary.provider_matches += 1,
+            RouteShadowAgreement::Divergence => summary.divergences += 1,
+            RouteShadowAgreement::NoAuthoritativeCandidate => {
+                summary.no_authoritative_candidate += 1;
+            }
+            RouteShadowAgreement::NoInventoryCandidate => summary.no_inventory_candidate += 1,
+        }
+    }
+    summary
+}
+
+impl RouteShadowSummary {
+    fn normalized_parity_percent(&self) -> f64 {
+        if self.observations == 0 {
+            return 0.0;
+        }
+        100.0 * (self.exact_matches + self.conceptual_matches + self.provider_matches) as f64
+            / self.observations as f64
+    }
+
+    fn readiness(&self) -> RouteAuthorityReadiness {
+        const MINIMUM_OBSERVATIONS: usize = 20;
+        const MINIMUM_PARITY_PERCENT: f64 = 95.0;
+        if self.observations < MINIMUM_OBSERVATIONS {
+            RouteAuthorityReadiness::InsufficientEvidence
+        } else if self.normalized_parity_percent() < MINIMUM_PARITY_PERCENT {
+            RouteAuthorityReadiness::BelowParityThreshold
+        } else {
+            RouteAuthorityReadiness::ReadyForReview
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RouteAuthorityReadiness {
+    InsufficientEvidence,
+    BelowParityThreshold,
+    ReadyForReview,
+}
+
+impl RouteAuthorityReadiness {
+    fn label(self) -> &'static str {
+        match self {
+            Self::InsufficientEvidence => "insufficient-evidence",
+            Self::BelowParityThreshold => "below-threshold",
+            Self::ReadyForReview => "ready-for-review",
+        }
+    }
+}
+
+fn classify_route_shadow(
+    snapshot: &InventorySnapshot,
+    authoritative: Option<&str>,
+    candidates: &[String],
+) -> RouteShadowAgreement {
+    let Some(authoritative) = authoritative else {
+        return RouteShadowAgreement::NoAuthoritativeCandidate;
+    };
+    if candidates.is_empty() {
+        return RouteShadowAgreement::NoInventoryCandidate;
+    }
+    if candidates
+        .iter()
+        .any(|candidate| candidate == authoritative)
+    {
+        return RouteShadowAgreement::ExactOffering;
+    }
+    let authoritative_offering = snapshot
+        .offerings
+        .get(&crate::inference_inventory::OfferingId(
+            authoritative.to_owned(),
+        ));
+    if let Some(authoritative_model) = authoritative_offering
+        .and_then(|offering| offering.conceptual_model.as_ref())
+        .map(|model| &model.value)
+        && candidates.iter().any(|candidate| {
+            snapshot
+                .offerings
+                .get(&crate::inference_inventory::OfferingId(candidate.clone()))
+                .and_then(|offering| offering.conceptual_model.as_ref())
+                .is_some_and(|model| &model.value == authoritative_model)
+        })
+    {
+        return RouteShadowAgreement::ConceptualModel;
+    }
+    let authoritative_provider = authoritative.split_once(':').map(|(provider, _)| provider);
+    if authoritative_provider.is_some_and(|provider| {
+        candidates.iter().any(|candidate| {
+            candidate
+                .split_once(':')
+                .is_some_and(|(candidate_provider, _)| candidate_provider == provider)
+        })
+    }) {
+        return RouteShadowAgreement::Provider;
+    }
+    RouteShadowAgreement::Divergence
 }
 
 fn shadow_grade_floor(grade: crate::routing::CapabilityGradeBand) -> Option<CapabilityGrade> {
@@ -161,20 +329,8 @@ impl InferenceRuntimeState {
             .map(|result| result.offering.id.0.clone())
             .collect();
         let authoritative = authoritative.map(str::to_owned);
-        let agreement = match &authoritative {
-            None => RouteShadowAgreement::NoAuthoritativeCandidate,
-            Some(_) if inventory_candidates.is_empty() => {
-                RouteShadowAgreement::NoInventoryCandidate
-            }
-            Some(route)
-                if inventory_candidates
-                    .iter()
-                    .any(|candidate| candidate == route) =>
-            {
-                RouteShadowAgreement::Agreement
-            }
-            Some(_) => RouteShadowAgreement::Divergence,
-        };
+        let agreement =
+            classify_route_shadow(&snapshot, authoritative.as_deref(), &inventory_candidates);
         let observation = RouteShadowObservation {
             generation: snapshot.generation,
             authoritative,
