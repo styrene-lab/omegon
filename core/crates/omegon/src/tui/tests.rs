@@ -7412,6 +7412,37 @@ fn active_tool_phase_beats_runtime_thinking_in_tui() {
 }
 
 #[test]
+fn episode_inspection_identity_survives_presentation_switches() {
+    let mut app = test_app();
+    app.tool_inspection_target = Some(ToolInspectionTarget::Episode {
+        episode_id: "turn:7".into(),
+        evidence_id: "tool-1".into(),
+    });
+
+    app.apply_ui_presentation(UiPresentationPolicy::full());
+    assert_eq!(
+        app.tool_inspection_target
+            .as_ref()
+            .and_then(ToolInspectionTarget::episode_id),
+        Some("turn:7")
+    );
+    assert_eq!(
+        app.tool_inspection_target
+            .as_ref()
+            .map(ToolInspectionTarget::evidence_id),
+        Some("tool-1")
+    );
+
+    app.apply_ui_presentation(UiPresentationPolicy::om());
+    assert_eq!(
+        app.tool_inspection_target
+            .as_ref()
+            .and_then(ToolInspectionTarget::episode_id),
+        Some("turn:7")
+    );
+}
+
+#[test]
 fn selected_tool_segment_detail_pane_renders_full_tool_context() {
     let mut app = test_app();
     app.handle_agent_event(AgentEvent::ToolStart {
@@ -7431,7 +7462,10 @@ fn selected_tool_segment_detail_pane_renders_full_tool_context() {
         },
     });
     app.activity_tools.clear();
-    app.tool_inspection_target = Some(ToolInspectionTarget::Pinned("tool-1".into()));
+    app.tool_inspection_target = Some(ToolInspectionTarget::Episode {
+        episode_id: "tool:tool-1".into(),
+        evidence_id: "tool-1".into(),
+    });
 
     let rendered = render_app_to_string(&mut app, 140, 36);
 

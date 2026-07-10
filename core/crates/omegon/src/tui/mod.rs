@@ -453,15 +453,29 @@ impl ActivityToolState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ToolInspectionTarget {
-    LiveLatest(String),
-    Pinned(String),
+    LiveLatest { evidence_id: String },
+    Episode {
+        episode_id: String,
+        evidence_id: String,
+    },
 }
 
 impl ToolInspectionTarget {
-    fn id(&self) -> &str {
+    fn evidence_id(&self) -> &str {
         match self {
-            Self::LiveLatest(id) | Self::Pinned(id) => id,
+            Self::LiveLatest { evidence_id } | Self::Episode { evidence_id, .. } => evidence_id,
         }
+    }
+
+    fn episode_id(&self) -> Option<&str> {
+        match self {
+            Self::LiveLatest { .. } => None,
+            Self::Episode { episode_id, .. } => Some(episode_id),
+        }
+    }
+
+    fn is_episode(&self) -> bool {
+        matches!(self, Self::Episode { .. })
     }
 }
 
@@ -2365,12 +2379,17 @@ impl App {
     }
 
     fn apply_ui_preset(&mut self, surfaces: UiSurfaces) {
-        let level = if surfaces == UiSurfaces::full() {
-            UiPresentationLevel::Full
+        let next = if surfaces == self.ui_presentation.surfaces {
+            self.ui_presentation.with_surfaces(surfaces)
         } else {
-            UiPresentationLevel::Om
+            let level = if surfaces == UiSurfaces::full() {
+                UiPresentationLevel::Full
+            } else {
+                UiPresentationLevel::Om
+            };
+            UiPresentationPolicy::named(level)
         };
-        self.apply_ui_presentation(UiPresentationPolicy::named(level));
+        self.apply_ui_presentation(next);
     }
 
     fn toggle_ui_surface(&mut self, surface: UiSurfaceToggle, enabled: bool) {
@@ -7611,7 +7630,9 @@ warning: {warning}"
             })
             .map(ActivityToolState::projection)
             .collect::<Vec<_>>();
-        if let Some(ToolInspectionTarget::Pinned(id)) = self.tool_inspection_target.as_ref()
+        if let Some(ToolInspectionTarget::Episode {
+            evidence_id: id, ..
+        }) = self.tool_inspection_target.as_ref()
             && let Some(segment) = self.conversation.tool_segment_by_id(id)
             && !live_activity_tools
                 .iter()
@@ -11551,7 +11572,9 @@ Scroll transcript:
                     | "lifecycle_doctor" => None,
                     _ => Some(serde_json::to_string_pretty(&args).unwrap_or_default()),
                 };
-                self.tool_inspection_target = Some(ToolInspectionTarget::LiveLatest(id.clone()));
+                self.tool_inspection_target = Some(ToolInspectionTarget::LiveLatest {
+                    evidence_id: id.clone(),
+                });
                 self.push_activity_tool_start(&id, &name, args_summary.clone());
                 self.conversation.push_tool_start_with_expanded(
                     &id,
@@ -11775,7 +11798,7 @@ Scroll transcript:
                 if self
                     .tool_inspection_target
                     .as_ref()
-                    .is_some_and(|target| matches!(target, ToolInspectionTarget::LiveLatest(active_id) if active_id == &id))
+                    .is_some_and(|target| matches!(target, ToolInspectionTarget::LiveLatest { evidence_id } if evidence_id == &id))
                 {
                     self.tool_inspection_target = None;
                 }
@@ -13978,13 +14001,22 @@ pub async fn run_tui(
 
                         // Ctrl+O: toggle the unified tool inspection target.
                         (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
-                            if matches!(
-                                app.tool_inspection_target,
-                                Some(ToolInspectionTarget::Pinned(_))
-                            ) {
+                            if app
+                                .tool_inspection_target
+                                .as_ref()
+                                .is_some_and(ToolInspectionTarget::is_episode)
+                            {
                                 app.tool_inspection_target = None;
                             } else if let Some(id) = app.conversation.latest_expandable_tool_id() {
-                                app.tool_inspection_target = Some(ToolInspectionTarget::Pinned(id));
+                                let episode_id = app
+                                    .conversation
+                                    .turn_id_for_tool(&id)
+                                    .map(|turn| format!("turn:{turn}"))
+                                    .unwrap_or_else(|| format!("tool:{id}"));
+                                app.tool_inspection_target = Some(ToolInspectionTarget::Episode {
+                                    episode_id,
+                                    evidence_id: id,
+                                });
                             }
                         }
 
@@ -14024,16 +14056,25 @@ pub async fn run_tui(
                                     app.editor.set_text(&matches[0].command);
                                 }
                             } else if text.is_empty() {
-                                if matches!(
-                                    app.tool_inspection_target,
-                                    Some(ToolInspectionTarget::Pinned(_))
-                                ) {
+                                if app
+                                    .tool_inspection_target
+                                    .as_ref()
+                                    .is_some_and(ToolInspectionTarget::is_episode)
+                                {
                                     app.tool_inspection_target = None;
                                 } else if let Some(id) =
                                     app.conversation.latest_expandable_tool_id()
                                 {
+                                    let episode_id = app
+                                        .conversation
+                                        .turn_id_for_tool(&id)
+                                        .map(|turn| format!("turn:{turn}"))
+                                        .unwrap_or_else(|| format!("tool:{id}"));
                                     app.tool_inspection_target =
-                                        Some(ToolInspectionTarget::Pinned(id));
+                                        Some(ToolInspectionTarget::Episode {
+                                            episode_id,
+                                            evidence_id: id,
+                                        });
                                 }
                             }
                         }
