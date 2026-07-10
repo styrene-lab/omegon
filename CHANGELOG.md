@@ -14,6 +14,7 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+- Added the first Om presentation implementation slice: renderer-neutral Om/Active/Full density policy now remains distinct from surface visibility, the TUI defaults to Om, `/ui om|active|full` and legacy lean/slim aliases select semantic levels, Ctrl+G cycles all three levels, and command/action tests cover the new contract.
 - Expanded the Om-first 0.28.0 release design with explicit release boundaries, presentation-policy separation, authoritative episode identity and deterministic outcome rules, atomic activity-to-history handoff, attention/Workbench/status behavior, migration and protocol compatibility, mode-independent export semantics, acceptance scenarios, and a substrate-first implementation plan.
 - Began the Om-first TUI design: `/ui om` is the quiet default projection, `/ui active` provides bounded live workflow visibility, and `/ui full` exposes persistent operational evidence; activity, outcomes, and inspectable evidence now have explicit information-lifetime contracts.
 - Operator-run `!` shell commands now enter canonical conversation and session history as explicitly attributed operator tool observations, making command, working directory, status, duration, and bounded output available to later model turns without fabricating assistant tool calls; completed ANSI output is rendered as terminal output instead of Bash source.

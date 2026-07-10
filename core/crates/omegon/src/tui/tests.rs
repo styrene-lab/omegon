@@ -369,7 +369,7 @@ async fn ui_action_set_ui_preset_updates_surfaces() {
     let outcome = app
         .handle_ui_action(
             UiAction::SetUiPreset(SetUiPresetAction {
-                surfaces: UiSurfaces::full(),
+                level: UiPresentationLevel::Full,
             }),
             &tx,
         )
@@ -2763,19 +2763,27 @@ fn slash_warp_toggles_between_slim_and_full_modes() {
 }
 
 #[test]
-fn ui_command_switches_between_full_and_slim_presets() {
+fn ui_command_switches_between_om_active_and_full_presentations() {
     let mut app = test_app();
     let tx = test_tx();
 
-    let result = app.handle_slash_command("/ui lean", &tx);
+    for alias in ["om", "lean", "slim"] {
+        let result = app.handle_slash_command(&format!("/ui {alias}"), &tx);
+        assert!(matches!(result, SlashResult::Display(_)));
+        assert_eq!(app.ui_presentation.level, UiPresentationLevel::Om);
+        assert_eq!(app.ui_presentation.preset_name(), "om");
+        assert!(app.ui_surfaces.is_compact());
+    }
+
+    let result = app.handle_slash_command("/ui active", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
+    assert_eq!(app.ui_presentation.level, UiPresentationLevel::Active);
+    assert_eq!(app.ui_presentation.preset_name(), "active");
     assert!(app.ui_surfaces.is_compact());
-    assert!(!app.ui_surfaces.dashboard);
-    assert!(!app.ui_surfaces.instruments);
-    assert!(!app.ui_surfaces.footer);
 
     let result = app.handle_slash_command("/ui full", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
+    assert_eq!(app.ui_presentation.level, UiPresentationLevel::Full);
     assert!(!app.ui_surfaces.is_compact());
     assert!(app.ui_surfaces.dashboard);
     assert!(app.ui_surfaces.instruments);
@@ -2971,21 +2979,24 @@ fn quit_aliases_are_advertised_and_handled() {
 }
 
 #[test]
-fn ctrl_g_preset_toggle_skips_removed_standard_mode() {
-    let mut surfaces = UiSurfaces::lean();
-    surfaces = surfaces.toggle_preset();
-    assert_eq!(surfaces.preset_name(), "full");
-    surfaces = surfaces.toggle_preset();
-    assert_eq!(surfaces.preset_name(), "lean");
+fn ctrl_g_presentation_cycle_includes_active() {
+    let mut policy = UiPresentationPolicy::om();
+    policy = policy.next();
+    assert_eq!(policy.preset_name(), "active");
+    policy = policy.next();
+    assert_eq!(policy.preset_name(), "full");
+    policy = policy.next();
+    assert_eq!(policy.preset_name(), "om");
 
-    let custom = UiSurfaces {
+    let custom_surfaces = UiSurfaces {
         dashboard: false,
         instruments: false,
         footer: true,
         activity: true,
     };
+    let custom = UiPresentationPolicy::active().with_surfaces(custom_surfaces);
     assert_eq!(custom.preset_name(), "custom");
-    assert_eq!(custom.toggle_preset().preset_name(), "lean");
+    assert_eq!(custom.next().preset_name(), "full");
 }
 
 #[test]

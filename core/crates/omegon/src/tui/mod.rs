@@ -132,7 +132,7 @@ use crate::surfaces::command::{
     CommandPanel, CommandPanelReturnTarget, CommandPrompt, CommandPromptAction, CommandSeverity,
     CommandToast,
 };
-use crate::surfaces::layout::UiSurfaces;
+use crate::surfaces::layout::{UiPresentationLevel, UiPresentationPolicy, UiSurface, UiSurfaces};
 use crate::surfaces::operations::OperationMilestoneProjection;
 use crate::ui_runtime::actions::{
     AttachComposerPathAction, ComposerCursorDirection, ComposerCursorUnit, ComposerEditOperation,
@@ -525,7 +525,8 @@ struct App {
     footer_data: FooterData,
     /// CIC instrument panel for telemetry visualization
     instrument_panel: InstrumentPanel,
-    // ui_mode removed — all behavior driven by ui_surfaces
+    /// Presentation density is independent from individual surface visibility.
+    ui_presentation: UiPresentationPolicy,
     ui_surfaces: UiSurfaces,
     theme: Box<dyn theme::Theme>,
     /// Whether durable completed-plan history exists for /plan view recall.
@@ -2263,8 +2264,8 @@ impl App {
                 ..Default::default()
             },
             instrument_panel: InstrumentPanel::default(),
-            // ui_mode removed — surfaces drive everything
-            ui_surfaces: UiSurfaces::lean(),
+            ui_presentation: UiPresentationPolicy::om(),
+            ui_surfaces: UiPresentationPolicy::om().surfaces,
             theme: theme::default_theme(),
             settings,
             cancel: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -2355,18 +2356,29 @@ impl App {
         self.set_mouse_capture(true);
     }
 
+    fn apply_ui_presentation(&mut self, policy: UiPresentationPolicy) {
+        self.ui_presentation = policy;
+        self.ui_surfaces = policy.surfaces;
+    }
+
     fn apply_ui_preset(&mut self, surfaces: UiSurfaces) {
-        self.ui_surfaces = surfaces;
-        if surfaces.is_compact() {}
+        let level = if surfaces == UiSurfaces::full() {
+            UiPresentationLevel::Full
+        } else {
+            UiPresentationLevel::Om
+        };
+        self.apply_ui_presentation(UiPresentationPolicy::named(level));
     }
 
     fn toggle_ui_surface(&mut self, surface: UiSurfaceToggle, enabled: bool) {
-        match surface {
-            UiSurfaceToggle::Dashboard => self.ui_surfaces.dashboard = enabled,
-            UiSurfaceToggle::Instruments => self.ui_surfaces.instruments = enabled,
-            UiSurfaceToggle::Footer => self.ui_surfaces.footer = enabled,
-            UiSurfaceToggle::Activity => self.ui_surfaces.activity = enabled,
-        }
+        let semantic_surface = match surface {
+            UiSurfaceToggle::Dashboard => UiSurface::Dashboard,
+            UiSurfaceToggle::Instruments => UiSurface::Instruments,
+            UiSurfaceToggle::Footer => UiSurface::Footer,
+            UiSurfaceToggle::Activity => UiSurface::Activity,
+        };
+        self.ui_presentation.set_surface(semantic_surface, enabled);
+        self.ui_surfaces = self.ui_presentation.surfaces;
     }
 
     /// Check if the agent's last text output looks like it's asking for
@@ -2418,9 +2430,9 @@ impl App {
     }
 
     fn ui_status_text(&self) -> String {
-        let mode = self.ui_surfaces.preset_name();
+        let mode = self.ui_presentation.preset_name();
         format!(
-            "UI preset: {mode}\n  dashboard: {}\n  instruments: {}\n  footer: {}\n  activity: {}\n\nPresets\n  /ui lean    (conversation + activity)\n  /ui full    (+ dashboard + instruments)\n\nSurfaces\n  /ui show|hide|toggle dashboard|instruments|footer|activity",
+            "UI presentation: {mode}\n  dashboard: {}\n  instruments: {}\n  footer: {}\n  activity: {}\n\nPresentation levels\n  /ui om      (quiet outcomes + essential attention)\n  /ui active  (bounded live workflow visibility)\n  /ui full    (persistent operational evidence)\n\nCompatibility aliases\n  /ui lean | /ui slim → om\n\nSurfaces\n  /ui show|hide|toggle dashboard|instruments|footer|activity",
             if self.ui_surfaces.dashboard {
                 "on"
             } else {
@@ -2770,7 +2782,7 @@ impl App {
         let mut menu = MenuProjection::new("ui", "UI");
         menu.summary = Some(format!(
             "TUI surface controls. Preset: {}; dashboard: {}; instruments: {}; footer: {}; activity: {}.",
-            surfaces.preset_name(),
+            self.ui_presentation.preset_name(),
             if surfaces.dashboard { "on" } else { "off" },
             if surfaces.instruments { "on" } else { "off" },
             if surfaces.footer { "on" } else { "off" },
@@ -2835,7 +2847,7 @@ impl App {
                             label: "Lean preset".into(),
                             description: "Conversation + activity, no dashboard chrome.".into(),
                             value: Some(
-                                if surfaces.preset_name() == "lean" {
+                                if self.ui_presentation.preset_name() == "lean" {
                                     "active"
                                 } else {
                                     ""
@@ -2844,12 +2856,12 @@ impl App {
                             ),
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection {
-                                label: if surfaces.preset_name() == "lean" {
+                                label: if self.ui_presentation.preset_name() == "lean" {
                                     "active".into()
                                 } else {
                                     "preset".into()
                                 },
-                                tone: if surfaces.preset_name() == "lean" {
+                                tone: if self.ui_presentation.preset_name() == "lean" {
                                     MenuBadgeTone::Success
                                 } else {
                                     MenuBadgeTone::Info
@@ -2885,7 +2897,7 @@ impl App {
                             label: "Full preset".into(),
                             description: "Dashboard, instruments, footer, and activity.".into(),
                             value: Some(
-                                if surfaces.preset_name() == "full" {
+                                if self.ui_presentation.preset_name() == "full" {
                                     "active"
                                 } else {
                                     ""
@@ -2894,12 +2906,12 @@ impl App {
                             ),
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection {
-                                label: if surfaces.preset_name() == "full" {
+                                label: if self.ui_presentation.preset_name() == "full" {
                                     "active".into()
                                 } else {
                                     "preset".into()
                                 },
-                                tone: if surfaces.preset_name() == "full" {
+                                tone: if self.ui_presentation.preset_name() == "full" {
                                     MenuBadgeTone::Success
                                 } else {
                                     MenuBadgeTone::Info
@@ -7066,8 +7078,8 @@ warning: {warning}"
     }
 
     fn handle_ui_preset_action(&mut self, action: SetUiPresetAction) -> UiActionOutcome {
-        let name = action.surfaces.preset_name();
-        self.apply_ui_preset(action.surfaces);
+        let name = action.level.name();
+        self.apply_ui_presentation(UiPresentationPolicy::named(action.level));
         UiActionOutcome::accepted_message(format!("UI → {name}"))
     }
 
@@ -10432,19 +10444,29 @@ Scroll transcript:
                     SlashResult::Handled
                 } else if args == "status" {
                     SlashResult::Display(self.ui_status_text())
-                } else if args == "lean" {
+                } else if matches!(args, "om" | "lean" | "slim") {
                     let outcome = self.handle_ui_preset_action(SetUiPresetAction {
-                        surfaces: UiSurfaces::lean(),
+                        level: UiPresentationLevel::Om,
                     });
                     match outcome {
                         UiActionOutcome::Accepted { message } => {
-                            SlashResult::Display(message.unwrap_or_else(|| "UI → lean".into()))
+                            SlashResult::Display(message.unwrap_or_else(|| "UI → om".into()))
+                        }
+                        other => SlashResult::Display(format!("UI action failed: {other:?}")),
+                    }
+                } else if args == "active" {
+                    let outcome = self.handle_ui_preset_action(SetUiPresetAction {
+                        level: UiPresentationLevel::Active,
+                    });
+                    match outcome {
+                        UiActionOutcome::Accepted { message } => {
+                            SlashResult::Display(message.unwrap_or_else(|| "UI → active".into()))
                         }
                         other => SlashResult::Display(format!("UI action failed: {other:?}")),
                     }
                 } else if args == "full" {
                     let outcome = self.handle_ui_preset_action(SetUiPresetAction {
-                        surfaces: UiSurfaces::full(),
+                        level: UiPresentationLevel::Full,
                     });
                     match outcome {
                         UiActionOutcome::Accepted { message } => SlashResult::Display(
@@ -13937,11 +13959,11 @@ pub async fn run_tui(
                             }
                         }
 
-                        // Ctrl+G: toggle UI preset (lean ↔ full).
+                        // Ctrl+G: cycle UI presentation (om → active → full).
                         (KeyCode::Char('g'), KeyModifiers::CONTROL) => {
-                            let next = app.ui_surfaces.toggle_preset();
-                            let name = next.preset_name();
-                            app.apply_ui_preset(next);
+                            let next = app.ui_presentation.level.next();
+                            let name = next.name();
+                            app.apply_ui_presentation(UiPresentationPolicy::named(next));
                             app.show_toast(
                                 &format!("UI → {name}"),
                                 ratatui_toaster::ToastType::Info,

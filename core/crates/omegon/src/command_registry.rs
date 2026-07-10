@@ -348,9 +348,10 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::cli_queue_mutation("new", "quick alias for /context reset", &[]),
     BuiltinCommandSpec::state_changing(
         "ui",
-        "open UI controls menu or toggle surfaces",
+        "open UI presentation controls or customize surfaces",
         &[
-            "status", "lean", "full", "show", "hide", "toggle", "detail", "density",
+            "status", "om", "active", "full", "lean", "slim", "show", "hide",
+            "toggle", "detail", "density",
         ],
     ),
     BuiltinCommandSpec::cli_queue_mutation(
