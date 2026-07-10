@@ -58,6 +58,7 @@ pub(crate) mod filelock;
 mod first_run;
 mod host_context;
 mod inference_inventory;
+mod inference_manifest;
 mod ipc;
 #[cfg(feature = "local-embeddings")]
 mod local_embedding;
