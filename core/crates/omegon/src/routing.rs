@@ -583,11 +583,11 @@ mod tests {
     fn test_openai_codex_defaults_reflect_tier() {
         assert_eq!(
             default_model_for_provider("openai-codex", CapabilityGradeBand::Frontier),
-            "gpt-5.4"
+            "gpt-5.6-terra"
         );
         assert_eq!(
             default_model_for_provider("openai-codex", CapabilityGradeBand::Leaf),
-            "gpt-5.4-mini"
+            "gpt-5.6-luna"
         );
     }
 

@@ -37,5 +37,5 @@
 
 - [x] 4.1 Register the module in `main.rs` and document the bootstrap/runtime boundary in module-level documentation.
 - [x] 4.2 Update `CHANGELOG.md` with the implemented foundation behavior.
-- [ ] 4.3 Run focused tests, `cargo test -p omegon`, `just lint`, and `just link`.
-- [ ] 4.4 Reconcile task status, design-tree implementation state, and OpenSpec verification evidence before archive.
+- [x] 4.3 Run focused tests, `cargo test -p omegon`, `just lint`, and `just link`.
+- [x] 4.4 Reconcile task status, design-tree implementation state, and OpenSpec verification evidence before archive.

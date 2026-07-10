@@ -4436,12 +4436,12 @@ impl App {
                 },
             ],
         }];
-        if let Some(path) = user_active {
-            if path.exists() {
-                menu.summary = menu.summary.map(|summary| {
-                    format!("{summary}\nUser active profile pointer: {}", path.display())
-                });
-            }
+        if let Some(path) = user_active
+            && path.exists()
+        {
+            menu.summary = menu.summary.map(|summary| {
+                format!("{summary}\nUser active profile pointer: {}", path.display())
+            });
         }
         menu
     }

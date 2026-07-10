@@ -2623,7 +2623,11 @@ fn parse_codex_cli_version(output: &str) -> Option<SemanticVersion> {
     } else {
         patch_digits.parse().ok()?
     };
-    Some(SemanticVersion { major, minor, patch })
+    Some(SemanticVersion {
+        major,
+        minor,
+        patch,
+    })
 }
 
 fn installed_codex_cli_version() -> Option<SemanticVersion> {
@@ -2672,7 +2676,7 @@ fn enrich_codex_error_message(model: &str, status: u16, user_msg: &str) -> Strin
             "\n\nGPT-5.6 for Codex is rolling out by ChatGPT plan, workspace, and account eligibility. Omegon's native Codex provider does not require the Codex CLI for dispatch; a local CLI version is only diagnostic context. Check account/workspace eligibility or temporarily select /model openai-codex:gpt-5.5.",
         );
         if let Some(advisory) = codex_gpt_5_6_cli_advisory(model, installed_codex_cli_version()) {
-            message.push_str("\n");
+            message.push('\n');
             message.push_str(&advisory);
         }
     }
@@ -5524,7 +5528,10 @@ mod tests {
         .expect("stale official Codex CLI should be advisory context");
         assert!(message.contains("official Codex CLI"), "{message}");
         assert!(message.contains("0.142.5"), "{message}");
-        assert!(message.contains("does not require the Codex CLI"), "{message}");
+        assert!(
+            message.contains("does not require the Codex CLI"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -5570,7 +5577,10 @@ mod tests {
             "The 'gpt-5.6' model is not supported when using Codex with a ChatGPT account.",
         );
         assert!(message.contains("rolling out by ChatGPT plan"), "{message}");
-        assert!(message.contains("does not require the Codex CLI"), "{message}");
+        assert!(
+            message.contains("does not require the Codex CLI"),
+            "{message}"
+        );
         assert!(message.contains("openai-codex:gpt-5.5"), "{message}");
     }
 

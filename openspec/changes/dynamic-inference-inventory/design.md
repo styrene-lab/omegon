@@ -65,6 +65,23 @@ The embedded registry is projected into a bootstrap layer. Existing callers rema
 - Snapshot refresh has no partial writes.
 - Diagnostic errors identify record IDs without exposing credentials.
 
+## Adversarial Review Findings
+
+The post-implementation adversarial pass found and corrected three contract violations:
+
+1. Offering conceptual-model references were not checked because conceptual models had no snapshot records. The snapshot now owns sparse conceptual-model records and rejects dangling references.
+2. `allow_ungraded_autonomous` incorrectly bypassed an explicitly requested capability-grade floor. Ungraded admission now controls only the general autonomous-selection gate; any requested grade floor remains mandatory.
+3. Concurrent refreshes could calculate the same next generation before either activated. Refresh generation calculation, candidate build, and activation are serialized while readers continue to receive immutable `Arc` snapshots.
+
+The sweep also exposed stale GPT-5.6 routing test expectations and pre-existing Clippy drift in adjacent touched surfaces; those expectations and lints were aligned with current behavior before the final full gates.
+
+## Validation Evidence
+
+- `cargo test -p omegon inference_inventory --locked`: 11 passed.
+- `cargo test -p omegon --locked`: 3841 passed, 1 ignored, 0 failed.
+- `just lint`: format, workspace check, and Clippy with `-D warnings` passed.
+- `just link`: release binary built and installed successfully.
+
 ## Validation
 
 Unit tests cover ungraded internal offerings, heterogeneous modalities, field provenance, deterministic precedence, dangling references, last-known-good retention, generation activation, compatibility-before-grade, explicit ungraded selection, policy-admitted ungraded selection, and evidence/grade independence.

@@ -827,14 +827,8 @@ mod tests {
         let reg = ModelRegistry::global();
         assert_eq!(reg.grade_model("S", "openai"), Some("gpt-5.6"));
         assert_eq!(reg.grade_model("S", "openai-codex"), Some("gpt-5.6"));
-        assert_eq!(
-            reg.grade_model("B", "openai-codex"),
-            Some("gpt-5.6-terra")
-        );
-        assert_eq!(
-            reg.grade_model("D", "openai-codex"),
-            Some("gpt-5.6-luna")
-        );
+        assert_eq!(reg.grade_model("B", "openai-codex"), Some("gpt-5.6-terra"));
+        assert_eq!(reg.grade_model("D", "openai-codex"), Some("gpt-5.6-luna"));
         assert_eq!(reg.grade_model("S", "github-copilot"), Some("gpt-5.4"));
         assert_eq!(
             reg.grade_model("B", "github-copilot"),
@@ -985,14 +979,8 @@ mod tests {
         assert_eq!(reg.infer_grade("openai", "gpt-5.6"), Some("S"));
         assert_eq!(reg.infer_grade("openai", "gpt-5.5"), Some("S"));
         assert_eq!(reg.exact_grade("openai-codex", "gpt-5.6"), Some("S"));
-        assert_eq!(
-            reg.exact_grade("openai-codex", "gpt-5.6-terra"),
-            Some("B")
-        );
-        assert_eq!(
-            reg.exact_grade("openai-codex", "gpt-5.6-luna"),
-            Some("D")
-        );
+        assert_eq!(reg.exact_grade("openai-codex", "gpt-5.6-terra"), Some("B"));
+        assert_eq!(reg.exact_grade("openai-codex", "gpt-5.6-luna"), Some("D"));
         assert_eq!(
             reg.infer_grade("anthropic", "claude-haiku-4-5-20251001"),
             Some("D")
