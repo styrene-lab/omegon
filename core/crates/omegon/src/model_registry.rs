@@ -815,8 +815,8 @@ mod tests {
     #[test]
     fn default_model_lookup() {
         let reg = ModelRegistry::global();
-        assert_eq!(reg.default_model("openai"), Some("gpt-5.5"));
-        assert_eq!(reg.default_model("openai-codex"), Some("gpt-5.5"));
+        assert_eq!(reg.default_model("openai"), Some("gpt-5.6"));
+        assert_eq!(reg.default_model("openai-codex"), Some("gpt-5.6"));
         assert_eq!(reg.default_model("github-copilot"), Some("gpt-5.4"));
         assert_eq!(reg.default_model("anthropic"), Some("claude-fable-5"));
         assert_eq!(reg.default_model("nonexistent"), None);
@@ -825,7 +825,16 @@ mod tests {
     #[test]
     fn grade_model_lookup() {
         let reg = ModelRegistry::global();
-        assert_eq!(reg.grade_model("S", "openai"), Some("gpt-5.5"));
+        assert_eq!(reg.grade_model("S", "openai"), Some("gpt-5.6"));
+        assert_eq!(reg.grade_model("S", "openai-codex"), Some("gpt-5.6"));
+        assert_eq!(
+            reg.grade_model("B", "openai-codex"),
+            Some("gpt-5.6-terra")
+        );
+        assert_eq!(
+            reg.grade_model("D", "openai-codex"),
+            Some("gpt-5.6-luna")
+        );
         assert_eq!(reg.grade_model("S", "github-copilot"), Some("gpt-5.4"));
         assert_eq!(
             reg.grade_model("B", "github-copilot"),
@@ -847,6 +856,17 @@ mod tests {
         assert_eq!(info.context_input, 1_000_000);
         assert_eq!(info.context_output, 131_072);
         assert_eq!(reg.infer_grade("anthropic", "claude-opus-4-8"), Some("S"));
+    }
+
+    #[test]
+    fn codex_gpt_5_6_family_models_are_registered() {
+        let reg = ModelRegistry::global();
+        for model in ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            let info = reg
+                .model_info(&format!("openai-codex:{model}"))
+                .unwrap_or_else(|| panic!("missing openai-codex:{model}"));
+            assert_eq!(info.conceptual_model_id.as_deref(), Some("gpt-5.6"));
+        }
     }
 
     #[test]

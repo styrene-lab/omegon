@@ -5556,7 +5556,9 @@ mod tests {
     #[test]
     fn codex_wire_model_expands_gpt_5_6_alias_without_cli_dependency() {
         assert_eq!(super::codex_wire_model("gpt-5.6"), "gpt-5.6-sol");
+        assert_eq!(super::codex_wire_model("gpt-5.6-sol"), "gpt-5.6-sol");
         assert_eq!(super::codex_wire_model("gpt-5.6-terra"), "gpt-5.6-terra");
+        assert_eq!(super::codex_wire_model("gpt-5.6-luna"), "gpt-5.6-luna");
         assert_eq!(super::codex_wire_model("gpt-5.5"), "gpt-5.5");
     }
 
