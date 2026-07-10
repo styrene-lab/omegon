@@ -9474,9 +9474,7 @@ Scroll transcript:
                     self.open_extension_runtime_menu();
                     SlashResult::Handled
                 } else if let Some(command) = canonical_slash_command("extension", args) {
-                    if matches!(command, CanonicalSlashCommand::RuntimeSubstrateRefresh) {
-                        self.handle_slash_command("/runtime refresh", tx)
-                    } else if let Some(request) =
+                    if let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
@@ -9575,8 +9573,16 @@ Scroll transcript:
                         SlashResult::Display(
                             "Runtime substrate refresh unavailable while a model turn is active. Wait for completion or cancel the turn first.".into(),
                         )
+                    } else if let Some(request) = crate::control_runtime::control_request_from_slash(
+                        &CanonicalSlashCommand::RuntimeSubstrateRefresh,
+                    ) {
+                        let _ = tx.try_send(TuiCommand::ExecuteControl {
+                            request,
+                            respond_to: None,
+                        });
+                        SlashResult::Handled
                     } else {
-                        SlashResult::Display(self.refresh_runtime_substrate())
+                        SlashResult::Display("Runtime refresh control unavailable.".into())
                     }
                 } else {
                     SlashResult::Display("Usage: /runtime [refresh|reload|restart|hot-restart]".into())

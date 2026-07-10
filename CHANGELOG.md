@@ -16,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Routed `/runtime refresh` and extension refresh aliases through shared control runtime state, where the single inference inventory store performs atomic manifest reload and returns generation, source, endpoint, offering, and redacted diagnostic projections consistently to TUI and remote slash callers.
 - Added versioned runtime inference manifests with deterministic organization/user/project/session layering, standalone endpoint and offering declarations, explicit required-vs-optional source handling, redacted per-source diagnostics, and atomic reload that retains the last-known-good snapshot when parsing or validation fails.
 - Refactored the inference inventory into a vendor-neutral runtime model: callable endpoints now have optional neutral groups, independently modeled adapters and transports, composable policy attributes, opaque namespaced connector metadata, standalone private/local endpoint support, and bootstrap-only managed transport enforcement without changing live provider execution.
 - Hardened dynamic inference inventory after adversarial review: conceptual-model references are now validated, capability grade floors remain hard when ungraded autonomous routing is allowed, and concurrent refreshes serialize generation assignment so successful snapshots cannot reuse a generation; final repository gates also aligned stale GPT-5.6 routing expectations and adjacent Clippy drift.

@@ -5333,7 +5333,7 @@ fn runtime_refresh_aliases_canonicalize() {
 #[test]
 fn runtime_refresh_menu_action_requires_confirmation() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
     app.open_extension_runtime_menu();
     {
         let menu = app.active_menu.as_mut().expect("runtime menu");
@@ -5363,10 +5363,14 @@ fn runtime_refresh_menu_action_requires_confirmation() {
 
     let second = app.execute_active_menu_action(action, &tx);
     assert!(matches!(second, SlashResult::Handled));
-    assert!(
-        app.command_panel.is_some(),
-        "confirmed refresh should show output panel"
-    );
+    assert!(app.command_panel.is_none());
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::RuntimeSubstrateRefresh,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -5427,50 +5431,42 @@ fn extension_search_menu_row_primes_editor_for_query() {
 }
 
 #[test]
-fn extension_refresh_aliases_execute_runtime_refresh() {
-    let mut app = test_app();
-    let tx = test_tx();
-
+fn extension_refresh_aliases_execute_shared_runtime_refresh() {
     for command in [
         "/extension refresh",
         "/extension reload",
         "/extension restart",
     ] {
-        let result = app.handle_slash_command(command, &tx);
-        let SlashResult::Display(message) = result else {
-            panic!("{command} should display refresh output");
-        };
-        assert!(
-            message.contains("Runtime substrate refresh"),
-            "{command}: {message}"
-        );
+        let mut app = test_app();
+        let (tx, mut rx) = test_tx_with_rx();
+        assert!(matches!(
+            app.handle_slash_command(command, &tx),
+            SlashResult::Handled
+        ));
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(TuiCommand::ExecuteControl {
+                request: crate::control_runtime::ControlRequest::RuntimeSubstrateRefresh,
+                ..
+            })
+        ));
     }
 }
 
 #[test]
-fn slash_runtime_substrate_refresh_displays_guarded_preview() {
+fn slash_runtime_substrate_refresh_queues_shared_control() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 
     let result = app.handle_slash_command("/runtime restart", &tx);
-    match result {
-        SlashResult::Display(message) => {
-            assert!(message.contains("Runtime substrate refresh"), "{message}");
-            assert!(
-                message.contains("partial live refresh completed"),
-                "{message}"
-            );
-            assert!(message.contains("Preserved"), "{message}");
-            assert!(message.contains("Refreshed now"), "{message}");
-            assert!(message.contains("Extension metadata entries"), "{message}");
-            assert!(
-                message.contains("Startup skill activation events"),
-                "{message}"
-            );
-        }
-        other => panic!("expected runtime restart preview display, got: {other:?}"),
-    }
-    assert!(rx.try_recv().is_err(), "preview is handled in-TUI");
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::RuntimeSubstrateRefresh,
+            ..
+        })
+    ));
 }
 
 #[test]

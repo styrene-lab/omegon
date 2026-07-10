@@ -54,6 +54,8 @@ pub struct AgentSetup {
     pub context_manager: ContextManager,
     pub conversation: ConversationState,
     pub cwd: PathBuf,
+    /// Single shared owner for the active inference inventory generation.
+    pub inference_runtime: crate::inference_runtime::InferenceRuntimeState,
     /// Secrets manager — redaction, guards, recipes.
     pub secrets: std::sync::Arc<omegon_secrets::SecretsManager>,
     /// Resolved web auth state for the embedded dashboard.
@@ -1460,6 +1462,9 @@ impl AgentSetup {
             command_tx,
             context_manager,
             conversation,
+            inference_runtime: crate::inference_runtime::InferenceRuntimeState::new(
+                &workspace_project_root,
+            ),
             cwd,
             secrets: secrets.clone(),
             web_auth_state,

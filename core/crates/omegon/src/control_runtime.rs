@@ -319,7 +319,9 @@ pub fn control_request_from_slash(
             ControlRequest::PermissionTrustRemove { path: path.clone() }
         }
         crate::tui::CanonicalSlashCommand::StatusView => ControlRequest::StatusView,
-        crate::tui::CanonicalSlashCommand::RuntimeSubstrateRefresh => return None,
+        crate::tui::CanonicalSlashCommand::RuntimeSubstrateRefresh => {
+            ControlRequest::RuntimeSubstrateRefresh
+        }
         crate::tui::CanonicalSlashCommand::WorkspaceStatusView => {
             ControlRequest::WorkspaceStatusView
         }
@@ -733,6 +735,9 @@ pub async fn execute_control(
         }
         ControlRequest::StatusView => {
             status_view_response(ctx.runtime_state, ctx.agent, ctx.shared_settings).await
+        }
+        ControlRequest::RuntimeSubstrateRefresh => {
+            runtime_substrate_refresh_response(ctx.runtime_state, ctx.agent).await
         }
         ControlRequest::WorkspaceStatusView => {
             let workspace_ctx = workspace_control_context(ctx.agent);
@@ -1716,6 +1721,78 @@ pub async fn set_runtime_mode_response(
             "Runtime profile → omegon (full harness, broader observability and advanced surfaces)."
                 .into()
         }),
+    }
+}
+
+pub async fn runtime_substrate_refresh_response(
+    runtime_state: &mut InteractiveAgentState,
+    agent: &InteractiveAgentHost,
+) -> SlashCommandResponse {
+    let substrate = match crate::setup::runtime_substrate_refresh_candidate(&agent.cwd) {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            return SlashCommandResponse {
+                accepted: false,
+                output: Some(format!("Runtime refresh rejected: {error}")),
+            };
+        }
+    };
+    let inference = runtime_state.inference_runtime.refresh().await;
+    if !inference.activated {
+        let mut output = format!(
+            "Runtime refresh rejected. Inference generation {} retained; {} endpoints, {} offerings; {} previously active manifest source(s). Extension and skill refresh was not promoted.",
+            inference.active_generation,
+            inference.endpoint_count,
+            inference.offering_count,
+            inference.loaded_sources.len(),
+        );
+        if !inference.diagnostics.is_empty() {
+            output.push_str(" Inference diagnostics:");
+            for diagnostic in &inference.diagnostics {
+                output.push_str(&format!(
+                    "\n- {:?} {}: {}",
+                    diagnostic.phase,
+                    diagnostic.path.display(),
+                    diagnostic.message
+                ));
+            }
+        }
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some(output),
+        };
+    }
+    let mut output = format!(
+        "Runtime refresh activated. Inference generation {} → {}; {} endpoints, {} offerings; {} manifest source(s) loaded. Extensions: {} candidate(s), {} skipped by policy, {} disabled.",
+        inference.previous_generation,
+        inference.active_generation,
+        inference.endpoint_count,
+        inference.offering_count,
+        inference.loaded_sources.len(),
+        substrate.extension_candidates,
+        substrate.skipped_by_policy,
+        substrate.disabled_extensions,
+    );
+    if !substrate.invalid_manifests.is_empty() {
+        output.push_str(&format!(
+            " {} extension manifest(s) were invalid.",
+            substrate.invalid_manifests.len()
+        ));
+    }
+    if !inference.diagnostics.is_empty() {
+        output.push_str(" Inference diagnostics:");
+        for diagnostic in &inference.diagnostics {
+            output.push_str(&format!(
+                "\n- {:?} {}: {}",
+                diagnostic.phase,
+                diagnostic.path.display(),
+                diagnostic.message
+            ));
+        }
+    }
+    SlashCommandResponse {
+        accepted: inference.activated,
+        output: Some(output),
     }
 }
 
@@ -5377,6 +5454,9 @@ mod context_compaction_tests {
             bus: crate::bus::EventBus::new(),
             context_manager: crate::context::ContextManager::new(String::new(), Vec::new()),
             conversation,
+            inference_runtime: crate::inference_runtime::InferenceRuntimeState::new(
+                std::path::Path::new("."),
+            ),
         }
     }
 
@@ -5432,6 +5512,9 @@ mod context_compaction_tests {
             bus: crate::bus::EventBus::new(),
             context_manager: crate::context::ContextManager::new(String::new(), Vec::new()),
             conversation: crate::conversation::ConversationState::new(),
+            inference_runtime: crate::inference_runtime::InferenceRuntimeState::new(
+                std::path::Path::new("."),
+            ),
         };
         let mut agent = test_agent();
         let settings = crate::settings::shared("test:model");

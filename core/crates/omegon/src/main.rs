@@ -59,6 +59,7 @@ mod first_run;
 mod host_context;
 mod inference_inventory;
 mod inference_manifest;
+mod inference_runtime;
 mod ipc;
 #[cfg(feature = "local-embeddings")]
 mod local_embedding;
@@ -6367,6 +6368,7 @@ pub(crate) struct InteractiveAgentState {
     pub(crate) bus: crate::bus::EventBus,
     pub(crate) context_manager: crate::context::ContextManager,
     pub(crate) conversation: crate::conversation::ConversationState,
+    pub(crate) inference_runtime: crate::inference_runtime::InferenceRuntimeState,
 }
 
 pub(crate) struct InteractiveAgentHost {
@@ -6416,6 +6418,7 @@ fn split_interactive_agent(
         bus: agent.bus,
         context_manager: agent.context_manager,
         conversation: agent.conversation,
+        inference_runtime: agent.inference_runtime,
     };
     (host, state)
 }
@@ -9617,6 +9620,9 @@ mod tests {
             command_tx: crate::features::context::new_shared_command_tx(),
             context_manager: crate::context::ContextManager::new("test prompt".into(), vec![]),
             conversation: crate::conversation::ConversationState::new(),
+            inference_runtime: crate::inference_runtime::InferenceRuntimeState::new(
+                std::path::Path::new("."),
+            ),
             cwd,
             secrets,
             web_auth_state: crate::web::WebAuthState::ephemeral_generated("test-token".into()),
@@ -11074,6 +11080,9 @@ mod tests {
             bus: crate::bus::EventBus::new(),
             context_manager: crate::context::ContextManager::new(String::new(), Vec::new()),
             conversation: crate::conversation::ConversationState::new(),
+            inference_runtime: crate::inference_runtime::InferenceRuntimeState::new(
+                std::path::Path::new("."),
+            ),
         };
         runtime_state
             .conversation
@@ -11109,6 +11118,9 @@ mod tests {
             bus: crate::bus::EventBus::new(),
             context_manager: crate::context::ContextManager::new(String::new(), Vec::new()),
             conversation: crate::conversation::ConversationState::new(),
+            inference_runtime: crate::inference_runtime::InferenceRuntimeState::new(
+                std::path::Path::new("."),
+            ),
         };
         runtime_state
             .conversation

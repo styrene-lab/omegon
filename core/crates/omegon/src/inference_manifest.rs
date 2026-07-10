@@ -12,7 +12,7 @@ use crate::inference_inventory::{
 
 const SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ManifestSource {
     pub source: InventorySource,
     pub path: PathBuf,
