@@ -1441,11 +1441,11 @@ impl CleaveFeature {
         let Some(directive) = args.get("directive").and_then(Value::as_str) else {
             return false;
         };
-        let Some(plan_json) = args.get("plan_json").and_then(Value::as_str) else {
+        let Ok((plan_json, _)) = parse_plan_argument(args) else {
             return false;
         };
-        let max_parallel = args["max_parallel"].as_u64().unwrap_or(4) as usize;
-        let requested_digest = cleave_plan_digest(directive, plan_json, max_parallel);
+        let max_parallel = args["max_parallel"].as_u64().unwrap_or(1) as usize;
+        let requested_digest = cleave_plan_digest(directive, &plan_json, max_parallel);
         self.pending_approval(approval_id).is_some_and(|approval| {
             approval.state == CleaveApprovalState::Approved
                 && approval.plan_digest == requested_digest
@@ -1666,12 +1666,8 @@ Directive: {}{}",
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("directive required"))?
             .to_string();
-        let plan_json = args["plan_json"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("plan_json required"))?
-            .to_string();
-        let max_parallel = args["max_parallel"].as_u64().unwrap_or(4) as usize;
-        let plan = CleavePlan::from_json(&plan_json)?;
+        let (plan_json, plan) = parse_plan_argument(args).map_err(anyhow::Error::msg)?;
+        let max_parallel = args["max_parallel"].as_u64().unwrap_or(1) as usize;
         if !self.cleave_run_has_approved_gate(args) {
             let result = cleave_run_menu_approval_required(&plan, max_parallel, args);
             let approval_id = result.details["approval_id"]
@@ -1786,12 +1782,8 @@ Directive: {}{}",
         let directive = args["directive"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("directive required"))?;
-        let plan_json = args["plan_json"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("plan_json required"))?;
-        let max_parallel = args["max_parallel"].as_u64().unwrap_or(4) as usize;
-
-        let plan = CleavePlan::from_json(plan_json)?;
+        let (plan_json, plan) = parse_plan_argument(args).map_err(anyhow::Error::msg)?;
+        let max_parallel = args["max_parallel"].as_u64().unwrap_or(1) as usize;
         if !self.cleave_run_has_approved_gate(args) {
             let result = cleave_run_menu_approval_required(&plan, max_parallel, args);
             let approval_id = result.details["approval_id"]
@@ -1801,7 +1793,7 @@ Directive: {}{}",
             self.record_pending_approval(
                 &approval_id,
                 directive,
-                plan_json,
+                &plan_json,
                 max_parallel,
                 plan.children.len(),
             );
@@ -2213,12 +2205,40 @@ impl Feature for CleaveFeature {
                             "description": "The original task directive"
                         },
                         "plan_json": {
-                            "type": "string",
-                            "description": "JSON string of the split plan: {\"children\": [{\"label\": \"...\", \"description\": \"...\", \"scope\": [...], \"depends_on\": [...]}]}"
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "description": "Preferred native split plan",
+                                    "properties": {
+                                        "children": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "label": { "type": "string" },
+                                                    "description": { "type": "string" },
+                                                    "scope": { "type": "array", "items": { "type": "string" } },
+                                                    "depends_on": { "type": "array", "items": { "type": "string" } },
+                                                    "model": { "type": "string" },
+                                                    "profile": { "type": "string", "enum": ["scout", "patch", "verify", "coordinator"] }
+                                                },
+                                                "required": ["label", "description", "scope"]
+                                            }
+                                        },
+                                        "rationale": { "type": "string" },
+                                        "default_model": { "type": "string" }
+                                    },
+                                    "required": ["children"]
+                                },
+                                {
+                                    "type": "string",
+                                    "description": "Legacy JSON-encoded split plan; native object form is preferred"
+                                }
+                            ]
                         },
                         "max_parallel": {
                             "type": "number",
-                            "description": "Maximum parallel cloves (default: 4)"
+                            "description": "Maximum parallel children. Defaults to 1 under conservative policy; runtime policy may permit more"
                         },
                         "background": {
                             "type": "boolean",
@@ -2362,6 +2382,20 @@ impl Feature for CleaveFeature {
     fn on_event(&mut self, _event: &BusEvent) -> Vec<BusRequest> {
         vec![]
     }
+}
+
+fn parse_plan_argument(args: &Value) -> Result<(String, CleavePlan), String> {
+    let value = args
+        .get("plan_json")
+        .ok_or_else(|| "Missing plan_json".to_string())?;
+    let encoded = match value {
+        Value::String(encoded) => encoded.clone(),
+        Value::Object(_) => serde_json::to_string(value)
+            .map_err(|error| format!("Failed to encode native plan_json: {error}"))?,
+        _ => return Err("plan_json must be an object or legacy JSON string".into()),
+    };
+    let plan = CleavePlan::from_json(&encoded).map_err(|error| format!("Invalid plan: {error}"))?;
+    Ok((encoded, plan))
 }
 
 fn cleave_plan_digest(directive: &str, plan_json: &str, max_parallel: usize) -> String {
