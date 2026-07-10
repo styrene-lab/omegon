@@ -9197,3 +9197,78 @@ fn variables_command_is_advertised() {
         .expect("vars alias advertised");
     assert!(alias.subcommands.contains(&"set"));
 }
+
+#[test]
+fn slash_init_opens_harness_init_menu() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let _cwd = push_current_dir(tmp.path());
+    let mut app = test_app();
+    app.footer_data.cwd = tmp.path().display().to_string();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/init", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    let menu = app.active_menu.as_ref().expect("init menu");
+    assert_eq!(menu.projection.id, "init");
+    assert!(
+        menu.projection
+            .summary
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Agent harness initialization defaults")
+    );
+    assert!(
+        menu.projection
+            .tabs
+            .iter()
+            .any(|tab| { tab.groups.iter().any(|group| group.id == "init.skills") })
+    );
+}
+
+#[test]
+fn init_menu_recommends_matching_user_skill_for_project_copy() {
+    let _env = crate::test_support::env::lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let home = tmp.path().join("home");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).expect("repo");
+    std::fs::write(repo.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("cargo");
+    let skill_dir = home.join(".omegon/skills/rust-helper");
+    std::fs::create_dir_all(&skill_dir).expect("skill dir");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: rust-helper\ndescription: Rust helper\nactivation: project_detected\nprofile: [coding]\nproject_signals: [Cargo.toml]\n---\n\n# Rust helper\n",
+    )
+    .expect("skill");
+    unsafe { std::env::set_var("HOME", &home) };
+    let _cwd = push_current_dir(&repo);
+    let mut app = test_app();
+    app.footer_data.cwd = repo.display().to_string();
+
+    app.open_init_menu();
+    let menu = app.active_menu.as_ref().expect("init menu");
+    let skills_group = menu
+        .projection
+        .tabs
+        .iter()
+        .flat_map(|tab| &tab.groups)
+        .find(|group| group.id == "init.skills")
+        .expect("skills group");
+    let row = skills_group
+        .rows
+        .iter()
+        .find(|row| row.id == "init.skill.rust-helper")
+        .expect("rust-helper recommendation");
+
+    assert!(row.description.contains("Cargo.toml"));
+    let action = row.primary_action.as_ref().expect("primary action");
+    assert_eq!(action.label, "Copy to project");
+    assert!(
+        action
+            .command
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("/skills import --project ")
+    );
+}

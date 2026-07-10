@@ -2811,167 +2811,165 @@ impl App {
             safety: None,
             availability: None,
         };
-        menu.tabs = vec![
-            MenuTabProjection {
-                id: "ui".into(),
-                label: "UI".into(),
-                groups: vec![
-                    MenuGroupProjection {
-                        id: "ui.presets".into(),
-                        label: "Presets".into(),
-                        description: Some("Switch coarse TUI surface presets.".into()),
-                        rows: vec![
-                            MenuRowProjection {
-                                id: "ui.preset.lean".into(),
-                                label: "Lean preset".into(),
-                                description: "Conversation + activity, no dashboard chrome.".into(),
-                                value: Some(
-                                    if surfaces.preset_name() == "lean" {
-                                        "active"
-                                    } else {
-                                        ""
-                                    }
-                                    .into(),
-                                ),
-                                kind: MenuRowKind::Action,
-                                badges: vec![MenuBadgeProjection {
-                                    label: if surfaces.preset_name() == "lean" {
-                                        "active".into()
-                                    } else {
-                                        "preset".into()
-                                    },
-                                    tone: if surfaces.preset_name() == "lean" {
-                                        MenuBadgeTone::Success
-                                    } else {
-                                        MenuBadgeTone::Info
-                                    },
-                                }],
-                                metadata: vec!["/ui lean".into()],
-                                primary_action: Some({
-                                    let mut action = MenuActionProjection::command(
-                                        "ui.preset.lean.primary",
-                                        "Lean",
-                                        "/ui lean",
-                                    );
-                                    action.close_policy =
-                                        crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
-                                    action
-                                }),
-                                actions: vec![{
-                                    let mut action = MenuActionProjection::command(
-                                        "ui.preset.lean.action",
-                                        "Lean",
-                                        "/ui lean",
-                                    );
-                                    action.key = Some("l".into());
-                                    action.close_policy =
-                                        crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
-                                    action
-                                }],
-                                safety: None,
-                                availability: None,
-                            },
-                            MenuRowProjection {
-                                id: "ui.preset.full".into(),
-                                label: "Full preset".into(),
-                                description: "Dashboard, instruments, footer, and activity.".into(),
-                                value: Some(
-                                    if surfaces.preset_name() == "full" {
-                                        "active"
-                                    } else {
-                                        ""
-                                    }
-                                    .into(),
-                                ),
-                                kind: MenuRowKind::Action,
-                                badges: vec![MenuBadgeProjection {
-                                    label: if surfaces.preset_name() == "full" {
-                                        "active".into()
-                                    } else {
-                                        "preset".into()
-                                    },
-                                    tone: if surfaces.preset_name() == "full" {
-                                        MenuBadgeTone::Success
-                                    } else {
-                                        MenuBadgeTone::Info
-                                    },
-                                }],
-                                metadata: vec!["/ui full".into()],
-                                primary_action: Some({
-                                    let mut action = MenuActionProjection::command(
-                                        "ui.preset.full.primary",
-                                        "Full",
-                                        "/ui full",
-                                    );
-                                    action.close_policy =
-                                        crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
-                                    action
-                                }),
-                                actions: vec![{
-                                    let mut action = MenuActionProjection::command(
-                                        "ui.preset.full.action",
-                                        "Full",
-                                        "/ui full",
-                                    );
-                                    action.key = Some("f".into());
-                                    action.close_policy =
-                                        crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
-                                    action
-                                }],
-                                safety: None,
-                                availability: None,
-                            },
-                        ],
-                    },
-                    MenuGroupProjection {
-                        id: "ui.surfaces".into(),
-                        label: "Surfaces".into(),
-                        description: Some("Toggle individual TUI surfaces.".into()),
-                        rows: vec![
-                            surface_row(
-                                "dashboard",
-                                "Dashboard",
-                                surfaces.dashboard,
-                                "/ui toggle dashboard",
+        menu.tabs = vec![MenuTabProjection {
+            id: "ui".into(),
+            label: "UI".into(),
+            groups: vec![
+                MenuGroupProjection {
+                    id: "ui.presets".into(),
+                    label: "Presets".into(),
+                    description: Some("Switch coarse TUI surface presets.".into()),
+                    rows: vec![
+                        MenuRowProjection {
+                            id: "ui.preset.lean".into(),
+                            label: "Lean preset".into(),
+                            description: "Conversation + activity, no dashboard chrome.".into(),
+                            value: Some(
+                                if surfaces.preset_name() == "lean" {
+                                    "active"
+                                } else {
+                                    ""
+                                }
+                                .into(),
                             ),
-                            surface_row(
-                                "instruments",
-                                "Instruments",
-                                surfaces.instruments,
-                                "/ui toggle instruments",
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: if surfaces.preset_name() == "lean" {
+                                    "active".into()
+                                } else {
+                                    "preset".into()
+                                },
+                                tone: if surfaces.preset_name() == "lean" {
+                                    MenuBadgeTone::Success
+                                } else {
+                                    MenuBadgeTone::Info
+                                },
+                            }],
+                            metadata: vec!["/ui lean".into()],
+                            primary_action: Some({
+                                let mut action = MenuActionProjection::command(
+                                    "ui.preset.lean.primary",
+                                    "Lean",
+                                    "/ui lean",
+                                );
+                                action.close_policy =
+                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                action
+                            }),
+                            actions: vec![{
+                                let mut action = MenuActionProjection::command(
+                                    "ui.preset.lean.action",
+                                    "Lean",
+                                    "/ui lean",
+                                );
+                                action.key = Some("l".into());
+                                action.close_policy =
+                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                action
+                            }],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "ui.preset.full".into(),
+                            label: "Full preset".into(),
+                            description: "Dashboard, instruments, footer, and activity.".into(),
+                            value: Some(
+                                if surfaces.preset_name() == "full" {
+                                    "active"
+                                } else {
+                                    ""
+                                }
+                                .into(),
                             ),
-                            surface_row("footer", "Footer", surfaces.footer, "/ui toggle footer"),
-                            surface_row(
-                                "activity",
-                                "Activity",
-                                surfaces.activity,
-                                "/ui toggle activity",
-                            ),
-                            MenuRowProjection {
-                                id: "ui.detail".into(),
-                                label: "Tool output detail".into(),
-                                description: "Adjust tool output density/detail level.".into(),
-                                value: Some(self.settings().tool_detail.as_str().into()),
-                                kind: MenuRowKind::Action,
-                                badges: vec![MenuBadgeProjection {
-                                    label: "density".into(),
-                                    tone: MenuBadgeTone::Neutral,
-                                }],
-                                metadata: vec!["/ui detail".into(), "/detail".into()],
-                                primary_action: Some(MenuActionProjection::command(
-                                    "ui.detail.primary",
-                                    "Detail",
-                                    "/ui detail",
-                                )),
-                                actions: vec![],
-                                safety: None,
-                                availability: None,
-                            },
-                        ],
-                    },
-                ],
-            },
-        ];
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: if surfaces.preset_name() == "full" {
+                                    "active".into()
+                                } else {
+                                    "preset".into()
+                                },
+                                tone: if surfaces.preset_name() == "full" {
+                                    MenuBadgeTone::Success
+                                } else {
+                                    MenuBadgeTone::Info
+                                },
+                            }],
+                            metadata: vec!["/ui full".into()],
+                            primary_action: Some({
+                                let mut action = MenuActionProjection::command(
+                                    "ui.preset.full.primary",
+                                    "Full",
+                                    "/ui full",
+                                );
+                                action.close_policy =
+                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                action
+                            }),
+                            actions: vec![{
+                                let mut action = MenuActionProjection::command(
+                                    "ui.preset.full.action",
+                                    "Full",
+                                    "/ui full",
+                                );
+                                action.key = Some("f".into());
+                                action.close_policy =
+                                    crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                                action
+                            }],
+                            safety: None,
+                            availability: None,
+                        },
+                    ],
+                },
+                MenuGroupProjection {
+                    id: "ui.surfaces".into(),
+                    label: "Surfaces".into(),
+                    description: Some("Toggle individual TUI surfaces.".into()),
+                    rows: vec![
+                        surface_row(
+                            "dashboard",
+                            "Dashboard",
+                            surfaces.dashboard,
+                            "/ui toggle dashboard",
+                        ),
+                        surface_row(
+                            "instruments",
+                            "Instruments",
+                            surfaces.instruments,
+                            "/ui toggle instruments",
+                        ),
+                        surface_row("footer", "Footer", surfaces.footer, "/ui toggle footer"),
+                        surface_row(
+                            "activity",
+                            "Activity",
+                            surfaces.activity,
+                            "/ui toggle activity",
+                        ),
+                        MenuRowProjection {
+                            id: "ui.detail".into(),
+                            label: "Tool output detail".into(),
+                            description: "Adjust tool output density/detail level.".into(),
+                            value: Some(self.settings().tool_detail.as_str().into()),
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection {
+                                label: "density".into(),
+                                tone: MenuBadgeTone::Neutral,
+                            }],
+                            metadata: vec!["/ui detail".into(), "/detail".into()],
+                            primary_action: Some(MenuActionProjection::command(
+                                "ui.detail.primary",
+                                "Detail",
+                                "/ui detail",
+                            )),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                    ],
+                },
+            ],
+        }];
         menu
     }
 
@@ -4129,6 +4127,327 @@ impl App {
 
     fn open_extension_runtime_menu(&mut self) {
         self.open_menu_projection(self.extension_runtime_menu_projection());
+    }
+
+    fn init_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
+        use crate::surfaces::menu::{
+            MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
+            MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
+        };
+
+        let cwd = self.cwd();
+        let project_root = crate::setup::find_project_root(cwd);
+        let project_profile = project_root.join(".omegon/profile.json");
+        let project_registry = project_root.join(".omegon/profiles");
+        let project_active = project_root.join(".omegon/active-profile.json");
+        let user_home = dirs::home_dir();
+        let user_profile = user_home
+            .as_ref()
+            .map(|home| home.join(".omegon/profile.json"));
+        let user_active = user_home
+            .as_ref()
+            .map(|home| home.join(".omegon/active-profile.json"));
+
+        let mut pending = Vec::new();
+        if !project_root.join(".omegon").exists() {
+            pending.push("create .omegon/ harness configuration directory");
+        }
+        if !project_root.join("ai/memory").exists() {
+            pending.push("create ai/memory/ for durable project facts");
+        }
+        if !project_root.join("AGENTS.md").exists()
+            && !project_root.join(".omegon/AGENTS.md").exists()
+        {
+            pending.push("create AGENTS.md if known project directives are discovered");
+        }
+        if !project_active.exists() && project_registry.is_dir() {
+            pending.push("select an active project profile pointer for the project registry");
+        }
+
+        let pending_summary = if pending.is_empty() {
+            "Harness substrate is already present; repair/import actions are still available."
+                .to_string()
+        } else {
+            pending
+                .iter()
+                .enumerate()
+                .map(|(idx, action)| format!("{}. {action}", idx + 1))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let signal_matches = |signal: &str| {
+            let signal = signal.trim().trim_start_matches("./");
+            if signal.is_empty() {
+                return false;
+            }
+            if !signal.contains('*') {
+                return project_root.join(signal).exists();
+            }
+            let (prefix, suffix) = signal.split_once('*').unwrap_or((signal, ""));
+            std::fs::read_dir(&project_root)
+                .ok()
+                .is_some_and(|entries| {
+                    entries.filter_map(|entry| entry.ok()).any(|entry| {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        name.starts_with(prefix) && name.ends_with(suffix)
+                    })
+                })
+        };
+        let mut skill_rows: Vec<MenuRowProjection> = crate::skills::list_structured()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|skill| {
+                let matched: Vec<String> = skill
+                    .project_signals
+                    .iter()
+                    .filter(|signal| signal_matches(signal))
+                    .cloned()
+                    .collect();
+                if matched.is_empty() {
+                    return None;
+                }
+                let tone = if skill.project_local {
+                    MenuBadgeTone::Success
+                } else if skill.source == "user" {
+                    MenuBadgeTone::Info
+                } else {
+                    MenuBadgeTone::Neutral
+                };
+                let (command, action_label, action_note) = if skill.project_local {
+                    (
+                        format!("/skills get {}", skill.name),
+                        "Inspect",
+                        "already project-local",
+                    )
+                } else if skill.source == "user" {
+                    (
+                        format!("/skills import --project {}", skill.path),
+                        "Copy to project",
+                        "user skill can be localized for this repo",
+                    )
+                } else if skill.bundled && !skill.installed {
+                    (
+                        format!("/skills install {}", skill.name),
+                        "Install",
+                        "bundled skill can be installed for reuse",
+                    )
+                } else {
+                    (
+                        format!("/skills get {}", skill.name),
+                        "Inspect",
+                        "inspect before changing project policy",
+                    )
+                };
+                Some(MenuRowProjection {
+                    id: format!("init.skill.{}", skill.name),
+                    label: format!("{} skill", skill.name),
+                    description: format!(
+                        "Detected {}. Source: {}; activation: {}; {action_note}.",
+                        matched.join(", "),
+                        skill.source,
+                        skill.activation.as_deref().unwrap_or("manual")
+                    ),
+                    value: Some(skill.source.clone()),
+                    kind: MenuRowKind::Action,
+                    badges: vec![MenuBadgeProjection {
+                        label: if skill.project_local {
+                            "project"
+                        } else {
+                            skill.source.as_str()
+                        }
+                        .into(),
+                        tone,
+                    }],
+                    metadata: vec![format!("signals: {}", matched.join(", ")), command.clone()],
+                    primary_action: Some(MenuActionProjection::command(
+                        format!("init.skill.{}.primary", skill.name),
+                        action_label,
+                        command,
+                    )),
+                    actions: vec![],
+                    safety: None,
+                    availability: None,
+                })
+            })
+            .collect();
+        skill_rows.sort_by(|a, b| a.label.cmp(&b.label));
+        if skill_rows.is_empty() {
+            skill_rows.push(MenuRowProjection {
+                id: "init.skills.none".into(),
+                label: "No skill recommendations detected".into(),
+                description: "No installed, bundled, user, project, or extension skill project_signals matched this repository.".into(),
+                value: Some("none".into()),
+                kind: MenuRowKind::Object,
+                badges: vec![MenuBadgeProjection {
+                    label: "clean".into(),
+                    tone: MenuBadgeTone::Neutral,
+                }],
+                metadata: vec![],
+                primary_action: None,
+                actions: vec![],
+                safety: None,
+                availability: None,
+            });
+        }
+
+        let row = |id: &str,
+                   label: &str,
+                   description: &str,
+                   value: Option<String>,
+                   badge: &str,
+                   tone: MenuBadgeTone,
+                   command: &str,
+                   confirm: bool| {
+            let mut primary =
+                MenuActionProjection::command(format!("{id}.primary"), "Run", command.to_string());
+            primary.requires_confirmation = confirm;
+            MenuRowProjection {
+                id: id.into(),
+                label: label.into(),
+                description: description.into(),
+                value,
+                kind: MenuRowKind::Action,
+                badges: vec![MenuBadgeProjection {
+                    label: badge.into(),
+                    tone,
+                }],
+                metadata: vec![command.into()],
+                primary_action: Some(primary),
+                actions: vec![],
+                safety: None,
+                availability: None,
+            }
+        };
+
+        let mut menu = MenuProjection::new("init", "Init");
+        menu.summary = Some(format!(
+            "Agent harness initialization defaults. Pending plan:\n{pending_summary}"
+        ));
+        menu.footer = Some("↑/↓ navigate · / filter · Enter run selected init action · edit command before running if needed · Esc close".into());
+        menu.tabs = vec![MenuTabProjection {
+            id: "defaults".into(),
+            label: "Defaults".into(),
+            groups: vec![
+                MenuGroupProjection {
+                    id: "init.pending".into(),
+                    label: "Pending harness initialization".into(),
+                    description: Some("Discovered harness substrate actions. Defaults are ready to run, but each row is still an explicit operator action.".into()),
+                    rows: vec![MenuRowProjection {
+                        id: "init.pending.summary".into(),
+                        label: "What /init will initialize".into(),
+                        description: pending_summary,
+                        value: Some(format!("{} pending", pending.len())),
+                        kind: MenuRowKind::Object,
+                        badges: vec![MenuBadgeProjection {
+                            label: if pending.is_empty() { "clean" } else { "plan" }.into(),
+                            tone: if pending.is_empty() { MenuBadgeTone::Success } else { MenuBadgeTone::Info },
+                        }],
+                        metadata: vec![format!("project: {}", project_root.display())],
+                        primary_action: None,
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    }],
+                },
+                MenuGroupProjection {
+                    id: "init.decisions".into(),
+                    label: "Detected compatibility decisions".into(),
+                    description: Some("Ad-hoc prompts for mid-state upgrades. These are not standard init steps; run them only when the detected legacy state is the source of confusion.".into()),
+                    rows: {
+                        let mut rows = Vec::new();
+                        if project_profile.exists() {
+                            rows.push(row(
+                                "init.profile.project_migrate",
+                                "Legacy project profile detected",
+                                "Keep compatibility as-is, or copy .omegon/profile.json into .omegon/profiles/ and select it for this project.",
+                                Some("decision".into()),
+                                "detected",
+                                MenuBadgeTone::Warning,
+                                "/init profile migrate --project",
+                                true,
+                            ));
+                        }
+                        if user_profile.as_ref().is_some_and(|path| path.exists()) {
+                            rows.push(row(
+                                "init.profile.user_migrate",
+                                "Legacy user profile detected",
+                                "Keep compatibility as-is, or copy ~/.omegon/profile.json into ~/.omegon/profiles/ and select it as the user fallback.",
+                                Some("decision".into()),
+                                "detected",
+                                MenuBadgeTone::Warning,
+                                "/init profile migrate --user",
+                                true,
+                            ));
+                        }
+                        if rows.is_empty() {
+                            rows.push(MenuRowProjection {
+                                id: "init.decisions.none".into(),
+                                label: "No compatibility decisions detected".into(),
+                                description: "No legacy mid-state prompts are currently needed.".into(),
+                                value: Some("clean".into()),
+                                kind: MenuRowKind::Object,
+                                badges: vec![MenuBadgeProjection {
+                                    label: "clean".into(),
+                                    tone: MenuBadgeTone::Success,
+                                }],
+                                metadata: vec![],
+                                primary_action: None,
+                                actions: vec![],
+                                safety: None,
+                                availability: None,
+                            });
+                        }
+                        rows
+                    },
+                },
+                MenuGroupProjection {
+                    id: "init.skills".into(),
+                    label: "Recommended skills".into(),
+                    description: Some("Skills whose declared project_signals match this repository. Inspect before enabling or copying anything project-local.".into()),
+                    rows: skill_rows,
+                },
+                MenuGroupProjection {
+                    id: "init.bootstrap".into(),
+                    label: "Harness bootstrap".into(),
+                    description: Some("Standard initialization fast paths for missing harness substrate.".into()),
+                    rows: vec![
+                        row(
+                            "init.scan",
+                            "Initialize missing harness defaults",
+                            "Create missing non-destructive harness substrate such as .omegon/ and ai/memory/, import discovered directives, and report layout.",
+                            None,
+                            "safe",
+                            MenuBadgeTone::Info,
+                            "/init scan",
+                            false,
+                        ),
+                        row(
+                            "init.migrate",
+                            "Repair legacy layout",
+                            "Optional repair action: move supported legacy docs/OpenSpec paths into ai/ where applicable.",
+                            None,
+                            "moves",
+                            MenuBadgeTone::Warning,
+                            "/init migrate",
+                            true,
+                        ),
+                    ],
+                },
+            ],
+        }];
+        if let Some(path) = user_active {
+            if path.exists() {
+                menu.summary = menu.summary.map(|summary| {
+                    format!("{summary}\nUser active profile pointer: {}", path.display())
+                });
+            }
+        }
+        menu
+    }
+
+    fn open_init_menu(&mut self) {
+        self.open_menu_projection(self.init_menu_projection());
     }
 
     fn profile_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
@@ -9841,9 +10160,39 @@ Scroll transcript:
 
             "init" => {
                 let cwd = std::path::Path::new(&self.footer_data.cwd);
-                let move_all = args == "migrate";
-                let report = crate::migrate::init_project(cwd, move_all);
-                SlashResult::Display(report)
+                match args {
+                    "" | "menu" => {
+                        self.open_init_menu();
+                        SlashResult::Handled
+                    }
+                    "scan" => {
+                        let report = crate::migrate::init_project(cwd, false);
+                        SlashResult::Display(report)
+                    }
+                    "profile migrate --project" | "profiles migrate --project" => {
+                        match crate::migrate::migrate_legacy_profile_to_registry(
+                            cwd,
+                            crate::migrate::InitProfileScope::Project,
+                        ) {
+                            Ok(message) => SlashResult::Display(message),
+                            Err(error) => SlashResult::Display(format!("✗ {error}")),
+                        }
+                    }
+                    "profile migrate --user" | "profiles migrate --user" => {
+                        match crate::migrate::migrate_legacy_profile_to_registry(
+                            cwd,
+                            crate::migrate::InitProfileScope::User,
+                        ) {
+                            Ok(message) => SlashResult::Display(message),
+                            Err(error) => SlashResult::Display(format!("✗ {error}")),
+                        }
+                    }
+                    _ => {
+                        let move_all = args == "migrate";
+                        let report = crate::migrate::init_project(cwd, move_all);
+                        SlashResult::Display(report)
+                    }
+                }
             }
 
             "migrate" => {

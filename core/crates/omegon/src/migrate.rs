@@ -649,6 +649,76 @@ enum ConventionKind {
     Config,
 }
 
+pub enum InitProfileScope {
+    Project,
+    User,
+}
+
+impl InitProfileScope {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Project => "project",
+            Self::User => "user",
+        }
+    }
+}
+
+pub fn migrate_legacy_profile_to_registry(
+    cwd: &Path,
+    scope: InitProfileScope,
+) -> anyhow::Result<String> {
+    let (legacy_path, registry_dir, active_path, source) = match scope {
+        InitProfileScope::Project => {
+            let root = crate::setup::find_project_root(cwd);
+            (
+                root.join(".omegon/profile.json"),
+                root.join(".omegon/profiles"),
+                root.join(".omegon/active-profile.json"),
+                "project",
+            )
+        }
+        InitProfileScope::User => {
+            let home =
+                dirs::home_dir().ok_or_else(|| anyhow::anyhow!("home directory unavailable"))?;
+            (
+                home.join(".omegon/profile.json"),
+                home.join(".omegon/profiles"),
+                home.join(".omegon/active-profile.json"),
+                "user",
+            )
+        }
+    };
+    if !legacy_path.exists() {
+        anyhow::bail!("no legacy {source} profile at `{}`", legacy_path.display());
+    }
+    let content = std::fs::read_to_string(&legacy_path)?;
+    let _: Profile = serde_json::from_str(&content)?;
+    std::fs::create_dir_all(&registry_dir)?;
+    let mut id = "default".to_string();
+    let mut target = registry_dir.join("default.json");
+    if target.exists() {
+        let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S");
+        id = format!("legacy-{timestamp}");
+        target = registry_dir.join(format!("{id}.json"));
+    }
+    std::fs::write(&target, content)?;
+    if let Some(parent) = active_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let selection = crate::settings::ActiveProfileSelection {
+        id: id.clone(),
+        scope: Some(scope.label().to_string()),
+    };
+    std::fs::write(
+        &active_path,
+        serde_json::to_string_pretty(&selection)? + "\n",
+    )?;
+    Ok(format!(
+        "✓ Migrated legacy {source} profile to `{}` and selected `{id}`. Legacy singleton was left in place for compatibility.",
+        target.display()
+    ))
+}
+
 /// Scan the project for agent conventions from other tools, migrate what's
 /// found, and bootstrap the ai/ directory structure.
 pub fn init_project(cwd: &Path, move_all: bool) -> String {
