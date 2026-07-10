@@ -84,6 +84,7 @@ pub enum ControlRequest {
         path: String,
     },
     StatusView,
+    RuntimeInventoryStatus,
     RuntimeSubstrateRefresh,
     WorkspaceStatusView,
     WorkspaceListView,
@@ -319,6 +320,9 @@ pub fn control_request_from_slash(
             ControlRequest::PermissionTrustRemove { path: path.clone() }
         }
         crate::tui::CanonicalSlashCommand::StatusView => ControlRequest::StatusView,
+        crate::tui::CanonicalSlashCommand::RuntimeInventoryStatus => {
+            ControlRequest::RuntimeInventoryStatus
+        }
         crate::tui::CanonicalSlashCommand::RuntimeSubstrateRefresh => {
             ControlRequest::RuntimeSubstrateRefresh
         }
@@ -735,6 +739,9 @@ pub async fn execute_control(
         }
         ControlRequest::StatusView => {
             status_view_response(ctx.runtime_state, ctx.agent, ctx.shared_settings).await
+        }
+        ControlRequest::RuntimeInventoryStatus => {
+            runtime_inventory_status_response(ctx.runtime_state).await
         }
         ControlRequest::RuntimeSubstrateRefresh => {
             runtime_substrate_refresh_response(ctx.runtime_state, ctx.agent).await
@@ -1724,6 +1731,16 @@ pub async fn set_runtime_mode_response(
     }
 }
 
+pub async fn runtime_inventory_status_response(
+    runtime_state: &InteractiveAgentState,
+) -> SlashCommandResponse {
+    let projection = runtime_state.inference_runtime.projection().await;
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(projection.render_text()),
+    }
+}
+
 pub async fn runtime_substrate_refresh_response(
     runtime_state: &mut InteractiveAgentState,
     agent: &InteractiveAgentHost,
@@ -1738,6 +1755,10 @@ pub async fn runtime_substrate_refresh_response(
         }
     };
     let inference = runtime_state.inference_runtime.refresh().await;
+    runtime_state
+        .inference_runtime
+        .record_refresh_report(&inference)
+        .await;
     if !inference.activated {
         let mut output = format!(
             "Runtime refresh rejected. Inference generation {} retained; {} endpoints, {} offerings; {} previously active manifest source(s). Extension and skill refresh was not promoted.",
@@ -1791,7 +1812,7 @@ pub async fn runtime_substrate_refresh_response(
         }
     }
     SlashCommandResponse {
-        accepted: inference.activated,
+        accepted: true,
         output: Some(output),
     }
 }

@@ -723,6 +723,7 @@ pub enum CanonicalSlashCommand {
     PermissionTrustAdd(String),
     PermissionTrustRemove(String),
     StatusView,
+    RuntimeInventoryStatus,
     RuntimeSubstrateRefresh,
     WorkspaceStatusView,
     WorkspaceListView,
@@ -1004,6 +1005,9 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             }
         }
         "status" if args.is_empty() => Some(CanonicalSlashCommand::StatusView),
+        "runtime" if matches!(args, "status" | "inventory") => {
+            Some(CanonicalSlashCommand::RuntimeInventoryStatus)
+        }
         "runtime" if matches!(args, "restart" | "hot-restart" | "refresh" | "reload") => {
             Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
         }
@@ -9566,26 +9570,28 @@ Scroll transcript:
                 if args.trim().is_empty() {
                     self.open_extension_runtime_menu();
                     SlashResult::Handled
-                } else if let Some(CanonicalSlashCommand::RuntimeSubstrateRefresh) =
-                    canonical_slash_command("runtime", args)
-                {
-                    if self.agent_active {
+                } else if let Some(command) = canonical_slash_command("runtime", args) {
+                    if matches!(command, CanonicalSlashCommand::RuntimeSubstrateRefresh)
+                        && self.agent_active
+                    {
                         SlashResult::Display(
                             "Runtime substrate refresh unavailable while a model turn is active. Wait for completion or cancel the turn first.".into(),
                         )
-                    } else if let Some(request) = crate::control_runtime::control_request_from_slash(
-                        &CanonicalSlashCommand::RuntimeSubstrateRefresh,
-                    ) {
+                    } else if let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
+                    {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
                             request,
                             respond_to: None,
                         });
                         SlashResult::Handled
                     } else {
-                        SlashResult::Display("Runtime refresh control unavailable.".into())
+                        SlashResult::Display("Runtime control unavailable.".into())
                     }
                 } else {
-                    SlashResult::Display("Usage: /runtime [refresh|reload|restart|hot-restart]".into())
+                    SlashResult::Display(
+                        "Usage: /runtime [status|inventory|refresh|reload|restart|hot-restart]".into(),
+                    )
                 }
             }
 

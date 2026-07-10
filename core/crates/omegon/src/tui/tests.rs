@@ -5320,6 +5320,23 @@ fn extension_view_preserves_text_readout() {
 }
 
 #[test]
+fn runtime_inventory_status_queues_shared_control() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+    assert!(matches!(
+        app.handle_slash_command("/runtime status", &tx),
+        SlashResult::Handled
+    ));
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::RuntimeInventoryStatus,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn runtime_refresh_aliases_canonicalize() {
     for args in ["refresh", "reload", "restart", "hot-restart"] {
         assert_eq!(

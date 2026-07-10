@@ -15,12 +15,46 @@ pub struct InferenceRefreshReport {
     pub diagnostics: Vec<ManifestDiagnostic>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InferenceRuntimeProjection {
+    pub generation: u64,
+    pub active_sources: Vec<ManifestSource>,
+    pub endpoint_count: usize,
+    pub offering_count: usize,
+    pub last_rejected_diagnostics: Vec<ManifestDiagnostic>,
+}
+
+impl InferenceRuntimeProjection {
+    pub fn render_text(&self) -> String {
+        let mut output = format!(
+            "Inference inventory\nGeneration: {}\nEndpoints: {}\nOfferings: {}\nActive manifest sources: {}",
+            self.generation,
+            self.endpoint_count,
+            self.offering_count,
+            self.active_sources.len()
+        );
+        if !self.last_rejected_diagnostics.is_empty() {
+            output.push_str("\nLast rejected refresh:");
+            for diagnostic in &self.last_rejected_diagnostics {
+                output.push_str(&format!(
+                    "\n- {:?} {}: {}",
+                    diagnostic.phase,
+                    diagnostic.path.display(),
+                    diagnostic.message
+                ));
+            }
+        }
+        output
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct InferenceRuntimeState {
     store: InferenceInventoryStore,
     loader: InferenceManifestLoader,
     sources: Vec<ManifestSource>,
     active_sources: Arc<tokio::sync::RwLock<Vec<ManifestSource>>>,
+    last_rejected_diagnostics: Arc<tokio::sync::RwLock<Vec<ManifestDiagnostic>>>,
 }
 
 impl InferenceRuntimeState {
@@ -30,16 +64,10 @@ impl InferenceRuntimeState {
             .expect("embedded inference registry must project to a valid inventory");
         let home = crate::paths::omegon_home().unwrap_or_else(|_| project_root.join(".omegon"));
         let sources = InferenceManifestLoader::default_sources(&home, project_root);
-        Self {
-            store: InferenceInventoryStore::new(initial),
-            loader: InferenceManifestLoader::new(embedded, sources.clone()),
-            sources,
-            active_sources: Arc::new(tokio::sync::RwLock::new(Vec::new())),
-        }
+        Self::with_runtime_parts(initial, embedded, sources)
     }
 
-    #[cfg(test)]
-    pub fn with_parts(
+    fn with_runtime_parts(
         initial: InventorySnapshot,
         embedded: InventoryLayer,
         sources: Vec<ManifestSource>,
@@ -49,11 +77,41 @@ impl InferenceRuntimeState {
             loader: InferenceManifestLoader::new(embedded, sources.clone()),
             sources,
             active_sources: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            last_rejected_diagnostics: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         }
+    }
+
+    #[cfg(test)]
+    pub fn with_parts(
+        initial: InventorySnapshot,
+        embedded: InventoryLayer,
+        sources: Vec<ManifestSource>,
+    ) -> Self {
+        Self::with_runtime_parts(initial, embedded, sources)
     }
 
     pub async fn snapshot(&self) -> Arc<InventorySnapshot> {
         self.store.snapshot().await
+    }
+
+    pub async fn projection(&self) -> InferenceRuntimeProjection {
+        let snapshot = self.store.snapshot().await;
+        InferenceRuntimeProjection {
+            generation: snapshot.generation,
+            active_sources: self.active_sources.read().await.clone(),
+            endpoint_count: snapshot.endpoints.len(),
+            offering_count: snapshot.offerings.len(),
+            last_rejected_diagnostics: self.last_rejected_diagnostics.read().await.clone(),
+        }
+    }
+
+    pub async fn record_refresh_report(&self, report: &InferenceRefreshReport) {
+        let diagnostics = if report.activated {
+            Vec::new()
+        } else {
+            report.diagnostics.clone()
+        };
+        *self.last_rejected_diagnostics.write().await = diagnostics;
     }
 
     pub async fn refresh(&self) -> InferenceRefreshReport {
