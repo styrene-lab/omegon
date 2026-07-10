@@ -78,8 +78,8 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     let mut segment_detail_height = inputs.segment_detail_height;
 
     if permission_lane_height > 0 {
-        tool_inspection_height = tool_inspection_height.min(6);
-        workbench_height = workbench_height.min(4);
+        tool_inspection_height = tool_inspection_height.min(8);
+        workbench_height = workbench_height.min(8);
     }
 
     let fixed_without_conversation = inputs
@@ -87,19 +87,27 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
         .saturating_add(inputs.editor_info_height)
         .saturating_add(session_height)
         .saturating_add(footer_height)
-        .saturating_add(permission_lane_height)
-        .saturating_add(segment_detail_height);
-    let bottom_budget = main_area
+        .saturating_add(permission_lane_height);
+    let available_auxiliary = main_area
         .height
         .saturating_sub(fixed_without_conversation)
         .saturating_sub(3);
-    if segment_detail_height > bottom_budget {
-        segment_detail_height = bottom_budget;
+    if segment_detail_height > available_auxiliary {
+        segment_detail_height = available_auxiliary;
     }
+    let bottom_budget = available_auxiliary.saturating_sub(segment_detail_height);
     if tool_inspection_height.saturating_add(workbench_height) > bottom_budget {
-        workbench_height = workbench_height.min(bottom_budget);
-        let stream_budget = bottom_budget.saturating_sub(workbench_height);
-        tool_inspection_height = tool_inspection_height.min(stream_budget);
+        // Share constrained space proportionally instead of allowing the plan to
+        // consume the entire budget and starving live operations (or vice versa).
+        let desired_total = tool_inspection_height.saturating_add(workbench_height);
+        let tool_share = if desired_total == 0 {
+            0
+        } else {
+            ((bottom_budget as u32 * tool_inspection_height as u32) / desired_total as u32) as u16
+        };
+        tool_inspection_height = tool_inspection_height.min(tool_share);
+        workbench_height =
+            workbench_height.min(bottom_budget.saturating_sub(tool_inspection_height));
     }
 
     let chunks = Layout::default()
@@ -237,8 +245,28 @@ mod tests {
         });
         assert!(plan.is_slim);
         assert_eq!(plan.permission_lane_height, 2);
-        assert!(plan.tool_inspection_height <= 6);
-        assert!(plan.workbench_height <= 4);
+        assert!(plan.tool_inspection_height <= 8);
+        assert!(plan.workbench_height <= 8);
+    }
+
+    #[test]
+    fn constrained_layout_shares_space_between_activity_and_plan() {
+        let plan = plan_tui_layout(TuiLayoutInputs {
+            area: Rect::new(0, 0, 100, 30),
+            surfaces: UiSurfaces::lean(),
+            dashboard_has_content: false,
+            editor_height: 3,
+            editor_info_height: 0,
+            instrument_footer_height: 4,
+            session_height: 2,
+            pending_permission: false,
+            tool_inspection_height: 16,
+            workbench_height: 16,
+            segment_detail_height: 0,
+        });
+        assert!(plan.tool_inspection_height >= 9, "{plan:?}");
+        assert!(plan.workbench_height >= 9, "{plan:?}");
+        assert!(plan.conversation_area.height >= 3);
     }
 
     #[test]

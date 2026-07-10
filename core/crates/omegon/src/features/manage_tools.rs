@@ -125,8 +125,7 @@ impl Feature for ManageTools {
         vec![ToolDefinition {
             name: crate::tool_registry::manage_tools::MANAGE_TOOLS.into(),
             label: "manage_tools".into(),
-            description: "List, enable, or disable tools. Use to activate tools the user \
-                requests or disable irrelevant ones to save context window space."
+            description: "List, enable, or disable tools. The model-visible tool schema is the currently enabled/callable inventory: if a tool is available for invocation, do not enable it first. Use action=list_groups only to inspect hidden or disabled groups before activating capabilities absent from the current schema."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -336,6 +335,16 @@ mod tests {
     use super::*;
     use omegon_traits::Feature;
     use serde_json::json;
+
+    #[test]
+    fn schema_tells_model_visible_tools_are_already_callable() {
+        let manager = ManageTools::new();
+        let tools = manager.tools();
+        let description = &tools[0].description;
+
+        assert!(description.contains("currently enabled/callable inventory"));
+        assert!(description.contains("do not enable it first"));
+    }
 
     #[tokio::test]
     async fn list_marks_registered_but_uncallable_tools_unavailable() {

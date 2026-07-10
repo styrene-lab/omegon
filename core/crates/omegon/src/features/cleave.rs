@@ -303,33 +303,24 @@ fn cleave_assessment_approval(legacy_decision: &str, strategy: &Value) -> Value 
     let mode = strategy["strategy"]["mode"]
         .as_str()
         .unwrap_or("direct_execution");
-    let requires = legacy_decision == "cleave"
+    let recommended = legacy_decision == "cleave"
         || matches!(mode, "parallel_cleave" | "sequential_children" | "hybrid");
     json!({
-        "required": requires,
+        // Assessment is advisory. Only cleave_run creates a durable approval
+        // request and an actionable TUI surface.
+        "state": "not_requested",
+        "required": false,
+        "recommended_for_run": recommended,
         "operation": "cleave_run",
-        "surface": "menu",
-        "workbench_role": "process_tree",
-        "reason": if requires {
-            "Cleave execution may launch cloves, create private workspaces, run long validation, and consume paid tokens; operator menu approval is required before execution."
+        "surface": Value::Null,
+        "workbench_role": Value::Null,
+        "reason": if recommended {
+            "Assessment recommends cleave. Invoke cleave_run to create a pending operator approval request; no approval menu exists yet."
         } else {
-            "Assessment does not recommend cleave execution."
+            "Assessment does not recommend cleave execution; no approval request exists."
         },
-        "actions": if requires {
-            json!([
-                "review_details",
-                "approve_and_run",
-                "deny",
-                "view_evidence",
-                "reassess"
-            ])
-        } else {
-            json!(["review_details"])
-        },
-        "confirmation": {
-            "required_for_high_cost": true,
-            "prompt": "Approve and run cleave cloves? y/N"
-        }
+        "actions": ["review_details"],
+        "confirmation": Value::Null
     })
 }
 
@@ -2485,30 +2476,26 @@ fn cleave_run_menu_approval_required(
     ToolResult {
         content: vec![ContentBlock::Text {
             text: format!(
-                "Cleave approval required: open the approval menu for {approval_id} before launching {requested_children} clove workstream(s) with max_parallel={max_parallel}."
+                "Cleave approval required: run `/cleave approve {approval_id}` to approve and launch {requested_children} clove workstream(s) with max_parallel={max_parallel}. Use `/cleave evidence {approval_id}` to review evidence or `/cleave deny {approval_id}` to deny. The pending request is also pinned in Workbench."
             ),
         }],
         details: json!({
             "approval_required": true,
-            "kind": "cleave_menu_approval_required",
+            "kind": "cleave_approval_required",
             "operation": "cleave_run",
             "approval_id": approval_id,
-            "surface": "menu",
-            "workbench_role": "process_tree_after_approval",
+            "surface": "workbench_and_commands",
+            "workbench_role": "pending_approval",
             "requested": {
                 "children": requested_children,
                 "max_parallel": max_parallel,
             },
-            "menu": {
-                "title": "Cleave approval required",
-                "actions": [
-                    {"id": "review_details", "label": "Review details", "hotkey": "enter"},
-                    {"id": "approve_and_run", "label": "Approve and run", "hotkey": "a"},
-                    {"id": "deny", "label": "Deny", "hotkey": "d"},
-                    {"id": "view_evidence", "label": "View evidence", "hotkey": "v"},
-                    {"id": "reassess", "label": "Reassess", "hotkey": "r"}
-                ]
-            }
+            "actions": [
+                {"id": "approve_and_run", "label": "Approve and run", "command": format!("/cleave approve {approval_id}")},
+                {"id": "view_evidence", "label": "View evidence", "command": format!("/cleave evidence {approval_id}")},
+                {"id": "deny", "label": "Deny", "command": format!("/cleave deny {approval_id}")},
+                {"id": "reassess", "label": "Reassess", "command": format!("/cleave reassess {approval_id}")}
+            ]
         }),
     }
 }
@@ -2679,7 +2666,24 @@ mod tests {
     use omegon_traits::OperationKind;
 
     #[test]
-    fn cleave_run_menu_gate_blocks_unapproved_launch() {
+    fn cleave_assessment_is_advisory_until_run_requests_approval() {
+        let assessment =
+            cleave_assessment_approval("cleave", &json!({"strategy": {"mode": "parallel_cleave"}}));
+
+        assert_eq!(assessment["state"], "not_requested");
+        assert_eq!(assessment["required"], false);
+        assert_eq!(assessment["recommended_for_run"], true);
+        assert!(assessment["surface"].is_null());
+        assert!(
+            assessment["reason"]
+                .as_str()
+                .unwrap()
+                .contains("no approval menu exists yet")
+        );
+    }
+
+    #[test]
+    fn cleave_run_gate_exposes_workbench_and_command_actions() {
         let plan = CleavePlan::from_json(
             r#"{
                 "children": [
@@ -2693,16 +2697,13 @@ mod tests {
         let result = cleave_run_menu_approval_required(&plan, 1, &args);
 
         assert_eq!(result.details["approval_required"], true);
-        assert_eq!(result.details["kind"], "cleave_menu_approval_required");
+        assert_eq!(result.details["kind"], "cleave_approval_required");
         assert_eq!(result.details["operation"], "cleave_run");
         assert_eq!(result.details["approval_id"], "cleave_27");
-        assert_eq!(result.details["surface"], "menu");
-        assert_eq!(
-            result.details["workbench_role"],
-            "process_tree_after_approval"
-        );
+        assert_eq!(result.details["surface"], "workbench_and_commands");
+        assert_eq!(result.details["workbench_role"], "pending_approval");
         assert_eq!(result.details["requested"]["children"], 1);
-        let actions = result.details["menu"]["actions"].as_array().unwrap();
+        let actions = result.details["actions"].as_array().unwrap();
         assert!(
             actions
                 .iter()
@@ -3249,26 +3250,20 @@ mod tests {
     }
 
     #[test]
-    fn assess_complex_directive_requires_menu_approval() {
+    fn assess_complex_directive_recommends_run_without_fabricating_approval() {
         let result = assess_directive(
             "Build a multi-service integration with gRPC, authentication, and backward compatibility for legacy clients with concurrent processing",
             2.0,
         );
 
-        assert_eq!(result["approval"]["required"], true);
+        assert_eq!(result["approval"]["state"], "not_requested");
+        assert_eq!(result["approval"]["required"], false);
+        assert_eq!(result["approval"]["recommended_for_run"], true);
         assert_eq!(result["approval"]["operation"], "cleave_run");
-        assert_eq!(result["approval"]["surface"], "menu");
-        assert_eq!(result["approval"]["workbench_role"], "process_tree");
+        assert!(result["approval"]["surface"].is_null());
+        assert!(result["approval"]["workbench_role"].is_null());
         let actions = result["approval"]["actions"].as_array().unwrap();
-        assert!(actions.iter().any(|action| action == "approve_and_run"));
-        assert!(actions.iter().any(|action| action == "view_evidence"));
-        assert!(actions.iter().all(|action| action != "modify_plan"));
-        assert!(
-            actions
-                .iter()
-                .all(|action| action != "run_phased_in_parent")
-        );
-        assert!(actions.iter().all(|action| action != "save_assessment"));
+        assert_eq!(actions, &[json!("review_details")]);
     }
 
     #[test]

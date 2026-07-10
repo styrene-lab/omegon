@@ -14,7 +14,10 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+- Corrected cleave lifecycle surfaces so `cleave_assess` explicitly remains advisory, while `cleave_run` creates a durable Workbench pending-approval lane and returns concrete `/cleave approve|evidence|deny` actions instead of claiming a nonexistent transient menu.
+- Clarified the model-visible tool inventory contract: tools present in the active schema are already enabled and callable, so `manage_tools` is only needed for capabilities absent from that schema.
 - Fixed completed session plans lingering as active Workbench lanes: terminal checklists remain available through the completion ledger and immediate plan-tool notification, while semantic and legacy projections omit completed or archived lanes instead of resurrecting stale active state.
+- Expanded Slim Workbench sizing from a fixed 3–5-line preview to content-driven heights for live activity, plans, cleave runs, and delegations; normal terminals now allocate substantially more useful rows, constrained terminals share available space between activity and plan panes, and permission prompts retain conservative caps.
 - Fixed the completed-plan render regression test to exercise the real approved/executing/manual-completion lifecycle, preserving coverage that completed session plans remain in history without leaving a stale Workbench lane.
 - Activated cleave pre-dispatch route pinning: feature-dispatched runs now capture one shared inventory snapshot, stamp the run generation, resolve every child route from that snapshot before orchestration, and pass immutable decisions to the orchestrator for persisted dispatch provenance.
 - Hardened cleave route-provenance compatibility across persisted state, semantic operation rows, TUI dashboard/workbench/instruments, web/API surfaces, CLI fixtures, and smoke scenarios; the complete cleave-focused suite now compiles and passes with explicit generation/decision defaults instead of hidden constructor drift.

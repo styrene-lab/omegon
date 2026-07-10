@@ -16,9 +16,9 @@ pub fn workbench_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> 
         return 0;
     }
     let item_count = snapshot.items.len() as u16;
-    // Rule/header + compact task rows. Keep the pinned plan compact so it stays
-    // adjacent to the composer without crowding the bottom interaction band.
-    (1 + item_count.min(4)).clamp(2, 5)
+    // Rule/header + every task row. The frame-level layout budget decides how much
+    // can actually be shown; do not discard useful plan content here.
+    1u16.saturating_add(item_count).max(2)
 }
 
 pub fn active_plan_workspace_context_height(state: &WorkbenchState) -> u16 {
@@ -57,6 +57,13 @@ pub fn activity_preferred_height(
             .as_ref()
             .is_some_and(|tool| should_render_activity_tool_detail(tool, 3))
     });
+    let operation_rows = projection
+        .entries
+        .iter()
+        .filter_map(|entry| entry.operation.as_ref())
+        .map(|operation| 1u16.saturating_add(operation.children.len() as u16))
+        .max()
+        .unwrap_or(0);
     match (projection.has_tool(), projection.has_operation()) {
         (true, true) => {
             let tool_height = if wants_tool_detail {
@@ -64,11 +71,11 @@ pub fn activity_preferred_height(
             } else {
                 tool_count.max(1)
             };
-            tool_height.saturating_add(3)
+            tool_height.saturating_add(operation_rows)
         }
         (true, false) if wants_tool_detail => 4,
         (true, false) => tool_count.max(1),
-        (false, true) => 5,
+        (false, true) => operation_rows,
         (false, false) => 0,
     }
 }
@@ -742,12 +749,20 @@ pub fn render_workbench_panel(
     }
 
     if let Some(snapshot) = state.active.as_ref() {
-        render_workspace_context_panel(Rect::new(area.x, area.y, area.width, 1), frame, t, state);
+        let context_height = active_plan_workspace_context_height(state).min(area.height);
+        if context_height > 0 {
+            render_workspace_context_panel(
+                Rect::new(area.x, area.y, area.width, context_height),
+                frame,
+                t,
+                state,
+            );
+        }
         let plan_area = Rect::new(
             area.x,
-            area.y.saturating_add(1),
+            area.y.saturating_add(context_height),
             area.width,
-            area.height.saturating_sub(1),
+            area.height.saturating_sub(context_height),
         );
         render_active_workbench_panel(plan_area, frame, t, snapshot, state.workstreams.len());
     } else if !state.workstreams.is_empty() {
@@ -1657,6 +1672,27 @@ mod tests {
     }
 
     #[test]
+    fn workbench_height_expands_for_all_plan_items() {
+        let snapshot = PlanDisplaySnapshot {
+            mode: "executing".into(),
+            completed: 1,
+            total: 8,
+            items: (0..8)
+                .map(|index| PlanDisplayItem {
+                    status: if index == 1 {
+                        PlanDisplayStatus::Active
+                    } else {
+                        PlanDisplayStatus::Todo
+                    },
+                    description: format!("Task {index}"),
+                })
+                .collect(),
+        };
+
+        assert_eq!(workbench_snapshot_height(&snapshot, 120), 9);
+    }
+
+    #[test]
     fn workbench_height_stacks_workspace_context_above_active_plan() {
         let state = WorkbenchState {
             active: Some(PlanDisplaySnapshot {
@@ -1677,6 +1713,44 @@ mod tests {
         };
 
         assert_eq!(workbench_preferred_height(&state, 120), 3);
+    }
+
+    #[test]
+    fn active_plan_without_workspace_context_uses_full_height() {
+        let state = WorkbenchState {
+            active: Some(PlanDisplaySnapshot {
+                mode: "executing".into(),
+                completed: 0,
+                total: 2,
+                items: vec![
+                    PlanDisplayItem {
+                        status: PlanDisplayStatus::Active,
+                        description: "Inspect layout".into(),
+                    },
+                    PlanDisplayItem {
+                        status: PlanDisplayStatus::Todo,
+                        description: "Patch layout".into(),
+                    },
+                ],
+            }),
+            ..WorkbenchState::default()
+        };
+        let backend = ratatui::backend::TestBackend::new(80, 3);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_workbench_panel(frame.area(), frame, &super::super::theme::Alpharius, &state)
+            })
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Inspect layout"), "{rendered}");
+        assert!(rendered.contains("Patch layout"), "{rendered}");
     }
 
     #[test]
