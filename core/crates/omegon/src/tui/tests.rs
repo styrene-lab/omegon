@@ -4996,7 +4996,7 @@ fn skills_registry_advertises_help_aliases() {
 
 #[test]
 fn slash_skills_opens_structured_menu() {
-    for command in ["/skills", "/skills list", "/skill"] {
+    for command in ["/skills", "/skills list", "/skill", "/skill list"] {
         let mut app = test_app();
         let (tx, mut rx) = test_tx_with_rx();
 
