@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::inference_inventory::{InferenceInventoryStore, InventoryLayer, InventorySnapshot};
+use crate::inference_inventory::{
+    CapabilityGrade, CompatibilityRequest, InferenceInventoryStore, InventoryLayer,
+    InventorySnapshot,
+};
 use crate::inference_manifest::{InferenceManifestLoader, ManifestDiagnostic, ManifestSource};
 use crate::model_registry::ModelRegistry;
 
@@ -16,12 +19,29 @@ pub struct InferenceRefreshReport {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RouteShadowAgreement {
+    Agreement,
+    Divergence,
+    NoAuthoritativeCandidate,
+    NoInventoryCandidate,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RouteShadowObservation {
+    pub generation: u64,
+    pub authoritative: Option<String>,
+    pub inventory_candidates: Vec<String>,
+    pub agreement: RouteShadowAgreement,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InferenceRuntimeProjection {
     pub generation: u64,
     pub active_sources: Vec<ManifestSource>,
     pub endpoint_count: usize,
     pub offering_count: usize,
     pub last_rejected_diagnostics: Vec<ManifestDiagnostic>,
+    pub route_shadow_observations: Vec<RouteShadowObservation>,
 }
 
 impl InferenceRuntimeProjection {
@@ -44,7 +64,23 @@ impl InferenceRuntimeProjection {
                 ));
             }
         }
+        output.push_str(&format!(
+            "\nRoute shadow observations: {}",
+            self.route_shadow_observations.len()
+        ));
+        if let Some(last) = self.route_shadow_observations.last() {
+            output.push_str(&format!("\nLast route shadow: {:?}", last.agreement));
+        }
         output
+    }
+}
+
+fn shadow_grade_floor(grade: crate::routing::CapabilityGradeBand) -> Option<CapabilityGrade> {
+    match grade {
+        crate::routing::CapabilityGradeBand::Max => Some(CapabilityGrade::S),
+        crate::routing::CapabilityGradeBand::Frontier => Some(CapabilityGrade::B),
+        crate::routing::CapabilityGradeBand::Mid => Some(CapabilityGrade::D),
+        crate::routing::CapabilityGradeBand::Leaf => None,
     }
 }
 
@@ -55,6 +91,7 @@ pub struct InferenceRuntimeState {
     sources: Vec<ManifestSource>,
     active_sources: Arc<tokio::sync::RwLock<Vec<ManifestSource>>>,
     last_rejected_diagnostics: Arc<tokio::sync::RwLock<Vec<ManifestDiagnostic>>>,
+    route_shadow_observations: Arc<tokio::sync::RwLock<Vec<RouteShadowObservation>>>,
 }
 
 impl InferenceRuntimeState {
@@ -78,6 +115,7 @@ impl InferenceRuntimeState {
             sources,
             active_sources: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             last_rejected_diagnostics: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            route_shadow_observations: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         }
     }
 
@@ -102,7 +140,54 @@ impl InferenceRuntimeState {
             endpoint_count: snapshot.endpoints.len(),
             offering_count: snapshot.offerings.len(),
             last_rejected_diagnostics: self.last_rejected_diagnostics.read().await.clone(),
+            route_shadow_observations: self.route_shadow_observations.read().await.clone(),
         }
+    }
+
+    pub async fn observe_route_shadow(
+        &self,
+        grade: crate::routing::CapabilityGradeBand,
+        authoritative: Option<&str>,
+    ) -> RouteShadowObservation {
+        let snapshot = self.store.snapshot().await;
+        let mut request = CompatibilityRequest::default();
+        if let Some(minimum) = shadow_grade_floor(grade) {
+            request.minimum_grades.insert("agentic".into(), minimum);
+        }
+        let inventory_candidates: Vec<String> = snapshot
+            .compatible_offerings(&request)
+            .into_iter()
+            .filter(|result| result.is_compatible())
+            .map(|result| result.offering.id.0.clone())
+            .collect();
+        let authoritative = authoritative.map(str::to_owned);
+        let agreement = match &authoritative {
+            None => RouteShadowAgreement::NoAuthoritativeCandidate,
+            Some(_) if inventory_candidates.is_empty() => {
+                RouteShadowAgreement::NoInventoryCandidate
+            }
+            Some(route)
+                if inventory_candidates
+                    .iter()
+                    .any(|candidate| candidate == route) =>
+            {
+                RouteShadowAgreement::Agreement
+            }
+            Some(_) => RouteShadowAgreement::Divergence,
+        };
+        let observation = RouteShadowObservation {
+            generation: snapshot.generation,
+            authoritative,
+            inventory_candidates,
+            agreement,
+        };
+        let mut observations = self.route_shadow_observations.write().await;
+        observations.push(observation.clone());
+        if observations.len() > 64 {
+            let excess = observations.len() - 64;
+            observations.drain(..excess);
+        }
+        observation
     }
 
     pub async fn record_refresh_report(&self, report: &InferenceRefreshReport) {

@@ -1172,12 +1172,16 @@ fn parse_csv_env(name: &str) -> Vec<String> {
 
 async fn resolve_current_model_intent_route(
     route_controller: &std::sync::Arc<route::RouteController>,
+    inference_runtime: &crate::inference_runtime::InferenceRuntimeState,
 ) -> Option<route::RouteSnapshot> {
     let mut inventory = routing::ProviderInventory::probe();
     inventory.probe_ollama().await;
     let intent = route_controller.snapshot().await.intent;
     let candidate = route::select_candidate_for_intent(&intent, &inventory)?;
     let target = format!("{}:{}", candidate.provider_id, candidate.model_id);
+    inference_runtime
+        .observe_route_shadow(intent.to_capability_request().grade, Some(&target))
+        .await;
     let bridge = providers::auto_detect_bridge(&target).await?;
     route_controller
         .resolve_route_from_intent_candidate(candidate, bridge)
@@ -4721,7 +4725,7 @@ fn build_tui_secret_readiness_snapshot(
                     if let Err(err) = settings::persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                     }
-                    let resolved = resolve_current_model_intent_route(&route_controller).await;
+                    let resolved = resolve_current_model_intent_route(&route_controller, &runtime_state.inference_runtime).await;
                     let active = resolved
                         .as_ref()
                         .and_then(|snapshot| snapshot.serving_model())
@@ -4764,7 +4768,7 @@ fn build_tui_secret_readiness_snapshot(
                     if let Err(err) = settings::persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                     }
-                    let resolved = resolve_current_model_intent_route(&route_controller).await;
+                    let resolved = resolve_current_model_intent_route(&route_controller, &runtime_state.inference_runtime).await;
                     let active = resolved
                         .as_ref()
                         .and_then(|snapshot| snapshot.serving_model())
@@ -4801,7 +4805,7 @@ fn build_tui_secret_readiness_snapshot(
                     if let Err(err) = settings::persist_model_intent(&agent.cwd, &snapshot.intent) {
                         let _ = events_tx.send(AgentEvent::SystemNotification { message: format!("Failed to persist model intent: {err}") });
                     }
-                    let resolved = resolve_current_model_intent_route(&route_controller).await;
+                    let resolved = resolve_current_model_intent_route(&route_controller, &runtime_state.inference_runtime).await;
                     let active = resolved
                         .as_ref()
                         .and_then(|snapshot| snapshot.serving_model())
