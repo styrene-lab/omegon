@@ -51,8 +51,8 @@
   },
   "defaults": {
     "anthropic": "claude-fable-5",
-    "openai": "gpt-5.5",
-    "openai-codex": "gpt-5.5",
+    "openai": "gpt-5.6",
+    "openai-codex": "gpt-5.6",
     "groq": "llama-3.3-70b-versatile",
     "xai": "grok-3",
     "mistral": "mistral-small-latest",
@@ -70,8 +70,8 @@
   "grades": {
     "S": {
       "anthropic": "claude-fable-5",
-      "openai": "gpt-5.5",
-      "openai-codex": "gpt-5.5",
+      "openai": "gpt-5.6",
+      "openai-codex": "gpt-5.6",
       "google": "gemini-3.1-pro-preview",
       "google-antigravity": "gemini-3.1-pro-preview",
       "openrouter": "anthropic/claude-opus-4-7",
@@ -408,6 +408,12 @@
     },
     {
       "provider": "openai",
+      "modelIdPattern": "gpt-5.6*",
+      "contextCeiling": 1000000,
+      "grade": "S"
+    },
+    {
+      "provider": "openai",
       "modelIdPattern": "gpt-5.5*",
       "contextCeiling": 1000000,
       "grade": "S"
@@ -567,6 +573,12 @@
       "modelIdPattern": "openai/*",
       "contextCeiling": 200000,
       "grade": "B"
+    },
+    {
+      "provider": "openai-codex",
+      "modelIdPattern": "gpt-5.6*",
+      "contextCeiling": 1000000,
+      "grade": "S"
     }
   ],
   "models": [
@@ -718,6 +730,23 @@
       ],
       "description": "Fastest, cheapest Claude",
       "producer": "anthropic",
+      "executionClass": "api-cloud"
+    },
+    {
+      "id": "gpt-5.6",
+      "provider": "openai",
+      "name": "GPT-5.6",
+      "contextInput": 1000000,
+      "contextOutput": 65536,
+      "capabilities": [
+        "reasoning",
+        "vision",
+        "coding"
+      ],
+      "supportsReasoning": true,
+      "description": "OpenAI frontier, 1M context, native reasoning",
+      "conceptualModelId": "gpt-5.6",
+      "producer": "openai",
       "executionClass": "api-cloud"
     },
     {
@@ -1079,6 +1108,23 @@
       "conceptualModelId": "claude-opus-4.7",
       "producer": "anthropic",
       "executionClass": "broker-cloud"
+    },
+    {
+      "id": "gpt-5.6",
+      "provider": "openai-codex",
+      "name": "GPT-5.6 (Codex)",
+      "contextInput": 1000000,
+      "contextOutput": 65536,
+      "capabilities": [
+        "reasoning",
+        "vision",
+        "coding"
+      ],
+      "supportsReasoning": true,
+      "description": "GPT-5.6 via ChatGPT/Codex OAuth \u2014 experimental consumer route, 1M context",
+      "conceptualModelId": "gpt-5.6",
+      "producer": "openai",
+      "executionClass": "api-cloud"
     },
     {
       "id": "gpt-5.5",

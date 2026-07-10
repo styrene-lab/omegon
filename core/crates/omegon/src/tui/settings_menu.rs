@@ -132,8 +132,8 @@ pub(crate) fn build_model_selector_options(
     if let Some((_, is_oauth)) = openai_auth {
         let auth = if is_oauth { "oauth" } else { "api key" };
         options.push(sel_opt(
-            "openai:gpt-5.4",
-            "GPT-5.4",
+            "openai:gpt-5.6",
+            "GPT-5.6",
             &format!("OpenAI API · frontier · 1M · {auth}"),
             current,
         ));
@@ -160,8 +160,8 @@ pub(crate) fn build_model_selector_options(
     if let Some((_, is_oauth)) = openai_codex_auth {
         let auth = if is_oauth { "oauth" } else { "api key" };
         options.push(sel_opt(
-            "openai-codex:gpt-5.4",
-            "GPT-5.4",
+            "openai-codex:gpt-5.6",
+            "GPT-5.6",
             &format!("ChatGPT/Codex · GPT route · 1M · {auth}"),
             current,
         ));
