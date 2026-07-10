@@ -8025,8 +8025,31 @@ warning: {warning}"
                 .wrap(ratatui::widgets::Wrap { trim: false });
             frame.render_widget(editor_widget, editor_area);
         } else {
+            let editor_text = self.editor.render_text();
+            let shell_primed = editor_text.trim_start().starts_with('!');
+            let command_primed = editor_text.trim_start().starts_with('/');
+            let intent_bg = if shell_primed {
+                t.tool_success_bg()
+            } else {
+                t.surface_bg()
+            };
+            let intent_color = if shell_primed {
+                t.warning()
+            } else if command_primed {
+                t.accent_bright()
+            } else {
+                t.accent_muted()
+            };
             let hint_text = if self.agent_active {
                 String::new()
+            } else if shell_primed {
+                if editor_text.trim() == "!" {
+                    "⏎ hand off to shell  type a command to run here  Esc clear ".into()
+                } else {
+                    "⏎ run directly  Tab complete  output opens below  Esc clear ".into()
+                }
+            } else if command_primed {
+                "⏎ run command  Tab accept suggestion  ↑/↓ browse  Esc clear ".into()
             } else if self.editor.is_empty() {
                 if self.ui_surfaces.dashboard {
                     "⏎ send  ⇧⏎/⌥⏎ newline  ^O/Tab details  ^D tree  / commands ".into()
@@ -8061,7 +8084,21 @@ warning: {warning}"
                 provider_label
             };
             let route_label = format!("{provider_label}/{model_short}");
-            let editor_title = {
+            let editor_title = if shell_primed {
+                let shell = std::env::var("SHELL")
+                    .ok()
+                    .and_then(|path| std::path::Path::new(&path).file_name()?.to_str().map(str::to_string))
+                    .unwrap_or_else(|| "shell".to_string());
+                Line::from(vec![
+                    Span::styled(" ⚡ SHELL ", Style::default().fg(t.bg()).bg(t.warning()).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" {shell} · {} ", self.footer_data.cwd), Style::default().fg(t.warning()).bg(intent_bg)),
+                ])
+            } else if command_primed {
+                Line::from(vec![
+                    Span::styled(" / COMMAND ", Style::default().fg(t.bg()).bg(t.accent_bright()).add_modifier(Modifier::BOLD)),
+                    Span::styled(" registry autocomplete ", Style::default().fg(t.accent_bright()).bg(intent_bg)),
+                ])
+            } else {
                 use crate::tui::glyphs::EngineGlyphRole;
                 let glyphs = crate::tui::glyphs::glyphs();
                 let is_local_provider = matches!(provider_label, "ollama" | "llama.cpp" | "local");
@@ -8171,10 +8208,10 @@ warning: {warning}"
             let editor_block = Block::default()
                 .borders(Borders::TOP)
                 .border_type(ratatui::widgets::BorderType::Rounded)
-                .border_style(Style::default().fg(t.accent_muted()).bg(t.surface_bg()))
+                .border_style(Style::default().fg(intent_color).bg(intent_bg))
                 .title(editor_title)
                 .title_bottom(
-                    Line::from(Span::styled(hint_text, Style::default().fg(t.border_dim())))
+                    Line::from(Span::styled(hint_text, Style::default().fg(intent_color)))
                         .right_aligned(),
                 );
 
@@ -8212,7 +8249,8 @@ warning: {warning}"
                 self.editor
                     .visible_visual_lines(content_width, visible_rows)
                     .into_iter()
-                    .map(|vl| {
+                    .enumerate()
+                    .map(|(line_idx, vl)| {
                         if let Some(summary) = vl.strip_prefix("[Pasted text #") {
                             let summary = summary.strip_suffix(']').unwrap_or(summary).to_string();
                             Line::from(vec![
@@ -8221,6 +8259,29 @@ warning: {warning}"
                                 Span::raw(" "),
                                 Span::styled(summary, Style::default().fg(t.accent_bright())),
                             ])
+                        } else if command_primed && line_idx == 0 {
+                            let ghost = self.command_ghost_suffix().unwrap_or_default();
+                            Line::from(vec![
+                                Span::styled(vl.to_string(), Style::default().fg(t.fg())),
+                                Span::styled(
+                                    ghost,
+                                    Style::default()
+                                        .fg(t.dim())
+                                        .add_modifier(Modifier::ITALIC),
+                                ),
+                            ])
+                        } else if shell_primed {
+                            let (sigil, command) = vl.split_at(vl.len().min(1));
+                            Line::from(vec![
+                                Span::styled(
+                                    sigil.to_string(),
+                                    Style::default()
+                                        .fg(t.bg())
+                                        .bg(t.warning())
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(command.to_string(), Style::default().fg(t.fg())),
+                            ])
                         } else {
                             Line::from(Span::styled(vl.to_string(), Style::default().fg(t.fg())))
                         }
@@ -8228,7 +8289,7 @@ warning: {warning}"
                     .collect()
             };
             let editor_widget = Paragraph::new(visual_lines)
-                .style(Style::default().bg(t.surface_bg()))
+                .style(Style::default().fg(t.fg()).bg(intent_bg))
                 .block(editor_block); // no .wrap() — pre-split above
             frame.render_widget(editor_widget, editor_rect);
             if !self.editor_input_suppressed_now() {
@@ -10891,6 +10952,21 @@ Scroll transcript:
     fn matching_commands(&self) -> Vec<crate::surfaces::command_menu::CommandMenuRowProjection> {
         let text = self.editor.render_text();
         self.command_menu_projection().matching(&text)
+    }
+
+    /// Untyped suffix for the first registry-ranked command match. Keeping this
+    /// derived from the shared command projection makes the editor hint and
+    /// palette agree without a renderer-local command inventory.
+    fn command_ghost_suffix(&self) -> Option<String> {
+        let typed = self.editor.render_text();
+        if !typed.starts_with('/') || typed.contains(char::is_whitespace) {
+            return None;
+        }
+        let command = self.matching_commands().first()?.command.clone();
+        command
+            .strip_prefix(&typed)
+            .filter(|suffix| !suffix.is_empty())
+            .map(str::to_string)
     }
 
     fn is_at_file_picker_trigger(text: &str) -> Option<String> {

@@ -1036,9 +1036,11 @@ impl ProjectEditorSurface for Editor {
             })
             .collect();
 
+        let text = self.render_text();
         EditorProjection {
             mode: self.project_mode(),
-            text: self.render_text(),
+            intent: crate::surfaces::editor::EditorIntentProjection::from_text(&text),
+            text,
             is_empty: self.is_empty(),
             cursor_position: self.cursor_position(),
             visual_line_count: self.visual_line_count(content_width),
@@ -1091,7 +1093,9 @@ struct TokenSpan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::surfaces::editor::{EditorInlineTokenProjection, EditorModeProjection};
+    use crate::surfaces::editor::{
+        EditorInlineTokenProjection, EditorIntentProjection, EditorModeProjection,
+    };
 
     #[test]
     fn editor_projects_input_surface() {
@@ -1103,6 +1107,7 @@ mod tests {
 
         let projection = e.surface_projection(80);
         assert_eq!(projection.mode, EditorModeProjection::Normal);
+        assert_eq!(projection.intent, EditorIntentProjection::Prompt);
         assert!(projection.text.contains("hello"));
         assert_eq!(projection.inline_tokens.len(), 1);
         assert!(projection.kill_ring_present);
@@ -1112,6 +1117,24 @@ mod tests {
                 assert_eq!(path, &PathBuf::from("/tmp/paste.png"));
             }
             other => panic!("expected attachment token, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn editor_projects_prefix_intent_without_mutating_mode() {
+        let cases = [
+            ("/model", EditorIntentProjection::SlashCommand),
+            ("  !git status", EditorIntentProjection::ShellCommand),
+            ("@README.md", EditorIntentProjection::Context),
+            ("*remember this", EditorIntentProjection::Memory),
+            ("hello", EditorIntentProjection::Prompt),
+        ];
+        for (text, expected) in cases {
+            let mut editor = Editor::new();
+            editor.set_text(text);
+            let projection = editor.surface_projection(80);
+            assert_eq!(projection.mode, EditorModeProjection::Normal);
+            assert_eq!(projection.intent, expected, "text: {text}");
         }
     }
 
