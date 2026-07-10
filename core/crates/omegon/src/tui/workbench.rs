@@ -1951,6 +1951,7 @@ mod tests {
     #[test]
     fn activity_tool_detail_requires_room_and_active_or_detail_status() {
         let running = crate::surfaces::activity::ActivityToolProjection {
+            episode_id: "turn:1".to_string(),
             segment_id: "tool-1".to_string(),
             mode: crate::surfaces::activity::ActivityToolMode::Live,
             status: crate::surfaces::activity::ActivityToolStatus::Running,

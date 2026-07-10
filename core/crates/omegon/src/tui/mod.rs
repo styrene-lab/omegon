@@ -427,6 +427,7 @@ pub(crate) fn voice_prompt_from_notification(
 /// Application state for the TUI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ActivityToolState {
+    episode_id: String,
     segment_id: String,
     name: String,
     args_summary: Option<String>,
@@ -439,6 +440,7 @@ struct ActivityToolState {
 impl ActivityToolState {
     fn projection(&self) -> crate::surfaces::activity::ActivityToolProjection {
         crate::surfaces::activity::ActivityToolProjection {
+            episode_id: self.episode_id.clone(),
             segment_id: self.segment_id.clone(),
             mode: self.mode,
             status: self.status,
@@ -7625,6 +7627,11 @@ warning: {warning}"
                 _ => ("tool".to_string(), None, None),
             };
             live_activity_tools.push(crate::surfaces::activity::ActivityToolProjection {
+                episode_id: self
+                    .conversation
+                    .turn_id_for_tool(id)
+                    .map(|turn| format!("turn:{turn}"))
+                    .unwrap_or_else(|| format!("tool:{id}")),
                 segment_id: id.clone(),
                 mode: crate::surfaces::activity::ActivityToolMode::Detail,
                 status: crate::surfaces::activity::ActivityToolStatus::Complete,
@@ -7636,7 +7643,8 @@ warning: {warning}"
         let activity_projection = if self.ui_surfaces.activity
             && self.ui_presentation.level != UiPresentationLevel::Full
         {
-            crate::surfaces::activity::ActivitySurfaceProjection::from_parts(
+            crate::surfaces::activity::ActivitySurfaceProjection::for_level(
+                self.ui_presentation.level,
                 live_activity_tools,
                 live_cleave.as_ref(),
                 live_delegate.as_ref(),
@@ -11281,6 +11289,7 @@ Scroll transcript:
         self.prune_activity_tools(std::time::Instant::now());
         self.activity_tools.retain(|tool| tool.segment_id != id);
         self.activity_tools.push_front(ActivityToolState {
+            episode_id: format!("turn:{}", self.turn),
             segment_id: id.to_string(),
             name: name.to_string(),
             args_summary,

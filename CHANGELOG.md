@@ -14,6 +14,7 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+- Live activity now carries the same stable episode identity used by durable outcomes (`turn:<id>` with safe `tool:<id>` fallback), and Om selects one primary attention/operation/running entry while Active retains the bounded multi-entry workflow view.
 - Successful tool completion now hands off directly from transient activity to the durable Om/Active episode outcome instead of lingering as duplicate completed activity rows; failures retain their longer attention window.
 - Om and Active now project completed tool evidence into one deterministic operation outcome per authoritative conversation turn while Full preserves the original per-tool evidence rows; projection is frame-local, leaves canonical segments untouched, and keeps running or unbound tools visible rather than guessing boundaries.
 - Continued decoupling presentation from surface bitsets: conversation detail, live activity allocation, editor chrome, runtime branding, and TUI layout compactness now derive from semantic Om/Active/Full level, so showing or hiding a dashboard no longer silently changes evidence density.

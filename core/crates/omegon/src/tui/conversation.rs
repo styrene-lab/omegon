@@ -1129,6 +1129,10 @@ impl ConversationView {
         })
     }
 
+    pub fn turn_id_for_tool(&self, id: &str) -> Option<u32> {
+        self.tool_segment_by_id(id).and_then(|segment| segment.meta.turn)
+    }
+
     pub fn latest_expandable_tool_id(&self) -> Option<String> {
         self.latest_expandable_tool_card()
             .and_then(|idx| match &self.segments.get(idx)?.content {
