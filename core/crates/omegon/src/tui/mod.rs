@@ -11845,8 +11845,11 @@ Scroll transcript:
                 operation,
             } => {
                 let milestone = OperationMilestoneProjection::started(&operation, children.len());
-                self.conversation
-                    .push_lifecycle(milestone.icon, &milestone.text);
+                self.conversation.push_operation_lifecycle(
+                    &operation,
+                    milestone.icon,
+                    &milestone.text,
+                );
             }
             AgentEvent::DecompositionChildCompleted {
                 label,
@@ -11855,13 +11858,19 @@ Scroll transcript:
             } => {
                 let milestone =
                     OperationMilestoneProjection::child_completed(&operation, &label, success);
-                self.conversation
-                    .push_lifecycle(milestone.icon, &milestone.text);
+                self.conversation.push_operation_lifecycle(
+                    &operation,
+                    milestone.icon,
+                    &milestone.text,
+                );
             }
             AgentEvent::DecompositionCompleted { merged, operation } => {
                 let milestone = OperationMilestoneProjection::completed(&operation, merged);
-                self.conversation
-                    .push_lifecycle(milestone.icon, &milestone.text);
+                self.conversation.push_operation_lifecycle(
+                    &operation,
+                    milestone.icon,
+                    &milestone.text,
+                );
             }
             AgentEvent::WebDashboardStarted { startup_json } => {
                 if let Ok(startup) =

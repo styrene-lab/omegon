@@ -44,9 +44,51 @@ pub fn project_conversation_segments(
         }
     }
 
+    let mut operation_lifecycle: BTreeMap<String, Vec<&Segment>> = BTreeMap::new();
+    for segment in segments {
+        if let Some(operation_id) = segment
+            .meta
+            .source_channel
+            .as_deref()
+            .and_then(|source| source.strip_prefix("operation:"))
+        {
+            operation_lifecycle
+                .entry(operation_id.to_string())
+                .or_default()
+                .push(segment);
+        }
+    }
+
     let mut projected = Vec::with_capacity(segments.len());
+    let mut emitted_operation: Option<String> = None;
     let mut emitted_turn = None;
     for segment in segments {
+        if let Some(operation_id) = segment
+            .meta
+            .source_channel
+            .as_deref()
+            .and_then(|source| source.strip_prefix("operation:"))
+        {
+            let operation_segments = &operation_lifecycle[operation_id];
+            let terminal = operation_segments.iter().rev().find(|candidate| {
+                matches!(
+                    &candidate.content,
+                    SegmentContent::LifecycleEvent { text, .. }
+                        if text.contains("merged") || text.contains("completed (no merge)")
+                )
+            });
+            if let Some(terminal) = terminal {
+                if emitted_operation.as_deref() != Some(operation_id) {
+                    projected.push(operation_outcome_segment(
+                        terminal.meta.clone(),
+                        operation_id,
+                        operation_segments,
+                    ));
+                    emitted_operation = Some(operation_id.to_string());
+                }
+                continue;
+            }
+        }
         if segment.meta.turn.is_none()
             && let SegmentContent::ToolCard { name, complete: true, .. } = &segment.content
             && name == "operator_shell"
@@ -72,6 +114,32 @@ pub fn project_conversation_segments(
         projected.push(segment.clone());
     }
     projected
+}
+
+fn operation_outcome_segment(
+    mut meta: SegmentMeta,
+    operation_id: &str,
+    evidence: &[&Segment],
+) -> Segment {
+    meta.duration_ms = None;
+    let terminal_text = evidence
+        .iter()
+        .rev()
+        .find_map(|segment| match &segment.content {
+            SegmentContent::LifecycleEvent { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .unwrap_or("completed");
+    let label = operation_id
+        .split_once(':')
+        .map(|(kind, id)| format!("{kind} {id}"))
+        .unwrap_or_else(|| operation_id.to_string());
+    Segment {
+        meta,
+        content: SegmentContent::SystemNotification {
+            text: format!("✓ {label} · {terminal_text} · {} events", evidence.len()),
+        },
+    }
 }
 
 fn outcome_segment(mut meta: SegmentMeta, episode: &OperationEpisodeProjection) -> Segment {
@@ -130,6 +198,35 @@ mod tests {
         let source = vec![tool(Some(7), "a", "done", true)];
         let projected = project_conversation_segments(&source, UiPresentationLevel::Active);
         assert!(matches!(projected[0].content, SegmentContent::SystemNotification { .. }));
+    }
+
+    #[test]
+    fn completed_operation_lifecycle_collapses_to_one_outcome() {
+        let operation = omegon_traits::OperationRef::delegate("delegate-7");
+        let mut conversation = crate::tui::conversation::ConversationView::new();
+        conversation.push_operation_lifecycle(&operation, "⇉", "Delegate: review started");
+        conversation.push_operation_lifecycle(&operation, "✓", "Delegate: review completed");
+        conversation.push_operation_lifecycle(
+            &operation,
+            "↯",
+            "Delegate completed (no merge)",
+        );
+
+        let projected =
+            project_conversation_segments(conversation.segments(), UiPresentationLevel::Om);
+        assert_eq!(projected.len(), 1);
+        let SegmentContent::SystemNotification { text } = &projected[0].content else {
+            panic!("operation outcome")
+        };
+        assert!(text.contains("delegate delegate-7"), "{text}");
+        assert!(text.contains("3 events"), "{text}");
+
+        let full =
+            project_conversation_segments(conversation.segments(), UiPresentationLevel::Full);
+        assert_eq!(full.len(), 3);
+        assert!(full
+            .iter()
+            .all(|segment| matches!(segment.content, SegmentContent::LifecycleEvent { .. })));
     }
 
     #[test]

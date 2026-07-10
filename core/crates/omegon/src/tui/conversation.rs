@@ -445,6 +445,24 @@ impl ConversationView {
         self.conv_state.auto_scroll_to_bottom();
     }
 
+    pub fn push_operation_lifecycle(
+        &mut self,
+        operation: &omegon_traits::OperationRef,
+        icon: &str,
+        text: &str,
+    ) {
+        let kind = match operation.kind {
+            omegon_traits::OperationKind::Delegate => "delegate",
+            omegon_traits::OperationKind::Cleave => "cleave",
+        };
+        let id = operation.id.as_deref().unwrap_or("active");
+        let mut segment = Segment::lifecycle(icon, text);
+        segment.meta.source_channel = Some(format!("operation:{kind}:{id}"));
+        self.segments.push(segment);
+        self.conv_state.invalidate();
+        self.conv_state.auto_scroll_to_bottom();
+    }
+
     pub fn push_lifecycle(&mut self, icon: &str, text: &str) {
         self.segments.push(Segment::lifecycle(icon, text));
         self.conv_state.invalidate();
