@@ -16,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Fixed inline terminal images rendering near the top of the conversation instead of inside their bottom-anchored segment chrome when short conversations sit above the composer.
 - Improved design-tree path-collision diagnostics: creating `docs/<id>.md` now distinguishes an existing indexed design node from an ordinary or malformed Markdown document and directs operators to convert or repair invalid frontmatter.
 
 ## [0.28.0] - 2026-07-10

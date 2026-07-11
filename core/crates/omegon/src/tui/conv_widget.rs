@@ -179,6 +179,15 @@ impl ConvState {
                     .scroll_offset
                     .min(total_height.saturating_sub(viewport_height))
         };
+        // Keep this projection aligned with ConversationWidget::render. Short
+        // conversations are bottom-anchored above the composer; using the raw
+        // viewport origin here sends out-of-band terminal image protocols to
+        // the top of the screen while their buffered chrome remains below.
+        let viewport_origin_y = if total_height < viewport_height {
+            viewport.y.saturating_add(viewport_height - total_height)
+        } else {
+            viewport.y
+        };
 
         let mut result = Vec::new();
         let mut y_cursor: u16 = 0;
@@ -196,7 +205,7 @@ impl ConvState {
             }
 
             if segment.is_image_render_segment() && seg_top >= top_offset {
-                let render_y = viewport.y + (seg_top - top_offset);
+                let render_y = viewport_origin_y + (seg_top - top_offset);
                 let segment_area = Rect {
                     x: viewport.x,
                     y: render_y,
@@ -761,6 +770,26 @@ mod tests {
             Some(area.height - 1),
             "short content should end at the bottom of the conversation viewport"
         );
+    }
+
+    #[test]
+    fn short_image_overlay_is_bottom_anchored_with_its_chrome() {
+        let segments = vec![Segment::image("/tmp/paste.png".into(), "pasted image")];
+        let widget = ConversationWidget::new(&segments, &Alpharius);
+        let area = Rect::new(4, 3, 40, 20);
+        let mut buf = Buffer::empty(Rect::new(0, 0, 50, 30));
+        let mut state = ConvState::new();
+        widget.render(area, &mut buf, &mut state);
+
+        let image_areas = state.visible_image_areas(&segments, area);
+        assert_eq!(image_areas.len(), 1);
+        let (_, image_area) = image_areas[0];
+        let segment_height = state.heights[0];
+        let expected_segment_y = area.bottom() - segment_height;
+        assert_eq!(image_area.x, area.x + 1);
+        assert_eq!(image_area.y, expected_segment_y + 1);
+        assert!(image_area.y > area.y, "overlay must not be pinned to viewport top");
+        assert!(image_area.bottom() < area.bottom());
     }
 
     #[test]
