@@ -8888,8 +8888,16 @@ warning: {warning}"
         }
     }
 
-    fn build_session_transcript(&self, mode: SegmentExportMode) -> String {
-        let segments = self.conversation.segments();
+    fn build_session_transcript_with_policy(
+        &self,
+        mode: SegmentExportMode,
+        policy: conversation_projection::ConversationExportPolicy,
+    ) -> String {
+        let projection = conversation_projection::project_conversation_for_export(
+            self.conversation.segments(),
+            policy,
+        );
+        let segments = projection.segments.as_slice();
         let mut parts: Vec<String> = Vec::new();
         if let Some(plan) = self.conversation.latest_plan_progress() {
             parts.push(format!("## Plan\n\n{}", plan.trim_end()));
@@ -8919,6 +8927,13 @@ warning: {warning}"
             }
         }
         parts.join("\n\n---\n\n")
+    }
+
+    fn build_session_transcript(&self, mode: SegmentExportMode) -> String {
+        self.build_session_transcript_with_policy(
+            mode,
+            conversation_projection::ConversationExportPolicy::Semantic,
+        )
     }
 
     fn restore_tui_after_native_scrollback(
