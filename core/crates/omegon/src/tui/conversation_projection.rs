@@ -106,7 +106,7 @@ pub fn project_conversation(
                 matches!(
                     &candidate.content,
                     SegmentContent::LifecycleEvent { text, .. }
-                        if text.contains("merged") || text.contains("completed (no merge)")
+                        if is_terminal_operation_text(text)
                 )
             });
             if let Some(terminal) = terminal {
@@ -156,6 +156,30 @@ pub fn project_conversation_segments(segments: &[Segment], level: UiPresentation
     project_conversation(segments, level).segments
 }
 
+fn operation_episode_id_from_source(source: Option<&str>) -> Option<&str> {
+    source?.strip_prefix("operation:")
+}
+
+fn is_terminal_operation_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("merged")
+        || lower.contains("completed (no merge)")
+        || lower.contains("failed")
+        || lower.contains("cancelled")
+}
+
+fn operation_failed(evidence: &[&Segment]) -> bool {
+    evidence.iter().any(|segment| {
+        matches!(
+            &segment.content,
+            SegmentContent::LifecycleEvent { icon, text }
+                if icon == "✗"
+                    || text.to_ascii_lowercase().contains("failed")
+                    || text.to_ascii_lowercase().contains("cancelled")
+        )
+    })
+}
+
 fn operation_outcome_segment(
     mut meta: SegmentMeta,
     operation_id: &str,
@@ -174,10 +198,14 @@ fn operation_outcome_segment(
         .split_once(':')
         .map(|(kind, id)| format!("{kind} {id}"))
         .unwrap_or_else(|| operation_id.to_string());
+    let state = if operation_failed(evidence) { "✗" } else { "✓" };
     Segment {
         meta,
         content: SegmentContent::SystemNotification {
-            text: format!("✓ {label} · {terminal_text} · {} events", evidence.len()),
+            text: format!(
+                "{state} {label} · {terminal_text} · {} events",
+                evidence.len()
+            ),
         },
     }
 }
@@ -267,6 +295,23 @@ mod tests {
         assert!(full
             .iter()
             .all(|segment| matches!(segment.content, SegmentContent::LifecycleEvent { .. })));
+    }
+
+    #[test]
+    fn failed_operation_collapses_to_failed_outcome() {
+        let operation = omegon_traits::OperationRef::cleave(Some("run-9".into()));
+        let mut conversation = crate::tui::conversation::ConversationView::new();
+        conversation.push_operation_lifecycle(&operation, "↯", "Cleave: 2 children dispatched");
+        conversation.push_operation_lifecycle(&operation, "✗", "Child 'tests' failed");
+
+        let projected =
+            project_conversation_segments(conversation.segments(), UiPresentationLevel::Om);
+        assert_eq!(projected.len(), 1);
+        let SegmentContent::SystemNotification { text } = &projected[0].content else {
+            panic!("failed operation outcome")
+        };
+        assert!(text.starts_with("✗ cleave run-9"), "{text}");
+        assert!(text.contains("failed"), "{text}");
     }
 
     #[test]
