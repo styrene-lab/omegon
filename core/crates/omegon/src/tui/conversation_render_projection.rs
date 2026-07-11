@@ -13,18 +13,11 @@ use crate::surfaces::conversation::{
     SegmentSelectionTreatment, SegmentSurfacePolicy, SegmentSurfaceTreatment, ToolCategory,
 };
 
-pub fn tool_category_color(kind: ToolCategory, t: &dyn Theme) -> Color {
-    match kind {
-        ToolCategory::CommandExec => t.warning(),
-        ToolCategory::FileRead => t.accent_muted(),
-        ToolCategory::FileMutation => t.caution(),
-        ToolCategory::DesignTree => t.accent_bright(),
-        ToolCategory::Memory => t.accent(),
-        ToolCategory::Search => t.accent_muted(),
-        ToolCategory::Subagent => t.accent(),
-        ToolCategory::Network => t.accent_muted(),
-        ToolCategory::Generic => t.border_dim(),
-    }
+pub fn tool_category_color(_kind: ToolCategory, t: &dyn Theme) -> Color {
+    // Category is identity, not hierarchy. Keep every tool category at the same
+    // neutral luminance; glyph and label distinguish kind. Brighter and dimmer
+    // grays remain available to encode prominence, selection, and de-emphasis.
+    t.muted()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,8 +97,8 @@ pub fn tool_card_chrome(
     } else if !complete {
         (
             glyphs.tool(crate::tui::glyphs::ToolGlyphRole::Running),
-            t.warning(),
-            t.warning(),
+            t.accent(),
+            t.accent_muted(),
             t.tool_success_bg(),
         )
     } else {
@@ -310,6 +303,27 @@ mod tests {
     }
 
     #[test]
+    fn tool_categories_share_one_neutral_luminance() {
+        for category in [
+            ToolCategory::CommandExec,
+            ToolCategory::FileRead,
+            ToolCategory::FileMutation,
+            ToolCategory::DesignTree,
+            ToolCategory::Memory,
+            ToolCategory::Search,
+            ToolCategory::Subagent,
+            ToolCategory::Network,
+            ToolCategory::Generic,
+        ] {
+            assert_eq!(
+                tool_category_color(category, &Alpharius),
+                Alpharius.muted(),
+                "{category:?} encoded category as luminance hierarchy"
+            );
+        }
+    }
+
+    #[test]
     fn tool_card_chrome_uses_category_color_for_completed_tools() {
         let chrome = tool_card_chrome(
             "bash",
@@ -329,6 +343,22 @@ mod tests {
             tool_category_color(ToolCategory::CommandExec, &Alpharius)
         );
         assert_eq!(chrome.background, Alpharius.tool_success_bg());
+    }
+
+    #[test]
+    fn running_tool_uses_active_teal_without_attention_orange() {
+        let chrome = tool_card_chrome(
+            "bash",
+            Some("cargo check"),
+            false,
+            false,
+            Some(ToolCategory::CommandExec),
+            &Alpharius,
+        );
+        assert_eq!(chrome.status_color, Alpharius.accent());
+        assert_eq!(chrome.border_color, Alpharius.accent_muted());
+        assert_ne!(chrome.status_color, Alpharius.warning());
+        assert_ne!(chrome.border_color, Alpharius.warning());
     }
 
     #[test]

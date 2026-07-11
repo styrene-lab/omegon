@@ -253,16 +253,16 @@ impl Theme for JsonTheme {
     }
 
     fn success(&self) -> Color {
-        self.get("green")
+        self.muted()
     }
     fn error(&self) -> Color {
-        self.get("red")
+        self.get("orange")
     }
     fn warning(&self) -> Color {
         self.get("orange")
     }
     fn caution(&self) -> Color {
-        self.get("yellow")
+        self.get("orange")
     }
 
     fn footer_bg(&self) -> Color {
@@ -344,16 +344,16 @@ impl Theme for Alpharius {
     }
 
     fn success(&self) -> Color {
-        Color::Rgb(26, 184, 120)
+        self.muted()
     }
     fn error(&self) -> Color {
-        Color::Rgb(224, 72, 72)
+        self.warning()
     }
     fn warning(&self) -> Color {
         Color::Rgb(200, 100, 24)
     }
     fn caution(&self) -> Color {
-        Color::Rgb(120, 184, 32)
+        self.warning()
     }
 }
 
@@ -405,11 +405,14 @@ mod tests {
     }
 
     #[test]
-    fn alpharius_fallback_colors_are_distinct() {
+    fn alpharius_fallback_colors_follow_conservative_semantics() {
         let t = Alpharius;
         assert_ne!(t.bg(), t.fg());
         assert_ne!(t.accent(), t.success());
-        assert_ne!(t.error(), t.warning());
+        assert_eq!(t.success(), t.muted());
+        assert_eq!(t.error(), t.warning());
+        assert_eq!(t.caution(), t.warning());
+        assert_ne!(t.warning(), t.accent());
         assert_ne!(t.card_bg(), t.surface_bg());
     }
 
@@ -428,6 +431,9 @@ mod tests {
             let theme = JsonTheme::load(&path).expect("should load alpharius.json");
             assert_ne!(theme.bg(), Color::Reset, "bg should be loaded");
             assert_ne!(theme.accent(), Color::Reset, "accent should be loaded");
+            assert_eq!(theme.success(), theme.muted());
+            assert_eq!(theme.error(), theme.warning());
+            assert_eq!(theme.caution(), theme.warning());
             // Verify known values from the file
             assert_eq!(
                 theme.accent(),
