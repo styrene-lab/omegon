@@ -9,6 +9,57 @@ use super::envelope::{
     UI_RUNTIME_ENVELOPE_VERSION, UiActionOutcomeEnvelope, UiActionOutcomeStatus,
 };
 use super::revision::{UiRevision, UiRevisionCounter};
+use crate::surfaces::episodes::OperationEpisodeState;
+
+/// Minimal replay state for proving the atomic activity-to-outcome handoff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpisodeReplayState {
+    pub revision: UiRevision,
+    pub episode_id: String,
+    pub activity_visible: bool,
+    pub outcome_visible: bool,
+    pub state: OperationEpisodeState,
+}
+
+#[derive(Debug, Clone)]
+pub struct EpisodeReplayFixture {
+    revisions: UiRevisionCounter,
+    states: Vec<EpisodeReplayState>,
+}
+
+impl EpisodeReplayFixture {
+    pub fn start(episode_id: impl Into<String>) -> Self {
+        let mut revisions = UiRevisionCounter::new();
+        let state = EpisodeReplayState {
+            revision: revisions.next_revision(),
+            episode_id: episode_id.into(),
+            activity_visible: true,
+            outcome_visible: false,
+            state: OperationEpisodeState::Running,
+        };
+        Self {
+            revisions,
+            states: vec![state],
+        }
+    }
+
+    pub fn complete(&mut self, state: OperationEpisodeState) -> &EpisodeReplayState {
+        assert!(state != OperationEpisodeState::Running);
+        let episode_id = self.states.last().expect("started episode").episode_id.clone();
+        self.states.push(EpisodeReplayState {
+            revision: self.revisions.next_revision(),
+            episode_id,
+            activity_visible: false,
+            outcome_visible: true,
+            state,
+        });
+        self.states.last().expect("completed episode")
+    }
+
+    pub fn states(&self) -> &[EpisodeReplayState] {
+        &self.states
+    }
+}
 
 /// Pure Rust replay fixture builder for semantic UI action outcomes.
 #[derive(Debug, Clone)]
@@ -105,6 +156,34 @@ pub fn outcome_to_envelope(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn episode_completion_atomically_replaces_activity_with_outcome() {
+        let mut fixture = EpisodeReplayFixture::start("turn:7");
+        let complete = fixture.complete(OperationEpisodeState::Complete);
+
+        assert_eq!(complete.episode_id, "turn:7");
+        assert!(!complete.activity_visible);
+        assert!(complete.outcome_visible);
+        assert_eq!(complete.revision.get(), 2);
+        assert!(fixture.states().iter().all(|state| {
+            state.activity_visible || state.outcome_visible
+        }));
+        assert!(fixture.states().iter().all(|state| {
+            !(state.activity_visible && state.outcome_visible)
+        }));
+    }
+
+    #[test]
+    fn failed_episode_handoff_preserves_identity_and_durable_failure() {
+        let mut fixture = EpisodeReplayFixture::start("operator-shell:shell-1");
+        let failed = fixture.complete(OperationEpisodeState::Failed);
+
+        assert_eq!(failed.episode_id, "operator-shell:shell-1");
+        assert_eq!(failed.state, OperationEpisodeState::Failed);
+        assert!(!failed.activity_visible);
+        assert!(failed.outcome_visible);
+    }
 
     #[test]
     fn accepted_outcome_replay_envelope_preserves_revision_and_message() {
