@@ -45,7 +45,12 @@ impl EpisodeReplayFixture {
 
     pub fn complete(&mut self, state: OperationEpisodeState) -> &EpisodeReplayState {
         assert!(state != OperationEpisodeState::Running);
-        let episode_id = self.states.last().expect("started episode").episode_id.clone();
+        let episode_id = self
+            .states
+            .last()
+            .expect("started episode")
+            .episode_id
+            .clone();
         self.states.push(EpisodeReplayState {
             revision: self.revisions.next_revision(),
             episode_id,
@@ -166,12 +171,18 @@ mod tests {
         assert!(!complete.activity_visible);
         assert!(complete.outcome_visible);
         assert_eq!(complete.revision.get(), 2);
-        assert!(fixture.states().iter().all(|state| {
-            state.activity_visible || state.outcome_visible
-        }));
-        assert!(fixture.states().iter().all(|state| {
-            !(state.activity_visible && state.outcome_visible)
-        }));
+        assert!(
+            fixture
+                .states()
+                .iter()
+                .all(|state| { state.activity_visible || state.outcome_visible })
+        );
+        assert!(
+            fixture
+                .states()
+                .iter()
+                .all(|state| { !(state.activity_visible && state.outcome_visible) })
+        );
     }
 
     #[test]

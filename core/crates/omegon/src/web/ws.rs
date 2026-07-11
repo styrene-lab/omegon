@@ -1569,12 +1569,9 @@ async fn handle_client_command(
                     crate::control_runtime::ControlRequest::SetContextClass { class }
                 }
                 "set_presentation_level" => {
-                    let Some(level) = cmd["level"]
-                        .as_str()
-                        .and_then(|level| {
-                            crate::surfaces::layout::UiPresentationLevel::parse(level).ok()
-                        })
-                    else {
+                    let Some(level) = cmd["level"].as_str().and_then(|level| {
+                        crate::surfaces::layout::UiPresentationLevel::parse(level).ok()
+                    }) else {
                         let _ = snapshot_tx
                             .send(control_result_message(
                                 cmd_type,

@@ -86,13 +86,12 @@ pub fn project_conversation(
         }
     }
     for (turn, tools) in &tools_by_turn {
-        if let Some(episode) = OperationEpisodeProjection::from_authoritative_boundary(
-            format!("turn:{turn}"),
-            tools,
-        ) && matches!(
-            episode.state,
-            OperationEpisodeState::Complete | OperationEpisodeState::Failed
-        )
+        if let Some(episode) =
+            OperationEpisodeProjection::from_authoritative_boundary(format!("turn:{turn}"), tools)
+            && matches!(
+                episode.state,
+                OperationEpisodeState::Complete | OperationEpisodeState::Failed
+            )
         {
             complete_turn_episodes.insert(*turn, episode);
         }
@@ -140,33 +139,50 @@ pub fn project_conversation(
                         .iter()
                         .position(|candidate| std::ptr::eq(candidate, *terminal))
                         .unwrap_or(canonical_index);
-                    projected.push_synthetic(terminal_index, operation_outcome_segment(
-                        terminal.meta.clone(),
-                        operation_id,
-                        operation_segments,
-                    ));
+                    projected.push_synthetic(
+                        terminal_index,
+                        operation_outcome_segment(
+                            terminal.meta.clone(),
+                            operation_id,
+                            operation_segments,
+                        ),
+                    );
                 }
                 continue;
             }
         }
         if segment.meta.turn.is_none()
-            && let SegmentContent::ToolCard { name, complete: true, .. } = &segment.content
+            && let SegmentContent::ToolCard {
+                name,
+                complete: true,
+                ..
+            } = &segment.content
             && name == "operator_shell"
         {
             let semantic = segment.project_conversation_segment();
             if let Some(episode) = OperationEpisodeProjection::single_tool_fallback(&semantic) {
-                projected.push_synthetic(canonical_index, outcome_segment(segment.meta.clone(), &episode));
+                projected.push_synthetic(
+                    canonical_index,
+                    outcome_segment(segment.meta.clone(), &episode),
+                );
                 continue;
             }
         }
         let collapsible = segment
             .meta
             .turn
-            .and_then(|turn| complete_turn_episodes.get(&turn).map(|episode| (turn, episode)))
+            .and_then(|turn| {
+                complete_turn_episodes
+                    .get(&turn)
+                    .map(|episode| (turn, episode))
+            })
             .filter(|_| matches!(segment.content, SegmentContent::ToolCard { .. }));
         if let Some((turn, episode)) = collapsible {
             if emitted_turn != Some(turn) {
-                projected.push_synthetic(canonical_index, outcome_segment(segment.meta.clone(), episode));
+                projected.push_synthetic(
+                    canonical_index,
+                    outcome_segment(segment.meta.clone(), episode),
+                );
                 emitted_turn = Some(turn);
             }
             continue;
@@ -176,7 +192,10 @@ pub fn project_conversation(
     projected
 }
 
-pub fn project_conversation_segments(segments: &[Segment], level: UiPresentationLevel) -> Vec<Segment> {
+pub fn project_conversation_segments(
+    segments: &[Segment],
+    level: UiPresentationLevel,
+) -> Vec<Segment> {
     project_conversation(segments, level).segments
 }
 
@@ -222,7 +241,11 @@ fn operation_outcome_segment(
         .split_once(':')
         .map(|(kind, id)| format!("{kind} {id}"))
         .unwrap_or_else(|| operation_id.to_string());
-    let state = if operation_failed(evidence) { "✗" } else { "✓" };
+    let state = if operation_failed(evidence) {
+        "✗"
+    } else {
+        "✓"
+    };
     Segment {
         meta,
         content: SegmentContent::SystemNotification {
@@ -282,11 +305,16 @@ mod tests {
 
     #[test]
     fn om_collapses_complete_turn_tools_without_mutating_source() {
-        let source = vec![tool(Some(7), "a", "read complete", true), tool(Some(7), "b", "47 tests passed", true)];
+        let source = vec![
+            tool(Some(7), "a", "read complete", true),
+            tool(Some(7), "b", "47 tests passed", true),
+        ];
         let projected = project_conversation_segments(&source, UiPresentationLevel::Om);
         assert_eq!(source.len(), 2);
         assert_eq!(projected.len(), 1);
-        let SegmentContent::SystemNotification { text } = &projected[0].content else { panic!("outcome") };
+        let SegmentContent::SystemNotification { text } = &projected[0].content else {
+            panic!("outcome")
+        };
         assert_eq!(text, "✓ bash · 47 tests passed · 2 operations");
     }
 
@@ -310,7 +338,10 @@ mod tests {
     fn active_uses_same_grouped_completed_history() {
         let source = vec![tool(Some(7), "a", "done", true)];
         let projected = project_conversation_segments(&source, UiPresentationLevel::Active);
-        assert!(matches!(projected[0].content, SegmentContent::SystemNotification { .. }));
+        assert!(matches!(
+            projected[0].content,
+            SegmentContent::SystemNotification { .. }
+        ));
     }
 
     #[test]
@@ -319,11 +350,7 @@ mod tests {
         let mut conversation = crate::tui::conversation::ConversationView::new();
         conversation.push_operation_lifecycle(&operation, "⇉", "Delegate: review started");
         conversation.push_operation_lifecycle(&operation, "✓", "Delegate: review completed");
-        conversation.push_operation_lifecycle(
-            &operation,
-            "↯",
-            "Delegate completed (no merge)",
-        );
+        conversation.push_operation_lifecycle(&operation, "↯", "Delegate completed (no merge)");
 
         let projected =
             project_conversation_segments(conversation.segments(), UiPresentationLevel::Om);
@@ -337,9 +364,10 @@ mod tests {
         let full =
             project_conversation_segments(conversation.segments(), UiPresentationLevel::Full);
         assert_eq!(full.len(), 3);
-        assert!(full
-            .iter()
-            .all(|segment| matches!(segment.content, SegmentContent::LifecycleEvent { .. })));
+        assert!(
+            full.iter()
+                .all(|segment| matches!(segment.content, SegmentContent::LifecycleEvent { .. }))
+        );
     }
 
     #[test]
@@ -348,16 +376,14 @@ mod tests {
             tool(Some(7), "a", "read complete", true),
             tool(Some(7), "b", "47 tests passed", true),
         ];
-        let semantic =
-            project_conversation_for_export(&source, ConversationExportPolicy::Semantic);
+        let semantic = project_conversation_for_export(&source, ConversationExportPolicy::Semantic);
         let om = project_conversation(&source, UiPresentationLevel::Om);
         let full = project_conversation(&source, UiPresentationLevel::Full);
         assert_eq!(semantic.segments.len(), om.segments.len());
         assert_eq!(semantic.canonical_indices, om.canonical_indices);
         assert_ne!(semantic.segments.len(), full.segments.len());
 
-        let evidence =
-            project_conversation_for_export(&source, ConversationExportPolicy::Evidence);
+        let evidence = project_conversation_for_export(&source, ConversationExportPolicy::Evidence);
         assert_eq!(evidence.canonical_indices, full.canonical_indices);
         assert_eq!(evidence.segments.len(), full.segments.len());
     }
@@ -383,7 +409,10 @@ mod tests {
     fn full_preserves_canonical_evidence_rows() {
         let source = vec![tool(Some(7), "a", "done", true)];
         let projected = project_conversation_segments(&source, UiPresentationLevel::Full);
-        assert!(matches!(projected[0].content, SegmentContent::ToolCard { .. }));
+        assert!(matches!(
+            projected[0].content,
+            SegmentContent::ToolCard { .. }
+        ));
     }
 
     #[test]
@@ -402,9 +431,16 @@ mod tests {
 
     #[test]
     fn running_or_unbound_tools_remain_visible() {
-        let source = vec![tool(Some(7), "a", "running", false), tool(None, "b", "done", true)];
+        let source = vec![
+            tool(Some(7), "a", "running", false),
+            tool(None, "b", "done", true),
+        ];
         let projected = project_conversation_segments(&source, UiPresentationLevel::Om);
         assert_eq!(projected.len(), 2);
-        assert!(projected.iter().all(|segment| matches!(segment.content, SegmentContent::ToolCard { .. })));
+        assert!(
+            projected
+                .iter()
+                .all(|segment| matches!(segment.content, SegmentContent::ToolCard { .. }))
+        );
     }
 }

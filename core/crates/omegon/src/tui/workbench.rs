@@ -857,7 +857,6 @@ fn render_activity_entries(
     conversation: &crate::tui::conversation::ConversationView,
     projection: &crate::surfaces::activity::ActivitySurfaceProjection,
 ) {
-
     let tools = projection
         .entries
         .iter()

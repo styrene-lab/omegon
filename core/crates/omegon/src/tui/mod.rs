@@ -125,8 +125,7 @@ use self::settings_menu::SelectorKind;
 use self::workbench::{
     PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, WorkbenchState,
     WorkbenchWorkspaceContext, active_plan_workspace_context_height, active_workbench_snapshot,
-    activity_preferred_height_for_level, render_activity_panel_for_level,
-    render_workbench_panel,
+    activity_preferred_height_for_level, render_activity_panel_for_level, render_workbench_panel,
     slim_completed_plan_hint_available, slim_operator_hint, upstream_retry_hint,
     workbench_preferred_height_for_level,
 };
@@ -454,7 +453,9 @@ impl ActivityToolState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ToolInspectionTarget {
-    LiveLatest { evidence_id: String },
+    LiveLatest {
+        evidence_id: String,
+    },
     Episode {
         episode_id: String,
         evidence_id: String,
@@ -2256,11 +2257,7 @@ impl App {
     pub fn new(settings: crate::settings::SharedSettings) -> Self {
         let (model_id, model_provider, presentation_level) = {
             let s = settings.lock().unwrap();
-            (
-                s.model.clone(),
-                s.provider().to_string(),
-                s.ui_presentation,
-            )
+            (s.model.clone(), s.provider().to_string(), s.ui_presentation)
         };
         Self {
             editor: Editor::new(),
@@ -7680,18 +7677,15 @@ warning: {warning}"
                 entries: Vec::new(),
             }
         };
-        let engine_status_height =
-            u16::from(
-                self.ui_surfaces.activity
-                    && self.ui_presentation.level != UiPresentationLevel::Full,
-            );
-        let raw_tool_inspection_height =
-            activity_preferred_height_for_level(
-                &activity_projection,
-                area.width,
-                self.ui_presentation.level,
-            )
-                .saturating_add(engine_status_height);
+        let engine_status_height = u16::from(
+            self.ui_surfaces.activity && self.ui_presentation.level != UiPresentationLevel::Full,
+        );
+        let raw_tool_inspection_height = activity_preferred_height_for_level(
+            &activity_projection,
+            area.width,
+            self.ui_presentation.level,
+        )
+        .saturating_add(engine_status_height);
         let raw_workbench_height = workbench_preferred_height_for_level(
             &workbench_state,
             area.width,
@@ -7778,20 +7772,19 @@ warning: {warning}"
                 self.ui_presentation.level,
             );
             let projected_segments = &conversation_projection.segments;
-            let pinned_segment = self
-                .conversation
-                .timeline_expanded_segment()
-                .and_then(|canonical| {
-                    conversation_projection.projected_index_for_canonical(canonical)
-                });
-            let selected_segment = self
-                .conversation
-                .selected_segment_index()
-                .and_then(|canonical| {
-                    conversation_projection.projected_index_for_canonical(canonical)
-                });
-            let (_, conv_state, image_cache) =
-                self.conversation.segments_state_and_image_cache();
+            let pinned_segment =
+                self.conversation
+                    .timeline_expanded_segment()
+                    .and_then(|canonical| {
+                        conversation_projection.projected_index_for_canonical(canonical)
+                    });
+            let selected_segment =
+                self.conversation
+                    .selected_segment_index()
+                    .and_then(|canonical| {
+                        conversation_projection.projected_index_for_canonical(canonical)
+                    });
+            let (_, conv_state, image_cache) = self.conversation.segments_state_and_image_cache();
             let conv_widget = conv_widget::ConversationWidget::new(projected_segments, t.as_ref())
                 .with_mode(if self.ui_presentation.level == UiPresentationLevel::Full {
                     SegmentRenderMode::Full
@@ -7885,11 +7878,12 @@ warning: {warning}"
             self.footer_data.context_window = s.context_window;
             self.footer_data.thinking_level = s.thinking.as_str().to_string();
             self.footer_data.posture = s.posture.effective.display_name().to_string();
-            self.footer_data.runtime_brand = if self.ui_presentation.level == UiPresentationLevel::Om {
-                "OM".to_string()
-            } else {
-                "Omegon".to_string()
-            };
+            self.footer_data.runtime_brand =
+                if self.ui_presentation.level == UiPresentationLevel::Om {
+                    "OM".to_string()
+                } else {
+                    "Omegon".to_string()
+                };
             self.footer_data.principal_id = s
                 .operating_profile()
                 .identity

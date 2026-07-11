@@ -107,9 +107,10 @@ fn select_primary_om_entry(entries: Vec<ActivityEntryProjection>) -> Vec<Activit
         })
         .or_else(|| {
             entries.iter().position(|entry| {
-                entry.tool.as_ref().is_some_and(|tool| {
-                    matches!(tool.status, ActivityToolStatus::Running)
-                })
+                entry
+                    .tool
+                    .as_ref()
+                    .is_some_and(|tool| matches!(tool.status, ActivityToolStatus::Running))
             })
         })
         .or_else(|| (!entries.is_empty()).then_some(0));

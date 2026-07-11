@@ -4,8 +4,8 @@ use omegon_traits::{
     IpcChangeSnapshot, IpcChildSnapshot, IpcCleaveSnapshot, IpcDesignCounts, IpcDesignTreeSnapshot,
     IpcDispatcherSnapshot, IpcFocusedNode, IpcHarnessSnapshot, IpcHealthSnapshot, IpcHealthState,
     IpcMemorySnapshot, IpcNodeBrief, IpcOpenSpecSnapshot, IpcOperationEpisodeSnapshot,
-    IpcPresentationSnapshot,
-    IpcProviderSnapshot, IpcSessionSnapshot, IpcStateSnapshot, OmegonAutonomyMode, OmegonControlPlane, OmegonDeploymentKind, OmegonIdentity,
+    IpcPresentationSnapshot, IpcProviderSnapshot, IpcSessionSnapshot, IpcStateSnapshot,
+    OmegonAutonomyMode, OmegonControlPlane, OmegonDeploymentKind, OmegonIdentity,
     OmegonInstanceDescriptor, OmegonOwnerKind, OmegonOwnership, OmegonPlacement,
     OmegonPlacementKind, OmegonRole, OmegonRuntime, OmegonRuntimeHealth, OmegonRuntimeProfile,
 };
@@ -56,16 +56,21 @@ pub fn build_state_snapshot(
 
 fn ipc_operation_episodes(handles: &DashboardHandles) -> Vec<IpcOperationEpisodeSnapshot> {
     let mut episodes = Vec::new();
-    if let Some(progress) = handles.delegate.as_ref().and_then(|value| value.lock().ok())
+    if let Some(progress) = handles
+        .delegate
+        .as_ref()
+        .and_then(|value| value.lock().ok())
         && (progress.active || progress.running > 0)
     {
-        let projection = crate::surfaces::operations::OperationWorkbenchProjection::from_delegate(&progress);
+        let projection =
+            crate::surfaces::operations::OperationWorkbenchProjection::from_delegate(&progress);
         episodes.push(ipc_operation_episode(&projection));
     }
     if let Some(progress) = handles.cleave.as_ref().and_then(|value| value.lock().ok())
         && progress.active
     {
-        let projection = crate::surfaces::operations::OperationWorkbenchProjection::from_cleave(&progress);
+        let projection =
+            crate::surfaces::operations::OperationWorkbenchProjection::from_cleave(&progress);
         episodes.push(ipc_operation_episode(&projection));
     }
     episodes

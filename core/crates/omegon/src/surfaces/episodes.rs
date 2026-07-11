@@ -140,7 +140,13 @@ mod tests {
     use super::*;
     use crate::surfaces::conversation::{ToolSegment, UserSegment};
 
-    fn tool<'a>(id: &'a str, name: &'a str, result: Option<&'a str>, complete: bool, is_error: bool) -> ConversationSegmentProjection<&'a str> {
+    fn tool<'a>(
+        id: &'a str,
+        name: &'a str,
+        result: Option<&'a str>,
+        complete: bool,
+        is_error: bool,
+    ) -> ConversationSegmentProjection<&'a str> {
         ConversationSegmentProjection::new(ConversationSegmentKind::Tool(ToolSegment {
             id,
             name,
@@ -160,7 +166,8 @@ mod tests {
             tool("read-1", "read", Some("86 lines"), true, false),
             tool("test-1", "bash", Some("47 tests passed"), true, false),
         ];
-        let episode = OperationEpisodeProjection::from_authoritative_boundary("turn:7", &segments).expect("episode");
+        let episode = OperationEpisodeProjection::from_authoritative_boundary("turn:7", &segments)
+            .expect("episode");
         assert_eq!(episode.id, "turn:7");
         assert_eq!(episode.state, OperationEpisodeState::Complete);
         assert_eq!(episode.tool_count, 2);
@@ -174,7 +181,8 @@ mod tests {
             tool("test-1", "bash", Some("exit 1"), true, true),
             tool("read-1", "read", Some("diagnostics"), true, false),
         ];
-        let episode = OperationEpisodeProjection::from_authoritative_boundary("turn:8", &segments).expect("episode");
+        let episode = OperationEpisodeProjection::from_authoritative_boundary("turn:8", &segments)
+            .expect("episode");
         assert_eq!(episode.state, OperationEpisodeState::Failed);
         assert_eq!(episode.outcome, "bash failed · exit 1");
     }
@@ -189,7 +197,9 @@ mod tests {
 
     #[test]
     fn prose_does_not_become_an_episode() {
-        let segment = ConversationSegmentProjection::<&str>::new(ConversationSegmentKind::User(UserSegment { text: "hello" }));
+        let segment = ConversationSegmentProjection::<&str>::new(ConversationSegmentKind::User(
+            UserSegment { text: "hello" },
+        ));
         assert!(OperationEpisodeProjection::single_tool_fallback(&segment).is_none());
     }
 }

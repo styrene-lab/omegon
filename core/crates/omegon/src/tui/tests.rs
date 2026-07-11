@@ -7761,7 +7761,10 @@ fn completed_tools_handoff_to_one_durable_outcome_without_activity_duplication()
 
     let rendered = render_app_to_string(&mut app, 140, 36);
 
-    assert!(rendered.contains("✓ bash · Finished dev profile · 2 operations"), "{rendered}");
+    assert!(
+        rendered.contains("✓ bash · Finished dev profile · 2 operations"),
+        "{rendered}"
+    );
     assert!(!rendered.contains("done bash"), "{rendered}");
     assert!(!rendered.contains("done read"), "{rendered}");
 }

@@ -350,8 +350,8 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
         "ui",
         "open UI presentation controls or customize surfaces",
         &[
-            "status", "om", "active", "full", "lean", "slim", "show", "hide",
-            "toggle", "detail", "density",
+            "status", "om", "active", "full", "lean", "slim", "show", "hide", "toggle", "detail",
+            "density",
         ],
     ),
     BuiltinCommandSpec::cli_queue_mutation(
