@@ -118,8 +118,8 @@ pub(crate) fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) 
     match state {
         SegmentState::Pending | SegmentState::Informational => t.dim(),
         SegmentState::Running => t.accent(),
-        SegmentState::Completed => t.success(),
-        SegmentState::Failed => t.error(),
+        SegmentState::Completed => t.muted(),
+        SegmentState::Failed => t.warning(),
         SegmentState::Cancelled => t.muted(),
     }
 }
@@ -1169,7 +1169,7 @@ mod tests {
         );
         assert_eq!(
             state_color_for_segment_state(SegmentState::Completed, &theme),
-            theme.success()
+            theme.muted()
         );
         assert_eq!(
             state_color_for_segment_state(SegmentState::Failed, &theme),
