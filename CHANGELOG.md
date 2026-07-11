@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 0.28.0 makes Om the outcome-first TUI default, adds bounded Active workflows and evidence-complete Full projection, and completes the permissions intent architecture. Canonical activity, outcomes, and evidence now project consistently across TUI, IPC/WebSocket, transcript export, and replay without changing runtime authority.
 
+- Expanded `/settings` into the universal configuration entrypoint with canonical navigation for runtime, model routing, authentication, skills, extensions, presentation, context, memory, profiles, secrets, sandbox policy, and updates; added `/config` as a registry-backed equivalent alias with direct routes such as `/config skills` and `/settings auth`.
+
 - Fixed short conversation projections anchoring to the top of a tall viewport and leaving a large false rendering boundary above the composer; conversations that fit now remain bottom-anchored while overflow retains normal scrolling.
 - Added a conservative semantic color boundary across the TUI theme: teal marks focus and ordinary active state, orange is the sole attention signal for warning/error/caution conditions, and routine completion plus tool identity use grayscale luminance and glyph/label semantics. This intentionally suppresses the previous green/red/yellow category-and-state palette until the TUI structure is stable enough for deliberate polish.
 - Failed or cancelled delegate/cleave operations now terminate and collapse just like successful runs, but produce an explicit failed outcome (`✗`) derived from lifecycle evidence instead of remaining as noisy milestone streams or being mislabeled successful.

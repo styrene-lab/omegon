@@ -4838,13 +4838,116 @@ impl App {
         };
         let mut menu = MenuProjection::new("settings", "Settings");
         menu.summary = Some(format!(
-            "Runtime, workspace, profile, and update settings. Enter edits the selected row.\n{drift_line}"
+            "Universal configuration entrypoint for runtime and capability settings. Enter opens or edits the selected area.\n{drift_line}"
         ));
-        menu.footer = Some("↑/↓ navigate · Tab switch tabs · / filter · Enter edit · s save profile · a apply profile · Esc close".into());
-        menu.tabs = settings
-            .tabs
-            .into_iter()
-            .map(|tab| MenuTabProjection {
+        menu.footer = Some("↑/↓ navigate · Tab switch tabs · / filter · Enter open/edit · s save profile · a apply profile · Esc close".into());
+        let configuration_rows = [
+            (
+                "runtime",
+                "Runtime",
+                "Edit runtime, workspace, and inference defaults here.",
+                "/settings runtime",
+            ),
+            (
+                "model",
+                "Model & inference",
+                "Select model routes, providers, grades, and routing policy.",
+                "/model",
+            ),
+            (
+                "auth",
+                "Authentication",
+                "Manage provider credentials, login state, and vault unlock.",
+                "/auth",
+            ),
+            (
+                "skills",
+                "Skills",
+                "Install, inspect, refresh, and remove operator skills.",
+                "/skills",
+            ),
+            (
+                "extensions",
+                "Extensions",
+                "Install, enable, disable, update, and inspect extensions.",
+                "/extension",
+            ),
+            (
+                "ui",
+                "UI & presentation",
+                "Configure Om, Active, Full, and individual interface surfaces.",
+                "/ui",
+            ),
+            (
+                "context",
+                "Context",
+                "Configure context class and manage context lifecycle.",
+                "/context",
+            ),
+            (
+                "memory",
+                "Memory",
+                "Inspect memory configuration and current memory state.",
+                "/memory",
+            ),
+            (
+                "profile",
+                "Profiles",
+                "Inspect, apply, and persist project or user defaults.",
+                "/profile",
+            ),
+            (
+                "secrets",
+                "Secrets",
+                "Manage named secrets and credential values.",
+                "/secrets",
+            ),
+            (
+                "sandbox",
+                "Sandbox & permissions",
+                "Configure child isolation and workspace access policy.",
+                "/sandbox",
+            ),
+            (
+                "updates",
+                "Updates",
+                "Configure the release channel and install available updates.",
+                "/update",
+            ),
+        ]
+        .into_iter()
+        .map(|(id, label, description, command)| MenuRowProjection {
+            id: format!("settings.area.{id}"),
+            label: label.into(),
+            description: description.into(),
+            value: Some(command.into()),
+            kind: MenuRowKind::Action,
+            badges: Vec::new(),
+            metadata: vec!["configuration area".into(), command.into()],
+            primary_action: Some(MenuActionProjection::command(
+                format!("settings.area.{id}.open"),
+                "Open",
+                command,
+            )),
+            actions: Vec::new(),
+            safety: None,
+            availability: None,
+        })
+        .collect();
+        let configuration_tab = MenuTabProjection {
+            id: "configuration".into(),
+            label: "Configuration".into(),
+            groups: vec![MenuGroupProjection {
+                id: "settings.configuration".into(),
+                label: "Configuration areas".into(),
+                description: Some(
+                    "Canonical entrances for every operator-configurable capability.".into(),
+                ),
+                rows: configuration_rows,
+            }],
+        };
+        menu.tabs
+            .extend(settings.tabs.into_iter().map(|tab| MenuTabProjection {
                 id: tab.id.clone(),
                 label: tab.label.clone(),
                 groups: vec![MenuGroupProjection {
@@ -4898,8 +5001,8 @@ impl App {
                         })
                         .collect(),
                 }],
-            })
-            .collect();
+            }));
+        menu.tabs.push(configuration_tab);
         menu.actions = vec![
             {
                 let mut action =
@@ -10882,10 +10985,33 @@ Scroll transcript:
             }
             "thinking" => self.handle_slash_command(&format!("/think {args}"), tx),
             "models" => self.handle_slash_command("/model", tx),
-            "settings" => {
-                self.open_settings_menu();
-                self.command_panel = None;
-                SlashResult::Handled
+            "settings" | "config" => {
+                let target = match args.trim() {
+                    "" | "runtime" => None,
+                    "model" => Some("/model"),
+                    "auth" => Some("/auth"),
+                    "skills" => Some("/skills"),
+                    "extensions" | "extension" => Some("/extension"),
+                    "ui" => Some("/ui"),
+                    "context" => Some("/context"),
+                    "memory" => Some("/memory"),
+                    "profile" => Some("/profile"),
+                    "secrets" => Some("/secrets"),
+                    "sandbox" => Some("/sandbox"),
+                    "updates" | "update" => Some("/update"),
+                    _ => {
+                        return SlashResult::Display(format!(
+                            "Unknown settings area: {args}\n\nUsage: /settings [runtime|model|auth|skills|extensions|ui|context|memory|profile|secrets|sandbox|updates]\nAlias: /config"
+                        ));
+                    }
+                };
+                if let Some(command) = target {
+                    self.handle_slash_command(command, tx)
+                } else {
+                    self.open_settings_menu();
+                    self.command_panel = None;
+                    SlashResult::Handled
+                }
             }
             "preferences" | "prefs" => {
                 self.open_preferences_selector();

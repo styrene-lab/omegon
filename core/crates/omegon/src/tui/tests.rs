@@ -6246,6 +6246,8 @@ fn canonical_slash_commands_are_registry_backed_or_intentional_aliases() {
         "new",
         "sessions",
         "auth",
+        "settings",
+        "config",
         "skills",
         "plan",
         "extension",
@@ -8376,11 +8378,98 @@ fn slash_settings_opens_active_menu_without_command_panel() {
 }
 
 #[test]
+fn slash_settings_and_config_open_the_universal_configuration_menu() {
+    for command in ["/settings", "/config"] {
+        let mut app = test_app();
+        let tx = test_tx();
+
+        let result = app.handle_slash_command(command, &tx);
+
+        assert!(matches!(result, SlashResult::Handled));
+        let menu = app.active_menu.as_ref().expect("settings menu");
+        assert_eq!(menu.projection.id, "settings");
+        assert_eq!(menu.state.active_tab, menu.projection.tabs[0].id);
+        assert!(app.command_panel.is_none());
+    }
+}
+
+#[test]
+fn settings_configuration_tab_routes_to_canonical_submenus() {
+    let mut app = test_app();
+    app.open_settings_menu();
+
+    let menu = app.active_menu.as_ref().expect("settings menu");
+    let tab = menu
+        .projection
+        .tabs
+        .iter()
+        .find(|tab| tab.id == "configuration")
+        .expect("configuration tab");
+    let rows = &tab.groups[0].rows;
+    for (id, command) in [
+        ("skills", "/skills"),
+        ("auth", "/auth"),
+        ("model", "/model"),
+        ("extensions", "/extension"),
+    ] {
+        let row = rows
+            .iter()
+            .find(|row| row.id == format!("settings.area.{id}"))
+            .unwrap_or_else(|| panic!("missing settings area {id}"));
+        assert_eq!(
+            row.primary_action
+                .as_ref()
+                .and_then(|action| action.command.as_deref()),
+            Some(command)
+        );
+    }
+}
+
+#[test]
+fn settings_and_config_direct_routes_open_canonical_submenus() {
+    for command in ["/settings auth", "/config auth"] {
+        let mut app = test_app();
+        assert!(matches!(
+            app.handle_slash_command(command, &test_tx()),
+            SlashResult::Handled
+        ));
+        assert_eq!(
+            app.active_menu
+                .as_ref()
+                .map(|menu| menu.projection.id.as_str()),
+            Some("auth")
+        );
+    }
+
+    for command in ["/settings skills", "/config skills"] {
+        let mut app = test_app();
+        assert!(matches!(
+            app.handle_slash_command(command, &test_tx()),
+            SlashResult::Handled
+        ));
+        assert_eq!(
+            app.active_menu
+                .as_ref()
+                .map(|menu| menu.projection.id.as_str()),
+            Some("skills")
+        );
+    }
+}
+
+#[test]
 fn settings_menu_opens_choice_rows_from_projection_metadata() {
     let mut app = test_app();
 
     app.open_settings_menu();
-    app.active_menu.as_mut().unwrap().state.selected_row = 1;
+    let runtime_tab = app
+        .active_menu
+        .as_ref()
+        .and_then(|menu| menu.projection.tabs.first())
+        .map(|tab| tab.id.clone())
+        .expect("runtime settings tab");
+    let menu = app.active_menu.as_mut().unwrap();
+    menu.state.active_tab = runtime_tab;
+    menu.state.selected_row = 1;
     let action = app
         .active_menu
         .as_ref()
@@ -8421,7 +8510,7 @@ fn settings_menu_navigation_helpers_bound_rows_and_wrap_tabs() {
     assert_eq!(state.active_tab, "runtime");
 
     state.previous_tab(&projection);
-    assert_eq!(state.active_tab, "updates");
+    assert_eq!(state.active_tab, "configuration");
 }
 
 #[test]
