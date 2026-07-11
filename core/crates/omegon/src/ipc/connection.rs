@@ -222,6 +222,10 @@ impl IpcConnection {
                         &cfg.started_at,
                         &cfg.server_instance_id,
                         &cfg.session_id,
+                        cfg.shared_settings
+                            .lock()
+                            .map(|settings| settings.ui_presentation)
+                            .unwrap_or_default(),
                     );
                     send_response(&out_tx, req_id, "get_state", serde_json::to_value(snap)?).await;
                 }

@@ -690,6 +690,24 @@ pub struct IpcStateSnapshot {
     pub cleave: IpcCleaveSnapshot,
     pub harness: IpcHarnessSnapshot,
     pub health: IpcHealthSnapshot,
+    /// Optional client-presentation projection. Added compatibly so older
+    /// serialized snapshots remain decodable as Om-capable clients evolve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<IpcPresentationSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IpcPresentationSnapshot {
+    pub level: String,
+    pub preset: String,
+    pub transcript_density: String,
+    pub live_detail: String,
+    pub telemetry_density: String,
+    pub supported_levels: Vec<String>,
+    pub dashboard: bool,
+    pub instruments: bool,
+    pub footer: bool,
+    pub activity: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3044,6 +3062,7 @@ mod tests {
                 provider_ok: true,
                 checked_at: "2026-03-29T00:00:00Z".into(),
             },
+            presentation: None,
         }
     }
 

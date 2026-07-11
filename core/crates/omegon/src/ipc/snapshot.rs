@@ -3,8 +3,8 @@
 use omegon_traits::{
     IpcChangeSnapshot, IpcChildSnapshot, IpcCleaveSnapshot, IpcDesignCounts, IpcDesignTreeSnapshot,
     IpcDispatcherSnapshot, IpcFocusedNode, IpcHarnessSnapshot, IpcHealthSnapshot, IpcHealthState,
-    IpcMemorySnapshot, IpcNodeBrief, IpcOpenSpecSnapshot, IpcProviderSnapshot, IpcSessionSnapshot,
-    IpcStateSnapshot, OmegonAutonomyMode, OmegonControlPlane, OmegonDeploymentKind, OmegonIdentity,
+    IpcMemorySnapshot, IpcNodeBrief, IpcOpenSpecSnapshot, IpcPresentationSnapshot,
+    IpcProviderSnapshot, IpcSessionSnapshot, IpcStateSnapshot, OmegonAutonomyMode, OmegonControlPlane, OmegonDeploymentKind, OmegonIdentity,
     OmegonInstanceDescriptor, OmegonOwnerKind, OmegonOwnership, OmegonPlacement,
     OmegonPlacementKind, OmegonRole, OmegonRuntime, OmegonRuntimeHealth, OmegonRuntimeProfile,
 };
@@ -20,6 +20,7 @@ pub fn build_state_snapshot(
     started_at: &str,
     server_instance_id: &str,
     session_id: &str,
+    presentation_level: crate::surfaces::layout::UiPresentationLevel,
 ) -> IpcStateSnapshot {
     let session = project_session(handles, cwd, started_at, session_id);
     let design_tree = project_design_tree(handles);
@@ -47,6 +48,39 @@ pub fn build_state_snapshot(
         cleave,
         harness,
         health,
+        presentation: Some(ipc_presentation_snapshot(presentation_level)),
+    }
+}
+
+fn ipc_presentation_snapshot(
+    level: crate::surfaces::layout::UiPresentationLevel,
+) -> IpcPresentationSnapshot {
+    let policy = crate::surfaces::layout::UiPresentationPolicy::named(level);
+    IpcPresentationSnapshot {
+        level: level.name().to_string(),
+        preset: policy.preset_name().to_string(),
+        transcript_density: match policy.transcript_density() {
+            crate::surfaces::layout::TranscriptDensity::Outcomes => "outcomes",
+            crate::surfaces::layout::TranscriptDensity::Evidence => "evidence",
+        }
+        .to_string(),
+        live_detail: match policy.live_detail() {
+            crate::surfaces::layout::LiveDetail::Status => "status",
+            crate::surfaces::layout::LiveDetail::Workflow => "workflow",
+            crate::surfaces::layout::LiveDetail::Diagnostic => "diagnostic",
+        }
+        .to_string(),
+        telemetry_density: match policy.telemetry_density() {
+            crate::surfaces::layout::TelemetryDensity::Essential => "essential",
+            crate::surfaces::layout::TelemetryDensity::Operational => "operational",
+            crate::surfaces::layout::TelemetryDensity::Diagnostic => "diagnostic",
+        }
+        .to_string(),
+        supported_levels: vec!["om".into(), "active".into(), "full".into()],
+        dashboard: policy.surfaces.dashboard,
+        instruments: policy.surfaces.instruments,
+        footer: policy.surfaces.footer,
+        activity: policy.surfaces.activity,
     }
 }
 
@@ -579,10 +613,14 @@ mod tests {
             "2026-04-05T12:00:00Z",
             "instance-123",
             "session-abc",
+            crate::surfaces::layout::UiPresentationLevel::Active,
         );
 
         assert_eq!(snap.instance.identity.instance_id, "instance-123");
         assert_eq!(snap.instance.identity.session_id, "session-abc");
+        let presentation = snap.presentation.expect("presentation snapshot");
+        assert_eq!(presentation.level, "active");
+        assert_eq!(presentation.live_detail, "workflow");
         assert_eq!(snap.instance.identity.workspace_id, "tmp::example-project");
         assert_eq!(snap.instance.identity.profile, "primary-interactive");
         assert_eq!(snap.harness.runtime_profile, "primary-interactive");
