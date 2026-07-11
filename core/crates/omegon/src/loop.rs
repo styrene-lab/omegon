@@ -396,6 +396,11 @@ pub async fn run(
     let mut session_used_tools: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     let mut turn: u32 = 0;
+    // A top-level run corresponds to a fresh operator prompt. Retire any
+    // unfinished ephemeral plan owned by an earlier prompt before projecting
+    // Workbench or asking the model to reconcile unrelated work. Plans created
+    // during this run bind to the incremented generation.
+    conversation.intent.begin_operator_task();
     // Infer the guidance task mode for this operator prompt (A1). Explicit
     // operator declarations pin the mode; otherwise inference updates it for
     // the current task without overriding a previously pinned mode.
@@ -5689,6 +5694,7 @@ mod tests {
             scope: PlanScope::Repo,
             source: PlanSource::OpenSpec,
             binding: PlanBinding::default(),
+            task_generation: 0,
             mode: PlanMode::Executing,
             items: items
                 .into_iter()

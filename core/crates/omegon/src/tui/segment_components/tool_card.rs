@@ -117,7 +117,7 @@ impl<'a> SlimSegmentHeader<'a> {
 pub(crate) fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) -> Color {
     match state {
         SegmentState::Pending | SegmentState::Informational => t.dim(),
-        SegmentState::Running => t.accent(),
+        SegmentState::Running => t.accent_muted(),
         SegmentState::Completed => t.muted(),
         SegmentState::Failed => t.warning(),
         SegmentState::Cancelled => t.muted(),
@@ -1164,7 +1164,7 @@ mod tests {
     fn rendered_slim_tool_labels_preserve_state_semantics() {
         let theme = crate::tui::theme::Alpharius;
         let cases = [
-            (SegmentState::Running, theme.accent()),
+            (SegmentState::Running, theme.accent_muted()),
             (SegmentState::Completed, theme.muted()),
             (SegmentState::Failed, theme.warning()),
         ];
@@ -1208,7 +1208,7 @@ mod tests {
         let theme = crate::tui::theme::Alpharius;
         assert_eq!(
             state_color_for_segment_state(SegmentState::Running, &theme),
-            theme.accent()
+            theme.accent_muted()
         );
         assert_eq!(
             state_color_for_segment_state(SegmentState::Completed, &theme),

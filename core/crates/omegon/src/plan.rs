@@ -674,6 +674,49 @@ pub enum PlanAction {
 }
 
 impl crate::conversation::IntentDocument {
+    /// Start a new top-level operator task. An unfinished session-scoped plan
+    /// from an earlier run is detached from the active Workbench lane but kept
+    /// in the registry for explicit inspection/resume. Repo-scoped plans are
+    /// artifact-owned and are never retired by prompt boundaries.
+    pub fn begin_operator_task(&mut self) {
+        self.task_generation = self.task_generation.saturating_add(1);
+        let stale_session_plan = self.visible_plan.as_ref().is_some_and(|plan| {
+            plan.scope == PlanScope::Session
+                && plan.mode != PlanMode::Complete
+                && !plan.items.is_empty()
+                && plan.task_generation < self.task_generation
+        });
+        if !stale_session_plan {
+            return;
+        }
+
+        let plan_id = self
+            .visible_plan
+            .as_ref()
+            .map(|plan| plan.plan_id.clone())
+            .unwrap_or_else(PlanBinding::session_plan_id);
+        self.plan_registry_view.entries.retain(|entry| entry.plan_id != plan_id);
+        self.plan_registry_view.entries.push(PlanViewEntry {
+            plan_id: plan_id.clone(),
+            status: PlanStatus::Detached,
+            last_visible_at: None,
+            resume_hint: Some("Detached when a later operator task started.".to_string()),
+            dismissed: false,
+        });
+        self.plan_events.push(PlanEvent {
+            plan_id,
+            task_id: None,
+            source: PlanEventSource::Manual,
+            summary: "Detached stale session plan at operator task boundary.".to_string(),
+            evidence: Vec::new(),
+        });
+        self.work_plan.clear();
+        self.plan_mode = PlanMode::Off;
+        self.visible_plan = None;
+        self.plan_reconciliation_fingerprint = None;
+        self.plan_reconciliation_nudges = 0;
+    }
+
     /// Set the work plan, replacing any existing plan.
     pub fn set_work_plan(&mut self, items: Vec<String>) {
         self.apply_plan_action(PlanAction::Set { items });
@@ -954,6 +997,7 @@ impl crate::conversation::IntentDocument {
                 .as_ref()
                 .map(|plan| plan.binding.clone())
                 .unwrap_or_default(),
+            task_generation: self.task_generation,
             mode: self.plan_mode,
             items: self.work_plan.clone(),
         });
@@ -1684,6 +1728,52 @@ pub fn render_plan_list_text(
 mod render_tests {
     use super::*;
     use crate::conversation::IntentDocument;
+
+    #[test]
+    fn later_operator_task_detaches_unfinished_session_plan() {
+        let mut intent = IntentDocument::default();
+        intent.begin_operator_task();
+        intent.set_work_plan(vec!["Investigate old task".into(), "Implement fix".into()]);
+        assert_eq!(intent.visible_plan.as_ref().unwrap().task_generation, 1);
+
+        intent.begin_operator_task();
+
+        assert!(intent.work_plan.is_empty());
+        assert!(intent.visible_plan.is_none());
+        assert_eq!(intent.plan_mode, PlanMode::Off);
+        assert!(intent.plan_registry_view.entries.iter().any(|entry| {
+            entry.plan_id == PlanBinding::session_plan_id()
+                && entry.status == PlanStatus::Detached
+        }));
+    }
+
+    #[test]
+    fn later_operator_task_preserves_repo_plan() {
+        let mut intent = IntentDocument::default();
+        intent.begin_operator_task();
+        intent.visible_plan = Some(VisiblePlanState {
+            plan_id: PlanBinding::openspec_plan_id("active-change", None),
+            scope: PlanScope::Repo,
+            source: PlanSource::OpenSpec,
+            binding: PlanBinding {
+                openspec_change: Some("active-change".into()),
+                ..PlanBinding::default()
+            },
+            task_generation: intent.task_generation,
+            mode: PlanMode::Executing,
+            items: vec![WorkItem {
+                description: "Implement scenario".into(),
+                status: WorkItemStatus::Active,
+                intent: Some(TaskIntent::Implementation),
+                completion_policy: TaskCompletionPolicy::Manual,
+                evidence: Vec::new(),
+            }],
+        });
+
+        intent.begin_operator_task();
+
+        assert_eq!(intent.visible_plan.as_ref().unwrap().scope, PlanScope::Repo);
+    }
 
     #[test]
     fn completed_session_plan_leaves_history_without_visible_lane() {
