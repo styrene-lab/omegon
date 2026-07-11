@@ -4517,6 +4517,7 @@ fn draw_routes_active_cleave_to_workbench_without_instruments() {
 #[test]
 fn draw_routes_active_delegate_to_workbench_without_instruments() {
     let mut app = test_app();
+    app.apply_ui_presentation(UiPresentationPolicy::active());
     app.ui_surfaces.footer = true;
     app.ui_surfaces.instruments = false;
     app.dashboard.delegate = Some(crate::features::delegate::DelegateProgress {
@@ -4553,6 +4554,7 @@ fn draw_routes_active_delegate_to_workbench_without_instruments() {
 #[test]
 fn draw_routes_failed_delegate_summary_to_workbench_without_instruments() {
     let mut app = test_app();
+    app.apply_ui_presentation(UiPresentationPolicy::active());
     app.ui_surfaces.footer = true;
     app.ui_surfaces.instruments = false;
     app.dashboard.delegate = Some(crate::features::delegate::DelegateProgress {
@@ -4590,6 +4592,7 @@ fn draw_routes_failed_delegate_summary_to_workbench_without_instruments() {
 #[test]
 fn draw_truncates_failed_delegate_summary_in_workbench() {
     let mut app = test_app();
+    app.apply_ui_presentation(UiPresentationPolicy::active());
     app.ui_surfaces.footer = true;
     app.ui_surfaces.instruments = false;
     app.dashboard.delegate = Some(crate::features::delegate::DelegateProgress {

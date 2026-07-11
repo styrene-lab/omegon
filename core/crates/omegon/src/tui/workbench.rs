@@ -974,8 +974,18 @@ fn render_active_workflow_panel(
             OperationChildStatus::Waiting => "◇",
             OperationChildStatus::Queued | OperationChildStatus::Unknown => "·",
         };
+        let text = format!(
+            "{glyph} {} · {}{}",
+            child.label,
+            child.status.label(),
+            child
+                .result_summary
+                .as_deref()
+                .map(|summary| format!(" · {summary}"))
+                .unwrap_or_default()
+        );
         lines.push(Line::from(Span::styled(
-            format!("{glyph} {} · {}", child.label, child.status.label()),
+            crate::util::truncate(&text, area.width.saturating_sub(2) as usize),
             operation_worker_status_style(child.status, t, bg),
         )));
     }
