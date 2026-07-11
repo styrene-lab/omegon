@@ -6,6 +6,7 @@ use ratatui::widgets::{Paragraph, Widget, Wrap};
 
 use super::{dashboard, theme};
 use crate::features::delegate::DelegateProgress;
+use crate::surfaces::layout::UiPresentationLevel;
 use crate::surfaces::operations::{
     OperationChildRow, OperationChildStatus, OperationWorkbenchProjection,
 };
@@ -23,6 +24,17 @@ pub fn workbench_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> 
 
 pub fn active_plan_workspace_context_height(state: &WorkbenchState) -> u16 {
     u16::from(state.active.is_some() && state.workspace.has_visible_context())
+}
+
+pub fn workbench_preferred_height_for_level(
+    state: &WorkbenchState,
+    width: u16,
+    level: UiPresentationLevel,
+) -> u16 {
+    if level == UiPresentationLevel::Om && !state.requires_operator_attention() {
+        return 0;
+    }
+    workbench_preferred_height(state, width)
 }
 
 pub fn workbench_preferred_height(state: &WorkbenchState, width: u16) -> u16 {
@@ -85,6 +97,19 @@ pub struct WorkbenchState {
     pub active: Option<PlanDisplaySnapshot>,
     pub workstreams: Vec<WorkstreamSummary>,
     pub workspace: WorkbenchWorkspaceContext,
+}
+
+impl WorkbenchState {
+    pub fn requires_operator_attention(&self) -> bool {
+        self.workstreams.iter().any(|workstream| {
+            matches!(
+                workstream.status,
+                WorkstreamStatus::PendingApproval
+                    | WorkstreamStatus::Waiting
+                    | WorkstreamStatus::Blocked
+            )
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1655,6 +1680,42 @@ mod tests {
         );
 
         assert!(rendered.contains("tasks 1/3"), "{rendered}");
+    }
+
+    #[test]
+    fn om_hides_routine_workbench_but_keeps_attention() {
+        let routine = WorkbenchState {
+            active: Some(PlanDisplaySnapshot {
+                mode: "execute".into(),
+                items: vec![],
+                completed: 0,
+                total: 1,
+            }),
+            ..WorkbenchState::default()
+        };
+        assert_eq!(
+            workbench_preferred_height_for_level(&routine, 120, UiPresentationLevel::Om),
+            0
+        );
+
+        let attention = WorkbenchState {
+            workstreams: vec![WorkstreamSummary {
+                id: "release".into(),
+                title: "Release".into(),
+                status: WorkstreamStatus::Blocked,
+                completed: 2,
+                total: 3,
+            }],
+            ..WorkbenchState::default()
+        };
+        assert_eq!(
+            workbench_preferred_height_for_level(&attention, 120, UiPresentationLevel::Om),
+            1
+        );
+        assert_eq!(
+            workbench_preferred_height_for_level(&routine, 120, UiPresentationLevel::Active),
+            workbench_preferred_height(&routine, 120)
+        );
     }
 
     #[test]

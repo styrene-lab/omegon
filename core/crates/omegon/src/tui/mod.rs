@@ -127,7 +127,7 @@ use self::workbench::{
     WorkbenchWorkspaceContext, active_plan_workspace_context_height, active_workbench_snapshot,
     activity_preferred_height, render_activity_panel, render_workbench_panel,
     slim_completed_plan_hint_available, slim_operator_hint, upstream_retry_hint,
-    workbench_preferred_height,
+    workbench_preferred_height_for_level,
 };
 use crate::surfaces::command::{
     CommandPanel, CommandPanelReturnTarget, CommandPrompt, CommandPromptAction, CommandSeverity,
@@ -7687,7 +7687,11 @@ warning: {warning}"
         let raw_tool_inspection_height =
             activity_preferred_height(&activity_projection, area.width)
                 .saturating_add(engine_status_height);
-        let raw_workbench_height = workbench_preferred_height(&workbench_state, area.width);
+        let raw_workbench_height = workbench_preferred_height_for_level(
+            &workbench_state,
+            area.width,
+            self.ui_presentation.level,
+        );
         self.session_row.sync_from_footer(&self.footer_data);
         let session_height = self.session_row.preferred_height_for(area.width);
         let layout_plan = plan_tui_layout(TuiLayoutInputs {
