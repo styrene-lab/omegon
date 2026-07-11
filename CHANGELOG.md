@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 0.28.0 makes Om the outcome-first TUI default, adds bounded Active workflows and evidence-complete Full projection, and completes the permissions intent architecture. Canonical activity, outcomes, and evidence now project consistently across TUI, IPC/WebSocket, transcript export, and replay without changing runtime authority.
 
+- Corrected the remaining Slim tool-row palette bypass: ordinary running tools and live progress now use active teal, completed tools remain neutral, and orange is reserved for failed or otherwise attention-bearing tool states across both compact and full card renderers.
 - Expanded `/settings` into the universal configuration entrypoint with canonical navigation for runtime, model routing, authentication, skills, extensions, presentation, context, memory, profiles, secrets, sandbox policy, and updates; added `/config` as a registry-backed equivalent alias with direct routes such as `/config skills` and `/settings auth`.
 
 - Fixed short conversation projections anchoring to the top of a tall viewport and leaving a large false rendering boundary above the composer; conversations that fit now remain bottom-anchored while overflow retains normal scrolling.

@@ -114,10 +114,10 @@ impl<'a> SlimSegmentHeader<'a> {
     }
 }
 
-fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) -> Color {
+pub(crate) fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) -> Color {
     match state {
         SegmentState::Pending | SegmentState::Informational => t.dim(),
-        SegmentState::Running => t.warning(),
+        SegmentState::Running => t.accent(),
         SegmentState::Completed => t.success(),
         SegmentState::Failed => t.error(),
         SegmentState::Cancelled => t.muted(),
@@ -212,7 +212,7 @@ pub(crate) fn append_tool_live_progress_section(
     let status_text = format!("▶ {}", status_parts.join(" · "));
     lines.push(Line::from(vec![Span::styled(
         status_text,
-        Style::default().fg(theme.warning()).bg(bg),
+        Style::default().fg(theme.accent()).bg(bg),
     )]));
     live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
 
@@ -1159,6 +1159,31 @@ pub(crate) fn render_slim_tool_live_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slim_tool_state_colors_reserve_orange_for_attention() {
+        let theme = crate::tui::theme::Alpharius;
+        assert_eq!(
+            state_color_for_segment_state(SegmentState::Running, &theme),
+            theme.accent()
+        );
+        assert_eq!(
+            state_color_for_segment_state(SegmentState::Completed, &theme),
+            theme.success()
+        );
+        assert_eq!(
+            state_color_for_segment_state(SegmentState::Failed, &theme),
+            theme.warning()
+        );
+        assert_ne!(
+            state_color_for_segment_state(SegmentState::Running, &theme),
+            theme.warning()
+        );
+        assert_ne!(
+            state_color_for_segment_state(SegmentState::Completed, &theme),
+            theme.warning()
+        );
+    }
 
     #[test]
     fn live_progress_section_adds_status_and_tail() {
