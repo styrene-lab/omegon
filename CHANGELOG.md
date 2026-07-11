@@ -14,6 +14,10 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+- Improved design-tree path-collision diagnostics: creating `docs/<id>.md` now distinguishes an existing indexed design node from an ordinary or malformed Markdown document and directs operators to convert or repair invalid frontmatter.
+
 ## [0.28.0] - 2026-07-10
 
 0.28.0 makes Om the outcome-first TUI default, adds bounded Active workflows and evidence-complete Full projection, and completes the permissions intent architecture. Canonical activity, outcomes, and evidence now project consistently across TUI, IPC/WebSocket, transcript export, and replay without changing runtime authority.

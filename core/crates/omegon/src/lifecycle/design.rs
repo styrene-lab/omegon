@@ -742,8 +742,21 @@ pub fn create_node(
     let file_path = docs_dir.join(format!("{id}.md"));
 
     if file_path.exists() {
+        let existing_is_node = fs::read_to_string(&file_path)
+            .ok()
+            .and_then(|content| parse_frontmatter(&content))
+            .and_then(|frontmatter| node_from_frontmatter(&frontmatter, file_path.clone()))
+            .is_some_and(|node| node.id == id);
+
+        if existing_is_node {
+            anyhow::bail!(
+                "Design node '{id}' already exists at {}",
+                file_path.display()
+            );
+        }
+
         anyhow::bail!(
-            "Design node '{id}' already exists at {}",
+            "Cannot create design node '{id}': {} exists but is not a valid indexed design node; convert it or repair its frontmatter first",
             file_path.display()
         );
     }
@@ -1280,7 +1293,62 @@ mod mutation_tests {
         let dir = tempfile::tempdir().unwrap();
         let docs = dir.path().join("docs");
         create_node(&docs, "dup", "Dup", None, None, &[], "").unwrap();
-        assert!(create_node(&docs, "dup", "Dup2", None, None, &[], "").is_err());
+        let error = create_node(&docs, "dup", "Dup2", None, None, &[], "").unwrap_err();
+        assert!(error.to_string().contains("Design node 'dup' already exists"));
+    }
+
+    #[test]
+    fn create_reports_non_design_document_path_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        fs::write(
+            docs.join("collision.md"),
+            "+++\ntitle = \"Ordinary note\"\n+++\n\n# Ordinary note\n",
+        )
+        .unwrap();
+
+        let error = create_node(
+            &docs,
+            "collision",
+            "Collision",
+            None,
+            None,
+            &[],
+            "",
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("exists but is not a valid indexed design node"));
+        assert!(message.contains("convert it or repair its frontmatter first"));
+    }
+
+    #[test]
+    fn create_reports_malformed_design_frontmatter_path_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        fs::write(
+            docs.join("malformed.md"),
+            "+++\ntitle = \"Malformed\"\nstatus = [\n+++\n",
+        )
+        .unwrap();
+
+        let error = create_node(
+            &docs,
+            "malformed",
+            "Malformed",
+            None,
+            None,
+            &[],
+            "",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("exists but is not a valid indexed design node")
+        );
     }
 
     #[test]
