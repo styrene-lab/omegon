@@ -125,7 +125,8 @@ use self::settings_menu::SelectorKind;
 use self::workbench::{
     PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, WorkbenchState,
     WorkbenchWorkspaceContext, active_plan_workspace_context_height, active_workbench_snapshot,
-    activity_preferred_height_for_level, render_activity_panel, render_workbench_panel,
+    activity_preferred_height_for_level, render_activity_panel_for_level,
+    render_workbench_panel,
     slim_completed_plan_hint_available, slim_operator_hint, upstream_retry_hint,
     workbench_preferred_height_for_level,
 };
@@ -7856,12 +7857,13 @@ warning: {warning}"
             if status_area.height > 0 {
                 self.render_engine_status_row(status_area, frame, self.theme.as_ref());
             }
-            render_activity_panel(
+            render_activity_panel_for_level(
                 activity_area,
                 frame,
                 self.theme.as_ref(),
                 &self.conversation,
                 &activity_projection,
+                self.ui_presentation.level,
             );
         }
 

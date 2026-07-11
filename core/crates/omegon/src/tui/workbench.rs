@@ -815,9 +815,48 @@ pub fn render_activity_panel(
     conversation: &crate::tui::conversation::ConversationView,
     projection: &crate::surfaces::activity::ActivitySurfaceProjection,
 ) {
+    render_activity_panel_for_level(
+        area,
+        frame,
+        t,
+        conversation,
+        projection,
+        UiPresentationLevel::Active,
+    );
+}
+
+pub fn render_activity_panel_for_level(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    conversation: &crate::tui::conversation::ConversationView,
+    projection: &crate::surfaces::activity::ActivitySurfaceProjection,
+    level: UiPresentationLevel,
+) {
     if area.width == 0 || area.height == 0 || projection.is_empty() {
         return;
     }
+
+    if level == UiPresentationLevel::Active
+        && let Some(operation) = projection
+            .entries
+            .iter()
+            .find_map(|entry| entry.operation.as_ref())
+    {
+        render_active_workflow_panel(area, frame, t, operation);
+        return;
+    }
+
+    render_activity_entries(area, frame, t, conversation, projection);
+}
+
+fn render_activity_entries(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    conversation: &crate::tui::conversation::ConversationView,
+    projection: &crate::surfaces::activity::ActivitySurfaceProjection,
+) {
 
     let tools = projection
         .entries
@@ -896,6 +935,60 @@ pub fn render_activity_panel(
             }
         }
     }
+}
+
+fn render_active_workflow_panel(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    projection: &OperationWorkbenchProjection,
+) {
+    let bg = t.surface_bg();
+    let kind = match projection.operation.kind {
+        omegon_traits::OperationKind::Delegate => "delegate",
+        omegon_traits::OperationKind::Cleave => "cleave",
+    };
+    let id = projection.operation.id.as_deref().unwrap_or("active");
+    let total = projection.children.len();
+    let done = projection
+        .children
+        .iter()
+        .filter(|child| child.status.is_terminal())
+        .count();
+    let mut lines = vec![workbench_rule_line(
+        t,
+        bg,
+        format!("{kind} {id} · {done}/{total}"),
+        area.width,
+    )];
+    let max_rows = area.height.saturating_sub(1) as usize;
+    let visible = prioritized_operation_child_indices(&projection.children, max_rows);
+    let hidden = total.saturating_sub(visible.len());
+    for index in visible {
+        let child = &projection.children[index];
+        let glyph = match child.status {
+            OperationChildStatus::Succeeded => "✓",
+            OperationChildStatus::Failed | OperationChildStatus::TimedOut => "✗",
+            OperationChildStatus::Cancelled => "■",
+            OperationChildStatus::Running | OperationChildStatus::Starting => "◌",
+            OperationChildStatus::Waiting => "◇",
+            OperationChildStatus::Queued | OperationChildStatus::Unknown => "·",
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{glyph} {} · {}", child.label, child.status.label()),
+            operation_worker_status_style(child.status, t, bg),
+        )));
+    }
+    if hidden > 0 && lines.len() < area.height as usize {
+        lines.push(Line::from(Span::styled(
+            format!("⋯ {hidden} more stages"),
+            Style::default().fg(t.dim()).bg(bg),
+        )));
+    }
+    Paragraph::new(lines)
+        .style(Style::default().bg(bg))
+        .wrap(Wrap { trim: false })
+        .render(area, frame.buffer_mut());
 }
 
 fn should_render_activity_tool_detail(
