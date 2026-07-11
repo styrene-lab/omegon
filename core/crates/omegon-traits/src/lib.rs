@@ -694,6 +694,20 @@ pub struct IpcStateSnapshot {
     /// serialized snapshots remain decodable as Om-capable clients evolve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation: Option<IpcPresentationSnapshot>,
+    /// Active structured operation episodes. Optional for wire compatibility.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub operation_episodes: Vec<IpcOperationEpisodeSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IpcOperationEpisodeSnapshot {
+    pub id: String,
+    pub kind: String,
+    pub state: String,
+    pub outcome: String,
+    pub evidence_refs: Vec<String>,
+    pub completed: usize,
+    pub total: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3063,6 +3077,7 @@ mod tests {
                 checked_at: "2026-03-29T00:00:00Z".into(),
             },
             presentation: None,
+            operation_episodes: Vec::new(),
         }
     }
 

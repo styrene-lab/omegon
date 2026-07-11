@@ -3,7 +3,8 @@
 use omegon_traits::{
     IpcChangeSnapshot, IpcChildSnapshot, IpcCleaveSnapshot, IpcDesignCounts, IpcDesignTreeSnapshot,
     IpcDispatcherSnapshot, IpcFocusedNode, IpcHarnessSnapshot, IpcHealthSnapshot, IpcHealthState,
-    IpcMemorySnapshot, IpcNodeBrief, IpcOpenSpecSnapshot, IpcPresentationSnapshot,
+    IpcMemorySnapshot, IpcNodeBrief, IpcOpenSpecSnapshot, IpcOperationEpisodeSnapshot,
+    IpcPresentationSnapshot,
     IpcProviderSnapshot, IpcSessionSnapshot, IpcStateSnapshot, OmegonAutonomyMode, OmegonControlPlane, OmegonDeploymentKind, OmegonIdentity,
     OmegonInstanceDescriptor, OmegonOwnerKind, OmegonOwnership, OmegonPlacement,
     OmegonPlacementKind, OmegonRole, OmegonRuntime, OmegonRuntimeHealth, OmegonRuntimeProfile,
@@ -49,6 +50,58 @@ pub fn build_state_snapshot(
         harness,
         health,
         presentation: Some(ipc_presentation_snapshot(presentation_level)),
+        operation_episodes: ipc_operation_episodes(handles),
+    }
+}
+
+fn ipc_operation_episodes(handles: &DashboardHandles) -> Vec<IpcOperationEpisodeSnapshot> {
+    let mut episodes = Vec::new();
+    if let Some(progress) = handles.delegate.as_ref().and_then(|value| value.lock().ok())
+        && (progress.active || progress.running > 0)
+    {
+        let projection = crate::surfaces::operations::OperationWorkbenchProjection::from_delegate(&progress);
+        episodes.push(ipc_operation_episode(&projection));
+    }
+    if let Some(progress) = handles.cleave.as_ref().and_then(|value| value.lock().ok())
+        && progress.active
+    {
+        let projection = crate::surfaces::operations::OperationWorkbenchProjection::from_cleave(&progress);
+        episodes.push(ipc_operation_episode(&projection));
+    }
+    episodes
+}
+
+fn ipc_operation_episode(
+    projection: &crate::surfaces::operations::OperationWorkbenchProjection,
+) -> IpcOperationEpisodeSnapshot {
+    let kind = match projection.operation.kind {
+        omegon_traits::OperationKind::Delegate => "delegate",
+        omegon_traits::OperationKind::Cleave => "cleave",
+    };
+    let raw_id = projection.operation.id.as_deref().unwrap_or("active");
+    let total = projection.children.len();
+    let state = if projection.failed > 0 {
+        "failed"
+    } else if projection.running > 0 {
+        "running"
+    } else {
+        "complete"
+    };
+    IpcOperationEpisodeSnapshot {
+        id: format!("{kind}:{raw_id}"),
+        kind: kind.into(),
+        state: state.into(),
+        outcome: format!(
+            "{kind} · {} done · {} running · {} failed",
+            projection.completed, projection.running, projection.failed
+        ),
+        evidence_refs: projection
+            .children
+            .iter()
+            .map(|child| format!("{kind}:child:{}", child.id))
+            .collect(),
+        completed: projection.completed,
+        total,
     }
 }
 
