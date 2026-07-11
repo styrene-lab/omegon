@@ -309,7 +309,10 @@ mod tests {
         let before = project_conversation(&running, UiPresentationLevel::Om);
         assert!(matches!(
             before.segments[0].content,
-            SegmentContent::ToolCard { complete: false, .. }
+            SegmentContent::ToolCard {
+                complete: false,
+                ..
+            }
         ));
 
         let completed = vec![tool(Some(7), "a", "47 tests passed", true)];
