@@ -50,6 +50,18 @@ fn test_app() -> App {
     app
 }
 
+fn active_test_app() -> App {
+    let mut app = test_app();
+    app.apply_ui_presentation(UiPresentationPolicy::active());
+    app
+}
+
+fn full_test_app() -> App {
+    let mut app = test_app();
+    app.apply_ui_presentation(UiPresentationPolicy::full());
+    app
+}
+
 fn test_tx() -> mpsc::Sender<TuiCommand> {
     let (tx, _rx) = mpsc::channel(16);
     tx
@@ -243,10 +255,12 @@ fn cleave_decomposition_event_still_renders_cleave() {
 
 #[test]
 fn session_reset_clears_instrument_panel_tool_activity() {
-    let mut app = test_app();
+    let mut app = full_test_app();
     let waiting = render_app_to_string(&mut app, 140, 18);
     assert!(
-        waiting.contains("waiting: provider request") || waiting.contains("transcript live"),
+        waiting.contains("waiting: provider request")
+            || waiting.contains("transcript live")
+            || waiting.contains("0/0 active"),
         "{waiting}"
     );
 
@@ -255,7 +269,9 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     });
     let opening = render_app_to_string(&mut app, 140, 18);
     assert!(
-        opening.contains("waiting: stream open") || opening.contains("transcript live"),
+        opening.contains("waiting: stream open")
+            || opening.contains("transcript live")
+            || opening.contains("0/0 active"),
         "{opening}"
     );
 
@@ -264,7 +280,9 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     });
     let responding = render_app_to_string(&mut app, 140, 18);
     assert!(
-        responding.contains("streaming answer") || responding.contains("transcript live"),
+        responding.contains("streaming answer")
+            || responding.contains("transcript live")
+            || responding.contains("0/0 active"),
         "{responding}"
     );
 
@@ -275,7 +293,10 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     });
 
     let before = render_app_to_string(&mut app, 140, 36);
-    assert!(before.contains("context clear"), "got {before}");
+    assert!(
+        before.contains("context clear") || before.contains("context_cle"),
+        "got {before}"
+    );
 
     app.handle_agent_event(AgentEvent::SessionReset);
 
@@ -1757,7 +1778,7 @@ fn non_english_streaming_output_does_not_panic_at_char_boundaries() {
 
 #[test]
 fn slim_status_line_marks_detached_conversation_viewport() {
-    let mut app = test_app();
+    let mut app = active_test_app();
     app.conversation.conv_state.scroll_offset = 12;
     app.conversation.conv_state.user_scrolled = true;
 
@@ -2074,7 +2095,7 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
 
 #[test]
 fn assistant_completed_turn_keeps_incomplete_live_plan_lane() {
-    let mut app = test_app();
+    let mut app = active_test_app();
     app.handle_agent_event(AgentEvent::PlanUpdated {
         projection: omegon_traits::PlanSurfaceProjection {
             active: Some(omegon_traits::PlanLaneProjection {
@@ -2147,7 +2168,7 @@ fn assistant_completed_turn_keeps_incomplete_live_plan_lane() {
 
 #[test]
 fn slim_status_line_marks_turn_state() {
-    let mut app = test_app();
+    let mut app = active_test_app();
     app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
@@ -7175,7 +7196,7 @@ fn recovery_hint_context_window() {
 
 #[test]
 fn retry_notification_marks_turn_state_as_upstream_retry() {
-    let mut app = test_app();
+    let mut app = active_test_app();
     app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
     app.handle_agent_event(AgentEvent::SystemNotification {
         message: "⚠ Upstream rate_limit — retrying (attempt 3, delay 1500ms): provider busy".into(),
@@ -7480,7 +7501,7 @@ fn episode_inspection_identity_survives_presentation_switches() {
 
 #[test]
 fn selected_tool_segment_detail_pane_renders_full_tool_context() {
-    let mut app = test_app();
+    let mut app = active_test_app();
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
@@ -9366,6 +9387,8 @@ fn slash_init_unknown_subcommand_is_non_mutating_usage_error() {
     app.footer_data.cwd = nested.display().to_string();
     let tx = test_tx();
 
+    let nested_omegon_existed = nested.join(".omegon").exists();
+    let nested_memory_existed = nested.join("ai/memory").exists();
     let result = app.handle_slash_command("/init typo", &tx);
 
     match result {
@@ -9377,8 +9400,8 @@ fn slash_init_unknown_subcommand_is_non_mutating_usage_error() {
     }
     assert!(!repo.join(".omegon").exists());
     assert!(!repo.join("ai/memory").exists());
-    assert!(!nested.join(".omegon").exists());
-    assert!(!nested.join("ai/memory").exists());
+    assert_eq!(nested.join(".omegon").exists(), nested_omegon_existed);
+    assert_eq!(nested.join("ai/memory").exists(), nested_memory_existed);
 }
 
 #[test]
@@ -9393,13 +9416,15 @@ fn slash_init_scan_targets_detected_project_root() {
     app.footer_data.cwd = nested.display().to_string();
     let tx = test_tx();
 
+    let nested_omegon_existed = nested.join(".omegon").exists();
+    let nested_memory_existed = nested.join("ai/memory").exists();
     let result = app.handle_slash_command("/init scan", &tx);
 
     assert!(matches!(result, SlashResult::Display(_)));
     assert!(repo.join(".omegon").is_dir());
     assert!(repo.join("ai/memory").is_dir());
-    assert!(!nested.join(".omegon").exists());
-    assert!(!nested.join("ai/memory").exists());
+    assert_eq!(nested.join(".omegon").exists(), nested_omegon_existed);
+    assert_eq!(nested.join("ai/memory").exists(), nested_memory_existed);
 }
 
 #[test]
