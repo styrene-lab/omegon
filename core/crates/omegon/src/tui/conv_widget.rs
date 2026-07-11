@@ -651,7 +651,7 @@ fn render_detached_viewport_hint(
     let right_rule_width = area.width.saturating_sub(label_width + 2) as usize;
     let text = format!("{left_rule}{label}{}", "─".repeat(right_rule_width));
     let style = Style::default()
-        .fg(theme.warning())
+        .fg(theme.muted())
         .bg(theme.surface_bg())
         .add_modifier(Modifier::BOLD);
 
@@ -697,6 +697,28 @@ mod tests {
         let mut state = ConvState::new();
         widget.render(area, &mut buf, &mut state);
         // Should not panic
+    }
+
+    #[test]
+    fn detached_viewport_hint_is_neutral_navigation_chrome() {
+        let area = Rect::new(0, 0, 48, 2);
+        let mut buf = Buffer::empty(area);
+        render_detached_viewport_hint(area, &mut buf, &Alpharius, 17);
+
+        let y = area.bottom() - 1;
+        let styled_cells = (area.left()..area.right())
+            .filter_map(|x| buf.cell((x, y)))
+            .filter(|cell| cell.symbol() != " ")
+            .collect::<Vec<_>>();
+        assert!(!styled_cells.is_empty(), "hint should render visible chrome");
+        assert!(
+            styled_cells.iter().all(|cell| cell.fg == Alpharius.muted()),
+            "detached navigation hint must remain neutral"
+        );
+        assert!(
+            styled_cells.iter().all(|cell| cell.fg != Alpharius.warning()),
+            "detached navigation hint must not consume the attention color"
+        );
     }
 
     #[test]

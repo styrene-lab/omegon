@@ -1161,6 +1161,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rendered_slim_tool_labels_preserve_state_semantics() {
+        let theme = crate::tui::theme::Alpharius;
+        let cases = [
+            (SegmentState::Running, theme.accent()),
+            (SegmentState::Completed, theme.muted()),
+            (SegmentState::Failed, theme.warning()),
+        ];
+
+        for (state, expected) in cases {
+            let area = Rect::new(0, 0, 64, 1);
+            let mut buf = Buffer::empty(area);
+            render_slim_tool_summary_rows(
+                area,
+                &mut buf,
+                &theme,
+                theme.bg(),
+                "⌘",
+                state_color_for_segment_state(state, &theme),
+                "bash",
+                &["git status".to_string()],
+                false,
+            );
+
+            let label_end = compact_row::prefix_width("⌘", "bash", false)
+                .saturating_sub(" · ".len() as u16);
+            let label_cells = (area.left()..area.left() + label_end)
+                .filter_map(|x| buf.cell((x, area.y)))
+                .collect::<Vec<_>>();
+            assert!(!label_cells.is_empty());
+            assert!(
+                label_cells.iter().all(|cell| cell.fg == expected),
+                "rendered {state:?} label should use {expected:?}"
+            );
+            if state != SegmentState::Failed {
+                assert!(
+                    label_cells.iter().all(|cell| cell.fg != theme.warning()),
+                    "non-failed {state:?} label must not consume attention orange"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn slim_tool_state_colors_reserve_orange_for_attention() {
         let theme = crate::tui::theme::Alpharius;
         assert_eq!(
