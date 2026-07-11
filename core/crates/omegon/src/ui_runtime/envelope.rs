@@ -7,6 +7,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::surfaces::layout::{
+    LiveDetail, TelemetryDensity, TranscriptDensity, UiPresentationPolicy,
+};
+
 /// Internal schema version for UI runtime envelopes.
 pub const UI_RUNTIME_ENVELOPE_VERSION: u32 = 1;
 
@@ -20,6 +24,7 @@ pub enum UiSurfaceKind {
     Dashboard,
     Instruments,
     Layout,
+    Presentation,
 }
 
 /// Versioned surface snapshot/update envelope.
@@ -48,6 +53,37 @@ impl SurfaceEnvelope {
             payload,
         }
     }
+}
+
+pub fn presentation_payload(policy: UiPresentationPolicy) -> Value {
+    let transcript = match policy.transcript_density() {
+        TranscriptDensity::Outcomes => "outcomes",
+        TranscriptDensity::Evidence => "evidence",
+    };
+    let live_detail = match policy.live_detail() {
+        LiveDetail::Status => "status",
+        LiveDetail::Workflow => "workflow",
+        LiveDetail::Diagnostic => "diagnostic",
+    };
+    let telemetry = match policy.telemetry_density() {
+        TelemetryDensity::Essential => "essential",
+        TelemetryDensity::Operational => "operational",
+        TelemetryDensity::Diagnostic => "diagnostic",
+    };
+    serde_json::json!({
+        "level": policy.level.name(),
+        "preset": policy.preset_name(),
+        "transcriptDensity": transcript,
+        "liveDetail": live_detail,
+        "telemetryDensity": telemetry,
+        "supportedLevels": ["om", "active", "full"],
+        "surfaces": {
+            "dashboard": policy.surfaces.dashboard,
+            "instruments": policy.surfaces.instruments,
+            "footer": policy.surfaces.footer,
+            "activity": policy.surfaces.activity,
+        },
+    })
 }
 
 /// Versioned action request envelope for replay/runtime boundaries.
@@ -154,6 +190,24 @@ mod tests {
         assert_eq!(value["surface"], "conversation");
         assert_eq!(value["revision"], 7);
         assert_eq!(value["payload"]["segments"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn presentation_envelope_advertises_semantic_levels_and_density() {
+        let envelope = SurfaceEnvelope::new(
+            "session-1",
+            UiSurfaceKind::Presentation,
+            9,
+            presentation_payload(UiPresentationPolicy::active()),
+        );
+        let value = serde_json::to_value(envelope).expect("serialize envelope");
+        assert_eq!(value["surface"], "presentation");
+        assert_eq!(value["payload"]["level"], "active");
+        assert_eq!(value["payload"]["liveDetail"], "workflow");
+        assert_eq!(
+            value["payload"]["supportedLevels"],
+            serde_json::json!(["om", "active", "full"])
+        );
     }
 
     #[test]
