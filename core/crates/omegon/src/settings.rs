@@ -336,6 +336,11 @@ pub struct Settings {
     /// Tool display detail level.
     pub tool_detail: ToolDetail,
 
+    /// Preferred UI presentation level. This is a client projection preference;
+    /// it never changes runtime posture, permissions, or tool policy.
+    #[serde(default)]
+    pub ui_presentation: crate::surfaces::layout::UiPresentationLevel,
+
     /// Source of the active persisted profile loaded for this runtime.
     #[serde(skip)]
     pub profile_source: ProfileSource,
@@ -681,6 +686,7 @@ impl Default for Settings {
             context_class: ContextClass::from_tokens(context_window),
             requested_context_class: None,
             tool_detail: ToolDetail::Detailed,
+            ui_presentation: crate::surfaces::layout::UiPresentationLevel::Om,
             profile_source: ProfileSource::BuiltInDefault,
             provider_order: Vec::new(),
             fallback_providers: Vec::new(),
@@ -1210,6 +1216,10 @@ pub struct Profile {
     /// Tool output density: "lean", "compact", "detailed", "verbose".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_detail: Option<String>,
+    /// UI presentation preference: "om", "active", or "full". Legacy
+    /// "lean"/"slim" values deserialize as Om.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ui_presentation: Option<String>,
 
     // ── Sandbox ──
     /// Sandbox isolation for delegate/cleave children.
@@ -1670,6 +1680,11 @@ impl Profile {
         {
             settings.tool_detail = detail;
         }
+        if let Some(ref level) = self.ui_presentation
+            && let Ok(level) = crate::surfaces::layout::UiPresentationLevel::parse(level)
+        {
+            settings.ui_presentation = level;
+        }
         if let Some(s) = self.sandbox {
             settings.sandbox = s;
         }
@@ -1745,6 +1760,11 @@ impl Profile {
             self.tool_detail = Some(settings.tool_detail.as_str().to_string());
         } else {
             self.tool_detail = None;
+        }
+        if settings.ui_presentation != crate::surfaces::layout::UiPresentationLevel::Om {
+            self.ui_presentation = Some(settings.ui_presentation.name().to_string());
+        } else {
+            self.ui_presentation = None;
         }
         if settings.sandbox {
             self.sandbox = Some(true);

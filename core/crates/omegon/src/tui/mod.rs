@@ -2253,9 +2253,13 @@ impl App {
     }
 
     pub fn new(settings: crate::settings::SharedSettings) -> Self {
-        let (model_id, model_provider) = {
+        let (model_id, model_provider, presentation_level) = {
             let s = settings.lock().unwrap();
-            (s.model.clone(), s.provider().to_string())
+            (
+                s.model.clone(),
+                s.provider().to_string(),
+                s.ui_presentation,
+            )
         };
         Self {
             editor: Editor::new(),
@@ -2281,8 +2285,8 @@ impl App {
                 ..Default::default()
             },
             instrument_panel: InstrumentPanel::default(),
-            ui_presentation: UiPresentationPolicy::om(),
-            ui_surfaces: UiPresentationPolicy::om().surfaces,
+            ui_presentation: UiPresentationPolicy::named(presentation_level),
+            ui_surfaces: UiPresentationPolicy::named(presentation_level).surfaces,
             theme: theme::default_theme(),
             settings,
             cancel: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -2376,6 +2380,7 @@ impl App {
     fn apply_ui_presentation(&mut self, policy: UiPresentationPolicy) {
         self.ui_presentation = policy;
         self.ui_surfaces = policy.surfaces;
+        self.update_and_persist(|settings| settings.ui_presentation = policy.level);
     }
 
     fn apply_ui_preset(&mut self, surfaces: UiSurfaces) {

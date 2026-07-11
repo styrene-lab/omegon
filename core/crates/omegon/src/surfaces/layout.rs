@@ -5,8 +5,13 @@
 //! concepts separate prevents dashboard visibility from becoming an accidental
 //! proxy for transcript, activity, or telemetry semantics.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum UiPresentationLevel {
+    #[default]
+    #[serde(alias = "lean", alias = "slim")]
     Om,
     Active,
     Full,
