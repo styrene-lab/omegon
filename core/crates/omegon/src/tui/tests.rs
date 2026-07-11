@@ -7412,6 +7412,39 @@ fn active_tool_phase_beats_runtime_thinking_in_tui() {
 }
 
 #[test]
+fn session_transcript_default_is_mode_independent_and_evidence_is_explicit() {
+    let mut app = test_app();
+    app.conversation
+        .push_tool_start("tool-a", "read", Some("src/lib.rs"), Some("src/lib.rs"));
+    app.conversation
+        .push_tool_end("tool-a", false, Some("86 lines"));
+    app.conversation
+        .push_tool_start("tool-b", "bash", Some("cargo test"), Some("cargo test"));
+    app.conversation
+        .push_tool_end("tool-b", false, Some("47 tests passed"));
+    for segment in app.conversation.segments_mut() {
+        if matches!(segment.content, SegmentContent::ToolCard { .. }) {
+            segment.meta.turn = Some(7);
+        }
+    }
+
+    app.apply_ui_presentation(UiPresentationPolicy::om());
+    let om = app.build_session_transcript(SegmentExportMode::Raw);
+    app.apply_ui_presentation(UiPresentationPolicy::full());
+    let full = app.build_session_transcript(SegmentExportMode::Raw);
+    assert_eq!(om, full);
+    assert!(om.contains("2 operations"), "{om}");
+    assert!(!om.contains("src/lib.rs"), "{om}");
+
+    let evidence = app.build_session_transcript_with_policy(
+        SegmentExportMode::Raw,
+        conversation_projection::ConversationExportPolicy::Evidence,
+    );
+    assert!(evidence.contains("src/lib.rs"), "{evidence}");
+    assert!(evidence.contains("cargo test"), "{evidence}");
+}
+
+#[test]
 fn episode_inspection_identity_survives_presentation_switches() {
     let mut app = test_app();
     app.tool_inspection_target = Some(ToolInspectionTarget::Episode {
