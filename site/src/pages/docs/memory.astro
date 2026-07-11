@@ -73,10 +73,10 @@ import Docs from "../../layouts/Docs.astro";
     Facts are stored as one JSON object per line in the project's memory directory.
     This file is git-tracked with <code>merge=union</code> in <code>.gitattributes</code>,
     allowing multiple branches to add facts without merge conflicts. SQLite databases
-    are gitignored and rebuilt from the JSONL source of truth. The 0.27.0 line also
-    exposes a renderer-neutral memory/federation status projection that classifies
-    one-off, Git, lifecycle, and federation contexts while treating Git-tracked JSONL
-    facts as the cross-checkout memory authority.
+    are gitignored and rebuilt from the JSONL source of truth. Omegon exposes a
+    renderer-neutral memory and federation status projection that classifies one-off,
+    Git, lifecycle, and federation contexts while treating Git-tracked JSONL facts as
+    the cross-checkout memory authority.
   </p>
 
   <h2>Embedding Backends</h2>

@@ -110,10 +110,11 @@ import Docs from "../../layouts/Docs.astro";
   <p>
     Not every task needs parallel decomposition. The <code>delegate</code> tool spawns a single
     subagent for a bounded task — a scout to search the codebase, a patch worker for a scoped
-    edit, or a verifier to run tests. In the 0.27.0 line, delegate and cleave share a
-    renderer-neutral operation projection, so Workbench rows, command status, transcript
-    lifecycle events, and failure summaries all use the same operation identity and child
-    status taxonomy.
+    edit, or a verifier to run tests. Delegate and cleave share a renderer-neutral
+    operation projection, so Workbench rows, command status, transcript lifecycle
+    events, and failure summaries all use the same operation identity and child
+    status taxonomy. In Om and Active, terminal operation streams collapse into one
+    durable outcome; Full retains the underlying lifecycle evidence for inspection.
   </p>
 
   <h3>Worker Profiles</h3>

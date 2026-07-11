@@ -346,6 +346,14 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
         } else {
             total_height - viewport_height - state.scroll_offset
         };
+        // Keep short conversations attached to the composer instead of pinning
+        // them to the top of a tall viewport and leaving a false "rendering
+        // boundary" below the latest message.
+        let viewport_origin_y = if total_height < viewport_height {
+            area.y.saturating_add(viewport_height - total_height)
+        } else {
+            area.y
+        };
 
         // Walk segments to find which ones are visible.
         // Segments partially above the viewport are rendered into a temp buffer
@@ -368,7 +376,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
 
             if seg_top >= top_offset {
                 // Segment starts within the viewport — render directly
-                let render_y = area.y + (seg_top - top_offset);
+                let render_y = viewport_origin_y + (seg_top - top_offset);
                 let available_height = area.bottom().saturating_sub(render_y);
                 if available_height == 0 {
                     continue;
@@ -439,7 +447,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                 // Copy the visible portion from temp_buf to main buf
                 for row in 0..visible_rows {
                     let src_y = clip_rows + row;
-                    let dst_y = area.y + row;
+                    let dst_y = viewport_origin_y + row;
                     if dst_y >= area.bottom() {
                         break;
                     }
@@ -711,6 +719,26 @@ mod tests {
             }
         }
         assert!(found, "should render something");
+    }
+
+    #[test]
+    fn short_conversation_is_bottom_anchored_to_the_composer() {
+        let segments = vec![Segment::user_prompt("hello")];
+        let widget = ConversationWidget::new(&segments, &Alpharius);
+        let area = Rect::new(0, 0, 40, 12);
+        let mut buf = Buffer::empty(area);
+        let mut state = ConvState::new();
+        widget.render(area, &mut buf, &mut state);
+
+        let occupied_rows = (0..area.height)
+            .filter(|&y| (0..area.width).any(|x| buf[(x, y)].symbol() != " "))
+            .collect::<Vec<_>>();
+        assert!(!occupied_rows.is_empty(), "prompt should render");
+        assert_eq!(
+            occupied_rows.last().copied(),
+            Some(area.height - 1),
+            "short content should end at the bottom of the conversation viewport"
+        );
     }
 
     #[test]

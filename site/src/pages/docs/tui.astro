@@ -13,6 +13,39 @@ import Docs from "../../layouts/Docs.astro";
   </ul>
   <!-- DIAGRAM:tui-layout | Annotated wireframe: conversation view (scrollable center), multiline editor (bottom), status footer (bottom bar with provider/model/grade/context/memory fields). Label each region and key telemetry indicators -->
 
+  <h2>Presentation levels</h2>
+  <p>
+    Omegon 0.28 separates presentation density from runtime authority. Changing the
+    presentation level changes what the interface projects; it does not change the
+    selected model, tool permissions, runtime posture, or what evidence is retained.
+  </p>
+  <table>
+    <thead><tr><th>Level</th><th>Purpose</th><th>Visible detail</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Om</strong></td><td>Quiet, outcome-first default</td><td>One primary live activity, durable operation outcomes, essential status, and Workbench only when attention is required</td></tr>
+      <tr><td><strong>Active</strong></td><td>Bounded execution awareness</td><td>Current workflow tree, progress, selected child states, and the active Workbench slice</td></tr>
+      <tr><td><strong>Full</strong></td><td>Persistent operational evidence</td><td>Complete tool and lifecycle evidence, richer telemetry, and all operational surfaces</td></tr>
+    </tbody>
+  </table>
+  <pre><code>/ui om       # Quiet outcome-first projection
+/ui active   # Bounded live workflow detail
+/ui full     # Complete operational evidence</code></pre>
+  <p>
+    Press <code>Ctrl+G</code> to cycle through the three levels. The selected level is
+    persisted in profile settings. Legacy <code>lean</code> and <code>slim</code> presentation
+    values migrate to Om.
+  </p>
+
+  <h3>Activity, outcomes, and evidence</h3>
+  <p>
+    Running tools and subordinate workflows appear as transient activity. When an
+    operation terminates, Om and Active replace that activity with one durable success,
+    failure, or cancellation outcome. Full preserves the underlying command arguments,
+    results, and lifecycle milestones. Default transcript and session exports are
+    presentation-independent, so switching the screen to Om never discards archival
+    evidence; evidence-inclusive export uses the canonical Full projection.
+  </p>
+
   <h2>Segments</h2>
   <p>
     The conversation is rendered as a sequence of typed segments, each with metadata:
@@ -112,9 +145,9 @@ import Docs from "../../layouts/Docs.astro";
   <p>
     The input area is a real wrapped multiline editor with visible cursor placement,
     prompt history, proportional height growth, and semantic edit actions shared by
-    TUI, ACP, and future frontend surfaces. Recent 0.27.0 work moved character,
-    word, replacement, clear, attachment, typed text, and paste operations through
-    the shared <code>UiAction</code> seam instead of binding behavior to frontend key events.
+    TUI, ACP, and future frontend surfaces. Character, word, replacement, clear,
+    attachment, typed text, and paste operations move through the shared
+    <code>UiAction</code> seam instead of binding behavior to frontend key events.
   </p>
   <ul>
     <li><strong>Enter</strong> sends the prompt</li>
