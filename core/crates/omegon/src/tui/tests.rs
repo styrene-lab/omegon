@@ -7690,8 +7690,9 @@ fn activity_prune_removes_expired_completed_but_keeps_running_entries() {
 }
 
 #[test]
-fn single_running_activity_tool_uses_full_live_card() {
+fn active_single_running_activity_tool_uses_full_live_card() {
     let mut app = test_app();
+    app.apply_ui_presentation(UiPresentationPolicy::active());
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
@@ -7701,6 +7702,21 @@ fn single_running_activity_tool_uses_full_live_card() {
     let rendered = render_app_to_string(&mut app, 140, 36);
 
     assert!(rendered.contains("live log"), "{rendered}");
+    assert!(rendered.contains("cargo check"), "{rendered}");
+}
+
+#[test]
+fn om_single_running_activity_tool_stays_one_line() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        args: serde_json::json!({"command": "cargo check"}),
+    });
+
+    let rendered = render_app_to_string(&mut app, 140, 36);
+
+    assert!(!rendered.contains("live log"), "{rendered}");
     assert!(rendered.contains("cargo check"), "{rendered}");
 }
 

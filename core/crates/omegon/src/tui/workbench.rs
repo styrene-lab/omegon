@@ -55,8 +55,19 @@ pub fn activity_preferred_height(
     projection: &crate::surfaces::activity::ActivitySurfaceProjection,
     width: u16,
 ) -> u16 {
+    activity_preferred_height_for_level(projection, width, UiPresentationLevel::Active)
+}
+
+pub fn activity_preferred_height_for_level(
+    projection: &crate::surfaces::activity::ActivitySurfaceProjection,
+    width: u16,
+    level: UiPresentationLevel,
+) -> u16 {
     if width == 0 || projection.is_empty() {
         return 0;
+    }
+    if level == UiPresentationLevel::Om {
+        return 1;
     }
     let tool_count = projection
         .entries

@@ -125,7 +125,7 @@ use self::settings_menu::SelectorKind;
 use self::workbench::{
     PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, WorkbenchState,
     WorkbenchWorkspaceContext, active_plan_workspace_context_height, active_workbench_snapshot,
-    activity_preferred_height, render_activity_panel, render_workbench_panel,
+    activity_preferred_height_for_level, render_activity_panel, render_workbench_panel,
     slim_completed_plan_hint_available, slim_operator_hint, upstream_retry_hint,
     workbench_preferred_height_for_level,
 };
@@ -7685,7 +7685,11 @@ warning: {warning}"
                     && self.ui_presentation.level != UiPresentationLevel::Full,
             );
         let raw_tool_inspection_height =
-            activity_preferred_height(&activity_projection, area.width)
+            activity_preferred_height_for_level(
+                &activity_projection,
+                area.width,
+                self.ui_presentation.level,
+            )
                 .saturating_add(engine_status_height);
         let raw_workbench_height = workbench_preferred_height_for_level(
             &workbench_state,
