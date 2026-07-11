@@ -14,6 +14,10 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.28.0] - 2026-07-10
+
+0.28.0 makes Om the outcome-first TUI default, adds bounded Active workflows and evidence-complete Full projection, and completes the permissions intent architecture. Canonical activity, outcomes, and evidence now project consistently across TUI, IPC/WebSocket, transcript export, and replay without changing runtime authority.
+
 - Failed or cancelled delegate/cleave operations now terminate and collapse just like successful runs, but produce an explicit failed outcome (`✗`) derived from lifecycle evidence instead of remaining as noisy milestone streams or being mislabeled successful.
 - Adversarial hardening fixed three projection/control defects: failed ordinary tool turns now collapse into one durable failed outcome, non-contiguous duplicate lifecycle streams cannot emit the same operation outcome twice, and semantic control requests now update shared presentation settings instead of acknowledging a no-op.
 - Session transcript and copy/export construction now consume the explicit semantic export policy by default rather than the current UI projection; regression coverage proves Om and Full produce identical default archives while evidence-inclusive export retains canonical command arguments and results.
@@ -86,10 +90,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Hardened `/secrets` menu UX so inventory rows make resolution the primary action: Enter now runs `/secrets get <NAME>` for redacted existence/status knowledge, set/replace remains an explicit secondary action, the TUI warms every discovered secret before building the menu snapshot so rows open as known `resolved`, `configured`, `deferred`, or `missing` instead of `not checked`, and bundled catalog agents no longer mark `ANTHROPIC_API_KEY` as globally required.
 - Hardened `/variables` menu UX to match the management-first `/secrets` posture: the inventory tab is now `Manage`, Enter updates the selected variable, empty state primes `/variables set`, and read-only value display moved to a secondary action.
 - 0.27.8 was not published as a usable artifact release; 0.28.0 supersedes it as the next installable release line.
-
-## [0.28.0] - 2026-07-09
-
-0.28.0 completes the permissions intent architecture: filesystem mediation now carries structured intent, path dialect, environment/mount, sensitive-infrastructure, privilege-escalation, and trusted-grant context through bash and terminal preflight.
 
 ### Added
 - Make permissions intent architecture the primary 0.28.0 release target: filesystem access is moving toward structured intent, provenance-rich path diagnostics, and confidence-aware mediation for suspicious shell-derived paths such as `/Ig` and mistaken root-dot paths such as `/.omegon`.
