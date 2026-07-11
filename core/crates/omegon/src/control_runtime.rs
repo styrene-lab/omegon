@@ -8,6 +8,7 @@ use crate::bridge::LlmBridge;
 use crate::providers;
 use crate::session;
 use crate::settings;
+use crate::surfaces::layout::UiPresentationLevel;
 use crate::{CliRuntimeView, InteractiveAgentHost, InteractiveAgentState};
 use omegon_traits::{AgentEvent, SlashCommandResponse};
 
@@ -140,6 +141,11 @@ pub enum ControlRequest {
     },
     SetRuntimeMode {
         slim: bool,
+    },
+    /// Semantic three-level presentation request. New clients should use this;
+    /// `SetRuntimeMode` remains a legacy Om/Full compatibility decoder.
+    SetPresentationLevel {
+        level: UiPresentationLevel,
     },
     NewSession,
     ListSessions,
@@ -854,6 +860,13 @@ pub async fn execute_control(
             set_runtime_mode_response(ctx.runtime_state, ctx.shared_settings, ctx.events_tx, slim)
                 .await
         }
+        ControlRequest::SetPresentationLevel { level } => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!(
+                "UI presentation → {} (client projection; runtime posture unchanged)",
+                level.name()
+            )),
+        },
         ControlRequest::NewSession => {
             new_session_response(ctx.runtime_state, ctx.agent, ctx.cli, ctx.events_tx).await
         }
@@ -919,6 +932,7 @@ pub async fn execute_daemon_control(
             | ControlRequest::SetThinking { .. }
             | ControlRequest::SetContextClass { .. }
             | ControlRequest::SetRuntimeMode { .. }
+            | ControlRequest::SetPresentationLevel { .. }
             | ControlRequest::SetMaxTurns { .. }
             | ControlRequest::ProfileApply
             | ControlRequest::ProfileUse { .. }
@@ -957,6 +971,13 @@ pub async fn execute_daemon_control(
             ControlRequest::SetRuntimeMode { slim } => {
                 set_runtime_mode_daemon_response(shared_settings, cwd, slim).await
             }
+            ControlRequest::SetPresentationLevel { level } => SlashCommandResponse {
+                accepted: true,
+                output: Some(format!(
+                    "UI presentation → {} (client projection; runtime posture unchanged)",
+                    level.name()
+                )),
+            },
             ControlRequest::ProfileApply => profile_apply_daemon_response(shared_settings, cwd).await,
             ControlRequest::ProfileUse { id, scope } => {
                 let selection = settings::ActiveProfileSelection { id, scope };

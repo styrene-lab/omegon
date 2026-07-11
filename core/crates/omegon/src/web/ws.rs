@@ -1568,6 +1568,29 @@ async fn handle_client_command(
                     };
                     crate::control_runtime::ControlRequest::SetContextClass { class }
                 }
+                "set_presentation_level" => {
+                    let Some(level) = cmd["level"]
+                        .as_str()
+                        .and_then(|level| {
+                            crate::surfaces::layout::UiPresentationLevel::parse(level).ok()
+                        })
+                    else {
+                        let _ = snapshot_tx
+                            .send(control_result_message(
+                                cmd_type,
+                                omegon_traits::ControlOutputResponse {
+                                    accepted: false,
+                                    output: Some(
+                                        "invalid or missing presentation level: use om, active, or full"
+                                            .to_string(),
+                                    ),
+                                },
+                            ))
+                            .await;
+                        return;
+                    };
+                    crate::control_runtime::ControlRequest::SetPresentationLevel { level }
+                }
                 "set_runtime_mode" => {
                     let slim = cmd["slim"].as_bool().unwrap_or(false);
                     crate::control_runtime::ControlRequest::SetRuntimeMode { slim }

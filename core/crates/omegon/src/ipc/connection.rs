@@ -669,6 +669,17 @@ impl IpcConnection {
                                     class,
                                 },
                             ),
+                        "set_presentation_level" => payload
+                            .get("level")
+                            .and_then(|value| value.as_str())
+                            .and_then(|level| {
+                                crate::surfaces::layout::UiPresentationLevel::parse(level).ok()
+                            })
+                            .map(|level| {
+                                crate::control_runtime::ControlRequest::SetPresentationLevel {
+                                    level,
+                                }
+                            }),
                         "set_runtime_mode" => {
                             let slim = payload
                                 .get("slim")
