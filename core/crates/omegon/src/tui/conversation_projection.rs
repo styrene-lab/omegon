@@ -38,6 +38,28 @@ impl ConversationProjection {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationExportPolicy {
+    /// Operator/assistant prose and durable outcomes, independent of UI level.
+    Semantic,
+    /// Canonical evidence-inclusive export for diagnostics and audit.
+    Evidence,
+}
+
+pub fn project_conversation_for_export(
+    segments: &[Segment],
+    policy: ConversationExportPolicy,
+) -> ConversationProjection {
+    match policy {
+        ConversationExportPolicy::Semantic => {
+            project_conversation(segments, UiPresentationLevel::Om)
+        }
+        ConversationExportPolicy::Evidence => {
+            project_conversation(segments, UiPresentationLevel::Full)
+        }
+    }
+}
+
 pub fn project_conversation(
     segments: &[Segment],
     level: UiPresentationLevel,
@@ -295,6 +317,26 @@ mod tests {
         assert!(full
             .iter()
             .all(|segment| matches!(segment.content, SegmentContent::LifecycleEvent { .. })));
+    }
+
+    #[test]
+    fn semantic_export_is_independent_of_display_level() {
+        let source = vec![
+            tool(Some(7), "a", "read complete", true),
+            tool(Some(7), "b", "47 tests passed", true),
+        ];
+        let semantic =
+            project_conversation_for_export(&source, ConversationExportPolicy::Semantic);
+        let om = project_conversation(&source, UiPresentationLevel::Om);
+        let full = project_conversation(&source, UiPresentationLevel::Full);
+        assert_eq!(semantic.segments.len(), om.segments.len());
+        assert_eq!(semantic.canonical_indices, om.canonical_indices);
+        assert_ne!(semantic.segments.len(), full.segments.len());
+
+        let evidence =
+            project_conversation_for_export(&source, ConversationExportPolicy::Evidence);
+        assert_eq!(evidence.canonical_indices, full.canonical_indices);
+        assert_eq!(evidence.segments.len(), full.segments.len());
     }
 
     #[test]

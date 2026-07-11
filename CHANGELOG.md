@@ -15,6 +15,7 @@ All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
 - Failed or cancelled delegate/cleave operations now terminate and collapse just like successful runs, but produce an explicit failed outcome (`✗`) derived from lifecycle evidence instead of remaining as noisy milestone streams or being mislabeled successful.
+- Added an explicit mode-independent conversation export policy: semantic export always uses durable outcome projection and evidence export always uses canonical Full projection, preventing the currently selected UI level from changing archival meaning.
 - Failed and cancelled delegate/cleave lifecycle streams now terminate into one durable `✗` outcome in Om/Active instead of remaining expanded indefinitely; failure precedence is derived from structured failure icons/text while Full retains the complete milestone evidence.
 - Conversation reprojection now carries an explicit projected-row → canonical-evidence index map; synthetic Om/Active outcomes point at their most relevant evidence row, so selection, expansion, and image lookup no longer use stale canonical row indexes after grouping changes row counts.
 - Terminal delegate/cleave lifecycle milestones now carry their authoritative operation identity; Om and Active collapse a completed operation's milestone stream into one durable outcome while Full preserves each start/child/completion event as evidence.
