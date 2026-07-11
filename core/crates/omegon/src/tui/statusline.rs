@@ -85,6 +85,65 @@ impl SessionRow {
         !self.provider_connected || self.drift.is_some()
     }
 
+    pub fn render_for_level(
+        &self,
+        level: crate::surfaces::layout::UiPresentationLevel,
+        area: Rect,
+        frame: &mut Frame,
+        t: &dyn Theme,
+    ) {
+        if level == crate::surfaces::layout::UiPresentationLevel::Om {
+            self.render_om(area, frame, t);
+        } else {
+            self.render(area, frame, t);
+        }
+    }
+
+    fn render_om(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        if area.width < 20 || area.height == 0 {
+            return;
+        }
+        let available = area.width as usize;
+        let mut fields = Vec::new();
+        if let Some(attention) = self
+            .operator_hint
+            .as_ref()
+            .or(self.turn_state.as_ref())
+            .filter(|value| !value.trim().is_empty())
+        {
+            fields.push((0u8, attention.clone(), t.warning()));
+        }
+        if !self.model_short.is_empty() {
+            fields.push((1, self.model_short.clone(), t.muted()));
+        }
+        if !self.cwd_basename.is_empty() {
+            let workspace = self
+                .git_branch
+                .as_ref()
+                .map(|branch| format!("{}:{branch}", self.cwd_basename))
+                .unwrap_or_else(|| self.cwd_basename.clone());
+            fields.push((2, workspace, t.dim()));
+        }
+        fields.push((3, format!("ctx {:.0}%", self.context_percent), t.dim()));
+
+        let mut selected: Vec<(u8, String, ratatui::style::Color)> = Vec::new();
+        let mut used = 1usize;
+        for field in fields {
+            let cost = field.1.chars().count() + if selected.is_empty() { 0 } else { 3 };
+            if used + cost <= available {
+                used += cost;
+                selected.push(field);
+            }
+        }
+        let mut spans = vec![Span::styled(" om", Style::default().fg(t.accent_muted()))];
+        for (_, text, color) in selected {
+            spans.push(Span::styled(" · ", Style::default().fg(t.dim())));
+            spans.push(Span::styled(text, Style::default().fg(color)));
+        }
+        frame.render_widget(Clear, area);
+        frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    }
+
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let height = Self::preferred_height(area.width).min(area.height);
         if height == 0 {

@@ -7945,8 +7945,12 @@ warning: {warning}"
                 plan_state,
                 &plan_context,
             ));
-            self.session_row
-                .render(session_area, frame, self.theme.as_ref());
+            self.session_row.render_for_level(
+                self.ui_presentation.level,
+                session_area,
+                frame,
+                self.theme.as_ref(),
+            );
         }
 
         // Project dashboard strip (above footer/tooling/instruments)
