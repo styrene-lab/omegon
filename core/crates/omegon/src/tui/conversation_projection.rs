@@ -304,6 +304,31 @@ mod tests {
     }
 
     #[test]
+    fn canonical_replay_hands_activity_to_one_outcome_without_mutating_evidence() {
+        let running = vec![tool(Some(7), "a", "running", false)];
+        let before = project_conversation(&running, UiPresentationLevel::Om);
+        assert!(matches!(
+            before.segments[0].content,
+            SegmentContent::ToolCard { complete: false, .. }
+        ));
+
+        let completed = vec![tool(Some(7), "a", "47 tests passed", true)];
+        let canonical_before = completed.clone();
+        let after = project_conversation(&completed, UiPresentationLevel::Om);
+        assert_eq!(after.segments.len(), 1);
+        assert_eq!(after.canonical_indices, vec![0]);
+        assert!(matches!(
+            after.segments[0].content,
+            SegmentContent::SystemNotification { .. }
+        ));
+        assert_eq!(completed.len(), canonical_before.len());
+        assert!(matches!(
+            completed[0].content,
+            SegmentContent::ToolCard { complete: true, .. }
+        ));
+    }
+
+    #[test]
     fn om_collapses_complete_turn_tools_without_mutating_source() {
         let source = vec![
             tool(Some(7), "a", "read complete", true),
