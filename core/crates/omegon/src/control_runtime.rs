@@ -860,12 +860,23 @@ pub async fn execute_control(
             set_runtime_mode_response(ctx.runtime_state, ctx.shared_settings, ctx.events_tx, slim)
                 .await
         }
-        ControlRequest::SetPresentationLevel { level } => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "UI presentation → {} (client projection; runtime posture unchanged)",
-                level.name()
-            )),
+        ControlRequest::SetPresentationLevel { level } => {
+            let persisted = ctx
+                .shared_settings
+                .lock()
+                .map(|mut settings| settings.ui_presentation = level)
+                .is_ok();
+            SlashCommandResponse {
+                accepted: persisted,
+                output: Some(if persisted {
+                    format!(
+                        "UI presentation → {} (client projection; runtime posture unchanged)",
+                        level.name()
+                    )
+                } else {
+                    "UI presentation update failed: settings lock unavailable".to_string()
+                }),
+            }
         },
         ControlRequest::NewSession => {
             new_session_response(ctx.runtime_state, ctx.agent, ctx.cli, ctx.events_tx).await
@@ -971,12 +982,22 @@ pub async fn execute_daemon_control(
             ControlRequest::SetRuntimeMode { slim } => {
                 set_runtime_mode_daemon_response(shared_settings, cwd, slim).await
             }
-            ControlRequest::SetPresentationLevel { level } => SlashCommandResponse {
-                accepted: true,
-                output: Some(format!(
-                    "UI presentation → {} (client projection; runtime posture unchanged)",
-                    level.name()
-                )),
+            ControlRequest::SetPresentationLevel { level } => {
+                let persisted = shared_settings
+                    .lock()
+                    .map(|mut settings| settings.ui_presentation = level)
+                    .is_ok();
+                SlashCommandResponse {
+                    accepted: persisted,
+                    output: Some(if persisted {
+                        format!(
+                            "UI presentation → {} (client projection; runtime posture unchanged)",
+                            level.name()
+                        )
+                    } else {
+                        "UI presentation update failed: settings lock unavailable".to_string()
+                    }),
+                }
             },
             ControlRequest::ProfileApply => profile_apply_daemon_response(shared_settings, cwd).await,
             ControlRequest::ProfileUse { id, scope } => {

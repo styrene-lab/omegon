@@ -15,6 +15,9 @@ All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
 - Failed or cancelled delegate/cleave operations now terminate and collapse just like successful runs, but produce an explicit failed outcome (`✗`) derived from lifecycle evidence instead of remaining as noisy milestone streams or being mislabeled successful.
+- Adversarial hardening fixed three projection/control defects: failed ordinary tool turns now collapse into one durable failed outcome, non-contiguous duplicate lifecycle streams cannot emit the same operation outcome twice, and semantic control requests now update shared presentation settings instead of acknowledging a no-op.
+- Semantic presentation control requests now update shared runtime settings instead of returning success without changing state; failed settings-lock acquisition returns a rejected control response.
+- Fixed grouped failed tool episodes incorrectly rendering with a success checkmark; turn-level failure outcomes now use the same explicit failure state as operation outcomes.
 - Om/Active/Full selection now persists through the canonical profile/settings path and is restored at TUI startup; stored `lean` and `slim` values migrate to Om through the shared parser, missing values default to Om, and Om is omitted from profile serialization as the default.
 - Added a semantic `SetPresentationLevel { Om | Active | Full }` control request for new adapters while retaining legacy `SetRuntimeMode { slim }` decoding; presentation requests are explicitly client projection changes and no longer mutate runtime posture, tool policy, or model behavior.
 - Added an explicit mode-independent conversation export policy: semantic export always uses durable outcome projection and evidence export always uses canonical Full projection, preventing the currently selected UI level from changing archival meaning.

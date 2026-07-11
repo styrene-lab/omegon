@@ -89,7 +89,10 @@ pub fn project_conversation(
         if let Some(episode) = OperationEpisodeProjection::from_authoritative_boundary(
             format!("turn:{turn}"),
             tools,
-        ) && episode.state == OperationEpisodeState::Complete
+        ) && matches!(
+            episode.state,
+            OperationEpisodeState::Complete | OperationEpisodeState::Failed
+        )
         {
             complete_turn_episodes.insert(*turn, episode);
         }
@@ -114,7 +117,7 @@ pub fn project_conversation(
         segments: Vec::with_capacity(segments.len()),
         canonical_indices: Vec::with_capacity(segments.len()),
     };
-    let mut emitted_operation: Option<String> = None;
+    let mut emitted_operations = std::collections::BTreeSet::new();
     let mut emitted_turn = None;
     for (canonical_index, segment) in segments.iter().enumerate() {
         if let Some(operation_id) = segment
@@ -132,7 +135,7 @@ pub fn project_conversation(
                 )
             });
             if let Some(terminal) = terminal {
-                if emitted_operation.as_deref() != Some(operation_id) {
+                if emitted_operations.insert(operation_id.to_string()) {
                     let terminal_index = segments
                         .iter()
                         .position(|candidate| std::ptr::eq(candidate, *terminal))
@@ -142,7 +145,6 @@ pub fn project_conversation(
                         operation_id,
                         operation_segments,
                     ));
-                    emitted_operation = Some(operation_id.to_string());
                 }
                 continue;
             }
@@ -238,7 +240,12 @@ fn outcome_segment(mut meta: SegmentMeta, episode: &OperationEpisodeProjection) 
         meta,
         content: SegmentContent::SystemNotification {
             text: format!(
-                "✓ {} · {} operation{}",
+                "{} {} · {} operation{}",
+                if episode.state == OperationEpisodeState::Failed {
+                    "✗"
+                } else {
+                    "✓"
+                },
                 episode.outcome,
                 episode.tool_count,
                 if episode.tool_count == 1 { "" } else { "s" }
@@ -281,6 +288,22 @@ mod tests {
         assert_eq!(projected.len(), 1);
         let SegmentContent::SystemNotification { text } = &projected[0].content else { panic!("outcome") };
         assert_eq!(text, "✓ bash · 47 tests passed · 2 operations");
+    }
+
+    #[test]
+    fn failed_turn_tools_collapse_to_one_failed_outcome() {
+        let mut failed = tool(Some(7), "a", "exit 1", true);
+        if let SegmentContent::ToolCard { is_error, .. } = &mut failed.content {
+            *is_error = true;
+        }
+        let source = vec![failed, tool(Some(7), "b", "diagnostics", true)];
+        let projected = project_conversation(&source, UiPresentationLevel::Om);
+        assert_eq!(projected.segments.len(), 1);
+        let SegmentContent::SystemNotification { text } = &projected.segments[0].content else {
+            panic!("failed outcome")
+        };
+        assert!(text.starts_with("✗ "), "{text}");
+        assert!(text.contains("bash failed · exit 1"), "{text}");
     }
 
     #[test]
