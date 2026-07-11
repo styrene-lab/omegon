@@ -396,22 +396,21 @@ pub async fn run(
     let mut session_used_tools: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     let mut turn: u32 = 0;
-    // A top-level run corresponds to a fresh operator prompt. Retire any
-    // unfinished ephemeral plan owned by an earlier prompt before projecting
-    // Workbench or asking the model to reconcile unrelated work. Plans created
-    // during this run bind to the incremented generation.
-    conversation.intent.begin_operator_task();
     // Infer the guidance task mode for this operator prompt (A1). Explicit
     // operator declarations pin the mode; otherwise inference updates it for
     // the current task without overriding a previously pinned mode.
-    let last_user_prompt = conversation.last_user_prompt();
-    if let Some(mode) = crate::behavior::explicit_task_mode_from_prompt(last_user_prompt) {
+    let last_user_prompt = conversation.last_user_prompt().to_string();
+    // A top-level run corresponds to a fresh operator prompt, but terse
+    // continuation prompts still belong to the active task. Reconcile the plan
+    // only after reading that prompt so continuation runs retain their lane.
+    conversation.intent.begin_operator_task(&last_user_prompt);
+    if let Some(mode) = crate::behavior::explicit_task_mode_from_prompt(&last_user_prompt) {
         conversation.intent.pin_task_mode(mode);
     } else {
         conversation
             .intent
             .observe_task_mode(crate::behavior::infer_task_mode_from_prompt(
-                last_user_prompt,
+                &last_user_prompt,
             ));
     }
     // Active model for this turn — updated each iteration from settings.

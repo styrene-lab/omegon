@@ -673,20 +673,51 @@ pub enum PlanAction {
     Clear,
 }
 
+fn operator_prompt_continues_active_task(prompt: &str) -> bool {
+    let normalized = prompt.trim().to_ascii_lowercase();
+    matches!(
+        normalized.trim_matches(|c: char| c.is_ascii_punctuation()),
+        "continue"
+            | "continue please"
+            | "go on"
+            | "keep going"
+            | "proceed"
+            | "yes"
+            | "yes proceed"
+            | "make it so"
+            | "do it"
+            | "ship it"
+            | "get it done"
+    )
+}
+
 impl crate::conversation::IntentDocument {
     /// Start a new top-level operator task. An unfinished session-scoped plan
     /// from an earlier run is detached from the active Workbench lane but kept
     /// in the registry for explicit inspection/resume. Repo-scoped plans are
     /// artifact-owned and are never retired by prompt boundaries.
-    pub fn begin_operator_task(&mut self) {
+    pub fn begin_operator_task(&mut self, prompt: &str) {
+        let previous_generation = self.task_generation;
         self.task_generation = self.task_generation.saturating_add(1);
+        let continues_active_task = operator_prompt_continues_active_task(prompt);
         let stale_session_plan = self.visible_plan.as_ref().is_some_and(|plan| {
             plan.scope == PlanScope::Session
                 && plan.mode != PlanMode::Complete
                 && !plan.items.is_empty()
                 && plan.task_generation < self.task_generation
+                && !continues_active_task
         });
         if !stale_session_plan {
+            // A terse continuation such as “proceed” starts another model run but
+            // not another operator task. Carry the plan forward to the new run
+            // generation so a subsequent continuation does not detach it.
+            if continues_active_task
+                && let Some(plan) = self.visible_plan.as_mut()
+                && plan.scope == PlanScope::Session
+                && plan.task_generation <= previous_generation
+            {
+                plan.task_generation = self.task_generation;
+            }
             return;
         }
 
@@ -1732,11 +1763,11 @@ mod render_tests {
     #[test]
     fn later_operator_task_detaches_unfinished_session_plan() {
         let mut intent = IntentDocument::default();
-        intent.begin_operator_task();
+        intent.begin_operator_task("new unrelated task");
         intent.set_work_plan(vec!["Investigate old task".into(), "Implement fix".into()]);
         assert_eq!(intent.visible_plan.as_ref().unwrap().task_generation, 1);
 
-        intent.begin_operator_task();
+        intent.begin_operator_task("new unrelated task");
 
         assert!(intent.work_plan.is_empty());
         assert!(intent.visible_plan.is_none());
@@ -1748,9 +1779,23 @@ mod render_tests {
     }
 
     #[test]
+    fn terse_continuation_keeps_unfinished_session_plan() {
+        let mut intent = IntentDocument::default();
+        intent.begin_operator_task("implement the plan lifecycle fix");
+        intent.set_work_plan(vec!["Implement fix".into(), "Validate".into()]);
+
+        intent.begin_operator_task("proceed");
+
+        let visible = intent.visible_plan.as_ref().expect("plan remains visible");
+        assert_eq!(visible.task_generation, intent.task_generation);
+        assert_eq!(visible.items.len(), 2);
+        assert!(intent.plan_registry_view.entries.is_empty());
+    }
+
+    #[test]
     fn later_operator_task_preserves_repo_plan() {
         let mut intent = IntentDocument::default();
-        intent.begin_operator_task();
+        intent.begin_operator_task("new unrelated task");
         intent.visible_plan = Some(VisiblePlanState {
             plan_id: PlanBinding::openspec_plan_id("active-change", None),
             scope: PlanScope::Repo,
@@ -1770,7 +1815,7 @@ mod render_tests {
             }],
         });
 
-        intent.begin_operator_task();
+        intent.begin_operator_task("new unrelated task");
 
         assert_eq!(intent.visible_plan.as_ref().unwrap().scope, PlanScope::Repo);
     }

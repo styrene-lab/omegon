@@ -16,7 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Fixed ephemeral Workbench plans remaining visibly active after a later operator task started; session plans now bind to an operator-task generation and detach into plan history at the next task boundary, while repo-scoped plans remain active.
+- Fixed ephemeral Workbench plans remaining visibly active after a later operator task started; session plans now bind to an operator-task generation and detach into plan history at the next unrelated task boundary, while terse continuation prompts and repo-scoped plans keep the active lane.
 - Fixed inline terminal images rendering near the top of the conversation instead of inside their bottom-anchored segment chrome when short conversations sit above the composer.
 - Improved design-tree path-collision diagnostics: creating `docs/<id>.md` now distinguishes an existing indexed design node from an ordinary or malformed Markdown document and directs operators to convert or repair invalid frontmatter.
 
