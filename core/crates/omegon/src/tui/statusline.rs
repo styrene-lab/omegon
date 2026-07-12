@@ -187,31 +187,29 @@ impl SessionRow {
         let mut used: usize = spans.iter().map(|s| s.width()).sum();
 
         // Web-search liveness is persistent chrome, not a transient nag.
-        // An all-empty keyed set is explicitly degraded: DDG scraping is a
-        // fallback floor, not an acceptable configured state.
-        if !self.web_search_providers.is_empty() {
-            let configured = self
+        // Missing readiness data and an all-empty keyed set are both degraded:
+        // DDG scraping is a fallback floor, not an acceptable configured state.
+        let configured = self
+            .web_search_providers
+            .iter()
+            .filter(|(_, configured)| *configured)
+            .count();
+        let (label, color) = if configured == 0 {
+            ("WEB! ddg-only".to_string(), t.warning())
+        } else {
+            let ticks: String = self
                 .web_search_providers
                 .iter()
-                .filter(|(_, configured)| *configured)
-                .count();
-            let (label, color) = if configured == 0 {
-                ("WEB! ddg-only".to_string(), t.warning())
-            } else {
-                let ticks: String = self
-                    .web_search_providers
-                    .iter()
-                    .map(|(_, configured)| if *configured { '●' } else { '○' })
-                    .collect();
-                (format!("WEB {ticks}"), t.success())
-            };
-            let field = Span::styled(label, Style::default().fg(color));
-            let cost = sect.width() + field.width();
-            if used + cost < w {
-                spans.push(sect.clone());
-                spans.push(field);
-                used += cost;
-            }
+                .map(|(_, configured)| if *configured { '●' } else { '○' })
+                .collect();
+            (format!("WEB {ticks}"), t.success())
+        };
+        let field = Span::styled(label, Style::default().fg(color));
+        let cost = sect.width() + field.width();
+        if used + cost < w {
+            spans.push(sect.clone());
+            spans.push(field);
+            used += cost;
         }
 
         // Detached conversation viewport. This is deliberately near the left
@@ -596,6 +594,24 @@ mod tests {
             "files: 16 touched · 4 changed"
         );
         assert_eq!(file_activity_label(12, 0, 90), "files: 12 read");
+    }
+
+    #[test]
+    fn unavailable_web_search_readiness_is_rendered_as_degraded() {
+        let sl = SessionRow {
+            provider_connected: true,
+            ..Default::default()
+        };
+
+        let backend = ratatui::backend::TestBackend::new(160, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| sl.render(frame.area(), frame, &super::super::theme::Alpharius))
+            .unwrap();
+        let text = (0..160)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(text.contains("WEB! ddg-only"), "{text}");
     }
 
     #[test]

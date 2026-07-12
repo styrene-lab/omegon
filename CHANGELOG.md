@@ -28,6 +28,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Kept the persistent web-search readiness gauge visible when fresh-session provider discovery is unavailable, conservatively rendering `WEB! ddg-only` instead of silently omitting the gauge.
 - Resolved and switched the live serving route when applying a selected profile's model intent, rejecting unavailable profile routes instead of reporting success after only mutating intent metadata; synchronized shared runtime model status with the resolved serving route and retained the registry ID for profile files without an embedded display name.
 - Routed ACP `/status` through the worker-owned shared `HarnessStatusProjection`, removing the abbreviated transport-only liveness response and giving ACP the same redacted harness/runtime contract as the TUI.
 - Added versioned semantic diagnostic projections for `/status` and `/stats`, moved TUI/control rendering onto them, and aligned ACP worker session stats with the shared contract while representing unavailable tool telemetry as `unknown` rather than zero.
