@@ -289,7 +289,7 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::ProfileView => ControlRequest::ProfileView,
         crate::tui::CanonicalSlashCommand::ProfileExport => ControlRequest::ProfileExport,
         crate::tui::CanonicalSlashCommand::ProfileCapture(target) => {
-            ControlRequest::ProfileCapture { target: *target }
+            ControlRequest::ProfileCapture { target: target.clone() }
         }
         crate::tui::CanonicalSlashCommand::ProfileApply => ControlRequest::ProfileApply,
         crate::tui::CanonicalSlashCommand::ProfileUse { id, scope } => ControlRequest::ProfileUse {
@@ -610,7 +610,7 @@ async fn try_stateless_control(
             profile_export_response(shared_settings, cwd, handles).await
         }
         ControlRequest::ProfileCapture { target } => {
-            profile_capture_response(shared_settings, cwd, *target).await
+            profile_capture_response(shared_settings, cwd, target.clone()).await
         }
         ControlRequest::ProfileSetMqtt { enabled } => {
             profile_set_mqtt_response(cwd, *enabled).await

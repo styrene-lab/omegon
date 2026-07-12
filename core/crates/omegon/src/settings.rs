@@ -1082,11 +1082,13 @@ impl std::fmt::Display for ProfileSource {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileSaveTarget {
     ActiveSource,
     Project,
     User,
+    /// Save as a named profile in the profiles registry directory.
+    Named { name: String, scope: ProfileRegistryScope },
 }
 
 #[derive(Debug, Clone)]
@@ -1572,6 +1574,27 @@ impl Profile {
                     anyhow::bail!("profile save target is ambiguous; use --project or --user")
                 }
             },
+            ProfileSaveTarget::Named { name, scope } => {
+                let safe_name = name
+                    .chars()
+                    .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+                    .collect::<String>();
+                let path = match scope {
+                    ProfileRegistryScope::Project => {
+                        project_profiles_dir(cwd).join(format!("{safe_name}.json"))
+                    }
+                    ProfileRegistryScope::User | ProfileRegistryScope::BuiltIn => {
+                        global_profiles_dir()
+                            .ok_or_else(|| anyhow::anyhow!("Cannot determine config directory"))?
+                            .join(format!("{safe_name}.json"))
+                    }
+                };
+                self.save_to_path(&path, &safe_name)?;
+                match scope {
+                    ProfileRegistryScope::Project => Ok(ProfileSource::Project(path)),
+                    _ => Ok(ProfileSource::User(path)),
+                }
+            }
         }
     }
 

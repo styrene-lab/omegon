@@ -928,6 +928,31 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 crate::settings::ProfileSaveTarget::User,
             ))
         }
+        "profile"
+            if (args.starts_with("save --name ") || args.starts_with("capture --name ")) =>
+        {
+            // `/profile save --name <name>` → user scope (default)
+            // `/profile save --name <name> --project` → project scope
+            let rest = args
+                .trim_start_matches("save --name ")
+                .trim_start_matches("capture --name ");
+            let (name, scope) = if let Some(n) = rest.strip_suffix(" --project") {
+                (n, crate::settings::ProfileRegistryScope::Project)
+            } else {
+                let name = rest.split_whitespace().next().unwrap_or(rest);
+                (name, crate::settings::ProfileRegistryScope::User)
+            };
+            if name.is_empty() {
+                None
+            } else {
+                Some(CanonicalSlashCommand::ProfileCapture(
+                    crate::settings::ProfileSaveTarget::Named {
+                        name: name.to_string(),
+                        scope,
+                    },
+                ))
+            }
+        }
         "profile" if args == "apply" || args == "load" => Some(CanonicalSlashCommand::ProfileApply),
         "profile" if args == "mqtt" || args == "mqtt status" => {
             Some(CanonicalSlashCommand::ProfileSetMqtt(None))
@@ -9575,7 +9600,7 @@ Scroll transcript:
                     SlashResult::Handled
                 } else {
                     SlashResult::Display(
-                        "Usage: /profile [view|export|capture|apply|mqtt on|mqtt off|extension allow <name>|extension deny <name>|extensions clear|persona <name|off>|tone <name|off>]".into(),
+                        "Usage: /profile [view|export|capture|apply|mqtt on|mqtt off|extension allow <name>|extension deny <name>|extensions clear|persona <name|off>|tone <name|off>|save --name <name> [--project]|save --user|save --project]".into(),
                     )
                 }
             }
