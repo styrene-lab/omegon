@@ -4564,7 +4564,7 @@ impl App {
             .entries
             .iter()
             .filter(|entry| {
-                entry.source_kind == crate::settings::ProfileRegistrySourceKind::RegistryFile
+                entry.source_kind != crate::settings::ProfileRegistrySourceKind::BuiltInDefault
             })
             .map(|entry| {
                 let is_active = entry
