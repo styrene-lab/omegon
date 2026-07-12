@@ -705,23 +705,25 @@ async fn handle_control_request(
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
-            let est = conversation.estimate_tokens();
-            let usage_pct = if settings.context_window > 0 {
-                (est as f64 / settings.context_window as f64) * 100.0
-            } else {
-                0.0
+            let projection = crate::surfaces::diagnostics::SessionStatsProjection {
+                version: crate::surfaces::diagnostics::DIAGNOSTIC_PROJECTION_VERSION,
+                turns: conversation.turn_count() as u32,
+                tool_calls: None,
+                model: settings.model,
+                thinking: settings.thinking.as_str().to_string(),
+                posture: settings.posture.effective.as_str().to_string(),
+                estimated_context_tokens: conversation.estimate_tokens(),
+                context_window: settings.context_window,
+                max_turns: settings.max_turns,
+                persona: None,
+                tone: None,
+                authenticated_providers: None,
+                provider_count: None,
+                mcp_servers: None,
+                memory_available: None,
+                cleave_available: None,
             };
-            format!(
-                "Model: {}\nThinking: {}\nPosture: {}\nTurns: {}\nContext: ~{} tokens ({:.0}% of {})\nMax turns: {}",
-                settings.model,
-                settings.thinking.as_str(),
-                settings.posture.effective.as_str(),
-                conversation.turn_count(),
-                est,
-                usage_pct,
-                settings.context_window,
-                settings.max_turns,
-            )
+            projection.render_markdown()
         }
 
         "max_turns" => {

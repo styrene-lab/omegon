@@ -5,6 +5,7 @@ pub mod command;
 pub mod command_menu;
 pub mod conversation;
 pub mod dashboard;
+pub mod diagnostics;
 pub mod editor;
 pub mod episodes;
 pub mod footer;

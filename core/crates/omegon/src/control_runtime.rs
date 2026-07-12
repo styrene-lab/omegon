@@ -1908,14 +1908,22 @@ pub async fn status_view_response(
         &session_kind,
         &authorization,
     );
+    let projection = crate::surfaces::diagnostics::HarnessStatusProjection::new(
+        status,
+        agent.runtime_generation,
+        agent.session_id.clone(),
+        agent.instance_id.clone(),
+        settings.automation_level.as_str(),
+        settings.automation_level.summary(),
+    );
     let panel = format!(
         "{}\nRuntime\n  Generation:   {}\n  Session:      {}\n  Instance:     {}\nAutomation\n  Level:        {} ({})",
-        crate::tui::bootstrap::render_bootstrap(&status, false),
-        agent.runtime_generation,
-        agent.session_id,
-        agent.instance_id,
-        settings.automation_level.as_str(),
-        settings.automation_level.summary()
+        crate::tui::bootstrap::render_bootstrap(&projection.harness, false),
+        projection.runtime_generation,
+        projection.session_id,
+        projection.instance_id,
+        projection.automation_level,
+        projection.automation_summary,
     );
     SlashCommandResponse {
         accepted: true,
@@ -2061,11 +2069,6 @@ pub async fn session_stats_view_response(
         .as_ref()
         .and_then(|h| h.lock().ok().map(|status| status.clone()))
         .unwrap_or_else(crate::status::HarnessStatus::assemble);
-    let usage_pct = if settings.context_window > 0 {
-        (est as f64 / settings.context_window as f64) * 100.0
-    } else {
-        0.0
-    };
     let persona = live_harness
         .active_persona
         .as_ref()
@@ -2076,46 +2079,37 @@ pub async fn session_stats_view_response(
         .as_ref()
         .map(|tone| tone.name.clone())
         .unwrap_or_else(|| "none".to_string());
-    let provider_summary = if live_harness.providers.is_empty() {
-        "none detected".to_string()
-    } else {
-        let authenticated = live_harness
-            .providers
-            .iter()
-            .filter(|provider| provider.authenticated)
-            .count();
-        format!(
-            "{authenticated}/{} authenticated",
-            live_harness.providers.len()
-        )
+    let authenticated_providers = live_harness
+        .providers
+        .iter()
+        .filter(|provider| provider.authenticated)
+        .count();
+    let projection = crate::surfaces::diagnostics::SessionStatsProjection {
+        version: crate::surfaces::diagnostics::DIAGNOSTIC_PROJECTION_VERSION,
+        turns,
+        tool_calls: Some(tool_calls),
+        model: settings.model_short(),
+        thinking: format!(
+            "{} {}",
+            settings.thinking.icon(),
+            settings.thinking.as_str()
+        ),
+        posture: settings.posture.effective.as_str().to_string(),
+        estimated_context_tokens: est,
+        context_window: settings.context_window,
+        max_turns: settings.max_turns,
+        persona: Some(persona),
+        tone: Some(tone),
+        authenticated_providers: Some(authenticated_providers),
+        provider_count: Some(live_harness.providers.len()),
+        mcp_servers: Some(live_harness.mcp_servers.len()),
+        memory_available: Some(live_harness.memory_available),
+        cleave_available: Some(live_harness.cleave_available),
     };
 
     SlashCommandResponse {
         accepted: true,
-        output: Some(format!(
-            "Session Overview\n\nActivity\n  Turns:            {}\n  Tool calls:       {}\n  Model:            {}\n  Thinking:         {} {}\n\nContext\n  Usage:            {:.0}%\n  Window:           {} tokens\n\nHarness\n  Persona:          {}\n  Tone:             {}\n  Providers:        {}\n  MCP servers:      {}\n\nCapabilities\n  Memory:           {}\n  Cleave:           {}",
-            turns,
-            tool_calls,
-            settings.model_short(),
-            settings.thinking.icon(),
-            settings.thinking.as_str(),
-            usage_pct,
-            settings.context_window,
-            persona,
-            tone,
-            provider_summary,
-            live_harness.mcp_servers.len(),
-            if live_harness.memory_available {
-                "available"
-            } else {
-                "UNAVAILABLE"
-            },
-            if live_harness.cleave_available {
-                "available"
-            } else {
-                "UNAVAILABLE"
-            },
-        )),
+        output: Some(projection.render_markdown()),
     }
 }
 
