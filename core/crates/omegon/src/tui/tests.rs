@@ -3656,7 +3656,12 @@ fn slash_stats_returns_session_info() {
     let result = app.handle_slash_command("/stats", &tx);
     assert!(matches!(result, SlashResult::Handled));
     match rx.try_recv().expect("queued command") {
-        TuiCommand::ExecuteControl { .. } => {}
+        TuiCommand::ExecuteControl { request, .. } => {
+            assert!(matches!(
+                request,
+                crate::control_runtime::ControlRequest::SessionStatsView
+            ));
+        }
         other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }
@@ -3668,7 +3673,12 @@ fn slash_status_returns_bootstrap_panel() {
     let result = app.handle_slash_command("/status", &tx);
     assert!(matches!(result, SlashResult::Handled));
     match rx.try_recv().expect("queued command") {
-        TuiCommand::ExecuteControl { .. } => {}
+        TuiCommand::ExecuteControl { request, .. } => {
+            assert!(matches!(
+                request,
+                crate::control_runtime::ControlRequest::StatusView
+            ));
+        }
         other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }

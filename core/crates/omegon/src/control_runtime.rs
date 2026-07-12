@@ -1864,8 +1864,21 @@ pub async fn status_view_response(
     agent: &InteractiveAgentHost,
     shared_settings: &settings::SharedSettings,
 ) -> SlashCommandResponse {
-    let mut status = crate::status::HarnessStatus::assemble();
-    let settings = shared_settings.lock().unwrap().clone();
+    let mut status = agent
+        .dashboard_handles
+        .harness
+        .as_ref()
+        .map(|handle| {
+            handle
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        })
+        .unwrap_or_else(crate::status::HarnessStatus::assemble);
+    let settings = shared_settings
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
     let operating_profile = settings.operating_profile();
     let operating_profile_label = operating_profile.summary();
     let principal_id = operating_profile
@@ -2028,8 +2041,20 @@ pub async fn session_stats_view_response(
     shared_settings: &settings::SharedSettings,
     agent: &InteractiveAgentHost,
 ) -> SlashCommandResponse {
-    let settings = shared_settings.lock().unwrap().clone();
+    let settings = shared_settings
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
     let est = runtime_state.conversation.estimate_tokens();
+    let session = agent
+        .dashboard_handles
+        .session
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let turns = session
+        .turns
+        .max(runtime_state.conversation.turn_count() as u32);
+    let tool_calls = session.tool_calls;
     let live_harness = agent
         .dashboard_handles
         .harness
@@ -2069,8 +2094,8 @@ pub async fn session_stats_view_response(
         accepted: true,
         output: Some(format!(
             "Session Overview\n\nActivity\n  Turns:            {}\n  Tool calls:       {}\n  Model:            {}\n  Thinking:         {} {}\n\nContext\n  Usage:            {:.0}%\n  Window:           {} tokens\n\nHarness\n  Persona:          {}\n  Tone:             {}\n  Providers:        {}\n  MCP servers:      {}\n\nCapabilities\n  Memory:           {}\n  Cleave:           {}",
-            runtime_state.conversation.turn_count(),
-            0,
+            turns,
+            tool_calls,
             settings.model_short(),
             settings.thinking.icon(),
             settings.thinking.as_str(),

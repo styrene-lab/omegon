@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Hardened `/status` and `/stats` ahead of 0.28.0: status now prefers the live harness snapshot, session stats report observed shared turn/tool-call counters instead of a fabricated zero, poisoned diagnostic locks degrade safely, and the unimplemented `/stats bench` affordance is no longer advertised.
+
 - Exposed concrete GPT-5.6 route variants (`sol`, `terra`, and `luna`) in the operator-facing engine ribbon instead of truncating all three to the ambiguous `gpt-5.6` conceptual family.
 
 - Kept successful projected conversation outcomes neutral in slim/Om views by classifying `✓` system notifications separately from warning, retry, and failure notifications, with a production-path regression test covering canonical tool evidence through conversation projection and final widget-buffer rendering.

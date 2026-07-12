@@ -343,7 +343,7 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::cli_acp_read_only(
         "stats",
         "session telemetry and performance metrics",
-        &["bench"],
+        &[],
     ),
     BuiltinCommandSpec::cli_queue_mutation("new", "quick alias for /context reset", &[]),
     BuiltinCommandSpec::state_changing(
