@@ -741,8 +741,17 @@ pub async fn execute_control(
                     ctx.events_tx,
                 )
                 .await;
-                if let Some(output) = response.output.as_mut() {
-                    output.insert_str(0, &format!("Profile selected: `{id}`.\n\n"));
+                if response.accepted {
+                    if let Some(output) = response.output.as_mut() {
+                        output.insert_str(0, &format!("Profile selected: `{id}`.\n\n"));
+                    }
+                } else if let Some(output) = response.output.as_mut() {
+                    output.insert_str(
+                        0,
+                        &format!(
+                            "Profile `{id}` was selected for the next startup but was not applied to the live runtime.\n\n"
+                        ),
+                    );
                 }
                 response
             }
@@ -3367,7 +3376,7 @@ async fn apply_profile_model_intent(
         return Ok(None);
     };
     let Some(controller) = route_controller else {
-        return Ok(None);
+        anyhow::bail!("live route controller is unavailable");
     };
 
     if let Some(model) = intent.exact_model_override.as_deref() {
