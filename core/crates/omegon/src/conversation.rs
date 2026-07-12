@@ -212,10 +212,10 @@ pub struct IntentDocument {
     #[serde(default)]
     pub operator_correction_pending: bool,
 
-    /// Monotonic ID source for ephemeral session plans. This is plan identity,
-    /// not a prompt or model-run counter.
-    #[serde(default)]
-    pub next_session_plan_id: u64,
+    /// Session-local plan index. The owning session supplies the outer identity;
+    /// this value is never a global plan identifier.
+    #[serde(default, alias = "next_session_plan_id")]
+    pub next_plan_index: u64,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retained_session_plans: Vec<VisiblePlanState>,

@@ -675,8 +675,8 @@ pub enum PlanAction {
 
 impl crate::conversation::IntentDocument {
     fn next_ephemeral_plan_id(&mut self) -> String {
-        self.next_session_plan_id = self.next_session_plan_id.saturating_add(1);
-        format!("session:{}", self.next_session_plan_id)
+        self.next_plan_index = self.next_plan_index.saturating_add(1);
+        self.next_plan_index.to_string()
     }
 
     fn retain_visible_session_plan(&mut self, status: PlanStatus, summary: &str) -> Option<String> {
@@ -1775,6 +1775,34 @@ mod render_tests {
         // reset/replacement operations invoke begin_new_operator_task.
         assert_eq!(intent.visible_plan, before);
         assert!(intent.retained_session_plans.is_empty());
+    }
+
+    #[test]
+    fn replacement_plans_receive_distinct_session_local_indexes() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["First plan".into()]);
+        let first_id = intent.visible_plan.as_ref().unwrap().plan_id.clone();
+        intent.set_work_plan(vec!["Second plan".into()]);
+        let second_id = intent.visible_plan.as_ref().unwrap().plan_id.clone();
+
+        assert_eq!(first_id, "1");
+        assert_eq!(second_id, "2");
+        assert!(intent.retained_session_plans.iter().any(|plan| plan.plan_id == first_id));
+    }
+
+    #[test]
+    fn independent_sessions_reuse_local_plan_indexes_without_global_collision_claims() {
+        let mut first_session = IntentDocument::default();
+        let mut second_session = IntentDocument::default();
+        first_session.set_work_plan(vec!["First session work".into()]);
+        second_session.set_work_plan(vec!["Second session work".into()]);
+
+        assert_eq!(first_session.visible_plan.as_ref().unwrap().plan_id, "1");
+        assert_eq!(second_session.visible_plan.as_ref().unwrap().plan_id, "1");
+        assert_ne!(
+            first_session.visible_plan.as_ref().unwrap().items,
+            second_session.visible_plan.as_ref().unwrap().items
+        );
     }
 
     #[test]

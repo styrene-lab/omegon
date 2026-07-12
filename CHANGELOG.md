@@ -16,7 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-- Fixed ephemeral Workbench plan lifecycle without treating every prompt as a destructive task boundary: session plans now receive stable IDs, replacement or explicit task-reset detachment retains the full plan snapshot in history, ordinary follow-up prompts leave the active lane intact, and repo-scoped plans remain active.
+- Fixed ephemeral Workbench plan lifecycle without treating every prompt as a destructive task boundary: plans are sub-indexed within their owning session, replacement or explicit task-reset detachment retains the full plan snapshot in history, ordinary follow-up prompts leave the active lane intact, and repo-scoped plans remain active.
 - Fixed inline terminal images rendering near the top of the conversation instead of inside their bottom-anchored segment chrome when short conversations sit above the composer.
 - Improved design-tree path-collision diagnostics: creating `docs/<id>.md` now distinguishes an existing indexed design node from an ordinary or malformed Markdown document and directs operators to convert or repair invalid frontmatter.
 
