@@ -412,6 +412,7 @@ pub fn control_request_from_slash(
         },
         crate::tui::CanonicalSlashCommand::SkillsView => ControlRequest::SkillsView,
         crate::tui::CanonicalSlashCommand::SkillsHelp => ControlRequest::SkillsHelp,
+        crate::tui::CanonicalSlashCommand::RuntimeProcessRestart => return None,
         crate::tui::CanonicalSlashCommand::SkillsReload => return None,
         crate::tui::CanonicalSlashCommand::SkillsInstall(name) => {
             ControlRequest::SkillsInstall { name: name.clone() }

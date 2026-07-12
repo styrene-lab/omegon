@@ -751,6 +751,7 @@ pub enum CanonicalSlashCommand {
     StatusView,
     RuntimeInventoryStatus,
     RuntimeSubstrateRefresh,
+    RuntimeProcessRestart,
     WorkspaceStatusView,
     WorkspaceListView,
     WorkspaceNew(String),
@@ -1065,8 +1066,11 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "runtime" if matches!(args, "status" | "inventory") => {
             Some(CanonicalSlashCommand::RuntimeInventoryStatus)
         }
-        "runtime" if matches!(args, "restart" | "hot-restart" | "refresh" | "reload") => {
+        "runtime" if matches!(args, "refresh" | "reload" | "hup" | "kick") => {
             Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
+        }
+        "runtime" if matches!(args, "restart" | "hot-restart") => {
+            Some(CanonicalSlashCommand::RuntimeProcessRestart)
         }
         "workspace" if args.is_empty() => Some(CanonicalSlashCommand::WorkspaceStatusView),
         "workspace" if args == "status" => Some(CanonicalSlashCommand::WorkspaceStatusView),
@@ -1318,8 +1322,10 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             } else if let Some(name) = args.strip_prefix("remove ") {
                 let name = name.trim();
                 (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionRemove(name.to_string()))
-            } else if matches!(args, "refresh" | "reload" | "restart") {
+            } else if matches!(args, "refresh" | "reload" | "hup" | "kick") {
                 Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
+            } else if matches!(args, "restart" | "hot-restart") {
+                Some(CanonicalSlashCommand::RuntimeProcessRestart)
             } else if args == "update" {
                 Some(CanonicalSlashCommand::ExtensionUpdate(None))
             } else if let Some(name) = args.strip_prefix("update ") {
@@ -9751,39 +9757,8 @@ Scroll transcript:
                             SlashResult::Display(crate::control_runtime::skills_help_text().into())
                         }
                         CanonicalSlashCommand::SkillsReload => {
-                            let cwd = self.cwd().to_path_buf();
-                            if let Some(ref mut registry) = self.augment_registry {
-                                let before_generation = self.runtime_generation;
-                                registry.load_skills(&cwd);
-                                let loaded = registry.skill_count();
-                                let events = registry.skill_activation_events();
-                                self.runtime_generation = self.runtime_generation.saturating_add(1);
-                                let after_generation = self.runtime_generation;
-                                let mut out = format!(
-                                    "## Skills reloaded\n\nRuntime generation: {before_generation} -> {after_generation}\nLoaded {loaded} active skill directive(s) from user and project skill directories. Changes apply to subsequent model requests in this session.\n"
-                                );
-                                if !events.is_empty() {
-                                    out.push_str("\nActivation events:\n");
-                                    for event in events {
-                                        self.conversation.push_skill_event(event);
-                                        out.push_str(&format!(
-                                            "- {} · {} · {}\n",
-                                            event.active_ref, event.reason, event.resolution
-                                        ));
-                                        if !event.suppressing.is_empty() {
-                                            out.push_str(&format!(
-                                                "  - suppressing: {}\n",
-                                                event.suppressing.join(", ")
-                                            ));
-                                        }
-                                    }
-                                }
-                                SlashResult::Display(out)
-                            } else {
-                                SlashResult::Display(
-                                    "Skills reload unavailable: no active augment registry in this TUI session.".into(),
-                                )
-                            }
+                            let result = self.refresh_runtime_substrate();
+                            SlashResult::Display(result)
                         }
                         CanonicalSlashCommand::SkillCreate(scope) => {
                             // Queue the skill builder prompt — the agent converses
@@ -9986,8 +9961,26 @@ Scroll transcript:
                         && self.agent_active
                     {
                         SlashResult::Display(
-                            "Runtime substrate refresh unavailable while a model turn is active. Wait for completion or cancel the turn first.".into(),
+                            "Runtime refresh unavailable while a model turn is active. Wait for completion or cancel the turn first.".into(),
                         )
+                    } else if matches!(command, CanonicalSlashCommand::RuntimeProcessRestart) {
+                        let binary = std::env::current_exe()
+                            .map_err(|error| error.to_string())
+                            .and_then(|path| path.canonicalize().map_err(|error| error.to_string()));
+                        match binary {
+                            Ok(binary) => {
+                                let args = std::env::args().skip(1).collect::<Vec<_>>();
+                                match crate::update::exec_restart(&binary, &args) {
+                                    Ok(()) => SlashResult::Handled,
+                                    Err(error) => SlashResult::Display(format!(
+                                        "Runtime restart failed: {error}"
+                                    )),
+                                }
+                            }
+                            Err(error) => SlashResult::Display(format!(
+                                "Runtime restart failed: could not resolve current executable: {error}"
+                            )),
+                        }
                     } else if let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
                     {
@@ -10001,7 +9994,7 @@ Scroll transcript:
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /runtime [status|inventory|refresh|reload|restart|hot-restart]".into(),
+                        "Usage: /runtime [status|inventory|refresh|reload|hup|kick|restart|hot-restart]".into(),
                     )
                 }
             }
@@ -15478,15 +15471,19 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn runtime_substrate_refresh() {
-        assert!(matches!(
-            canonical_slash_command("runtime", "restart"),
-            Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
-        ));
-        assert!(matches!(
-            canonical_slash_command("runtime", "hot-restart"),
-            Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
-        ));
+    fn runtime_reload_and_restart_have_distinct_semantics() {
+        for args in ["refresh", "reload", "hup", "kick"] {
+            assert!(matches!(
+                canonical_slash_command("runtime", args),
+                Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
+            ));
+        }
+        for args in ["restart", "hot-restart"] {
+            assert!(matches!(
+                canonical_slash_command("runtime", args),
+                Some(CanonicalSlashCommand::RuntimeProcessRestart)
+            ));
+        }
     }
 
     #[test]
@@ -15500,8 +15497,9 @@ mod slash_command_parsing_tests {
 
         match result {
             SlashResult::Display(message) => {
-                assert!(message.contains("Skills reloaded"), "{message}");
+                assert!(message.contains("Runtime substrate refresh"), "{message}");
                 assert!(message.contains("Runtime generation:"), "{message}");
+                assert!(message.contains("skill augments"), "{message}");
             }
             other => panic!("expected skills reload display, got {other:?}"),
         }
@@ -15819,13 +15817,17 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn extension_refresh_aliases_runtime_substrate_refresh() {
-        for args in ["refresh", "reload", "restart"] {
+    fn extension_reload_aliases_runtime_refresh_but_restart_is_process_restart() {
+        for args in ["refresh", "reload"] {
             assert!(matches!(
                 canonical_slash_command("extension", args),
                 Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
             ));
         }
+        assert!(matches!(
+            canonical_slash_command("extension", "restart"),
+            Some(CanonicalSlashCommand::RuntimeProcessRestart)
+        ));
     }
 
     #[test]
