@@ -1508,9 +1508,9 @@ impl crate::conversation::IntentDocument {
             .work_plan
             .iter()
             .any(|item| matches!(item.intent, Some(TaskIntent::Validation)));
-        if has_evidence_required || has_design || has_validation {
+        if has_evidence_required {
             nudges.push(
-                "durable-work: session plan has research/design/validation work; consider binding it to a design node or OpenSpec change".to_string(),
+                "durable-work: preserve evidence for this session plan; use a versioned workspace or explicit durable artifact when the work needs history beyond the session".to_string(),
             );
         }
         if has_design {
@@ -1848,6 +1848,35 @@ mod render_tests {
         let projection = PlanSurfaceInputs::from_intent(&intent, dir.path());
         assert!(projection.active_lane(&intent).is_none());
         assert_eq!(projection.completed_session.unwrap().completed, 1);
+    }
+
+    #[test]
+    fn promotion_nudges_do_not_treat_design_or_validation_as_openspec_evidence() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Design the local layout".into(), "Validate the output".into()]);
+
+        let nudges = intent.promotion_nudges();
+
+        assert!(nudges.iter().any(|nudge| nudge.starts_with("design node:")));
+        assert!(nudges.iter().any(|nudge| nudge.starts_with("Operations/validation:")));
+        assert!(nudges.iter().all(|nudge| !nudge.contains("OpenSpec")));
+        assert!(nudges.iter().any(|nudge| {
+            nudge.starts_with("durable-work:")
+                && nudge.contains("versioned workspace or explicit durable artifact")
+        }));
+    }
+
+    #[test]
+    fn evidence_required_plan_uses_neutral_durability_guidance() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Investigate behavior".into()]);
+
+        let nudges = intent.promotion_nudges();
+
+        assert!(nudges.iter().any(|nudge| {
+            nudge.contains("versioned workspace or explicit durable artifact")
+                && !nudge.contains("OpenSpec")
+        }));
     }
 
     #[test]
