@@ -36,21 +36,10 @@ jobs:
       - name: Install site dependencies
         run: cd site && npm ci
 
-      - name: Load canonical snippets
-        run: cd site && node scripts/load-snippets.mjs
-
-      - name: Fetch release data
-        run: cd site && node scripts/fetch-releases.mjs
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build design tree SVG
-        run: cd site && node scripts/build-design-tree.mjs
-
       - name: Build site
         run: |
           cp core/install.sh site/public/install.sh
-          cd site && npx astro build
+          cd site && npm run build
 
       - name: Deploy Pages
         if: github.ref == 'refs/heads/main' || github.event_name == 'release'
@@ -104,21 +93,10 @@ jobs:
       - name: Install site dependencies
         run: cd site && npm ci
 
-      - name: Load canonical snippets
-        run: cd site && node scripts/load-snippets.mjs
-
-      - name: Fetch release data
-        run: cd site && node scripts/fetch-releases.mjs
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build design tree SVG
-        run: cd site && node scripts/build-design-tree.mjs
-
       - name: Build site for container bundle
         run: |
           cp core/install.sh site/public/install.sh
-          cd site && npx astro build
+          cd site && npm run build
 
       - name: Prepare container build context
         run: |

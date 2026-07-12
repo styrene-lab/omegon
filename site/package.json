@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.3.0",
-    "astro": "^5.7.0",
+    "astro": "^7.0.7",
     "markdown-it": "^14.1.1"
   },
   "devDependencies": {

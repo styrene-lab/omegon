@@ -33,6 +33,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 0.28.0 makes Om the outcome-first TUI default, adds bounded Active workflows and evidence-complete Full projection, and completes the permissions intent architecture. Canonical activity, outcomes, and evidence now project consistently across TUI, IPC/WebSocket, transcript export, and replay without changing runtime authority.
 
+### Highlights
+
+- **Outcome-first TUI:** Om keeps routine execution quiet and presents one durable outcome per operation; Active adds bounded live workflow detail; Full retains complete operational evidence.
+- **Mode-independent evidence:** changing presentation level does not change model, tool, permission, transcript, or export authority.
+- **Safer execution:** permissions now carry structured filesystem intent, path dialect, sensitive-infrastructure risk, and mount/environment context.
+- **Provider-neutral routing:** shared inference inventory, conceptual model identity, generation-pinned subagent routing, and route provenance make provider choice inspectable without silently replacing compiled routing authority.
+
+### Operator-visible changes
+
+- Omegon starts in Om. Use `/ui om`, `/ui active`, or `/ui full`; Ctrl+G cycles the three levels. Stored `lean` and `slim` values migrate to Om.
+- Workbench suppresses routine chrome in Om but remains visible for approvals, blockers, reconciliation issues, and pending decisions.
+- Operator `!` shell commands become attributed observations in canonical session history, and completed tools collapse into durable success or failure outcomes.
+- Settings are available through the universal configuration entrypoint, while semantic presentation controls are shared across TUI and remote clients.
+
+### Compatibility and migration
+
+- Existing `/ui lean` and `/ui slim` aliases continue to work and map to Om.
+- Legacy `SetRuntimeMode { slim }` decoding remains supported; new clients should use `SetPresentationLevel { Om | Active | Full }`.
+- No manual data migration is required. Default transcript and session-copy output remains mode-independent; evidence-inclusive export retains canonical command arguments and results.
+
+### Security and known limitations
+
+- Permission mediation is stricter for suspicious, shell-derived, cross-platform, container, VM, Kubernetes secret, and runtime-socket paths. Prompts now explain the resolved target and risk rather than granting ambiguous path strings.
+- Inventory-preferred routing remains an opt-in experiment behind `OMEGON_INFERENCE_ROUTE_POLICY=inventory_prefer`; authoritative compiled routing remains the fallback.
+- GitHub Models and Copilot-seat transports that are marked “coming soon” in provider documentation are not part of the 0.28 support contract.
+
 - Corrected the detached conversation viewport marker so neutral `more below · End to tail` navigation chrome uses muted gray instead of attention orange, and added final-buffer regression coverage proving rendered running, completed, and failed Slim tool labels retain teal, neutral, and orange semantics respectively.
 - Corrected the remaining Slim semantic-header state mapping so completed tool rows use neutral gray and failed rows use attention orange; this covers the grouped `memory_recall`/`bash` path that bypassed the previously fixed tool-card chrome.
 - Corrected the remaining Slim tool-row palette bypass: ordinary running tools and live progress now use active teal, completed tools remain neutral, and orange is reserved for failed or otherwise attention-bearing tool states across both compact and full card renderers.
