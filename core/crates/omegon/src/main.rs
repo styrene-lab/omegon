@@ -6056,6 +6056,7 @@ fn build_tui_secret_readiness_snapshot(
     bridge.read().await.shutdown().await;
     tui_handle.abort();
     if let Some((binary, args)) = restart_request {
+        let args = restart_args_for_session(args, &agent.session_id);
         crate::update::exec_restart(&binary, &args)?;
     }
     Ok(())
@@ -6525,6 +6526,31 @@ pub(crate) struct CliRuntimeView<'a> {
     pub(crate) no_session: bool,
     pub(crate) model: &'a str,
     pub(crate) dangerously_bypass_permissions: bool,
+}
+
+fn restart_args_for_session(mut args: Vec<String>, session_id: &str) -> Vec<String> {
+    let mut filtered = Vec::with_capacity(args.len() + 2);
+    let mut skip_resume_value = false;
+    for arg in args.drain(..) {
+        if skip_resume_value {
+            skip_resume_value = false;
+            continue;
+        }
+        if arg == "--fresh" {
+            continue;
+        }
+        if arg == "--resume" {
+            skip_resume_value = true;
+            continue;
+        }
+        if arg.starts_with("--resume=") {
+            continue;
+        }
+        filtered.push(arg);
+    }
+    filtered.push("--resume".to_string());
+    filtered.push(session_id.to_string());
+    filtered
 }
 
 fn interactive_resume_mode(cli: &Cli) -> Option<Option<&str>> {
@@ -9911,6 +9937,28 @@ mod tests {
             "got: {result}"
         );
         assert!(!result.contains("provider-side failure"), "got: {result}");
+    }
+
+    #[test]
+    fn restart_args_resume_the_exact_saved_session() {
+        let args = restart_args_for_session(
+            vec![
+                "--fresh".into(),
+                "--resume".into(),
+                "old-session".into(),
+                "--model".into(),
+                "anthropic:claude-sonnet-4-6".into(),
+            ],
+            "current-session",
+        );
+
+        assert!(!args.contains(&"--fresh".to_string()));
+        assert!(!args.contains(&"old-session".to_string()));
+        assert_eq!(
+            args.windows(2).last(),
+            Some(["--resume".to_string(), "current-session".to_string()].as_slice())
+        );
+        assert!(args.contains(&"--model".to_string()));
     }
 
     #[test]

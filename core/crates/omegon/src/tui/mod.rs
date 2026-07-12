@@ -4206,7 +4206,10 @@ impl App {
                             description: "Reload skills and re-scan extension/runtime candidates without closing this session. Running extensions are inspected but not replaced.".into(),
                             value: Some("keeps session open".into()),
                             kind: MenuRowKind::Action,
-                            badges: vec![MenuBadgeProjection { label: "runtime".into(), tone: MenuBadgeTone::Warning }],
+                            badges: vec![
+                                MenuBadgeProjection { label: "live".into(), tone: MenuBadgeTone::Warning },
+                                MenuBadgeProjection { label: "keeps session".into(), tone: MenuBadgeTone::Neutral },
+                            ],
                             metadata: vec!["/runtime refresh".into(), "/extension refresh".into()],
                             primary_action: Some({ let mut action = MenuActionProjection::command("runtime.refresh.primary", "Refresh", "/runtime refresh"); action.requires_confirmation = true; action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
                             actions: vec![{
