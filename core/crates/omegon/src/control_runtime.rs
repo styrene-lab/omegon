@@ -289,7 +289,9 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::ProfileView => ControlRequest::ProfileView,
         crate::tui::CanonicalSlashCommand::ProfileExport => ControlRequest::ProfileExport,
         crate::tui::CanonicalSlashCommand::ProfileCapture(target) => {
-            ControlRequest::ProfileCapture { target: target.clone() }
+            ControlRequest::ProfileCapture {
+                target: target.clone(),
+            }
         }
         crate::tui::CanonicalSlashCommand::ProfileApply => ControlRequest::ProfileApply,
         crate::tui::CanonicalSlashCommand::ProfileUse { id, scope } => ControlRequest::ProfileUse {
@@ -3353,6 +3355,22 @@ pub async fn profile_capture_response(
     }
 }
 
+async fn apply_profile_model_intent(
+    profile: &settings::Profile,
+    route_controller: Option<&Arc<crate::route::RouteController>>,
+) {
+    let Some(intent) = profile
+        .model_intent
+        .as_ref()
+        .and_then(settings::ProfileModelIntent::to_route_intent)
+    else {
+        return;
+    };
+    if let Some(controller) = route_controller {
+        controller.set_model_intent(intent).await;
+    }
+}
+
 pub async fn profile_apply_response(
     agent: &mut InteractiveAgentHost,
     runtime_state: &mut InteractiveAgentState,
@@ -3362,10 +3380,6 @@ pub async fn profile_apply_response(
     events_tx: &broadcast::Sender<AgentEvent>,
 ) -> SlashCommandResponse {
     let profile = settings::Profile::load(&agent.cwd);
-    let profile_model_intent = profile
-        .model_intent
-        .as_ref()
-        .and_then(settings::ProfileModelIntent::to_route_intent);
     let old_model = shared_settings
         .lock()
         .ok()
@@ -3375,11 +3389,7 @@ pub async fn profile_apply_response(
         profile.apply_to_with_posture(&mut s, &agent.cwd);
     }
 
-    if let Some(intent) = profile_model_intent
-        && let Some(controller) = route_controller
-    {
-        controller.set_model_intent(intent).await;
-    }
+    apply_profile_model_intent(&profile, route_controller.as_ref()).await;
 
     let new_model = shared_settings
         .lock()
@@ -3879,7 +3889,10 @@ fn render_profile_export(
         out.push_str(&format!("- Max turns: `{turns}`\n"));
     }
     if let Some(slim) = settings_json["slim_mode"].as_bool() {
-        out.push_str(&format!("- Slim mode: `{}`\n", if slim { "on" } else { "off" }));
+        out.push_str(&format!(
+            "- Slim mode: `{}`\n",
+            if slim { "on" } else { "off" }
+        ));
     }
     if let Some(order) = settings_json["provider_order"].as_array() {
         if !order.is_empty() {
@@ -5080,6 +5093,37 @@ mod tests {
                 "secret response ownership belongs in control/secrets.rs, not control_runtime.rs: {forbidden}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn applying_profile_updates_live_route_controller_model_intent() {
+        let controller = Arc::new(crate::route::RouteController::with_initial_intent(
+            crate::route::ProviderRoute::Serving {
+                model: crate::route::ModelRouteSpec::parse("anthropic:claude-sonnet-4-6"),
+            },
+            Box::new(crate::bridge::MockBridge { events: vec![] }),
+            None,
+            crate::route::ModelIntent::pinned_model("anthropic:claude-sonnet-4-6".into()),
+        ));
+        let profile = settings::Profile {
+            model_intent: Some(settings::ProfileModelIntent {
+                grade: Some("B".into()),
+                provider: Some("auto".into()),
+                grade_policy: Some("minimum".into()),
+                provider_policy: None,
+                exact_model_override: Some("openai-codex:gpt-5.5".into()),
+            }),
+            ..settings::Profile::default()
+        };
+
+        apply_profile_model_intent(&profile, Some(&controller)).await;
+
+        let intent = controller.snapshot().await.intent;
+        assert_eq!(intent.grade, Some(crate::route::ModelGrade::B));
+        assert_eq!(
+            intent.exact_model_override.as_deref(),
+            Some("openai-codex:gpt-5.5")
+        );
     }
 
     #[test]

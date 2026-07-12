@@ -1088,7 +1088,10 @@ pub enum ProfileSaveTarget {
     Project,
     User,
     /// Save as a named profile in the profiles registry directory.
-    Named { name: String, scope: ProfileRegistryScope },
+    Named {
+        name: String,
+        scope: ProfileRegistryScope,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -1577,7 +1580,13 @@ impl Profile {
             ProfileSaveTarget::Named { name, scope } => {
                 let safe_name = name
                     .chars()
-                    .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+                    .map(|c| {
+                        if c.is_alphanumeric() || c == '-' || c == '_' {
+                            c
+                        } else {
+                            '-'
+                        }
+                    })
                     .collect::<String>();
                 let path = match scope {
                     ProfileRegistryScope::Project => {
@@ -1852,11 +1861,7 @@ pub fn save_project_active_profile_selection(
     let registry = ProfileRegistry::discover(cwd);
     if registry.find_selected(selection).is_none() {
         let scope = selection.scope.as_deref().unwrap_or("any scope");
-        anyhow::bail!(
-            "profile `{}` was not found in {}",
-            selection.id,
-            scope
-        );
+        anyhow::bail!("profile `{}` was not found in {}", selection.id, scope);
     }
 
     let path = project_active_profile_path(cwd);
@@ -2885,7 +2890,11 @@ mod tests {
         let error = save_project_active_profile_selection(tmp.path(), &selection)
             .expect_err("missing profile must be rejected");
 
-        assert!(error.to_string().contains("profile `missing` was not found"));
+        assert!(
+            error
+                .to_string()
+                .contains("profile `missing` was not found")
+        );
         assert_eq!(
             std::fs::read_to_string(path).unwrap(),
             r#"{"id":"default","scope":"user"}"#
@@ -2919,6 +2928,31 @@ mod tests {
         assert_eq!(loaded.profile.thinking_level.as_deref(), Some("high"));
         assert!(
             matches!(loaded.source, ProfileSource::Project(path) if path.ends_with(".omegon/profiles/build.json"))
+        );
+    }
+
+    #[test]
+    fn active_profile_selection_uses_registry_id_when_file_has_no_embedded_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon/profiles")).unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/profiles/pig.json"),
+            r#"{"thinkingLevel":"high"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/active-profile.json"),
+            r#"{"id":"pig","scope":"project"}"#,
+        )
+        .unwrap();
+
+        let loaded = Profile::load_with_source(tmp.path());
+
+        assert_eq!(loaded.profile.name.as_deref(), Some("pig"));
+        assert_eq!(loaded.profile.thinking_level.as_deref(), Some("high"));
+        assert!(
+            matches!(loaded.source, ProfileSource::Project(path) if path.ends_with(".omegon/profiles/pig.json"))
         );
     }
 
