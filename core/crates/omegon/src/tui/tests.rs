@@ -5301,8 +5301,8 @@ fn slash_skills_reload_displays_current_session_reload() {
     let result = app.handle_slash_command("/skills reload", &tx);
     match result {
         SlashResult::Display(message) => {
-            assert!(message.contains("Runtime substrate refresh"), "{message}");
-            assert!(message.contains("subsequent model requests") || message.contains("skill augments"), "{message}");
+            assert!(message.contains("Reload complete"), "{message}");
+            assert!(message.contains("session stayed open"), "{message}");
         }
         other => panic!("expected reload display, got: {other:?}"),
     }
@@ -5577,14 +5577,9 @@ Loaded by runtime substrate refresh.
             .iter()
             .any(|event| event.active_ref.contains("runtime-refresh-skill"))
     );
-    assert!(
-        message.contains("Active skill directives: 0 ->"),
-        "{message}"
-    );
-    assert!(
-        message.contains("partial live refresh completed"),
-        "{message}"
-    );
+    assert!(message.contains("Skills active for future requests: 0 →"), "{message}");
+    assert!(message.contains("Your session stayed open"), "{message}");
+    assert!(message.contains("Not restarted"), "{message}");
 }
 
 #[test]

@@ -4482,6 +4482,30 @@ fn build_tui_secret_readiness_snapshot(
 
         match cmd {
             tui::TuiCommand::Quit => break,
+            tui::TuiCommand::InstallUpdate { info, args } => {
+                let latest = info.latest.clone();
+                let _ = events_tx.send(AgentEvent::SystemNotification {
+                    message: format!("Downloading and verifying Omegon v{latest}…"),
+                });
+                match crate::update::download_and_replace(&info).await {
+                    Ok(binary) => {
+                        let _ = events_tx.send(AgentEvent::SystemNotification {
+                            message: format!(
+                                "Omegon v{latest} installed. Saving this session and restarting…"
+                            ),
+                        });
+                        restart_request = Some((binary, args));
+                        break;
+                    }
+                    Err(error) => {
+                        let _ = events_tx.send(AgentEvent::SystemNotification {
+                            message: format!(
+                                "Update failed; the current version is still running: {error}"
+                            ),
+                        });
+                    }
+                }
+            }
             tui::TuiCommand::RestartProcess { binary, args } => {
                 restart_request = Some((binary, args));
                 break;
@@ -5915,6 +5939,17 @@ fn build_tui_secret_readiness_snapshot(
                                         );
                                     }
                                     tui::TuiCommand::Quit => {
+                                        quit_after_turn = true;
+                                        if let Ok(guard) = shared_cancel.lock()
+                                            && let Some(ref cancel) = *guard
+                                        {
+                                            cancel.cancel();
+                                        }
+                                    }
+                                    tui::TuiCommand::InstallUpdate { info, args } => {
+                                        deferred_commands.push_back(
+                                            tui::TuiCommand::InstallUpdate { info, args },
+                                        );
                                         quit_after_turn = true;
                                         if let Ok(guard) = shared_cancel.lock()
                                             && let Some(ref cancel) = *guard

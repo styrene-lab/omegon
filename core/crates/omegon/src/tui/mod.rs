@@ -253,6 +253,11 @@ pub enum TuiCommand {
     ShellHandoff { keyboard_enhancement: bool },
     /// User wants to quit (double Ctrl+C, or /exit).
     Quit,
+    /// Download and verify an update, then enter the graceful restart lifecycle.
+    InstallUpdate {
+        info: crate::update::UpdateInfo,
+        args: Vec<String>,
+    },
     /// Gracefully save and shut down, then re-exec the current process.
     RestartProcess {
         binary: std::path::PathBuf,
@@ -4197,9 +4202,9 @@ impl App {
                     rows: vec![
                         MenuRowProjection {
                             id: "runtime.refresh".into(),
-                            label: "Refresh runtime substrate".into(),
-                            description: "Reload skill augments and inspect extension/runtime candidates; unavailable while a model turn is active.".into(),
-                            value: None,
+                            label: "Reload live configuration".into(),
+                            description: "Reload skills and re-scan extension/runtime candidates without closing this session. Running extensions are inspected but not replaced.".into(),
+                            value: Some("keeps session open".into()),
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: "runtime".into(), tone: MenuBadgeTone::Warning }],
                             metadata: vec!["/runtime refresh".into(), "/extension refresh".into()],
@@ -9451,30 +9456,17 @@ warning: {warning}"
                     dry_run.invalid_manifests.join("; ")
                 };
                 format!(
-                    "## Runtime substrate refresh\n\nStatus: partial live refresh completed; extension process/widget promotion is not implemented yet.\nRuntime generation: {before_generation} -> {}\n\nPreserved: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nRefreshed now: user/project/extension skill augments.\nInspected only: discovered extensions, widgets, RPC handles, commands/tools, context-provider registrations, harness inventory.\nActive skill directives: {skills_before} -> {skills_after}\nCommand definitions registered: {}\n\nLive substrate inventory:\n- Extension widgets mounted: {}\n- Extension metadata entries: {}\n- Extension RPC handles: {}\n- Widget receivers: {}\n- Voice notification receivers: {}\n- Voice polling handles: {}\n- Vox polling handles: {}\n- Startup skill activation events: {}\n\nCandidate refresh inventory:\n- Extension candidates: {}\n- Skipped by policy: {}\n- Disabled extensions: {}\n- Invalid manifests: {invalid}\n- Candidate widgets: {}\n- Candidate metadata entries: {}\n- Candidate RPC handles: {}\n- Candidate widget receivers: {}\n- Candidate vox polling handles: {}\n- Reloadable skill entries: {}\n\nNext implementation step: promote validated extension-owned handles without replacing the whole runtime bus.",
+                    "## Reload complete\n\nYour session stayed open. Skills active for future requests: {skills_before} → {skills_after}.\n\nReloaded now:\n- User, project, and extension-provided skills\n- Inference inventory generation {before_generation} → {}\n\nNot restarted:\n- Running extension processes and widgets\n- The Omegon executable\n\nUse `/runtime restart` after installing new Omegon code or when a component explicitly says a process restart is required.\n\nDetails:\n- Extension candidates found: {}\n- Skipped by policy: {}\n- Disabled extensions: {}\n- Invalid extension manifests: {}\n- Registered commands: {}",
                     self.runtime_generation,
-                    self.bus_commands.len(),
-                    self.runtime_inventory.extension_widgets,
-                    self.runtime_inventory.extension_metadata_entries,
-                    self.runtime_inventory.extension_rpc_handles,
-                    self.runtime_inventory.widget_receivers,
-                    self.runtime_inventory.voice_notification_receivers,
-                    self.runtime_inventory.voice_polling_handles,
-                    self.runtime_inventory.vox_polling_handles,
-                    self.runtime_inventory.skill_activation_events,
                     dry_run.extension_candidates,
                     dry_run.skipped_by_policy,
                     dry_run.disabled_extensions,
-                    dry_run.inventory.extension_widgets,
-                    dry_run.inventory.extension_metadata_entries,
-                    dry_run.inventory.extension_rpc_handles,
-                    dry_run.inventory.widget_receivers,
-                    dry_run.inventory.vox_polling_handles,
-                    dry_run.inventory.skill_activation_events,
+                    invalid,
+                    self.bus_commands.len(),
                 )
             }
             Err(err) => format!(
-                "Runtime substrate refresh candidate inspection failed after skill refresh: {err}"
+                "Reload partially completed: skills were reloaded, but extension/runtime inspection failed: {err}\n\nThe current session remains usable. Run `/runtime status` for current state or `/runtime restart` if a full process restart is required."
             ),
         }
     }
@@ -10453,29 +10445,16 @@ Scroll transcript:
                     let info = self.update_rx.as_ref().and_then(|rx| rx.borrow().clone());
                     match info {
                         Some(info) if info.is_newer && info.has_downloadable_archive() => {
-                            let args: Vec<String> = std::env::args().skip(1).collect();
-                            let restart_tx = tx.clone();
+                            let args = std::env::args().skip(1).collect::<Vec<_>>();
                             let latest = info.latest.clone();
-                            tokio::spawn(async move {
-                                match crate::update::download_and_replace(&info).await {
-                                    Ok(binary) => {
-                                        if restart_tx
-                                            .send(TuiCommand::RestartProcess { binary, args })
-                                            .await
-                                            .is_err()
-                                        {
-                                            tracing::error!(
-                                                "update installed but graceful runtime restart could not be queued"
-                                            );
-                                        }
-                                    }
-                                    Err(e) => tracing::error!("update install failed: {e}"),
-                                }
-                            });
-                            SlashResult::Display(format!(
-                                "Installing v{}; the shared graceful runtime restart will run after replacement.",
-                                latest
-                            ))
+                            match tx.try_send(TuiCommand::InstallUpdate { info, args }) {
+                                Ok(()) => SlashResult::Display(format!(
+                                    "Installing v{latest}. Omegon will verify the download, save this session, then restart automatically."
+                                )),
+                                Err(error) => SlashResult::Display(format!(
+                                    "Update was not started: could not queue installation: {error}"
+                                )),
+                            }
                         }
                         Some(info) if info.is_newer => {
                             if let Some(tx) = self.update_tx.clone() {
@@ -15499,9 +15478,9 @@ mod slash_command_parsing_tests {
 
         match result {
             SlashResult::Display(message) => {
-                assert!(message.contains("Runtime substrate refresh"), "{message}");
-                assert!(message.contains("Runtime generation:"), "{message}");
-                assert!(message.contains("skill augments"), "{message}");
+                assert!(message.contains("Reload complete"), "{message}");
+                assert!(message.contains("session stayed open"), "{message}");
+                assert!(message.contains("Skills active"), "{message}");
             }
             other => panic!("expected skills reload display, got {other:?}"),
         }
