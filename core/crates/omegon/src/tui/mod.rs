@@ -4762,6 +4762,60 @@ impl App {
                         availability: None,
                     },
                     MenuRowProjection {
+                        id: "profile.save_named_user".into(),
+                        label: "Save as named user profile".into(),
+                        description: "Capture runtime settings to a named profile in ~/.omegon/profiles/<name>.json.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![
+                            MenuBadgeProjection {
+                                label: "writes".into(),
+                                tone: MenuBadgeTone::Warning,
+                            },
+                            MenuBadgeProjection {
+                                label: "user".into(),
+                                tone: MenuBadgeTone::Info,
+                            },
+                        ],
+                        metadata: vec!["/profile save --name <name>".into()],
+                        primary_action: Some(MenuActionProjection::prime_editor(
+                            "profile.save_named_user.primary",
+                            "Name & save (user)",
+                            "/profile save --name ",
+                            "Type the profile name and press Enter — saved to ~/.omegon/profiles/<name>.json",
+                        )),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "profile.save_named_project".into(),
+                        label: "Save as named project profile".into(),
+                        description: "Capture runtime settings to a named profile in .omegon/profiles/<name>.json.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![
+                            MenuBadgeProjection {
+                                label: "writes".into(),
+                                tone: MenuBadgeTone::Warning,
+                            },
+                            MenuBadgeProjection {
+                                label: "project".into(),
+                                tone: MenuBadgeTone::Info,
+                            },
+                        ],
+                        metadata: vec!["/profile save --name <name> --project".into()],
+                        primary_action: Some(MenuActionProjection::prime_editor(
+                            "profile.save_named_project.primary",
+                            "Name & save (project)",
+                            "/profile save --name ",
+                            "Type the profile name followed by ' --project' and press Enter — saved to .omegon/profiles/<name>.json",
+                        )),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
                         id: "profile.export".into(),
                         label: "Export profile".into(),
                         description: "Render the current runtime profile as a text readout.".into(),
