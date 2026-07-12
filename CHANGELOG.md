@@ -18,7 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
-- Listed discovered user and project profiles directly in the `/profile` menu, including scope and active-state badges, with Enter switching to the selected profile.
+- Listed discovered user and project profiles directly in the `/profile` menu, including scope and active-state badges, concise display names, and safe selection of profile names containing spaces; Enter switches to an existing selected profile and rejects stale or unknown targets.
 
 ### Fixed
 

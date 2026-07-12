@@ -1849,6 +1849,16 @@ pub fn save_project_active_profile_selection(
     cwd: &std::path::Path,
     selection: &ActiveProfileSelection,
 ) -> anyhow::Result<std::path::PathBuf> {
+    let registry = ProfileRegistry::discover(cwd);
+    if registry.find_selected(selection).is_none() {
+        let scope = selection.scope.as_deref().unwrap_or("any scope");
+        anyhow::bail!(
+            "profile `{}` was not found in {}",
+            selection.id,
+            scope
+        );
+    }
+
     let path = project_active_profile_path(cwd);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -2854,6 +2864,28 @@ mod tests {
         assert!(registry.entries.iter().any(|entry| {
             entry.id == "built-in-default" && entry.scope == ProfileRegistryScope::BuiltIn
         }));
+    }
+
+    #[test]
+    fn active_profile_selection_save_rejects_missing_entry_without_overwriting() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let path = tmp.path().join(".omegon/active-profile.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{"id":"default","scope":"user"}"#).unwrap();
+        let selection = ActiveProfileSelection {
+            id: "missing".into(),
+            scope: Some("project".into()),
+        };
+
+        let error = save_project_active_profile_selection(tmp.path(), &selection)
+            .expect_err("missing profile must be rejected");
+
+        assert!(error.to_string().contains("profile `missing` was not found"));
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            r#"{"id":"default","scope":"user"}"#
+        );
     }
 
     #[test]

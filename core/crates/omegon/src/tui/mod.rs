@@ -994,11 +994,17 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
             {
-                let mut parts = rest.split_whitespace();
-                let id = parts.next()?.to_string();
-                let scope = parts
-                    .next()
-                    .map(|value| value.trim_start_matches("--scope=").to_string());
+                let parts = shlex::split(rest)?;
+                let id = parts.first()?.clone();
+                let scope = match parts.as_slice() {
+                    [_] => None,
+                    [_, scope] if !scope.starts_with("--") => Some(scope.clone()),
+                    [_, flag] if flag.starts_with("--scope=") => {
+                        Some(flag.trim_start_matches("--scope=").to_string())
+                    }
+                    [_, flag, scope] if flag == "--scope" => Some(scope.clone()),
+                    _ => return None,
+                };
                 Some(CanonicalSlashCommand::ProfileUse { id, scope })
             } else if let Some(name) = args.strip_prefix("persona ").map(str::trim) {
                 Some(CanonicalSlashCommand::ProfileSetPersona(
@@ -4551,12 +4557,15 @@ impl App {
         menu.summary = Some(format!(
             "Persisted profile controls. {source_line}; runtime drift: {drift_value}."
         ));
-        menu.footer = Some("↑/↓ navigate · / filter · Enter run · s save · explicit /profile apply to apply · Esc close".into());
+        menu.footer = Some("↑/↓ navigate · / filter · Enter use/view · s save · explicit /profile apply to apply · Esc close".into());
         let registry = crate::settings::ProfileRegistry::discover(self.cwd());
         let active_source = drift.source.clone();
         let mut registry_rows: Vec<MenuRowProjection> = registry
             .entries
             .iter()
+            .filter(|entry| {
+                entry.source_kind == crate::settings::ProfileRegistrySourceKind::RegistryFile
+            })
             .map(|entry| {
                 let is_active = entry
                     .path
@@ -4591,8 +4600,11 @@ impl App {
                     label: entry.id.clone(),
                     description: entry
                         .profile
-                        .compact_label()
-                        .unwrap_or("Profile registry entry")
+                        .display_name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or("Saved profile")
                         .to_string(),
                     value: Some(entry.scope.as_str().into()),
                     kind: MenuRowKind::Object,
@@ -4609,7 +4621,12 @@ impl App {
                         MenuActionProjection::command(
                             format!("profile.use.{}.{}", entry.scope.as_str(), entry.id),
                             "Use",
-                            format!("/profile use {} {}", entry.id, entry.scope.as_str()),
+                            format!(
+                                "/profile use {} {}",
+                                shlex::try_quote(&entry.id)
+                                    .unwrap_or_else(|_| "''".into()),
+                                entry.scope.as_str()
+                            ),
                         )
                     }),
                     actions: vec![],

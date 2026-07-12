@@ -8206,14 +8206,36 @@ fn slash_profile_opens_profile_menu() {
 }
 
 #[test]
+fn canonical_profile_use_parses_quoted_names_and_rejects_extra_arguments() {
+    assert_eq!(
+        canonical_slash_command("profile", "use 'review profile' project"),
+        Some(CanonicalSlashCommand::ProfileUse {
+            id: "review profile".into(),
+            scope: Some("project".into()),
+        })
+    );
+    assert_eq!(
+        canonical_slash_command("profile", "use reviewer --scope project"),
+        Some(CanonicalSlashCommand::ProfileUse {
+            id: "reviewer".into(),
+            scope: Some("project".into()),
+        })
+    );
+    assert_eq!(
+        canonical_slash_command("profile", "use reviewer project ignored"),
+        None
+    );
+}
+
+#[test]
 fn profile_menu_lists_discovered_project_profiles() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let _cwd = push_current_dir(tmp.path());
     let profiles_dir = tmp.path().join(".omegon/profiles");
     std::fs::create_dir_all(&profiles_dir).expect("profiles dir");
     std::fs::write(
-        profiles_dir.join("reviewer.json"),
-        r#"{"name":"reviewer","thinkingLevel":"high"}"#,
+        profiles_dir.join("review profile.json"),
+        r#"{"displayName":"Reviewer","thinkingLevel":"high"}"#,
     )
     .expect("profile");
 
@@ -8229,10 +8251,11 @@ fn profile_menu_lists_discovered_project_profiles() {
     let reviewer = available
         .rows
         .iter()
-        .find(|row| row.id == "profile.registry.project.reviewer")
+        .find(|row| row.id == "profile.registry.project.review profile")
         .expect("project profile row");
 
-    assert_eq!(reviewer.label, "reviewer");
+    assert_eq!(reviewer.label, "review profile");
+    assert_eq!(reviewer.description, "Reviewer");
     assert_eq!(reviewer.value.as_deref(), Some("project"));
     assert!(reviewer.badges.iter().any(|badge| badge.label == "project"));
     assert_eq!(
@@ -8240,7 +8263,7 @@ fn profile_menu_lists_discovered_project_profiles() {
             .primary_action
             .as_ref()
             .and_then(|action| action.command.as_deref()),
-        Some("/profile use reviewer project")
+        Some("/profile use 'review profile' project")
     );
 }
 
