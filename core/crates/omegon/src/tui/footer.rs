@@ -109,6 +109,10 @@ pub struct FooterData {
     pub operator_events: Vec<OperatorEventLine>,
     /// Current provider quota/headroom telemetry, if exposed by the upstream.
     pub provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,
+    /// Web-search provider readiness for the liveness gauge. Empty until the
+    /// secret readiness snapshot is available. Zero configured providers is
+    /// rendered as a degradation (DDG scrape floor only), never as neutral.
+    pub web_search_providers: Vec<crate::capabilities::secrets::WebSearchProviderReadiness>,
 }
 
 impl FooterData {
@@ -323,6 +327,48 @@ impl FooterData {
                 t.accent_muted(),
                 false,
             );
+        }
+
+        // Web-search liveness gauge. Keyless (DDG scrape floor only) renders
+        // as a persistent degradation — operators should not sit in that state.
+        if !self.web_search_providers.is_empty() {
+            let configured = self
+                .web_search_providers
+                .iter()
+                .filter(|provider| provider.configured)
+                .count();
+            if configured == 0 {
+                push_row(
+                    &mut lines,
+                    "web",
+                    "▲ keyless · ddg floor only · /secrets".to_string(),
+                    value_width,
+                    t.border_dim(),
+                    t.warning(),
+                    true,
+                );
+            } else {
+                let mut spans = vec![Span::styled(
+                    format!(" {:<width$} ", "web", width = label_width),
+                    Style::default().fg(t.border_dim()),
+                )];
+                for provider in &self.web_search_providers {
+                    let (tick, color) = if provider.configured {
+                        ("●", t.success())
+                    } else {
+                        ("○", t.dim())
+                    };
+                    spans.push(Span::styled(tick, Style::default().fg(color)));
+                }
+                spans.push(Span::styled(
+                    format!(
+                        " {configured}/{} providers",
+                        self.web_search_providers.len()
+                    ),
+                    Style::default().fg(t.muted()),
+                ));
+                lines.push(Line::from(spans));
+            }
         }
 
         if self.update_available.is_some() {
@@ -1074,6 +1120,18 @@ mod tests {
             principal_id: "operator".into(),
             authorization: "trusted".into(),
             provider_connected: true,
+            web_search_providers: vec![
+                crate::capabilities::secrets::WebSearchProviderReadiness {
+                    provider: "brave",
+                    secret_name: "BRAVE_API_KEY",
+                    configured: true,
+                },
+                crate::capabilities::secrets::WebSearchProviderReadiness {
+                    provider: "tavily",
+                    secret_name: "TAVILY_API_KEY",
+                    configured: false,
+                },
+            ],
             update_available: Some("0.27.1".into()),
             sandbox: true,
             ..Default::default()
@@ -1083,6 +1141,10 @@ mod tests {
         let projection = data.projection();
         assert_eq!(projection.engine.model_id, "anthropic:claude-sonnet-4-6");
         assert_eq!(projection.engine.model_provider, "anthropic");
+        assert_eq!(
+            projection.engine.web_search_providers,
+            vec![("brave".into(), true), ("tavily".into(), false)]
+        );
         assert!(projection.engine.model_short.contains("sonnet"));
         assert_eq!(projection.context.percent, 37.5);
         assert_eq!(projection.context.window, 200_000);

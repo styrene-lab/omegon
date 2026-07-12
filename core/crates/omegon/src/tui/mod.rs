@@ -6188,7 +6188,7 @@ warning: {warning}"
                         Some(format!("Opening browser for {label} login…"))
                     }
                     "openai" | "openrouter" | "ollama-cloud" | "brave" | "tavily" | "serper"
-                    | "huggingface" => {
+                    | "firecrawl" | "huggingface" => {
                         // Map to the correct env var name for storage
                         let key_name = match value.as_str() {
                             "openai" => "OPENAI_API_KEY",
@@ -6197,14 +6197,26 @@ warning: {warning}"
                             "brave" => "BRAVE_API_KEY",
                             "tavily" => "TAVILY_API_KEY",
                             "serper" => "SERPER_API_KEY",
+                            "firecrawl" => "FIRECRAWL_API_KEY",
                             "huggingface" => "HUGGING_FACE_TOKEN",
                             _ => unreachable!(),
                         };
+                        let acquisition =
+                            crate::capabilities::secrets::secret_console_url(key_name);
+                        if let Some(url) = acquisition {
+                            let url = url.to_string();
+                            std::thread::spawn(move || {
+                                let _ = open::that(url);
+                            });
+                        }
                         self.editor.start_secret_input(key_name);
-                        Some(format!(
-                            "🔒 Paste your {} API key (input is hidden):",
-                            value
-                        ))
+                        Some(if acquisition.is_some() {
+                            format!(
+                                "Opening the {value} key console… 🔒 paste {key_name} here (input is hidden):"
+                            )
+                        } else {
+                            format!("🔒 Paste your {value} API key (input is hidden):")
+                        })
                     }
                     "github" => {
                         // GitHub uses dynamic resolution via gh CLI
@@ -6248,11 +6260,25 @@ warning: {warning}"
                         .map(|(_, recipe, _)| *recipe)
                         .unwrap_or("");
                     if suggested.is_empty() {
-                        // Direct value — enter masked secret input mode
+                        // Direct value — enter masked secret input mode. Search
+                        // providers additionally open their fixed key-console URL
+                        // in the operator's browser; the key itself never transits
+                        // model context.
+                        let acquisition = crate::capabilities::secrets::secret_console_url(&value);
+                        if let Some(url) = acquisition {
+                            let url = url.to_string();
+                            std::thread::spawn(move || {
+                                let _ = open::that(url);
+                            });
+                        }
                         self.editor.start_secret_input(&value);
-                        Some(format!(
-                            "🔒 Paste or type value for {value} (input is hidden):"
-                        ))
+                        Some(if acquisition.is_some() {
+                            format!(
+                                "Opening the provider key console… 🔒 paste {value} here (input is hidden):"
+                            )
+                        } else {
+                            format!("🔒 Paste or type value for {value} (input is hidden):")
+                        })
                     } else {
                         // Dynamic recipe — set immediately
                         if let Some(request) = crate::control_runtime::control_request_from_slash(
@@ -6410,6 +6436,7 @@ warning: {warning}"
         ("BRAVE_API_KEY", "", "Brave Search API"),
         ("TAVILY_API_KEY", "", "Tavily Search API"),
         ("SERPER_API_KEY", "", "Serper (Google) Search API"),
+        ("FIRECRAWL_API_KEY", "", "Firecrawl Search API"),
         // Git forges
         (
             "GITHUB_TOKEN",
@@ -6493,7 +6520,11 @@ warning: {warning}"
                 } else {
                     format!("{name:<30} {desc}")
                 },
-                description: if recipe.is_empty() {
+                description: if let Some(url) =
+                    crate::capabilities::secrets::secret_console_url(name)
+                {
+                    format!("opens {url} → masked key input")
+                } else if recipe.is_empty() {
                     "direct value → OS keyring".to_string()
                 } else {
                     format!("suggested: {recipe}")
@@ -6541,10 +6572,21 @@ warning: {warning}"
             // /secrets set NAME → enter hidden input mode for arbitrary operator secrets.
             "set" if parts.len() == 2 && !parts[1].trim().is_empty() => {
                 let name = parts[1].trim();
+                let acquisition = crate::capabilities::secrets::secret_console_url(name);
+                if let Some(url) = acquisition {
+                    let url = url.to_string();
+                    std::thread::spawn(move || {
+                        let _ = open::that(url);
+                    });
+                }
                 self.editor.start_secret_input(name);
-                SlashResult::Display(format!(
-                    "🔒 Paste or type value for {name} (input is hidden):"
-                ))
+                SlashResult::Display(if acquisition.is_some() {
+                    format!(
+                        "Opening the provider key console… 🔒 paste {name} here (input is hidden):"
+                    )
+                } else {
+                    format!("🔒 Paste or type value for {name} (input is hidden):")
+                })
             }
             // /secrets configure and /secrets set with no name/value → open shared menu
             "configure" | "set" if parts.len() < 3 => {
@@ -13064,6 +13106,10 @@ pub async fn run_tui(
     app.mouse_capture_enabled = true;
     app.keyboard_enhancement = has_keyboard_enhancement;
     app.secret_readiness = config.secret_readiness.clone();
+    if let Some(snapshot) = app.secret_readiness.as_ref() {
+        app.footer_data.web_search_providers =
+            crate::capabilities::secrets::web_search_provider_readiness(snapshot);
+    }
     app.show_startup_notice();
     // Populate extension widgets and receivers from config
     for widget in config.extension_widgets {
@@ -13831,6 +13877,18 @@ pub async fn run_tui(
                                                 respond_to: None,
                                             })
                                             .await;
+
+                                        // Reflect keyed search readiness immediately in footer
+                                        // chrome; the secret write has already been queued and
+                                        // no restart is required by web_search resolution.
+                                        if let Some(provider) = app
+                                            .footer_data
+                                            .web_search_providers
+                                            .iter_mut()
+                                            .find(|provider| provider.secret_name == label)
+                                        {
+                                            provider.configured = true;
+                                        }
 
                                         // For provider keys, also write to auth.json so the
                                         // provider resolution chain finds them (/auth login checks

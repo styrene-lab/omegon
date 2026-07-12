@@ -31,6 +31,8 @@ pub struct SessionRow {
     pub principal_id: String,
     pub authorization: String,
     pub provider_connected: bool,
+    /// Web-search provider gauge projected from first-party secret readiness.
+    pub web_search_providers: Vec<(String, bool)>,
     pub session_input_tokens: u64,
     pub session_output_tokens: u64,
     pub cwd_basename: String,
@@ -60,6 +62,7 @@ impl SessionRow {
         self.principal_id = projection.engine.principal_id;
         self.authorization = projection.engine.authorization;
         self.provider_connected = projection.engine.provider_connected;
+        self.web_search_providers = projection.engine.web_search_providers;
         self.session_input_tokens = projection.session.session_input_tokens;
         self.session_output_tokens = projection.session.session_output_tokens;
         self.cwd_basename = projection.workspace.cwd_basename;
@@ -182,6 +185,34 @@ impl SessionRow {
         ];
 
         let mut used: usize = spans.iter().map(|s| s.width()).sum();
+
+        // Web-search liveness is persistent chrome, not a transient nag.
+        // An all-empty keyed set is explicitly degraded: DDG scraping is a
+        // fallback floor, not an acceptable configured state.
+        if !self.web_search_providers.is_empty() {
+            let configured = self
+                .web_search_providers
+                .iter()
+                .filter(|(_, configured)| *configured)
+                .count();
+            let (label, color) = if configured == 0 {
+                ("WEB! ddg-only".to_string(), t.warning())
+            } else {
+                let ticks: String = self
+                    .web_search_providers
+                    .iter()
+                    .map(|(_, configured)| if *configured { '●' } else { '○' })
+                    .collect();
+                (format!("WEB {ticks}"), t.success())
+            };
+            let field = Span::styled(label, Style::default().fg(color));
+            let cost = sect.width() + field.width();
+            if used + cost < w {
+                spans.push(sect.clone());
+                spans.push(field);
+                used += cost;
+            }
+        }
 
         // Detached conversation viewport. This is deliberately near the left
         // pinned fields: when Slim auto-pins a long answer at its start, the
@@ -565,6 +596,55 @@ mod tests {
             "files: 16 touched · 4 changed"
         );
         assert_eq!(file_activity_label(12, 0, 90), "files: 12 read");
+    }
+
+    #[test]
+    fn keyless_web_search_is_rendered_as_degraded() {
+        let sl = SessionRow {
+            provider_connected: true,
+            web_search_providers: vec![
+                ("tavily".into(), false),
+                ("serper".into(), false),
+                ("brave".into(), false),
+                ("firecrawl".into(), false),
+            ],
+            ..Default::default()
+        };
+
+        let backend = ratatui::backend::TestBackend::new(160, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| sl.render(frame.area(), frame, &super::super::theme::Alpharius))
+            .unwrap();
+        let text = (0..160)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(text.contains("WEB! ddg-only"), "{text}");
+    }
+
+    #[test]
+    fn keyed_web_search_uses_provider_ticks() {
+        let sl = SessionRow {
+            provider_connected: true,
+            web_search_providers: vec![
+                ("tavily".into(), false),
+                ("serper".into(), false),
+                ("brave".into(), true),
+                ("firecrawl".into(), false),
+            ],
+            ..Default::default()
+        };
+
+        let backend = ratatui::backend::TestBackend::new(160, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| sl.render(frame.area(), frame, &super::super::theme::Alpharius))
+            .unwrap();
+        let text = (0..160)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(text.contains("WEB ○○●○"), "{text}");
+        assert!(!text.contains("ddg-only"), "{text}");
     }
 
     #[test]

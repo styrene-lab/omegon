@@ -115,6 +115,59 @@ pub struct SecretRecipeDescriptorSummary {
     pub kind: String,
 }
 
+/// Per-provider readiness slice for the footer web-search liveness gauge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebSearchProviderReadiness {
+    pub provider: &'static str,
+    pub secret_name: &'static str,
+    pub configured: bool,
+}
+
+/// Keyed web-search providers in the same precedence order as the
+/// `web_search` auto ladder (`tools/web_search.rs`).
+pub const WEB_SEARCH_PROVIDER_SECRETS: &[(&str, &str)] = &[
+    ("tavily", "TAVILY_API_KEY"),
+    ("serper", "SERPER_API_KEY"),
+    ("brave", "BRAVE_API_KEY"),
+    ("firecrawl", "FIRECRAWL_API_KEY"),
+];
+
+/// Key-console URL for guided acquisition of a first-party secret.
+/// Opened in the operator's browser by `/secrets acquire <NAME>`.
+pub fn secret_console_url(secret_name: &str) -> Option<&'static str> {
+    match secret_name {
+        "BRAVE_API_KEY" => Some("https://api-dashboard.search.brave.com/app/keys"),
+        "TAVILY_API_KEY" => Some("https://app.tavily.com/home"),
+        "SERPER_API_KEY" => Some("https://serper.dev/dashboard"),
+        "FIRECRAWL_API_KEY" => Some("https://www.firecrawl.dev/app/api-keys"),
+        _ => None,
+    }
+}
+
+/// Derive the web-search gauge slice from a readiness snapshot.
+/// A provider counts as configured when its secret is warmed or configured.
+pub fn web_search_provider_readiness(
+    snapshot: &SecretReadinessSnapshot,
+) -> Vec<WebSearchProviderReadiness> {
+    WEB_SEARCH_PROVIDER_SECRETS
+        .iter()
+        .map(|(provider, secret_name)| {
+            let configured = snapshot.secrets.iter().any(|secret| {
+                secret.name == *secret_name
+                    && matches!(
+                        secret.status,
+                        SecretReadinessStatus::Warmed | SecretReadinessStatus::Configured
+                    )
+            });
+            WebSearchProviderReadiness {
+                provider,
+                secret_name,
+                configured,
+            }
+        })
+        .collect()
+}
+
 pub fn build_secret_readiness_snapshot(
     extensions: &[ExtensionCapabilitySummary],
     agents: &[AgentBundleSummary],
@@ -550,6 +603,45 @@ mod tests {
         assert_eq!(web_search.deferred_count, 1);
         assert_eq!(web_search.missing_count, 3);
         assert_eq!(web_search.status, HarnessCapabilityReadinessStatus::Ready);
+    }
+
+    #[test]
+    fn web_search_provider_readiness_tracks_configured_keys() {
+        let snapshot = build_secret_readiness_snapshot(
+            &[],
+            &[],
+            SecretReadinessInputs {
+                session_diagnostics: vec![SecretSessionDiagnostic {
+                    name: "BRAVE_API_KEY".into(),
+                    warmed: true,
+                }],
+                recipe_descriptors: Vec::new(),
+                checked_names: Vec::new(),
+            },
+        );
+
+        let providers = web_search_provider_readiness(&snapshot);
+        assert_eq!(providers.len(), 4);
+        assert!(providers.iter().any(|provider| {
+            provider.provider == "brave"
+                && provider.secret_name == "BRAVE_API_KEY"
+                && provider.configured
+        }));
+        assert!(
+            providers
+                .iter()
+                .filter(|provider| provider.provider != "brave")
+                .all(|provider| !provider.configured)
+        );
+    }
+
+    #[test]
+    fn web_search_key_consoles_are_fixed_https_urls() {
+        for (_, secret_name) in WEB_SEARCH_PROVIDER_SECRETS {
+            let url = secret_console_url(secret_name).expect("search provider console URL");
+            assert!(url.starts_with("https://"));
+        }
+        assert_eq!(secret_console_url("UNRELATED_SECRET"), None);
     }
 
     #[test]
