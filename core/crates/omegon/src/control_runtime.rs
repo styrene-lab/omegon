@@ -712,6 +712,7 @@ pub async fn execute_control(
                 ctx.runtime_state,
                 ctx.shared_settings,
                 ctx.bridge,
+                ctx.route_controller.clone(),
                 ctx.events_tx,
             )
             .await
@@ -734,6 +735,7 @@ pub async fn execute_control(
                     ctx.runtime_state,
                     ctx.shared_settings,
                     ctx.bridge,
+                    ctx.route_controller.clone(),
                     ctx.events_tx,
                 )
                 .await;
@@ -3356,9 +3358,14 @@ pub async fn profile_apply_response(
     runtime_state: &mut InteractiveAgentState,
     shared_settings: &settings::SharedSettings,
     bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+    route_controller: Option<Arc<crate::route::RouteController>>,
     events_tx: &broadcast::Sender<AgentEvent>,
 ) -> SlashCommandResponse {
     let profile = settings::Profile::load(&agent.cwd);
+    let profile_model_intent = profile
+        .model_intent
+        .as_ref()
+        .and_then(settings::ProfileModelIntent::to_route_intent);
     let old_model = shared_settings
         .lock()
         .ok()
@@ -3366,6 +3373,12 @@ pub async fn profile_apply_response(
         .unwrap_or_default();
     if let Ok(mut s) = shared_settings.lock() {
         profile.apply_to_with_posture(&mut s, &agent.cwd);
+    }
+
+    if let Some(intent) = profile_model_intent
+        && let Some(controller) = route_controller
+    {
+        controller.set_model_intent(intent).await;
     }
 
     let new_model = shared_settings

@@ -1931,8 +1931,12 @@ impl ProfileRegistry {
             };
             if let Some(entry) = self.find_selected(&selection) {
                 tracing::debug!(path = %path.display(), profile = %entry.id, scope = entry.scope.as_str(), "active profile selection loaded");
+                let mut profile = entry.profile.clone();
+                if profile.compact_label().is_none() {
+                    profile.name = Some(entry.id.clone());
+                }
                 return LoadedProfile {
-                    profile: entry.profile.clone(),
+                    profile,
                     source: entry.source(),
                 };
             }
