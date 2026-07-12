@@ -212,11 +212,13 @@ pub struct IntentDocument {
     #[serde(default)]
     pub operator_correction_pending: bool,
 
-    /// Monotonic operator-task generation. Each top-level operator run advances
-    /// this counter so ephemeral plans can be retired when a later prompt
-    /// starts instead of lingering indefinitely in Workbench.
+    /// Monotonic ID source for ephemeral session plans. This is plan identity,
+    /// not a prompt or model-run counter.
     #[serde(default)]
-    pub task_generation: u64,
+    pub next_session_plan_id: u64,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retained_session_plans: Vec<VisiblePlanState>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub work_plan: Vec<WorkItem>,
@@ -388,10 +390,6 @@ pub struct VisiblePlanState {
     pub scope: PlanScope,
     pub source: PlanSource,
     pub binding: PlanBinding,
-    /// Operator-task generation that created this ephemeral plan. Zero is the
-    /// backward-compatible value for plans saved before generation tracking.
-    #[serde(default)]
-    pub task_generation: u64,
     pub mode: PlanMode,
     pub items: Vec<WorkItem>,
 }
@@ -403,7 +401,6 @@ impl Default for VisiblePlanState {
             scope: PlanScope::Session,
             source: PlanSource::Ephemeral,
             binding: PlanBinding::default(),
-            task_generation: 0,
             mode: PlanMode::Off,
             items: Vec::new(),
         }
@@ -4636,7 +4633,6 @@ mod tests {
                     openspec_change: Some("active-change".into()),
                     ..PlanBinding::default()
                 },
-                task_generation: 0,
                 mode: PlanMode::Executing,
                 items: vec![WorkItem {
                     description: "Implement spec scenario".into(),
@@ -4867,7 +4863,6 @@ mod tests {
                 openspec_change: Some("plan-refinement".into()),
                 ..PlanBinding::default()
             },
-            task_generation: 0,
             mode: PlanMode::Executing,
             items: intent.work_plan.clone(),
         });
@@ -5121,7 +5116,6 @@ mod tests {
                     openspec_change: Some("missing".into()),
                     ..PlanBinding::default()
                 },
-                task_generation: 0,
                 mode: PlanMode::Executing,
                 items: Vec::new(),
             }),

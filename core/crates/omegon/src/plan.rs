@@ -673,79 +673,53 @@ pub enum PlanAction {
     Clear,
 }
 
-fn operator_prompt_continues_active_task(prompt: &str) -> bool {
-    let normalized = prompt.trim().to_ascii_lowercase();
-    matches!(
-        normalized.trim_matches(|c: char| c.is_ascii_punctuation()),
-        "continue"
-            | "continue please"
-            | "go on"
-            | "keep going"
-            | "proceed"
-            | "yes"
-            | "yes proceed"
-            | "make it so"
-            | "do it"
-            | "ship it"
-            | "get it done"
-    )
-}
-
 impl crate::conversation::IntentDocument {
-    /// Start a new top-level operator task. An unfinished session-scoped plan
-    /// from an earlier run is detached from the active Workbench lane but kept
-    /// in the registry for explicit inspection/resume. Repo-scoped plans are
-    /// artifact-owned and are never retired by prompt boundaries.
-    pub fn begin_operator_task(&mut self, prompt: &str) {
-        let previous_generation = self.task_generation;
-        self.task_generation = self.task_generation.saturating_add(1);
-        let continues_active_task = operator_prompt_continues_active_task(prompt);
-        let stale_session_plan = self.visible_plan.as_ref().is_some_and(|plan| {
-            plan.scope == PlanScope::Session
-                && plan.mode != PlanMode::Complete
-                && !plan.items.is_empty()
-                && plan.task_generation < self.task_generation
-                && !continues_active_task
-        });
-        if !stale_session_plan {
-            // A terse continuation such as “proceed” starts another model run but
-            // not another operator task. Carry the plan forward to the new run
-            // generation so a subsequent continuation does not detach it.
-            if continues_active_task
-                && let Some(plan) = self.visible_plan.as_mut()
-                && plan.scope == PlanScope::Session
-                && plan.task_generation <= previous_generation
-            {
-                plan.task_generation = self.task_generation;
-            }
-            return;
-        }
+    fn next_ephemeral_plan_id(&mut self) -> String {
+        self.next_session_plan_id = self.next_session_plan_id.saturating_add(1);
+        format!("session:{}", self.next_session_plan_id)
+    }
 
-        let plan_id = self
-            .visible_plan
-            .as_ref()
-            .map(|plan| plan.plan_id.clone())
-            .unwrap_or_else(PlanBinding::session_plan_id);
+    fn retain_visible_session_plan(&mut self, status: PlanStatus, summary: &str) -> Option<String> {
+        let plan = self.visible_plan.take()?;
+        if plan.scope != PlanScope::Session {
+            self.visible_plan = Some(plan);
+            return None;
+        }
+        let plan_id = plan.plan_id.clone();
+        self.retained_session_plans.retain(|saved| saved.plan_id != plan_id);
+        self.retained_session_plans.push(plan);
         self.plan_registry_view.entries.retain(|entry| entry.plan_id != plan_id);
         self.plan_registry_view.entries.push(PlanViewEntry {
             plan_id: plan_id.clone(),
-            status: PlanStatus::Detached,
+            status,
             last_visible_at: None,
-            resume_hint: Some("Detached when a later operator task started.".to_string()),
+            resume_hint: Some(summary.to_string()),
             dismissed: false,
         });
+        self.work_plan.clear();
+        self.plan_mode = PlanMode::Off;
+        self.plan_reconciliation_fingerprint = None;
+        self.plan_reconciliation_nudges = 0;
+        Some(plan_id)
+    }
+
+    /// Explicitly start a new operator task. Prompt arrival alone is not a safe
+    /// task-boundary signal: ordinary follow-ups frequently continue the active
+    /// plan. Callers use this only for explicit reset/replacement operations.
+    pub fn begin_new_operator_task(&mut self) {
+        let Some(plan_id) = self.retain_visible_session_plan(
+            PlanStatus::Detached,
+            "Detached when the operator explicitly started a new task.",
+        ) else {
+            return;
+        };
         self.plan_events.push(PlanEvent {
             plan_id,
             task_id: None,
             source: PlanEventSource::Manual,
-            summary: "Detached stale session plan at operator task boundary.".to_string(),
+            summary: "Detached session plan at explicit operator task boundary.".to_string(),
             evidence: Vec::new(),
         });
-        self.work_plan.clear();
-        self.plan_mode = PlanMode::Off;
-        self.visible_plan = None;
-        self.plan_reconciliation_fingerprint = None;
-        self.plan_reconciliation_nudges = 0;
     }
 
     /// Set the work plan, replacing any existing plan.
@@ -771,6 +745,15 @@ impl crate::conversation::IntentDocument {
     }
 
     fn set_work_plan_inner(&mut self, items: Vec<String>) {
+        let replacing_session = self.visible_plan.as_ref().is_some_and(|plan| {
+            plan.scope == PlanScope::Session && !plan.items.is_empty()
+        });
+        if replacing_session {
+            self.retain_visible_session_plan(
+                PlanStatus::Detached,
+                "Detached when a replacement session plan was created.",
+            );
+        }
         self.work_plan = items
             .into_iter()
             .filter_map(|desc| {
@@ -1015,12 +998,13 @@ impl crate::conversation::IntentDocument {
             return;
         }
 
+        let plan_id = self
+            .visible_plan
+            .as_ref()
+            .map(|plan| plan.plan_id.clone())
+            .unwrap_or_else(|| self.next_ephemeral_plan_id());
         self.visible_plan = Some(VisiblePlanState {
-            plan_id: self
-                .visible_plan
-                .as_ref()
-                .map(|plan| plan.plan_id.clone())
-                .unwrap_or_else(PlanBinding::session_plan_id),
+            plan_id,
             scope: PlanScope::Session,
             source: PlanSource::Ephemeral,
             binding: self
@@ -1028,7 +1012,6 @@ impl crate::conversation::IntentDocument {
                 .as_ref()
                 .map(|plan| plan.binding.clone())
                 .unwrap_or_default(),
-            task_generation: self.task_generation,
             mode: self.plan_mode,
             items: self.work_plan.clone(),
         });
@@ -1761,41 +1744,42 @@ mod render_tests {
     use crate::conversation::IntentDocument;
 
     #[test]
-    fn later_operator_task_detaches_unfinished_session_plan() {
+    fn explicit_new_task_retains_unfinished_session_plan_snapshot() {
         let mut intent = IntentDocument::default();
-        intent.begin_operator_task("new unrelated task");
         intent.set_work_plan(vec!["Investigate old task".into(), "Implement fix".into()]);
-        assert_eq!(intent.visible_plan.as_ref().unwrap().task_generation, 1);
+        let plan_id = intent.visible_plan.as_ref().unwrap().plan_id.clone();
 
-        intent.begin_operator_task("new unrelated task");
+        intent.begin_new_operator_task();
 
         assert!(intent.work_plan.is_empty());
         assert!(intent.visible_plan.is_none());
         assert_eq!(intent.plan_mode, PlanMode::Off);
+        let retained = intent
+            .retained_session_plans
+            .iter()
+            .find(|plan| plan.plan_id == plan_id)
+            .expect("detached plan snapshot retained");
+        assert_eq!(retained.items.len(), 2);
         assert!(intent.plan_registry_view.entries.iter().any(|entry| {
-            entry.plan_id == PlanBinding::session_plan_id()
-                && entry.status == PlanStatus::Detached
+            entry.plan_id == plan_id && entry.status == PlanStatus::Detached
         }));
     }
 
     #[test]
-    fn terse_continuation_keeps_unfinished_session_plan() {
+    fn ordinary_follow_up_does_not_change_active_session_plan() {
         let mut intent = IntentDocument::default();
-        intent.begin_operator_task("implement the plan lifecycle fix");
         intent.set_work_plan(vec!["Implement fix".into(), "Validate".into()]);
+        let before = intent.visible_plan.clone();
 
-        intent.begin_operator_task("proceed");
-
-        let visible = intent.visible_plan.as_ref().expect("plan remains visible");
-        assert_eq!(visible.task_generation, intent.task_generation);
-        assert_eq!(visible.items.len(), 2);
-        assert!(intent.plan_registry_view.entries.is_empty());
+        // Prompt arrival has no destructive plan lifecycle hook. Only explicit
+        // reset/replacement operations invoke begin_new_operator_task.
+        assert_eq!(intent.visible_plan, before);
+        assert!(intent.retained_session_plans.is_empty());
     }
 
     #[test]
-    fn later_operator_task_preserves_repo_plan() {
+    fn explicit_new_task_preserves_repo_plan() {
         let mut intent = IntentDocument::default();
-        intent.begin_operator_task("new unrelated task");
         intent.visible_plan = Some(VisiblePlanState {
             plan_id: PlanBinding::openspec_plan_id("active-change", None),
             scope: PlanScope::Repo,
@@ -1804,7 +1788,6 @@ mod render_tests {
                 openspec_change: Some("active-change".into()),
                 ..PlanBinding::default()
             },
-            task_generation: intent.task_generation,
             mode: PlanMode::Executing,
             items: vec![WorkItem {
                 description: "Implement scenario".into(),
@@ -1815,7 +1798,7 @@ mod render_tests {
             }],
         });
 
-        intent.begin_operator_task("new unrelated task");
+        intent.begin_new_operator_task();
 
         assert_eq!(intent.visible_plan.as_ref().unwrap().scope, PlanScope::Repo);
     }

@@ -400,10 +400,6 @@ pub async fn run(
     // operator declarations pin the mode; otherwise inference updates it for
     // the current task without overriding a previously pinned mode.
     let last_user_prompt = conversation.last_user_prompt().to_string();
-    // A top-level run corresponds to a fresh operator prompt, but terse
-    // continuation prompts still belong to the active task. Reconcile the plan
-    // only after reading that prompt so continuation runs retain their lane.
-    conversation.intent.begin_operator_task(&last_user_prompt);
     if let Some(mode) = crate::behavior::explicit_task_mode_from_prompt(&last_user_prompt) {
         conversation.intent.pin_task_mode(mode);
     } else {
@@ -5693,7 +5689,6 @@ mod tests {
             scope: PlanScope::Repo,
             source: PlanSource::OpenSpec,
             binding: PlanBinding::default(),
-            task_generation: 0,
             mode: PlanMode::Executing,
             items: items
                 .into_iter()
