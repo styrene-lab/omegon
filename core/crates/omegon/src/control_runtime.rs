@@ -3358,17 +3358,42 @@ pub async fn profile_capture_response(
 async fn apply_profile_model_intent(
     profile: &settings::Profile,
     route_controller: Option<&Arc<crate::route::RouteController>>,
-) {
+) -> anyhow::Result<Option<String>> {
     let Some(intent) = profile
         .model_intent
         .as_ref()
         .and_then(settings::ProfileModelIntent::to_route_intent)
     else {
-        return;
+        return Ok(None);
     };
-    if let Some(controller) = route_controller {
-        controller.set_model_intent(intent).await;
+    let Some(controller) = route_controller else {
+        return Ok(None);
+    };
+
+    if let Some(model) = intent.exact_model_override.as_deref() {
+        let bridge = providers::auto_detect_bridge(model).await;
+        let snapshot = controller
+            .switch_model(model.to_string(), &crate::route::CredentialLedger, bridge)
+            .await?;
+        if snapshot.serving_model() != Some(model) {
+            anyhow::bail!(snapshot.operator_status());
+        }
+        return Ok(Some(model.to_string()));
     }
+
+    let mut inventory = crate::routing::ProviderInventory::probe();
+    inventory.probe_ollama().await;
+    let candidate = crate::route::select_candidate_for_intent(&intent, &inventory)
+        .ok_or_else(|| anyhow::anyhow!("no provider candidate satisfies {}", intent.summary()))?;
+    let target = format!("{}:{}", candidate.provider_id, candidate.model_id);
+    let bridge = providers::auto_detect_bridge(&target)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("no executable bridge is available for {target}"))?;
+    controller.set_model_intent(intent).await;
+    let snapshot = controller
+        .resolve_route_from_intent_candidate(candidate, bridge)
+        .await?;
+    Ok(snapshot.serving_model().map(ToOwned::to_owned))
 }
 
 pub async fn profile_apply_response(
@@ -3389,7 +3414,21 @@ pub async fn profile_apply_response(
         profile.apply_to_with_posture(&mut s, &agent.cwd);
     }
 
-    apply_profile_model_intent(&profile, route_controller.as_ref()).await;
+    let resolved_model = match apply_profile_model_intent(&profile, route_controller.as_ref()).await {
+        Ok(model) => model,
+        Err(error) => {
+            return SlashCommandResponse {
+                accepted: false,
+                output: Some(format!("Profile could not be applied: {error}")),
+            };
+        }
+    };
+    if let Some(model) = resolved_model.as_deref()
+        && let Ok(mut settings) = shared_settings.lock()
+    {
+        settings.set_model(model);
+        settings.provider_connected = crate::auth::provider_connected_for_model(model);
+    }
 
     let new_model = shared_settings
         .lock()
@@ -5111,19 +5150,26 @@ mod tests {
                 provider: Some("auto".into()),
                 grade_policy: Some("minimum".into()),
                 provider_policy: None,
-                exact_model_override: Some("openai-codex:gpt-5.5".into()),
+                exact_model_override: Some("anthropic:claude-sonnet-4-6".into()),
             }),
             ..settings::Profile::default()
         };
 
-        apply_profile_model_intent(&profile, Some(&controller)).await;
+        let applied_model = apply_profile_model_intent(&profile, Some(&controller))
+            .await
+            .expect("profile intent should apply");
 
-        let intent = controller.snapshot().await.intent;
-        assert_eq!(intent.grade, Some(crate::route::ModelGrade::B));
+        let snapshot = controller.snapshot().await;
+        assert_eq!(snapshot.intent.grade, Some(crate::route::ModelGrade::B));
         assert_eq!(
-            intent.exact_model_override.as_deref(),
-            Some("openai-codex:gpt-5.5")
+            snapshot.intent.exact_model_override.as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
         );
+        assert_eq!(
+            snapshot.serving_model(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
+        assert_eq!(applied_model.as_deref(), snapshot.serving_model());
     }
 
     #[test]
