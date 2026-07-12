@@ -3830,10 +3830,83 @@ pub async fn profile_export_response(
         "profile": serde_json::to_value(&profile).unwrap_or(serde_json::json!(null)),
     });
 
+    let output = render_profile_export(&export, &settings_json, &persona_json, &profile);
+
     SlashCommandResponse {
         accepted: true,
-        output: Some(export.to_string()),
+        output: Some(output),
     }
+}
+
+fn render_profile_export(
+    export: &serde_json::Value,
+    settings_json: &serde_json::Value,
+    persona_json: &serde_json::Value,
+    profile: &settings::Profile,
+) -> String {
+    let mut out = String::new();
+    out.push_str("## Profile Export\n\n");
+    out.push_str(&format!(
+        "Version: `{}`\n\n",
+        export["version"].as_str().unwrap_or("?")
+    ));
+
+    // Settings
+    out.push_str("### Settings\n");
+    if let Some(model) = settings_json["model"].as_str() {
+        out.push_str(&format!("- Model: `{model}`\n"));
+    }
+    if let Some(thinking) = settings_json["thinking_level"].as_str() {
+        out.push_str(&format!("- Thinking: `{thinking}`\n"));
+    }
+    if let Some(ctx) = settings_json["context_class"].as_str() {
+        out.push_str(&format!("- Context class: `{ctx}`\n"));
+    }
+    if let Some(turns) = settings_json["max_turns"].as_u64() {
+        out.push_str(&format!("- Max turns: `{turns}`\n"));
+    }
+    if let Some(slim) = settings_json["slim_mode"].as_bool() {
+        out.push_str(&format!("- Slim mode: `{}`\n", if slim { "on" } else { "off" }));
+    }
+    if let Some(order) = settings_json["provider_order"].as_array() {
+        if !order.is_empty() {
+            let providers: Vec<&str> = order.iter().filter_map(|v| v.as_str()).collect();
+            out.push_str(&format!("- Provider order: `{}`\n", providers.join(" → ")));
+        }
+    }
+
+    // Persona
+    out.push_str("\n### Persona\n");
+    if persona_json.is_null() {
+        out.push_str("None active\n");
+    } else {
+        if let Some(name) = persona_json["name"].as_str() {
+            out.push_str(&format!("- Name: `{name}`\n"));
+        }
+        if let Some(badge) = persona_json["badge"].as_str() {
+            out.push_str(&format!("- Badge: {badge}\n"));
+        }
+        if let Some(skills) = persona_json["activated_skills"].as_array() {
+            if !skills.is_empty() {
+                let names: Vec<&str> = skills.iter().filter_map(|v| v.as_str()).collect();
+                out.push_str(&format!("- Skills: {}\n", names.join(", ")));
+            }
+        }
+        if let Some(disabled) = persona_json["disabled_tools"].as_array() {
+            if !disabled.is_empty() {
+                let names: Vec<&str> = disabled.iter().filter_map(|v| v.as_str()).collect();
+                out.push_str(&format!("- Disabled tools: {}\n", names.join(", ")));
+            }
+        }
+    }
+
+    // Saved profile summary
+    out.push_str("\n### Saved profile\n");
+    out.push_str("```json\n");
+    out.push_str(&serde_json::to_string_pretty(profile).unwrap_or_else(|_| "null".to_string()));
+    out.push_str("\n```\n");
+
+    out
 }
 
 pub async fn persona_list_response(
