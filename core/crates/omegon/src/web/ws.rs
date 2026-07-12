@@ -1621,9 +1621,22 @@ async fn handle_client_command(
                 }
                 "profile_view" => crate::control_runtime::ControlRequest::ProfileView,
                 "profile_export" => crate::control_runtime::ControlRequest::ProfileExport,
-                "profile_capture" => crate::control_runtime::ControlRequest::ProfileCapture {
-                    target: crate::settings::ProfileSaveTarget::ActiveSource,
-                },
+                "profile_capture" => {
+                    let target = match cmd["target"].as_str() {
+                        Some("project") => crate::settings::ProfileSaveTarget::Project,
+                        Some("user") | Some("global") => crate::settings::ProfileSaveTarget::User,
+                        Some("named") => {
+                            let name = cmd["name"].as_str().unwrap_or("unnamed").to_string();
+                            let scope = match cmd["scope"].as_str() {
+                                Some("project") => crate::settings::ProfileRegistryScope::Project,
+                                _ => crate::settings::ProfileRegistryScope::User,
+                            };
+                            crate::settings::ProfileSaveTarget::Named { name, scope }
+                        }
+                        _ => crate::settings::ProfileSaveTarget::ActiveSource,
+                    };
+                    crate::control_runtime::ControlRequest::ProfileCapture { target }
+                }
                 "profile_apply" => crate::control_runtime::ControlRequest::ProfileApply,
                 "profile_mqtt" => crate::control_runtime::ControlRequest::ProfileSetMqtt {
                     enabled: cmd["enabled"].as_bool(),

@@ -705,8 +705,32 @@ impl IpcConnection {
                             Some(crate::control_runtime::ControlRequest::ProfileExport)
                         }
                         "profile_capture" => {
+                            let target = match payload.get("target").and_then(|v| v.as_str()) {
+                                Some("project") => crate::settings::ProfileSaveTarget::Project,
+                                Some("user") | Some("global") => {
+                                    crate::settings::ProfileSaveTarget::User
+                                }
+                                Some("named") => {
+                                    let name = payload
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unnamed")
+                                        .to_string();
+                                    let scope = match payload
+                                        .get("scope")
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        Some("project") => {
+                                            crate::settings::ProfileRegistryScope::Project
+                                        }
+                                        _ => crate::settings::ProfileRegistryScope::User,
+                                    };
+                                    crate::settings::ProfileSaveTarget::Named { name, scope }
+                                }
+                                _ => crate::settings::ProfileSaveTarget::ActiveSource,
+                            };
                             Some(crate::control_runtime::ControlRequest::ProfileCapture {
-                                target: crate::settings::ProfileSaveTarget::ActiveSource,
+                                target,
                             })
                         }
                         "profile_apply" => {

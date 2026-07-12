@@ -4919,7 +4919,7 @@ impl App {
         menu.summary = Some(format!(
             "Universal configuration entrypoint for runtime and capability settings. Enter opens or edits the selected area.\n{drift_line}"
         ));
-        menu.footer = Some("↑/↓ navigate · Tab switch tabs · / filter · Enter open/edit · s save profile · a apply profile · Esc close".into());
+        menu.footer = Some("↑/↓ navigate · Tab switch tabs · / filter · Enter open/edit · s save · a apply · n save named · Esc close".into());
         let configuration_rows = [
             (
                 "runtime",
@@ -5098,6 +5098,22 @@ impl App {
                 action.key = Some("a".into());
                 action
             },
+            {
+                let mut action = MenuActionProjection::prime_editor(
+                    "settings.save_named_user",
+                    "Save as named (user)",
+                    "/profile save --name ",
+                    "Type the profile name and press Enter — saved to ~/.omegon/profiles/<name>.json",
+                );
+                action.key = Some("n".into());
+                action
+            },
+            MenuActionProjection::prime_editor(
+                "settings.save_named_project",
+                "Save as named (project)",
+                "/profile save --name ",
+                "Type the profile name followed by ' --project' and press Enter — saved to .omegon/profiles/<name>.json",
+            ),
         ];
         menu
     }
