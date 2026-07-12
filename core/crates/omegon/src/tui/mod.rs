@@ -8258,7 +8258,7 @@ warning: {warning}"
                 .next_back()
                 .unwrap_or(model_id)
                 .split('-')
-                .take(2)
+                .take(3)
                 .collect::<Vec<_>>()
                 .join("-");
             let provider_label = self

@@ -7361,7 +7361,7 @@ fn editor_top_line_grades_actual_model_not_route_intent() {
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(
-        rendered.contains("openai-codex/gpt-5.6  󰿃 S  default   low   ctx:"),
+        rendered.contains("openai-codex/gpt-5.6-sol  󰿃 S  default   low   ctx:"),
         "{rendered}"
     );
 }
