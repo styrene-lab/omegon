@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Kept completed slim conversation tool rows neutral at the final segment-render boundary, with an end-to-end buffer regression test preventing successful tools from consuming attention orange.
+
 - Refined session-plan durability guidance so research, design, or validation work no longer implies OpenSpec adoption; evidence-bearing plans now neutrally recommend a versioned workspace or explicit durable artifact when history beyond the session is needed.
 - Fixed ephemeral Workbench plan lifecycle without treating every prompt as a destructive task boundary: plans are sub-indexed within their owning session, replacement or explicit task-reset detachment retains the full plan snapshot in history, ordinary follow-up prompts leave the active lane intact, and repo-scoped plans remain active.
 - Fixed inline terminal images rendering near the top of the conversation instead of inside their bottom-anchored segment chrome when short conversations sit above the composer.
