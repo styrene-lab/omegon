@@ -1212,16 +1212,22 @@ If blocked, say the blocker plainly.\n",
                     }
                 }
                 Err(err) => {
-                    // Only increment on actual failure, not pre-spawn.
                     let error = err.to_string();
-                    if let Ok(mut count) = fail_counter.lock() {
+                    let selected_model = runtime.model.as_deref().unwrap_or("auto");
+                    let failure_kind = classify_delegate_child_failure(&error, selected_model);
+                    // Startup failures identify an unavailable route, not a
+                    // broken delegation capability. Keep the global breaker
+                    // for unknown/task failures only.
+                    if matches!(failure_kind, DelegateChildFailureKind::Unknown)
+                        && let Ok(mut count) = fail_counter.lock()
+                    {
                         *count += 1;
                     }
                     store.update_task_status(
                         &task_id,
                         DelegateTaskStatus::Failed {
                             error: error.clone(),
-                            kind: DelegateChildFailureKind::Unknown,
+                            kind: failure_kind,
                         },
                         None,
                     );
@@ -1301,9 +1307,9 @@ pub struct DelegateFeature {
     /// for child delegates so they inherit the operator's active provider
     /// instead of falling back to a hardcoded candidate list.
     session_model: Arc<Mutex<Option<String>>>,
-    /// Consecutive delegate failure counter. After 3 consecutive failures,
-    /// the delegate tool is hard-disabled for the rest of the session to
-    /// prevent infinite retry loops.
+    /// Consecutive task/runtime failures. Route-startup failures are excluded:
+    /// one unavailable provider or local model must not disable delegation for
+    /// every otherwise healthy route in the session.
     consecutive_failures: Arc<Mutex<u32>>,
     /// Provider inventory for surfacing available models in context injection.
     /// When set, the delegation model catalog is injected into the system prompt
@@ -1585,7 +1591,7 @@ impl Feature for DelegateFeature {
                         },
                         "agent": { "type": "string" },
                         "scope": { "type": "array", "items": {"type": "string"} },
-                        "model": { "type": "string", "description": "Model to use (e.g., `ollama:qwen3:32b`). Omit to inherit session model. Prefer local models for rote tasks." },
+                        "model": { "type": "string", "description": "Optional exact model pin. Omit this field to inherit the parent session's known-working provider route. Set it only to a model whose runtime availability you have already verified." },
                         "worker_profile": {
                             "type": "string",
                             "enum": ["scout", "patch", "verify"],
@@ -1659,8 +1665,9 @@ impl Feature for DelegateFeature {
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
             crate::tool_registry::delegate::DELEGATE => {
-                // Hard-stop after 3 consecutive delegate failures to prevent
-                // infinite retry loops.
+                // Stop repeated task/runtime failures, but do not globally
+                // disable delegation for route-startup failures; those are
+                // scoped to the unavailable provider/model.
                 let failures = self.consecutive_failures.lock().map(|g| *g).unwrap_or(0);
                 if failures >= 3 {
                     return Err(anyhow::anyhow!(

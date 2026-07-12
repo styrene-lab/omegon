@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Delegates without an explicit model pin now inherit the parent session's known-working route instead of selecting a merely compatible inventory offering, preventing unavailable local models from trapping delegation in repeated startup failures. Provider/model startup failures no longer count toward the session-wide task-failure breaker, and the tool schema no longer encourages speculative local-model pins.
+
 - Kept completed slim conversation tool rows neutral at the final segment-render boundary, with an end-to-end buffer regression test preventing successful tools from consuming attention orange.
 
 - Refined session-plan durability guidance so research, design, or validation work no longer implies OpenSpec adoption; evidence-bearing plans now neutrally recommend a versioned workspace or explicit durable artifact when history beyond the session is needed.
