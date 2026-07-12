@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Kept successful projected conversation outcomes neutral in slim/Om views by classifying `✓` system notifications separately from warning, retry, and failure notifications, with a production-path regression test covering canonical tool evidence through conversation projection and final widget-buffer rendering.
+
 - Delegates without an explicit model pin now inherit the parent session's known-working route instead of selecting a merely compatible inventory offering, preventing unavailable local models from trapping delegation in repeated startup failures. Provider/model startup failures no longer count toward the session-wide task-failure breaker, and the tool schema no longer encourages speculative local-model pins.
 
 - Kept completed slim conversation tool rows neutral at the final segment-render boundary, with an end-to-end buffer regression test preventing successful tools from consuming attention orange.

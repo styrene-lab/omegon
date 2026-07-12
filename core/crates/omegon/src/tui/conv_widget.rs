@@ -1196,6 +1196,59 @@ mod tests {
     }
 
     #[test]
+    fn projected_success_outcome_is_neutral_in_slim_conversation_buffer() {
+        use crate::surfaces::layout::UiPresentationLevel;
+        use crate::tui::conversation_projection::project_conversation;
+
+        let mut first = Segment::tool_card("tool-1", "read");
+        first.meta.turn = Some(1);
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_result,
+            ..
+        } = &mut first.content
+        {
+            *complete = true;
+            *detail_result = Some("file contents".into());
+        }
+        let projected = project_conversation(&[first], UiPresentationLevel::Om);
+        assert!(matches!(
+            projected.segments.as_slice(),
+            [Segment {
+                content: SegmentContent::SystemNotification { text },
+                ..
+            }] if text.starts_with('✓')
+        ));
+
+        let area = Rect::new(0, 0, 72, 3);
+        let mut buf = Buffer::empty(area);
+        let mut state = ConvState::new();
+        ConversationWidget::new(&projected.segments, &Alpharius)
+            .with_mode(SegmentRenderMode::Slim)
+            .render(area, &mut buf, &mut state);
+
+        let mut colors = Vec::new();
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                if let Some(cell) = buf.cell((x, y))
+                    && cell.symbol() != " "
+                {
+                    colors.push(cell.fg);
+                }
+            }
+        }
+        assert!(!colors.is_empty());
+        assert!(
+            colors.iter().all(|color| *color != Alpharius.warning()),
+            "successful projected outcome must not consume attention orange"
+        );
+        assert!(
+            colors.iter().any(|color| *color == Alpharius.muted()),
+            "successful projected outcome should render as neutral transcript evidence"
+        );
+    }
+
+    #[test]
     fn slim_mode_renders_lighter_segment_chrome() {
         let segments = vec![
             Segment::user_prompt("hello"),
