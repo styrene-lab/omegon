@@ -18,7 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
-- Unified runtime lifecycle verbs: `/runtime refresh`, `/runtime reload`, `/runtime hup`, and `/runtime kick` rebuild reloadable in-process state through one shared path; `/runtime restart` and `/runtime hot-restart` now re-exec the current Omegon binary so newly linked code takes effect. `/skills reload` and extension reload aliases reuse the shared refresh implementation instead of maintaining separate reload logic.
+- Unified runtime lifecycle verbs: `/runtime refresh`, `/runtime reload`, `/runtime hup`, and `/runtime kick` rebuild reloadable in-process state through one shared path; `/runtime restart` and `/runtime hot-restart` re-exec the current Omegon binary so newly linked code takes effect. `/skills reload` and extension reload aliases reuse the shared refresh implementation instead of maintaining separate reload logic.
+- Unified `/update install` with the graceful runtime restart lifecycle: successful replacement now queues the same shutdown, session finalization, provider shutdown, terminal teardown, and process re-exec path as `/runtime restart` instead of executing from a background download task.
 
 - Listed discovered user and project profiles directly in the `/profile` menu, including scope and active-state badges, concise display names, and safe selection of profile names containing spaces; Enter switches to an existing selected profile and rejects stale or unknown targets.
 

@@ -4457,6 +4457,7 @@ fn build_tui_secret_readiness_snapshot(
 
     let mut runtime = InteractiveRuntimeSupervisor::default();
     let mut deferred_commands = VecDeque::new();
+    let mut restart_request: Option<(std::path::PathBuf, Vec<String>)> = None;
     'interactive: loop {
         let cmd = if let Some(cmd) = deferred_commands.pop_front() {
             cmd
@@ -4481,6 +4482,10 @@ fn build_tui_secret_readiness_snapshot(
 
         match cmd {
             tui::TuiCommand::Quit => break,
+            tui::TuiCommand::RestartProcess { binary, args } => {
+                restart_request = Some((binary, args));
+                break;
+            }
 
             tui::TuiCommand::ExecuteControl { request, respond_to } => {
                 let mut ctx = control_runtime::ControlContext {
@@ -5917,6 +5922,15 @@ fn build_tui_secret_readiness_snapshot(
                                             cancel.cancel();
                                         }
                                     }
+                                    tui::TuiCommand::RestartProcess { binary, args } => {
+                                        restart_request = Some((binary, args));
+                                        quit_after_turn = true;
+                                        if let Ok(guard) = shared_cancel.lock()
+                                            && let Some(ref cancel) = *guard
+                                        {
+                                            cancel.cancel();
+                                        }
+                                    }
                                     other => deferred_commands.push_back(other),
                                 }
                             }
@@ -6006,6 +6020,9 @@ fn build_tui_secret_readiness_snapshot(
 
     bridge.read().await.shutdown().await;
     tui_handle.abort();
+    if let Some((binary, args)) = restart_request {
+        crate::update::exec_restart(&binary, &args)?;
+    }
     Ok(())
         })
         .await

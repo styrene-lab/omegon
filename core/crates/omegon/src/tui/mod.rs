@@ -253,6 +253,11 @@ pub enum TuiCommand {
     ShellHandoff { keyboard_enhancement: bool },
     /// User wants to quit (double Ctrl+C, or /exit).
     Quit,
+    /// Gracefully save and shut down, then re-exec the current process.
+    RestartProcess {
+        binary: std::path::PathBuf,
+        args: Vec<String>,
+    },
     /// Show current model/provider posture.
     ModelView {
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
@@ -9970,10 +9975,10 @@ Scroll transcript:
                         match binary {
                             Ok(binary) => {
                                 let args = std::env::args().skip(1).collect::<Vec<_>>();
-                                match crate::update::exec_restart(&binary, &args) {
+                                match tx.try_send(TuiCommand::RestartProcess { binary, args }) {
                                     Ok(()) => SlashResult::Handled,
                                     Err(error) => SlashResult::Display(format!(
-                                        "Runtime restart failed: {error}"
+                                        "Runtime restart failed: could not queue graceful restart: {error}"
                                     )),
                                 }
                             }
@@ -10449,29 +10454,26 @@ Scroll transcript:
                     match info {
                         Some(info) if info.is_newer && info.has_downloadable_archive() => {
                             let args: Vec<String> = std::env::args().skip(1).collect();
-                            let keyboard_enhancement = self.keyboard_enhancement;
+                            let restart_tx = tx.clone();
                             let latest = info.latest.clone();
                             tokio::spawn(async move {
                                 match crate::update::download_and_replace(&info).await {
                                     Ok(binary) => {
-                                        #[cfg(unix)]
+                                        if restart_tx
+                                            .send(TuiCommand::RestartProcess { binary, args })
+                                            .await
+                                            .is_err()
                                         {
-                                            let _ = io::stdout()
-                                                .execute(crossterm::event::DisableMouseCapture);
-                                            if keyboard_enhancement {
-                                                let _ = io::stdout()
-                                                    .execute(PopKeyboardEnhancementFlags);
-                                            }
-                                            let _ = disable_raw_mode();
-                                            let _ = io::stdout().execute(LeaveAlternateScreen);
+                                            tracing::error!(
+                                                "update installed but graceful runtime restart could not be queued"
+                                            );
                                         }
-                                        let _ = crate::update::exec_restart(&binary, &args);
                                     }
                                     Err(e) => tracing::error!("update install failed: {e}"),
                                 }
                             });
                             SlashResult::Display(format!(
-                                "Installing v{} and restarting... If replacement fails, relaunch Omegon manually.",
+                                "Installing v{}; the shared graceful runtime restart will run after replacement.",
                                 latest
                             ))
                         }

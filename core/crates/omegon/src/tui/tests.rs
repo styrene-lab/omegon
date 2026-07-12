@@ -5301,8 +5301,8 @@ fn slash_skills_reload_displays_current_session_reload() {
     let result = app.handle_slash_command("/skills reload", &tx);
     match result {
         SlashResult::Display(message) => {
-            assert!(message.contains("Skills reloaded"), "{message}");
-            assert!(message.contains("subsequent model requests"), "{message}");
+            assert!(message.contains("Runtime substrate refresh"), "{message}");
+            assert!(message.contains("subsequent model requests") || message.contains("skill augments"), "{message}");
         }
         other => panic!("expected reload display, got: {other:?}"),
     }
@@ -5524,7 +5524,7 @@ fn extension_refresh_aliases_execute_shared_runtime_refresh() {
 }
 
 #[test]
-fn slash_runtime_substrate_refresh_queues_shared_control() {
+fn slash_runtime_restart_queues_graceful_process_restart() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 
@@ -5532,10 +5532,7 @@ fn slash_runtime_substrate_refresh_queues_shared_control() {
     assert!(matches!(result, SlashResult::Handled));
     assert!(matches!(
         rx.try_recv(),
-        Ok(TuiCommand::ExecuteControl {
-            request: crate::control_runtime::ControlRequest::RuntimeSubstrateRefresh,
-            ..
-        })
+        Ok(TuiCommand::RestartProcess { .. })
     ));
 }
 
