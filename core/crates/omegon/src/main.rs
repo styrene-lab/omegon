@@ -4458,6 +4458,13 @@ fn build_tui_secret_readiness_snapshot(
     let mut runtime = InteractiveRuntimeSupervisor::default();
     let mut deferred_commands = VecDeque::new();
     let mut restart_request: Option<(std::path::PathBuf, Vec<String>)> = None;
+    let runtime_lifecycle_handle = agent.dashboard_handles.runtime_lifecycle.clone();
+    let emit_lifecycle = |snapshot: omegon_traits::RuntimeLifecycleSnapshot| {
+        if let Ok(mut current) = runtime_lifecycle_handle.lock() {
+            *current = Some(snapshot.clone());
+        }
+        let _ = events_tx.send(AgentEvent::RuntimeLifecycleUpdated { snapshot });
+    };
     'interactive: loop {
         let cmd = if let Some(cmd) = deferred_commands.pop_front() {
             cmd
@@ -4484,11 +4491,26 @@ fn build_tui_secret_readiness_snapshot(
             tui::TuiCommand::Quit => break,
             tui::TuiCommand::InstallUpdate { info, args } => {
                 let latest = info.latest.clone();
+                let operation_id = uuid::Uuid::new_v4().to_string();
+                let mut lifecycle = omegon_traits::RuntimeLifecycleSnapshot {
+                    operation_id,
+                    kind: omegon_traits::RuntimeLifecycleKind::UpdateInstall,
+                    phase: omegon_traits::RuntimeLifecyclePhase::Downloading,
+                    message: "Downloading and verifying update".into(),
+                    session_id: Some(agent.session_id.clone()),
+                    target_version: Some(latest.clone()),
+                    reconnect_required: false,
+                };
+                emit_lifecycle(lifecycle.clone());
                 let _ = events_tx.send(AgentEvent::SystemNotification {
                     message: format!("Downloading and verifying Omegon v{latest}…"),
                 });
                 match crate::update::download_and_replace(&info).await {
                     Ok(binary) => {
+                        lifecycle.phase = omegon_traits::RuntimeLifecyclePhase::Restarting;
+                        lifecycle.message = "Update installed; saving session and restarting".into();
+                        lifecycle.reconnect_required = true;
+                        emit_lifecycle(lifecycle);
                         let _ = events_tx.send(AgentEvent::SystemNotification {
                             message: format!(
                                 "Omegon v{latest} installed. Saving this session and restarting…"
@@ -4498,6 +4520,12 @@ fn build_tui_secret_readiness_snapshot(
                         break;
                     }
                     Err(error) => {
+                        lifecycle.phase = omegon_traits::RuntimeLifecyclePhase::Failed;
+                        lifecycle.message = format!(
+                            "Update failed; current version still running: {error}"
+                        );
+                        lifecycle.reconnect_required = false;
+                        emit_lifecycle(lifecycle);
                         let _ = events_tx.send(AgentEvent::SystemNotification {
                             message: format!(
                                 "Update failed; the current version is still running: {error}"
@@ -4507,6 +4535,16 @@ fn build_tui_secret_readiness_snapshot(
                 }
             }
             tui::TuiCommand::RestartProcess { binary, args } => {
+                let lifecycle = omegon_traits::RuntimeLifecycleSnapshot {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
+                    kind: omegon_traits::RuntimeLifecycleKind::Restart,
+                    phase: omegon_traits::RuntimeLifecyclePhase::Restarting,
+                    message: "Saving session and restarting".into(),
+                    session_id: Some(agent.session_id.clone()),
+                    target_version: None,
+                    reconnect_required: true,
+                };
+                emit_lifecycle(lifecycle);
                 restart_request = Some((binary, args));
                 break;
             }
@@ -5402,6 +5440,44 @@ fn build_tui_secret_readiness_snapshot(
                 args,
                 respond_to,
             } => {
+                let lifecycle_command = crate::tui::canonical_slash_command(&name, &args);
+                if matches!(
+                    lifecycle_command,
+                    Some(crate::tui::CanonicalSlashCommand::RuntimeProcessRestart)
+                ) {
+                    let binary = std::env::current_exe()
+                        .and_then(|path| path.canonicalize())
+                        .unwrap_or_else(|_| std::path::PathBuf::from("omegon"));
+                    deferred_commands.push_back(tui::TuiCommand::RestartProcess {
+                        binary,
+                        args: std::env::args().skip(1).collect(),
+                    });
+                    if let Some(reply) = respond_to {
+                        let _ = reply.send(omegon_traits::SlashCommandResponse {
+                            accepted: true,
+                            output: Some(
+                                "Runtime restart accepted. Save and same-session reconnect events will follow."
+                                    .into(),
+                            ),
+                        });
+                    }
+                    continue;
+                }
+                if matches!(
+                    lifecycle_command,
+                    Some(crate::tui::CanonicalSlashCommand::RuntimeSubstrateRefresh)
+                        | Some(crate::tui::CanonicalSlashCommand::SkillsReload)
+                ) {
+                    let response = control_runtime::runtime_substrate_refresh_response(
+                        &mut runtime_state,
+                        &mut agent,
+                    )
+                    .await;
+                    if let Some(reply) = respond_to {
+                        let _ = reply.send(response);
+                    }
+                    continue;
+                }
                 let response = execute_remote_slash_command(
                     &mut runtime_state,
                     &mut agent,

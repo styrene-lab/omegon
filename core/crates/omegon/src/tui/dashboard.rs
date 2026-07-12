@@ -47,6 +47,7 @@ pub struct DashboardHandles {
     pub delegate: Option<Arc<Mutex<crate::features::delegate::DelegateProgress>>>,
     pub session: Arc<Mutex<SharedSessionStats>>,
     pub harness: Option<Arc<Mutex<HarnessStatus>>>,
+    pub runtime_lifecycle: Arc<Mutex<Option<omegon_traits::RuntimeLifecycleSnapshot>>>,
 }
 
 impl DashboardHandles {

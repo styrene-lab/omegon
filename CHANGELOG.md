@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Unified runtime lifecycle verbs: `/runtime refresh`, `/runtime reload`, `/runtime hup`, and `/runtime kick` rebuild reloadable in-process state through one shared path; `/runtime restart` and `/runtime hot-restart` re-exec the current Omegon binary so newly linked code takes effect. `/skills reload` and extension reload aliases reuse the shared refresh implementation instead of maintaining separate reload logic.
 - Hardened lifecycle UX for mixed operator skill levels: runtime reload output now leads with what changed, what stayed open, and when restart is actually needed; update installation is owned by the runtime loop so progress and failure remain visible instead of disappearing into background logs; graceful restarts now resume the exact saved conversation automatically; live actions carry an explicit warning badge before execution.
+- Added a versioned semantic runtime-lifecycle contract across native events, IPC, WebSocket, and MQTT, including operation kind/state, bounded progress, details, and same-session reconnect hints for update and restart operations.
 
 - Listed discovered user and project profiles directly in the `/profile` menu, including scope and active-state badges, concise display names, and safe selection of profile names containing spaces; Enter switches to an existing selected profile and rejects stale or unknown targets.
 

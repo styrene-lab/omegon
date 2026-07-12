@@ -483,6 +483,8 @@ pub enum IpcCapability {
     DispatcherSwitch,
     /// `run_slash_command` is available.
     SlashCommands,
+    /// Runtime lifecycle state snapshots and events are available.
+    RuntimeLifecycle,
     /// `shutdown` is available.
     Shutdown,
 }
@@ -507,6 +509,7 @@ impl IpcCapability {
             Self::ThinkingSet => "thinking.set",
             Self::DispatcherSwitch => "dispatcher.switch",
             Self::SlashCommands => "slash_commands",
+            Self::RuntimeLifecycle => "runtime.lifecycle",
             Self::Shutdown => "shutdown",
         }
     }
@@ -531,6 +534,7 @@ impl IpcCapability {
             Self::ThinkingSet.as_str(),
             Self::DispatcherSwitch.as_str(),
             Self::SlashCommands.as_str(),
+            Self::RuntimeLifecycle.as_str(),
             Self::Shutdown.as_str(),
         ]
     }
@@ -678,6 +682,40 @@ pub struct DaemonEventEnvelope {
 
 // ── Typed state snapshot ─────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeLifecycleKind {
+    Reload,
+    Restart,
+    UpdateInstall,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeLifecyclePhase {
+    Queued,
+    Downloading,
+    Verifying,
+    Saving,
+    Restarting,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeLifecycleSnapshot {
+    pub operation_id: String,
+    pub kind: RuntimeLifecycleKind,
+    pub phase: RuntimeLifecyclePhase,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_version: Option<String>,
+    #[serde(default)]
+    pub reconnect_required: bool,
+}
+
 /// Top-level attach-time state snapshot. All sections are required.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IpcStateSnapshot {
@@ -697,6 +735,9 @@ pub struct IpcStateSnapshot {
     /// Active structured operation episodes. Optional for wire compatibility.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub operation_episodes: Vec<IpcOperationEpisodeSnapshot>,
+    /// Current runtime lifecycle operation, if one is active or recently terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_lifecycle: Option<RuntimeLifecycleSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1325,6 +1366,9 @@ pub enum IpcEventPayload {
     StateChanged { sections: Vec<String> },
 
     // ── Notifications ──────────────────────────────────────────────────────
+    #[serde(rename = "runtime.lifecycle.updated")]
+    RuntimeLifecycleUpdated { snapshot: RuntimeLifecycleSnapshot },
+
     #[serde(rename = "system.notification")]
     SystemNotification { message: String },
 
@@ -2844,6 +2888,11 @@ pub enum AgentEvent {
         text: String,
         image_paths: Vec<PathBuf>,
     },
+    /// Runtime lifecycle operation changed. Remote clients use this to render
+    /// update/reload/restart progress and reconnect expectations.
+    RuntimeLifecycleUpdated {
+        snapshot: RuntimeLifecycleSnapshot,
+    },
     /// Context updated — authoritative snapshot after compaction, clear, or turn completion.
     /// TUI + web consumers should use this as the canonical context status source.
     ContextUpdated {
@@ -3078,7 +3127,37 @@ mod tests {
             },
             presentation: None,
             operation_episodes: Vec::new(),
+            runtime_lifecycle: None,
         }
+    }
+
+    #[test]
+    fn runtime_lifecycle_payload_round_trips_and_optional_snapshot_is_compatible() {
+        let snapshot = RuntimeLifecycleSnapshot {
+            operation_id: "restart-1".into(),
+            kind: RuntimeLifecycleKind::Restart,
+            phase: RuntimeLifecyclePhase::Restarting,
+            message: "Restarting".into(),
+            session_id: Some("session-1".into()),
+            target_version: None,
+            reconnect_required: true,
+        };
+        let payload = IpcEventPayload::RuntimeLifecycleUpdated {
+            snapshot: snapshot.clone(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["name"], "runtime.lifecycle.updated");
+        assert_eq!(json["data"]["snapshot"]["phase"], "restarting");
+        let decoded: IpcEventPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, payload);
+
+        let mut state_json = serde_json::to_value(sample_state_snapshot()).unwrap();
+        state_json
+            .as_object_mut()
+            .unwrap()
+            .remove("runtime_lifecycle");
+        let decoded: IpcStateSnapshot = serde_json::from_value(state_json).unwrap();
+        assert_eq!(decoded.runtime_lifecycle, None);
     }
 
     #[test]

@@ -2352,6 +2352,11 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "recommendation": event.recommendation,
             "injected": event.injected,
         }),
+        AgentEvent::RuntimeLifecycleUpdated { snapshot } => json!({
+            "type": "runtime_lifecycle",
+            "event_name": "runtime.lifecycle.updated",
+            "snapshot": snapshot,
+        }),
         AgentEvent::SystemNotification { message } => json!({
             "type": "system_notification",
             "event_name": "system.notification",
@@ -2937,6 +2942,26 @@ mod tests {
     }
 
     #[test]
+    fn serialize_runtime_lifecycle_includes_reconnect_contract() {
+        let value = serialize_agent_event(&AgentEvent::RuntimeLifecycleUpdated {
+            snapshot: omegon_traits::RuntimeLifecycleSnapshot {
+                operation_id: "update-1".into(),
+                kind: omegon_traits::RuntimeLifecycleKind::UpdateInstall,
+                phase: omegon_traits::RuntimeLifecyclePhase::Restarting,
+                message: "Restarting".into(),
+                session_id: Some("session-1".into()),
+                target_version: Some("0.29.0".into()),
+                reconnect_required: true,
+            },
+        });
+
+        assert_eq!(value["event_name"], "runtime.lifecycle.updated");
+        assert_eq!(value["snapshot"]["phase"], "restarting");
+        assert_eq!(value["snapshot"]["reconnect_required"], true);
+        assert_eq!(value["snapshot"]["session_id"], "session-1");
+    }
+
+    #[test]
     fn serialize_turn_start() {
         let event = AgentEvent::TurnStart { turn: 5 };
         let json = serialize_agent_event(&event);
@@ -3119,6 +3144,7 @@ mod tests {
             AgentEvent::PlanUpdated { .. } => {}
             AgentEvent::RouteChanged { .. } => {}
             AgentEvent::SkillActivation { .. } => {}
+            AgentEvent::RuntimeLifecycleUpdated { .. } => {}
             AgentEvent::SystemNotification { .. } => {}
             AgentEvent::OperatorCopyBlock { .. } => {}
             AgentEvent::StreamIdle { .. } => {}
@@ -3264,6 +3290,17 @@ mod tests {
                 serving: Some("anthropic:claude-fable-5".into()),
                 warning: Some("fallback engaged".into()),
                 message: "Provider route changed".into(),
+            },
+            AgentEvent::RuntimeLifecycleUpdated {
+                snapshot: omegon_traits::RuntimeLifecycleSnapshot {
+                    operation_id: "op-1".into(),
+                    kind: omegon_traits::RuntimeLifecycleKind::UpdateInstall,
+                    phase: omegon_traits::RuntimeLifecyclePhase::Downloading,
+                    message: "Downloading update".into(),
+                    session_id: Some("session-1".into()),
+                    target_version: Some("0.29.0".into()),
+                    reconnect_required: false,
+                },
             },
             AgentEvent::SystemNotification {
                 message: "test".into(),
