@@ -4836,6 +4836,15 @@ impl App {
                         availability: None,
                     },
                 ],
+            },
+            MenuGroupProjection {
+                id: "profile.available".into(),
+                label: "Available profiles".into(),
+                description: Some(
+                    "Discovered user and project profiles. Enter switches to the selected profile."
+                        .into(),
+                ),
+                rows: registry_rows,
             }],
         }];
         menu

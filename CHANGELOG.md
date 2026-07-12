@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Listed discovered user and project profiles directly in the `/profile` menu, including scope and active-state badges, with Enter switching to the selected profile.
+
 ### Fixed
 
 - Routed ACP `/status` through the worker-owned shared `HarnessStatusProjection`, removing the abbreviated transport-only liveness response and giving ACP the same redacted harness/runtime contract as the TUI.

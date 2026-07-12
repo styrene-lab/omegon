@@ -8206,6 +8206,45 @@ fn slash_profile_opens_profile_menu() {
 }
 
 #[test]
+fn profile_menu_lists_discovered_project_profiles() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let _cwd = push_current_dir(tmp.path());
+    let profiles_dir = tmp.path().join(".omegon/profiles");
+    std::fs::create_dir_all(&profiles_dir).expect("profiles dir");
+    std::fs::write(
+        profiles_dir.join("reviewer.json"),
+        r#"{"name":"reviewer","thinkingLevel":"high"}"#,
+    )
+    .expect("profile");
+
+    let mut app = test_app();
+    app.footer_data.cwd = tmp.path().display().to_string();
+    app.open_profile_menu();
+    let menu = app.active_menu.as_ref().expect("profile menu");
+    let available = menu.projection.tabs[0]
+        .groups
+        .iter()
+        .find(|group| group.id == "profile.available")
+        .expect("available profiles group");
+    let reviewer = available
+        .rows
+        .iter()
+        .find(|row| row.id == "profile.registry.project.reviewer")
+        .expect("project profile row");
+
+    assert_eq!(reviewer.label, "reviewer");
+    assert_eq!(reviewer.value.as_deref(), Some("project"));
+    assert!(reviewer.badges.iter().any(|badge| badge.label == "project"));
+    assert_eq!(
+        reviewer
+            .primary_action
+            .as_ref()
+            .and_then(|action| action.command.as_deref()),
+        Some("/profile use reviewer project")
+    );
+}
+
+#[test]
 fn menu_action_confirmation_requires_second_activation() {
     let mut app = test_app();
     let tx = test_tx();
