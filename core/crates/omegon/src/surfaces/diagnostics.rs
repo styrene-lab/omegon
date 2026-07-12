@@ -39,6 +39,18 @@ impl HarnessStatusProjection {
             automation_summary: automation_summary.into(),
         }
     }
+
+    pub fn render_markdown(&self) -> String {
+        format!(
+            "{}\nRuntime\n  Generation:   {}\n  Session:      {}\n  Instance:     {}\nAutomation\n  Level:        {} ({})",
+            crate::tui::bootstrap::render_bootstrap(&self.harness, false),
+            self.runtime_generation,
+            self.session_id,
+            self.instance_id,
+            self.automation_level,
+            self.automation_summary,
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

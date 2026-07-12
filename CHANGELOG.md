@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Routed ACP `/status` through the worker-owned shared `HarnessStatusProjection`, removing the abbreviated transport-only liveness response and giving ACP the same redacted harness/runtime contract as the TUI.
 - Added versioned semantic diagnostic projections for `/status` and `/stats`, moved TUI/control rendering onto them, and aligned ACP worker session stats with the shared contract while representing unavailable tool telemetry as `unknown` rather than zero.
 - Hardened `/status` and `/stats` ahead of 0.28.0: status now prefers the live harness snapshot, session stats report observed shared turn/tool-call counters instead of a fabricated zero, poisoned diagnostic locks degrade safely, and the unimplemented `/stats bench` affordance is no longer advertised.
 

@@ -700,6 +700,46 @@ async fn handle_control_request(
     let args = parts.get(1).unwrap_or(&"").trim();
 
     match cmd {
+        "status" => {
+            let settings = shared_settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let mut harness = crate::status::HarnessStatus::assemble();
+            let operating_profile = settings.operating_profile();
+            harness.update_routing(
+                settings.effective_requested_class().label(),
+                settings.thinking.as_str(),
+                &harness.capability_grade.clone(),
+                operating_profile.posture.effective.display_name(),
+                &operating_profile.summary(),
+                operating_profile
+                    .identity
+                    .principal_id
+                    .as_deref()
+                    .unwrap_or("anonymous"),
+                operating_profile
+                    .identity
+                    .issuer
+                    .as_deref()
+                    .unwrap_or("unknown"),
+                operating_profile
+                    .identity
+                    .session_kind
+                    .as_deref()
+                    .unwrap_or("unknown"),
+                &operating_profile.authorization.summary(),
+            );
+            crate::surfaces::diagnostics::HarnessStatusProjection::new(
+                harness,
+                0,
+                workspace_ctx.session_id,
+                workspace_ctx.instance_id,
+                settings.automation_level.as_str(),
+                settings.automation_level.summary(),
+            )
+            .render_markdown()
+        }
         "stats" => {
             let settings = shared_settings
                 .lock()

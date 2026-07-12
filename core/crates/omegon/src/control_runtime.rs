@@ -1916,15 +1916,7 @@ pub async fn status_view_response(
         settings.automation_level.as_str(),
         settings.automation_level.summary(),
     );
-    let panel = format!(
-        "{}\nRuntime\n  Generation:   {}\n  Session:      {}\n  Instance:     {}\nAutomation\n  Level:        {} ({})",
-        crate::tui::bootstrap::render_bootstrap(&projection.harness, false),
-        projection.runtime_generation,
-        projection.session_id,
-        projection.instance_id,
-        projection.automation_level,
-        projection.automation_summary,
-    );
+    let panel = projection.render_markdown();
     SlashCommandResponse {
         accepted: true,
         output: Some(panel),
