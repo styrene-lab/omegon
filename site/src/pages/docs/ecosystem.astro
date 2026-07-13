@@ -79,25 +79,25 @@ read_only = true</code></pre>
   <h3>API Keys &amp; Credentials</h3>
   <p>
     Omegon connects to {stats.providerCount} inference providers. If you already have API keys
-    for any of them, set the environment variable or use <code>/login</code>:
+    for any of them, set the environment variable or use <code>/auth login</code>:
   </p>
   <table>
     <thead><tr><th>Provider</th><th>Env Variable</th><th>Login Command</th></tr></thead>
     <tbody>
-      <tr><td>Anthropic</td><td><code>ANTHROPIC_API_KEY</code></td><td><code>/login anthropic</code> (OAuth)</td></tr>
-      <tr><td>OpenAI</td><td><code>OPENAI_API_KEY</code></td><td><code>/login openai</code></td></tr>
-      <tr><td>OpenAI/Codex</td><td>—</td><td><code>/login openai-codex</code> (OAuth)</td></tr>
-      <tr><td>Google Gemini</td><td><code>GOOGLE_API_KEY</code></td><td><code>/login google</code></td></tr>
-      <tr><td>OpenRouter</td><td><code>OPENROUTER_API_KEY</code></td><td><code>/login openrouter</code></td></tr>
-      <tr><td>OpenCode Go</td><td><code>OPENCODE_GO_API_KEY</code></td><td><code>/login opencode-go</code></td></tr>
-      <tr><td>Groq</td><td><code>GROQ_API_KEY</code></td><td><code>/login groq</code></td></tr>
-      <tr><td>xAI (Grok)</td><td><code>XAI_API_KEY</code></td><td><code>/login xai</code></td></tr>
-      <tr><td>Mistral AI</td><td><code>MISTRAL_API_KEY</code></td><td><code>/login mistral</code></td></tr>
-      <tr><td>Cerebras</td><td><code>CEREBRAS_API_KEY</code></td><td><code>/login cerebras</code></td></tr>
-      <tr><td>Google Antigravity</td><td><code>ANTIGRAVITY_OAUTH_TOKEN</code></td><td><code>/login google-antigravity</code></td></tr>
-      <tr><td>Perplexity AI</td><td><code>PERPLEXITY_API_KEY</code></td><td><code>/login perplexity</code></td></tr>
+      <tr><td>Anthropic</td><td><code>ANTHROPIC_API_KEY</code></td><td><code>/auth login anthropic</code> (OAuth)</td></tr>
+      <tr><td>OpenAI</td><td><code>OPENAI_API_KEY</code></td><td><code>/auth login openai</code></td></tr>
+      <tr><td>OpenAI/Codex</td><td>—</td><td><code>/auth login openai-codex</code> (OAuth)</td></tr>
+      <tr><td>Google Gemini</td><td><code>GOOGLE_API_KEY</code></td><td><code>/auth login google</code></td></tr>
+      <tr><td>OpenRouter</td><td><code>OPENROUTER_API_KEY</code></td><td><code>/auth login openrouter</code></td></tr>
+      <tr><td>OpenCode Go</td><td><code>OPENCODE_GO_API_KEY</code></td><td><code>/auth login opencode-go</code></td></tr>
+      <tr><td>Groq</td><td><code>GROQ_API_KEY</code></td><td><code>/auth login groq</code></td></tr>
+      <tr><td>xAI (Grok)</td><td><code>XAI_API_KEY</code></td><td><code>/auth login xai</code></td></tr>
+      <tr><td>Mistral AI</td><td><code>MISTRAL_API_KEY</code></td><td><code>/auth login mistral</code></td></tr>
+      <tr><td>Cerebras</td><td><code>CEREBRAS_API_KEY</code></td><td><code>/auth login cerebras</code></td></tr>
+      <tr><td>Google Antigravity</td><td><code>ANTIGRAVITY_OAUTH_TOKEN</code></td><td><code>/auth login google-antigravity</code></td></tr>
+      <tr><td>Perplexity AI</td><td><code>PERPLEXITY_API_KEY</code></td><td><code>/auth login perplexity</code></td></tr>
       <tr><td>Ollama (Local)</td><td>—</td><td>Auto-detected on localhost</td></tr>
-      <tr><td>Ollama Cloud</td><td><code>OLLAMA_API_KEY</code></td><td><code>/login ollama-cloud</code></td></tr>
+      <tr><td>Ollama Cloud</td><td><code>OLLAMA_API_KEY</code></td><td><code>/auth login ollama-cloud</code></td></tr>
     </tbody>
   </table>
   <p>

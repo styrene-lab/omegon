@@ -19,11 +19,9 @@ import Docs from "../../layouts/Docs.astro";
     <thead><tr><th>Command</th><th>Description</th></tr></thead>
     <tbody>
       <tr><td><code>/model [name]</code></td><td>View or switch model. Opens selector popup, or pass a model ID directly.</td></tr>
-      <tr><td><code>/think [level]</code></td><td>Set thinking level: <code>off</code>, <code>low</code>, <code>medium</code>, <code>high</code>.</td></tr>
-      <tr><td><code>/context [class]</code></td><td>Select context class: <code>compact</code> (128k), <code>standard</code> (272k), <code>extended</code> (400k), <code>massive</code> (1M+).</td></tr>
-      <tr><td><code>/context compact</code></td><td>Trigger context compaction to free context window space.</td></tr>
-      <tr><td><code>/context clear</code></td><td>Save the current session and start a fresh conversation with cleared live context.</td></tr>
-      <tr><td><code>/detail [mode]</code></td><td>Toggle tool display: <code>compact</code> or <code>detailed</code>.</td></tr>
+      <tr><td><code>/think [level]</code></td><td>Set thinking level: <code>off</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, or <code>high</code>.</td></tr>
+      <tr><td><code>/context compact</code></td><td>Trigger context compaction. Use <code>standard</code>, <code>extended</code>, or <code>massive</code> to select a context class.</td></tr>
+      <tr><td><code>/context reset</code> / <code>/context clear</code></td><td>Save the current session and start a fresh conversation with cleared live context.</td></tr>
     </tbody>
   </table>
 
@@ -44,7 +42,7 @@ import Docs from "../../layouts/Docs.astro";
   <table>
     <thead><tr><th>Command</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>/login [provider]</code></td><td>Log in to a provider such as <code>anthropic</code>, <code>openai-codex</code>, <code>openai</code>, <code>openrouter</code>, or <code>ollama-cloud</code>.</td></tr>
+      <tr><td><code>/auth [status|login|logout|unlock]</code></td><td>Inspect or change provider authentication.</td></tr>
       <tr><td><code>/logout [provider]</code></td><td>Log out of a provider.</td></tr>
       <tr><td><code>/auth [action]</code></td><td>Authentication management: <code>status</code>, <code>unlock</code>.</td></tr>
       <tr><td><code>/secrets [action]</code></td><td>Manage stored secrets: <code>list</code>, <code>set</code>, <code>get</code>, <code>delete</code>. <code>/secrets set NAME</code> opens hidden input for raw values; <code>/secrets get NAME</code> checks resolution without printing the value.</td></tr>
@@ -116,7 +114,9 @@ import Docs from "../../layouts/Docs.astro";
       <tr><td><code>/auspex</code></td><td>Show Auspex attachability and handoff status.</td></tr>
       <tr><td><code>/auspex open</code></td><td>Launch the primary browser surface. If the local compatibility server is not running yet, Omegon starts it first.</td></tr>
       <tr><td><code>/dash</code></td><td>Open Omegon's local browser compatibility/debug surface (real-time live state over WebSocket).</td></tr>
-      <tr><td><code>/focus</code></td><td>Toggle selected-segment focus mode for terminal-native text selection.</td></tr>
+      <tr><td><code>/mouse [on|off]</code></td><td>Toggle pane mouse interaction. Mouse capture must be enabled for click and double-click interactions.</td></tr>
+      <tr><td><code>/copy [plain|raw|answer|latest|session]</code></td><td>Copy the selected segment, latest answer, or session projection.</td></tr>
+      <tr><td><code>/transcript [file|open|scrollback]</code></td><td>Write or open a clean Markdown transcript.</td></tr>
       <tr><td><code>/warp</code></td><td>Toggle live between <code>om</code> (slim) and <code>omegon</code> (full) runtime posture.</td></tr>
       <tr><td><code>/shackle</code></td><td>Force slim <code>om</code>-style posture: copy-friendly, conversation-first, lower-pressure surfaces.</td></tr>
       <tr><td><code>/unshackle</code></td><td>Force full <code>omegon</code> posture with the broader harness surfaces.</td></tr>
@@ -152,31 +152,16 @@ import Docs from "../../layouts/Docs.astro";
     <li><code>manage_tools</code> — enable/disable tools or whole tool groups</li>
   </ul>
 
-  <h3>Full mode only</h3>
-  <p>These tools are hidden from the agent in slim mode to keep the coding loop focused. Switch to full mode with <code>/warp</code> or enable them individually with <code>manage_tools</code>.</p>
+  <h3>Situational tools</h3>
+  <p>
+    Lifecycle, decomposition, advanced memory, local inference, and other specialist tools may be hidden until their capability group is enabled. Use <code>manage_tools</code> to inspect the live group inventory. Tool availability is dynamic: extensions, project configuration, persona policy, and runtime mode can add or remove tools, so the inventory shown by the running harness is authoritative.
+  </p>
   <ul>
-    <li><code>design_tree</code> / <code>design_tree_update</code> — query and mutate the design knowledge graph</li>
-    <li><code>openspec_manage</code> — manage OpenSpec lifecycle (propose, spec, verify, archive)</li>
-    <li><code>cleave_assess</code> / <code>cleave_run</code> — assess complexity and execute parallel decomposition</li>
-    <li><code>delegate</code> / <code>delegate_result</code> / <code>delegate_status</code> — cross-session task delegation</li>
-    <li><code>lifecycle_doctor</code> — audit lifecycle and design state health</li>
-    <li><code>set_model_intent</code> / <code>set_thinking_level</code> / <code>switch_to_offline_driver</code> — adjust inference parameters or drop to local/offline execution</li>
-    <li><code>view</code> — render images and visual content</li>
-    <li><code>serve</code> — manage long-lived background processes</li>
-    <li><code>ask_local_model</code> / <code>list_local_models</code> / <code>manage_ollama</code> — local inference and Ollama control</li>
-    <li><code>codebase_index</code> — full codebase indexing</li>
-    <li><code>session_log</code> — session transcript management</li>
-  </ul>
-
-  <h3>Tool groups</h3>
-  <p>Tools are organized into named groups that can be toggled together via the <code>manage_tools</code> tool:</p>
-  <ul>
-    <li><code>harness-lifecycle</code> — <code>design_tree</code>, <code>design_tree_update</code>, <code>openspec_manage</code></li>
-    <li><code>cleave</code> — <code>cleave_assess</code>, <code>cleave_run</code></li>
-    <li><code>delegate</code> — <code>delegate</code>, <code>delegate_result</code>, <code>delegate_status</code></li>
-    <li><code>memory-advanced</code> — <code>memory_connect</code>, <code>memory_search_archive</code>, <code>memory_ingest_lifecycle</code></li>
-    <li><code>model-control</code> — <code>set_model_intent</code>, <code>switch_to_offline_driver</code>, <code>set_thinking_level</code></li>
-    <li><code>lifecycle-advanced</code> — <code>lifecycle_doctor</code>, <code>codebase_search</code>, <code>codebase_index</code></li>
-    <li><code>openapi-tools</code> — generated <code>api_*</code> tools for project-configured OpenAPI specs</li>
+    <li><code>design_tree</code> / <code>design_tree_update</code> — query and mutate design knowledge.</li>
+    <li><code>cleave_assess</code> / <code>cleave_run</code> — assess and execute coordinated decomposition when enabled.</li>
+    <li><code>delegate</code> / <code>delegate_result</code> / <code>delegate_status</code> — bounded subordinate work.</li>
+    <li><code>codebase_search</code> — ranked concept search across code and project knowledge.</li>
+    <li><code>ask_local_model</code> / <code>list_local_models</code> / <code>manage_ollama</code> — local inference controls when installed.</li>
+    <li>Generated <code>api_*</code> tools — project-configured OpenAPI operations.</li>
   </ul>
 </Docs>

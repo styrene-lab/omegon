@@ -45,7 +45,7 @@ import { snippet } from "../../lib/snippets";
       </tr>
       <tr>
         <td><strong>OpenAI/Codex OAuth</strong></td>
-        <td><code>{snippet("auth.login_openai_codex")}</code> or <code>/login openai-codex</code></td>
+        <td><code>{snippet("auth.login_openai_codex")}</code> or <code>/auth login openai-codex</code></td>
         <td>Supported Codex-backed Omegon flows, including interactive work and supported automation.</td>
         <td>
           The engine footer may show a selected model such as <code>gpt-5.4</code> while the limit row
@@ -61,39 +61,33 @@ import { snippet } from "../../lib/snippets";
       </tr>
       <tr>
         <td><strong>Ollama Cloud</strong></td>
-        <td><code>{snippet("auth.login_ollama_cloud")}</code>, <code>/login ollama-cloud</code>, or <code>{snippet("slash.secrets_set")}</code></td>
+        <td><code>{snippet("auth.login_ollama_cloud")}</code>, <code>/auth login ollama-cloud</code>, or <code>{snippet("slash.secrets_set")}</code></td>
         <td>All supported hosted-Ollama workflows.</td>
         <td>Separate hosted provider from local Ollama. Uses <code>OLLAMA_API_KEY</code> against Ollama's cloud API.</td>
       </tr>
       <tr>
         <td><strong>OpenAI-compatible API key providers</strong></td>
-        <td><code>/login openrouter</code>, <code>/login groq</code>, <code>/login xai</code>, <code>/login mistral</code>, <code>/login cerebras</code>, <code>/login opencode-go</code>, or <code>/login perplexity</code></td>
+        <td><code>/auth login openrouter</code>, <code>/auth login groq</code>, <code>/auth login xai</code>, <code>/auth login mistral</code>, <code>/auth login cerebras</code>, <code>/auth login opencode-go</code>, or <code>/auth login perplexity</code></td>
         <td>All supported key-backed workflows.</td>
         <td>Each provider has its own billing, quota, model catalog, and upstream error semantics.</td>
       </tr>
       <tr>
         <td><strong>Google Gemini</strong></td>
-        <td><code>/login google</code> or <code>GOOGLE_API_KEY</code> / <code>GEMINI_API_KEY</code></td>
+        <td><code>/auth login google</code> or <code>GOOGLE_API_KEY</code> / <code>GEMINI_API_KEY</code></td>
         <td>All supported key-backed workflows.</td>
         <td>Gemini models through Google's public API surface.</td>
       </tr>
       <tr>
         <td><strong>Google Antigravity</strong></td>
-        <td><code>/login google-antigravity</code></td>
+        <td><code>/auth login google-antigravity</code></td>
         <td>Interactive and supported OAuth-backed workflows.</td>
         <td>Gemini models through the Antigravity OAuth route. Distinct from the API-key Gemini provider.</td>
       </tr>
       <tr>
-        <td><strong>GitHub Models</strong> <em>(coming soon)</em></td>
-        <td>Official PAT configuration will be documented when the integration ships.</td>
-        <td>Planned support.</td>
-        <td>Not available yet.</td>
-      </tr>
-      <tr>
-        <td><strong>Copilot seat</strong> <em>(coming soon)</em></td>
-        <td>Seat-based auth will be documented when the integration ships.</td>
-        <td>Planned support.</td>
-        <td>Not available yet.</td>
+        <td><strong>GitHub Copilot</strong></td>
+        <td><code>/auth login github-copilot</code></td>
+        <td>Interactive use with a Copilot-specific credential.</td>
+        <td>GitHub Copilot inference. Generic GitHub CLI and <code>GITHUB_TOKEN</code> credentials are diagnostic only and are not used for runtime inference.</td>
       </tr>
     </tbody>
   </table>
@@ -153,7 +147,7 @@ import { snippet } from "../../lib/snippets";
     <li>If you want unattended or scripted automation with clean provider terms, configure <code>ANTHROPIC_API_KEY</code>.</li>
     <li>If you want GPT-family routing without API-key setup, try <code>omegon auth login openai-codex</code>.</li>
     <li>If you want local-only inference, use <code>Ollama (Local)</code>.</li>
-    <li>If you want hosted Ollama without running a local daemon, use <code>Ollama Cloud</code> via <code>/login</code> or <code>/secrets</code>.</li>
+    <li>If you want hosted Ollama without running a local daemon, use <code>Ollama Cloud</code> via <code>/auth login</code> or <code>/secrets</code>.</li>
     <li>If you want predictable automation with commercial API terms, prefer API-key-backed providers.</li>
   </ul>
 

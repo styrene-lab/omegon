@@ -36,7 +36,7 @@ import Docs from "../../layouts/Docs.astro";
       <tr><td><code>memory_episodes(query)</code></td><td>Search session narratives for episodic context</td></tr>
       <tr><td><code>memory_focus(fact_ids)</code></td><td>Pin facts to working memory (survives compaction)</td></tr>
       <tr><td><code>memory_release()</code></td><td>Clear working memory buffer</td></tr>
-      <tr><td><code>memory_connect(source, target, relation)</code></td><td>Create a typed edge in the knowledge graph</td></tr>
+      <tr><td><code>memory_query(query, ...)</code></td><td>Query stored memory with structured filters</td></tr>
       <tr><td><code>memory_compact()</code></td><td>Trigger context compaction to free context window</td></tr>
       <tr><td><code>memory_search_archive(query)</code></td><td>Search archived (superseded/stale) facts — not injected into context but still queryable</td></tr>
       <tr><td><code>memory_ingest_lifecycle()</code></td><td>Batch-import recent design-tree decisions and resolved questions into the memory store</td></tr>
@@ -64,7 +64,7 @@ import Docs from "../../layouts/Docs.astro";
 
   <h2>Operator Commands</h2>
   <pre><code>/memory       # Show memory stats: facts, episodes, working memory
-/compact      # Trigger context compaction manually
+/context compact      # Trigger context compaction manually
 /note [text]  # Quick-capture a note (persists across sessions)
 /notes        # Show pending notes</code></pre>
 

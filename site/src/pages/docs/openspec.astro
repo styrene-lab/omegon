@@ -12,18 +12,19 @@ import Docs from "../../layouts/Docs.astro";
   <p>
     OpenSpec is the spec-driven development system in Omegon. Specs define what must be true
     <em>before</em> code is written — they are the source of truth for correctness. The full
-    lifecycle: propose, spec, fast-forward, cleave, assess, archive.
+    lifecycle: propose, specify, plan, test, implement, verify, archive.
   </p>
 
-  <img src="/diagrams/openspec-lifecycle.svg" alt="OpenSpec lifecycle: propose, spec, fast-forward, cleave, assess, archive — with feedback loop from assess back to spec on failure" class="diagram" />
+  <img src="/diagrams/openspec-lifecycle.svg" alt="OpenSpec lifecycle from proposal and scenarios through planning, implementation, verification, and archive" class="diagram" />
 
   <h2>Lifecycle Stages</h2>
   <ol>
     <li><strong>Propose</strong> — create a change with a name, title, and intent</li>
     <li><strong>Spec</strong> — write Given/When/Then scenarios defining acceptance criteria</li>
-    <li><strong>Fast-Forward</strong> — generate <code>design.md</code> (architecture) and <code>tasks.md</code> (work items) from specs</li>
-    <li><strong>Execute</strong> — implement via <code>/cleave</code> (parallel) or direct coding</li>
-    <li><strong>Verify</strong> — <code>/assess spec</code> checks that implementation satisfies all scenarios</li>
+    <li><strong>Plan</strong> — write <code>design.md</code> (architecture) and <code>tasks.md</code> (scenario-owned work items)</li>
+    <li><strong>Test</strong> — register failing test files before implementation</li>
+    <li><strong>Implement</strong> — execute directly, with a bounded delegate, or through cleave when coordinated worktree isolation is justified</li>
+    <li><strong>Verify</strong> — assess every scenario against implementation and test evidence</li>
     <li><strong>Archive</strong> — move completed change to baseline</li>
   </ol>
 
@@ -78,8 +79,8 @@ And the served bridge reports the authenticated provider/model that actually han
     <li><code>design_tree_update(implement)</code> creates the OpenSpec change</li>
     <li>Specs are generated from the node's decisions and acceptance criteria</li>
     <li><code>openspec_manage(register_tasks)</code> records task progress from tasks.md</li>
-    <li><code>/cleave</code> executes the tasks in parallel</li>
-    <li><code>/assess spec</code> verifies against the original specs</li>
+    <li>Continue implementation directly, through a bounded delegate, or with cleave for coordinated child scopes</li>
+    <li>Assess implementation and tests against the original scenarios</li>
     <li><code>openspec_manage(archive)</code> closes the loop</li>
   </ol>
 
@@ -88,7 +89,7 @@ And the served bridge reports the authenticated provider/model that actually han
     After implementation or assessment, the lifecycle may need reconciliation:
   </p>
   <ul>
-    <li>If <code>/assess spec</code> finds issues, <code>reconcile_after_assess</code> reopens work</li>
+    <li>If scenario assessment finds issues, reopen implementation and update lifecycle state</li>
     <li>If cleave adds files not in the original scope, tasks.md is updated</li>
     <li>Archive refuses to proceed if tasks are incomplete or design-tree binding is stale</li>
   </ul>

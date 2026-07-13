@@ -245,7 +245,17 @@ fn is_windows_device_namespace(raw: &str) -> bool {
     raw.starts_with(r"\\.\") || raw.starts_with(r"//./")
 }
 
+fn is_shell_syntax_or_quote(ch: char) -> bool {
+    matches!(
+        ch,
+        '\'' | '`' | '$' | '(' | ')' | '{' | '}' | ';' | '|' | '&'
+    )
+}
+
 fn is_windows_unc(raw: &str) -> bool {
+    if raw.chars().any(is_shell_syntax_or_quote) {
+        return false;
+    }
     let is_standard_unc =
         raw.starts_with(r"\\") && !is_windows_verbatim(raw) && !is_windows_device_namespace(raw);
     let is_slash_unc = raw.starts_with("//") && !raw.starts_with("///");
@@ -1340,6 +1350,18 @@ mod tests {
         let intent = classify_privilege_intent("sudo -S true").unwrap();
         assert_eq!(intent.program, PrivilegeProgram::Sudo);
         assert_eq!(intent.mode, PrivilegeMode::PasswordFromStdin);
+        assert!(!matches!(
+            PathTarget::classify("//')"),
+            PathTarget::WindowsUnc { .. }
+        ));
+        assert!(!matches!(
+            PathTarget::classify("//')/console"),
+            PathTarget::WindowsUnc { .. }
+        ));
+        assert!(!matches!(
+            PathTarget::classify("//server/share$(noise)"),
+            PathTarget::WindowsUnc { .. }
+        ));
     }
 
     #[test]

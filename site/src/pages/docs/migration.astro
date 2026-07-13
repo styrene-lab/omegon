@@ -20,11 +20,11 @@ import stats from "../../data/stats.json";
     <tbody>
       <tr><td>CLAUDE.md</td><td>Project memory — persistent facts with semantic search, knowledge graph, episodic recall. Not a flat file.</td></tr>
       <tr><td>Model picker</td><td><code>/model</code> — {stats.providerCount} providers with tier-based routing and automatic failover</td></tr>
-      <tr><td>Extended thinking toggle</td><td><code>/think off|low|medium|high</code> — five levels, agent self-adjusts per task</td></tr>
+      <tr><td>Extended thinking toggle</td><td><code>/think off|minimal|low|medium|high</code> — five explicit levels</td></tr>
       <tr><td>Custom slash commands (.md)</td><td>{stats.skillCount} skills — specialized instruction sets loaded on demand (git, rust, python, security, OCI, etc.)</td></tr>
       <tr><td>Conversation history</td><td>Sessions — auto-save, <code>--resume</code>, full replay with segment metadata</td></tr>
       <tr><td>Anthropic only</td><td>{stats.providerCount} inference providers — {stats.providerNames.join(", ")}</td></tr>
-      <tr><td>—</td><td>Design tree — a structured knowledge graph of architecture decisions, open questions, dependencies, and implementation status. Nodes have typed lifecycles (seed, exploring, decided, blocked, deferred) and bridge directly into the spec and implementation system. Not a TODO list — a design exploration space.</td></tr>
+      <tr><td>—</td><td>Design tree — a structured knowledge graph of architecture decisions, open questions, dependencies, and implementation status. Nodes follow the lifecycle <code>seed → exploring → resolved → decided → implementing → implemented</code> and bridge into specification and implementation work.</td></tr>
       <tr><td>Subagents (shared working directory)</td><td>Cleave — each child runs in its own git worktree on its own branch. File scope enforcement, dependency-ordered dispatch waves, per-file conflict detection (never bulk-resolved), and adversarial review. See <a href="/docs/cleave">Cleave vs Subagents</a>.</td></tr>
       <tr><td>—</td><td>OpenSpec — spec-driven development lifecycle (propose, specify, execute, verify, archive)</td></tr>
       <tr><td>—</td><td>Personas — cognitive profiles with dedicated organic memory that grows across sessions</td></tr>
@@ -36,8 +36,8 @@ import stats from "../../data/stats.json";
 
   <h3>What Transfers</h3>
   <ul>
-    <li>Your muscle memory — <code>read</code>, <code>edit</code>, <code>write</code>, <code>bash</code> tools are identical</li>
-    <li>Anthropic OAuth — same <code>/login</code> flow, same credentials</li>
+    <li>Your muscle memory — Omegon provides familiar <code>read</code>, <code>edit</code>, <code>write</code>, and <code>bash</code> operations, though schemas and permission behavior are Omegon-specific.</li>
+    <li>Anthropic OAuth — use Omegon's <code>/auth login anthropic</code> flow; credential discovery and automation policy remain explicit runtime boundaries.</li>
     <li>Your prompting style — the agent responds to the same kinds of instructions</li>
   </ul>
 
@@ -55,9 +55,9 @@ import stats from "../../data/stats.json";
     The design tree isn't theoretical — it's how Omegon itself is built. At any point you can
     see the state of every design decision in the project:
   </p>
-  <pre><code>Design Tree: 267 nodes
-  207 implemented — 10 decided — 32 exploring
-  60 open questions — 18 deferred</code></pre>
+  <pre><code>Design Tree: project-defined nodes
+  seed → exploring → resolved → decided → implementing → implemented
+  decisions, open questions, assumptions, dependencies, and implementation notes</code></pre>
   <p>
     Every node is a markdown file with structured sections: overview, research findings,
     decisions with rationale, open questions, and implementation notes with file scope. Nodes
@@ -67,9 +67,8 @@ import stats from "../../data/stats.json";
   </p>
   <p>
     Claude Code has no equivalent. Design decisions live in conversation history and are
-    forgotten when context fills up. CLAUDE.md is a flat file — it can't track the state of
-    60 open questions across 267 nodes, or tell you which decisions are blocked on which
-    dependencies.
+    forgotten when context fills up. CLAUDE.md is a flat file — it cannot represent typed lifecycle state,
+    unresolved assumptions, or dependency relationships across a project's design nodes.
   </p>
 
   <h3>Cleave vs Subagents</h3>
@@ -101,7 +100,7 @@ import stats from "../../data/stats.json";
       <tr><td>AGENTS.md</td><td>Project memory + AGENTS.md support (both formats recognized)</td></tr>
       <tr><td>OpenAI models only</td><td>{stats.providerCount} inference providers — including Ollama (Local) for fully offline operation and Ollama Cloud as a separate hosted path</td></tr>
       <tr><td>Cloud-dependent orchestration</td><td>Fully local orchestration — cloud is only used for inference, and even that is optional with Ollama</td></tr>
-      <tr><td>Sandbox execution</td><td>OCI-based isolation available via the OCI skill — Containerfile authoring, multi-arch builds, registry auth, and security scanning are first-class. Plus secrets management through system keychain and HashiCorp Vault, so credentials never touch environment variables or disk in plaintext.</td></tr>
+      <tr><td>Sandbox execution</td><td>OCI-based isolation is available when the sandbox runtime is configured. Provider credentials can come from secure stores or environment variables; avoid plaintext project files.</td></tr>
       <tr><td>Single-turn execution</td><td>Multi-turn sessions with auto-save and resume. The agent maintains context across turns and sessions.</td></tr>
       <tr><td>—</td><td>Parallel execution — cleave decomposes tasks into isolated git worktree branches with file scope enforcement, dependency waves, per-file merge, and adversarial review. Not shared-directory subagents.</td></tr>
       <tr><td>—</td><td>Design tree — structured knowledge graph tracking decisions, dependencies, open questions, and implementation status. Bridges directly into spec-driven implementation.</td></tr>
@@ -119,7 +118,7 @@ import stats from "../../data/stats.json";
   </p>
   <ul>
     <li><strong>OCI skill</strong> — first-class support for building and running containers. Containerfile authoring, multi-arch builds, registry authentication, image tagging, and security scanning are built into the agent's skill set. You can run the agent's work inside containers as a matter of course, not as an afterthought.</li>
-    <li><strong>Secrets management</strong> — credentials stored in the system keychain (macOS Keychain, Linux Secret Service) or HashiCorp Vault. Never in environment variables, never in plaintext on disk. The agent manages secrets through <code>/secrets</code> and <code>/vault</code> commands.</li>
+    <li><strong>Secrets management</strong> — credentials configured through <code>/secrets</code> can be stored in supported secure backends such as the system keychain or HashiCorp Vault. Environment-variable credentials remain supported for provider and automation workflows; avoid plaintext project files.</li>
     <li><strong>Signed releases</strong> — every binary is signed with Sigstore cosign (keyless OIDC), includes a CycloneDX SBOM, and carries GitHub Attestations for build provenance. You can verify the supply chain from source to binary.</li>
     <li><strong>Process control</strong> — <code>Esc</code> or <code>Ctrl+C</code> cancels any operation immediately. <code>--max-turns</code> limits agent autonomy. Session logs provide full audit trail.</li>
   </ul>

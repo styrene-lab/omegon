@@ -49,7 +49,7 @@ memory:
   desc: "Show memory overview"
 
 compact:
-  cmd: "/compact"
+  cmd: "/context compact"
   desc: "Compact conversation context"
 
 note:
@@ -71,34 +71,6 @@ cleave:
 auspex_open:
   cmd: "/auspex open"
   desc: "Launch primary browser surface"
-
-opsx_propose:
-  cmd: "/opsx:propose"
-  desc: "Propose a new OpenSpec design"
-
-opsx_spec:
-  cmd: "/opsx:spec"
-  desc: "Write specification scenarios"
-
-opsx_ff:
-  cmd: "/opsx:ff"
-  desc: "Fast-forward implementation"
-
-opsx_status:
-  cmd: "/opsx:status"
-  desc: "Check OpenSpec status"
-
-opsx_verify:
-  cmd: "/opsx:verify"
-  desc: "Verify specs are satisfied"
-
-opsx_archive:
-  cmd: "/opsx:archive"
-  desc: "Archive completed change"
-
-assess_spec:
-  cmd: "/assess spec"
-  desc: "Verify specs are satisfied (alias)"
 
 vault_status:
   cmd: "/vault status"
@@ -133,7 +105,7 @@ auth_status_slash:
   desc: "Check auth status in-TUI"
 
 login_slash:
-  cmd: "/login anthropic"
+  cmd: "/auth login anthropic"
   desc: "Log in to provider in-TUI"
 
 secrets_set:

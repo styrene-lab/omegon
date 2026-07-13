@@ -66,7 +66,7 @@ import Docs from "../../layouts/Docs.astro";
   <p>
     Assistant responses carry a dim metadata header stamped at creation time, for example:
   </p>
-  <pre><code>gpt-5.4 · openai-codex · grade B · think:medium</code></pre>
+  <pre><code>provider:model · provider · grade B · think:medium</code></pre>
   <p>
     Fields include model ID, provider, model grade intent, thinking level, and other runtime details.
   </p>
@@ -136,9 +136,18 @@ import Docs from "../../layouts/Docs.astro";
   <h2>Mouse</h2>
   <p>
     In <code>om</code> / slim mode, mouse capture is off by default so terminal-native selection and paste work immediately.
-    In full <code>omegon</code> mode, mouse capture is on by default. Toggle mouse handling with <code>Ctrl+M</code> or use
+    In full <code>omegon</code> mode, mouse capture is on by default. Toggle pane mouse handling with <code>/mouse on</code> or <code>/mouse off</code>, and use
     <code>/warp</code>, <code>/shackle</code>, and <code>/unshackle</code> to move between slim and full runtime posture.
     Press <code>Ctrl+Y</code> to copy the selected conversation segment as plain text.
+  </p>
+
+  <h2>Image attachments</h2>
+  <p>
+    Attached images are represented by compact rows associated with the originating user prompt.
+    Double-click a collapsed image row to expand all image attachments for that prompt; double-click
+    an expanded image to collapse the prompt's images again. Mouse capture must be enabled for this
+    interaction. Prompt navigation treats the image rows as part of their parent prompt rather than
+    as independent turns.
   </p>
 
   <h2>Editor</h2>

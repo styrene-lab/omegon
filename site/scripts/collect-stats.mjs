@@ -32,13 +32,16 @@ function getCrateCount() {
 // ── Binary size from GitHub release assets ───────────────────────────────────
 
 async function getBinarySize() {
+  const releaseTag = process.env.OMEGON_SITE_RELEASE_TAG || null;
   const headers = { "User-Agent": "omegon-site-build" };
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (token) headers["Authorization"] = `token ${token}`;
 
   try {
     const res = await fetch(
-      `https://api.github.com/repos/${REPO}/releases/latest`,
+      releaseTag
+        ? `https://api.github.com/repos/${REPO}/releases/tags/${encodeURIComponent(releaseTag)}`
+        : `https://api.github.com/repos/${REPO}/releases/latest`,
       { headers },
     );
     if (!res.ok) throw new Error(`${res.status}`);
@@ -149,7 +152,7 @@ async function main() {
   const stats = {
     crateCount,
     downloadMB: binaryInfo?.downloadMB ?? null,
-    releaseTag: binaryInfo?.tag ?? null,
+    releaseTag: binaryInfo?.tag ?? process.env.OMEGON_SITE_RELEASE_TAG ?? null,
     providerCount: providerInfo?.count ?? null,
     providerNames: providerInfo?.names ?? [],
     providerIds: providerInfo?.ids ?? [],

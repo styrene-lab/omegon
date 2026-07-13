@@ -23,8 +23,8 @@ import Docs from "../../layouts/Docs.astro";
 # Deactivate
 /persona off
 
-# The agent shows active persona in the meta tag:
-# claude-sonnet-4-6 · anthropic · grade B · ⌘ architect</code></pre>
+# The agent shows the active route and persona in metadata:
+# provider:model · provider · grade B · ⌘ architect</code></pre>
 
   <h3>What Personas Control</h3>
   <ul>
@@ -55,20 +55,15 @@ import Docs from "../../layouts/Docs.astro";
     <li>Showing persona/tone state changes as toast notifications</li>
   </ul>
 
-  <h2>Tool Profiles</h2>
+  <h2>Dynamic tool inventory</h2>
   <p>
-    Tool profiles control which tools are visible in the agent's context. They reduce prompt
-    bloat by only exposing relevant tools based on project type:
+    Tool visibility is assembled at runtime from core tools, enabled capability groups,
+    extensions, project configuration, persona policy, and the current provider surface.
+    The running inventory—not a fixed documentation list—is authoritative.
   </p>
   <ul>
-    <li><strong>core</strong> — always active: read, edit, write, bash, view</li>
-    <li><strong>coding</strong> — activated when <code>.git</code> detected: git tools, test runners</li>
-    <li><strong>visual</strong> — activated for <code>.excalidraw</code> / <code>.d2</code> files</li>
-    <li><strong>local-ai</strong> — activated when Ollama is available</li>
-    <li><strong>web</strong> — always active: search tools</li>
+    <li>Use <code>manage_tools</code> to list, enable, or disable situational capability groups.</li>
+    <li>Use <code>/profile</code> and <code>/settings</code> to inspect operator-selected runtime defaults.</li>
+    <li>Project and persona policy can narrow tool availability; enabling a group does not bypass permissions.</li>
   </ul>
-  <p>
-    The agent can manage its own profiles with <code>manage_tools</code>, or operators can
-    override with <code>/profile</code>.
-  </p>
 </Docs>

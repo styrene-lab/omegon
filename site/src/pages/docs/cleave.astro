@@ -76,7 +76,7 @@ import Docs from "../../layouts/Docs.astro";
   <ul>
     <li>Each child receives design context from <code>design.md</code> — architecture decisions, file scope, constraints</li>
     <li><code>tasks.md</code> is reconciled after merge — completed tasks are checked off, new tasks from child work are added</li>
-    <li>Post-merge: <code>/assess spec</code> runs the acceptance scenarios from the specs against the merged code</li>
+    <li>Post-merge: assess the merged implementation against the acceptance scenarios from the specs</li>
     <li>If specs pass, <code>openspec_manage(archive)</code> closes the change. If they fail, the feedback loop sends you back to the spec stage.</li>
   </ul>
 

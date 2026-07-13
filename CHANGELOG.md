@@ -33,6 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- The documentation site now derives current crate/provider/tool/skill statistics from runtime sources, can pin release metadata with <code>OMEGON_SITE_RELEASE_TAG</code>, and removes stale slash commands, provider status, design-tree counts, lifecycle stages, model examples, and mouse shortcuts across the page-by-page reference audit.
 - Updated the public installation and artifact-verification examples to target the 0.28.0 stable release, removing stale 0.27.x commands from the generated docs site.
 - Double-clicking a bottom-aligned collapsed image now hits the rendered image row and expands the associated prompt attachments; conversation mouse hit testing now uses the same short-content viewport origin as rendering.
 - Interrupting an active turn now explicitly reattaches the conversation viewport to the live tail before restoring operator control, preventing the recovered composer from remaining stranded above the latest exchange.
