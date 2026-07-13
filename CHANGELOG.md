@@ -33,6 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Updated the public installation and artifact-verification examples to target the 0.28.0 stable release, removing stale 0.27.x commands from the generated docs site.
 - Double-clicking a bottom-aligned collapsed image now hits the rendered image row and expands the associated prompt attachments; conversation mouse hit testing now uses the same short-content viewport origin as rendering.
 - Interrupting an active turn now explicitly reattaches the conversation viewport to the live tail before restoring operator control, preventing the recovered composer from remaining stranded above the latest exchange.
 - Persistent directory approvals now write back to the selected active profile source instead of silently creating an unused project singleton; permission confirmation messages also canonicalize both target and grant paths so macOS `/tmp` and `/private/tmp` aliases are shown as one filesystem identity.
