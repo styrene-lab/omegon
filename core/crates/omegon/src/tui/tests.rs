@@ -908,6 +908,50 @@ async fn ui_action_permission_response_unblocks_pending_permission() {
 }
 
 #[tokio::test]
+async fn ui_action_always_allow_reports_canonical_grant_identity() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let (permission_tx, permission_rx) = std::sync::mpsc::channel();
+    app.pending_permission = Some(std::sync::Arc::new(std::sync::Mutex::new(Some(
+        permission_tx,
+    ))));
+    app.pending_permission_context = Some(PendingPermissionContext {
+        tool_name: "bash".into(),
+        target: "/tmp/omegon-just-list".into(),
+        kind: omegon_traits::PermissionRequestKind::PathBoundary,
+        persistence: omegon_traits::PermissionPersistence::ProjectDirectory,
+        grant_path: Some("/tmp".into()),
+    });
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::RespondToPermission(PermissionAction {
+                request_id: None,
+                response: omegon_traits::PermissionResponse::AlwaysAllow,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        permission_rx.recv().expect("permission response"),
+        omegon_traits::PermissionResponse::AlwaysAllow
+    );
+    let UiActionOutcome::Accepted { message } = outcome else {
+        panic!("expected accepted outcome");
+    };
+    let message = message.expect("accepted message");
+    assert!(message.contains("canonical grant:"), "{message}");
+    let target = crate::tools::canonicalize_existing_parent_for_permissions(std::path::Path::new(
+        "/tmp/omegon-just-list",
+    ));
+    let grant =
+        crate::tools::canonicalize_existing_parent_for_permissions(std::path::Path::new("/tmp"));
+    assert!(message.contains(&target.display().to_string()), "{message}");
+    assert!(message.contains(&grant.display().to_string()), "{message}");
+}
+
+#[tokio::test]
 async fn ui_action_operator_wait_response_unblocks_pending_wait() {
     let mut app = test_app();
     let tx = test_tx();

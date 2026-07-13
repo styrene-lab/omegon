@@ -7446,9 +7446,17 @@ warning: {warning}"
                 omegon_traits::PermissionResponse::AlwaysAllow
             ) {
                 if let Some(grant_path) = context.grant_path {
+                    let target = crate::tools::canonicalize_existing_parent_for_permissions(
+                        std::path::Path::new(&context.target),
+                    );
+                    let grant = crate::tools::canonicalize_existing_parent_for_permissions(
+                        std::path::Path::new(&grant_path),
+                    );
                     format!(
-                        "→ {label}: {} {} (grant: {})",
-                        context.tool_name, context.target, grant_path
+                        "→ {label}: {} {} (canonical grant: {})",
+                        context.tool_name,
+                        target.display(),
+                        grant.display()
                     )
                 } else {
                     format!("→ {label}: {} {}", context.tool_name, context.target)

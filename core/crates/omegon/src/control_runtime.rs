@@ -3783,11 +3783,13 @@ pub async fn permission_trust_add_response(
     if let Ok(mut s) = shared_settings.lock() {
         push_unique(&mut s.trusted_directories, path);
     }
-    let mut profile = settings::Profile::load(cwd);
+    let loaded = settings::Profile::load_with_source(cwd);
+    let mut profile = loaded.profile;
     profile.add_trusted_directory_grant(path.to_string(), mount_identity, environment);
-    save_profile_response(
+    save_active_profile_response(
         cwd,
         profile,
+        &loaded.source,
         &format!(
             "Trusted directory added to project permissions: {path}\n\
              The agent can now read/write files in this directory."
@@ -3807,11 +3809,13 @@ pub async fn permission_trust_remove_response(
     if let Ok(mut s) = shared_settings.lock() {
         retain_not_equal(&mut s.trusted_directories, path);
     }
-    let mut profile = settings::Profile::load(cwd);
+    let loaded = settings::Profile::load_with_source(cwd);
+    let mut profile = loaded.profile;
     profile.remove_trusted_directory(path);
-    save_profile_response(
+    save_active_profile_response(
         cwd,
         profile,
+        &loaded.source,
         &format!("Trusted directory removed from project permissions: {path}"),
     )
 }
@@ -3823,6 +3827,28 @@ fn save_profile_response(
 ) -> SlashCommandResponse {
     match profile.save(cwd) {
         Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(success.to_string()),
+        },
+        Err(e) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("failed to save profile: {e}")),
+        },
+    }
+}
+
+fn save_active_profile_response(
+    cwd: &Path,
+    profile: settings::Profile,
+    source: &settings::ProfileSource,
+    success: &str,
+) -> SlashCommandResponse {
+    let target = match source {
+        settings::ProfileSource::BuiltInDefault => settings::ProfileSaveTarget::Project,
+        _ => settings::ProfileSaveTarget::ActiveSource,
+    };
+    match profile.save_to_target(cwd, target, source) {
+        Ok(_) => SlashCommandResponse {
             accepted: true,
             output: Some(success.to_string()),
         },

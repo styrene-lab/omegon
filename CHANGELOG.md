@@ -33,6 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Persistent directory approvals now write back to the selected active profile source instead of silently creating an unused project singleton; permission confirmation messages also canonicalize both target and grant paths so macOS `/tmp` and `/private/tmp` aliases are shown as one filesystem identity.
 - Removed the archived `omegon-pi` sibling from repository test/typecheck recipes, test counts, npm migration messaging, and package documentation; release validation now covers only maintained Omegon surfaces.
 - Updated the Claude Code OAuth user-agent to match upstream `@anthropic-ai/claude-code` 2.1.207, preserving subscription recognition for the 0.28.0 release.
 - Cleared Rust 1.8x Clippy regressions across conversation telemetry, control-runtime summaries, skill frontmatter parsing, path classification, TUI rendering, and related tests so the release lint gate remains warning-free.
