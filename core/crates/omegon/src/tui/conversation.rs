@@ -484,6 +484,7 @@ impl ConversationView {
         );
         if needs_new_seg {
             self.segments.push(Segment::assistant_text());
+            self.conv_state.invalidate();
         }
         self.streaming = true;
 
@@ -492,7 +493,10 @@ impl ConversationView {
         {
             text.push_str(delta);
         }
-        self.conv_state.invalidate();
+        // Do not invalidate the full height cache for every token. While
+        // attached, ConvState remeasures the live tail each frame. While the
+        // operator is detached, retaining the tail's cached height preserves
+        // the visible anchor and avoids an O(history) remeasure on every delta.
         self.conv_state.auto_scroll_to_bottom();
     }
 
@@ -797,6 +801,8 @@ impl ConversationView {
         }
         self.streaming = false;
         self.conv_state.invalidate();
+        // Preserve an intentional detached viewport through completion. The
+        // next submitted operator turn explicitly reattaches in push_user().
         self.conv_state.auto_scroll_to_bottom();
     }
 
@@ -1426,8 +1432,46 @@ impl ConversationView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::conv_widget::ConversationWidget;
     use crate::tui::theme::Alpharius;
     use ratatui::prelude::*;
+
+    #[test]
+    fn submitting_next_turn_reattaches_detached_viewport() {
+        let mut cv = ConversationView::new();
+        cv.push_user("question");
+        cv.append_streaming("answer in progress");
+        cv.scroll_up(105);
+        cv.finalize_message();
+        assert!(cv.conv_state.user_scrolled);
+
+        cv.push_user("next question");
+
+        assert_eq!(cv.conv_state.scroll_offset, 0);
+        assert!(!cv.conv_state.user_scrolled);
+    }
+
+    #[test]
+    fn detached_streaming_deltas_retain_height_cache() {
+        let mut cv = ConversationView::new();
+        cv.push_user("question");
+        cv.append_streaming("first line");
+        let theme = Alpharius;
+        let area = Rect::new(0, 0, 40, 6);
+        let mut buf = Buffer::empty(area);
+        {
+            let (segments, state) = cv.segments_and_state();
+            ConversationWidget::new(segments, &theme).render(area, &mut buf, state);
+        }
+        let cached = cv.conv_state.heights.clone();
+        cv.scroll_up(3);
+
+        cv.append_streaming("\nsecond line");
+
+        assert_eq!(cv.conv_state.heights, cached);
+        assert!(cv.conv_state.user_scrolled);
+        assert_eq!(cv.conv_state.scroll_offset, 3);
+    }
 
     #[test]
     fn plan_progress_notifications_replace_latest_snapshot_across_tool_cards() {
