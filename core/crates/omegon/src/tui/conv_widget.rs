@@ -351,10 +351,16 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     .saturating_sub(selected_top);
             }
             state.snap_to_selected = false;
-        } else if state.user_scrolled && total_height > state.last_total_height {
-            state.scroll_offset = state
-                .scroll_offset
-                .saturating_add(total_height - state.last_total_height);
+        } else if state.user_scrolled {
+            if total_height > state.last_total_height {
+                state.scroll_offset = state
+                    .scroll_offset
+                    .saturating_add(total_height - state.last_total_height);
+            } else if total_height < state.last_total_height {
+                state.scroll_offset = state
+                    .scroll_offset
+                    .saturating_sub(state.last_total_height - total_height);
+            }
         }
 
         // Clamp scroll offset so we don't scroll past the top
@@ -940,6 +946,48 @@ mod tests {
         assert!(
             state.heights[0] > 1,
             "completed detached tail must be remeasured so it cannot look truncated"
+        );
+    }
+
+    #[test]
+    fn detached_viewport_tracks_content_shrink_without_jumping_up() {
+        let mut segments = vec![
+            Segment::user_prompt("inspect the attached image"),
+            Segment::operator_image("/tmp/paste.png".into(), "pasted image"),
+            Segment::user_prompt("later prompt"),
+        ];
+        let area = Rect::new(0, 0, 40, 6);
+        let mut state = ConvState::new();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+        state.scroll_up(8);
+        let previous_offset = state.scroll_offset;
+        let previous_height = state.last_total_height;
+
+        if let SegmentContent::Image { display, .. } = &mut segments[1].content {
+            *display = crate::tui::segments::ImageDisplayState::Collapsed;
+        } else {
+            panic!("operator attachment should be an image segment");
+        }
+        state.invalidate();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+
+        let height_reduction = previous_height - state.last_total_height;
+        assert!(
+            height_reduction > 0,
+            "collapsed image should reduce content height"
+        );
+        assert_eq!(
+            state.scroll_offset,
+            previous_offset.saturating_sub(height_reduction),
+            "automatic content collapse must preserve the visible anchor instead of leaving a stale offset"
         );
     }
 
