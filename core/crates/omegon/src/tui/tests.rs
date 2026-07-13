@@ -2768,6 +2768,37 @@ fn recalled_history_can_continue_walking_with_up() {
 }
 
 #[test]
+fn collapsed_image_bottom_alignment_hit_tests_to_image_segment() {
+    let mut cv = ConversationView::new();
+    cv.push_user_with_attachments("inspect", &[std::path::PathBuf::from("/tmp/image.png")]);
+    cv.collapse_preview_images();
+
+    let t = crate::tui::theme::Alpharius;
+    let area = Rect::new(0, 0, 80, 12);
+    let mut buf = Buffer::empty(area);
+    {
+        let (segments, state) = cv.segments_and_state();
+        let widget = crate::tui::conv_widget::ConversationWidget::new(segments, &t);
+        widget.render(area, &mut buf, state);
+    }
+
+    let image_row = area.bottom() - 1;
+    assert_eq!(
+        cv.segment_at(area, image_row),
+        Some(1),
+        "bottom-aligned collapsed image row must hit the image segment"
+    );
+    assert_eq!(cv.toggle_image_attachments_at(1), 1);
+    assert!(matches!(
+        cv.segments()[1].content,
+        crate::tui::segments::SegmentContent::Image {
+            display: crate::tui::segments::ImageDisplayState::Expanded,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn conversation_segment_at_returns_clicked_segment() {
     let mut cv = ConversationView::new();
     cv.push_user("first");

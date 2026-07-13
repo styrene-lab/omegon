@@ -1465,7 +1465,15 @@ impl ConversationView {
                     .min(total_height.saturating_sub(viewport_height))
         };
 
-        let target_y = top_offset + (row - viewport.y);
+        let viewport_origin_y = if total_height < viewport_height {
+            viewport.y.saturating_add(viewport_height - total_height)
+        } else {
+            viewport.y
+        };
+        if row < viewport_origin_y {
+            return None;
+        }
+        let target_y = top_offset + (row - viewport_origin_y);
         let mut y_cursor: u16 = 0;
         for (idx, seg_height) in heights.iter().copied().enumerate() {
             let seg_top = y_cursor;
