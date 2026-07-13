@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- Fixed the Profile TUI so project-scoped registry selections persist through the canonical `.omegon/active-profile.json` pointer and the profile summary/footer wrap instead of silently truncating paths and commands.
+
 ### Added
 
 - Added `Alt+Shift+Up/Down` conversation navigation that snaps the viewport between semantic operator-message anchors, complementing `Alt+Up/Down` editor-history recall.

@@ -132,11 +132,9 @@ fn menu_lines<'a>(
         .filter(|summary| !summary.is_empty())
     {
         for line in summary.lines() {
-            lines.push(clipped_line(
-                line,
-                width,
-                Style::default().fg(theme.muted()),
-            ));
+            lines.extend(wrap_display(line, width).into_iter().map(|segment| {
+                Line::from(Span::styled(segment, Style::default().fg(theme.muted())))
+            }));
         }
     }
 
@@ -186,8 +184,15 @@ fn menu_lines<'a>(
     lines.push(Line::from(""));
 
     let rows = state.visible_rows(projection);
-    let reserved = 6usize;
-    let body_budget = usize::from(inner_height).saturating_sub(reserved).max(1);
+    let footer = projection.footer.as_deref().unwrap_or(match state.mode {
+        MenuMode::Search => "type to filter · Backspace edit · Esc browse · Enter run",
+        MenuMode::Browse => "↑/↓ navigate · Tab category · / search · Enter run · Esc close",
+    });
+    let footer_segments = wrap_display(footer, width);
+    let body_budget = usize::from(inner_height)
+        .saturating_sub(lines.len())
+        .saturating_sub(1 + footer_segments.len())
+        .max(1);
     let mut previous_group: Option<&str> = None;
 
     if rows.is_empty() {
@@ -256,15 +261,12 @@ fn menu_lines<'a>(
     }
 
     lines.push(Line::from(""));
-    let footer = projection.footer.as_deref().unwrap_or(match state.mode {
-        MenuMode::Search => "type to filter · Backspace edit · Esc browse · Enter run",
-        MenuMode::Browse => "↑/↓ navigate · Tab category · / search · Enter run · Esc close",
-    });
-    lines.push(clipped_line(
-        footer,
-        width,
-        Style::default().fg(theme.dim()),
-    ));
+    for segment in footer_segments {
+        lines.push(Line::from(Span::styled(
+            segment,
+            Style::default().fg(theme.dim()),
+        )));
+    }
     lines
 }
 
@@ -962,6 +964,48 @@ mod tests {
         assert!(!text.contains("Row 29"), "{text}");
         assert!(text.contains("↑"), "{text}");
         assert!(text.contains("↓"), "{text}");
+    }
+
+    #[test]
+    fn rendered_lines_wrap_summary_and_footer_without_truncation() {
+        let mut projection = projection();
+        projection.summary = Some(
+            "Persisted profile controls. profile: user · file: /Users/operator/.omegon/profiles/default.json"
+                .into(),
+        );
+        projection.footer = Some(
+            "↑/↓ navigate · / filter · Enter use/view · s save · explicit /profile apply to apply · Esc close"
+                .into(),
+        );
+        let state = MenuState::new(&projection);
+
+        let theme = Alpharius;
+        let lines = menu_lines(&theme, &projection, &state, 40, 20);
+        let text_lines = lines
+            .into_iter()
+            .map(|line| {
+                let text = line
+                    .spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>();
+                assert!(
+                    UnicodeWidthStr::width(text.as_str()) <= 40,
+                    "line exceeds menu width: {text:?}"
+                );
+                text
+            })
+            .collect::<Vec<_>>();
+        let text = text_lines.join("\n");
+
+        assert!(
+            text.contains("/Users/operator/.omegon/profiles/default"),
+            "{text}"
+        );
+        assert!(text.contains(".json"), "{text}");
+        assert!(text.contains("explicit /profile apply to"), "{text}");
+        assert!(text.contains("apply · Esc close"), "{text}");
+        assert!(!text.contains('…'), "{text}");
     }
 
     #[test]
