@@ -1387,9 +1387,12 @@ pub enum SegmentRenderMode {
 /// The typed content of a conversation segment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageDisplayState {
+    /// Operator attachment remains visible until the agent begins responding.
     Preview,
     Collapsed,
     Expanded,
+    /// Standalone image evidence is not owned by an operator prompt.
+    Standalone,
 }
 
 #[derive(Debug, Clone)]
@@ -1590,12 +1593,24 @@ impl Segment {
         }
     }
     pub fn image(path: std::path::PathBuf, alt: impl Into<String>) -> Self {
+        Self::image_with_display(path, alt, ImageDisplayState::Standalone)
+    }
+
+    pub fn operator_image(path: std::path::PathBuf, alt: impl Into<String>) -> Self {
+        Self::image_with_display(path, alt, ImageDisplayState::Preview)
+    }
+
+    fn image_with_display(
+        path: std::path::PathBuf,
+        alt: impl Into<String>,
+        display: ImageDisplayState,
+    ) -> Self {
         Self {
             meta: SegmentMeta::default(),
             content: SegmentContent::Image {
                 path,
                 alt: alt.into(),
-                display: ImageDisplayState::Preview,
+                display,
             },
         }
     }

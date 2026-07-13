@@ -29,6 +29,8 @@ pub struct ConvState {
     cached_count: usize,
     /// Selected segment when heights were last computed.
     cached_selected_segment: Option<usize>,
+    /// One-shot request to align the selected projected segment to the viewport top.
+    snap_to_selected: bool,
     /// Total rendered height from the previous frame.
     /// Used to preserve a detached viewport when streaming grows content.
     last_total_height: u16,
@@ -44,6 +46,7 @@ impl ConvState {
             cached_mode: None,
             cached_count: 0,
             cached_selected_segment: None,
+            snap_to_selected: false,
             last_total_height: 0,
         }
     }
@@ -69,6 +72,11 @@ impl ConvState {
     pub fn force_scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
         self.user_scrolled = false;
+    }
+
+    pub fn snap_to_selected(&mut self) {
+        self.snap_to_selected = true;
+        self.user_scrolled = true;
     }
 
     /// Invalidate height cache — call when segments change.
@@ -335,7 +343,15 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
         let viewport_height = area.height;
         let total_height = state.total_height();
 
-        if state.user_scrolled && total_height > state.last_total_height {
+        if state.snap_to_selected {
+            if let Some(selected) = self.selected_segment {
+                let selected_top: u16 = state.heights[..selected].iter().copied().sum();
+                state.scroll_offset = total_height
+                    .saturating_sub(viewport_height)
+                    .saturating_sub(selected_top);
+            }
+            state.snap_to_selected = false;
+        } else if state.user_scrolled && total_height > state.last_total_height {
             state.scroll_offset = state
                 .scroll_offset
                 .saturating_add(total_height - state.last_total_height);

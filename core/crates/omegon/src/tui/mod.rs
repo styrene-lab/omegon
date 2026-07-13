@@ -13700,8 +13700,8 @@ pub async fn run_tui(
                             if modifiers.contains(KeyModifiers::ALT)
                                 && modifiers.contains(KeyModifiers::SHIFT) =>
                         {
-                            if let Some(area) = app.conversation_area {
-                                app.conversation.move_to_operator_prompt(true, area.height);
+                            if app.conversation.move_to_operator_prompt(true).is_some() {
+                                app.conversation.conv_state.snap_to_selected();
                             }
                             continue;
                         }
@@ -13709,8 +13709,8 @@ pub async fn run_tui(
                             if modifiers.contains(KeyModifiers::ALT)
                                 && modifiers.contains(KeyModifiers::SHIFT) =>
                         {
-                            if let Some(area) = app.conversation_area {
-                                app.conversation.move_to_operator_prompt(false, area.height);
+                            if app.conversation.move_to_operator_prompt(false).is_some() {
+                                app.conversation.conv_state.snap_to_selected();
                             }
                             continue;
                         }

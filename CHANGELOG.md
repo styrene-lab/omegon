@@ -19,7 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 
 - Added `Alt+Shift+Up/Down` conversation navigation that snaps the viewport between semantic operator-message anchors, complementing `Alt+Up/Down` editor-history recall.
-- Operator image attachments now remain visible for immediate send confirmation, collapse into compact transcript rows when assistant output starts, and toggle between collapsed and expanded rendering when the operator double-clicks the owning message or image.
+- Operator image attachments now remain visible for immediate send confirmation, collapse into compact transcript rows when assistant output or tool activity starts, and toggle between collapsed and expanded rendering when the operator double-clicks the owning message or image. Standalone tool-result images retain independent rendering state.
 
 - Added pre-0.29 unified-work foundations: a dependency-light `styrene-work-model` crate that separates authority, origin, capabilities, lifecycle, provenance/revision, and source-specific facets; plus `styrene-work-runtime`, an async refresh layer that publishes immutable generation snapshots and explicit partial-source warnings.
 

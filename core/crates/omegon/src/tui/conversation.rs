@@ -371,8 +371,10 @@ impl ConversationView {
 
         for (idx, path) in attachments.iter().enumerate() {
             if super::image::is_image_path(&path.to_string_lossy()) {
-                self.segments
-                    .push(Segment::image(path.clone(), attachment_alt_text(path, idx)));
+                self.segments.push(Segment::operator_image(
+                    path.clone(),
+                    attachment_alt_text(path, idx),
+                ));
             }
         }
 
@@ -543,6 +545,7 @@ impl ConversationView {
         detail_args: Option<&str>,
         expanded_by_default: bool,
     ) {
+        self.collapse_preview_images();
         if is_suppressed_control_plane_tool(name) {
             self.suppressed_tool_calls.insert(
                 id.to_string(),
@@ -1254,7 +1257,17 @@ impl ConversationView {
         }
         let end = self.segments[prompt_idx + 1..]
             .iter()
-            .position(|segment| matches!(segment.content, SegmentContent::UserPrompt { .. }))
+            .position(|segment| {
+                !matches!(
+                    segment.content,
+                    SegmentContent::Image {
+                        display: crate::tui::segments::ImageDisplayState::Preview
+                            | crate::tui::segments::ImageDisplayState::Collapsed
+                            | crate::tui::segments::ImageDisplayState::Expanded,
+                        ..
+                    }
+                )
+            })
             .map_or(self.segments.len(), |offset| prompt_idx + 1 + offset);
         let expand = self.segments[prompt_idx + 1..end].iter().any(|segment| {
             matches!(
@@ -1285,7 +1298,7 @@ impl ConversationView {
         changed
     }
 
-    pub fn move_to_operator_prompt(&mut self, previous: bool, viewport_height: u16) -> Option<usize> {
+    pub fn move_to_operator_prompt(&mut self, previous: bool) -> Option<usize> {
         let prompts = self
             .segments
             .iter()
@@ -1299,17 +1312,18 @@ impl ConversationView {
         let current = self.selected_segment.and_then(|idx| prompts.iter().position(|p| *p == idx));
         let target = if previous {
             current.and_then(|pos| pos.checked_sub(1)).unwrap_or(prompts.len() - 1)
+        } else if let Some(pos) = current {
+            if pos + 1 >= prompts.len() {
+                self.selected_segment = None;
+                self.conv_state.force_scroll_to_bottom();
+                return None;
+            }
+            pos + 1
         } else {
-            current.map(|pos| (pos + 1).min(prompts.len() - 1)).unwrap_or(prompts.len() - 1)
+            prompts.len() - 1
         };
         let idx = prompts[target];
         self.selected_segment = Some(idx);
-        if self.conv_state.heights.len() == self.segments.len() {
-            let total: u16 = self.conv_state.heights.iter().copied().sum();
-            let top: u16 = self.conv_state.heights[..idx].iter().copied().sum();
-            self.conv_state.scroll_offset = total.saturating_sub(top.saturating_add(viewport_height));
-            self.conv_state.user_scrolled = self.conv_state.scroll_offset > 0;
-        }
         Some(idx)
     }
 
@@ -1576,6 +1590,38 @@ mod tests {
     }
 
     #[test]
+    fn prompt_toggle_does_not_capture_later_tool_images() {
+        let mut cv = ConversationView::new();
+        cv.push_user_with_attachments("inspect", &[std::path::PathBuf::from("/tmp/paste.png")]);
+        cv.append_streaming("working");
+        cv.finalize_message();
+        cv.push_image(std::path::PathBuf::from("/tmp/tool.png"), "tool evidence");
+
+        assert_eq!(cv.toggle_image_attachments_for_prompt(0), 1);
+        assert!(matches!(
+            cv.segments.last().map(|segment| &segment.content),
+            Some(SegmentContent::Image {
+                display: crate::tui::segments::ImageDisplayState::Standalone,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn tool_start_collapses_operator_image_previews() {
+        let mut cv = ConversationView::new();
+        cv.push_user_with_attachments("inspect", &[std::path::PathBuf::from("/tmp/paste.png")]);
+        cv.push_tool_start("call", "read", None, None);
+        assert!(matches!(
+            cv.segments[1].content,
+            SegmentContent::Image {
+                display: crate::tui::segments::ImageDisplayState::Collapsed,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn operator_prompt_navigation_moves_between_semantic_anchors() {
         let mut cv = ConversationView::new();
         cv.push_user("first");
@@ -1585,9 +1631,12 @@ mod tests {
         cv.append_streaming("two");
         cv.finalize_message();
 
-        assert_eq!(cv.move_to_operator_prompt(true, 8), Some(3));
-        assert_eq!(cv.move_to_operator_prompt(true, 8), Some(0));
-        assert_eq!(cv.move_to_operator_prompt(false, 8), Some(3));
+        assert_eq!(cv.move_to_operator_prompt(true), Some(3));
+        assert_eq!(cv.move_to_operator_prompt(true), Some(0));
+        assert_eq!(cv.move_to_operator_prompt(false), Some(3));
+        assert_eq!(cv.move_to_operator_prompt(false), None);
+        assert_eq!(cv.selected_segment, None);
+        assert_eq!(cv.conv_state.scroll_offset, 0);
     }
 
     #[test]

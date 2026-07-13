@@ -26,7 +26,18 @@ pub fn render(
         return;
     }
 
-    // Keep the title short and stable. The full path is rendered in the body;
+    if area.height == 1 {
+        let label = format!(" ▦ {} · double-click to expand", props.alt);
+        Paragraph::new(Line::from(Span::styled(
+            label,
+            Style::default()
+                .fg(theme.accent_muted())
+                .bg(theme.bg()),
+        )))
+        .render(area, buf);
+        return;
+    }
+
     // putting it in the border title makes Ratatui clip the header hard on
     // narrow terminals and obscures the image chrome.
     let path_str = props.path.display().to_string();
