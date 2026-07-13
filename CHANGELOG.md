@@ -40,6 +40,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Fixed release license auditing to classify the complete explicit Cargo workspace—including the new `styrene-work-*` crates—as first-party without broadly trusting arbitrary `omegon-*` package names.
 - Fixed the stable release runner appearing to hang before output by replacing its global `RUSTFLAGS=-D warnings` rebuild of every transitive dependency with the workspace Clippy warning gate.
 - Made the outside-workspace bash permission regression portable across bare-metal and containerized CI environments while preserving assertions for host-bridge risk diagnostics when present.
 - Reconciled detached conversation scroll anchors when transcript content shrinks, preventing automatic image-preview collapse from jumping the viewport upward or leaving it blank while a tool call runs or fails.
