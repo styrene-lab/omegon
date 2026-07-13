@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-07-13
+
+0.28.0 makes Om the outcome-first TUI default, adds bounded Active workflows and evidence-complete Full projection, and completes the permissions intent architecture. Canonical activity, outcomes, and evidence now project consistently across TUI, IPC/WebSocket, transcript export, and replay without changing runtime authority.
+
 - Fixed the Profile TUI so project-scoped registry selections persist through the canonical `.omegon/active-profile.json` pointer and the profile summary/footer wrap instead of silently truncating paths and commands.
 - Made turn termination and provider stalls explicit: terminal reasons now distinguish completion, operator waits, blocking, turn limits, provider exhaustion, worker failures, and cancellation; the TUI projects lifecycle, stream-idle, and terminal provider-failure evidence instead of collapsing them into generic idle state.
 
@@ -71,10 +75,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Fixed ephemeral Workbench plan lifecycle without treating every prompt as a destructive task boundary: plans are sub-indexed within their owning session, replacement or explicit task-reset detachment retains the full plan snapshot in history, ordinary follow-up prompts leave the active lane intact, and repo-scoped plans remain active.
 - Fixed inline terminal images rendering near the top of the conversation instead of inside their bottom-anchored segment chrome when short conversations sit above the composer.
 - Improved design-tree path-collision diagnostics: creating `docs/<id>.md` now distinguishes an existing indexed design node from an ordinary or malformed Markdown document and directs operators to convert or repair invalid frontmatter.
-
-## [0.28.0] - 2026-07-10
-
-0.28.0 makes Om the outcome-first TUI default, adds bounded Active workflows and evidence-complete Full projection, and completes the permissions intent architecture. Canonical activity, outcomes, and evidence now project consistently across TUI, IPC/WebSocket, transcript export, and replay without changing runtime authority.
 
 ### Highlights
 
