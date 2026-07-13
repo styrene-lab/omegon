@@ -1545,7 +1545,15 @@ mod tests {
         let permission = err
             .downcast_ref::<crate::tools::PathPermissionError>()
             .expect("bash boundary hits must use PathPermissionError");
-        assert_eq!(permission.requested_path, "/etc/evil.txt");
+        assert!(
+            permission.requested_path.starts_with("/etc/evil.txt"),
+            "unexpected requested path: {}",
+            permission.requested_path
+        );
+        if permission.requested_path.len() > "/etc/evil.txt".len() {
+            assert!(permission.requested_path.contains("permission context warning"));
+            assert!(permission.requested_path.contains("HostBridge"));
+        }
         assert!(
             permission.directory.ends_with("/etc"),
             "unexpected directory: {}",

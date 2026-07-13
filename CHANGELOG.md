@@ -40,6 +40,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Made the outside-workspace bash permission regression portable across bare-metal and containerized CI environments while preserving assertions for host-bridge risk diagnostics when present.
 - Reconciled detached conversation scroll anchors when transcript content shrinks, preventing automatic image-preview collapse from jumping the viewport upward or leaving it blank while a tool call runs or fails.
 - Restored release-suite coverage after recent plan, footer, runtime-lifecycle, skill-reload, segment-selection, and WebSocket event changes: ephemeral plan assertions now use session-local IDs, compact-footer tests match the authoritative Workbench split, `/extension restart` uses the graceful process-restart path, live skill reloads emit skill-event segments, and event serialization covers all current variants.
 
