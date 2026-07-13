@@ -182,6 +182,11 @@ class ReleaseRecipeTests(unittest.TestCase):
         self.assertIn("Release version must be stable semver", block)
         self.assertIn("NEW_VERSION=\"$CURRENT\"", block)
 
+    def test_release_recipe_uses_clippy_warning_gate_without_rebuilding_dependencies(self) -> None:
+        block = self.release_block()
+        self.assertIn("{{cargo}} clippy -p omegon --all-targets -- -D warnings", block)
+        self.assertNotIn('RUSTFLAGS="-D warnings"', block)
+
     def test_release_recipe_builds_before_publish_instruction(self) -> None:
         block = self.release_block()
         self.assertIn("{{cargo}} build --release -p omegon", block)

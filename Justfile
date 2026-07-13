@@ -600,7 +600,10 @@ release:
     just preflight
 
     echo "Rust warning gate..."
-    RUSTFLAGS="-D warnings" {{cargo}} check -p omegon -q
+    # Pass warning denial through Clippy rather than RUSTFLAGS. Setting
+    # RUSTFLAGS invalidates the entire dependency cache, recompiles every
+    # transitive crate, and applies our warning policy to third-party code.
+    {{cargo}} clippy -p omegon --all-targets -- -D warnings
 
     CURRENT=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
     if echo "$CURRENT" | grep -q '-'; then
