@@ -33,6 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Shell filesystem-intent checks now treat heredoc payloads as opaque program input, preventing embedded source containing redirect-like text from triggering bogus permission requests; malformed UNC-like fragments must also contain valid server and share components before being classified as network paths.
 - Restored persistent web-search readiness and Omegon build-version status in the default Om footer. Readiness now uses one semantic network/failure glyph rather than ASCII plus one dot per provider, and it is pinned with the active binary identity at the bottom-right.
 - Neutralized routine plan footer and Workbench styling: normal plan state no longer consumes warning orange, active steps render bright and bold, completed steps bold and dim, and pending steps italic and dim.
 - Reattached stale detached conversation offsets when the operator submits the next turn, preventing an old `more below` position from carrying into a new exchange; streaming deltas now preserve the detached tail-height cache instead of invalidating it for every token, reducing severe scroll stutter during live responses.

@@ -246,8 +246,28 @@ fn is_windows_device_namespace(raw: &str) -> bool {
 }
 
 fn is_windows_unc(raw: &str) -> bool {
-    (raw.starts_with(r"\\") && !is_windows_verbatim(raw) && !is_windows_device_namespace(raw))
-        || (raw.starts_with("//") && !raw.starts_with("///"))
+    let rest = if raw.starts_with(r"\\")
+        && !is_windows_verbatim(raw)
+        && !is_windows_device_namespace(raw)
+    {
+        &raw[2..]
+    } else if raw.starts_with("//") && !raw.starts_with("///") {
+        &raw[2..]
+    } else {
+        return false;
+    };
+
+    let mut components = rest.split(['/', '\\']);
+    let server = components.next().unwrap_or_default();
+    let share = components.next().unwrap_or_default();
+    !server.is_empty()
+        && !share.is_empty()
+        && server
+            .chars()
+            .all(|ch| !ch.is_control() && !ch.is_ascii_whitespace() && !matches!(ch, '<' | '>' | '"' | '|' | '?' | '*'))
+        && share
+            .chars()
+            .all(|ch| !ch.is_control() && !ch.is_ascii_whitespace() && !matches!(ch, '<' | '>' | '"' | '|' | '?' | '*'))
 }
 
 fn windows_drive_absolute(raw: &str) -> Option<char> {
@@ -1363,6 +1383,20 @@ mod tests {
         assert!(matches!(
             PathTarget::classify("CON"),
             PathTarget::WindowsDevice { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_implausible_windows_unc_prefixes() {
+        for raw in [r"\\", r"\\server", r#"\\n<p>[!{marker}]")"#, "//server"] {
+            assert!(
+                !matches!(PathTarget::classify(raw), PathTarget::WindowsUnc { .. }),
+                "implausible UNC token was classified as network path: {raw}"
+            );
+        }
+        assert!(matches!(
+            PathTarget::classify("//server/share/file.txt"),
+            PathTarget::WindowsUnc { .. }
         ));
     }
 
