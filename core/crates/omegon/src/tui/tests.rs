@@ -2472,8 +2472,13 @@ fn streaming_assistant_omits_quick_copy_affordance() {
     }
 
     let rendered = (0..area.height)
-        .flat_map(|y| (0..area.width).map(move |x| buf[(x, y)].symbol().to_owned()))
-        .collect::<String>();
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(!rendered.contains(" Copy "), "got {rendered}");
     assert!((0..area.height).all(|row| {
         cv.assistant_copy_button_at(area, area.right() - 1, row)

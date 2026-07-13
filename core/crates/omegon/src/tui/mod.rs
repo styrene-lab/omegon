@@ -13456,7 +13456,7 @@ pub async fn run_tui(
                                     let _ = app.handle_copy_conversation_segment_action(
                                         CopyConversationSegmentAction {
                                             segment: ConversationSegmentRef::by_index(idx),
-                                            mode: SegmentExportMode::Plaintext,
+                                            mode: SegmentCopyMode::Plaintext,
                                         },
                                     );
                                     continue;
