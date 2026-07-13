@@ -164,7 +164,13 @@ impl SessionRow {
                 selected.push(field);
             }
         }
-        let mut spans = vec![Span::styled(" om", Style::default().fg(t.accent_muted()))];
+        let mut spans = vec![
+            Span::styled(" om", Style::default().fg(t.accent_muted())),
+            Span::styled(
+                format!(" {}", omegon_version_label()),
+                Style::default().fg(t.dim()),
+            ),
+        ];
         for (_, text, color) in selected {
             spans.push(Span::styled(" · ", Style::default().fg(t.dim())));
             spans.push(Span::styled(text, Style::default().fg(color)));
@@ -337,13 +343,7 @@ impl SessionRow {
 
         // Right-align version string. Official tag builds can stay compact;
         // branch/nightly/dev builds include the baked git hash for specificity.
-        let version = if env!("OMEGON_GIT_DESCRIBE").is_empty()
-            && !env!("OMEGON_GIT_SHA").contains("-dirty")
-        {
-            concat!("v", env!("CARGO_PKG_VERSION")).to_string()
-        } else {
-            format!("v{} {}", env!("CARGO_PKG_VERSION"), env!("OMEGON_GIT_SHA"))
-        };
+        let version = omegon_version_label();
         let version_width = version.len() + 1; // +1 for trailing space
         if used + version_width < w {
             let pad = w - used - version_width;
@@ -480,6 +480,14 @@ fn turn_state_field(state: &str) -> String {
         format!("{state:<WAITING_WIDTH$}")
     } else {
         state.to_string()
+    }
+}
+
+fn omegon_version_label() -> String {
+    if env!("OMEGON_GIT_DESCRIBE").is_empty() && !env!("OMEGON_GIT_SHA").contains("-dirty") {
+        concat!("v", env!("CARGO_PKG_VERSION")).to_string()
+    } else {
+        format!("v{} {}", env!("CARGO_PKG_VERSION"), env!("OMEGON_GIT_SHA"))
     }
 }
 
@@ -646,6 +654,7 @@ mod tests {
             .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
             .collect::<String>();
         assert!(text.contains("WEB ●○"), "{text}");
+        assert!(text.contains(&omegon_version_label()), "{text}");
     }
 
     #[test]
