@@ -109,31 +109,6 @@ impl SessionRow {
         let available = area.width as usize;
         let mut fields = Vec::new();
 
-        // Web readiness is persistent operational status in every presentation
-        // level. Om must not erase it merely because the rest of the session
-        // telemetry is compressed.
-        let configured = self
-            .web_search_providers
-            .iter()
-            .filter(|(_, configured)| *configured)
-            .count();
-        let web_status = if configured == 0 {
-            "WEB! ddg-only".to_string()
-        } else {
-            let ticks: String = self
-                .web_search_providers
-                .iter()
-                .map(|(_, configured)| if *configured { '●' } else { '○' })
-                .collect();
-            format!("WEB {ticks}")
-        };
-        let web_color = if configured == 0 {
-            t.warning()
-        } else {
-            t.success()
-        };
-        fields.push((0u8, web_status, web_color));
-
         if let Some(attention) = self
             .operator_hint
             .as_ref()
@@ -155,26 +130,32 @@ impl SessionRow {
         }
         fields.push((3, format!("ctx {:.0}%", self.context_percent), t.dim()));
 
+        let right_status = format!(
+            "{}  {} ",
+            web_readiness_glyph(self.web_search_providers.iter().any(|(_, ready)| *ready)),
+            omegon_version_label(),
+        );
+        let right_width = right_status.chars().count();
+        let left_budget = available.saturating_sub(right_width);
         let mut selected: Vec<(u8, String, ratatui::style::Color)> = Vec::new();
         let mut used = 1usize;
         for field in fields {
             let cost = field.1.chars().count() + if selected.is_empty() { 0 } else { 3 };
-            if used + cost <= available {
+            if used + cost <= left_budget {
                 used += cost;
                 selected.push(field);
             }
         }
-        let mut spans = vec![
-            Span::styled(" om", Style::default().fg(t.accent_muted())),
-            Span::styled(
-                format!(" {}", omegon_version_label()),
-                Style::default().fg(t.dim()),
-            ),
-        ];
+        let mut spans = vec![Span::styled(" om", Style::default().fg(t.accent_muted()))];
         for (_, text, color) in selected {
             spans.push(Span::styled(" · ", Style::default().fg(t.dim())));
             spans.push(Span::styled(text, Style::default().fg(color)));
         }
+        let left_width = spans.iter().map(|span| span.width()).sum::<usize>();
+        spans.push(Span::raw(" ".repeat(
+            available.saturating_sub(left_width + right_width),
+        )));
+        spans.push(Span::styled(right_status, Style::default().fg(t.dim())));
         frame.render_widget(Clear, area);
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
@@ -483,6 +464,16 @@ fn turn_state_field(state: &str) -> String {
     }
 }
 
+fn web_readiness_glyph(configured: bool) -> &'static str {
+    use crate::tui::glyphs::ToolCategoryGlyphRole;
+
+    if configured {
+        crate::tui::glyphs::glyphs().tool_category(ToolCategoryGlyphRole::Network)
+    } else {
+        crate::tui::glyphs::glyphs().tool_state(crate::tui::glyphs::ToolStateGlyphRole::Failed)
+    }
+}
+
 fn omegon_version_label() -> String {
     if env!("OMEGON_GIT_DESCRIBE").is_empty() && !env!("OMEGON_GIT_SHA").contains("-dirty") {
         concat!("v", env!("CARGO_PKG_VERSION")).to_string()
@@ -653,8 +644,12 @@ mod tests {
         let text = (0..80)
             .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
             .collect::<String>();
-        assert!(text.contains("WEB ●○"), "{text}");
-        assert!(text.contains(&omegon_version_label()), "{text}");
+        assert!(
+            text.contains(web_readiness_glyph(true)),
+            "{text}"
+        );
+        assert!(!text.contains("WEB"), "{text}");
+        assert!(text.trim_end().ends_with(&omegon_version_label()), "{text}");
     }
 
     #[test]
