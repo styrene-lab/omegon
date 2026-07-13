@@ -2079,7 +2079,7 @@ fn completed_plan_update_enables_done_view_hint_without_pinning() {
     assert!(app.completed_plan_history_available);
     assert!(app.workbench_state.active.is_none());
     let text = render_app_to_string(&mut app, 120, 18);
-    assert!(text.contains("plan complete · history available"), "{text}");
+    assert!(!text.contains("plan complete"), "{text}");
     assert!(
         !text.contains("remember me"),
         "completed history should not pin active lane: {text}"
@@ -2218,7 +2218,8 @@ fn assistant_completed_turn_keeps_incomplete_live_plan_lane() {
     assert!(app.workbench_state.active.is_some());
     let text = render_app_to_string(&mut app, 140, 18);
     assert!(text.contains("Harden set_recipe"), "{text}");
-    assert!(!text.contains("plan active"), "{text}");
+    assert!(text.contains("plan active"), "{text}");
+    assert!(text.contains("active plan"), "{text}");
     assert!(text.contains("turn done"), "{text}");
 }
 
@@ -5521,10 +5522,17 @@ fn runtime_inventory_status_queues_shared_control() {
 
 #[test]
 fn runtime_refresh_aliases_canonicalize() {
-    for args in ["refresh", "reload", "restart", "hot-restart"] {
+    for args in ["refresh", "reload"] {
         assert_eq!(
             crate::tui::canonical_slash_command("runtime", args),
             Some(crate::tui::CanonicalSlashCommand::RuntimeSubstrateRefresh),
+            "runtime {args}"
+        );
+    }
+    for args in ["restart", "hot-restart"] {
+        assert_eq!(
+            crate::tui::canonical_slash_command("runtime", args),
+            Some(crate::tui::CanonicalSlashCommand::RuntimeProcessRestart),
             "runtime {args}"
         );
     }
@@ -5632,11 +5640,7 @@ fn extension_search_menu_row_primes_editor_for_query() {
 
 #[test]
 fn extension_refresh_aliases_execute_shared_runtime_refresh() {
-    for command in [
-        "/extension refresh",
-        "/extension reload",
-        "/extension restart",
-    ] {
+    for command in ["/extension refresh", "/extension reload"] {
         let mut app = test_app();
         let (tx, mut rx) = test_tx_with_rx();
         assert!(matches!(
@@ -5651,6 +5655,21 @@ fn extension_refresh_aliases_execute_shared_runtime_refresh() {
             })
         ));
     }
+}
+
+#[test]
+fn extension_restart_queues_graceful_process_restart() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    assert!(matches!(
+        app.handle_slash_command("/extension restart", &tx),
+        SlashResult::Handled
+    ));
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(TuiCommand::RestartProcess { .. })
+    ));
 }
 
 #[test]

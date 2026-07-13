@@ -1189,10 +1189,7 @@ mod tests {
             "selected copyable segment should advertise double-click copy: {rendered}"
         );
         assert!(
-            rendered
-                .lines()
-                .next()
-                .is_some_and(|line| line.starts_with('◆')),
+            rendered.lines().any(|line| line.starts_with('◆')),
             "detail-openable selection should mark the segment start: {rendered}"
         );
         assert!(

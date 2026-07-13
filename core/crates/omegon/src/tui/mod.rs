@@ -9494,6 +9494,9 @@ warning: {warning}"
             .unwrap_or(0);
         let skills_after = if let Some(ref mut registry) = self.augment_registry {
             registry.load_skills(&cwd);
+            for event in registry.skill_activation_events() {
+                self.conversation.push_skill_event(event);
+            }
             registry.skill_count()
         } else {
             skills_before
@@ -9914,7 +9917,25 @@ Scroll transcript:
                     self.open_extension_runtime_menu();
                     SlashResult::Handled
                 } else if let Some(command) = canonical_slash_command("extension", args) {
-                    if let Some(request) =
+                    if matches!(command, CanonicalSlashCommand::RuntimeProcessRestart) {
+                        let binary = std::env::current_exe()
+                            .map_err(|error| error.to_string())
+                            .and_then(|path| path.canonicalize().map_err(|error| error.to_string()));
+                        match binary {
+                            Ok(binary) => {
+                                let args = std::env::args().skip(1).collect::<Vec<_>>();
+                                match tx.try_send(TuiCommand::RestartProcess { binary, args }) {
+                                    Ok(()) => SlashResult::Handled,
+                                    Err(error) => SlashResult::Display(format!(
+                                        "Extension restart failed: could not queue graceful restart: {error}"
+                                    )),
+                                }
+                            }
+                            Err(error) => SlashResult::Display(format!(
+                                "Extension restart failed: could not resolve current executable: {error}"
+                            )),
+                        }
+                    } else if let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {

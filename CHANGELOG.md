@@ -35,6 +35,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Restored release-suite coverage after recent plan, footer, runtime-lifecycle, skill-reload, segment-selection, and WebSocket event changes: ephemeral plan assertions now use session-local IDs, compact-footer tests match the authoritative Workbench split, `/extension restart` uses the graceful process-restart path, live skill reloads emit skill-event segments, and event serialization covers all current variants.
+
 - The documentation site now derives current crate/provider/tool/skill statistics from runtime sources, can pin release metadata with <code>OMEGON_SITE_RELEASE_TAG</code>, and removes stale slash commands, provider status, design-tree counts, lifecycle stages, model examples, and mouse shortcuts across the page-by-page reference audit.
 - Updated the public installation and artifact-verification examples to target the 0.28.0 stable release, removing stale 0.27.x commands from the generated docs site.
 - Double-clicking a bottom-aligned collapsed image now hits the rendered image row and expands the associated prompt attachments; conversation mouse hit testing now uses the same short-content viewport origin as rendering.

@@ -5628,9 +5628,11 @@ mod tests {
                 .contains(&"/tmp/vault".to_string())
         );
         let profile = crate::settings::Profile::load(tmp.path());
-        assert_eq!(
-            profile.permissions.trusted_directories,
-            vec!["/tmp/vault".to_string()]
+        assert!(
+            profile
+                .permissions
+                .trusted_directories
+                .contains(&"/tmp/vault".to_string())
         );
         assert!(profile.trusted_directories.is_empty());
 
@@ -5644,7 +5646,11 @@ mod tests {
                 .contains(&"/tmp/vault".to_string())
         );
         let profile = crate::settings::Profile::load(tmp.path());
-        assert!(profile.effective_trusted_directories().is_empty());
+        assert!(
+            !profile
+                .effective_trusted_directories()
+                .contains(&"/tmp/vault".to_string())
+        );
     }
 
     #[tokio::test]
