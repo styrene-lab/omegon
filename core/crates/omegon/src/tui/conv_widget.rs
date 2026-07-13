@@ -328,6 +328,25 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
             return;
         }
 
+        // Preserve the logical segment at the top of a detached viewport when
+        // an in-place mutation changes measured heights (for example, an
+        // operator image folding from preview to one row). A total-height
+        // delta alone cannot distinguish changes above the viewport from
+        // changes within or below it.
+        let previous_anchor = if state.user_scrolled
+            && state.heights.len() == self.segments.len()
+            && state.last_total_height > 0
+        {
+            let previous_top = state
+                .last_total_height
+                .saturating_sub(area.height)
+                .saturating_sub(state.scroll_offset);
+            segment_anchor_at_top(&state.heights, previous_top)
+        } else {
+            None
+        };
+        let previous_segment_count = state.heights.len();
+
         // Ensure all segment heights are computed
         let measure_ctx = SegmentRenderContext::new(self.theme, self.mode)
             .with_density(self.density)
@@ -351,16 +370,27 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     .saturating_sub(selected_top);
             }
             state.snap_to_selected = false;
-        } else if state.user_scrolled {
-            if total_height > state.last_total_height {
-                state.scroll_offset = state
-                    .scroll_offset
-                    .saturating_add(total_height - state.last_total_height);
-            } else if total_height < state.last_total_height {
-                state.scroll_offset = state
-                    .scroll_offset
-                    .saturating_sub(state.last_total_height - total_height);
-            }
+        } else if state.user_scrolled
+            && previous_segment_count == self.segments.len()
+            && let Some((anchor_segment, row_within_segment)) = previous_anchor
+        {
+            let anchor_top: u16 = state.heights[..anchor_segment]
+                .iter()
+                .copied()
+                .fold(0u16, u16::saturating_add);
+            let anchored_top = anchor_top.saturating_add(
+                row_within_segment.min(state.heights[anchor_segment].saturating_sub(1)),
+            );
+            state.scroll_offset = total_height
+                .saturating_sub(viewport_height)
+                .saturating_sub(anchored_top);
+        } else if state.user_scrolled && total_height > state.last_total_height {
+            // Segment insertion has no stable prior index to anchor against.
+            // Retain the established bottom-relative growth behavior so new
+            // output below a detached viewport does not pull it downward.
+            state.scroll_offset = state
+                .scroll_offset
+                .saturating_add(total_height - state.last_total_height);
         }
 
         // Clamp scroll offset so we don't scroll past the top
@@ -533,6 +563,21 @@ fn render_detail_affordance_hint(area: Rect, buf: &mut Buffer, theme: &dyn Theme
             cell.set_style(style);
         }
     }
+}
+
+fn segment_anchor_at_top(heights: &[u16], top_offset: u16) -> Option<(usize, u16)> {
+    let mut segment_top = 0u16;
+    for (index, height) in heights.iter().copied().enumerate() {
+        let segment_bottom = segment_top.saturating_add(height);
+        if top_offset < segment_bottom {
+            return Some((index, top_offset.saturating_sub(segment_top)));
+        }
+        segment_top = segment_bottom;
+    }
+    heights
+        .len()
+        .checked_sub(1)
+        .map(|index| (index, heights[index].saturating_sub(1)))
 }
 
 fn measured_segment_height(
@@ -947,6 +992,88 @@ mod tests {
             state.heights[0] > 1,
             "completed detached tail must be remeasured so it cannot look truncated"
         );
+    }
+
+    #[test]
+    fn detached_viewport_preserves_logical_anchor_when_content_above_shrinks() {
+        let mut segments = vec![
+            Segment::operator_image("/tmp/paste.png".into(), "pasted image"),
+            Segment::user_prompt("anchor"),
+            Segment::user_prompt("tail one"),
+            Segment::user_prompt("tail two"),
+        ];
+        let area = Rect::new(0, 0, 40, 4);
+        let mut state = ConvState::new();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+        let anchor_top = state.heights[0];
+        state.scroll_offset = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(anchor_top);
+        state.user_scrolled = true;
+        let previous_offset = state.scroll_offset;
+
+        if let SegmentContent::Image { display, .. } = &mut segments[0].content {
+            *display = crate::tui::segments::ImageDisplayState::Collapsed;
+        }
+        state.invalidate();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+
+        assert_eq!(
+            state.scroll_offset, previous_offset,
+            "shrinking a segment above the viewport must preserve the same logical segment anchor"
+        );
+        let new_top = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(state.scroll_offset);
+        assert_eq!(new_top, state.heights[0]);
+    }
+
+    #[test]
+    fn detached_viewport_preserves_top_coordinate_when_content_below_shrinks() {
+        let mut segments = vec![
+            Segment::user_prompt("anchor"),
+            Segment::user_prompt("middle"),
+            Segment::operator_image("/tmp/paste.png".into(), "pasted image"),
+        ];
+        let area = Rect::new(0, 0, 40, 4);
+        let mut state = ConvState::new();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+        state.scroll_offset = state.last_total_height.saturating_sub(area.height);
+        state.user_scrolled = true;
+        let previous_top = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(state.scroll_offset);
+
+        if let SegmentContent::Image { display, .. } = &mut segments[2].content {
+            *display = crate::tui::segments::ImageDisplayState::Collapsed;
+        }
+        state.invalidate();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+
+        let new_top = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(state.scroll_offset);
+        assert_eq!(new_top, previous_top);
     }
 
     #[test]
