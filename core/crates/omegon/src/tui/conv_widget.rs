@@ -411,6 +411,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                 .render(seg_area, buf, self.theme, |content_area, buf| {
                     segment.render_in_context(content_area, buf, &render_ctx);
                 });
+                render_assistant_copy_affordance(seg_area, buf, self.theme, segment);
             } else {
                 // Segment starts ABOVE the viewport — partially visible.
                 // Render into a temp buffer at full size, then copy the
@@ -453,6 +454,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                         segment.render_in_context(content_area, buf, &render_ctx);
                     },
                 );
+                render_assistant_copy_affordance(temp_area, &mut temp_buf, self.theme, segment);
                 // Copy the visible portion from temp_buf to main buf
                 for row in 0..visible_rows {
                     let src_y = clip_rows + row;
@@ -526,6 +528,35 @@ fn measured_segment_height(
     .content_area(Rect::new(0, 0, width, 1))
     .width;
     segment.height_in_context(content_width, ctx)
+}
+
+fn render_assistant_copy_affordance(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: &dyn Theme,
+    segment: &Segment,
+) {
+    const LABEL: &str = " Copy ";
+    let eligible = matches!(
+        &segment.content,
+        super::segments::SegmentContent::AssistantText { complete: true, .. }
+    );
+    let label_width = LABEL.chars().count() as u16;
+    if !eligible || area.height == 0 || area.width < label_width {
+        return;
+    }
+
+    let x = area.right().saturating_sub(label_width);
+    let style = Style::default()
+        .fg(theme.bg())
+        .bg(theme.accent_bright())
+        .add_modifier(Modifier::BOLD);
+    for (offset, ch) in LABEL.chars().enumerate() {
+        if let Some(cell) = buf.cell_mut((x + offset as u16, area.y)) {
+            cell.set_char(ch);
+            cell.set_style(style);
+        }
+    }
 }
 
 fn is_collapsed_expandable_tool_card(segment: &Segment) -> bool {
@@ -719,13 +750,18 @@ mod tests {
             .filter_map(|x| buf.cell((x, y)))
             .filter(|cell| cell.symbol() != " ")
             .collect::<Vec<_>>();
-        assert!(!styled_cells.is_empty(), "hint should render visible chrome");
+        assert!(
+            !styled_cells.is_empty(),
+            "hint should render visible chrome"
+        );
         assert!(
             styled_cells.iter().all(|cell| cell.fg == Alpharius.muted()),
             "detached navigation hint must remain neutral"
         );
         assert!(
-            styled_cells.iter().all(|cell| cell.fg != Alpharius.warning()),
+            styled_cells
+                .iter()
+                .all(|cell| cell.fg != Alpharius.warning()),
             "detached navigation hint must not consume the attention color"
         );
     }
@@ -788,7 +824,10 @@ mod tests {
         let expected_segment_y = area.bottom() - segment_height;
         assert_eq!(image_area.x, area.x + 1);
         assert_eq!(image_area.y, expected_segment_y + 1);
-        assert!(image_area.y > area.y, "overlay must not be pinned to viewport top");
+        assert!(
+            image_area.y > area.y,
+            "overlay must not be pinned to viewport top"
+        );
         assert!(image_area.bottom() < area.bottom());
     }
 

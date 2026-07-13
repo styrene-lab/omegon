@@ -2419,9 +2419,11 @@ fn text_copy_modal_uses_wide_copy_surface_with_non_copy_footer() {
 }
 
 #[test]
-fn conversation_omits_inline_copy_affordance() {
+fn completed_assistant_renders_single_click_copy_affordance() {
     let mut cv = ConversationView::new();
-    cv.push_user("alpha beta gamma");
+    cv.push_user("operator prompt");
+    cv.append_streaming("alpha beta gamma");
+    cv.finalize_message();
 
     let t = crate::tui::theme::Alpharius;
     let area = Rect::new(0, 0, 80, 8);
@@ -2440,7 +2442,43 @@ fn conversation_omits_inline_copy_affordance() {
         })
         .collect::<Vec<_>>()
         .join("\n");
+    assert_eq!(rendered.matches(" Copy ").count(), 1, "got {rendered}");
+
+    let assistant_row = (0..area.height)
+        .find(|&row| cv.assistant_copy_button_at(area, area.right() - 1, row) == Some(1))
+        .expect("assistant copy target should map to its visible first row");
+    assert_eq!(
+        cv.assistant_copy_button_at(area, area.right() - 6, assistant_row),
+        Some(1)
+    );
+    assert_eq!(
+        cv.assistant_copy_button_at(area, area.right() - 7, assistant_row),
+        None
+    );
+}
+
+#[test]
+fn streaming_assistant_omits_quick_copy_affordance() {
+    let mut cv = ConversationView::new();
+    cv.append_streaming("still arriving");
+
+    let t = crate::tui::theme::Alpharius;
+    let area = Rect::new(0, 0, 80, 8);
+    let mut buf = Buffer::empty(area);
+    {
+        let (segments, state) = cv.segments_and_state();
+        let widget = crate::tui::conv_widget::ConversationWidget::new(segments, &t);
+        widget.render(area, &mut buf, state);
+    }
+
+    let rendered = (0..area.height)
+        .flat_map(|y| (0..area.width).map(move |x| buf[(x, y)].symbol().to_owned()))
+        .collect::<String>();
     assert!(!rendered.contains(" Copy "), "got {rendered}");
+    assert!((0..area.height).all(|row| {
+        cv.assistant_copy_button_at(area, area.right() - 1, row)
+            .is_none()
+    }));
 }
 
 #[test]
@@ -5577,7 +5615,10 @@ Loaded by runtime substrate refresh.
             .iter()
             .any(|event| event.active_ref.contains("runtime-refresh-skill"))
     );
-    assert!(message.contains("Skills active for future requests: 0 →"), "{message}");
+    assert!(
+        message.contains("Skills active for future requests: 0 →"),
+        "{message}"
+    );
     assert!(message.contains("Your session stayed open"), "{message}");
     assert!(message.contains("Not restarted"), "{message}");
 }

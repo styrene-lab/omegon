@@ -28,6 +28,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Restored an explicit single-click `Copy` affordance on completed assistant responses while retaining double-click copy as a secondary shortcut; operator, tool, system, and streaming segments remain free of persistent copy chrome.
 - Kept the persistent web-search readiness gauge visible when fresh-session provider discovery is unavailable, conservatively rendering `WEB! ddg-only` instead of silently omitting the gauge.
 - Resolved and switched the live serving route when applying a selected profile's model intent, rejecting unavailable profile routes instead of reporting success after only mutating intent metadata; synchronized shared runtime model status with the resolved serving route and retained the registry ID for profile files without an embedded display name.
 - Routed ACP `/status` through the worker-owned shared `HarnessStatusProjection`, removing the abbreviated transport-only liveness response and giving ACP the same redacted harness/runtime contract as the TUI.

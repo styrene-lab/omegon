@@ -939,9 +939,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 crate::settings::ProfileSaveTarget::User,
             ))
         }
-        "profile"
-            if (args.starts_with("save --name ") || args.starts_with("capture --name ")) =>
-        {
+        "profile" if (args.starts_with("save --name ") || args.starts_with("capture --name ")) => {
             // `/profile save --name <name>` → user scope (default)
             // `/profile save --name <name> --project` → project scope
             let rest = args
@@ -4642,8 +4640,7 @@ impl App {
                             "Use",
                             format!(
                                 "/profile use {} {}",
-                                shlex::try_quote(&entry.id)
-                                    .unwrap_or_else(|_| "''".into()),
+                                shlex::try_quote(&entry.id).unwrap_or_else(|_| "''".into()),
                                 entry.scope.as_str()
                             ),
                         )
@@ -13445,36 +13442,56 @@ pub async fn run_tui(
                             app.last_left_click = Some((mouse.column, mouse.row, now));
                         } else if point_in(app.conversation_area) {
                             app.dashboard.sidebar_active = false;
-                            if let Some(area) = app.conversation_area
-                                && let Some(idx) = app.conversation.segment_at(area, mouse.row)
-                            {
-                                let now = std::time::Instant::now();
-                                let is_double = app.last_left_click.is_some_and(|(col, row, t)| {
-                                    row == mouse.row
-                                        && col.abs_diff(mouse.column) <= 1
-                                        && row.abs_diff(mouse.row) <= 1
-                                        && now.duration_since(t) <= Duration::from_millis(400)
-                                });
-                                let _ = app.handle_select_conversation_segment_action(
-                                    SelectConversationSegmentAction {
-                                        segment: ConversationSegmentRef::by_index(idx),
-                                    },
-                                );
-                                if is_double {
-                                    if app.conversation.is_segment_collapsed_tool_card(idx) {
-                                        app.conversation.toggle_expand(idx);
-                                        app.show_toast(
-                                            "Expanded selected tool result",
-                                            ratatui_toaster::ToastType::Success,
-                                        );
-                                        app.effects.pulse_conversation_action();
-                                    } else if app.conversation.is_segment_copyable(idx) {
-                                        app.copy_selected_conversation_segment_with_mode(
-                                            SegmentExportMode::Plaintext,
-                                        );
-                                    }
+                            if let Some(area) = app.conversation_area {
+                                if let Some(idx) = app.conversation.assistant_copy_button_at(
+                                    area,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    let _ = app.handle_select_conversation_segment_action(
+                                        SelectConversationSegmentAction {
+                                            segment: ConversationSegmentRef::by_index(idx),
+                                        },
+                                    );
+                                    let _ = app.handle_copy_conversation_segment_action(
+                                        CopyConversationSegmentAction {
+                                            segment: ConversationSegmentRef::by_index(idx),
+                                            mode: SegmentExportMode::Plaintext,
+                                        },
+                                    );
+                                    continue;
                                 }
-                                app.last_left_click = Some((mouse.column, mouse.row, now));
+                                if let Some(idx) = app.conversation.segment_at(area, mouse.row) {
+                                    let now = std::time::Instant::now();
+                                    let is_double =
+                                        app.last_left_click.is_some_and(|(col, row, t)| {
+                                            row == mouse.row
+                                                && col.abs_diff(mouse.column) <= 1
+                                                && row.abs_diff(mouse.row) <= 1
+                                                && now.duration_since(t)
+                                                    <= Duration::from_millis(400)
+                                        });
+                                    let _ = app.handle_select_conversation_segment_action(
+                                        SelectConversationSegmentAction {
+                                            segment: ConversationSegmentRef::by_index(idx),
+                                        },
+                                    );
+                                    if is_double {
+                                        if app.conversation.is_segment_collapsed_tool_card(idx) {
+                                            app.conversation.toggle_expand(idx);
+                                            app.show_toast(
+                                                "Expanded selected tool result",
+                                                ratatui_toaster::ToastType::Success,
+                                            );
+                                            app.effects.pulse_conversation_action();
+                                        } else if app.conversation.is_segment_copyable(idx) {
+                                            app.copy_selected_conversation_segment_with_mode(
+                                                SegmentExportMode::Plaintext,
+                                            );
+                                        }
+                                    }
+                                    app.last_left_click = Some((mouse.column, mouse.row, now));
+                                }
                             }
                         } else if point_in(app.editor_area) {
                             app.dashboard.sidebar_active = false;
