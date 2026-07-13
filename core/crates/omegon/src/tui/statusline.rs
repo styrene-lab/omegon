@@ -152,9 +152,9 @@ impl SessionRow {
             spans.push(Span::styled(text, Style::default().fg(color)));
         }
         let left_width = spans.iter().map(|span| span.width()).sum::<usize>();
-        spans.push(Span::raw(" ".repeat(
-            available.saturating_sub(left_width + right_width),
-        )));
+        spans.push(Span::raw(
+            " ".repeat(available.saturating_sub(left_width + right_width)),
+        ));
         spans.push(Span::styled(right_status, Style::default().fg(t.dim())));
         frame.render_widget(Clear, area);
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -644,10 +644,7 @@ mod tests {
         let text = (0..80)
             .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
             .collect::<String>();
-        assert!(
-            text.contains(web_readiness_glyph(true)),
-            "{text}"
-        );
+        assert!(text.contains(web_readiness_glyph(true)), "{text}");
         assert!(!text.contains("WEB"), "{text}");
         assert!(text.trim_end().ends_with(&omegon_version_label()), "{text}");
     }

@@ -1705,10 +1705,12 @@ impl<'a> ProjectConversationSegment<'a> for Segment {
                     text: text.as_str(),
                 })
             }
-            SegmentContent::Image { path, alt, .. } => ConversationSegmentKind::Image(ImageSegment {
-                path: path.as_path(),
-                alt: alt.as_str(),
-            }),
+            SegmentContent::Image { path, alt, .. } => {
+                ConversationSegmentKind::Image(ImageSegment {
+                    path: path.as_path(),
+                    alt: alt.as_str(),
+                })
+            }
             SegmentContent::TurnSeparator => ConversationSegmentKind::Separator,
         };
         ConversationSegmentProjection::new(kind)

@@ -817,7 +817,11 @@ fn mask_heredoc_bodies(command: &str) -> String {
             if strip_tabs {
                 cursor += 1;
             }
-            while syntax.as_bytes().get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            while syntax
+                .as_bytes()
+                .get(cursor)
+                .is_some_and(u8::is_ascii_whitespace)
+            {
                 cursor += 1;
             }
 

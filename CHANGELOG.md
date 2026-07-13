@@ -33,6 +33,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Removed the archived `omegon-pi` sibling from repository test/typecheck recipes, test counts, npm migration messaging, and package documentation; release validation now covers only maintained Omegon surfaces.
+- Updated the Claude Code OAuth user-agent to match upstream `@anthropic-ai/claude-code` 2.1.207, preserving subscription recognition for the 0.28.0 release.
+- Cleared Rust 1.8x Clippy regressions across conversation telemetry, control-runtime summaries, skill frontmatter parsing, path classification, TUI rendering, and related tests so the release lint gate remains warning-free.
 - Shell filesystem-intent checks now treat heredoc payloads as opaque program input, preventing embedded source containing redirect-like text from triggering bogus permission requests; malformed UNC-like fragments must also contain valid server and share components before being classified as network paths.
 - Restored persistent web-search readiness and Omegon build-version status in the default Om footer. Readiness now uses one semantic network/failure glyph rather than ASCII plus one dot per provider, and it is pinned with the active binary identity at the bottom-right.
 - Neutralized routine plan footer and Workbench styling: normal plan state no longer consumes warning orange, active steps render bright and bold, completed steps bold and dim, and pending steps italic and dim.

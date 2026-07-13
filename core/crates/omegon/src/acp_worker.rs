@@ -747,7 +747,7 @@ async fn handle_control_request(
                 .clone();
             let projection = crate::surfaces::diagnostics::SessionStatsProjection {
                 version: crate::surfaces::diagnostics::DIAGNOSTIC_PROJECTION_VERSION,
-                turns: conversation.turn_count() as u32,
+                turns: conversation.turn_count(),
                 tool_calls: None,
                 model: settings.model,
                 thinking: settings.thinking.as_str().to_string(),

@@ -2008,7 +2008,9 @@ open_questions:
                 .trusted_directories
                 .contains(&trusted_dir)
         );
-        let profile = crate::settings::Profile::load(project.path());
+        let raw_profile =
+            std::fs::read_to_string(project.path().join(".omegon/profile.json")).unwrap();
+        let profile: crate::settings::Profile = serde_json::from_str(&raw_profile).unwrap();
         assert!(
             profile
                 .effective_trusted_directories()

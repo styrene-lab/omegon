@@ -82,15 +82,10 @@ impl ConversationState {
         provider: Option<&str>,
     ) -> Option<omegon_traits::ProviderTelemetrySnapshot> {
         self.canonical.iter().rev().find_map(|msg| match msg {
-            AgentMessage::Assistant(assistant, _) => {
-                assistant.provider_telemetry.clone().and_then(|t| {
-                    if provider.is_none_or(|p| t.provider == p) {
-                        Some(t)
-                    } else {
-                        None
-                    }
-                })
-            }
+            AgentMessage::Assistant(assistant, _) => assistant
+                .provider_telemetry
+                .clone()
+                .filter(|t| provider.is_none_or(|p| t.provider == p)),
             _ => None,
         })
     }

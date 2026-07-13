@@ -2065,9 +2065,7 @@ pub async fn session_stats_view_response(
         .session
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let turns = session
-        .turns
-        .max(runtime_state.conversation.turn_count() as u32);
+    let turns = session.turns.max(runtime_state.conversation.turn_count());
     let tool_calls = session.tool_calls;
     let live_harness = agent
         .dashboard_handles
@@ -3424,7 +3422,8 @@ pub async fn profile_apply_response(
         profile.apply_to_with_posture(&mut s, &agent.cwd);
     }
 
-    let resolved_model = match apply_profile_model_intent(&profile, route_controller.as_ref()).await {
+    let resolved_model = match apply_profile_model_intent(&profile, route_controller.as_ref()).await
+    {
         Ok(model) => model,
         Err(error) => {
             return SlashCommandResponse {
@@ -3943,11 +3942,11 @@ fn render_profile_export(
             if slim { "on" } else { "off" }
         ));
     }
-    if let Some(order) = settings_json["provider_order"].as_array() {
-        if !order.is_empty() {
-            let providers: Vec<&str> = order.iter().filter_map(|v| v.as_str()).collect();
-            out.push_str(&format!("- Provider order: `{}`\n", providers.join(" → ")));
-        }
+    if let Some(order) = settings_json["provider_order"].as_array()
+        && !order.is_empty()
+    {
+        let providers: Vec<&str> = order.iter().filter_map(|v| v.as_str()).collect();
+        out.push_str(&format!("- Provider order: `{}`\n", providers.join(" → ")));
     }
 
     // Persona
@@ -3961,17 +3960,17 @@ fn render_profile_export(
         if let Some(badge) = persona_json["badge"].as_str() {
             out.push_str(&format!("- Badge: {badge}\n"));
         }
-        if let Some(skills) = persona_json["activated_skills"].as_array() {
-            if !skills.is_empty() {
-                let names: Vec<&str> = skills.iter().filter_map(|v| v.as_str()).collect();
-                out.push_str(&format!("- Skills: {}\n", names.join(", ")));
-            }
+        if let Some(skills) = persona_json["activated_skills"].as_array()
+            && !skills.is_empty()
+        {
+            let names: Vec<&str> = skills.iter().filter_map(|v| v.as_str()).collect();
+            out.push_str(&format!("- Skills: {}\n", names.join(", ")));
         }
-        if let Some(disabled) = persona_json["disabled_tools"].as_array() {
-            if !disabled.is_empty() {
-                let names: Vec<&str> = disabled.iter().filter_map(|v| v.as_str()).collect();
-                out.push_str(&format!("- Disabled tools: {}\n", names.join(", ")));
-            }
+        if let Some(disabled) = persona_json["disabled_tools"].as_array()
+            && !disabled.is_empty()
+        {
+            let names: Vec<&str> = disabled.iter().filter_map(|v| v.as_str()).collect();
+            out.push_str(&format!("- Disabled tools: {}\n", names.join(", ")));
         }
     }
 

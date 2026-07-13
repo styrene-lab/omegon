@@ -5470,7 +5470,7 @@ fn build_tui_secret_readiness_snapshot(
                 ) {
                     let response = control_runtime::runtime_substrate_refresh_response(
                         &mut runtime_state,
-                        &mut agent,
+                        &agent,
                     )
                     .await;
                     if let Some(reply) = respond_to {

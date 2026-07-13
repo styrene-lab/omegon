@@ -161,7 +161,10 @@ mod tests {
         let decision = resolve_subagent_route(&request, &snapshot, "ollama:qwen3:32b");
         assert_eq!(decision.source, SubagentRouteSource::CompiledFallback);
         assert_eq!(decision.selected_model, "openai:gpt-5.6");
-        assert_eq!(decision.fallback_reason.as_deref(), Some("inherited parent route"));
+        assert_eq!(
+            decision.fallback_reason.as_deref(),
+            Some("inherited parent route")
+        );
     }
 
     #[test]

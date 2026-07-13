@@ -246,28 +246,29 @@ fn is_windows_device_namespace(raw: &str) -> bool {
 }
 
 fn is_windows_unc(raw: &str) -> bool {
-    let rest = if raw.starts_with(r"\\")
-        && !is_windows_verbatim(raw)
-        && !is_windows_device_namespace(raw)
-    {
-        &raw[2..]
-    } else if raw.starts_with("//") && !raw.starts_with("///") {
-        &raw[2..]
-    } else {
+    let is_standard_unc =
+        raw.starts_with(r"\\") && !is_windows_verbatim(raw) && !is_windows_device_namespace(raw);
+    let is_slash_unc = raw.starts_with("//") && !raw.starts_with("///");
+    if !is_standard_unc && !is_slash_unc {
         return false;
-    };
+    }
+    let rest = &raw[2..];
 
     let mut components = rest.split(['/', '\\']);
     let server = components.next().unwrap_or_default();
     let share = components.next().unwrap_or_default();
     !server.is_empty()
         && !share.is_empty()
-        && server
-            .chars()
-            .all(|ch| !ch.is_control() && !ch.is_ascii_whitespace() && !matches!(ch, '<' | '>' | '"' | '|' | '?' | '*'))
-        && share
-            .chars()
-            .all(|ch| !ch.is_control() && !ch.is_ascii_whitespace() && !matches!(ch, '<' | '>' | '"' | '|' | '?' | '*'))
+        && server.chars().all(|ch| {
+            !ch.is_control()
+                && !ch.is_ascii_whitespace()
+                && !matches!(ch, '<' | '>' | '"' | '|' | '?' | '*')
+        })
+        && share.chars().all(|ch| {
+            !ch.is_control()
+                && !ch.is_ascii_whitespace()
+                && !matches!(ch, '<' | '>' | '"' | '|' | '?' | '*')
+        })
 }
 
 fn windows_drive_absolute(raw: &str) -> Option<char> {

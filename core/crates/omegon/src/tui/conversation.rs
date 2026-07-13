@@ -1250,7 +1250,9 @@ impl ConversationView {
 
     pub fn toggle_image_attachments_for_prompt(&mut self, prompt_idx: usize) -> usize {
         if !matches!(
-            self.segments.get(prompt_idx).map(|segment| &segment.content),
+            self.segments
+                .get(prompt_idx)
+                .map(|segment| &segment.content),
             Some(SegmentContent::UserPrompt { .. })
         ) {
             return 0;
@@ -1309,9 +1311,13 @@ impl ConversationView {
         if prompts.is_empty() {
             return None;
         }
-        let current = self.selected_segment.and_then(|idx| prompts.iter().position(|p| *p == idx));
+        let current = self
+            .selected_segment
+            .and_then(|idx| prompts.iter().position(|p| *p == idx));
         let target = if previous {
-            current.and_then(|pos| pos.checked_sub(1)).unwrap_or(prompts.len() - 1)
+            current
+                .and_then(|pos| pos.checked_sub(1))
+                .unwrap_or(prompts.len() - 1)
         } else if let Some(pos) = current {
             if pos + 1 >= prompts.len() {
                 self.selected_segment = None;
@@ -1503,12 +1509,16 @@ impl ConversationView {
 
     pub fn toggle_image_attachments_at(&mut self, segment_idx: usize) -> usize {
         let prompt_idx = if matches!(
-            self.segments.get(segment_idx).map(|segment| &segment.content),
+            self.segments
+                .get(segment_idx)
+                .map(|segment| &segment.content),
             Some(SegmentContent::UserPrompt { .. })
         ) {
             segment_idx
         } else if matches!(
-            self.segments.get(segment_idx).map(|segment| &segment.content),
+            self.segments
+                .get(segment_idx)
+                .map(|segment| &segment.content),
             Some(SegmentContent::Image { .. })
         ) {
             self.segments[..segment_idx]

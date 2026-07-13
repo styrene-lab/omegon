@@ -30,9 +30,7 @@ pub fn render(
         let label = format!(" ▦ {} · double-click to expand", props.alt);
         Paragraph::new(Line::from(Span::styled(
             label,
-            Style::default()
-                .fg(theme.accent_muted())
-                .bg(theme.bg()),
+            Style::default().fg(theme.accent_muted()).bg(theme.bg()),
         )))
         .render(area, buf);
         return;

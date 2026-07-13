@@ -1199,8 +1199,8 @@ mod tests {
             crate::settings::ToolDetail::Lean,
         );
 
-        let label_width = compact_row::prefix_width("⌘", "bash", false)
-            .saturating_sub(" · ".len() as u16);
+        let label_width =
+            compact_row::prefix_width("⌘", "bash", false).saturating_sub(" · ".len() as u16);
         let label_cells = (area.left()..area.left() + label_width)
             .filter_map(|x| buf.cell((x, area.y)))
             .collect::<Vec<_>>();
@@ -1239,8 +1239,8 @@ mod tests {
                 false,
             );
 
-            let label_end = compact_row::prefix_width("⌘", "bash", false)
-                .saturating_sub(" · ".len() as u16);
+            let label_end =
+                compact_row::prefix_width("⌘", "bash", false).saturating_sub(" · ".len() as u16);
             let label_cells = (area.left()..area.left() + label_end)
                 .filter_map(|x| buf.cell((x, area.y)))
                 .collect::<Vec<_>>();

@@ -686,9 +686,12 @@ impl crate::conversation::IntentDocument {
             return None;
         }
         let plan_id = plan.plan_id.clone();
-        self.retained_session_plans.retain(|saved| saved.plan_id != plan_id);
+        self.retained_session_plans
+            .retain(|saved| saved.plan_id != plan_id);
         self.retained_session_plans.push(plan);
-        self.plan_registry_view.entries.retain(|entry| entry.plan_id != plan_id);
+        self.plan_registry_view
+            .entries
+            .retain(|entry| entry.plan_id != plan_id);
         self.plan_registry_view.entries.push(PlanViewEntry {
             plan_id: plan_id.clone(),
             status,
@@ -745,9 +748,10 @@ impl crate::conversation::IntentDocument {
     }
 
     fn set_work_plan_inner(&mut self, items: Vec<String>) {
-        let replacing_session = self.visible_plan.as_ref().is_some_and(|plan| {
-            plan.scope == PlanScope::Session && !plan.items.is_empty()
-        });
+        let replacing_session = self
+            .visible_plan
+            .as_ref()
+            .is_some_and(|plan| plan.scope == PlanScope::Session && !plan.items.is_empty());
         if replacing_session {
             self.retain_visible_session_plan(
                 PlanStatus::Detached,
@@ -1760,9 +1764,13 @@ mod render_tests {
             .find(|plan| plan.plan_id == plan_id)
             .expect("detached plan snapshot retained");
         assert_eq!(retained.items.len(), 2);
-        assert!(intent.plan_registry_view.entries.iter().any(|entry| {
-            entry.plan_id == plan_id && entry.status == PlanStatus::Detached
-        }));
+        assert!(
+            intent
+                .plan_registry_view
+                .entries
+                .iter()
+                .any(|entry| { entry.plan_id == plan_id && entry.status == PlanStatus::Detached })
+        );
     }
 
     #[test]
@@ -1787,7 +1795,12 @@ mod render_tests {
 
         assert_eq!(first_id, "1");
         assert_eq!(second_id, "2");
-        assert!(intent.retained_session_plans.iter().any(|plan| plan.plan_id == first_id));
+        assert!(
+            intent
+                .retained_session_plans
+                .iter()
+                .any(|plan| plan.plan_id == first_id)
+        );
     }
 
     #[test]
@@ -1853,12 +1866,19 @@ mod render_tests {
     #[test]
     fn promotion_nudges_do_not_treat_design_or_validation_as_openspec_evidence() {
         let mut intent = IntentDocument::default();
-        intent.set_work_plan(vec!["Design the local layout".into(), "Validate the output".into()]);
+        intent.set_work_plan(vec![
+            "Design the local layout".into(),
+            "Validate the output".into(),
+        ]);
 
         let nudges = intent.promotion_nudges();
 
         assert!(nudges.iter().any(|nudge| nudge.starts_with("design node:")));
-        assert!(nudges.iter().any(|nudge| nudge.starts_with("Operations/validation:")));
+        assert!(
+            nudges
+                .iter()
+                .any(|nudge| nudge.starts_with("Operations/validation:"))
+        );
         assert!(nudges.iter().all(|nudge| !nudge.contains("OpenSpec")));
         assert!(nudges.iter().any(|nudge| {
             nudge.starts_with("durable-work:")

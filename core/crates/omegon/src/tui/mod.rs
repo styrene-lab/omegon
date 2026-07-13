@@ -13481,7 +13481,10 @@ pub async fn run_tui(
                                     if is_double {
                                         if app.conversation.toggle_image_attachments_at(idx) > 0 {
                                             app.effects.pulse_conversation_action();
-                                        } else if app.conversation.is_segment_collapsed_tool_card(idx) {
+                                        } else if app
+                                            .conversation
+                                            .is_segment_collapsed_tool_card(idx)
+                                        {
                                             app.conversation.toggle_expand(idx);
                                             app.show_toast(
                                                 "Expanded selected tool result",

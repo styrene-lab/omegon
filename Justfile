@@ -1113,38 +1113,6 @@ finalize-nightly tag='':
     echo "  Uploaded: $ARCHIVE"
     echo "  Release:  $(gh release view "$TAG" --json url --jq .url)"
 
-# ─── TypeScript (omegon-pi) ─────────────────────────────────
-
-# Run all TS tests
-test-ts:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ ! -d ../omegon-pi ]; then
-        echo "Skipping TypeScript tests: ../omegon-pi is not present."
-        exit 0
-    fi
-    cd ../omegon-pi && npx tsx --test tests/*.test.ts extensions/**/*.test.ts
-
-# TS type check
-typecheck:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ ! -d ../omegon-pi ]; then
-        echo "Skipping TypeScript typecheck: ../omegon-pi is not present."
-        exit 0
-    fi
-    cd ../omegon-pi && npx tsc --noEmit
-
-# Full TS check: typecheck + lifecycle + tests
-check-ts:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ ! -d ../omegon-pi ]; then
-        echo "Skipping TypeScript check: ../omegon-pi is not present."
-        exit 0
-    fi
-    cd ../omegon-pi && npm run check
-
 # ─── Armory (omegon-armory) ─────────────────────────────────
 
 # Run armory plugin tests
@@ -1169,7 +1137,7 @@ site-dev:
 
 # ─── Combined ───────────────────────────────────────────────
 
-# Run ALL tests (Rust + TS + armory)
+# Run all repository-owned tests
 test-all: test-rust
 
 # Quick pre-commit check: local Rust workspace only
@@ -1186,8 +1154,6 @@ test-count:
     set -e
     echo "=== Rust ==="
     {{cargo}} test --workspace 2>&1 | grep "test result" | awk '{s+=$4; f+=$6} END {printf "  %d passed, %d failed\n", s, f}'
-    echo "=== TypeScript ==="
-    if [ -d ../omegon-pi ]; then cd ../omegon-pi && npx tsx --test tests/*.test.ts extensions/**/*.test.ts 2>&1 | grep "^ℹ tests" | awk '{printf "  %s tests\n", $3}'; else echo "  (../omegon-pi not present)"; fi
     echo "=== Armory ==="
     if [ -d /tmp/omegon-armory ]; then cd /tmp/omegon-armory && npx tsx --test tests/*.test.ts 2>&1 | grep "^ℹ tests" | awk '{printf "  %s tests\n", $3}'; else echo "  (/tmp/omegon-armory not present)"; fi
 

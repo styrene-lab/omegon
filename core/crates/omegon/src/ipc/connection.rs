@@ -716,9 +716,7 @@ impl IpcConnection {
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("unnamed")
                                         .to_string();
-                                    let scope = match payload
-                                        .get("scope")
-                                        .and_then(|v| v.as_str())
+                                    let scope = match payload.get("scope").and_then(|v| v.as_str())
                                     {
                                         Some("project") => {
                                             crate::settings::ProfileRegistryScope::Project
@@ -729,9 +727,7 @@ impl IpcConnection {
                                 }
                                 _ => crate::settings::ProfileSaveTarget::ActiveSource,
                             };
-                            Some(crate::control_runtime::ControlRequest::ProfileCapture {
-                                target,
-                            })
+                            Some(crate::control_runtime::ControlRequest::ProfileCapture { target })
                         }
                         "profile_apply" => {
                             Some(crate::control_runtime::ControlRequest::ProfileApply)
