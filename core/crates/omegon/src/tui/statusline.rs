@@ -108,6 +108,32 @@ impl SessionRow {
         }
         let available = area.width as usize;
         let mut fields = Vec::new();
+
+        // Web readiness is persistent operational status in every presentation
+        // level. Om must not erase it merely because the rest of the session
+        // telemetry is compressed.
+        let configured = self
+            .web_search_providers
+            .iter()
+            .filter(|(_, configured)| *configured)
+            .count();
+        let web_status = if configured == 0 {
+            "WEB! ddg-only".to_string()
+        } else {
+            let ticks: String = self
+                .web_search_providers
+                .iter()
+                .map(|(_, configured)| if *configured { '●' } else { '○' })
+                .collect();
+            format!("WEB {ticks}")
+        };
+        let web_color = if configured == 0 {
+            t.warning()
+        } else {
+            t.success()
+        };
+        fields.push((0u8, web_status, web_color));
+
         if let Some(attention) = self
             .operator_hint
             .as_ref()
@@ -594,6 +620,32 @@ mod tests {
             "files: 16 touched · 4 changed"
         );
         assert_eq!(file_activity_label(12, 0, 90), "files: 12 read");
+    }
+
+    #[test]
+    fn om_row_keeps_web_search_readiness_visible() {
+        let sl = SessionRow {
+            provider_connected: true,
+            web_search_providers: vec![("brave".into(), true), ("tavily".into(), false)],
+            ..Default::default()
+        };
+
+        let backend = ratatui::backend::TestBackend::new(80, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                sl.render_for_level(
+                    crate::surfaces::layout::UiPresentationLevel::Om,
+                    frame.area(),
+                    frame,
+                    &super::super::theme::Alpharius,
+                )
+            })
+            .unwrap();
+        let text = (0..80)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(text.contains("WEB ●○"), "{text}");
     }
 
     #[test]
