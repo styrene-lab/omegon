@@ -212,7 +212,7 @@ fn editor_inline_attachment_tokens_submit_as_multimodal_prompt() {
     ));
     assert!(matches!(
         &app.conversation.segments()[1].content,
-        crate::tui::segments::SegmentContent::Image { path, alt }
+        crate::tui::segments::SegmentContent::Image { path, alt, .. }
             if path == &std::path::PathBuf::from("/tmp/paste.png") && alt.contains("[image0]")
     ));
 }

@@ -1385,6 +1385,13 @@ pub enum SegmentRenderMode {
 }
 
 /// The typed content of a conversation segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageDisplayState {
+    Preview,
+    Collapsed,
+    Expanded,
+}
+
 #[derive(Debug, Clone)]
 pub enum SegmentContent {
     /// User's input prompt.
@@ -1463,6 +1470,8 @@ pub enum SegmentContent {
         path: std::path::PathBuf,
         /// Alt text shown when image can't be rendered.
         alt: String,
+        /// Frontend-local visibility lifecycle for operator attachments.
+        display: ImageDisplayState,
     },
 
     /// Visual separator between turns.
@@ -1586,6 +1595,7 @@ impl Segment {
             content: SegmentContent::Image {
                 path,
                 alt: alt.into(),
+                display: ImageDisplayState::Preview,
             },
         }
     }
@@ -1680,7 +1690,7 @@ impl<'a> ProjectConversationSegment<'a> for Segment {
                     text: text.as_str(),
                 })
             }
-            SegmentContent::Image { path, alt } => ConversationSegmentKind::Image(ImageSegment {
+            SegmentContent::Image { path, alt, .. } => ConversationSegmentKind::Image(ImageSegment {
                 path: path.as_path(),
                 alt: alt.as_str(),
             }),
@@ -1861,7 +1871,7 @@ status: {}
                 text
             }
             SegmentContent::LifecycleEvent { icon, text } => format!("{icon} {text}"),
-            SegmentContent::Image { path, alt } => {
+            SegmentContent::Image { path, alt, .. } => {
                 let mut lines = vec![format!("image: {}", path.display())];
                 if !alt.trim().is_empty() {
                     lines.push(format!("alt: {alt}"));
@@ -2112,7 +2122,7 @@ status: {}
                 buf,
                 render_ctx,
             ),
-            Image { path, alt } => super::segment_components::image::render(
+            Image { path, alt, .. } => super::segment_components::image::render(
                 super::segment_components::image::ImageRenderProps { path, alt },
                 area,
                 buf,
@@ -2140,7 +2150,13 @@ status: {}
             TurnSeparator => return 1,
             SkillEvent { .. } => return 1,
             LifecycleEvent { .. } => return 1,
-            Image { .. } => return 14, // Fixed: 12 rows image + 1 caption + 1 spacing
+            Image { display, .. } => {
+                return if *display == ImageDisplayState::Collapsed {
+                    1
+                } else {
+                    14
+                };
+            }
             _ => {}
         }
 

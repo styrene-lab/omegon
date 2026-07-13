@@ -8081,13 +8081,15 @@ warning: {warning}"
             for (segment_idx, image_area) in
                 conv_state.visible_image_areas(projected_segments, content_area)
             {
-                let Some(SegmentContent::Image { path, .. }) = projected_segments
+                let Some(SegmentContent::Image { path, display, .. }) = projected_segments
                     .get(segment_idx)
                     .map(|segment| &segment.content)
                 else {
                     continue;
                 };
-                if let Some(protocol) = image_cache.get_or_create(segment_idx, path) {
+                if *display != segments::ImageDisplayState::Collapsed
+                    && let Some(protocol) = image_cache.get_or_create(segment_idx, path)
+                {
                     image::render_image(image_area, frame, protocol);
                 }
             }
@@ -13477,7 +13479,9 @@ pub async fn run_tui(
                                         },
                                     );
                                     if is_double {
-                                        if app.conversation.is_segment_collapsed_tool_card(idx) {
+                                        if app.conversation.toggle_image_attachments_at(idx) > 0 {
+                                            app.effects.pulse_conversation_action();
+                                        } else if app.conversation.is_segment_collapsed_tool_card(idx) {
                                             app.conversation.toggle_expand(idx);
                                             app.show_toast(
                                                 "Expanded selected tool result",
@@ -13690,6 +13694,24 @@ pub async fn run_tui(
                     match (key.code, key.modifiers) {
                         (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
                             app.conversation.toggle_pin();
+                            continue;
+                        }
+                        (KeyCode::Up, modifiers)
+                            if modifiers.contains(KeyModifiers::ALT)
+                                && modifiers.contains(KeyModifiers::SHIFT) =>
+                        {
+                            if let Some(area) = app.conversation_area {
+                                app.conversation.move_to_operator_prompt(true, area.height);
+                            }
+                            continue;
+                        }
+                        (KeyCode::Down, modifiers)
+                            if modifiers.contains(KeyModifiers::ALT)
+                                && modifiers.contains(KeyModifiers::SHIFT) =>
+                        {
+                            if let Some(area) = app.conversation_area {
+                                app.conversation.move_to_operator_prompt(false, area.height);
+                            }
                             continue;
                         }
                         (KeyCode::PageUp, _) => {

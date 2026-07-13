@@ -470,6 +470,7 @@ impl ConversationView {
     }
 
     pub fn append_streaming(&mut self, delta: &str) {
+        self.collapse_preview_images();
         // Push a new AssistantText segment if we aren't already writing into one.
         // This handles both the initial case (!streaming) and the case where
         // tool cards were interleaved — the last segment may be a ToolCard even
@@ -501,6 +502,7 @@ impl ConversationView {
     }
 
     pub fn append_thinking(&mut self, delta: &str) {
+        self.collapse_preview_images();
         // Same guard as append_streaming — don't append into a ToolCard.
         let needs_new_seg = !matches!(
             self.segments.last(),
@@ -1227,6 +1229,90 @@ impl ConversationView {
         changed
     }
 
+    pub fn collapse_preview_images(&mut self) -> usize {
+        let mut changed = 0;
+        for segment in &mut self.segments {
+            if let SegmentContent::Image { display, .. } = &mut segment.content
+                && *display == crate::tui::segments::ImageDisplayState::Preview
+            {
+                *display = crate::tui::segments::ImageDisplayState::Collapsed;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.conv_state.invalidate();
+        }
+        changed
+    }
+
+    pub fn toggle_image_attachments_for_prompt(&mut self, prompt_idx: usize) -> usize {
+        if !matches!(
+            self.segments.get(prompt_idx).map(|segment| &segment.content),
+            Some(SegmentContent::UserPrompt { .. })
+        ) {
+            return 0;
+        }
+        let end = self.segments[prompt_idx + 1..]
+            .iter()
+            .position(|segment| matches!(segment.content, SegmentContent::UserPrompt { .. }))
+            .map_or(self.segments.len(), |offset| prompt_idx + 1 + offset);
+        let expand = self.segments[prompt_idx + 1..end].iter().any(|segment| {
+            matches!(
+                segment.content,
+                SegmentContent::Image {
+                    display: crate::tui::segments::ImageDisplayState::Collapsed,
+                    ..
+                }
+            )
+        });
+        let target = if expand {
+            crate::tui::segments::ImageDisplayState::Expanded
+        } else {
+            crate::tui::segments::ImageDisplayState::Collapsed
+        };
+        let mut changed = 0;
+        for segment in &mut self.segments[prompt_idx + 1..end] {
+            if let SegmentContent::Image { display, .. } = &mut segment.content
+                && *display != target
+            {
+                *display = target;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.conv_state.invalidate();
+        }
+        changed
+    }
+
+    pub fn move_to_operator_prompt(&mut self, previous: bool, viewport_height: u16) -> Option<usize> {
+        let prompts = self
+            .segments
+            .iter()
+            .enumerate()
+            .filter(|(_, segment)| matches!(segment.content, SegmentContent::UserPrompt { .. }))
+            .map(|(idx, _)| idx)
+            .collect::<Vec<_>>();
+        if prompts.is_empty() {
+            return None;
+        }
+        let current = self.selected_segment.and_then(|idx| prompts.iter().position(|p| *p == idx));
+        let target = if previous {
+            current.and_then(|pos| pos.checked_sub(1)).unwrap_or(prompts.len() - 1)
+        } else {
+            current.map(|pos| (pos + 1).min(prompts.len() - 1)).unwrap_or(prompts.len() - 1)
+        };
+        let idx = prompts[target];
+        self.selected_segment = Some(idx);
+        if self.conv_state.heights.len() == self.segments.len() {
+            let total: u16 = self.conv_state.heights.iter().copied().sum();
+            let top: u16 = self.conv_state.heights[..idx].iter().copied().sum();
+            self.conv_state.scroll_offset = total.saturating_sub(top.saturating_add(viewport_height));
+            self.conv_state.user_scrolled = self.conv_state.scroll_offset > 0;
+        }
+        Some(idx)
+    }
+
     pub fn select_segment(&mut self, idx: usize) {
         if idx < self.segments.len() {
             self.selected_segment = Some(idx);
@@ -1401,6 +1487,26 @@ impl ConversationView {
         })
     }
 
+    pub fn toggle_image_attachments_at(&mut self, segment_idx: usize) -> usize {
+        let prompt_idx = if matches!(
+            self.segments.get(segment_idx).map(|segment| &segment.content),
+            Some(SegmentContent::UserPrompt { .. })
+        ) {
+            segment_idx
+        } else if matches!(
+            self.segments.get(segment_idx).map(|segment| &segment.content),
+            Some(SegmentContent::Image { .. })
+        ) {
+            self.segments[..segment_idx]
+                .iter()
+                .rposition(|segment| matches!(segment.content, SegmentContent::UserPrompt { .. }))
+                .unwrap_or(segment_idx)
+        } else {
+            return 0;
+        };
+        self.toggle_image_attachments_for_prompt(prompt_idx)
+    }
+
     pub fn is_segment_collapsed_tool_card(&self, segment_idx: usize) -> bool {
         matches!(
             self.segments.get(segment_idx).map(|seg| &seg.content),
@@ -1435,6 +1541,54 @@ mod tests {
     use crate::tui::conv_widget::ConversationWidget;
     use crate::tui::theme::Alpharius;
     use ratatui::prelude::*;
+
+    #[test]
+    fn assistant_start_collapses_operator_image_previews() {
+        let mut cv = ConversationView::new();
+        cv.push_user_with_attachments(
+            "inspect",
+            &[std::path::PathBuf::from("/tmp/screenshot.png")],
+        );
+        assert_eq!(cv.collapse_preview_images(), 1);
+        assert!(matches!(
+            cv.segments[1].content,
+            SegmentContent::Image {
+                display: crate::tui::segments::ImageDisplayState::Collapsed,
+                ..
+            }
+        ));
+        assert_eq!(cv.toggle_image_attachments_for_prompt(0), 1);
+        assert!(matches!(
+            cv.segments[1].content,
+            SegmentContent::Image {
+                display: crate::tui::segments::ImageDisplayState::Expanded,
+                ..
+            }
+        ));
+        assert_eq!(cv.toggle_image_attachments_at(1), 1);
+        assert!(matches!(
+            cv.segments[1].content,
+            SegmentContent::Image {
+                display: crate::tui::segments::ImageDisplayState::Collapsed,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn operator_prompt_navigation_moves_between_semantic_anchors() {
+        let mut cv = ConversationView::new();
+        cv.push_user("first");
+        cv.append_streaming("one");
+        cv.finalize_message();
+        cv.push_user("second");
+        cv.append_streaming("two");
+        cv.finalize_message();
+
+        assert_eq!(cv.move_to_operator_prompt(true, 8), Some(3));
+        assert_eq!(cv.move_to_operator_prompt(true, 8), Some(0));
+        assert_eq!(cv.move_to_operator_prompt(false, 8), Some(3));
+    }
 
     #[test]
     fn submitting_next_turn_reattaches_detached_viewport() {
@@ -1727,7 +1881,7 @@ mod tests {
         assert!(matches!(
             &cv.segments[1],
             Segment {
-                content: SegmentContent::Image { path, alt },
+                content: SegmentContent::Image { path, alt, .. },
                 ..
             } if path == &std::path::PathBuf::from("/tmp/paste.png")
                 && alt.contains("[image0]")

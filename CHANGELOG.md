@@ -18,6 +18,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added `Alt+Shift+Up/Down` conversation navigation that snaps the viewport between semantic operator-message anchors, complementing `Alt+Up/Down` editor-history recall.
+- Operator image attachments now remain visible for immediate send confirmation, collapse into compact transcript rows when assistant output starts, and toggle between collapsed and expanded rendering when the operator double-clicks the owning message or image.
+
 - Added pre-0.29 unified-work foundations: a dependency-light `styrene-work-model` crate that separates authority, origin, capabilities, lifecycle, provenance/revision, and source-specific facets; plus `styrene-work-runtime`, an async refresh layer that publishes immutable generation snapshots and explicit partial-source warnings.
 
 - Added a persistent web-search readiness gauge to slim and full TUI chrome. Keyless DuckDuckGo-only search is shown as an explicit degraded `WEB! ddg-only` state; configured Brave, Tavily, Serper, and Firecrawl providers render as compact readiness ticks. Selecting a search-provider secret opens its verified provider key console in the operator's browser and immediately accepts the key through Omegon's existing masked secret input, without exposing the key to model context.
