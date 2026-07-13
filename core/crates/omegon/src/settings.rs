@@ -1082,11 +1082,16 @@ impl std::fmt::Display for ProfileSource {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileSaveTarget {
     ActiveSource,
     Project,
     User,
+    /// Save as a named profile in the profiles registry directory.
+    Named {
+        name: String,
+        scope: ProfileRegistryScope,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -1572,6 +1577,33 @@ impl Profile {
                     anyhow::bail!("profile save target is ambiguous; use --project or --user")
                 }
             },
+            ProfileSaveTarget::Named { name, scope } => {
+                let safe_name = name
+                    .chars()
+                    .map(|c| {
+                        if c.is_alphanumeric() || c == '-' || c == '_' {
+                            c
+                        } else {
+                            '-'
+                        }
+                    })
+                    .collect::<String>();
+                let path = match scope {
+                    ProfileRegistryScope::Project => {
+                        project_profiles_dir(cwd).join(format!("{safe_name}.json"))
+                    }
+                    ProfileRegistryScope::User | ProfileRegistryScope::BuiltIn => {
+                        global_profiles_dir()
+                            .ok_or_else(|| anyhow::anyhow!("Cannot determine config directory"))?
+                            .join(format!("{safe_name}.json"))
+                    }
+                };
+                self.save_to_path(&path, &safe_name)?;
+                match scope {
+                    ProfileRegistryScope::Project => Ok(ProfileSource::Project(path)),
+                    _ => Ok(ProfileSource::User(path)),
+                }
+            }
         }
     }
 
@@ -1826,6 +1858,12 @@ pub fn save_project_active_profile_selection(
     cwd: &std::path::Path,
     selection: &ActiveProfileSelection,
 ) -> anyhow::Result<std::path::PathBuf> {
+    let registry = ProfileRegistry::discover(cwd);
+    if registry.find_selected(selection).is_none() {
+        let scope = selection.scope.as_deref().unwrap_or("any scope");
+        anyhow::bail!("profile `{}` was not found in {}", selection.id, scope);
+    }
+
     let path = project_active_profile_path(cwd);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -1885,32 +1923,27 @@ impl ProfileRegistry {
     }
 
     pub fn resolve_active(&self) -> LoadedProfile {
-        for selection_path in [
-            Some(project_active_profile_path_from_registry(self)),
-            global_active_profile_path(),
-        ] {
-            let Some(path) = selection_path else { continue };
-            let Ok(content) = std::fs::read_to_string(&path) else {
-                continue;
+        if let Some(loaded) =
+            self.resolve_selection(project_active_profile_path_from_registry(self))
+        {
+            return loaded;
+        }
+
+        if let Some(entry) = self.entries.iter().find(|entry| {
+            entry.scope == ProfileRegistryScope::Project
+                && entry.source_kind == ProfileRegistrySourceKind::LegacySingleton
+        }) {
+            return LoadedProfile {
+                profile: entry.profile.clone(),
+                source: entry.source(),
             };
-            let Ok(selection) = serde_json::from_str::<ActiveProfileSelection>(&content) else {
-                continue;
-            };
-            if let Some(entry) = self.find_selected(&selection) {
-                tracing::debug!(path = %path.display(), profile = %entry.id, scope = entry.scope.as_str(), "active profile selection loaded");
-                return LoadedProfile {
-                    profile: entry.profile.clone(),
-                    source: entry.source(),
-                };
-            }
-            tracing::warn!(path = %path.display(), profile = %selection.id, "active profile selection did not match any registry entry");
+        }
+
+        if let Some(loaded) = self.resolve_selection(global_active_profile_path()) {
+            return loaded;
         }
 
         for (scope, kind) in [
-            (
-                ProfileRegistryScope::Project,
-                ProfileRegistrySourceKind::LegacySingleton,
-            ),
             (
                 ProfileRegistryScope::User,
                 ProfileRegistrySourceKind::LegacySingleton,
@@ -1936,6 +1969,25 @@ impl ProfileRegistry {
             profile: Profile::default(),
             source: ProfileSource::BuiltInDefault,
         }
+    }
+
+    fn resolve_selection(&self, path: Option<std::path::PathBuf>) -> Option<LoadedProfile> {
+        let path = path?;
+        let content = std::fs::read_to_string(&path).ok()?;
+        let selection = serde_json::from_str::<ActiveProfileSelection>(&content).ok()?;
+        let Some(entry) = self.find_selected(&selection) else {
+            tracing::warn!(path = %path.display(), profile = %selection.id, "active profile selection did not match any registry entry");
+            return None;
+        };
+        tracing::debug!(path = %path.display(), profile = %entry.id, scope = entry.scope.as_str(), "active profile selection loaded");
+        let mut profile = entry.profile.clone();
+        if profile.compact_label().is_none() {
+            profile.name = Some(entry.id.clone());
+        }
+        Some(LoadedProfile {
+            profile,
+            source: entry.source(),
+        })
     }
 
     fn load_registry_dir(&mut self, scope: ProfileRegistryScope, dir: Option<std::path::PathBuf>) {
@@ -2019,22 +2071,29 @@ impl ProfileRegistry {
     }
 }
 
-fn project_active_profile_path_from_registry(registry: &ProfileRegistry) -> std::path::PathBuf {
-    registry
-        .entries
-        .iter()
-        .find_map(|entry| match (&entry.scope, &entry.path) {
-            (ProfileRegistryScope::Project, Some(path)) => path
+fn project_active_profile_path_from_registry(
+    registry: &ProfileRegistry,
+) -> Option<std::path::PathBuf> {
+    registry.entries.iter().find_map(
+        |entry| match (&entry.scope, entry.source_kind, &entry.path) {
+            (
+                ProfileRegistryScope::Project,
+                ProfileRegistrySourceKind::RegistryFile,
+                Some(path),
+            ) => path
                 .parent()
-                .and_then(|parent| parent.parent())
-                .map(|root| root.join("active-profile.json")),
+                .and_then(|profiles_dir| profiles_dir.parent())
+                .map(|omegon_dir| omegon_dir.join("active-profile.json")),
+            (
+                ProfileRegistryScope::Project,
+                ProfileRegistrySourceKind::LegacySingleton,
+                Some(path),
+            ) => path
+                .parent()
+                .map(|omegon_dir| omegon_dir.join("active-profile.json")),
             _ => None,
-        })
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .map(|cwd| project_active_profile_path(&cwd))
-                .unwrap_or_else(|_| PathBuf::from(".omegon/active-profile.json"))
-        })
+        },
+    )
 }
 
 // ─── Custom posture definitions ─────────────────────────────────────────────
@@ -2834,6 +2893,81 @@ mod tests {
     }
 
     #[test]
+    fn project_scope_profile_switch_writes_pointer_beside_profiles_directory() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let profiles_dir = tmp.path().join(".omegon/profiles");
+        std::fs::create_dir_all(&profiles_dir).expect("create profiles dir");
+        let path = profiles_dir.join("project-default.json");
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&Profile::default()).expect("serialize profile"),
+        )
+        .expect("write profile");
+        let registry = ProfileRegistry {
+            entries: vec![ProfileRegistryEntry {
+                id: "project-default".into(),
+                scope: ProfileRegistryScope::Project,
+                source_kind: ProfileRegistrySourceKind::RegistryFile,
+                path: Some(path.clone()),
+                profile: Profile::default(),
+                editable: true,
+                shadows: Vec::new(),
+                portable: true,
+            }],
+        };
+
+        let pointer_path = save_project_active_profile_selection(
+            tmp.path(),
+            &ActiveProfileSelection {
+                id: "project-default".into(),
+                scope: Some("project".into()),
+            },
+        )
+        .expect("save project profile selection");
+
+        let switched = registry.resolve_active();
+        assert_eq!(switched.source, ProfileSource::Project(path));
+        assert_eq!(
+            std::fs::canonicalize(&pointer_path).expect("canonical pointer path"),
+            std::fs::canonicalize(tmp.path().join(".omegon/active-profile.json"))
+                .expect("canonical expected pointer path")
+        );
+        let selection: ActiveProfileSelection = serde_json::from_slice(
+            &std::fs::read(&pointer_path).expect("read active profile pointer"),
+        )
+        .expect("parse active profile pointer");
+        assert_eq!(selection.id, "project-default");
+        assert_eq!(selection.scope.as_deref(), Some("project"));
+        assert!(!tmp.path().join("active-profile.json").exists());
+    }
+
+    #[test]
+    fn active_profile_selection_save_rejects_missing_entry_without_overwriting() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let path = tmp.path().join(".omegon/active-profile.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{"id":"default","scope":"user"}"#).unwrap();
+        let selection = ActiveProfileSelection {
+            id: "missing".into(),
+            scope: Some("project".into()),
+        };
+
+        let error = save_project_active_profile_selection(tmp.path(), &selection)
+            .expect_err("missing profile must be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("profile `missing` was not found")
+        );
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            r#"{"id":"default","scope":"user"}"#
+        );
+    }
+
+    #[test]
     fn active_profile_selection_prefers_project_registry_entry() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
@@ -2860,6 +2994,31 @@ mod tests {
         assert_eq!(loaded.profile.thinking_level.as_deref(), Some("high"));
         assert!(
             matches!(loaded.source, ProfileSource::Project(path) if path.ends_with(".omegon/profiles/build.json"))
+        );
+    }
+
+    #[test]
+    fn active_profile_selection_uses_registry_id_when_file_has_no_embedded_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon/profiles")).unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/profiles/pig.json"),
+            r#"{"thinkingLevel":"high"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/active-profile.json"),
+            r#"{"id":"pig","scope":"project"}"#,
+        )
+        .unwrap();
+
+        let loaded = Profile::load_with_source(tmp.path());
+
+        assert_eq!(loaded.profile.name.as_deref(), Some("pig"));
+        assert_eq!(loaded.profile.thinking_level.as_deref(), Some("high"));
+        assert!(
+            matches!(loaded.source, ProfileSource::Project(path) if path.ends_with(".omegon/profiles/pig.json"))
         );
     }
 

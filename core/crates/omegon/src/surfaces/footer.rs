@@ -27,6 +27,10 @@ pub struct EngineProjection {
     pub provider_connected: bool,
     pub update_available: Option<String>,
     pub sandbox: bool,
+    /// Web-search provider gauge: (provider, configured). Empty when the
+    /// readiness snapshot is unavailable. All-false means the DDG scrape
+    /// floor is the only search path — a degraded state.
+    pub web_search_providers: Vec<(String, bool)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

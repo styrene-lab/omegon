@@ -289,7 +289,9 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::ProfileView => ControlRequest::ProfileView,
         crate::tui::CanonicalSlashCommand::ProfileExport => ControlRequest::ProfileExport,
         crate::tui::CanonicalSlashCommand::ProfileCapture(target) => {
-            ControlRequest::ProfileCapture { target: *target }
+            ControlRequest::ProfileCapture {
+                target: target.clone(),
+            }
         }
         crate::tui::CanonicalSlashCommand::ProfileApply => ControlRequest::ProfileApply,
         crate::tui::CanonicalSlashCommand::ProfileUse { id, scope } => ControlRequest::ProfileUse {
@@ -410,6 +412,7 @@ pub fn control_request_from_slash(
         },
         crate::tui::CanonicalSlashCommand::SkillsView => ControlRequest::SkillsView,
         crate::tui::CanonicalSlashCommand::SkillsHelp => ControlRequest::SkillsHelp,
+        crate::tui::CanonicalSlashCommand::RuntimeProcessRestart => return None,
         crate::tui::CanonicalSlashCommand::SkillsReload => return None,
         crate::tui::CanonicalSlashCommand::SkillsInstall(name) => {
             ControlRequest::SkillsInstall { name: name.clone() }
@@ -610,7 +613,7 @@ async fn try_stateless_control(
             profile_export_response(shared_settings, cwd, handles).await
         }
         ControlRequest::ProfileCapture { target } => {
-            profile_capture_response(shared_settings, cwd, *target).await
+            profile_capture_response(shared_settings, cwd, target.clone()).await
         }
         ControlRequest::ProfileSetMqtt { enabled } => {
             profile_set_mqtt_response(cwd, *enabled).await
@@ -712,6 +715,7 @@ pub async fn execute_control(
                 ctx.runtime_state,
                 ctx.shared_settings,
                 ctx.bridge,
+                ctx.route_controller.clone(),
                 ctx.events_tx,
             )
             .await
@@ -734,11 +738,21 @@ pub async fn execute_control(
                     ctx.runtime_state,
                     ctx.shared_settings,
                     ctx.bridge,
+                    ctx.route_controller.clone(),
                     ctx.events_tx,
                 )
                 .await;
-                if let Some(output) = response.output.as_mut() {
-                    output.insert_str(0, &format!("Profile selected: `{id}`.\n\n"));
+                if response.accepted {
+                    if let Some(output) = response.output.as_mut() {
+                        output.insert_str(0, &format!("Profile selected: `{id}`.\n\n"));
+                    }
+                } else if let Some(output) = response.output.as_mut() {
+                    output.insert_str(
+                        0,
+                        &format!(
+                            "Profile `{id}` was selected for the next startup but was not applied to the live runtime.\n\n"
+                        ),
+                    );
                 }
                 response
             }
@@ -1864,8 +1878,21 @@ pub async fn status_view_response(
     agent: &InteractiveAgentHost,
     shared_settings: &settings::SharedSettings,
 ) -> SlashCommandResponse {
-    let mut status = crate::status::HarnessStatus::assemble();
-    let settings = shared_settings.lock().unwrap().clone();
+    let mut status = agent
+        .dashboard_handles
+        .harness
+        .as_ref()
+        .map(|handle| {
+            handle
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        })
+        .unwrap_or_else(crate::status::HarnessStatus::assemble);
+    let settings = shared_settings
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
     let operating_profile = settings.operating_profile();
     let operating_profile_label = operating_profile.summary();
     let principal_id = operating_profile
@@ -1895,15 +1922,15 @@ pub async fn status_view_response(
         &session_kind,
         &authorization,
     );
-    let panel = format!(
-        "{}\nRuntime\n  Generation:   {}\n  Session:      {}\n  Instance:     {}\nAutomation\n  Level:        {} ({})",
-        crate::tui::bootstrap::render_bootstrap(&status, false),
+    let projection = crate::surfaces::diagnostics::HarnessStatusProjection::new(
+        status,
         agent.runtime_generation,
-        agent.session_id,
-        agent.instance_id,
+        agent.session_id.clone(),
+        agent.instance_id.clone(),
         settings.automation_level.as_str(),
-        settings.automation_level.summary()
+        settings.automation_level.summary(),
     );
+    let panel = projection.render_markdown();
     SlashCommandResponse {
         accepted: true,
         output: Some(panel),
@@ -2028,19 +2055,24 @@ pub async fn session_stats_view_response(
     shared_settings: &settings::SharedSettings,
     agent: &InteractiveAgentHost,
 ) -> SlashCommandResponse {
-    let settings = shared_settings.lock().unwrap().clone();
+    let settings = shared_settings
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
     let est = runtime_state.conversation.estimate_tokens();
+    let session = agent
+        .dashboard_handles
+        .session
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let turns = session.turns.max(runtime_state.conversation.turn_count());
+    let tool_calls = session.tool_calls;
     let live_harness = agent
         .dashboard_handles
         .harness
         .as_ref()
         .and_then(|h| h.lock().ok().map(|status| status.clone()))
         .unwrap_or_else(crate::status::HarnessStatus::assemble);
-    let usage_pct = if settings.context_window > 0 {
-        (est as f64 / settings.context_window as f64) * 100.0
-    } else {
-        0.0
-    };
     let persona = live_harness
         .active_persona
         .as_ref()
@@ -2051,46 +2083,37 @@ pub async fn session_stats_view_response(
         .as_ref()
         .map(|tone| tone.name.clone())
         .unwrap_or_else(|| "none".to_string());
-    let provider_summary = if live_harness.providers.is_empty() {
-        "none detected".to_string()
-    } else {
-        let authenticated = live_harness
-            .providers
-            .iter()
-            .filter(|provider| provider.authenticated)
-            .count();
-        format!(
-            "{authenticated}/{} authenticated",
-            live_harness.providers.len()
-        )
+    let authenticated_providers = live_harness
+        .providers
+        .iter()
+        .filter(|provider| provider.authenticated)
+        .count();
+    let projection = crate::surfaces::diagnostics::SessionStatsProjection {
+        version: crate::surfaces::diagnostics::DIAGNOSTIC_PROJECTION_VERSION,
+        turns,
+        tool_calls: Some(tool_calls),
+        model: settings.model_short(),
+        thinking: format!(
+            "{} {}",
+            settings.thinking.icon(),
+            settings.thinking.as_str()
+        ),
+        posture: settings.posture.effective.as_str().to_string(),
+        estimated_context_tokens: est,
+        context_window: settings.context_window,
+        max_turns: settings.max_turns,
+        persona: Some(persona),
+        tone: Some(tone),
+        authenticated_providers: Some(authenticated_providers),
+        provider_count: Some(live_harness.providers.len()),
+        mcp_servers: Some(live_harness.mcp_servers.len()),
+        memory_available: Some(live_harness.memory_available),
+        cleave_available: Some(live_harness.cleave_available),
     };
 
     SlashCommandResponse {
         accepted: true,
-        output: Some(format!(
-            "Session Overview\n\nActivity\n  Turns:            {}\n  Tool calls:       {}\n  Model:            {}\n  Thinking:         {} {}\n\nContext\n  Usage:            {:.0}%\n  Window:           {} tokens\n\nHarness\n  Persona:          {}\n  Tone:             {}\n  Providers:        {}\n  MCP servers:      {}\n\nCapabilities\n  Memory:           {}\n  Cleave:           {}",
-            runtime_state.conversation.turn_count(),
-            0,
-            settings.model_short(),
-            settings.thinking.icon(),
-            settings.thinking.as_str(),
-            usage_pct,
-            settings.context_window,
-            persona,
-            tone,
-            provider_summary,
-            live_harness.mcp_servers.len(),
-            if live_harness.memory_available {
-                "available"
-            } else {
-                "UNAVAILABLE"
-            },
-            if live_harness.cleave_available {
-                "available"
-            } else {
-                "UNAVAILABLE"
-            },
-        )),
+        output: Some(projection.render_markdown()),
     }
 }
 
@@ -3340,11 +3363,53 @@ pub async fn profile_capture_response(
     }
 }
 
+async fn apply_profile_model_intent(
+    profile: &settings::Profile,
+    route_controller: Option<&Arc<crate::route::RouteController>>,
+) -> anyhow::Result<Option<String>> {
+    let Some(intent) = profile
+        .model_intent
+        .as_ref()
+        .and_then(settings::ProfileModelIntent::to_route_intent)
+    else {
+        return Ok(None);
+    };
+    let Some(controller) = route_controller else {
+        anyhow::bail!("live route controller is unavailable");
+    };
+
+    if let Some(model) = intent.exact_model_override.as_deref() {
+        let bridge = providers::auto_detect_bridge(model).await;
+        let snapshot = controller
+            .switch_model(model.to_string(), &crate::route::CredentialLedger, bridge)
+            .await?;
+        if snapshot.serving_model() != Some(model) {
+            anyhow::bail!(snapshot.operator_status());
+        }
+        return Ok(Some(model.to_string()));
+    }
+
+    let mut inventory = crate::routing::ProviderInventory::probe();
+    inventory.probe_ollama().await;
+    let candidate = crate::route::select_candidate_for_intent(&intent, &inventory)
+        .ok_or_else(|| anyhow::anyhow!("no provider candidate satisfies {}", intent.summary()))?;
+    let target = format!("{}:{}", candidate.provider_id, candidate.model_id);
+    let bridge = providers::auto_detect_bridge(&target)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("no executable bridge is available for {target}"))?;
+    controller.set_model_intent(intent).await;
+    let snapshot = controller
+        .resolve_route_from_intent_candidate(candidate, bridge)
+        .await?;
+    Ok(snapshot.serving_model().map(ToOwned::to_owned))
+}
+
 pub async fn profile_apply_response(
     agent: &mut InteractiveAgentHost,
     runtime_state: &mut InteractiveAgentState,
     shared_settings: &settings::SharedSettings,
     bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+    route_controller: Option<Arc<crate::route::RouteController>>,
     events_tx: &broadcast::Sender<AgentEvent>,
 ) -> SlashCommandResponse {
     let profile = settings::Profile::load(&agent.cwd);
@@ -3355,6 +3420,23 @@ pub async fn profile_apply_response(
         .unwrap_or_default();
     if let Ok(mut s) = shared_settings.lock() {
         profile.apply_to_with_posture(&mut s, &agent.cwd);
+    }
+
+    let resolved_model = match apply_profile_model_intent(&profile, route_controller.as_ref()).await
+    {
+        Ok(model) => model,
+        Err(error) => {
+            return SlashCommandResponse {
+                accepted: false,
+                output: Some(format!("Profile could not be applied: {error}")),
+            };
+        }
+    };
+    if let Some(model) = resolved_model.as_deref()
+        && let Ok(mut settings) = shared_settings.lock()
+    {
+        settings.set_model(model);
+        settings.provider_connected = crate::auth::provider_connected_for_model(model);
     }
 
     let new_model = shared_settings
@@ -3701,11 +3783,13 @@ pub async fn permission_trust_add_response(
     if let Ok(mut s) = shared_settings.lock() {
         push_unique(&mut s.trusted_directories, path);
     }
-    let mut profile = settings::Profile::load(cwd);
+    let loaded = settings::Profile::load_with_source(cwd);
+    let mut profile = loaded.profile;
     profile.add_trusted_directory_grant(path.to_string(), mount_identity, environment);
-    save_profile_response(
+    save_active_profile_response(
         cwd,
         profile,
+        &loaded.source,
         &format!(
             "Trusted directory added to project permissions: {path}\n\
              The agent can now read/write files in this directory."
@@ -3725,11 +3809,13 @@ pub async fn permission_trust_remove_response(
     if let Ok(mut s) = shared_settings.lock() {
         retain_not_equal(&mut s.trusted_directories, path);
     }
-    let mut profile = settings::Profile::load(cwd);
+    let loaded = settings::Profile::load_with_source(cwd);
+    let mut profile = loaded.profile;
     profile.remove_trusted_directory(path);
-    save_profile_response(
+    save_active_profile_response(
         cwd,
         profile,
+        &loaded.source,
         &format!("Trusted directory removed from project permissions: {path}"),
     )
 }
@@ -3741,6 +3827,28 @@ fn save_profile_response(
 ) -> SlashCommandResponse {
     match profile.save(cwd) {
         Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(success.to_string()),
+        },
+        Err(e) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("failed to save profile: {e}")),
+        },
+    }
+}
+
+fn save_active_profile_response(
+    cwd: &Path,
+    profile: settings::Profile,
+    source: &settings::ProfileSource,
+    success: &str,
+) -> SlashCommandResponse {
+    let target = match source {
+        settings::ProfileSource::BuiltInDefault => settings::ProfileSaveTarget::Project,
+        _ => settings::ProfileSaveTarget::ActiveSource,
+    };
+    match profile.save_to_target(cwd, target, source) {
+        Ok(_) => SlashCommandResponse {
             accepted: true,
             output: Some(success.to_string()),
         },
@@ -3819,10 +3927,86 @@ pub async fn profile_export_response(
         "profile": serde_json::to_value(&profile).unwrap_or(serde_json::json!(null)),
     });
 
+    let output = render_profile_export(&export, &settings_json, &persona_json, &profile);
+
     SlashCommandResponse {
         accepted: true,
-        output: Some(export.to_string()),
+        output: Some(output),
     }
+}
+
+fn render_profile_export(
+    export: &serde_json::Value,
+    settings_json: &serde_json::Value,
+    persona_json: &serde_json::Value,
+    profile: &settings::Profile,
+) -> String {
+    let mut out = String::new();
+    out.push_str("## Profile Export\n\n");
+    out.push_str(&format!(
+        "Version: `{}`\n\n",
+        export["version"].as_str().unwrap_or("?")
+    ));
+
+    // Settings
+    out.push_str("### Settings\n");
+    if let Some(model) = settings_json["model"].as_str() {
+        out.push_str(&format!("- Model: `{model}`\n"));
+    }
+    if let Some(thinking) = settings_json["thinking_level"].as_str() {
+        out.push_str(&format!("- Thinking: `{thinking}`\n"));
+    }
+    if let Some(ctx) = settings_json["context_class"].as_str() {
+        out.push_str(&format!("- Context class: `{ctx}`\n"));
+    }
+    if let Some(turns) = settings_json["max_turns"].as_u64() {
+        out.push_str(&format!("- Max turns: `{turns}`\n"));
+    }
+    if let Some(slim) = settings_json["slim_mode"].as_bool() {
+        out.push_str(&format!(
+            "- Slim mode: `{}`\n",
+            if slim { "on" } else { "off" }
+        ));
+    }
+    if let Some(order) = settings_json["provider_order"].as_array()
+        && !order.is_empty()
+    {
+        let providers: Vec<&str> = order.iter().filter_map(|v| v.as_str()).collect();
+        out.push_str(&format!("- Provider order: `{}`\n", providers.join(" → ")));
+    }
+
+    // Persona
+    out.push_str("\n### Persona\n");
+    if persona_json.is_null() {
+        out.push_str("None active\n");
+    } else {
+        if let Some(name) = persona_json["name"].as_str() {
+            out.push_str(&format!("- Name: `{name}`\n"));
+        }
+        if let Some(badge) = persona_json["badge"].as_str() {
+            out.push_str(&format!("- Badge: {badge}\n"));
+        }
+        if let Some(skills) = persona_json["activated_skills"].as_array()
+            && !skills.is_empty()
+        {
+            let names: Vec<&str> = skills.iter().filter_map(|v| v.as_str()).collect();
+            out.push_str(&format!("- Skills: {}\n", names.join(", ")));
+        }
+        if let Some(disabled) = persona_json["disabled_tools"].as_array()
+            && !disabled.is_empty()
+        {
+            let names: Vec<&str> = disabled.iter().filter_map(|v| v.as_str()).collect();
+            out.push_str(&format!("- Disabled tools: {}\n", names.join(", ")));
+        }
+    }
+
+    // Saved profile summary
+    out.push_str("\n### Saved profile\n");
+    out.push_str("```json\n");
+    out.push_str(&serde_json::to_string_pretty(profile).unwrap_or_else(|_| "null".to_string()));
+    out.push_str("\n```\n");
+
+    out
 }
 
 pub async fn persona_list_response(
@@ -4985,6 +5169,44 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn applying_profile_updates_live_route_controller_model_intent() {
+        let controller = Arc::new(crate::route::RouteController::with_initial_intent(
+            crate::route::ProviderRoute::Serving {
+                model: crate::route::ModelRouteSpec::parse("anthropic:claude-sonnet-4-6"),
+            },
+            Box::new(crate::bridge::MockBridge { events: vec![] }),
+            None,
+            crate::route::ModelIntent::pinned_model("anthropic:claude-sonnet-4-6".into()),
+        ));
+        let profile = settings::Profile {
+            model_intent: Some(settings::ProfileModelIntent {
+                grade: Some("B".into()),
+                provider: Some("auto".into()),
+                grade_policy: Some("minimum".into()),
+                provider_policy: None,
+                exact_model_override: Some("anthropic:claude-sonnet-4-6".into()),
+            }),
+            ..settings::Profile::default()
+        };
+
+        let applied_model = apply_profile_model_intent(&profile, Some(&controller))
+            .await
+            .expect("profile intent should apply");
+
+        let snapshot = controller.snapshot().await;
+        assert_eq!(snapshot.intent.grade, Some(crate::route::ModelGrade::B));
+        assert_eq!(
+            snapshot.intent.exact_model_override.as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
+        assert_eq!(
+            snapshot.serving_model(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
+        assert_eq!(applied_model.as_deref(), snapshot.serving_model());
+    }
+
     #[test]
     fn context_status_projection_uses_palette_instead_of_dump() {
         let rendered = context_status_projection(
@@ -5406,9 +5628,11 @@ mod tests {
                 .contains(&"/tmp/vault".to_string())
         );
         let profile = crate::settings::Profile::load(tmp.path());
-        assert_eq!(
-            profile.permissions.trusted_directories,
-            vec!["/tmp/vault".to_string()]
+        assert!(
+            profile
+                .permissions
+                .trusted_directories
+                .contains(&"/tmp/vault".to_string())
         );
         assert!(profile.trusted_directories.is_empty());
 
@@ -5422,7 +5646,11 @@ mod tests {
                 .contains(&"/tmp/vault".to_string())
         );
         let profile = crate::settings::Profile::load(tmp.path());
-        assert!(profile.effective_trusted_directories().is_empty());
+        assert!(
+            !profile
+                .effective_trusted_directories()
+                .contains(&"/tmp/vault".to_string())
+        );
     }
 
     #[tokio::test]

@@ -35,16 +35,11 @@ curl -fsSL https://omegon.styrene.dev/install.sh | sh
 - Linux ARM64
 - Linux x64
 
-## Looking for the interactive TUI?
+## Interface
 
-The TypeScript-based interactive TUI harness is a separate package:
-
-```bash
-npm install -g omegon-pi
-```
+The native Omegon binary includes the interactive terminal interface; no companion package is required.
 
 ## Links
 
 - [GitHub](https://github.com/styrene-lab/omegon)
 - [Website](https://omegon.styrene.dev)
-- [omegon-pi (TS TUI)](https://www.npmjs.com/package/omegon-pi)

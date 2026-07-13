@@ -8,8 +8,8 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wra
 use super::theme::Theme;
 use crate::surfaces::command::{CommandPanel, CommandPrompt, CommandSeverity};
 
-pub(crate) const COMMAND_MODAL_WIDTH: u16 = 96;
-pub(crate) const COMMAND_MODAL_HEIGHT: u16 = 24;
+pub(crate) const COMMAND_MODAL_WIDTH: u16 = 120;
+pub(crate) const COMMAND_MODAL_HEIGHT: u16 = 32;
 pub(crate) const COMMAND_MODAL_MARGIN: u16 = 4;
 
 pub(crate) fn command_modal_area(area: Rect) -> Rect {
@@ -107,8 +107,8 @@ mod tests {
 
         assert_eq!(modal.width, COMMAND_MODAL_WIDTH);
         assert_eq!(modal.height, COMMAND_MODAL_HEIGHT);
-        assert_eq!(modal.x, 22);
-        assert_eq!(modal.y, 8);
+        assert_eq!(modal.x, 10);
+        assert_eq!(modal.y, 4);
     }
 
     #[test]

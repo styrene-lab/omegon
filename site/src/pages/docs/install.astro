@@ -20,7 +20,8 @@ import { snippet } from "../../lib/snippets";
 # Install latest nightly (bleeding-edge from main)
 {snippet("install.install_nightly")}
 
-# Install a specific version (Replace 0.27.0 with the release you actually want)
+# Install the 0.28.0 stable release
+# Replace 0.28.0 with the release you actually want
 {snippet("install.install_version")}
 
 # Non-interactive (CI)
@@ -56,7 +57,7 @@ import { snippet } from "../../lib/snippets";
   <h3>Verify a Download</h3>
   <pre><code>{snippet("verify.cosign_verify")}</code></pre>
   <p>
-    The versioned filenames above are examples. Replace 0.27.0 with the release you downloaded.
+    The filenames above target the 0.28.0 release. Replace 0.28.0 with the release you downloaded.
   </p>
 
   <h2>Provider Setup</h2>
@@ -93,7 +94,7 @@ import { snippet } from "../../lib/snippets";
   <p>
     Omegon auto-detects Ollama for local-tier work. OpenAI/Codex gives you the ChatGPT/Codex-backed route
     without requiring an OpenAI API key. Ollama Cloud is a separate hosted provider from local Ollama,
-    authenticated via <code>OLLAMA_API_KEY</code> and configurable through <code>/login</code> or <code>/secrets</code>.
+    authenticated via <code>OLLAMA_API_KEY</code> and configurable through <code>/auth login</code> or <code>/secrets</code>.
   </p>
 
   <p>

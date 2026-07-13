@@ -1490,6 +1490,7 @@ impl AgentSetup {
                 harness: Some(std::sync::Arc::new(std::sync::Mutex::new(
                     initial_harness_status.clone(),
                 ))),
+                runtime_lifecycle: Default::default(),
             },
             cleave_event_slot,
             delegate_event_slot,

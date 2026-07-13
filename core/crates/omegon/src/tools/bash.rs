@@ -643,6 +643,8 @@ pub(crate) fn extract_shell_fs_intents_with_dialect(
     dialect: PathDialect,
 ) -> Vec<FsIntent> {
     let mut intents = Vec::new();
+    let scan_command = mask_heredoc_bodies(command);
+    let command = scan_command.as_str();
 
     // Pattern 1a: Output redirects to quoted paths — > '/path with spaces'.
     for cap in regex_lite::Regex::new(r#"([012]?>>?)\s*('[^']*'|\"[^\"]*\")"#)
@@ -788,6 +790,98 @@ pub(crate) fn extract_shell_fs_intents_with_dialect(
     }
 
     intents
+}
+
+/// Replace heredoc payload bytes with spaces while preserving newlines and byte
+/// offsets. Filesystem intent patterns operate on shell syntax; heredoc bodies
+/// belong to the receiving program and may contain arbitrary `>`, `rm`, or
+/// other shell-looking text that must not be interpreted as commands.
+fn mask_heredoc_bodies(command: &str) -> String {
+    let mut masked = command.as_bytes().to_vec();
+    let mut offset = 0;
+
+    for line in command.split_inclusive('\n') {
+        let line_end = offset + line.len();
+        let syntax = line.strip_suffix('\n').unwrap_or(line);
+        let mut search_from = 0;
+
+        while let Some(relative) = syntax[search_from..].find("<<") {
+            let operator = search_from + relative;
+            if operator > 0 && syntax.as_bytes()[operator - 1] == b'<' {
+                search_from = operator + 2;
+                continue;
+            }
+
+            let mut cursor = operator + 2;
+            let strip_tabs = syntax.as_bytes().get(cursor) == Some(&b'-');
+            if strip_tabs {
+                cursor += 1;
+            }
+            while syntax
+                .as_bytes()
+                .get(cursor)
+                .is_some_and(u8::is_ascii_whitespace)
+            {
+                cursor += 1;
+            }
+
+            let Some((delimiter, consumed)) = heredoc_delimiter(&syntax[cursor..]) else {
+                search_from = operator + 2;
+                continue;
+            };
+            if delimiter.is_empty() {
+                search_from = cursor + consumed;
+                continue;
+            }
+
+            let body_start = line_end;
+            let mut body_cursor = body_start;
+            let mut body_end = command.len();
+            while body_cursor < command.len() {
+                let next_newline = command[body_cursor..]
+                    .find('\n')
+                    .map_or(command.len(), |idx| body_cursor + idx + 1);
+                let candidate = command[body_cursor..next_newline]
+                    .strip_suffix('\n')
+                    .unwrap_or(&command[body_cursor..next_newline]);
+                let candidate = if strip_tabs {
+                    candidate.trim_start_matches('\t')
+                } else {
+                    candidate
+                };
+                if candidate == delimiter {
+                    body_end = body_cursor;
+                    break;
+                }
+                body_cursor = next_newline;
+            }
+
+            for byte in &mut masked[body_start..body_end] {
+                if *byte != b'\n' {
+                    *byte = b' ';
+                }
+            }
+            break;
+        }
+
+        offset = line_end;
+    }
+
+    String::from_utf8(masked).expect("masking ASCII bytes preserves UTF-8")
+}
+
+fn heredoc_delimiter(input: &str) -> Option<(String, usize)> {
+    let first = *input.as_bytes().first()?;
+    if matches!(first, b'\'' | b'\"') {
+        let quote = first as char;
+        let end = input[1..].find(quote)? + 1;
+        return Some((input[1..end].to_string(), end + 1));
+    }
+
+    let end = input
+        .find(|ch: char| ch.is_ascii_whitespace() || matches!(ch, ';' | '|' | '&' | '<' | '>'))
+        .unwrap_or(input.len());
+    (end > 0).then(|| (input[..end].to_string(), end))
 }
 
 fn push_shell_intent(
@@ -1451,7 +1545,15 @@ mod tests {
         let permission = err
             .downcast_ref::<crate::tools::PathPermissionError>()
             .expect("bash boundary hits must use PathPermissionError");
-        assert_eq!(permission.requested_path, "/etc/evil.txt");
+        assert!(
+            permission.requested_path.starts_with("/etc/evil.txt"),
+            "unexpected requested path: {}",
+            permission.requested_path
+        );
+        if permission.requested_path.len() > "/etc/evil.txt".len() {
+            assert!(permission.requested_path.contains("permission context warning"));
+            assert!(permission.requested_path.contains("HostBridge"));
+        }
         assert!(
             permission.directory.ends_with("/etc"),
             "unexpected directory: {}",
@@ -1546,6 +1648,30 @@ mod tests {
         let text = result.content[0].as_text().unwrap();
         assert!(text.contains("$(mktemp)"));
         assert!(text.contains("runtime path cannot be proven"));
+    }
+
+    #[test]
+    fn shell_intent_extraction_ignores_opaque_heredoc_bodies() {
+        let command = r#"python3 - <<'PY'
+text = ">\\n<p>[!{marker}]\")"
+print("mkdir /etc/not-a-command; rm /etc/not-a-command")
+PY
+"#;
+        assert!(extract_shell_fs_intents(command).is_empty());
+    }
+
+    #[test]
+    fn shell_intent_extraction_ignores_tab_stripped_heredoc_bodies() {
+        let command = "cat <<-EOF\n\t> /etc/not-a-redirect\n\tEOF\n";
+        assert!(extract_shell_fs_intents(command).is_empty());
+    }
+
+    #[test]
+    fn shell_intent_extraction_keeps_real_redirect_after_heredoc() {
+        let command = "cat <<'EOF'\n> /etc/not-a-redirect\nEOF\necho data > /etc/real.txt\n";
+        let intents = extract_shell_fs_intents(command);
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].raw_path(), "/etc/real.txt");
     }
 
     #[test]

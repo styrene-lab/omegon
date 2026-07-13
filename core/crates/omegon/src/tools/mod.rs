@@ -1592,9 +1592,16 @@ impl ToolProvider for CoreTools {
                     {
                         s.trusted_directories.push(canonical_str.clone());
                     }
-                    let mut profile = crate::settings::Profile::load(&self.cwd);
+                    let loaded = crate::settings::Profile::load_with_source(&self.cwd);
+                    let mut profile = loaded.profile;
                     profile.add_trusted_directory(canonical_str);
-                    profile.save(&self.cwd)?;
+                    let target = match loaded.source {
+                        crate::settings::ProfileSource::BuiltInDefault => {
+                            crate::settings::ProfileSaveTarget::Project
+                        }
+                        _ => crate::settings::ProfileSaveTarget::ActiveSource,
+                    };
+                    profile.save_to_target(&self.cwd, target, &loaded.source)?;
                 }
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
@@ -1980,9 +1987,78 @@ open_questions:
     }
 
     #[tokio::test]
+    async fn trust_directory_persistent_scope_updates_active_user_profile() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("AGENTS.md"), "instructions").unwrap();
+        let trusted = tempfile::tempdir().unwrap();
+        let profile_path = project.path().join("selected-user-profile.json");
+        let profile = crate::settings::Profile::default();
+        profile
+            .save_to_target(
+                project.path(),
+                crate::settings::ProfileSaveTarget::Named {
+                    name: "unused".into(),
+                    scope: crate::settings::ProfileRegistryScope::Project,
+                },
+                &crate::settings::ProfileSource::BuiltInDefault,
+            )
+            .unwrap();
+        std::fs::write(
+            &profile_path,
+            serde_json::to_string_pretty(&profile).unwrap(),
+        )
+        .unwrap();
+        let active = serde_json::json!({"id": "selected-user", "scope": "user"});
+        std::fs::create_dir_all(project.path().join(".omegon")).unwrap();
+        std::fs::write(
+            project.path().join(".omegon/active-profile.json"),
+            serde_json::to_vec_pretty(&active).unwrap(),
+        )
+        .unwrap();
+        // Exercise save-to-source directly with a synthetic user source; registry
+        // discovery is covered separately and must not redirect this grant to the
+        // project singleton.
+        let canonical = trusted.path().canonicalize().unwrap().display().to_string();
+        let mut selected = crate::settings::Profile::default();
+        selected.add_trusted_directory(canonical.clone());
+        selected
+            .save_to_target(
+                project.path(),
+                crate::settings::ProfileSaveTarget::ActiveSource,
+                &crate::settings::ProfileSource::User(profile_path.clone()),
+            )
+            .unwrap();
+        let persisted: crate::settings::Profile =
+            serde_json::from_slice(&std::fs::read(&profile_path).unwrap()).unwrap();
+        assert!(
+            persisted
+                .effective_trusted_directories()
+                .contains(&canonical)
+        );
+        assert!(!project.path().join(".omegon/profile.json").exists());
+    }
+
+    #[tokio::test]
     async fn trust_directory_persistent_scope_updates_profile_permissions() {
         let project = tempfile::tempdir().unwrap();
         std::fs::write(project.path().join("AGENTS.md"), "instructions").unwrap();
+        let active_profile_dir = project.path().join(".omegon/profiles");
+        std::fs::create_dir_all(&active_profile_dir).unwrap();
+        let active_profile_path = active_profile_dir.join("release-test.json");
+        std::fs::write(
+            &active_profile_path,
+            serde_json::to_vec_pretty(&crate::settings::Profile::default()).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            project.path().join(".omegon/active-profile.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "id": "release-test",
+                "scope": "project"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
         let trusted = tempfile::tempdir().unwrap();
         let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
         let tools = CoreTools::new(project.path().to_path_buf()).with_settings(settings.clone());
@@ -2008,7 +2084,8 @@ open_questions:
                 .trusted_directories
                 .contains(&trusted_dir)
         );
-        let profile = crate::settings::Profile::load(project.path());
+        let raw_profile = std::fs::read_to_string(&active_profile_path).unwrap();
+        let profile: crate::settings::Profile = serde_json::from_str(&raw_profile).unwrap();
         assert!(
             profile
                 .effective_trusted_directories()
@@ -2204,6 +2281,17 @@ open_questions:
         assert!(!b.is_inside_boundary(Path::new("/opt/data/file.txt")));
         b.approve_directory(PathBuf::from("/opt/data"));
         assert!(b.is_inside_boundary(Path::new("/opt/data/file.txt")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn canonical_permission_paths_unify_tmp_symlink_and_private_tmp() {
+        let requested = canonicalize_existing_parent_for_permissions(Path::new(
+            "/tmp/omegon-permission-missing/child",
+        ));
+        let granted = canonicalize_existing_parent_for_permissions(Path::new("/private/tmp"));
+        assert!(requested.starts_with(&granted));
+        assert_eq!(granted, PathBuf::from("/private/tmp"));
     }
 
     #[test]

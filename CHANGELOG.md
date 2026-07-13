@@ -16,12 +16,94 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-07-13
+
+0.28.0 makes Om the outcome-first TUI default, adds bounded Active workflows and evidence-complete Full projection, and completes the permissions intent architecture. Canonical activity, outcomes, and evidence now project consistently across TUI, IPC/WebSocket, transcript export, and replay without changing runtime authority.
+
+- Fixed the Profile TUI so project-scoped registry selections persist through the canonical `.omegon/active-profile.json` pointer and the profile summary/footer wrap instead of silently truncating paths and commands.
+- Made turn termination and provider stalls explicit: terminal reasons now distinguish completion, operator waits, blocking, turn limits, provider exhaustion, worker failures, and cancellation; the TUI projects lifecycle, stream-idle, and terminal provider-failure evidence instead of collapsing them into generic idle state.
+
+### Added
+
+- Added `Alt+Shift+Up/Down` conversation navigation that snaps the viewport between semantic operator-message anchors, complementing `Alt+Up/Down` editor-history recall.
+- Operator image attachments now remain visible for immediate send confirmation, collapse into compact transcript rows when assistant output or tool activity starts, and toggle between collapsed and expanded rendering when the operator double-clicks the owning message or image. Standalone tool-result images retain independent rendering state.
+
+- Added pre-0.29 unified-work foundations: a dependency-light `styrene-work-model` crate that separates authority, origin, capabilities, lifecycle, provenance/revision, and source-specific facets; plus `styrene-work-runtime`, an async refresh layer that publishes immutable generation snapshots and explicit partial-source warnings.
+
+- Added a persistent web-search readiness gauge to slim and full TUI chrome. Keyless DuckDuckGo-only search is shown as an explicit degraded `WEB! ddg-only` state; configured Brave, Tavily, Serper, and Firecrawl providers render as compact readiness ticks. Selecting a search-provider secret opens its verified provider key console in the operator's browser and immediately accepts the key through Omegon's existing masked secret input, without exposing the key to model context.
+
+- Unified runtime lifecycle verbs: `/runtime refresh`, `/runtime reload`, `/runtime hup`, and `/runtime kick` rebuild reloadable in-process state through one shared path; `/runtime restart` and `/runtime hot-restart` re-exec the current Omegon binary so newly linked code takes effect. `/skills reload` and extension reload aliases reuse the shared refresh implementation instead of maintaining separate reload logic.
+- Hardened lifecycle UX for mixed operator skill levels: runtime reload output now leads with what changed, what stayed open, and when restart is actually needed; update installation is owned by the runtime loop so progress and failure remain visible instead of disappearing into background logs; graceful restarts now resume the exact saved conversation automatically; live actions carry an explicit warning badge before execution.
+- Added a versioned semantic runtime-lifecycle contract across native events, IPC, WebSocket, and MQTT, including operation kind/state, bounded progress, details, and same-session reconnect hints for update and restart operations.
+
+- Listed discovered user and project profiles directly in the `/profile` menu, including scope and active-state badges, concise display names, and safe selection of profile names containing spaces; Enter switches to an existing selected profile and rejects stale or unknown targets.
+
+### Fixed
+
+- Fixed release license auditing to classify the complete explicit Cargo workspace—including the new `styrene-work-*` crates—as first-party without broadly trusting arbitrary `omegon-*` package names.
+- Fixed the stable release runner appearing to hang before output by replacing its global `RUSTFLAGS=-D warnings` rebuild of every transitive dependency with the workspace Clippy warning gate.
+- Made the outside-workspace bash permission regression portable across bare-metal and containerized CI environments while preserving assertions for host-bridge risk diagnostics when present.
+- Reconciled detached conversation scroll anchors when transcript content shrinks, preventing automatic image-preview collapse from jumping the viewport upward or leaving it blank while a tool call runs or fails.
+- Restored release-suite coverage after recent plan, footer, runtime-lifecycle, skill-reload, segment-selection, and WebSocket event changes: ephemeral plan assertions now use session-local IDs, compact-footer tests match the authoritative Workbench split, `/extension restart` uses the graceful process-restart path, live skill reloads emit skill-event segments, and event serialization covers all current variants.
+
+- The documentation site now derives current crate/provider/tool/skill statistics from runtime sources, can pin release metadata with <code>OMEGON_SITE_RELEASE_TAG</code>, and removes stale slash commands, provider status, design-tree counts, lifecycle stages, model examples, and mouse shortcuts across the page-by-page reference audit.
+- Updated the public installation and artifact-verification examples to target the 0.28.0 stable release, removing stale 0.27.x commands from the generated docs site.
+- Double-clicking a bottom-aligned collapsed image now hits the rendered image row and expands the associated prompt attachments; conversation mouse hit testing now uses the same short-content viewport origin as rendering.
+- Interrupting an active turn now explicitly reattaches the conversation viewport to the live tail before restoring operator control, preventing the recovered composer from remaining stranded above the latest exchange.
+- Persistent directory approvals now write back to the selected active profile source instead of silently creating an unused project singleton; permission confirmation messages also canonicalize both target and grant paths so macOS `/tmp` and `/private/tmp` aliases are shown as one filesystem identity.
+- Removed the archived `omegon-pi` sibling from repository test/typecheck recipes, test counts, npm migration messaging, and package documentation; release validation now covers only maintained Omegon surfaces.
+- The session footer now omits duplicated plan/workbench labels, model route, context percentage, and the remaining session/turn/token prefix; those states remain available in their authoritative Workbench, engine, and context surfaces while the footer keeps only immediate actionable state.
+- Updated the Claude Code OAuth user-agent to match upstream `@anthropic-ai/claude-code` 2.1.207, preserving subscription recognition for the 0.28.0 release.
+- Cleared Rust 1.8x Clippy regressions across conversation telemetry, control-runtime summaries, skill frontmatter parsing, path classification, TUI rendering, and related tests so the release lint gate remains warning-free.
+- Shell filesystem-intent checks now treat heredoc payloads as opaque program input, preventing embedded source containing redirect-like text from triggering bogus permission requests; malformed UNC-like fragments must also contain valid server and share components before being classified as network paths.
+- Restored persistent web-search readiness and Omegon build-version status in the default Om footer. Readiness now uses one semantic network/failure glyph rather than ASCII plus one dot per provider, and it is pinned with the active binary identity at the bottom-right.
+- Neutralized routine plan footer and Workbench styling: normal plan state no longer consumes warning orange, active steps render bright and bold, completed steps bold and dim, and pending steps italic and dim.
+- Reattached stale detached conversation offsets when the operator submits the next turn, preventing an old `more below` position from carrying into a new exchange; streaming deltas now preserve the detached tail-height cache instead of invalidating it for every token, reducing severe scroll stutter during live responses.
+- Restored an explicit single-click `Copy` affordance on completed assistant responses while retaining double-click copy as a secondary shortcut; operator, tool, system, and streaming segments remain free of persistent copy chrome.
+- Kept the persistent web-search readiness gauge visible when fresh-session provider discovery is unavailable, conservatively rendering `WEB! ddg-only` instead of silently omitting the gauge.
+- Resolved and switched the live serving route when applying a selected profile's model intent, rejecting unavailable profile routes instead of reporting success after only mutating intent metadata; synchronized shared runtime model status with the resolved serving route and retained the registry ID for profile files without an embedded display name.
+- Routed ACP `/status` through the worker-owned shared `HarnessStatusProjection`, removing the abbreviated transport-only liveness response and giving ACP the same redacted harness/runtime contract as the TUI.
+- Added versioned semantic diagnostic projections for `/status` and `/stats`, moved TUI/control rendering onto them, and aligned ACP worker session stats with the shared contract while representing unavailable tool telemetry as `unknown` rather than zero.
+- Hardened `/status` and `/stats` ahead of 0.28.0: status now prefers the live harness snapshot, session stats report observed shared turn/tool-call counters instead of a fabricated zero, poisoned diagnostic locks degrade safely, and the unimplemented `/stats bench` affordance is no longer advertised.
+
+- Exposed concrete GPT-5.6 route variants (`sol`, `terra`, and `luna`) in the operator-facing engine ribbon instead of truncating all three to the ambiguous `gpt-5.6` conceptual family.
+
+- Kept successful projected conversation outcomes neutral in slim/Om views by classifying `✓` system notifications separately from warning, retry, and failure notifications, with a production-path regression test covering canonical tool evidence through conversation projection and final widget-buffer rendering.
+
+- Delegates without an explicit model pin now inherit the parent session's known-working route instead of selecting a merely compatible inventory offering, preventing unavailable local models from trapping delegation in repeated startup failures. Provider/model startup failures no longer count toward the session-wide task-failure breaker, and the tool schema no longer encourages speculative local-model pins.
+
+- Kept completed slim conversation tool rows neutral at the final segment-render boundary, with an end-to-end buffer regression test preventing successful tools from consuming attention orange.
+
+- Refined session-plan durability guidance so research, design, or validation work no longer implies OpenSpec adoption; evidence-bearing plans now neutrally recommend a versioned workspace or explicit durable artifact when history beyond the session is needed.
+- Fixed ephemeral Workbench plan lifecycle without treating every prompt as a destructive task boundary: plans are sub-indexed within their owning session, replacement or explicit task-reset detachment retains the full plan snapshot in history, ordinary follow-up prompts leave the active lane intact, and repo-scoped plans remain active.
 - Fixed inline terminal images rendering near the top of the conversation instead of inside their bottom-anchored segment chrome when short conversations sit above the composer.
 - Improved design-tree path-collision diagnostics: creating `docs/<id>.md` now distinguishes an existing indexed design node from an ordinary or malformed Markdown document and directs operators to convert or repair invalid frontmatter.
 
-## [0.28.0] - 2026-07-10
+### Highlights
 
-0.28.0 makes Om the outcome-first TUI default, adds bounded Active workflows and evidence-complete Full projection, and completes the permissions intent architecture. Canonical activity, outcomes, and evidence now project consistently across TUI, IPC/WebSocket, transcript export, and replay without changing runtime authority.
+- **Outcome-first TUI:** Om keeps routine execution quiet and presents one durable outcome per operation; Active adds bounded live workflow detail; Full retains complete operational evidence.
+- **Mode-independent evidence:** changing presentation level does not change model, tool, permission, transcript, or export authority.
+- **Safer execution:** permissions now carry structured filesystem intent, path dialect, sensitive-infrastructure risk, and mount/environment context.
+- **Provider-neutral routing:** shared inference inventory, conceptual model identity, generation-pinned subagent routing, and route provenance make provider choice inspectable without silently replacing compiled routing authority.
+
+### Operator-visible changes
+
+- Omegon starts in Om. Use `/ui om`, `/ui active`, or `/ui full`; Ctrl+G cycles the three levels. Stored `lean` and `slim` values migrate to Om.
+- Workbench suppresses routine chrome in Om but remains visible for approvals, blockers, reconciliation issues, and pending decisions.
+- Operator `!` shell commands become attributed observations in canonical session history, and completed tools collapse into durable success or failure outcomes.
+- Settings are available through the universal configuration entrypoint, while semantic presentation controls are shared across TUI and remote clients.
+
+### Compatibility and migration
+
+- Existing `/ui lean` and `/ui slim` aliases continue to work and map to Om.
+- Legacy `SetRuntimeMode { slim }` decoding remains supported; new clients should use `SetPresentationLevel { Om | Active | Full }`.
+- No manual data migration is required. Default transcript and session-copy output remains mode-independent; evidence-inclusive export retains canonical command arguments and results.
+
+### Security and known limitations
+
+- Permission mediation is stricter for suspicious, shell-derived, cross-platform, container, VM, Kubernetes secret, and runtime-socket paths. Prompts now explain the resolved target and risk rather than granting ambiguous path strings.
+- Inventory-preferred routing remains an opt-in experiment behind `OMEGON_INFERENCE_ROUTE_POLICY=inventory_prefer`; authoritative compiled routing remains the fallback.
+- GitHub Models and Copilot-seat transports that are marked “coming soon” in provider documentation are not part of the 0.28 support contract.
 
 - Corrected the detached conversation viewport marker so neutral `more below · End to tail` navigation chrome uses muted gray instead of attention orange, and added final-buffer regression coverage proving rendered running, completed, and failed Slim tool labels retain teal, neutral, and orange semantics respectively.
 - Corrected the remaining Slim semantic-header state mapping so completed tool rows use neutral gray and failed rows use attention orange; this covers the grouped `memory_recall`/`bash` path that bypassed the previously fixed tool-card chrome.

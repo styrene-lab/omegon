@@ -133,7 +133,7 @@ def ensure_release_workspace_role(repo_root: Path) -> None:
     lease_path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
-def collect_failures(repo_root: Path) -> list[str]:
+def collect_failures(repo_root: Path, *, check_release_gaps: bool = True) -> list[str]:
     failures: list[str] = []
 
     branch = git_stdout(repo_root, "branch", "--show-current")
@@ -176,10 +176,11 @@ def collect_failures(repo_root: Path) -> list[str]:
     if not workflows_use_release_manifest(repo_root):
         failures.append("release workflows are not consistently wired through release-manifest.json")
 
-    try:
-        release_gaps_clear(repo_root)
-    except PreflightError as err:
-        failures.append(str(err))
+    if check_release_gaps:
+        try:
+            release_gaps_clear(repo_root)
+        except PreflightError as err:
+            failures.append(str(err))
 
     return failures
 
@@ -192,6 +193,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="repair/create .omegon/runtime/workspace.json with role=release before exiting",
     )
+    parser.add_argument(
+        "--skip-release-gap-check",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args(argv)
 
     repo_root = args.repo_root.resolve()
@@ -200,7 +206,10 @@ def main(argv: list[str] | None = None) -> int:
         print(repo_root / ".omegon" / "runtime" / "workspace.json")
         return 0
 
-    failures = collect_failures(repo_root)
+    failures = collect_failures(
+        repo_root,
+        check_release_gaps=not args.skip_release_gap_check,
+    )
     if failures:
         print("✗ Release preflight failed:", file=sys.stderr)
         for failure in failures:

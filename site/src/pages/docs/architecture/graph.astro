@@ -10,21 +10,21 @@ const svgContent = existsSync(svgPath) ? readFileSync(svgPath, "utf-8") : null;
 
 <Docs title="Design Graph" description="Force-directed visualization of omegon's design tree — every architectural decision from initial fork through the current state.">
   <h1>Design Graph</h1>
-  <p>This is a static rendering of omegon's design exploration tree — every architectural decision from initial fork through the current state. Node count grows with each design session; the legend below reflects the most recent build.</p>
+  <p>The graph is generated from the repository's current design-tree artifacts. Counts and statuses evolve with design work; inspect the rendered graph or the live dashboard for the authoritative current inventory.</p>
 
   <div class="graph-container">
     {svgContent ? <Fragment set:html={svgContent} /> : <p class="graph-placeholder">Graph SVG not generated. Run <code>npm run build</code> in <code>site/</code> to generate.</p>}
   </div>
 
-  <h2>Legend</h2>
+  <h2>Status semantics</h2>
   <table>
-    <thead><tr><th>Color</th><th>Status</th><th>Count</th></tr></thead>
+    <thead><tr><th>Color</th><th>Status</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td style="color: #22c55e">●</td><td>Implemented</td><td>207</td></tr>
-      <tr><td style="color: #2ab4c8">●</td><td>Implementing</td><td>15</td></tr>
-      <tr><td style="color: #f59e0b">●</td><td>Decided</td><td>10</td></tr>
-      <tr><td style="color: #607888">●</td><td>Exploring</td><td>32</td></tr>
-      <tr><td style="color: #405870">●</td><td>Seed / Deferred</td><td>18</td></tr>
+      <tr><td style="color: #22c55e">●</td><td>Implemented</td><td>Implementation is recorded as complete.</td></tr>
+      <tr><td style="color: #2ab4c8">●</td><td>Implementing</td><td>Implementation work is active.</td></tr>
+      <tr><td style="color: #f59e0b">●</td><td>Decided</td><td>Open questions are resolved and the design is ready to implement.</td></tr>
+      <tr><td style="color: #607888">●</td><td>Exploring / Resolved</td><td>Research or decision reconciliation is still in progress.</td></tr>
+      <tr><td style="color: #405870">●</td><td>Seed</td><td>The design has been captured but not yet developed.</td></tr>
     </tbody>
   </table>
 

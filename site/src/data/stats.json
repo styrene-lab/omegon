@@ -1,12 +1,13 @@
 {
-  "crateCount": 9,
-  "downloadMB": 16,
-  "releaseTag": "v0.27.1",
-  "providerCount": 15,
+  "crateCount": 11,
+  "downloadMB": null,
+  "releaseTag": "v0.28.0",
+  "providerCount": 16,
   "providerNames": [
     "Anthropic/Claude",
     "OpenAI API",
     "OpenAI/Codex",
+    "GitHub Copilot",
     "OpenRouter",
     "Groq",
     "xAI (Grok)",
@@ -24,6 +25,7 @@
     "anthropic",
     "openai",
     "openai-codex",
+    "github-copilot",
     "openrouter",
     "groq",
     "xai",
@@ -37,8 +39,8 @@
     "ollama",
     "ollama-cloud"
   ],
-  "toolFiles": 23,
+  "toolFiles": 24,
   "skillCount": 10,
   "searchProviderCount": 3,
-  "collectedAt": "2026-07-04T15:32:52.046Z"
+  "collectedAt": "2026-07-13T16:27:36.949Z"
 }

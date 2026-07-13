@@ -894,10 +894,9 @@ fn extract_description(content: &str) -> Option<&str> {
     // Support both YAML (---) and TOML (+++) frontmatter delimiters.
     let (body, delimiter) = if let Some(b) = content.strip_prefix("---\n") {
         (b, "\n---")
-    } else if let Some(b) = content.strip_prefix("+++\n") {
-        (b, "\n+++")
     } else {
-        return None;
+        let b = content.strip_prefix("+++\n")?;
+        (b, "\n+++")
     };
     let end = body.find(delimiter)?;
     let frontmatter = &body[..end];

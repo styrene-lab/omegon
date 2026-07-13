@@ -4457,6 +4457,14 @@ fn build_tui_secret_readiness_snapshot(
 
     let mut runtime = InteractiveRuntimeSupervisor::default();
     let mut deferred_commands = VecDeque::new();
+    let mut restart_request: Option<(std::path::PathBuf, Vec<String>)> = None;
+    let runtime_lifecycle_handle = agent.dashboard_handles.runtime_lifecycle.clone();
+    let emit_lifecycle = |snapshot: omegon_traits::RuntimeLifecycleSnapshot| {
+        if let Ok(mut current) = runtime_lifecycle_handle.lock() {
+            *current = Some(snapshot.clone());
+        }
+        let _ = events_tx.send(AgentEvent::RuntimeLifecycleUpdated { snapshot });
+    };
     'interactive: loop {
         let cmd = if let Some(cmd) = deferred_commands.pop_front() {
             cmd
@@ -4481,6 +4489,65 @@ fn build_tui_secret_readiness_snapshot(
 
         match cmd {
             tui::TuiCommand::Quit => break,
+            tui::TuiCommand::InstallUpdate { info, args } => {
+                let latest = info.latest.clone();
+                let operation_id = uuid::Uuid::new_v4().to_string();
+                let mut lifecycle = omegon_traits::RuntimeLifecycleSnapshot {
+                    operation_id,
+                    kind: omegon_traits::RuntimeLifecycleKind::UpdateInstall,
+                    phase: omegon_traits::RuntimeLifecyclePhase::Downloading,
+                    message: "Downloading and verifying update".into(),
+                    session_id: Some(agent.session_id.clone()),
+                    target_version: Some(latest.clone()),
+                    reconnect_required: false,
+                };
+                emit_lifecycle(lifecycle.clone());
+                let _ = events_tx.send(AgentEvent::SystemNotification {
+                    message: format!("Downloading and verifying Omegon v{latest}…"),
+                });
+                match crate::update::download_and_replace(&info).await {
+                    Ok(binary) => {
+                        lifecycle.phase = omegon_traits::RuntimeLifecyclePhase::Restarting;
+                        lifecycle.message = "Update installed; saving session and restarting".into();
+                        lifecycle.reconnect_required = true;
+                        emit_lifecycle(lifecycle);
+                        let _ = events_tx.send(AgentEvent::SystemNotification {
+                            message: format!(
+                                "Omegon v{latest} installed. Saving this session and restarting…"
+                            ),
+                        });
+                        restart_request = Some((binary, args));
+                        break;
+                    }
+                    Err(error) => {
+                        lifecycle.phase = omegon_traits::RuntimeLifecyclePhase::Failed;
+                        lifecycle.message = format!(
+                            "Update failed; current version still running: {error}"
+                        );
+                        lifecycle.reconnect_required = false;
+                        emit_lifecycle(lifecycle);
+                        let _ = events_tx.send(AgentEvent::SystemNotification {
+                            message: format!(
+                                "Update failed; the current version is still running: {error}"
+                            ),
+                        });
+                    }
+                }
+            }
+            tui::TuiCommand::RestartProcess { binary, args } => {
+                let lifecycle = omegon_traits::RuntimeLifecycleSnapshot {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
+                    kind: omegon_traits::RuntimeLifecycleKind::Restart,
+                    phase: omegon_traits::RuntimeLifecyclePhase::Restarting,
+                    message: "Saving session and restarting".into(),
+                    session_id: Some(agent.session_id.clone()),
+                    target_version: None,
+                    reconnect_required: true,
+                };
+                emit_lifecycle(lifecycle);
+                restart_request = Some((binary, args));
+                break;
+            }
 
             tui::TuiCommand::ExecuteControl { request, respond_to } => {
                 let mut ctx = control_runtime::ControlContext {
@@ -5373,6 +5440,44 @@ fn build_tui_secret_readiness_snapshot(
                 args,
                 respond_to,
             } => {
+                let lifecycle_command = crate::tui::canonical_slash_command(&name, &args);
+                if matches!(
+                    lifecycle_command,
+                    Some(crate::tui::CanonicalSlashCommand::RuntimeProcessRestart)
+                ) {
+                    let binary = std::env::current_exe()
+                        .and_then(|path| path.canonicalize())
+                        .unwrap_or_else(|_| std::path::PathBuf::from("omegon"));
+                    deferred_commands.push_back(tui::TuiCommand::RestartProcess {
+                        binary,
+                        args: std::env::args().skip(1).collect(),
+                    });
+                    if let Some(reply) = respond_to {
+                        let _ = reply.send(omegon_traits::SlashCommandResponse {
+                            accepted: true,
+                            output: Some(
+                                "Runtime restart accepted. Save and same-session reconnect events will follow."
+                                    .into(),
+                            ),
+                        });
+                    }
+                    continue;
+                }
+                if matches!(
+                    lifecycle_command,
+                    Some(crate::tui::CanonicalSlashCommand::RuntimeSubstrateRefresh)
+                        | Some(crate::tui::CanonicalSlashCommand::SkillsReload)
+                ) {
+                    let response = control_runtime::runtime_substrate_refresh_response(
+                        &mut runtime_state,
+                        &agent,
+                    )
+                    .await;
+                    if let Some(reply) = respond_to {
+                        let _ = reply.send(response);
+                    }
+                    continue;
+                }
                 let response = execute_remote_slash_command(
                     &mut runtime_state,
                     &mut agent,
@@ -5917,6 +6022,26 @@ fn build_tui_secret_readiness_snapshot(
                                             cancel.cancel();
                                         }
                                     }
+                                    tui::TuiCommand::InstallUpdate { info, args } => {
+                                        deferred_commands.push_back(
+                                            tui::TuiCommand::InstallUpdate { info, args },
+                                        );
+                                        quit_after_turn = true;
+                                        if let Ok(guard) = shared_cancel.lock()
+                                            && let Some(ref cancel) = *guard
+                                        {
+                                            cancel.cancel();
+                                        }
+                                    }
+                                    tui::TuiCommand::RestartProcess { binary, args } => {
+                                        restart_request = Some((binary, args));
+                                        quit_after_turn = true;
+                                        if let Ok(guard) = shared_cancel.lock()
+                                            && let Some(ref cancel) = *guard
+                                        {
+                                            cancel.cancel();
+                                        }
+                                    }
                                     other => deferred_commands.push_back(other),
                                 }
                             }
@@ -6006,6 +6131,10 @@ fn build_tui_secret_readiness_snapshot(
 
     bridge.read().await.shutdown().await;
     tui_handle.abort();
+    if let Some((binary, args)) = restart_request {
+        let args = restart_args_for_session(args, &agent.session_id);
+        crate::update::exec_restart(&binary, &args)?;
+    }
     Ok(())
         })
         .await
@@ -6475,6 +6604,31 @@ pub(crate) struct CliRuntimeView<'a> {
     pub(crate) dangerously_bypass_permissions: bool,
 }
 
+fn restart_args_for_session(mut args: Vec<String>, session_id: &str) -> Vec<String> {
+    let mut filtered = Vec::with_capacity(args.len() + 2);
+    let mut skip_resume_value = false;
+    for arg in args.drain(..) {
+        if skip_resume_value {
+            skip_resume_value = false;
+            continue;
+        }
+        if arg == "--fresh" {
+            continue;
+        }
+        if arg == "--resume" {
+            skip_resume_value = true;
+            continue;
+        }
+        if arg.starts_with("--resume=") {
+            continue;
+        }
+        filtered.push(arg);
+    }
+    filtered.push("--resume".to_string());
+    filtered.push(session_id.to_string());
+    filtered
+}
+
 fn interactive_resume_mode(cli: &Cli) -> Option<Option<&str>> {
     if cli.fresh {
         None
@@ -6693,6 +6847,46 @@ async fn run_interactive_active_turn(
     }
 
     if let Some(Err(e)) = run_result {
+        let terminal_reason = if r#loop::is_upstream_exhausted(&e) {
+            omegon_traits::TurnEndReason::ProviderExhausted
+        } else {
+            omegon_traits::TurnEndReason::WorkerFailed
+        };
+        let _ = events_tx.send(AgentEvent::TurnEnd(Box::new(
+            omegon_traits::AgentEventTurnEnd {
+                turn: runtime_state.conversation.intent.stats.turns,
+                turn_end_reason: terminal_reason,
+                model: loop_config
+                    .bridge_model
+                    .clone()
+                    .or_else(|| Some(loop_config.model.clone())),
+                provider: loop_config
+                    .bridge_model
+                    .as_deref()
+                    .map(crate::providers::infer_provider_id)
+                    .or_else(|| Some(crate::providers::infer_provider_id(&loop_config.model))),
+                estimated_tokens: runtime_state.conversation.estimate_tokens(),
+                context_window: 0,
+                context_composition: omegon_traits::ContextComposition::default(),
+                actual_input_tokens: 0,
+                actual_output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                provider_telemetry: None,
+                dominant_phase: None,
+                drift_kind: None,
+                progress_nudge_reason: None,
+                intent_task: runtime_state.conversation.intent.current_task.clone(),
+                intent_phase: Some(format!(
+                    "{:?}",
+                    runtime_state.conversation.intent.lifecycle_phase
+                )),
+                files_read_count: runtime_state.conversation.intent.files_read.len(),
+                files_modified_count: runtime_state.conversation.intent.files_modified.len(),
+                stats_tool_calls: runtime_state.conversation.intent.stats.tool_calls,
+                streaks: omegon_traits::ControllerStreaks::default(),
+            },
+        )));
         let recent_telemetry = runtime_state.conversation.last_provider_telemetry(None);
         let user_msg = format_agent_error(&e, recent_telemetry.as_ref());
         tracing::error!(
@@ -9859,6 +10053,28 @@ mod tests {
             "got: {result}"
         );
         assert!(!result.contains("provider-side failure"), "got: {result}");
+    }
+
+    #[test]
+    fn restart_args_resume_the_exact_saved_session() {
+        let args = restart_args_for_session(
+            vec![
+                "--fresh".into(),
+                "--resume".into(),
+                "old-session".into(),
+                "--model".into(),
+                "anthropic:claude-sonnet-4-6".into(),
+            ],
+            "current-session",
+        );
+
+        assert!(!args.contains(&"--fresh".to_string()));
+        assert!(!args.contains(&"old-session".to_string()));
+        assert_eq!(
+            args.windows(2).last(),
+            Some(["--resume".to_string(), "current-session".to_string()].as_slice())
+        );
+        assert!(args.contains(&"--model".to_string()));
     }
 
     #[test]

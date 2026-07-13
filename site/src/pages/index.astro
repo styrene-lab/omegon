@@ -100,6 +100,20 @@ const valueCards = [
       </div>
     </section>
 
+    <section class="release-callout" aria-labelledby="release-heading">
+      <p class="release-kicker">New in 0.28</p>
+      <h2 id="release-heading">Quiet by default. Complete when you need it.</h2>
+      <p>
+        <strong>Om</strong> is the outcome-first default, <strong>Active</strong> shows bounded live workflow detail,
+        and <strong>Full</strong> preserves complete operational evidence. Presentation density never changes model,
+        tool, or permission authority, and transcripts retain the same durable evidence at every level.
+      </p>
+      <div class="release-links">
+        <a href="/docs/tui">Explore Om, Active, and Full &rarr;</a>
+        <a href="/changelog">Read the 0.28 release notes &rarr;</a>
+      </div>
+    </section>
+
     <section class="install">
       <div class="install-bar">
         <div class="install-label">Install</div>
@@ -235,6 +249,25 @@ const valueCards = [
   .topnav-links { display: flex; gap: 24px; font-size: 14px; }
   .topnav-links a { color: var(--muted); }
   .topnav-links a:hover { color: var(--fg); text-decoration: none; }
+
+  .release-callout {
+    margin: 0 auto 36px;
+    padding: 28px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(42, 180, 200, 0.12), rgba(14, 22, 34, 0.92));
+  }
+  .release-kicker {
+    margin: 0 0 8px;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .release-callout h2 { margin: 0 0 10px; font-size: 24px; }
+  .release-callout > p:not(.release-kicker) { margin: 0; color: var(--muted); max-width: 78ch; }
+  .release-links { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 16px; font-size: 14px; }
 
   /* ── Page shell — single measure ─────────── */
   .page {

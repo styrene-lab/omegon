@@ -253,6 +253,16 @@ pub enum TuiCommand {
     ShellHandoff { keyboard_enhancement: bool },
     /// User wants to quit (double Ctrl+C, or /exit).
     Quit,
+    /// Download and verify an update, then enter the graceful restart lifecycle.
+    InstallUpdate {
+        info: crate::update::UpdateInfo,
+        args: Vec<String>,
+    },
+    /// Gracefully save and shut down, then re-exec the current process.
+    RestartProcess {
+        binary: std::path::PathBuf,
+        args: Vec<String>,
+    },
     /// Show current model/provider posture.
     ModelView {
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
@@ -751,6 +761,7 @@ pub enum CanonicalSlashCommand {
     StatusView,
     RuntimeInventoryStatus,
     RuntimeSubstrateRefresh,
+    RuntimeProcessRestart,
     WorkspaceStatusView,
     WorkspaceListView,
     WorkspaceNew(String),
@@ -928,6 +939,29 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 crate::settings::ProfileSaveTarget::User,
             ))
         }
+        "profile" if (args.starts_with("save --name ") || args.starts_with("capture --name ")) => {
+            // `/profile save --name <name>` → user scope (default)
+            // `/profile save --name <name> --project` → project scope
+            let rest = args
+                .trim_start_matches("save --name ")
+                .trim_start_matches("capture --name ");
+            let (name, scope) = if let Some(n) = rest.strip_suffix(" --project") {
+                (n, crate::settings::ProfileRegistryScope::Project)
+            } else {
+                let name = rest.split_whitespace().next().unwrap_or(rest);
+                (name, crate::settings::ProfileRegistryScope::User)
+            };
+            if name.is_empty() {
+                None
+            } else {
+                Some(CanonicalSlashCommand::ProfileCapture(
+                    crate::settings::ProfileSaveTarget::Named {
+                        name: name.to_string(),
+                        scope,
+                    },
+                ))
+            }
+        }
         "profile" if args == "apply" || args == "load" => Some(CanonicalSlashCommand::ProfileApply),
         "profile" if args == "mqtt" || args == "mqtt status" => {
             Some(CanonicalSlashCommand::ProfileSetMqtt(None))
@@ -969,11 +1003,17 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
             {
-                let mut parts = rest.split_whitespace();
-                let id = parts.next()?.to_string();
-                let scope = parts
-                    .next()
-                    .map(|value| value.trim_start_matches("--scope=").to_string());
+                let parts = shlex::split(rest)?;
+                let id = parts.first()?.clone();
+                let scope = match parts.as_slice() {
+                    [_] => None,
+                    [_, scope] if !scope.starts_with("--") => Some(scope.clone()),
+                    [_, flag] if flag.starts_with("--scope=") => {
+                        Some(flag.trim_start_matches("--scope=").to_string())
+                    }
+                    [_, flag, scope] if flag == "--scope" => Some(scope.clone()),
+                    _ => return None,
+                };
                 Some(CanonicalSlashCommand::ProfileUse { id, scope })
             } else if let Some(name) = args.strip_prefix("persona ").map(str::trim) {
                 Some(CanonicalSlashCommand::ProfileSetPersona(
@@ -1034,8 +1074,11 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "runtime" if matches!(args, "status" | "inventory") => {
             Some(CanonicalSlashCommand::RuntimeInventoryStatus)
         }
-        "runtime" if matches!(args, "restart" | "hot-restart" | "refresh" | "reload") => {
+        "runtime" if matches!(args, "refresh" | "reload" | "hup" | "kick") => {
             Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
+        }
+        "runtime" if matches!(args, "restart" | "hot-restart") => {
+            Some(CanonicalSlashCommand::RuntimeProcessRestart)
         }
         "workspace" if args.is_empty() => Some(CanonicalSlashCommand::WorkspaceStatusView),
         "workspace" if args == "status" => Some(CanonicalSlashCommand::WorkspaceStatusView),
@@ -1287,8 +1330,10 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             } else if let Some(name) = args.strip_prefix("remove ") {
                 let name = name.trim();
                 (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionRemove(name.to_string()))
-            } else if matches!(args, "refresh" | "reload" | "restart") {
+            } else if matches!(args, "refresh" | "reload" | "hup" | "kick") {
                 Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
+            } else if matches!(args, "restart" | "hot-restart") {
+                Some(CanonicalSlashCommand::RuntimeProcessRestart)
             } else if args == "update" {
                 Some(CanonicalSlashCommand::ExtensionUpdate(None))
             } else if let Some(name) = args.strip_prefix("update ") {
@@ -4155,11 +4200,14 @@ impl App {
                     rows: vec![
                         MenuRowProjection {
                             id: "runtime.refresh".into(),
-                            label: "Refresh runtime substrate".into(),
-                            description: "Reload skill augments and inspect extension/runtime candidates; unavailable while a model turn is active.".into(),
-                            value: None,
+                            label: "Reload live configuration".into(),
+                            description: "Reload skills and re-scan extension/runtime candidates without closing this session. Running extensions are inspected but not replaced.".into(),
+                            value: Some("keeps session open".into()),
                             kind: MenuRowKind::Action,
-                            badges: vec![MenuBadgeProjection { label: "runtime".into(), tone: MenuBadgeTone::Warning }],
+                            badges: vec![
+                                MenuBadgeProjection { label: "live".into(), tone: MenuBadgeTone::Warning },
+                                MenuBadgeProjection { label: "keeps session".into(), tone: MenuBadgeTone::Neutral },
+                            ],
                             metadata: vec!["/runtime refresh".into(), "/extension refresh".into()],
                             primary_action: Some({ let mut action = MenuActionProjection::command("runtime.refresh.primary", "Refresh", "/runtime refresh"); action.requires_confirmation = true; action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
                             actions: vec![{
@@ -4526,12 +4574,15 @@ impl App {
         menu.summary = Some(format!(
             "Persisted profile controls. {source_line}; runtime drift: {drift_value}."
         ));
-        menu.footer = Some("↑/↓ navigate · / filter · Enter run · s save · explicit /profile apply to apply · Esc close".into());
+        menu.footer = Some("↑/↓ navigate · / filter · Enter use/view · s save · explicit /profile apply to apply · Esc close".into());
         let registry = crate::settings::ProfileRegistry::discover(self.cwd());
         let active_source = drift.source.clone();
         let mut registry_rows: Vec<MenuRowProjection> = registry
             .entries
             .iter()
+            .filter(|entry| {
+                entry.source_kind != crate::settings::ProfileRegistrySourceKind::BuiltInDefault
+            })
             .map(|entry| {
                 let is_active = entry
                     .path
@@ -4566,8 +4617,11 @@ impl App {
                     label: entry.id.clone(),
                     description: entry
                         .profile
-                        .compact_label()
-                        .unwrap_or("Profile registry entry")
+                        .display_name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or("Saved profile")
                         .to_string(),
                     value: Some(entry.scope.as_str().into()),
                     kind: MenuRowKind::Object,
@@ -4584,7 +4638,11 @@ impl App {
                         MenuActionProjection::command(
                             format!("profile.use.{}.{}", entry.scope.as_str(), entry.id),
                             "Use",
-                            format!("/profile use {} {}", entry.id, entry.scope.as_str()),
+                            format!(
+                                "/profile use {} {}",
+                                shlex::try_quote(&entry.id).unwrap_or_else(|_| "''".into()),
+                                entry.scope.as_str()
+                            ),
                         )
                     }),
                     actions: vec![],
@@ -4737,6 +4795,60 @@ impl App {
                         availability: None,
                     },
                     MenuRowProjection {
+                        id: "profile.save_named_user".into(),
+                        label: "Save as named user profile".into(),
+                        description: "Capture runtime settings to a named profile in ~/.omegon/profiles/<name>.json.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![
+                            MenuBadgeProjection {
+                                label: "writes".into(),
+                                tone: MenuBadgeTone::Warning,
+                            },
+                            MenuBadgeProjection {
+                                label: "user".into(),
+                                tone: MenuBadgeTone::Info,
+                            },
+                        ],
+                        metadata: vec!["/profile save --name <name>".into()],
+                        primary_action: Some(MenuActionProjection::prime_editor(
+                            "profile.save_named_user.primary",
+                            "Name & save (user)",
+                            "/profile save --name ",
+                            "Type the profile name and press Enter — saved to ~/.omegon/profiles/<name>.json",
+                        )),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
+                        id: "profile.save_named_project".into(),
+                        label: "Save as named project profile".into(),
+                        description: "Capture runtime settings to a named profile in .omegon/profiles/<name>.json.".into(),
+                        value: None,
+                        kind: MenuRowKind::Action,
+                        badges: vec![
+                            MenuBadgeProjection {
+                                label: "writes".into(),
+                                tone: MenuBadgeTone::Warning,
+                            },
+                            MenuBadgeProjection {
+                                label: "project".into(),
+                                tone: MenuBadgeTone::Info,
+                            },
+                        ],
+                        metadata: vec!["/profile save --name <name> --project".into()],
+                        primary_action: Some(MenuActionProjection::prime_editor(
+                            "profile.save_named_project.primary",
+                            "Name & save (project)",
+                            "/profile save --name ",
+                            "Type the profile name followed by ' --project' and press Enter — saved to .omegon/profiles/<name>.json",
+                        )),
+                        actions: vec![],
+                        safety: None,
+                        availability: None,
+                    },
+                    MenuRowProjection {
                         id: "profile.export".into(),
                         label: "Export profile".into(),
                         description: "Render the current runtime profile as a text readout.".into(),
@@ -4757,6 +4869,15 @@ impl App {
                         availability: None,
                     },
                 ],
+            },
+            MenuGroupProjection {
+                id: "profile.available".into(),
+                label: "Available profiles".into(),
+                description: Some(
+                    "Discovered user and project profiles. Enter switches to the selected profile."
+                        .into(),
+                ),
+                rows: registry_rows,
             }],
         }];
         menu
@@ -4840,7 +4961,7 @@ impl App {
         menu.summary = Some(format!(
             "Universal configuration entrypoint for runtime and capability settings. Enter opens or edits the selected area.\n{drift_line}"
         ));
-        menu.footer = Some("↑/↓ navigate · Tab switch tabs · / filter · Enter open/edit · s save profile · a apply profile · Esc close".into());
+        menu.footer = Some("↑/↓ navigate · Tab switch tabs · / filter · Enter open/edit · s save · a apply · n save named · Esc close".into());
         let configuration_rows = [
             (
                 "runtime",
@@ -5019,6 +5140,22 @@ impl App {
                 action.key = Some("a".into());
                 action
             },
+            {
+                let mut action = MenuActionProjection::prime_editor(
+                    "settings.save_named_user",
+                    "Save as named (user)",
+                    "/profile save --name ",
+                    "Type the profile name and press Enter — saved to ~/.omegon/profiles/<name>.json",
+                );
+                action.key = Some("n".into());
+                action
+            },
+            MenuActionProjection::prime_editor(
+                "settings.save_named_project",
+                "Save as named (project)",
+                "/profile save --name ",
+                "Type the profile name followed by ' --project' and press Enter — saved to .omegon/profiles/<name>.json",
+            ),
         ];
         menu
     }
@@ -6048,7 +6185,7 @@ warning: {warning}"
                         Some(format!("Opening browser for {label} login…"))
                     }
                     "openai" | "openrouter" | "ollama-cloud" | "brave" | "tavily" | "serper"
-                    | "huggingface" => {
+                    | "firecrawl" | "huggingface" => {
                         // Map to the correct env var name for storage
                         let key_name = match value.as_str() {
                             "openai" => "OPENAI_API_KEY",
@@ -6057,14 +6194,26 @@ warning: {warning}"
                             "brave" => "BRAVE_API_KEY",
                             "tavily" => "TAVILY_API_KEY",
                             "serper" => "SERPER_API_KEY",
+                            "firecrawl" => "FIRECRAWL_API_KEY",
                             "huggingface" => "HUGGING_FACE_TOKEN",
                             _ => unreachable!(),
                         };
+                        let acquisition =
+                            crate::capabilities::secrets::secret_console_url(key_name);
+                        if let Some(url) = acquisition {
+                            let url = url.to_string();
+                            std::thread::spawn(move || {
+                                let _ = open::that(url);
+                            });
+                        }
                         self.editor.start_secret_input(key_name);
-                        Some(format!(
-                            "🔒 Paste your {} API key (input is hidden):",
-                            value
-                        ))
+                        Some(if acquisition.is_some() {
+                            format!(
+                                "Opening the {value} key console… 🔒 paste {key_name} here (input is hidden):"
+                            )
+                        } else {
+                            format!("🔒 Paste your {value} API key (input is hidden):")
+                        })
                     }
                     "github" => {
                         // GitHub uses dynamic resolution via gh CLI
@@ -6108,11 +6257,25 @@ warning: {warning}"
                         .map(|(_, recipe, _)| *recipe)
                         .unwrap_or("");
                     if suggested.is_empty() {
-                        // Direct value — enter masked secret input mode
+                        // Direct value — enter masked secret input mode. Search
+                        // providers additionally open their fixed key-console URL
+                        // in the operator's browser; the key itself never transits
+                        // model context.
+                        let acquisition = crate::capabilities::secrets::secret_console_url(&value);
+                        if let Some(url) = acquisition {
+                            let url = url.to_string();
+                            std::thread::spawn(move || {
+                                let _ = open::that(url);
+                            });
+                        }
                         self.editor.start_secret_input(&value);
-                        Some(format!(
-                            "🔒 Paste or type value for {value} (input is hidden):"
-                        ))
+                        Some(if acquisition.is_some() {
+                            format!(
+                                "Opening the provider key console… 🔒 paste {value} here (input is hidden):"
+                            )
+                        } else {
+                            format!("🔒 Paste or type value for {value} (input is hidden):")
+                        })
                     } else {
                         // Dynamic recipe — set immediately
                         if let Some(request) = crate::control_runtime::control_request_from_slash(
@@ -6270,6 +6433,7 @@ warning: {warning}"
         ("BRAVE_API_KEY", "", "Brave Search API"),
         ("TAVILY_API_KEY", "", "Tavily Search API"),
         ("SERPER_API_KEY", "", "Serper (Google) Search API"),
+        ("FIRECRAWL_API_KEY", "", "Firecrawl Search API"),
         // Git forges
         (
             "GITHUB_TOKEN",
@@ -6353,7 +6517,11 @@ warning: {warning}"
                 } else {
                     format!("{name:<30} {desc}")
                 },
-                description: if recipe.is_empty() {
+                description: if let Some(url) =
+                    crate::capabilities::secrets::secret_console_url(name)
+                {
+                    format!("opens {url} → masked key input")
+                } else if recipe.is_empty() {
                     "direct value → OS keyring".to_string()
                 } else {
                     format!("suggested: {recipe}")
@@ -6401,10 +6569,21 @@ warning: {warning}"
             // /secrets set NAME → enter hidden input mode for arbitrary operator secrets.
             "set" if parts.len() == 2 && !parts[1].trim().is_empty() => {
                 let name = parts[1].trim();
+                let acquisition = crate::capabilities::secrets::secret_console_url(name);
+                if let Some(url) = acquisition {
+                    let url = url.to_string();
+                    std::thread::spawn(move || {
+                        let _ = open::that(url);
+                    });
+                }
                 self.editor.start_secret_input(name);
-                SlashResult::Display(format!(
-                    "🔒 Paste or type value for {name} (input is hidden):"
-                ))
+                SlashResult::Display(if acquisition.is_some() {
+                    format!(
+                        "Opening the provider key console… 🔒 paste {name} here (input is hidden):"
+                    )
+                } else {
+                    format!("🔒 Paste or type value for {name} (input is hidden):")
+                })
             }
             // /secrets configure and /secrets set with no name/value → open shared menu
             "configure" | "set" if parts.len() < 3 => {
@@ -7267,9 +7446,17 @@ warning: {warning}"
                 omegon_traits::PermissionResponse::AlwaysAllow
             ) {
                 if let Some(grant_path) = context.grant_path {
+                    let target = crate::tools::canonicalize_existing_parent_for_permissions(
+                        std::path::Path::new(&context.target),
+                    );
+                    let grant = crate::tools::canonicalize_existing_parent_for_permissions(
+                        std::path::Path::new(&grant_path),
+                    );
                     format!(
-                        "→ {label}: {} {} (grant: {})",
-                        context.tool_name, context.target, grant_path
+                        "→ {label}: {} {} (canonical grant: {})",
+                        context.tool_name,
+                        target.display(),
+                        grant.display()
                     )
                 } else {
                     format!("→ {label}: {} {}", context.tool_name, context.target)
@@ -7565,6 +7752,7 @@ warning: {warning}"
 
     fn prepare_interrupt_ui(&mut self) {
         self.editor.clear_line();
+        self.conversation.conv_state.force_scroll_to_bottom();
         self.interrupt_pending = true;
         self.slim_turn_state = SlimTurnState::Interrupting;
         self.suppress_editor_input_for(Duration::from_millis(1500));
@@ -7902,13 +8090,15 @@ warning: {warning}"
             for (segment_idx, image_area) in
                 conv_state.visible_image_areas(projected_segments, content_area)
             {
-                let Some(SegmentContent::Image { path, .. }) = projected_segments
+                let Some(SegmentContent::Image { path, display, .. }) = projected_segments
                     .get(segment_idx)
                     .map(|segment| &segment.content)
                 else {
                     continue;
                 };
-                if let Some(protocol) = image_cache.get_or_create(segment_idx, path) {
+                if *display != segments::ImageDisplayState::Collapsed
+                    && let Some(protocol) = image_cache.get_or_create(segment_idx, path)
+                {
                     image::render_image(image_area, frame, protocol);
                 }
             }
@@ -8258,7 +8448,7 @@ warning: {warning}"
                 .next_back()
                 .unwrap_or(model_id)
                 .split('-')
-                .take(2)
+                .take(3)
                 .collect::<Vec<_>>()
                 .join("-");
             let provider_label = self
@@ -9304,6 +9494,9 @@ warning: {warning}"
             .unwrap_or(0);
         let skills_after = if let Some(ref mut registry) = self.augment_registry {
             registry.load_skills(&cwd);
+            for event in registry.skill_activation_events() {
+                self.conversation.push_skill_event(event);
+            }
             registry.skill_count()
         } else {
             skills_before
@@ -9319,30 +9512,17 @@ warning: {warning}"
                     dry_run.invalid_manifests.join("; ")
                 };
                 format!(
-                    "## Runtime substrate refresh\n\nStatus: partial live refresh completed; extension process/widget promotion is not implemented yet.\nRuntime generation: {before_generation} -> {}\n\nPreserved: TUI shell, session id, cwd, model/settings, conversation, workbench state.\nRefreshed now: user/project/extension skill augments.\nInspected only: discovered extensions, widgets, RPC handles, commands/tools, context-provider registrations, harness inventory.\nActive skill directives: {skills_before} -> {skills_after}\nCommand definitions registered: {}\n\nLive substrate inventory:\n- Extension widgets mounted: {}\n- Extension metadata entries: {}\n- Extension RPC handles: {}\n- Widget receivers: {}\n- Voice notification receivers: {}\n- Voice polling handles: {}\n- Vox polling handles: {}\n- Startup skill activation events: {}\n\nCandidate refresh inventory:\n- Extension candidates: {}\n- Skipped by policy: {}\n- Disabled extensions: {}\n- Invalid manifests: {invalid}\n- Candidate widgets: {}\n- Candidate metadata entries: {}\n- Candidate RPC handles: {}\n- Candidate widget receivers: {}\n- Candidate vox polling handles: {}\n- Reloadable skill entries: {}\n\nNext implementation step: promote validated extension-owned handles without replacing the whole runtime bus.",
+                    "## Reload complete\n\nYour session stayed open. Skills active for future requests: {skills_before} → {skills_after}.\n\nReloaded now:\n- User, project, and extension-provided skills\n- Inference inventory generation {before_generation} → {}\n\nNot restarted:\n- Running extension processes and widgets\n- The Omegon executable\n\nUse `/runtime restart` after installing new Omegon code or when a component explicitly says a process restart is required.\n\nDetails:\n- Extension candidates found: {}\n- Skipped by policy: {}\n- Disabled extensions: {}\n- Invalid extension manifests: {}\n- Registered commands: {}",
                     self.runtime_generation,
-                    self.bus_commands.len(),
-                    self.runtime_inventory.extension_widgets,
-                    self.runtime_inventory.extension_metadata_entries,
-                    self.runtime_inventory.extension_rpc_handles,
-                    self.runtime_inventory.widget_receivers,
-                    self.runtime_inventory.voice_notification_receivers,
-                    self.runtime_inventory.voice_polling_handles,
-                    self.runtime_inventory.vox_polling_handles,
-                    self.runtime_inventory.skill_activation_events,
                     dry_run.extension_candidates,
                     dry_run.skipped_by_policy,
                     dry_run.disabled_extensions,
-                    dry_run.inventory.extension_widgets,
-                    dry_run.inventory.extension_metadata_entries,
-                    dry_run.inventory.extension_rpc_handles,
-                    dry_run.inventory.widget_receivers,
-                    dry_run.inventory.vox_polling_handles,
-                    dry_run.inventory.skill_activation_events,
+                    invalid,
+                    self.bus_commands.len(),
                 )
             }
             Err(err) => format!(
-                "Runtime substrate refresh candidate inspection failed after skill refresh: {err}"
+                "Reload partially completed: skills were reloaded, but extension/runtime inspection failed: {err}\n\nThe current session remains usable. Run `/runtime status` for current state or `/runtime restart` if a full process restart is required."
             ),
         }
     }
@@ -9575,7 +9755,7 @@ Scroll transcript:
                     SlashResult::Handled
                 } else {
                     SlashResult::Display(
-                        "Usage: /profile [view|export|capture|apply|mqtt on|mqtt off|extension allow <name>|extension deny <name>|extensions clear|persona <name|off>|tone <name|off>]".into(),
+                        "Usage: /profile [view|export|capture|apply|mqtt on|mqtt off|extension allow <name>|extension deny <name>|extensions clear|persona <name|off>|tone <name|off>|save --name <name> [--project]|save --user|save --project]".into(),
                     )
                 }
             }
@@ -9630,39 +9810,8 @@ Scroll transcript:
                             SlashResult::Display(crate::control_runtime::skills_help_text().into())
                         }
                         CanonicalSlashCommand::SkillsReload => {
-                            let cwd = self.cwd().to_path_buf();
-                            if let Some(ref mut registry) = self.augment_registry {
-                                let before_generation = self.runtime_generation;
-                                registry.load_skills(&cwd);
-                                let loaded = registry.skill_count();
-                                let events = registry.skill_activation_events();
-                                self.runtime_generation = self.runtime_generation.saturating_add(1);
-                                let after_generation = self.runtime_generation;
-                                let mut out = format!(
-                                    "## Skills reloaded\n\nRuntime generation: {before_generation} -> {after_generation}\nLoaded {loaded} active skill directive(s) from user and project skill directories. Changes apply to subsequent model requests in this session.\n"
-                                );
-                                if !events.is_empty() {
-                                    out.push_str("\nActivation events:\n");
-                                    for event in events {
-                                        self.conversation.push_skill_event(event);
-                                        out.push_str(&format!(
-                                            "- {} · {} · {}\n",
-                                            event.active_ref, event.reason, event.resolution
-                                        ));
-                                        if !event.suppressing.is_empty() {
-                                            out.push_str(&format!(
-                                                "  - suppressing: {}\n",
-                                                event.suppressing.join(", ")
-                                            ));
-                                        }
-                                    }
-                                }
-                                SlashResult::Display(out)
-                            } else {
-                                SlashResult::Display(
-                                    "Skills reload unavailable: no active augment registry in this TUI session.".into(),
-                                )
-                            }
+                            let result = self.refresh_runtime_substrate();
+                            SlashResult::Display(result)
                         }
                         CanonicalSlashCommand::SkillCreate(scope) => {
                             // Queue the skill builder prompt — the agent converses
@@ -9768,7 +9917,25 @@ Scroll transcript:
                     self.open_extension_runtime_menu();
                     SlashResult::Handled
                 } else if let Some(command) = canonical_slash_command("extension", args) {
-                    if let Some(request) =
+                    if matches!(command, CanonicalSlashCommand::RuntimeProcessRestart) {
+                        let binary = std::env::current_exe()
+                            .map_err(|error| error.to_string())
+                            .and_then(|path| path.canonicalize().map_err(|error| error.to_string()));
+                        match binary {
+                            Ok(binary) => {
+                                let args = std::env::args().skip(1).collect::<Vec<_>>();
+                                match tx.try_send(TuiCommand::RestartProcess { binary, args }) {
+                                    Ok(()) => SlashResult::Handled,
+                                    Err(error) => SlashResult::Display(format!(
+                                        "Extension restart failed: could not queue graceful restart: {error}"
+                                    )),
+                                }
+                            }
+                            Err(error) => SlashResult::Display(format!(
+                                "Extension restart failed: could not resolve current executable: {error}"
+                            )),
+                        }
+                    } else if let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
@@ -9865,8 +10032,26 @@ Scroll transcript:
                         && self.agent_active
                     {
                         SlashResult::Display(
-                            "Runtime substrate refresh unavailable while a model turn is active. Wait for completion or cancel the turn first.".into(),
+                            "Runtime refresh unavailable while a model turn is active. Wait for completion or cancel the turn first.".into(),
                         )
+                    } else if matches!(command, CanonicalSlashCommand::RuntimeProcessRestart) {
+                        let binary = std::env::current_exe()
+                            .map_err(|error| error.to_string())
+                            .and_then(|path| path.canonicalize().map_err(|error| error.to_string()));
+                        match binary {
+                            Ok(binary) => {
+                                let args = std::env::args().skip(1).collect::<Vec<_>>();
+                                match tx.try_send(TuiCommand::RestartProcess { binary, args }) {
+                                    Ok(()) => SlashResult::Handled,
+                                    Err(error) => SlashResult::Display(format!(
+                                        "Runtime restart failed: could not queue graceful restart: {error}"
+                                    )),
+                                }
+                            }
+                            Err(error) => SlashResult::Display(format!(
+                                "Runtime restart failed: could not resolve current executable: {error}"
+                            )),
+                        }
                     } else if let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
                     {
@@ -9880,7 +10065,7 @@ Scroll transcript:
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /runtime [status|inventory|refresh|reload|restart|hot-restart]".into(),
+                        "Usage: /runtime [status|inventory|refresh|reload|hup|kick|restart|hot-restart]".into(),
                     )
                 }
             }
@@ -10334,32 +10519,16 @@ Scroll transcript:
                     let info = self.update_rx.as_ref().and_then(|rx| rx.borrow().clone());
                     match info {
                         Some(info) if info.is_newer && info.has_downloadable_archive() => {
-                            let args: Vec<String> = std::env::args().skip(1).collect();
-                            let keyboard_enhancement = self.keyboard_enhancement;
+                            let args = std::env::args().skip(1).collect::<Vec<_>>();
                             let latest = info.latest.clone();
-                            tokio::spawn(async move {
-                                match crate::update::download_and_replace(&info).await {
-                                    Ok(binary) => {
-                                        #[cfg(unix)]
-                                        {
-                                            let _ = io::stdout()
-                                                .execute(crossterm::event::DisableMouseCapture);
-                                            if keyboard_enhancement {
-                                                let _ = io::stdout()
-                                                    .execute(PopKeyboardEnhancementFlags);
-                                            }
-                                            let _ = disable_raw_mode();
-                                            let _ = io::stdout().execute(LeaveAlternateScreen);
-                                        }
-                                        let _ = crate::update::exec_restart(&binary, &args);
-                                    }
-                                    Err(e) => tracing::error!("update install failed: {e}"),
-                                }
-                            });
-                            SlashResult::Display(format!(
-                                "Installing v{} and restarting... If replacement fails, relaunch Omegon manually.",
-                                latest
-                            ))
+                            match tx.try_send(TuiCommand::InstallUpdate { info, args }) {
+                                Ok(()) => SlashResult::Display(format!(
+                                    "Installing v{latest}. Omegon will verify the download, save this session, then restart automatically."
+                                )),
+                                Err(error) => SlashResult::Display(format!(
+                                    "Update was not started: could not queue installation: {error}"
+                                )),
+                            }
                         }
                         Some(info) if info.is_newer => {
                             if let Some(tx) = self.update_tx.clone() {
@@ -11553,6 +11722,11 @@ Scroll transcript:
                 let turn_end_reason = te.turn_end_reason;
                 self.slim_turn_state = SlimTurnState::Finished(match turn_end_reason {
                     omegon_traits::TurnEndReason::AssistantCompleted => "done",
+                    omegon_traits::TurnEndReason::AwaitingOperator => "waiting",
+                    omegon_traits::TurnEndReason::Blocked => "blocked",
+                    omegon_traits::TurnEndReason::TurnLimitReached => "turn limit",
+                    omegon_traits::TurnEndReason::ProviderExhausted => "provider exhausted",
+                    omegon_traits::TurnEndReason::WorkerFailed => "worker failed",
                     omegon_traits::TurnEndReason::ToolContinuation => "continuing",
                     omegon_traits::TurnEndReason::ProgressNudge => "nudged",
                     omegon_traits::TurnEndReason::Cancelled => "cancelled",
@@ -11560,6 +11734,11 @@ Scroll transcript:
                 if matches!(
                     turn_end_reason,
                     omegon_traits::TurnEndReason::AssistantCompleted
+                        | omegon_traits::TurnEndReason::AwaitingOperator
+                        | omegon_traits::TurnEndReason::Blocked
+                        | omegon_traits::TurnEndReason::TurnLimitReached
+                        | omegon_traits::TurnEndReason::ProviderExhausted
+                        | omegon_traits::TurnEndReason::WorkerFailed
                         | omegon_traits::TurnEndReason::Cancelled
                 ) {
                     self.agent_active = false;
@@ -12075,7 +12254,6 @@ Scroll transcript:
             AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
                 self.runtime_queue_snapshot = Some(snapshot_json);
             }
-            AgentEvent::RuntimeTurnLifecycleUpdated { .. } => {}
             AgentEvent::RuntimePromptStarted { text, image_paths } => {
                 if image_paths.is_empty() {
                     self.conversation.push_user(&text);
@@ -12138,6 +12316,46 @@ Scroll transcript:
                 } else {
                     self.conversation.push_system(&message);
                 }
+            }
+            AgentEvent::StreamIdle {
+                provider,
+                model,
+                phase,
+                idle_secs,
+                ambiguous,
+                message,
+            } => {
+                let qualifier = if ambiguous { " · ambiguous" } else { "" };
+                self.slim_turn_state =
+                    SlimTurnState::StreamIdle(format!("{idle_secs}s · {phase}{qualifier}"));
+                self.show_toast(
+                    &format!("Stream idle · {provider}/{model} · {message}"),
+                    ratatui_toaster::ToastType::Warning,
+                );
+            }
+            AgentEvent::ProviderFailure {
+                provider,
+                model,
+                reason,
+                attempts,
+                message,
+                retryable,
+                recommended_action,
+            } => {
+                self.slim_turn_state = SlimTurnState::Finished("provider failed");
+                self.agent_active = false;
+                let retry = if retryable { "retryable" } else { "terminal" };
+                self.conversation.push_system(&format!(
+                    "Provider failure · {provider}/{model} · {reason} · {attempts} attempt(s) · {retry} · {message}\nRecommended action: {recommended_action}"
+                ));
+            }
+            AgentEvent::RuntimeTurnLifecycleUpdated { snapshot_json } => {
+                let phase = snapshot_json
+                    .get("phase")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("active")
+                    .replace('_', " ");
+                self.slim_turn_state = SlimTurnState::Lifecycle(format!("turn {phase}"));
             }
             AgentEvent::PlanUpdated { projection } => {
                 if WorkbenchState::is_workstream_only_projection(&projection) {
@@ -12966,6 +13184,10 @@ pub async fn run_tui(
     app.mouse_capture_enabled = true;
     app.keyboard_enhancement = has_keyboard_enhancement;
     app.secret_readiness = config.secret_readiness.clone();
+    if let Some(snapshot) = app.secret_readiness.as_ref() {
+        app.footer_data.web_search_providers =
+            crate::capabilities::secrets::web_search_provider_readiness(snapshot);
+    }
     app.show_startup_notice();
     // Populate extension widgets and receivers from config
     for widget in config.extension_widgets {
@@ -13301,36 +13523,61 @@ pub async fn run_tui(
                             app.last_left_click = Some((mouse.column, mouse.row, now));
                         } else if point_in(app.conversation_area) {
                             app.dashboard.sidebar_active = false;
-                            if let Some(area) = app.conversation_area
-                                && let Some(idx) = app.conversation.segment_at(area, mouse.row)
-                            {
-                                let now = std::time::Instant::now();
-                                let is_double = app.last_left_click.is_some_and(|(col, row, t)| {
-                                    row == mouse.row
-                                        && col.abs_diff(mouse.column) <= 1
-                                        && row.abs_diff(mouse.row) <= 1
-                                        && now.duration_since(t) <= Duration::from_millis(400)
-                                });
-                                let _ = app.handle_select_conversation_segment_action(
-                                    SelectConversationSegmentAction {
-                                        segment: ConversationSegmentRef::by_index(idx),
-                                    },
-                                );
-                                if is_double {
-                                    if app.conversation.is_segment_collapsed_tool_card(idx) {
-                                        app.conversation.toggle_expand(idx);
-                                        app.show_toast(
-                                            "Expanded selected tool result",
-                                            ratatui_toaster::ToastType::Success,
-                                        );
-                                        app.effects.pulse_conversation_action();
-                                    } else if app.conversation.is_segment_copyable(idx) {
-                                        app.copy_selected_conversation_segment_with_mode(
-                                            SegmentExportMode::Plaintext,
-                                        );
-                                    }
+                            if let Some(area) = app.conversation_area {
+                                if let Some(idx) = app.conversation.assistant_copy_button_at(
+                                    area,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    let _ = app.handle_select_conversation_segment_action(
+                                        SelectConversationSegmentAction {
+                                            segment: ConversationSegmentRef::by_index(idx),
+                                        },
+                                    );
+                                    let _ = app.handle_copy_conversation_segment_action(
+                                        CopyConversationSegmentAction {
+                                            segment: ConversationSegmentRef::by_index(idx),
+                                            mode: SegmentCopyMode::Plaintext,
+                                        },
+                                    );
+                                    continue;
                                 }
-                                app.last_left_click = Some((mouse.column, mouse.row, now));
+                                if let Some(idx) = app.conversation.segment_at(area, mouse.row) {
+                                    let now = std::time::Instant::now();
+                                    let is_double =
+                                        app.last_left_click.is_some_and(|(col, row, t)| {
+                                            row == mouse.row
+                                                && col.abs_diff(mouse.column) <= 1
+                                                && row.abs_diff(mouse.row) <= 1
+                                                && now.duration_since(t)
+                                                    <= Duration::from_millis(400)
+                                        });
+                                    let _ = app.handle_select_conversation_segment_action(
+                                        SelectConversationSegmentAction {
+                                            segment: ConversationSegmentRef::by_index(idx),
+                                        },
+                                    );
+                                    if is_double {
+                                        if app.conversation.toggle_image_attachments_at(idx) > 0 {
+                                            app.effects.pulse_conversation_action();
+                                        } else if app
+                                            .conversation
+                                            .is_segment_collapsed_tool_card(idx)
+                                        {
+                                            app.conversation.toggle_expand(idx);
+                                            app.show_toast(
+                                                "Expanded selected tool result",
+                                                ratatui_toaster::ToastType::Success,
+                                            );
+                                            app.effects.pulse_conversation_action();
+                                        } else if app.conversation.is_segment_copyable(idx) {
+                                            app.copy_selected_conversation_segment_with_mode(
+                                                SegmentExportMode::Plaintext,
+                                            );
+                                        }
+                                    }
+                                    app.last_left_click = Some((mouse.column, mouse.row, now));
+                                }
                             }
                         } else if point_in(app.editor_area) {
                             app.dashboard.sidebar_active = false;
@@ -13529,6 +13776,24 @@ pub async fn run_tui(
                     match (key.code, key.modifiers) {
                         (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
                             app.conversation.toggle_pin();
+                            continue;
+                        }
+                        (KeyCode::Up, modifiers)
+                            if modifiers.contains(KeyModifiers::ALT)
+                                && modifiers.contains(KeyModifiers::SHIFT) =>
+                        {
+                            if app.conversation.move_to_operator_prompt(true).is_some() {
+                                app.conversation.conv_state.snap_to_selected();
+                            }
+                            continue;
+                        }
+                        (KeyCode::Down, modifiers)
+                            if modifiers.contains(KeyModifiers::ALT)
+                                && modifiers.contains(KeyModifiers::SHIFT) =>
+                        {
+                            if app.conversation.move_to_operator_prompt(false).is_some() {
+                                app.conversation.conv_state.snap_to_selected();
+                            }
                             continue;
                         }
                         (KeyCode::PageUp, _) => {
@@ -13733,6 +13998,18 @@ pub async fn run_tui(
                                                 respond_to: None,
                                             })
                                             .await;
+
+                                        // Reflect keyed search readiness immediately in footer
+                                        // chrome; the secret write has already been queued and
+                                        // no restart is required by web_search resolution.
+                                        if let Some(provider) = app
+                                            .footer_data
+                                            .web_search_providers
+                                            .iter_mut()
+                                            .find(|provider| provider.secret_name == label)
+                                        {
+                                            provider.configured = true;
+                                        }
 
                                         // For provider keys, also write to auth.json so the
                                         // provider resolution chain finds them (/auth login checks
@@ -15357,15 +15634,19 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn runtime_substrate_refresh() {
-        assert!(matches!(
-            canonical_slash_command("runtime", "restart"),
-            Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
-        ));
-        assert!(matches!(
-            canonical_slash_command("runtime", "hot-restart"),
-            Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
-        ));
+    fn runtime_reload_and_restart_have_distinct_semantics() {
+        for args in ["refresh", "reload", "hup", "kick"] {
+            assert!(matches!(
+                canonical_slash_command("runtime", args),
+                Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
+            ));
+        }
+        for args in ["restart", "hot-restart"] {
+            assert!(matches!(
+                canonical_slash_command("runtime", args),
+                Some(CanonicalSlashCommand::RuntimeProcessRestart)
+            ));
+        }
     }
 
     #[test]
@@ -15379,8 +15660,9 @@ mod slash_command_parsing_tests {
 
         match result {
             SlashResult::Display(message) => {
-                assert!(message.contains("Skills reloaded"), "{message}");
-                assert!(message.contains("Runtime generation:"), "{message}");
+                assert!(message.contains("Reload complete"), "{message}");
+                assert!(message.contains("session stayed open"), "{message}");
+                assert!(message.contains("Skills active"), "{message}");
             }
             other => panic!("expected skills reload display, got {other:?}"),
         }
@@ -15698,13 +15980,17 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn extension_refresh_aliases_runtime_substrate_refresh() {
-        for args in ["refresh", "reload", "restart"] {
+    fn extension_reload_aliases_runtime_refresh_but_restart_is_process_restart() {
+        for args in ["refresh", "reload"] {
             assert!(matches!(
                 canonical_slash_command("extension", args),
                 Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
             ));
         }
+        assert!(matches!(
+            canonical_slash_command("extension", "restart"),
+            Some(CanonicalSlashCommand::RuntimeProcessRestart)
+        ));
     }
 
     #[test]

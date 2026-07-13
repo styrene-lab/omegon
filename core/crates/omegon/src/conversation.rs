@@ -82,15 +82,10 @@ impl ConversationState {
         provider: Option<&str>,
     ) -> Option<omegon_traits::ProviderTelemetrySnapshot> {
         self.canonical.iter().rev().find_map(|msg| match msg {
-            AgentMessage::Assistant(assistant, _) => {
-                assistant.provider_telemetry.clone().and_then(|t| {
-                    if provider.is_none_or(|p| t.provider == p) {
-                        Some(t)
-                    } else {
-                        None
-                    }
-                })
-            }
+            AgentMessage::Assistant(assistant, _) => assistant
+                .provider_telemetry
+                .clone()
+                .filter(|t| provider.is_none_or(|p| t.provider == p)),
             _ => None,
         })
     }
@@ -211,6 +206,14 @@ pub struct IntentDocument {
     /// recovery state before the next model turn.
     #[serde(default)]
     pub operator_correction_pending: bool,
+
+    /// Session-local plan index. The owning session supplies the outer identity;
+    /// this value is never a global plan identifier.
+    #[serde(default, alias = "next_session_plan_id")]
+    pub next_plan_index: u64,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retained_session_plans: Vec<VisiblePlanState>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub work_plan: Vec<WorkItem>,
@@ -4808,7 +4811,7 @@ mod tests {
         intent.apply_plan_action(PlanAction::View);
 
         let visible = intent.visible_plan.as_ref().unwrap();
-        assert_eq!(visible.plan_id, "session:current");
+        assert_eq!(visible.plan_id, "1");
         assert_eq!(visible.scope, PlanScope::Session);
         assert_eq!(visible.source, PlanSource::Ephemeral);
         assert_eq!(visible.mode, PlanMode::Executing);
@@ -4816,7 +4819,7 @@ mod tests {
 
         let snapshot = intent.work_plan_snapshot_json();
         assert_eq!(snapshot["mode"], "executing");
-        assert_eq!(snapshot["plan_id"], "session:current");
+        assert_eq!(snapshot["plan_id"], "1");
         assert_eq!(snapshot["scope"], "session");
         assert_eq!(snapshot["source"], "session");
     }
@@ -4915,7 +4918,7 @@ mod tests {
         intent.apply_plan_action(PlanAction::Advance);
 
         let entry = intent.visible_plan_registry_entry().unwrap();
-        assert_eq!(entry.plan_id, "session:current");
+        assert_eq!(entry.plan_id, "1");
         assert_eq!(entry.scope, PlanScope::Session);
         assert_eq!(entry.source, PlanSource::Ephemeral);
         assert_eq!(entry.status, PlanStatus::Active);
@@ -4924,7 +4927,7 @@ mod tests {
 
         let items = intent.visible_plan_items();
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].id, "session:current:1");
+        assert_eq!(items[0].id, "1:1");
         assert_eq!(items[0].intent, TaskIntent::Unspecified);
         assert!(items[0].writable);
     }
@@ -4942,7 +4945,7 @@ mod tests {
         assert_eq!(entry.progress.completed, 1);
         assert_eq!(entry.progress.total, 1);
         assert_eq!(intent.completion_ledger.len(), 1);
-        assert_eq!(intent.completion_ledger[0].plan_id, "session:current");
+        assert_eq!(intent.completion_ledger[0].plan_id, "1");
         assert_eq!(intent.completion_ledger[0].item_count, 1);
     }
 
@@ -5004,17 +5007,14 @@ mod tests {
             .add_plan_item_evidence(0, EvidenceRef::Citation("docs/design.md".into()))
             .expect("task id");
 
-        assert_eq!(task_id, "session:current:1");
+        assert_eq!(task_id, "1:1");
         let items = intent.visible_plan_items();
         assert_eq!(
             items[0].evidence,
             vec![EvidenceRef::Citation("docs/design.md".into())]
         );
         assert_eq!(intent.plan_events.len(), 1);
-        assert_eq!(
-            intent.plan_events[0].task_id.as_deref(),
-            Some("session:current:1")
-        );
+        assert_eq!(intent.plan_events[0].task_id.as_deref(), Some("1:1"));
     }
 
     #[test]
@@ -5084,17 +5084,14 @@ mod tests {
             },
         ]);
 
-        assert_eq!(candidates[0].plan_id, "session:current");
+        assert_eq!(candidates[0].plan_id, "1");
         assert_eq!(candidates[0].rank, 0);
         assert!(
             candidates
                 .iter()
                 .any(|candidate| candidate.hint == STALE_PLAN_COPY)
         );
-        assert_eq!(
-            intent.visible_plan.as_ref().unwrap().plan_id,
-            "session:current"
-        );
+        assert_eq!(intent.visible_plan.as_ref().unwrap().plan_id, "1");
     }
 
     #[test]

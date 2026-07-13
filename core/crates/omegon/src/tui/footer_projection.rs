@@ -27,6 +27,11 @@ impl ProjectFooterSurface for FooterData {
                 provider_connected: self.provider_connected,
                 update_available: self.update_available.clone(),
                 sandbox: self.sandbox,
+                web_search_providers: self
+                    .web_search_providers
+                    .iter()
+                    .map(|provider| (provider.provider.to_string(), provider.configured))
+                    .collect(),
             },
             context: ContextProjection {
                 percent: self.context_percent,

@@ -674,6 +674,57 @@ pub enum PlanAction {
 }
 
 impl crate::conversation::IntentDocument {
+    fn next_ephemeral_plan_id(&mut self) -> String {
+        self.next_plan_index = self.next_plan_index.saturating_add(1);
+        self.next_plan_index.to_string()
+    }
+
+    fn retain_visible_session_plan(&mut self, status: PlanStatus, summary: &str) -> Option<String> {
+        let plan = self.visible_plan.take()?;
+        if plan.scope != PlanScope::Session {
+            self.visible_plan = Some(plan);
+            return None;
+        }
+        let plan_id = plan.plan_id.clone();
+        self.retained_session_plans
+            .retain(|saved| saved.plan_id != plan_id);
+        self.retained_session_plans.push(plan);
+        self.plan_registry_view
+            .entries
+            .retain(|entry| entry.plan_id != plan_id);
+        self.plan_registry_view.entries.push(PlanViewEntry {
+            plan_id: plan_id.clone(),
+            status,
+            last_visible_at: None,
+            resume_hint: Some(summary.to_string()),
+            dismissed: false,
+        });
+        self.work_plan.clear();
+        self.plan_mode = PlanMode::Off;
+        self.plan_reconciliation_fingerprint = None;
+        self.plan_reconciliation_nudges = 0;
+        Some(plan_id)
+    }
+
+    /// Explicitly start a new operator task. Prompt arrival alone is not a safe
+    /// task-boundary signal: ordinary follow-ups frequently continue the active
+    /// plan. Callers use this only for explicit reset/replacement operations.
+    pub fn begin_new_operator_task(&mut self) {
+        let Some(plan_id) = self.retain_visible_session_plan(
+            PlanStatus::Detached,
+            "Detached when the operator explicitly started a new task.",
+        ) else {
+            return;
+        };
+        self.plan_events.push(PlanEvent {
+            plan_id,
+            task_id: None,
+            source: PlanEventSource::Manual,
+            summary: "Detached session plan at explicit operator task boundary.".to_string(),
+            evidence: Vec::new(),
+        });
+    }
+
     /// Set the work plan, replacing any existing plan.
     pub fn set_work_plan(&mut self, items: Vec<String>) {
         self.apply_plan_action(PlanAction::Set { items });
@@ -697,6 +748,16 @@ impl crate::conversation::IntentDocument {
     }
 
     fn set_work_plan_inner(&mut self, items: Vec<String>) {
+        let replacing_session = self
+            .visible_plan
+            .as_ref()
+            .is_some_and(|plan| plan.scope == PlanScope::Session && !plan.items.is_empty());
+        if replacing_session {
+            self.retain_visible_session_plan(
+                PlanStatus::Detached,
+                "Detached when a replacement session plan was created.",
+            );
+        }
         self.work_plan = items
             .into_iter()
             .filter_map(|desc| {
@@ -941,12 +1002,13 @@ impl crate::conversation::IntentDocument {
             return;
         }
 
+        let plan_id = self
+            .visible_plan
+            .as_ref()
+            .map(|plan| plan.plan_id.clone())
+            .unwrap_or_else(|| self.next_ephemeral_plan_id());
         self.visible_plan = Some(VisiblePlanState {
-            plan_id: self
-                .visible_plan
-                .as_ref()
-                .map(|plan| plan.plan_id.clone())
-                .unwrap_or_else(PlanBinding::session_plan_id),
+            plan_id,
             scope: PlanScope::Session,
             source: PlanSource::Ephemeral,
             binding: self
@@ -1450,9 +1512,9 @@ impl crate::conversation::IntentDocument {
             .work_plan
             .iter()
             .any(|item| matches!(item.intent, Some(TaskIntent::Validation)));
-        if has_evidence_required || has_design || has_validation {
+        if has_evidence_required {
             nudges.push(
-                "durable-work: session plan has research/design/validation work; consider binding it to a design node or OpenSpec change".to_string(),
+                "durable-work: preserve evidence for this session plan; use a versioned workspace or explicit durable artifact when the work needs history beyond the session".to_string(),
             );
         }
         if has_design {
@@ -1686,6 +1748,103 @@ mod render_tests {
     use crate::conversation::IntentDocument;
 
     #[test]
+    fn explicit_new_task_retains_unfinished_session_plan_snapshot() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Investigate old task".into(), "Implement fix".into()]);
+        let plan_id = intent.visible_plan.as_ref().unwrap().plan_id.clone();
+
+        intent.begin_new_operator_task();
+
+        assert!(intent.work_plan.is_empty());
+        assert!(intent.visible_plan.is_none());
+        assert_eq!(intent.plan_mode, PlanMode::Off);
+        let retained = intent
+            .retained_session_plans
+            .iter()
+            .find(|plan| plan.plan_id == plan_id)
+            .expect("detached plan snapshot retained");
+        assert_eq!(retained.items.len(), 2);
+        assert!(
+            intent
+                .plan_registry_view
+                .entries
+                .iter()
+                .any(|entry| { entry.plan_id == plan_id && entry.status == PlanStatus::Detached })
+        );
+    }
+
+    #[test]
+    fn ordinary_follow_up_does_not_change_active_session_plan() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Implement fix".into(), "Validate".into()]);
+        let before = intent.visible_plan.clone();
+
+        // Prompt arrival has no destructive plan lifecycle hook. Only explicit
+        // reset/replacement operations invoke begin_new_operator_task.
+        assert_eq!(intent.visible_plan, before);
+        assert!(intent.retained_session_plans.is_empty());
+    }
+
+    #[test]
+    fn replacement_plans_receive_distinct_session_local_indexes() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["First plan".into()]);
+        let first_id = intent.visible_plan.as_ref().unwrap().plan_id.clone();
+        intent.set_work_plan(vec!["Second plan".into()]);
+        let second_id = intent.visible_plan.as_ref().unwrap().plan_id.clone();
+
+        assert_eq!(first_id, "1");
+        assert_eq!(second_id, "2");
+        assert!(
+            intent
+                .retained_session_plans
+                .iter()
+                .any(|plan| plan.plan_id == first_id)
+        );
+    }
+
+    #[test]
+    fn independent_sessions_reuse_local_plan_indexes_without_global_collision_claims() {
+        let mut first_session = IntentDocument::default();
+        let mut second_session = IntentDocument::default();
+        first_session.set_work_plan(vec!["First session work".into()]);
+        second_session.set_work_plan(vec!["Second session work".into()]);
+
+        assert_eq!(first_session.visible_plan.as_ref().unwrap().plan_id, "1");
+        assert_eq!(second_session.visible_plan.as_ref().unwrap().plan_id, "1");
+        assert_ne!(
+            first_session.visible_plan.as_ref().unwrap().items,
+            second_session.visible_plan.as_ref().unwrap().items
+        );
+    }
+
+    #[test]
+    fn explicit_new_task_preserves_repo_plan() {
+        let mut intent = IntentDocument::default();
+        intent.visible_plan = Some(VisiblePlanState {
+            plan_id: PlanBinding::openspec_plan_id("active-change", None),
+            scope: PlanScope::Repo,
+            source: PlanSource::OpenSpec,
+            binding: PlanBinding {
+                openspec_change: Some("active-change".into()),
+                ..PlanBinding::default()
+            },
+            mode: PlanMode::Executing,
+            items: vec![WorkItem {
+                description: "Implement scenario".into(),
+                status: WorkItemStatus::Active,
+                intent: Some(TaskIntent::Implementation),
+                completion_policy: TaskCompletionPolicy::Manual,
+                evidence: Vec::new(),
+            }],
+        });
+
+        intent.begin_new_operator_task();
+
+        assert_eq!(intent.visible_plan.as_ref().unwrap().scope, PlanScope::Repo);
+    }
+
+    #[test]
     fn completed_session_plan_leaves_history_without_visible_lane() {
         let dir = tempfile::tempdir().unwrap();
         let mut intent = IntentDocument::default();
@@ -1702,6 +1861,42 @@ mod render_tests {
         let projection = PlanSurfaceInputs::from_intent(&intent, dir.path());
         assert!(projection.active_lane(&intent).is_none());
         assert_eq!(projection.completed_session.unwrap().completed, 1);
+    }
+
+    #[test]
+    fn promotion_nudges_do_not_treat_design_or_validation_as_openspec_evidence() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec![
+            "Design the local layout".into(),
+            "Validate the output".into(),
+        ]);
+
+        let nudges = intent.promotion_nudges();
+
+        assert!(nudges.iter().any(|nudge| nudge.starts_with("design node:")));
+        assert!(
+            nudges
+                .iter()
+                .any(|nudge| nudge.starts_with("Operations/validation:"))
+        );
+        assert!(nudges.iter().all(|nudge| !nudge.contains("OpenSpec")));
+        assert!(nudges.iter().any(|nudge| {
+            nudge.starts_with("durable-work:")
+                && nudge.contains("versioned workspace or explicit durable artifact")
+        }));
+    }
+
+    #[test]
+    fn evidence_required_plan_uses_neutral_durability_guidance() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Investigate behavior".into()]);
+
+        let nudges = intent.promotion_nudges();
+
+        assert!(nudges.iter().any(|nudge| {
+            nudge.contains("versioned workspace or explicit durable artifact")
+                && !nudge.contains("OpenSpec")
+        }));
     }
 
     #[test]

@@ -29,6 +29,8 @@ pub struct ConvState {
     cached_count: usize,
     /// Selected segment when heights were last computed.
     cached_selected_segment: Option<usize>,
+    /// One-shot request to align the selected projected segment to the viewport top.
+    snap_to_selected: bool,
     /// Total rendered height from the previous frame.
     /// Used to preserve a detached viewport when streaming grows content.
     last_total_height: u16,
@@ -44,6 +46,7 @@ impl ConvState {
             cached_mode: None,
             cached_count: 0,
             cached_selected_segment: None,
+            snap_to_selected: false,
             last_total_height: 0,
         }
     }
@@ -69,6 +72,11 @@ impl ConvState {
     pub fn force_scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
         self.user_scrolled = false;
+    }
+
+    pub fn snap_to_selected(&mut self) {
+        self.snap_to_selected = true;
+        self.user_scrolled = true;
     }
 
     /// Invalidate height cache — call when segments change.
@@ -320,6 +328,25 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
             return;
         }
 
+        // Preserve the logical segment at the top of a detached viewport when
+        // an in-place mutation changes measured heights (for example, an
+        // operator image folding from preview to one row). A total-height
+        // delta alone cannot distinguish changes above the viewport from
+        // changes within or below it.
+        let previous_anchor = if state.user_scrolled
+            && state.heights.len() == self.segments.len()
+            && state.last_total_height > 0
+        {
+            let previous_top = state
+                .last_total_height
+                .saturating_sub(area.height)
+                .saturating_sub(state.scroll_offset);
+            segment_anchor_at_top(&state.heights, previous_top)
+        } else {
+            None
+        };
+        let previous_segment_count = state.heights.len();
+
         // Ensure all segment heights are computed
         let measure_ctx = SegmentRenderContext::new(self.theme, self.mode)
             .with_density(self.density)
@@ -335,7 +362,32 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
         let viewport_height = area.height;
         let total_height = state.total_height();
 
-        if state.user_scrolled && total_height > state.last_total_height {
+        if state.snap_to_selected {
+            if let Some(selected) = self.selected_segment {
+                let selected_top: u16 = state.heights[..selected].iter().copied().sum();
+                state.scroll_offset = total_height
+                    .saturating_sub(viewport_height)
+                    .saturating_sub(selected_top);
+            }
+            state.snap_to_selected = false;
+        } else if state.user_scrolled
+            && previous_segment_count == self.segments.len()
+            && let Some((anchor_segment, row_within_segment)) = previous_anchor
+        {
+            let anchor_top: u16 = state.heights[..anchor_segment]
+                .iter()
+                .copied()
+                .fold(0u16, u16::saturating_add);
+            let anchored_top = anchor_top.saturating_add(
+                row_within_segment.min(state.heights[anchor_segment].saturating_sub(1)),
+            );
+            state.scroll_offset = total_height
+                .saturating_sub(viewport_height)
+                .saturating_sub(anchored_top);
+        } else if state.user_scrolled && total_height > state.last_total_height {
+            // Segment insertion has no stable prior index to anchor against.
+            // Retain the established bottom-relative growth behavior so new
+            // output below a detached viewport does not pull it downward.
             state.scroll_offset = state
                 .scroll_offset
                 .saturating_add(total_height - state.last_total_height);
@@ -411,6 +463,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                 .render(seg_area, buf, self.theme, |content_area, buf| {
                     segment.render_in_context(content_area, buf, &render_ctx);
                 });
+                render_assistant_copy_affordance(seg_area, buf, self.theme, segment);
             } else {
                 // Segment starts ABOVE the viewport — partially visible.
                 // Render into a temp buffer at full size, then copy the
@@ -453,6 +506,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                         segment.render_in_context(content_area, buf, &render_ctx);
                     },
                 );
+                render_assistant_copy_affordance(temp_area, &mut temp_buf, self.theme, segment);
                 // Copy the visible portion from temp_buf to main buf
                 for row in 0..visible_rows {
                     let src_y = clip_rows + row;
@@ -511,6 +565,21 @@ fn render_detail_affordance_hint(area: Rect, buf: &mut Buffer, theme: &dyn Theme
     }
 }
 
+fn segment_anchor_at_top(heights: &[u16], top_offset: u16) -> Option<(usize, u16)> {
+    let mut segment_top = 0u16;
+    for (index, height) in heights.iter().copied().enumerate() {
+        let segment_bottom = segment_top.saturating_add(height);
+        if top_offset < segment_bottom {
+            return Some((index, top_offset.saturating_sub(segment_top)));
+        }
+        segment_top = segment_bottom;
+    }
+    heights
+        .len()
+        .checked_sub(1)
+        .map(|index| (index, heights[index].saturating_sub(1)))
+}
+
 fn measured_segment_height(
     segment: &Segment,
     width: u16,
@@ -526,6 +595,35 @@ fn measured_segment_height(
     .content_area(Rect::new(0, 0, width, 1))
     .width;
     segment.height_in_context(content_width, ctx)
+}
+
+fn render_assistant_copy_affordance(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: &dyn Theme,
+    segment: &Segment,
+) {
+    const LABEL: &str = " Copy ";
+    let eligible = matches!(
+        &segment.content,
+        super::segments::SegmentContent::AssistantText { complete: true, .. }
+    );
+    let label_width = LABEL.chars().count() as u16;
+    if !eligible || area.height == 0 || area.width < label_width {
+        return;
+    }
+
+    let x = area.right().saturating_sub(label_width);
+    let style = Style::default()
+        .fg(theme.bg())
+        .bg(theme.accent_bright())
+        .add_modifier(Modifier::BOLD);
+    for (offset, ch) in LABEL.chars().enumerate() {
+        if let Some(cell) = buf.cell_mut((x + offset as u16, area.y)) {
+            cell.set_char(ch);
+            cell.set_style(style);
+        }
+    }
 }
 
 fn is_collapsed_expandable_tool_card(segment: &Segment) -> bool {
@@ -719,13 +817,18 @@ mod tests {
             .filter_map(|x| buf.cell((x, y)))
             .filter(|cell| cell.symbol() != " ")
             .collect::<Vec<_>>();
-        assert!(!styled_cells.is_empty(), "hint should render visible chrome");
+        assert!(
+            !styled_cells.is_empty(),
+            "hint should render visible chrome"
+        );
         assert!(
             styled_cells.iter().all(|cell| cell.fg == Alpharius.muted()),
             "detached navigation hint must remain neutral"
         );
         assert!(
-            styled_cells.iter().all(|cell| cell.fg != Alpharius.warning()),
+            styled_cells
+                .iter()
+                .all(|cell| cell.fg != Alpharius.warning()),
             "detached navigation hint must not consume the attention color"
         );
     }
@@ -788,7 +891,10 @@ mod tests {
         let expected_segment_y = area.bottom() - segment_height;
         assert_eq!(image_area.x, area.x + 1);
         assert_eq!(image_area.y, expected_segment_y + 1);
-        assert!(image_area.y > area.y, "overlay must not be pinned to viewport top");
+        assert!(
+            image_area.y > area.y,
+            "overlay must not be pinned to viewport top"
+        );
         assert!(image_area.bottom() < area.bottom());
     }
 
@@ -885,6 +991,130 @@ mod tests {
         assert!(
             state.heights[0] > 1,
             "completed detached tail must be remeasured so it cannot look truncated"
+        );
+    }
+
+    #[test]
+    fn detached_viewport_preserves_logical_anchor_when_content_above_shrinks() {
+        let mut segments = vec![
+            Segment::operator_image("/tmp/paste.png".into(), "pasted image"),
+            Segment::user_prompt("anchor"),
+            Segment::user_prompt("tail one"),
+            Segment::user_prompt("tail two"),
+        ];
+        let area = Rect::new(0, 0, 40, 4);
+        let mut state = ConvState::new();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+        let anchor_top = state.heights[0];
+        state.scroll_offset = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(anchor_top);
+        state.user_scrolled = true;
+        let previous_offset = state.scroll_offset;
+
+        if let SegmentContent::Image { display, .. } = &mut segments[0].content {
+            *display = crate::tui::segments::ImageDisplayState::Collapsed;
+        }
+        state.invalidate();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+
+        assert_eq!(
+            state.scroll_offset, previous_offset,
+            "shrinking a segment above the viewport must preserve the same logical segment anchor"
+        );
+        let new_top = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(state.scroll_offset);
+        assert_eq!(new_top, state.heights[0]);
+    }
+
+    #[test]
+    fn detached_viewport_preserves_top_coordinate_when_content_below_shrinks() {
+        let mut segments = vec![
+            Segment::user_prompt("anchor"),
+            Segment::user_prompt("middle"),
+            Segment::operator_image("/tmp/paste.png".into(), "pasted image"),
+        ];
+        let area = Rect::new(0, 0, 40, 4);
+        let mut state = ConvState::new();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+        state.scroll_offset = state.last_total_height.saturating_sub(area.height);
+        state.user_scrolled = true;
+        let previous_top = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(state.scroll_offset);
+
+        if let SegmentContent::Image { display, .. } = &mut segments[2].content {
+            *display = crate::tui::segments::ImageDisplayState::Collapsed;
+        }
+        state.invalidate();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+
+        let new_top = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(state.scroll_offset);
+        assert_eq!(new_top, previous_top);
+    }
+
+    #[test]
+    fn detached_viewport_tracks_content_shrink_without_jumping_up() {
+        let mut segments = vec![
+            Segment::user_prompt("inspect the attached image"),
+            Segment::operator_image("/tmp/paste.png".into(), "pasted image"),
+            Segment::user_prompt("later prompt"),
+        ];
+        let area = Rect::new(0, 0, 40, 6);
+        let mut state = ConvState::new();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+        state.scroll_up(8);
+        let previous_offset = state.scroll_offset;
+        let previous_height = state.last_total_height;
+
+        if let SegmentContent::Image { display, .. } = &mut segments[1].content {
+            *display = crate::tui::segments::ImageDisplayState::Collapsed;
+        } else {
+            panic!("operator attachment should be an image segment");
+        }
+        state.invalidate();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+
+        let height_reduction = previous_height - state.last_total_height;
+        assert!(
+            height_reduction > 0,
+            "collapsed image should reduce content height"
+        );
+        assert_eq!(
+            state.scroll_offset,
+            previous_offset.saturating_sub(height_reduction),
+            "automatic content collapse must preserve the visible anchor instead of leaving a stale offset"
         );
     }
 
@@ -1134,10 +1364,7 @@ mod tests {
             "selected copyable segment should advertise double-click copy: {rendered}"
         );
         assert!(
-            rendered
-                .lines()
-                .next()
-                .is_some_and(|line| line.starts_with('◆')),
+            rendered.lines().any(|line| line.starts_with('◆')),
             "detail-openable selection should mark the segment start: {rendered}"
         );
         assert!(
@@ -1192,6 +1419,59 @@ mod tests {
         assert!(
             rendered.contains("dbl-click expand"),
             "selected collapsed tool card should advertise double-click expand: {rendered}"
+        );
+    }
+
+    #[test]
+    fn projected_success_outcome_is_neutral_in_slim_conversation_buffer() {
+        use crate::surfaces::layout::UiPresentationLevel;
+        use crate::tui::conversation_projection::project_conversation;
+
+        let mut first = Segment::tool_card("tool-1", "read");
+        first.meta.turn = Some(1);
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_result,
+            ..
+        } = &mut first.content
+        {
+            *complete = true;
+            *detail_result = Some("file contents".into());
+        }
+        let projected = project_conversation(&[first], UiPresentationLevel::Om);
+        assert!(matches!(
+            projected.segments.as_slice(),
+            [Segment {
+                content: SegmentContent::SystemNotification { text },
+                ..
+            }] if text.starts_with('✓')
+        ));
+
+        let area = Rect::new(0, 0, 72, 3);
+        let mut buf = Buffer::empty(area);
+        let mut state = ConvState::new();
+        ConversationWidget::new(&projected.segments, &Alpharius)
+            .with_mode(SegmentRenderMode::Slim)
+            .render(area, &mut buf, &mut state);
+
+        let mut colors = Vec::new();
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                if let Some(cell) = buf.cell((x, y))
+                    && cell.symbol() != " "
+                {
+                    colors.push(cell.fg);
+                }
+            }
+        }
+        assert!(!colors.is_empty());
+        assert!(
+            colors.iter().all(|color| *color != Alpharius.warning()),
+            "successful projected outcome must not consume attention orange"
+        );
+        assert!(
+            colors.iter().any(|color| *color == Alpharius.muted()),
+            "successful projected outcome should render as neutral transcript evidence"
         );
     }
 

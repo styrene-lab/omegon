@@ -245,9 +245,40 @@ fn is_windows_device_namespace(raw: &str) -> bool {
     raw.starts_with(r"\\.\") || raw.starts_with(r"//./")
 }
 
+fn is_shell_syntax_or_quote(ch: char) -> bool {
+    matches!(
+        ch,
+        '\'' | '`' | '$' | '(' | ')' | '{' | '}' | ';' | '|' | '&'
+    )
+}
+
 fn is_windows_unc(raw: &str) -> bool {
-    (raw.starts_with(r"\\") && !is_windows_verbatim(raw) && !is_windows_device_namespace(raw))
-        || (raw.starts_with("//") && !raw.starts_with("///"))
+    if raw.chars().any(is_shell_syntax_or_quote) {
+        return false;
+    }
+    let is_standard_unc =
+        raw.starts_with(r"\\") && !is_windows_verbatim(raw) && !is_windows_device_namespace(raw);
+    let is_slash_unc = raw.starts_with("//") && !raw.starts_with("///");
+    if !is_standard_unc && !is_slash_unc {
+        return false;
+    }
+    let rest = &raw[2..];
+
+    let mut components = rest.split(['/', '\\']);
+    let server = components.next().unwrap_or_default();
+    let share = components.next().unwrap_or_default();
+    !server.is_empty()
+        && !share.is_empty()
+        && server.chars().all(|ch| {
+            !ch.is_control()
+                && !ch.is_ascii_whitespace()
+                && !matches!(ch, '<' | '>' | '"' | '|' | '?' | '*')
+        })
+        && share.chars().all(|ch| {
+            !ch.is_control()
+                && !ch.is_ascii_whitespace()
+                && !matches!(ch, '<' | '>' | '"' | '|' | '?' | '*')
+        })
 }
 
 fn windows_drive_absolute(raw: &str) -> Option<char> {
@@ -1319,6 +1350,18 @@ mod tests {
         let intent = classify_privilege_intent("sudo -S true").unwrap();
         assert_eq!(intent.program, PrivilegeProgram::Sudo);
         assert_eq!(intent.mode, PrivilegeMode::PasswordFromStdin);
+        assert!(!matches!(
+            PathTarget::classify("//')"),
+            PathTarget::WindowsUnc { .. }
+        ));
+        assert!(!matches!(
+            PathTarget::classify("//')/console"),
+            PathTarget::WindowsUnc { .. }
+        ));
+        assert!(!matches!(
+            PathTarget::classify("//server/share$(noise)"),
+            PathTarget::WindowsUnc { .. }
+        ));
     }
 
     #[test]
@@ -1363,6 +1406,20 @@ mod tests {
         assert!(matches!(
             PathTarget::classify("CON"),
             PathTarget::WindowsDevice { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_implausible_windows_unc_prefixes() {
+        for raw in [r"\\", r"\\server", r#"\\n<p>[!{marker}]")"#, "//server"] {
+            assert!(
+                !matches!(PathTarget::classify(raw), PathTarget::WindowsUnc { .. }),
+                "implausible UNC token was classified as network path: {raw}"
+            );
+        }
+        assert!(matches!(
+            PathTarget::classify("//server/share/file.txt"),
+            PathTarget::WindowsUnc { .. }
         ));
     }
 

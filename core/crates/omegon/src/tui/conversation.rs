@@ -371,8 +371,10 @@ impl ConversationView {
 
         for (idx, path) in attachments.iter().enumerate() {
             if super::image::is_image_path(&path.to_string_lossy()) {
-                self.segments
-                    .push(Segment::image(path.clone(), attachment_alt_text(path, idx)));
+                self.segments.push(Segment::operator_image(
+                    path.clone(),
+                    attachment_alt_text(path, idx),
+                ));
             }
         }
 
@@ -470,6 +472,7 @@ impl ConversationView {
     }
 
     pub fn append_streaming(&mut self, delta: &str) {
+        self.collapse_preview_images();
         // Push a new AssistantText segment if we aren't already writing into one.
         // This handles both the initial case (!streaming) and the case where
         // tool cards were interleaved — the last segment may be a ToolCard even
@@ -484,6 +487,7 @@ impl ConversationView {
         );
         if needs_new_seg {
             self.segments.push(Segment::assistant_text());
+            self.conv_state.invalidate();
         }
         self.streaming = true;
 
@@ -492,11 +496,15 @@ impl ConversationView {
         {
             text.push_str(delta);
         }
-        self.conv_state.invalidate();
+        // Do not invalidate the full height cache for every token. While
+        // attached, ConvState remeasures the live tail each frame. While the
+        // operator is detached, retaining the tail's cached height preserves
+        // the visible anchor and avoids an O(history) remeasure on every delta.
         self.conv_state.auto_scroll_to_bottom();
     }
 
     pub fn append_thinking(&mut self, delta: &str) {
+        self.collapse_preview_images();
         // Same guard as append_streaming — don't append into a ToolCard.
         let needs_new_seg = !matches!(
             self.segments.last(),
@@ -537,6 +545,7 @@ impl ConversationView {
         detail_args: Option<&str>,
         expanded_by_default: bool,
     ) {
+        self.collapse_preview_images();
         if is_suppressed_control_plane_tool(name) {
             self.suppressed_tool_calls.insert(
                 id.to_string(),
@@ -797,6 +806,8 @@ impl ConversationView {
         }
         self.streaming = false;
         self.conv_state.invalidate();
+        // Preserve an intentional detached viewport through completion. The
+        // next submitted operator turn explicitly reattaches in push_user().
         self.conv_state.auto_scroll_to_bottom();
     }
 
@@ -1221,6 +1232,107 @@ impl ConversationView {
         changed
     }
 
+    pub fn collapse_preview_images(&mut self) -> usize {
+        let mut changed = 0;
+        for segment in &mut self.segments {
+            if let SegmentContent::Image { display, .. } = &mut segment.content
+                && *display == crate::tui::segments::ImageDisplayState::Preview
+            {
+                *display = crate::tui::segments::ImageDisplayState::Collapsed;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.conv_state.invalidate();
+        }
+        changed
+    }
+
+    pub fn toggle_image_attachments_for_prompt(&mut self, prompt_idx: usize) -> usize {
+        if !matches!(
+            self.segments
+                .get(prompt_idx)
+                .map(|segment| &segment.content),
+            Some(SegmentContent::UserPrompt { .. })
+        ) {
+            return 0;
+        }
+        let end = self.segments[prompt_idx + 1..]
+            .iter()
+            .position(|segment| {
+                !matches!(
+                    segment.content,
+                    SegmentContent::Image {
+                        display: crate::tui::segments::ImageDisplayState::Preview
+                            | crate::tui::segments::ImageDisplayState::Collapsed
+                            | crate::tui::segments::ImageDisplayState::Expanded,
+                        ..
+                    }
+                )
+            })
+            .map_or(self.segments.len(), |offset| prompt_idx + 1 + offset);
+        let expand = self.segments[prompt_idx + 1..end].iter().any(|segment| {
+            matches!(
+                segment.content,
+                SegmentContent::Image {
+                    display: crate::tui::segments::ImageDisplayState::Collapsed,
+                    ..
+                }
+            )
+        });
+        let target = if expand {
+            crate::tui::segments::ImageDisplayState::Expanded
+        } else {
+            crate::tui::segments::ImageDisplayState::Collapsed
+        };
+        let mut changed = 0;
+        for segment in &mut self.segments[prompt_idx + 1..end] {
+            if let SegmentContent::Image { display, .. } = &mut segment.content
+                && *display != target
+            {
+                *display = target;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.conv_state.invalidate();
+        }
+        changed
+    }
+
+    pub fn move_to_operator_prompt(&mut self, previous: bool) -> Option<usize> {
+        let prompts = self
+            .segments
+            .iter()
+            .enumerate()
+            .filter(|(_, segment)| matches!(segment.content, SegmentContent::UserPrompt { .. }))
+            .map(|(idx, _)| idx)
+            .collect::<Vec<_>>();
+        if prompts.is_empty() {
+            return None;
+        }
+        let current = self
+            .selected_segment
+            .and_then(|idx| prompts.iter().position(|p| *p == idx));
+        let target = if previous {
+            current
+                .and_then(|pos| pos.checked_sub(1))
+                .unwrap_or(prompts.len() - 1)
+        } else if let Some(pos) = current {
+            if pos + 1 >= prompts.len() {
+                self.selected_segment = None;
+                self.conv_state.force_scroll_to_bottom();
+                return None;
+            }
+            pos + 1
+        } else {
+            prompts.len() - 1
+        };
+        let idx = prompts[target];
+        self.selected_segment = Some(idx);
+        Some(idx)
+    }
+
     pub fn select_segment(&mut self, idx: usize) {
         if idx < self.segments.len() {
             self.selected_segment = Some(idx);
@@ -1353,7 +1465,15 @@ impl ConversationView {
                     .min(total_height.saturating_sub(viewport_height))
         };
 
-        let target_y = top_offset + (row - viewport.y);
+        let viewport_origin_y = if total_height < viewport_height {
+            viewport.y.saturating_add(viewport_height - total_height)
+        } else {
+            viewport.y
+        };
+        if row < viewport_origin_y {
+            return None;
+        }
+        let target_y = top_offset + (row - viewport_origin_y);
         let mut y_cursor: u16 = 0;
         for (idx, seg_height) in heights.iter().copied().enumerate() {
             let seg_top = y_cursor;
@@ -1368,6 +1488,55 @@ impl ConversationView {
 
     pub fn segment_at(&self, viewport: ratatui::prelude::Rect, row: u16) -> Option<usize> {
         self.segment_bounds_at(viewport, row).map(|(idx, _, _)| idx)
+    }
+
+    pub fn assistant_copy_button_at(
+        &self,
+        viewport: ratatui::prelude::Rect,
+        column: u16,
+        row: u16,
+    ) -> Option<usize> {
+        const COPY_LABEL_WIDTH: u16 = 6;
+        if column < viewport.right().saturating_sub(COPY_LABEL_WIDTH) || column >= viewport.right()
+        {
+            return None;
+        }
+        let (idx, seg_top, top_offset) = self.segment_bounds_at(viewport, row)?;
+        let visible_top = viewport.y + seg_top.saturating_sub(top_offset);
+        if row != visible_top {
+            return None;
+        }
+        self.segments.get(idx).and_then(|segment| {
+            matches!(
+                &segment.content,
+                SegmentContent::AssistantText { complete: true, .. }
+            )
+            .then_some(idx)
+        })
+    }
+
+    pub fn toggle_image_attachments_at(&mut self, segment_idx: usize) -> usize {
+        let prompt_idx = if matches!(
+            self.segments
+                .get(segment_idx)
+                .map(|segment| &segment.content),
+            Some(SegmentContent::UserPrompt { .. })
+        ) {
+            segment_idx
+        } else if matches!(
+            self.segments
+                .get(segment_idx)
+                .map(|segment| &segment.content),
+            Some(SegmentContent::Image { .. })
+        ) {
+            self.segments[..segment_idx]
+                .iter()
+                .rposition(|segment| matches!(segment.content, SegmentContent::UserPrompt { .. }))
+                .unwrap_or(segment_idx)
+        } else {
+            return 0;
+        };
+        self.toggle_image_attachments_for_prompt(prompt_idx)
     }
 
     pub fn is_segment_collapsed_tool_card(&self, segment_idx: usize) -> bool {
@@ -1401,8 +1570,129 @@ impl ConversationView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::conv_widget::ConversationWidget;
     use crate::tui::theme::Alpharius;
     use ratatui::prelude::*;
+
+    #[test]
+    fn assistant_start_collapses_operator_image_previews() {
+        let mut cv = ConversationView::new();
+        cv.push_user_with_attachments(
+            "inspect",
+            &[std::path::PathBuf::from("/tmp/screenshot.png")],
+        );
+        assert_eq!(cv.collapse_preview_images(), 1);
+        assert!(matches!(
+            cv.segments[1].content,
+            SegmentContent::Image {
+                display: crate::tui::segments::ImageDisplayState::Collapsed,
+                ..
+            }
+        ));
+        assert_eq!(cv.toggle_image_attachments_for_prompt(0), 1);
+        assert!(matches!(
+            cv.segments[1].content,
+            SegmentContent::Image {
+                display: crate::tui::segments::ImageDisplayState::Expanded,
+                ..
+            }
+        ));
+        assert_eq!(cv.toggle_image_attachments_at(1), 1);
+        assert!(matches!(
+            cv.segments[1].content,
+            SegmentContent::Image {
+                display: crate::tui::segments::ImageDisplayState::Collapsed,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn prompt_toggle_does_not_capture_later_tool_images() {
+        let mut cv = ConversationView::new();
+        cv.push_user_with_attachments("inspect", &[std::path::PathBuf::from("/tmp/paste.png")]);
+        cv.append_streaming("working");
+        cv.finalize_message();
+        cv.push_image(std::path::PathBuf::from("/tmp/tool.png"), "tool evidence");
+
+        assert_eq!(cv.toggle_image_attachments_for_prompt(0), 1);
+        assert!(matches!(
+            cv.segments.last().map(|segment| &segment.content),
+            Some(SegmentContent::Image {
+                display: crate::tui::segments::ImageDisplayState::Standalone,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn tool_start_collapses_operator_image_previews() {
+        let mut cv = ConversationView::new();
+        cv.push_user_with_attachments("inspect", &[std::path::PathBuf::from("/tmp/paste.png")]);
+        cv.push_tool_start("call", "read", None, None);
+        assert!(matches!(
+            cv.segments[1].content,
+            SegmentContent::Image {
+                display: crate::tui::segments::ImageDisplayState::Collapsed,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn operator_prompt_navigation_moves_between_semantic_anchors() {
+        let mut cv = ConversationView::new();
+        cv.push_user("first");
+        cv.append_streaming("one");
+        cv.finalize_message();
+        cv.push_user("second");
+        cv.append_streaming("two");
+        cv.finalize_message();
+
+        assert_eq!(cv.move_to_operator_prompt(true), Some(3));
+        assert_eq!(cv.move_to_operator_prompt(true), Some(0));
+        assert_eq!(cv.move_to_operator_prompt(false), Some(3));
+        assert_eq!(cv.move_to_operator_prompt(false), None);
+        assert_eq!(cv.selected_segment, None);
+        assert_eq!(cv.conv_state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn submitting_next_turn_reattaches_detached_viewport() {
+        let mut cv = ConversationView::new();
+        cv.push_user("question");
+        cv.append_streaming("answer in progress");
+        cv.scroll_up(105);
+        cv.finalize_message();
+        assert!(cv.conv_state.user_scrolled);
+
+        cv.push_user("next question");
+
+        assert_eq!(cv.conv_state.scroll_offset, 0);
+        assert!(!cv.conv_state.user_scrolled);
+    }
+
+    #[test]
+    fn detached_streaming_deltas_retain_height_cache() {
+        let mut cv = ConversationView::new();
+        cv.push_user("question");
+        cv.append_streaming("first line");
+        let theme = Alpharius;
+        let area = Rect::new(0, 0, 40, 6);
+        let mut buf = Buffer::empty(area);
+        {
+            let (segments, state) = cv.segments_and_state();
+            ConversationWidget::new(segments, &theme).render(area, &mut buf, state);
+        }
+        let cached = cv.conv_state.heights.clone();
+        cv.scroll_up(3);
+
+        cv.append_streaming("\nsecond line");
+
+        assert_eq!(cv.conv_state.heights, cached);
+        assert!(cv.conv_state.user_scrolled);
+        assert_eq!(cv.conv_state.scroll_offset, 3);
+    }
 
     #[test]
     fn plan_progress_notifications_replace_latest_snapshot_across_tool_cards() {
@@ -1658,7 +1948,7 @@ mod tests {
         assert!(matches!(
             &cv.segments[1],
             Segment {
-                content: SegmentContent::Image { path, alt },
+                content: SegmentContent::Image { path, alt, .. },
                 ..
             } if path == &std::path::PathBuf::from("/tmp/paste.png")
                 && alt.contains("[image0]")

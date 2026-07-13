@@ -225,6 +225,11 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                     .unwrap_or_default()
             ),
         }),
+        AgentEvent::RuntimeLifecycleUpdated { snapshot } => {
+            Some(IpcEventPayload::RuntimeLifecycleUpdated {
+                snapshot: snapshot.clone(),
+            })
+        }
         AgentEvent::SystemNotification { message } => Some(IpcEventPayload::SystemNotification {
             message: message.clone(),
         }),
@@ -336,6 +341,7 @@ fn event_name(ev: &IpcEventPayload) -> &'static str {
         IpcEventPayload::DecompositionStarted { .. } => "decomposition.started",
         IpcEventPayload::DecompositionChildCompleted { .. } => "decomposition.child_completed",
         IpcEventPayload::DecompositionCompleted { .. } => "decomposition.completed",
+        IpcEventPayload::RuntimeLifecycleUpdated { .. } => "runtime.lifecycle.updated",
         IpcEventPayload::FamilyVitalSignsUpdated { .. } => "family.vital_signs",
         IpcEventPayload::PlanUpdated { .. } => "plan.updated",
         IpcEventPayload::StreamIdle { .. } => "stream.idle",

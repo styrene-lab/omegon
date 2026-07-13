@@ -8,8 +8,15 @@ SCRIPT = ROOT / "scripts" / "release_preflight.py"
 
 
 class ReleasePreflightTests(unittest.TestCase):
-    def write_repo_fixture(self, root: Path, *, version: str, install_placeholder: bool = True, manifest_wired: bool = True, workspace_role: str | None = "release") -> None:
-        (root / "core").mkdir(parents=True)
+    def write_repo_fixture(
+        self,
+        root: Path,
+        *,
+        version: str,
+        install_placeholder: bool = True,
+        manifest_wired: bool = True,
+        workspace_role: str | None = "release",
+    ) -> None:
         (root / "site" / "src" / "pages" / "docs").mkdir(parents=True)
         (root / ".github" / "workflows").mkdir(parents=True)
         if workspace_role is not None:
@@ -18,27 +25,45 @@ class ReleasePreflightTests(unittest.TestCase):
                 '{"role": "%s"}\n' % workspace_role
             )
 
-        (root / "core" / "Cargo.toml").write_text(f'[workspace.package]\nversion = "{version}"\n')
-        stable = version.split("-rc.", 1)[0] if "-rc." in version else version
-        (root / "CHANGELOG.md").write_text(f'# Changelog\n\n## [{stable}] - 2026-04-04\n')
+        (root / "Cargo.toml").write_text(
+            f'[workspace.package]\nversion = "{version}"\n'
+        )
+        (root / "CHANGELOG.md").write_text(
+            f'# Changelog\n\n## [{version}] - 2026-07-12\n'
+        )
 
         install_lines = [
-            "VERSION=0.15.7 curl -fsSL https://omegon.styrene.dev/install.sh | sh\n",
+            "VERSION=0.28.0 curl -fsSL https://omegon.styrene.io/install.sh | sh\n",
         ]
         if install_placeholder:
-            install_lines.append("# Replace 0.15.7 with the release you actually want\n")
-            install_lines.append("# Replace 0.15.7 with the release you downloaded\n")
-        (root / "site" / "src" / "pages" / "docs" / "install.astro").write_text("".join(install_lines))
+            install_lines.append(
+                "# Replace 0.28.0 with the release you actually want\n"
+            )
+            install_lines.append("# Replace 0.28.0 with the release you downloaded\n")
+        (root / "site" / "src" / "pages" / "docs" / "install.astro").write_text(
+            "".join(install_lines)
+        )
 
         manifest_line = "release-manifest.json\n" if manifest_wired else "checksums.sha256\n"
         (root / ".github" / "workflows" / "release.yml").write_text(manifest_line)
         (root / ".github" / "workflows" / "homebrew.yml").write_text(manifest_line)
 
-    def init_git_repo(self, root: Path) -> None:
-        subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+    def init_git_repo(self, root: Path, *, branch: str = "release/0.28") -> None:
+        subprocess.run(
+            ["git", "init", "-b", branch], cwd=root, check=True, capture_output=True
+        )
         subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True)
         subprocess.run(
-            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"],
+            [
+                "git",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "init",
+            ],
             cwd=root,
             check=True,
             capture_output=True,
@@ -46,115 +71,136 @@ class ReleasePreflightTests(unittest.TestCase):
 
     def run_script(self, repo_root: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", str(SCRIPT), "--repo-root", str(repo_root)],
+            [
+                "python3",
+                str(SCRIPT),
+                "--repo-root",
+                str(repo_root),
+                "--skip-release-gap-check",
+            ],
             cwd=ROOT,
             check=False,
             capture_output=True,
             text=True,
         )
 
-    def test_preflight_passes_for_clean_rc_repo(self) -> None:
+    def test_preflight_passes_for_clean_stable_release_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)
-            self.write_repo_fixture(repo_root, version="0.15.9-rc.14")
+            self.write_repo_fixture(repo_root, version="0.28.0")
             self.init_git_repo(repo_root)
 
             result = self.run_script(repo_root)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("0.15.9", result.stdout)
+            self.assertIn("0.28.0", result.stdout)
 
     def test_preflight_fails_when_changelog_missing_target_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)
-            self.write_repo_fixture(repo_root, version="0.15.9-rc.14")
-            (repo_root / "CHANGELOG.md").write_text("# Changelog\n\n## [0.15.8] - 2026-04-04\n")
+            self.write_repo_fixture(repo_root, version="0.28.0")
+            (repo_root / "CHANGELOG.md").write_text(
+                "# Changelog\n\n## [0.27.7] - 2026-07-01\n"
+            )
             self.init_git_repo(repo_root)
 
             result = self.run_script(repo_root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("CHANGELOG.md is missing section [0.15.9]", result.stderr)
+            self.assertIn("CHANGELOG.md is missing section [0.28.0]", result.stderr)
 
     def test_preflight_fails_when_install_doc_is_not_placeholder_based(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)
-            self.write_repo_fixture(repo_root, version="0.15.9-rc.14", install_placeholder=False)
+            self.write_repo_fixture(
+                repo_root, version="0.28.0", install_placeholder=False
+            )
             self.init_git_repo(repo_root)
 
             result = self.run_script(repo_root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("install.astro versioned examples are not marked as placeholders", result.stderr)
+            self.assertIn(
+                "install.astro versioned examples are not marked as placeholders",
+                result.stderr,
+            )
 
     def test_preflight_fails_when_manifest_wiring_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)
-            self.write_repo_fixture(repo_root, version="0.15.9-rc.14", manifest_wired=False)
+            self.write_repo_fixture(
+                repo_root, version="0.28.0", manifest_wired=False
+            )
             self.init_git_repo(repo_root)
 
             result = self.run_script(repo_root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("release-manifest.json", result.stderr)
+
     def test_preflight_fails_when_workspace_role_is_not_release(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)
-            self.write_repo_fixture(repo_root, version="0.15.9-rc.14", workspace_role="feature")
+            self.write_repo_fixture(
+                repo_root, version="0.28.0", workspace_role="feature"
+            )
             self.init_git_repo(repo_root)
 
             result = self.run_script(repo_root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("workspace role must be 'release'", result.stderr)
 
+    def test_preflight_fails_when_release_branch_does_not_match_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            self.write_repo_fixture(repo_root, version="0.28.0")
+            self.init_git_repo(repo_root, branch="release/0.27")
+
+            result = self.run_script(repo_root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "release branch release/0.27 does not match workspace release line 0.28.0",
+                result.stderr,
+            )
+
 
 class ReleaseRecipeTests(unittest.TestCase):
-    def test_rc_recipe_relinks_local_binary_after_build(self) -> None:
+    def release_block(self) -> str:
         justfile = (ROOT / "justfile").read_text()
-        rc_start = justfile.index("rc:\n")
-        preflight_start = justfile.index("# Release preflight:")
-        rc_block = justfile[rc_start:preflight_start]
+        marker = "# Cut a stable release: test, commit milestone state if needed, tag, build.\nrelease:\n"
+        start = justfile.index(marker) + len(marker) - len("release:\n")
+        end = justfile.index("# Sign the local macOS validation binary", start)
+        return justfile[start:end]
 
-        self.assertIn('echo "Linking freshly built RC into PATH..."', rc_block)
-        self.assertIn("just link", rc_block)
+    def test_release_recipe_runs_preflight_before_mutation(self) -> None:
+        block = self.release_block()
+        self.assertIn("just preflight", block)
+        self.assertIn('./scripts/milestone-update.sh release "$NEW_VERSION"', block)
         self.assertLess(
-            rc_block.index('echo "Linking freshly built RC into PATH..."'),
-            rc_block.index('echo "Pushing rc tag..."'),
-            "rc recipe should relink the local binary before pushing/tag completion output",
+            block.index("just preflight"),
+            block.index('./scripts/milestone-update.sh release "$NEW_VERSION"'),
         )
 
-    def test_rc_recipe_uses_fast_local_validation_build(self) -> None:
-        justfile = (ROOT / "justfile").read_text()
-        rc_start = justfile.index("rc:\n")
-        preflight_start = justfile.index("# Release preflight:")
-        rc_block = justfile[rc_start:preflight_start]
+    def test_release_recipe_requires_stable_semver(self) -> None:
+        block = self.release_block()
+        self.assertIn("Release version must be stable semver", block)
+        self.assertIn("NEW_VERSION=\"$CURRENT\"", block)
 
-        self.assertIn('cargo build --profile dev-release -p omegon', rc_block)
-        self.assertNotIn('cargo build --release -p omegon', rc_block)
-        self.assertIn('core/target/dev-release/omegon', rc_block)
+    def test_release_recipe_uses_clippy_warning_gate_without_rebuilding_dependencies(self) -> None:
+        block = self.release_block()
+        self.assertIn("{{cargo}} clippy -p omegon --all-targets -- -D warnings", block)
+        self.assertNotIn('RUSTFLAGS="-D warnings"', block)
 
-    def test_rc_recipe_self_sets_release_workspace_role_before_preflight(self) -> None:
-        justfile = (ROOT / "justfile").read_text()
-        rc_start = justfile.index("rc:\n")
-        preflight_start = justfile.index("# Release preflight:")
-        rc_block = justfile[rc_start:preflight_start]
-
-        repair_line = 'python3 scripts/release_preflight.py --ensure-release-workspace-role --repo-root .'
-        preflight_line = 'python3 scripts/release_preflight.py\n'
-        self.assertIn(repair_line, rc_block)
-        self.assertIn(preflight_line, rc_block)
+    def test_release_recipe_builds_before_publish_instruction(self) -> None:
+        block = self.release_block()
+        self.assertIn("{{cargo}} build --release -p omegon", block)
+        self.assertIn("just publish", block)
         self.assertLess(
-            rc_block.index(repair_line),
-            rc_block.rindex(preflight_line),
-            "rc recipe should repair workspace role before preflight",
+            block.index("{{cargo}} build --release -p omegon"),
+            block.index("just publish"),
         )
 
-    def test_rc_recipe_does_not_publish_release_inline(self) -> None:
-        justfile = (ROOT / "justfile").read_text()
-        rc_start = justfile.index("rc:\n")
-        preflight_start = justfile.index("# Release preflight:")
-        rc_block = justfile[rc_start:preflight_start]
-
-        self.assertNotIn('gh release edit "v${NEW_VERSION}" --draft=false --prerelease', rc_block)
-        self.assertNotIn('gh release create "v${NEW_VERSION}"', rc_block)
-        self.assertIn('Release publication now completes in CI after assets upload.', rc_block)
-        self.assertIn('echo "✓ ${NEW_VERSION} — preflighted, committed, tagged, built, pushed."', rc_block)
+    def test_release_recipe_does_not_publish_inline(self) -> None:
+        block = self.release_block()
+        self.assertNotIn("gh release create", block)
+        self.assertNotIn("\n    git push origin", block)
+        self.assertIn("Stable release committed and tagged", block)
 
 
 if __name__ == "__main__":

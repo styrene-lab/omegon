@@ -51,6 +51,11 @@ pub fn build_state_snapshot(
         health,
         presentation: Some(ipc_presentation_snapshot(presentation_level)),
         operation_episodes: ipc_operation_episodes(handles),
+        runtime_lifecycle: handles
+            .runtime_lifecycle
+            .lock()
+            .ok()
+            .and_then(|snapshot| snapshot.clone()),
     }
 }
 
@@ -634,6 +639,41 @@ fn project_health(handles: &DashboardHandles) -> IpcHealthSnapshot {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn build_state_snapshot_retains_latest_runtime_lifecycle() {
+        let lifecycle = omegon_traits::RuntimeLifecycleSnapshot {
+            operation_id: "restart-1".into(),
+            kind: omegon_traits::RuntimeLifecycleKind::Restart,
+            phase: omegon_traits::RuntimeLifecyclePhase::Restarting,
+            message: "Saving session and restarting".into(),
+            session_id: Some("session-abc".into()),
+            target_version: None,
+            reconnect_required: true,
+        };
+        let handles = DashboardHandles {
+            runtime_lifecycle: Arc::new(Mutex::new(Some(lifecycle.clone()))),
+            ..Default::default()
+        };
+
+        let snap = build_state_snapshot(
+            &handles,
+            "0.28.0",
+            "/tmp/example-project",
+            "2026-07-12T12:00:00Z",
+            "instance-123",
+            "session-abc",
+            crate::surfaces::layout::UiPresentationLevel::Om,
+        );
+
+        assert_eq!(snap.runtime_lifecycle, Some(lifecycle));
+        assert!(
+            snap.instance
+                .control_plane
+                .capabilities
+                .contains(&"runtime.lifecycle".to_string())
+        );
+    }
 
     #[test]
     fn build_state_snapshot_includes_instance_descriptor() {

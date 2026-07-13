@@ -212,7 +212,7 @@ fn editor_inline_attachment_tokens_submit_as_multimodal_prompt() {
     ));
     assert!(matches!(
         &app.conversation.segments()[1].content,
-        crate::tui::segments::SegmentContent::Image { path, alt }
+        crate::tui::segments::SegmentContent::Image { path, alt, .. }
             if path == &std::path::PathBuf::from("/tmp/paste.png") && alt.contains("[image0]")
     ));
 }
@@ -905,6 +905,62 @@ async fn ui_action_permission_response_unblocks_pending_permission() {
     assert!(app.pending_permission.is_none());
     assert!(app.pending_permission_context.is_none());
     assert!(app.command_prompt.is_none());
+}
+
+#[test]
+fn preparing_interrupt_reattaches_conversation_viewport_to_tail() {
+    let mut app = test_app();
+    app.conversation.conv_state.scroll_offset = 24;
+
+    app.prepare_interrupt_ui();
+
+    assert_eq!(app.conversation.conv_state.scroll_offset, 0);
+    assert!(app.interrupt_pending);
+    assert_eq!(app.slim_turn_state, SlimTurnState::Interrupting);
+}
+
+#[tokio::test]
+async fn ui_action_always_allow_reports_canonical_grant_identity() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let (permission_tx, permission_rx) = std::sync::mpsc::channel();
+    app.pending_permission = Some(std::sync::Arc::new(std::sync::Mutex::new(Some(
+        permission_tx,
+    ))));
+    app.pending_permission_context = Some(PendingPermissionContext {
+        tool_name: "bash".into(),
+        target: "/tmp/omegon-just-list".into(),
+        kind: omegon_traits::PermissionRequestKind::PathBoundary,
+        persistence: omegon_traits::PermissionPersistence::ProjectDirectory,
+        grant_path: Some("/tmp".into()),
+    });
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::RespondToPermission(PermissionAction {
+                request_id: None,
+                response: omegon_traits::PermissionResponse::AlwaysAllow,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        permission_rx.recv().expect("permission response"),
+        omegon_traits::PermissionResponse::AlwaysAllow
+    );
+    let UiActionOutcome::Accepted { message } = outcome else {
+        panic!("expected accepted outcome");
+    };
+    let message = message.expect("accepted message");
+    assert!(message.contains("canonical grant:"), "{message}");
+    let target = crate::tools::canonicalize_existing_parent_for_permissions(std::path::Path::new(
+        "/tmp/omegon-just-list",
+    ));
+    let grant =
+        crate::tools::canonicalize_existing_parent_for_permissions(std::path::Path::new("/tmp"));
+    assert!(message.contains(&target.display().to_string()), "{message}");
+    assert!(message.contains(&grant.display().to_string()), "{message}");
 }
 
 #[tokio::test]
@@ -2023,7 +2079,7 @@ fn completed_plan_update_enables_done_view_hint_without_pinning() {
     assert!(app.completed_plan_history_available);
     assert!(app.workbench_state.active.is_none());
     let text = render_app_to_string(&mut app, 120, 18);
-    assert!(text.contains("plan complete · history available"), "{text}");
+    assert!(!text.contains("plan complete"), "{text}");
     assert!(
         !text.contains("remember me"),
         "completed history should not pin active lane: {text}"
@@ -2161,8 +2217,9 @@ fn assistant_completed_turn_keeps_incomplete_live_plan_lane() {
 
     assert!(app.workbench_state.active.is_some());
     let text = render_app_to_string(&mut app, 140, 18);
-    assert!(text.contains("plan active"), "{text}");
     assert!(text.contains("Harden set_recipe"), "{text}");
+    assert!(text.contains("plan active"), "{text}");
+    assert!(text.contains("active plan"), "{text}");
     assert!(text.contains("turn done"), "{text}");
 }
 
@@ -2244,6 +2301,97 @@ fn slim_status_line_marks_turn_state() {
     assert_eq!(app.slim_turn_state, SlimTurnState::Finished("done"));
     let done = render_app_to_string(&mut app, 140, 18);
     assert!(done.contains("turn done"), "{done}");
+}
+
+#[test]
+fn turn_terminal_reasons_release_active_gate_and_remain_visible() {
+    for (reason, label) in [
+        (omegon_traits::TurnEndReason::AwaitingOperator, "waiting"),
+        (omegon_traits::TurnEndReason::Blocked, "blocked"),
+        (omegon_traits::TurnEndReason::TurnLimitReached, "turn limit"),
+        (
+            omegon_traits::TurnEndReason::ProviderExhausted,
+            "provider exhausted",
+        ),
+        (omegon_traits::TurnEndReason::WorkerFailed, "worker failed"),
+        (omegon_traits::TurnEndReason::Cancelled, "cancelled"),
+    ] {
+        let mut app = active_test_app();
+        app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
+        app.handle_agent_event(AgentEvent::TurnEnd(Box::new(
+            omegon_traits::AgentEventTurnEnd {
+                turn: 1,
+                turn_end_reason: reason,
+                model: Some("openai:gpt-5.4".into()),
+                provider: Some("openai".into()),
+                estimated_tokens: 0,
+                context_window: 0,
+                context_composition: omegon_traits::ContextComposition::default(),
+                actual_input_tokens: 0,
+                actual_output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                provider_telemetry: None,
+                dominant_phase: None,
+                drift_kind: None,
+                progress_nudge_reason: None,
+                intent_task: None,
+                intent_phase: None,
+                files_read_count: 0,
+                files_modified_count: 0,
+                stats_tool_calls: 0,
+                streaks: omegon_traits::ControllerStreaks::default(),
+            },
+        )));
+
+        assert_eq!(app.slim_turn_state, SlimTurnState::Finished(label));
+        assert!(!app.agent_active, "{reason:?} must release active gate");
+    }
+}
+
+#[test]
+fn stream_idle_provider_failure_and_lifecycle_events_project_into_tui() {
+    let mut app = active_test_app();
+    app.handle_agent_event(AgentEvent::StreamIdle {
+        provider: "openai-codex".into(),
+        model: "gpt-5.4".into(),
+        phase: "reasoning".into(),
+        idle_secs: 90,
+        ambiguous: true,
+        message: "no bytes received".into(),
+    });
+    assert_eq!(
+        app.slim_turn_state,
+        SlimTurnState::StreamIdle("90s · reasoning · ambiguous".into())
+    );
+
+    app.handle_agent_event(AgentEvent::RuntimeTurnLifecycleUpdated {
+        snapshot_json: serde_json::json!({"phase": "awaiting_operator"}),
+    });
+    assert_eq!(
+        app.slim_turn_state,
+        SlimTurnState::Lifecycle("turn awaiting operator".into())
+    );
+
+    app.handle_agent_event(AgentEvent::ProviderFailure {
+        provider: "openai-codex".into(),
+        model: "gpt-5.4".into(),
+        reason: "stream-stall".into(),
+        attempts: 3,
+        message: "silent stream exhausted retries".into(),
+        retryable: false,
+        recommended_action: "switch provider".into(),
+    });
+    assert_eq!(
+        app.slim_turn_state,
+        SlimTurnState::Finished("provider failed")
+    );
+    assert!(!app.agent_active);
+    assert!(app.conversation.segments().iter().any(|segment| {
+        segment
+            .plain_text()
+            .contains("silent stream exhausted retries")
+    }));
 }
 
 #[test]
@@ -2419,9 +2567,48 @@ fn text_copy_modal_uses_wide_copy_surface_with_non_copy_footer() {
 }
 
 #[test]
-fn conversation_omits_inline_copy_affordance() {
+fn completed_assistant_renders_single_click_copy_affordance() {
     let mut cv = ConversationView::new();
-    cv.push_user("alpha beta gamma");
+    cv.push_user("operator prompt");
+    cv.append_streaming("alpha beta gamma");
+    cv.finalize_message();
+
+    let t = crate::tui::theme::Alpharius;
+    let area = Rect::new(0, 0, 80, 8);
+    let mut buf = Buffer::empty(area);
+    {
+        let (segments, state) = cv.segments_and_state();
+        let widget = crate::tui::conv_widget::ConversationWidget::new(segments, &t);
+        widget.render(area, &mut buf, state);
+    }
+
+    let rendered = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(rendered.matches(" Copy ").count(), 1, "got {rendered}");
+
+    let assistant_row = (0..area.height)
+        .find(|&row| cv.assistant_copy_button_at(area, area.right() - 1, row) == Some(1))
+        .expect("assistant copy target should map to its visible first row");
+    assert_eq!(
+        cv.assistant_copy_button_at(area, area.right() - 6, assistant_row),
+        Some(1)
+    );
+    assert_eq!(
+        cv.assistant_copy_button_at(area, area.right() - 7, assistant_row),
+        None
+    );
+}
+
+#[test]
+fn streaming_assistant_omits_quick_copy_affordance() {
+    let mut cv = ConversationView::new();
+    cv.append_streaming("still arriving");
 
     let t = crate::tui::theme::Alpharius;
     let area = Rect::new(0, 0, 80, 8);
@@ -2441,6 +2628,10 @@ fn conversation_omits_inline_copy_affordance() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(!rendered.contains(" Copy "), "got {rendered}");
+    assert!((0..area.height).all(|row| {
+        cv.assistant_copy_button_at(area, area.right() - 1, row)
+            .is_none()
+    }));
 }
 
 #[test]
@@ -2666,6 +2857,37 @@ fn recalled_history_can_continue_walking_with_up() {
 
     assert_eq!(app.editor.render_text(), "second");
     assert_eq!(app.history_idx, Some(1));
+}
+
+#[test]
+fn collapsed_image_bottom_alignment_hit_tests_to_image_segment() {
+    let mut cv = ConversationView::new();
+    cv.push_user_with_attachments("inspect", &[std::path::PathBuf::from("/tmp/image.png")]);
+    cv.collapse_preview_images();
+
+    let t = crate::tui::theme::Alpharius;
+    let area = Rect::new(0, 0, 80, 12);
+    let mut buf = Buffer::empty(area);
+    {
+        let (segments, state) = cv.segments_and_state();
+        let widget = crate::tui::conv_widget::ConversationWidget::new(segments, &t);
+        widget.render(area, &mut buf, state);
+    }
+
+    let image_row = area.bottom() - 1;
+    assert_eq!(
+        cv.segment_at(area, image_row),
+        Some(1),
+        "bottom-aligned collapsed image row must hit the image segment"
+    );
+    assert_eq!(cv.toggle_image_attachments_at(1), 1);
+    assert!(matches!(
+        cv.segments()[1].content,
+        crate::tui::segments::SegmentContent::Image {
+            display: crate::tui::segments::ImageDisplayState::Expanded,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -3656,7 +3878,12 @@ fn slash_stats_returns_session_info() {
     let result = app.handle_slash_command("/stats", &tx);
     assert!(matches!(result, SlashResult::Handled));
     match rx.try_recv().expect("queued command") {
-        TuiCommand::ExecuteControl { .. } => {}
+        TuiCommand::ExecuteControl { request, .. } => {
+            assert!(matches!(
+                request,
+                crate::control_runtime::ControlRequest::SessionStatsView
+            ));
+        }
         other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }
@@ -3668,7 +3895,12 @@ fn slash_status_returns_bootstrap_panel() {
     let result = app.handle_slash_command("/status", &tx);
     assert!(matches!(result, SlashResult::Handled));
     match rx.try_recv().expect("queued command") {
-        TuiCommand::ExecuteControl { .. } => {}
+        TuiCommand::ExecuteControl { request, .. } => {
+            assert!(matches!(
+                request,
+                crate::control_runtime::ControlRequest::StatusView
+            ));
+        }
         other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }
@@ -5291,8 +5523,8 @@ fn slash_skills_reload_displays_current_session_reload() {
     let result = app.handle_slash_command("/skills reload", &tx);
     match result {
         SlashResult::Display(message) => {
-            assert!(message.contains("Skills reloaded"), "{message}");
-            assert!(message.contains("subsequent model requests"), "{message}");
+            assert!(message.contains("Reload complete"), "{message}");
+            assert!(message.contains("session stayed open"), "{message}");
         }
         other => panic!("expected reload display, got: {other:?}"),
     }
@@ -5381,10 +5613,17 @@ fn runtime_inventory_status_queues_shared_control() {
 
 #[test]
 fn runtime_refresh_aliases_canonicalize() {
-    for args in ["refresh", "reload", "restart", "hot-restart"] {
+    for args in ["refresh", "reload"] {
         assert_eq!(
             crate::tui::canonical_slash_command("runtime", args),
             Some(crate::tui::CanonicalSlashCommand::RuntimeSubstrateRefresh),
+            "runtime {args}"
+        );
+    }
+    for args in ["restart", "hot-restart"] {
+        assert_eq!(
+            crate::tui::canonical_slash_command("runtime", args),
+            Some(crate::tui::CanonicalSlashCommand::RuntimeProcessRestart),
             "runtime {args}"
         );
     }
@@ -5492,11 +5731,7 @@ fn extension_search_menu_row_primes_editor_for_query() {
 
 #[test]
 fn extension_refresh_aliases_execute_shared_runtime_refresh() {
-    for command in [
-        "/extension refresh",
-        "/extension reload",
-        "/extension restart",
-    ] {
+    for command in ["/extension refresh", "/extension reload"] {
         let mut app = test_app();
         let (tx, mut rx) = test_tx_with_rx();
         assert!(matches!(
@@ -5514,7 +5749,22 @@ fn extension_refresh_aliases_execute_shared_runtime_refresh() {
 }
 
 #[test]
-fn slash_runtime_substrate_refresh_queues_shared_control() {
+fn extension_restart_queues_graceful_process_restart() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    assert!(matches!(
+        app.handle_slash_command("/extension restart", &tx),
+        SlashResult::Handled
+    ));
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(TuiCommand::RestartProcess { .. })
+    ));
+}
+
+#[test]
+fn slash_runtime_restart_queues_graceful_process_restart() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
 
@@ -5522,10 +5772,7 @@ fn slash_runtime_substrate_refresh_queues_shared_control() {
     assert!(matches!(result, SlashResult::Handled));
     assert!(matches!(
         rx.try_recv(),
-        Ok(TuiCommand::ExecuteControl {
-            request: crate::control_runtime::ControlRequest::RuntimeSubstrateRefresh,
-            ..
-        })
+        Ok(TuiCommand::RestartProcess { .. })
     ));
 }
 
@@ -5571,13 +5818,11 @@ Loaded by runtime substrate refresh.
             .any(|event| event.active_ref.contains("runtime-refresh-skill"))
     );
     assert!(
-        message.contains("Active skill directives: 0 ->"),
+        message.contains("Skills active for future requests: 0 →"),
         "{message}"
     );
-    assert!(
-        message.contains("partial live refresh completed"),
-        "{message}"
-    );
+    assert!(message.contains("Your session stayed open"), "{message}");
+    assert!(message.contains("Not restarted"), "{message}");
 }
 
 #[test]
@@ -7361,7 +7606,7 @@ fn editor_top_line_grades_actual_model_not_route_intent() {
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(
-        rendered.contains("openai-codex/gpt-5.6  󰿃 S  default   low   ctx:"),
+        rendered.contains("openai-codex/gpt-5.6-sol  󰿃 S  default   low   ctx:"),
         "{rendered}"
     );
 }
@@ -8192,6 +8437,68 @@ fn slash_profile_opens_profile_menu() {
             .summary
             .as_deref()
             .is_some_and(|summary| summary.contains("runtime drift"))
+    );
+}
+
+#[test]
+fn canonical_profile_use_parses_quoted_names_and_rejects_extra_arguments() {
+    assert_eq!(
+        canonical_slash_command("profile", "use 'review profile' project"),
+        Some(CanonicalSlashCommand::ProfileUse {
+            id: "review profile".into(),
+            scope: Some("project".into()),
+        })
+    );
+    assert_eq!(
+        canonical_slash_command("profile", "use reviewer --scope project"),
+        Some(CanonicalSlashCommand::ProfileUse {
+            id: "reviewer".into(),
+            scope: Some("project".into()),
+        })
+    );
+    assert_eq!(
+        canonical_slash_command("profile", "use reviewer project ignored"),
+        None
+    );
+}
+
+#[test]
+fn profile_menu_lists_discovered_project_profiles() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let _cwd = push_current_dir(tmp.path());
+    let profiles_dir = tmp.path().join(".omegon/profiles");
+    std::fs::create_dir_all(&profiles_dir).expect("profiles dir");
+    std::fs::write(
+        profiles_dir.join("review profile.json"),
+        r#"{"displayName":"Reviewer","thinkingLevel":"high"}"#,
+    )
+    .expect("profile");
+
+    let mut app = test_app();
+    app.footer_data.cwd = tmp.path().display().to_string();
+    app.open_profile_menu();
+    let menu = app.active_menu.as_ref().expect("profile menu");
+    let available = menu.projection.tabs[0]
+        .groups
+        .iter()
+        .find(|group| group.id == "profile.available")
+        .expect("available profiles group");
+    let reviewer = available
+        .rows
+        .iter()
+        .find(|row| row.id == "profile.registry.project.review profile")
+        .expect("project profile row");
+
+    assert_eq!(reviewer.label, "review profile");
+    assert_eq!(reviewer.description, "Reviewer");
+    assert_eq!(reviewer.value.as_deref(), Some("project"));
+    assert!(reviewer.badges.iter().any(|badge| badge.label == "project"));
+    assert_eq!(
+        reviewer
+            .primary_action
+            .as_ref()
+            .and_then(|action| action.command.as_deref()),
+        Some("/profile use 'review profile' project")
     );
 }
 

@@ -1294,7 +1294,11 @@ mod mutation_tests {
         let docs = dir.path().join("docs");
         create_node(&docs, "dup", "Dup", None, None, &[], "").unwrap();
         let error = create_node(&docs, "dup", "Dup2", None, None, &[], "").unwrap_err();
-        assert!(error.to_string().contains("Design node 'dup' already exists"));
+        assert!(
+            error
+                .to_string()
+                .contains("Design node 'dup' already exists")
+        );
     }
 
     #[test]
@@ -1308,16 +1312,7 @@ mod mutation_tests {
         )
         .unwrap();
 
-        let error = create_node(
-            &docs,
-            "collision",
-            "Collision",
-            None,
-            None,
-            &[],
-            "",
-        )
-        .unwrap_err();
+        let error = create_node(&docs, "collision", "Collision", None, None, &[], "").unwrap_err();
         let message = error.to_string();
         assert!(message.contains("exists but is not a valid indexed design node"));
         assert!(message.contains("convert it or repair its frontmatter first"));
@@ -1334,16 +1329,7 @@ mod mutation_tests {
         )
         .unwrap();
 
-        let error = create_node(
-            &docs,
-            "malformed",
-            "Malformed",
-            None,
-            None,
-            &[],
-            "",
-        )
-        .unwrap_err();
+        let error = create_node(&docs, "malformed", "Malformed", None, None, &[], "").unwrap_err();
         assert!(
             error
                 .to_string()

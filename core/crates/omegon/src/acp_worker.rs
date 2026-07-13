@@ -700,28 +700,70 @@ async fn handle_control_request(
     let args = parts.get(1).unwrap_or(&"").trim();
 
     match cmd {
+        "status" => {
+            let settings = shared_settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let mut harness = crate::status::HarnessStatus::assemble();
+            let operating_profile = settings.operating_profile();
+            harness.update_routing(
+                settings.effective_requested_class().label(),
+                settings.thinking.as_str(),
+                &harness.capability_grade.clone(),
+                operating_profile.posture.effective.display_name(),
+                &operating_profile.summary(),
+                operating_profile
+                    .identity
+                    .principal_id
+                    .as_deref()
+                    .unwrap_or("anonymous"),
+                operating_profile
+                    .identity
+                    .issuer
+                    .as_deref()
+                    .unwrap_or("unknown"),
+                operating_profile
+                    .identity
+                    .session_kind
+                    .as_deref()
+                    .unwrap_or("unknown"),
+                &operating_profile.authorization.summary(),
+            );
+            crate::surfaces::diagnostics::HarnessStatusProjection::new(
+                harness,
+                0,
+                workspace_ctx.session_id,
+                workspace_ctx.instance_id,
+                settings.automation_level.as_str(),
+                settings.automation_level.summary(),
+            )
+            .render_markdown()
+        }
         "stats" => {
             let settings = shared_settings
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
-            let est = conversation.estimate_tokens();
-            let usage_pct = if settings.context_window > 0 {
-                (est as f64 / settings.context_window as f64) * 100.0
-            } else {
-                0.0
+            let projection = crate::surfaces::diagnostics::SessionStatsProjection {
+                version: crate::surfaces::diagnostics::DIAGNOSTIC_PROJECTION_VERSION,
+                turns: conversation.turn_count(),
+                tool_calls: None,
+                model: settings.model,
+                thinking: settings.thinking.as_str().to_string(),
+                posture: settings.posture.effective.as_str().to_string(),
+                estimated_context_tokens: conversation.estimate_tokens(),
+                context_window: settings.context_window,
+                max_turns: settings.max_turns,
+                persona: None,
+                tone: None,
+                authenticated_providers: None,
+                provider_count: None,
+                mcp_servers: None,
+                memory_available: None,
+                cleave_available: None,
             };
-            format!(
-                "Model: {}\nThinking: {}\nPosture: {}\nTurns: {}\nContext: ~{} tokens ({:.0}% of {})\nMax turns: {}",
-                settings.model,
-                settings.thinking.as_str(),
-                settings.posture.effective.as_str(),
-                conversation.turn_count(),
-                est,
-                usage_pct,
-                settings.context_window,
-                settings.max_turns,
-            )
+            projection.render_markdown()
         }
 
         "max_turns" => {

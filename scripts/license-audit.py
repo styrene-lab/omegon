@@ -38,8 +38,22 @@ ACKNOWLEDGED = {
 }
 
 # ── Own crates ─────────────────────────────────────────────────────────────
-# First-party crates under BSL-1.1. Not third-party; skip in audit.
-FIRST_PARTY_PREFIX = "omegon"
+# First-party crates under BSL-1.1. Not third-party; skip in audit. Keep this
+# explicit: a broad prefix could accidentally exempt an external package.
+FIRST_PARTY_PACKAGES = {
+    "omegon",
+    "omegon-codescan",
+    "omegon-git",
+    "omegon-memory",
+    "omegon-opsx",
+    "omegon-rbac",
+    "omegon-secrets",
+    "omegon-skills",
+    "omegon-traits",
+    "omegon-web",
+    "styrene-work-model",
+    "styrene-work-runtime",
+}
 
 # ── Licenses we flag ──────────────────────────────────────────────────────
 # Permissive licenses are fine. These need acknowledgement.
@@ -97,9 +111,8 @@ def main():
 
     # ── First-party filter ────────────────────────────────────────────────
     third_party = [
-        p for p in packages
-        if not p["name"].startswith(FIRST_PARTY_PREFIX)
-        and p["name"] != "opsx-core"
+        package for package in packages
+        if package["name"] not in FIRST_PARTY_PACKAGES
     ]
 
     # ── Find flagged packages ─────────────────────────────────────────────

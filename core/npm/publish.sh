@@ -135,7 +135,7 @@ echo ""
 if [ -z "$DRY_RUN" ]; then
   echo "Deprecating old omegon TS versions (<=0.11.x)..."
   npm deprecate 'omegon@<=0.11.0' \
-    'This package now installs the Rust Omegon agent. For the TS TUI: npm i -g omegon-pi' \
+    'This package now installs the native Rust Omegon agent. See https://omegon.styrene.dev for current installation options.' \
     2>/dev/null || true
 fi
 

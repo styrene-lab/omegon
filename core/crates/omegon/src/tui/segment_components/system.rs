@@ -33,6 +33,7 @@ pub struct SystemChrome {
 pub enum SystemLineKind {
     Info,
     Brand,
+    Success,
     Warning,
 }
 
@@ -45,7 +46,9 @@ pub fn plan(props: &SystemRenderProps<'_>) -> SystemRenderPlan {
     let first = props.text.lines().next().unwrap_or_default();
     let first_line = if first.starts_with('Ω') {
         SystemLineKind::Brand
-    } else if first.starts_with('⚠') || first.starts_with('⟳') || first.starts_with('✓') {
+    } else if first.starts_with('✓') {
+        SystemLineKind::Success
+    } else if first.starts_with('⚠') || first.starts_with('⟳') || first.starts_with('✗') {
         SystemLineKind::Warning
     } else {
         SystemLineKind::Info
@@ -102,6 +105,7 @@ fn system_line_style(
                     .bg(bg)
                     .add_modifier(Modifier::BOLD);
             }
+            SystemLineKind::Success => return Style::default().fg(theme.muted()).bg(bg),
             SystemLineKind::Warning => return Style::default().fg(theme.warning()).bg(bg),
             SystemLineKind::Info => {}
         }
@@ -168,7 +172,7 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::theme::Alpharius;
+    use crate::tui::theme::{Alpharius, Theme};
 
     #[test]
     fn system_props_preserve_render_inputs() {
@@ -235,7 +239,7 @@ mod tests {
         });
         assert_eq!(brand.first_line, SystemLineKind::Brand);
 
-        for text in ["⚠ warning", "⟳ retry", "✓ complete"] {
+        for text in ["⚠ warning", "⟳ retry", "✗ failed"] {
             let warning = super::plan(&SystemRenderProps {
                 surface: crate::surfaces::conversation::SegmentSurfacePolicy {
                     surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
@@ -247,6 +251,46 @@ mod tests {
             });
             assert_eq!(warning.first_line, SystemLineKind::Warning, "{text}");
         }
+
+        let success = super::plan(&SystemRenderProps {
+            surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+            },
+            text: "✓ complete",
+            mode: SegmentRenderMode::Full,
+        });
+        assert_eq!(success.first_line, SystemLineKind::Success);
+    }
+
+    #[test]
+    fn successful_system_outcome_renders_neutral_not_warning() {
+        let area = Rect::new(0, 0, 48, 1);
+        let mut buf = Buffer::empty(area);
+        let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Slim);
+        render(
+            SystemRenderProps {
+                surface: crate::surfaces::conversation::SegmentSurfacePolicy {
+                    surface: crate::surfaces::conversation::SegmentSurfaceTreatment::Transcript,
+                    copy: crate::surfaces::conversation::SegmentCopyPolicy::Body,
+                    selection: crate::surfaces::conversation::SegmentSelectionTreatment::Subtle,
+                },
+                text: "✓ read · file contents · 1 operation",
+                mode: SegmentRenderMode::Slim,
+            },
+            area,
+            &mut buf,
+            &ctx,
+        );
+
+        let visible = (area.left()..area.right())
+            .filter_map(|x| buf.cell((x, area.y)))
+            .filter(|cell| cell.symbol() != " ")
+            .collect::<Vec<_>>();
+        assert!(!visible.is_empty());
+        assert!(visible.iter().all(|cell| cell.fg == Alpharius.muted()));
+        assert!(visible.iter().all(|cell| cell.fg != Alpharius.warning()));
     }
 
     #[test]

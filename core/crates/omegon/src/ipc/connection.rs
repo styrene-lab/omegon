@@ -705,9 +705,29 @@ impl IpcConnection {
                             Some(crate::control_runtime::ControlRequest::ProfileExport)
                         }
                         "profile_capture" => {
-                            Some(crate::control_runtime::ControlRequest::ProfileCapture {
-                                target: crate::settings::ProfileSaveTarget::ActiveSource,
-                            })
+                            let target = match payload.get("target").and_then(|v| v.as_str()) {
+                                Some("project") => crate::settings::ProfileSaveTarget::Project,
+                                Some("user") | Some("global") => {
+                                    crate::settings::ProfileSaveTarget::User
+                                }
+                                Some("named") => {
+                                    let name = payload
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unnamed")
+                                        .to_string();
+                                    let scope = match payload.get("scope").and_then(|v| v.as_str())
+                                    {
+                                        Some("project") => {
+                                            crate::settings::ProfileRegistryScope::Project
+                                        }
+                                        _ => crate::settings::ProfileRegistryScope::User,
+                                    };
+                                    crate::settings::ProfileSaveTarget::Named { name, scope }
+                                }
+                                _ => crate::settings::ProfileSaveTarget::ActiveSource,
+                            };
+                            Some(crate::control_runtime::ControlRequest::ProfileCapture { target })
                         }
                         "profile_apply" => {
                             Some(crate::control_runtime::ControlRequest::ProfileApply)
@@ -1067,6 +1087,11 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                     .unwrap_or_default()
             ),
         }),
+        AgentEvent::RuntimeLifecycleUpdated { snapshot } => {
+            Some(IpcEventPayload::RuntimeLifecycleUpdated {
+                snapshot: snapshot.clone(),
+            })
+        }
         AgentEvent::SystemNotification { message } => Some(IpcEventPayload::SystemNotification {
             message: message.clone(),
         }),
@@ -1192,6 +1217,7 @@ fn event_name(ev: &IpcEventPayload) -> &'static str {
         IpcEventPayload::DecompositionStarted { .. } => "decomposition.started",
         IpcEventPayload::DecompositionChildCompleted { .. } => "decomposition.child_completed",
         IpcEventPayload::DecompositionCompleted { .. } => "decomposition.completed",
+        IpcEventPayload::RuntimeLifecycleUpdated { .. } => "runtime.lifecycle.updated",
         IpcEventPayload::FamilyVitalSignsUpdated { .. } => "family.vital_signs",
         IpcEventPayload::PlanUpdated { .. } => "plan.updated",
         IpcEventPayload::StreamIdle { .. } => "stream.idle",

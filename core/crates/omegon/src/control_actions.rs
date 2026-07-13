@@ -53,6 +53,9 @@ pub enum CanonicalAction {
     SessionList,
     TurnCancel,
     RuntimeShutdown,
+    RuntimeReload,
+    RuntimeRestart,
+    UpdateInstall,
     PromptSubmit,
     AuthStatus,
     AuthLogin,
@@ -335,7 +338,9 @@ pub fn classify_slash_command(name: &str, args: &str) -> ClassifiedAction {
     let classified = match name {
         "skills" | "skill" => {
             let trimmed = args.trim();
-            if trimmed.is_empty() || trimmed == "list" {
+            if trimmed == "reload" {
+                (CanonicalAction::RuntimeReload, ControlRole::Admin, true)
+            } else if trimmed.is_empty() || trimmed == "list" {
                 (CanonicalAction::SkillsView, ControlRole::Read, true)
             } else if trimmed.starts_with("get ") {
                 (CanonicalAction::SkillsGet, ControlRole::Read, true)
@@ -408,6 +413,24 @@ pub fn classify_slash_command(name: &str, args: &str) -> ClassifiedAction {
             }
             _ => (CanonicalAction::Unknown, ControlRole::Admin, false),
         },
+        "extension" | "ext" if matches!(args.trim(), "refresh" | "reload" | "hup" | "kick") => {
+            (CanonicalAction::RuntimeReload, ControlRole::Admin, true)
+        }
+        "extension" | "ext" if matches!(args.trim(), "restart" | "hot-restart") => {
+            (CanonicalAction::RuntimeRestart, ControlRole::Admin, true)
+        }
+        "runtime" => match args.trim() {
+            "refresh" | "reload" | "hup" | "kick" => {
+                (CanonicalAction::RuntimeReload, ControlRole::Admin, true)
+            }
+            "restart" | "hot-restart" => {
+                (CanonicalAction::RuntimeRestart, ControlRole::Admin, true)
+            }
+            _ => (CanonicalAction::StatusView, ControlRole::Read, true),
+        },
+        "update" if args.trim() == "install" => {
+            (CanonicalAction::UpdateInstall, ControlRole::Admin, true)
+        }
         "new" => (CanonicalAction::SessionNew, ControlRole::Edit, true),
         "sessions" => (CanonicalAction::SessionList, ControlRole::Read, false),
         "auth" => match canonical_slash_command("auth", args) {
@@ -482,6 +505,22 @@ pub fn classify_remote_slash_command(name: &str, args: &str) -> ClassifiedAction
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_runtime_lifecycle_actions_require_admin_and_are_explicitly_safe() {
+        for (name, args, action) in [
+            ("runtime", "reload", CanonicalAction::RuntimeReload),
+            ("runtime", "restart", CanonicalAction::RuntimeRestart),
+            ("skills", "reload", CanonicalAction::RuntimeReload),
+            ("extension", "restart", CanonicalAction::RuntimeRestart),
+            ("update", "install", CanonicalAction::UpdateInstall),
+        ] {
+            let classified = classify_remote_slash_command(name, args);
+            assert_eq!(classified.action, action);
+            assert_eq!(classified.role, ControlRole::Admin);
+            assert!(classified.remote_safe);
+        }
+    }
 
     #[test]
     fn classifies_context_view_as_read() {

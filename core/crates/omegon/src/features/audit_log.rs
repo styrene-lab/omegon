@@ -50,6 +50,7 @@ fn agent_event_kind(event: &omegon_traits::AgentEvent) -> &'static str {
         omegon_traits::AgentEvent::FamilyVitalSignsUpdated { .. } => "family_vital_signs_updated",
         omegon_traits::AgentEvent::RouteChanged { .. } => "route_changed",
         omegon_traits::AgentEvent::SkillActivation { .. } => "skill_activation",
+        omegon_traits::AgentEvent::RuntimeLifecycleUpdated { .. } => "runtime_lifecycle_updated",
         omegon_traits::AgentEvent::SystemNotification { .. } => "system_notification",
         omegon_traits::AgentEvent::OperatorCopyBlock { .. } => "operator_copy_block",
         omegon_traits::AgentEvent::StreamIdle { .. } => "stream_idle",

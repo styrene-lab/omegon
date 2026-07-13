@@ -117,11 +117,17 @@ impl<'a> SlimSegmentHeader<'a> {
 pub(crate) fn state_color_for_segment_state(state: SegmentState, t: &dyn Theme) -> Color {
     match state {
         SegmentState::Pending | SegmentState::Informational => t.dim(),
-        SegmentState::Running => t.accent(),
-        SegmentState::Completed => t.muted(),
+        SegmentState::Running => t.accent_muted(),
+        SegmentState::Completed | SegmentState::Cancelled => t.muted(),
         SegmentState::Failed => t.warning(),
-        SegmentState::Cancelled => t.muted(),
     }
+}
+
+fn completed_slim_tool_label_color(t: &dyn Theme) -> Color {
+    // Completed tool rows are transcript evidence, not attention states. Resolve
+    // their color at the final render boundary so neither category chrome nor a
+    // stale status projection can reintroduce warning orange.
+    t.muted()
 }
 
 fn slim_tool_header_cells(
@@ -886,7 +892,11 @@ fn render_tool_card(
             t,
             bg,
             header.category_icon,
-            state_color_for_segment_state(header.state, t),
+            if header.state == SegmentState::Completed {
+                completed_slim_tool_label_color(t)
+            } else {
+                state_color_for_segment_state(header.state, t)
+            },
             &header.display_name,
             &detail_rows,
             pinned,
@@ -1161,10 +1171,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn completed_tool_segment_is_neutral_at_the_final_render_boundary() {
+        let theme = crate::tui::theme::Alpharius;
+        let segment = segments::Segment {
+            meta: SegmentMeta::default(),
+            content: segments::SegmentContent::ToolCard {
+                id: "tool-1".into(),
+                name: "bash".into(),
+                args_summary: None,
+                detail_args: Some("git status".into()),
+                result_summary: None,
+                detail_result: Some("command completed".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+                live_partial: None,
+                started_at: None,
+            },
+        };
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buf = Buffer::empty(area);
+        segment.render(
+            area,
+            &mut buf,
+            &theme,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+
+        let label_width =
+            compact_row::prefix_width("⌘", "bash", false).saturating_sub(" · ".len() as u16);
+        let label_cells = (area.left()..area.left() + label_width)
+            .filter_map(|x| buf.cell((x, area.y)))
+            .collect::<Vec<_>>();
+        assert!(!label_cells.is_empty());
+        assert!(
+            label_cells.iter().all(|cell| cell.fg == theme.muted()),
+            "completed tool label must be neutral in the final segment buffer"
+        );
+        assert!(
+            label_cells.iter().all(|cell| cell.fg != theme.warning()),
+            "completed tool label must not consume attention orange"
+        );
+    }
+
+    #[test]
     fn rendered_slim_tool_labels_preserve_state_semantics() {
         let theme = crate::tui::theme::Alpharius;
         let cases = [
-            (SegmentState::Running, theme.accent()),
+            (SegmentState::Running, theme.accent_muted()),
             (SegmentState::Completed, theme.muted()),
             (SegmentState::Failed, theme.warning()),
         ];
@@ -1184,8 +1239,8 @@ mod tests {
                 false,
             );
 
-            let label_end = compact_row::prefix_width("⌘", "bash", false)
-                .saturating_sub(" · ".len() as u16);
+            let label_end =
+                compact_row::prefix_width("⌘", "bash", false).saturating_sub(" · ".len() as u16);
             let label_cells = (area.left()..area.left() + label_end)
                 .filter_map(|x| buf.cell((x, area.y)))
                 .collect::<Vec<_>>();
@@ -1208,7 +1263,7 @@ mod tests {
         let theme = crate::tui::theme::Alpharius;
         assert_eq!(
             state_color_for_segment_state(SegmentState::Running, &theme),
-            theme.accent()
+            theme.accent_muted()
         );
         assert_eq!(
             state_color_for_segment_state(SegmentState::Completed, &theme),

@@ -128,7 +128,7 @@
     "desc": "Install latest nightly"
   },
   "install.install_version": {
-    "cmd": "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --version=v0.27.1",
+    "cmd": "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --version=v0.28.0",
     "desc": "Install a specific version"
   },
   "install.install_ci": {
@@ -216,7 +216,7 @@
     "desc": "Show memory overview"
   },
   "slash.compact": {
-    "cmd": "/compact",
+    "cmd": "/context compact",
     "desc": "Compact conversation context"
   },
   "slash.note": {
@@ -238,34 +238,6 @@
   "slash.auspex_open": {
     "cmd": "/auspex open",
     "desc": "Launch primary browser surface"
-  },
-  "slash.opsx_propose": {
-    "cmd": "/opsx:propose",
-    "desc": "Propose a new OpenSpec design"
-  },
-  "slash.opsx_spec": {
-    "cmd": "/opsx:spec",
-    "desc": "Write specification scenarios"
-  },
-  "slash.opsx_ff": {
-    "cmd": "/opsx:ff",
-    "desc": "Fast-forward implementation"
-  },
-  "slash.opsx_status": {
-    "cmd": "/opsx:status",
-    "desc": "Check OpenSpec status"
-  },
-  "slash.opsx_verify": {
-    "cmd": "/opsx:verify",
-    "desc": "Verify specs are satisfied"
-  },
-  "slash.opsx_archive": {
-    "cmd": "/opsx:archive",
-    "desc": "Archive completed change"
-  },
-  "slash.assess_spec": {
-    "cmd": "/assess spec",
-    "desc": "Verify specs are satisfied (alias)"
   },
   "slash.vault_status": {
     "cmd": "/vault status",
@@ -300,7 +272,7 @@
     "desc": "Check auth status in-TUI"
   },
   "slash.login_slash": {
-    "cmd": "/login anthropic",
+    "cmd": "/auth login anthropic",
     "desc": "Log in to provider in-TUI"
   },
   "slash.secrets_set": {
@@ -320,7 +292,7 @@
     "desc": "Check that a secret resolves without printing it"
   },
   "verify.cosign_verify": {
-    "cmd": "cosign verify-blob omegon-0.27.1-aarch64-apple-darwin.tar.gz \\\n  --signature omegon-0.27.1-aarch64-apple-darwin.tar.gz.sig \\\n  --certificate omegon-0.27.1-aarch64-apple-darwin.tar.gz.pem \\\n  --certificate-identity-regexp '.*' \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com",
+    "cmd": "cosign verify-blob omegon-0.28.0-aarch64-apple-darwin.tar.gz \\\n  --signature omegon-0.28.0-aarch64-apple-darwin.tar.gz.sig \\\n  --certificate omegon-0.28.0-aarch64-apple-darwin.tar.gz.pem \\\n  --certificate-identity-regexp '.*' \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com",
     "desc": "Verify cosign signature (keyless) — replace version with actual"
   },
   "verify.gh_attestation": {

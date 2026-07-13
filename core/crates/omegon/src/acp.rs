@@ -3986,6 +3986,32 @@ impl OmegonAcpAgent {
         }
     }
 
+    fn request_worker_control(&self, command: &str) -> String {
+        let worker_tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
+        let Some(worker_tx) = worker_tx else {
+            return "ACP worker is not initialized".into();
+        };
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        let runtime = tokio::runtime::Handle::current();
+        if runtime
+            .block_on(worker_tx.send(WorkerRequest::ControlRequest {
+                command: command.to_string(),
+                response_tx,
+            }))
+            .is_err()
+        {
+            return "ACP worker is not accepting requests".into();
+        }
+        match runtime.block_on(tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            response_rx,
+        )) {
+            Ok(Ok(response)) => response.text,
+            Ok(Err(_)) => "ACP worker dropped control response".into(),
+            Err(_) => "ACP control request timed out".into(),
+        }
+    }
+
     fn handle_slash_command(&self, input: &str) -> String {
         let trimmed = input.trim();
         let (cmd, args) = trimmed
@@ -4033,7 +4059,7 @@ impl OmegonAcpAgent {
             "/posture" => "Use the posture dropdown or /posture <fabricator|architect|explorator|devastator>".into(),
             "/compact" => "Context compaction happens automatically. The model manages its own context window.".into(),
             "/clear" => "Start a new thread via the + button to clear the conversation.".into(),
-            "/status" => format!("omegon {} | ACP mode | Worker thread active", env!("CARGO_PKG_VERSION")),
+            "/status" => self.request_worker_control("status"),
             "/version" => format!("omegon {}", env!("CARGO_PKG_VERSION")),
             "/secrets" => {
                 // Read recipes file for a diagnostic view — no values exposed

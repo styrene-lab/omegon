@@ -31,6 +31,8 @@ pub struct SessionRow {
     pub principal_id: String,
     pub authorization: String,
     pub provider_connected: bool,
+    /// Web-search provider gauge projected from first-party secret readiness.
+    pub web_search_providers: Vec<(String, bool)>,
     pub session_input_tokens: u64,
     pub session_output_tokens: u64,
     pub cwd_basename: String,
@@ -60,6 +62,7 @@ impl SessionRow {
         self.principal_id = projection.engine.principal_id;
         self.authorization = projection.engine.authorization;
         self.provider_connected = projection.engine.provider_connected;
+        self.web_search_providers = projection.engine.web_search_providers;
         self.session_input_tokens = projection.session.session_input_tokens;
         self.session_output_tokens = projection.session.session_output_tokens;
         self.cwd_basename = projection.workspace.cwd_basename;
@@ -105,16 +108,13 @@ impl SessionRow {
         }
         let available = area.width as usize;
         let mut fields = Vec::new();
+
         if let Some(attention) = self
-            .operator_hint
+            .turn_state
             .as_ref()
-            .or(self.turn_state.as_ref())
             .filter(|value| !value.trim().is_empty())
         {
-            fields.push((0u8, attention.clone(), t.warning()));
-        }
-        if !self.model_short.is_empty() {
-            fields.push((1, self.model_short.clone(), t.muted()));
+            fields.push((0u8, attention.clone(), t.muted()));
         }
         if !self.cwd_basename.is_empty() {
             let workspace = self
@@ -122,15 +122,21 @@ impl SessionRow {
                 .as_ref()
                 .map(|branch| format!("{}:{branch}", self.cwd_basename))
                 .unwrap_or_else(|| self.cwd_basename.clone());
-            fields.push((2, workspace, t.dim()));
+            fields.push((1, workspace, t.dim()));
         }
-        fields.push((3, format!("ctx {:.0}%", self.context_percent), t.dim()));
 
+        let right_status = format!(
+            "{}  {} ",
+            web_readiness_glyph(self.web_search_providers.iter().any(|(_, ready)| *ready)),
+            omegon_version_label(),
+        );
+        let right_width = right_status.chars().count();
+        let left_budget = available.saturating_sub(right_width);
         let mut selected: Vec<(u8, String, ratatui::style::Color)> = Vec::new();
         let mut used = 1usize;
         for field in fields {
             let cost = field.1.chars().count() + if selected.is_empty() { 0 } else { 3 };
-            if used + cost <= available {
+            if used + cost <= left_budget {
                 used += cost;
                 selected.push(field);
             }
@@ -140,6 +146,11 @@ impl SessionRow {
             spans.push(Span::styled(" · ", Style::default().fg(t.dim())));
             spans.push(Span::styled(text, Style::default().fg(color)));
         }
+        let left_width = spans.iter().map(|span| span.width()).sum::<usize>();
+        spans.push(Span::raw(
+            " ".repeat(available.saturating_sub(left_width + right_width)),
+        ));
+        spans.push(Span::styled(right_status, Style::default().fg(t.dim())));
         frame.render_widget(Clear, area);
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
@@ -166,22 +177,36 @@ impl SessionRow {
         let sep = Span::styled(" · ", Style::default().fg(t.dim()));
         let sect = Span::styled(" │ ", Style::default().fg(t.dim()));
 
-        // ── Pinned session fields (always shown) ─────────────────
+        // The compact footer only carries state that is not already owned by
+        // the engine block, context instrument, or Workbench.
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut used = 0usize;
 
-        let turn_str = format!("turn {}", self.turn);
-        let in_str = format!("↑{}", fmt_tokens(self.session_input_tokens));
-        let out_str = format!("↓{}", fmt_tokens(self.session_output_tokens));
-        let tok_str = format!("io {in_str} {out_str}");
-
-        let mut spans: Vec<Span<'static>> = vec![
-            Span::styled(" session", Style::default().fg(t.accent_muted())),
-            sep.clone(),
-            Span::styled(turn_str, Style::default().fg(t.muted())),
-            sep.clone(),
-            Span::styled(tok_str, Style::default().fg(t.dim())),
-        ];
-
-        let mut used: usize = spans.iter().map(|s| s.width()).sum();
+        // Web-search liveness is persistent chrome, not a transient nag.
+        // Missing readiness data and an all-empty keyed set are both degraded:
+        // DDG scraping is a fallback floor, not an acceptable configured state.
+        let configured = self
+            .web_search_providers
+            .iter()
+            .filter(|(_, configured)| *configured)
+            .count();
+        let (label, color) = if configured == 0 {
+            ("WEB! ddg-only".to_string(), t.warning())
+        } else {
+            let ticks: String = self
+                .web_search_providers
+                .iter()
+                .map(|(_, configured)| if *configured { '●' } else { '○' })
+                .collect();
+            (format!("WEB {ticks}"), t.success())
+        };
+        let field = Span::styled(label, Style::default().fg(color));
+        let cost = sect.width() + field.width();
+        if used + cost < w {
+            spans.push(sect.clone());
+            spans.push(field);
+            used += cost;
+        }
 
         // Detached conversation viewport. This is deliberately near the left
         // pinned fields: when Slim auto-pins a long answer at its start, the
@@ -282,13 +307,7 @@ impl SessionRow {
 
         // Right-align version string. Official tag builds can stay compact;
         // branch/nightly/dev builds include the baked git hash for specificity.
-        let version = if env!("OMEGON_GIT_DESCRIBE").is_empty()
-            && !env!("OMEGON_GIT_SHA").contains("-dirty")
-        {
-            concat!("v", env!("CARGO_PKG_VERSION")).to_string()
-        } else {
-            format!("v{} {}", env!("CARGO_PKG_VERSION"), env!("OMEGON_GIT_SHA"))
-        };
+        let version = omegon_version_label();
         let version_width = version.len() + 1; // +1 for trailing space
         if used + version_width < w {
             let pad = w - used - version_width;
@@ -428,6 +447,24 @@ fn turn_state_field(state: &str) -> String {
     }
 }
 
+fn web_readiness_glyph(configured: bool) -> &'static str {
+    use crate::tui::glyphs::ToolCategoryGlyphRole;
+
+    if configured {
+        crate::tui::glyphs::glyphs().tool_category(ToolCategoryGlyphRole::Network)
+    } else {
+        crate::tui::glyphs::glyphs().tool_state(crate::tui::glyphs::ToolStateGlyphRole::Failed)
+    }
+}
+
+fn omegon_version_label() -> String {
+    if env!("OMEGON_GIT_DESCRIBE").is_empty() && !env!("OMEGON_GIT_SHA").contains("-dirty") {
+        concat!("v", env!("CARGO_PKG_VERSION")).to_string()
+    } else {
+        format!("v{} {}", env!("CARGO_PKG_VERSION"), env!("OMEGON_GIT_SHA"))
+    }
+}
+
 fn file_activity_label(read: usize, modified: usize, width: usize) -> String {
     let total = read + modified;
     if width >= 115 && read > 0 && modified > 0 {
@@ -520,12 +557,20 @@ mod tests {
             phase: Some(OodaPhase::Act),
             ..Default::default()
         };
-        sl.operator_hint = Some("plan active".into());
+        sl.operator_hint = Some("plan active · active plan · tracked".into());
+        sl.turn_state = Some("turn done".into());
 
         let backend = ratatui::backend::TestBackend::new(160, 1);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| sl.render(frame.area(), frame, &super::super::theme::Alpharius))
+            .draw(|frame| {
+                sl.render_for_level(
+                    crate::surfaces::layout::UiPresentationLevel::Om,
+                    frame.area(),
+                    frame,
+                    &super::super::theme::Alpharius,
+                )
+            })
             .unwrap();
         let buf = terminal.backend().buffer();
         let mut text = String::new();
@@ -533,11 +578,10 @@ mod tests {
             text.push_str(buf[(x, 0)].symbol());
         }
 
-        assert!(text.contains("session"), "{text}");
-        assert!(text.contains("turn 8"), "{text}");
-        assert!(text.contains("io ↑32k ↓2k"), "{text}");
-        assert!(text.contains("files: 16 touched"), "{text}");
-        assert!(text.contains("oodA Act"), "{text}");
+        assert!(text.contains("om"), "{text}");
+        assert!(text.contains("turn done"), "{text}");
+        assert!(!text.contains("plan active"), "{text}");
+        assert!(!text.contains("active plan"), "{text}");
         assert!(!text.contains("dir omegon"), "{text}");
         assert!(!text.contains("git fix/footer"), "{text}");
         assert!(!text.contains("50%"), "{text}");
@@ -565,6 +609,101 @@ mod tests {
             "files: 16 touched · 4 changed"
         );
         assert_eq!(file_activity_label(12, 0, 90), "files: 12 read");
+    }
+
+    #[test]
+    fn om_row_keeps_web_search_readiness_visible() {
+        let sl = SessionRow {
+            provider_connected: true,
+            web_search_providers: vec![("brave".into(), true), ("tavily".into(), false)],
+            ..Default::default()
+        };
+
+        let backend = ratatui::backend::TestBackend::new(80, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                sl.render_for_level(
+                    crate::surfaces::layout::UiPresentationLevel::Om,
+                    frame.area(),
+                    frame,
+                    &super::super::theme::Alpharius,
+                )
+            })
+            .unwrap();
+        let text = (0..80)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(text.contains(web_readiness_glyph(true)), "{text}");
+        assert!(!text.contains("WEB"), "{text}");
+        assert!(text.trim_end().ends_with(&omegon_version_label()), "{text}");
+    }
+
+    #[test]
+    fn unavailable_web_search_readiness_is_rendered_as_degraded() {
+        let sl = SessionRow {
+            provider_connected: true,
+            ..Default::default()
+        };
+
+        let backend = ratatui::backend::TestBackend::new(160, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| sl.render(frame.area(), frame, &super::super::theme::Alpharius))
+            .unwrap();
+        let text = (0..160)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(text.contains("WEB! ddg-only"), "{text}");
+    }
+
+    #[test]
+    fn keyless_web_search_is_rendered_as_degraded() {
+        let sl = SessionRow {
+            provider_connected: true,
+            web_search_providers: vec![
+                ("tavily".into(), false),
+                ("serper".into(), false),
+                ("brave".into(), false),
+                ("firecrawl".into(), false),
+            ],
+            ..Default::default()
+        };
+
+        let backend = ratatui::backend::TestBackend::new(160, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| sl.render(frame.area(), frame, &super::super::theme::Alpharius))
+            .unwrap();
+        let text = (0..160)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(text.contains("WEB! ddg-only"), "{text}");
+    }
+
+    #[test]
+    fn keyed_web_search_uses_provider_ticks() {
+        let sl = SessionRow {
+            provider_connected: true,
+            web_search_providers: vec![
+                ("tavily".into(), false),
+                ("serper".into(), false),
+                ("brave".into(), true),
+                ("firecrawl".into(), false),
+            ],
+            ..Default::default()
+        };
+
+        let backend = ratatui::backend::TestBackend::new(160, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| sl.render(frame.area(), frame, &super::super::theme::Alpharius))
+            .unwrap();
+        let text = (0..160)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(text.contains("WEB ○○●○"), "{text}");
+        assert!(!text.contains("ddg-only"), "{text}");
     }
 
     #[test]
