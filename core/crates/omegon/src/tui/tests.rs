@@ -907,6 +907,18 @@ async fn ui_action_permission_response_unblocks_pending_permission() {
     assert!(app.command_prompt.is_none());
 }
 
+#[test]
+fn preparing_interrupt_reattaches_conversation_viewport_to_tail() {
+    let mut app = test_app();
+    app.conversation.conv_state.scroll_offset = 24;
+
+    app.prepare_interrupt_ui();
+
+    assert_eq!(app.conversation.conv_state.scroll_offset, 0);
+    assert!(app.interrupt_pending);
+    assert_eq!(app.slim_turn_state, SlimTurnState::Interrupting);
+}
+
 #[tokio::test]
 async fn ui_action_always_allow_reports_canonical_grant_identity() {
     let mut app = test_app();

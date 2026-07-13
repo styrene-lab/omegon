@@ -7752,6 +7752,7 @@ warning: {warning}"
 
     fn prepare_interrupt_ui(&mut self) {
         self.editor.clear_line();
+        self.conversation.conv_state.force_scroll_to_bottom();
         self.interrupt_pending = true;
         self.slim_turn_state = SlimTurnState::Interrupting;
         self.suppress_editor_input_for(Duration::from_millis(1500));
