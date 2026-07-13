@@ -9,6 +9,9 @@ members = [
     "core/crates/omegon-opsx",
     "core/crates/omegon-rbac",
     "core/crates/omegon-skills",
+    "core/crates/styrene-work",
+    "core/crates/styrene-work-local",
+    "core/crates/styrene-work-relations",
     "core/crates/omegon-web",
 ]
 
@@ -32,6 +35,7 @@ strip = false
 [workspace.package]
 version = "0.28.0"
 edition = "2024"
+rust-version = "1.93"
 license = "BUSL-1.1"
 repository = "https://github.com/styrene-lab/omegon"
 
@@ -50,6 +54,10 @@ clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 indexmap = { version = "2", features = ["serde"] }
+tempfile = "3"
+chrono = { version = "0.4", features = ["serde"] }
+ulid = { version = "1", features = ["serde"] }
+markplane-core = { git = "https://github.com/zerowand01/markplane", rev = "7ccdbd94a5eb08d667af50bb2cfd88eab7eb3d18" }
 
 # Flynt vault types — used by sentry::flynt_board to surface flynt
 # kanban tasks to the autonomous executor. Lightweight types-only crate

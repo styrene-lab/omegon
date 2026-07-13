@@ -18,6 +18,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added a preliminary unified work-agent design describing how Omegon will compose Markplane repository work, native OpenSpec lifecycle state, existing agent execution tasks, typed relation sidecars, and a future shared task server behind one semantic runtime, command, Workbench, ACP, and tool surface.
+
+- Added the initial experimental Styrene work-contract crates: normalized work items and commands, a pinned `markplane-core` repository adapter, and validated cross-source relation overlays. The workspace now declares Rust 1.93 as its minimum supported toolchain, matching the imported Rust 2024 integration baseline.
+
 - Added a persistent web-search readiness gauge to slim and full TUI chrome. Keyless DuckDuckGo-only search is shown as an explicit degraded `WEB! ddg-only` state; configured Brave, Tavily, Serper, and Firecrawl providers render as compact readiness ticks. Selecting a search-provider secret opens its verified provider key console in the operator's browser and immediately accepts the key through Omegon's existing masked secret input, without exposing the key to model context.
 
 - Unified runtime lifecycle verbs: `/runtime refresh`, `/runtime reload`, `/runtime hup`, and `/runtime kick` rebuild reloadable in-process state through one shared path; `/runtime restart` and `/runtime hot-restart` re-exec the current Omegon binary so newly linked code takes effect. `/skills reload` and extension reload aliases reuse the shared refresh implementation instead of maintaining separate reload logic.

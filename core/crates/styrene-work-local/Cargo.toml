@@ -1,0 +1,16 @@
+[package]
+name = "styrene-work-local"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+chrono.workspace = true
+markplane-core.workspace = true
+serde_json.workspace = true
+styrene-work = { path = "../styrene-work" }
+
+[dev-dependencies]
+tempfile.workspace = true
