@@ -30,6 +30,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Neutralized routine plan footer and Workbench styling: normal plan state no longer consumes warning orange, active steps render bright and bold, completed steps bold and dim, and pending steps italic and dim.
 - Reattached stale detached conversation offsets when the operator submits the next turn, preventing an old `more below` position from carrying into a new exchange; streaming deltas now preserve the detached tail-height cache instead of invalidating it for every token, reducing severe scroll stutter during live responses.
 - Restored an explicit single-click `Copy` affordance on completed assistant responses while retaining double-click copy as a secondary shortcut; operator, tool, system, and streaming segments remain free of persistent copy chrome.
 - Kept the persistent web-search readiness gauge visible when fresh-session provider discovery is unavailable, conservatively rendering `WEB! ddg-only` instead of silently omitting the gauge.

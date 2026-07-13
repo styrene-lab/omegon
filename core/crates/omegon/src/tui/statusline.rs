@@ -114,7 +114,7 @@ impl SessionRow {
             .or(self.turn_state.as_ref())
             .filter(|value| !value.trim().is_empty())
         {
-            fields.push((0u8, attention.clone(), t.warning()));
+            fields.push((0u8, attention.clone(), t.muted()));
         }
         if !self.model_short.is_empty() {
             fields.push((1, self.model_short.clone(), t.muted()));

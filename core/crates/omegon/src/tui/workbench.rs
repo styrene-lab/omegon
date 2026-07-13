@@ -417,19 +417,33 @@ impl PlanDisplayStatus {
     }
 
     fn row_style(self, t: &dyn theme::Theme, bg: ratatui::style::Color) -> Style {
-        let color = match self {
-            Self::Active => t.fg(),
-            Self::Todo => t.muted(),
-            Self::Done | Self::Skipped => t.dim(),
-        };
-        Style::default().fg(color).bg(bg)
+        match self {
+            Self::Active => Style::default()
+                .fg(t.fg())
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+            Self::Done => Style::default()
+                .fg(t.dim())
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+            Self::Todo => Style::default()
+                .fg(t.dim())
+                .bg(bg)
+                .add_modifier(Modifier::ITALIC),
+            Self::Skipped => Style::default()
+                .fg(t.dim())
+                .bg(bg)
+                .add_modifier(Modifier::CROSSED_OUT),
+        }
     }
 }
 
 impl PlanDisplayRowKind {
     fn style(self, status: Option<PlanDisplayStatus>, t: &dyn theme::Theme, bg: Color) -> Style {
         match self {
-            Self::NextAction => Style::default().fg(t.accent_muted()).bg(bg),
+            Self::NextAction => status
+                .map(|status| status.row_style(t, bg))
+                .unwrap_or_else(|| Style::default().fg(t.fg()).bg(bg)),
             Self::Overflow => Style::default().fg(t.dim()).bg(bg),
             Self::Normal => status
                 .map(|status| status.row_style(t, bg))
@@ -1554,6 +1568,29 @@ fn render_workstream_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_status_styles_follow_neutral_conversation_semantics() {
+        use crate::tui::theme::Theme;
+        use ratatui::style::Modifier;
+
+        let t = theme::Alpharius;
+        let bg = t.surface_bg();
+        let active = PlanDisplayStatus::Active.row_style(&t, bg);
+        assert_eq!(active.fg, Some(t.fg()));
+        assert!(active.add_modifier.contains(Modifier::BOLD));
+
+        let done = PlanDisplayStatus::Done.row_style(&t, bg);
+        assert_eq!(done.fg, Some(t.dim()));
+        assert!(done.add_modifier.contains(Modifier::BOLD));
+
+        let todo = PlanDisplayStatus::Todo.row_style(&t, bg);
+        assert_eq!(todo.fg, Some(t.dim()));
+        assert!(todo.add_modifier.contains(Modifier::ITALIC));
+
+        let next = PlanDisplayRowKind::NextAction.style(Some(PlanDisplayStatus::Active), &t, bg);
+        assert_eq!(next, active);
+    }
 
     #[test]
     fn operation_worker_projection_maps_structured_child_row() {
