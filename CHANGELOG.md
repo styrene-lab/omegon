@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added pre-0.29 unified-work foundations: a dependency-light `styrene-work-model` crate that separates authority, origin, capabilities, lifecycle, provenance/revision, and source-specific facets; plus `styrene-work-runtime`, an async refresh layer that publishes immutable generation snapshots and explicit partial-source warnings.
+
 - Added a persistent web-search readiness gauge to slim and full TUI chrome. Keyless DuckDuckGo-only search is shown as an explicit degraded `WEB! ddg-only` state; configured Brave, Tavily, Serper, and Firecrawl providers render as compact readiness ticks. Selecting a search-provider secret opens its verified provider key console in the operator's browser and immediately accepts the key through Omegon's existing masked secret input, without exposing the key to model context.
 
 - Unified runtime lifecycle verbs: `/runtime refresh`, `/runtime reload`, `/runtime hup`, and `/runtime kick` rebuild reloadable in-process state through one shared path; `/runtime restart` and `/runtime hot-restart` re-exec the current Omegon binary so newly linked code takes effect. `/skills reload` and extension reload aliases reuse the shared refresh implementation instead of maintaining separate reload logic.

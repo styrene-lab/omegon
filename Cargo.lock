@@ -7755,6 +7755,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba09f6fc6e5b3df2306d66c2ba74b0c8901f2a39a4b18847ffc9e179db974a3f"
 
 [[package]]
+name = "styrene-work-model"
+version = "0.28.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "ulid",
+]
+
+[[package]]
+name = "styrene-work-runtime"
+version = "0.28.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "styrene-work-model",
+ "tokio",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8593,6 +8615,17 @@ name = "ucd-trie"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
+
+[[package]]
+name = "ulid"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "470dbf6591da1b39d43c14523b2b469c86879a53e8b758c8e090a470fe7b1fbe"
+dependencies = [
+ "rand 0.9.4",
+ "serde",
+ "web-time",
+]
 
 [[package]]
 name = "uluru"

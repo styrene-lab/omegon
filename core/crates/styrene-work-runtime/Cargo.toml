@@ -1,0 +1,15 @@
+[package]
+name = "styrene-work-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+styrene-work-model = { path = "../styrene-work-model" }
+
+[dev-dependencies]
+tokio.workspace = true

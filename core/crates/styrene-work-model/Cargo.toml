@@ -1,0 +1,13 @@
+[package]
+name = "styrene-work-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+chrono = { workspace = true, features = ["serde"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ulid = { workspace = true, features = ["serde"] }

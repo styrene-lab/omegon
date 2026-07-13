@@ -9,6 +9,8 @@ members = [
     "core/crates/omegon-opsx",
     "core/crates/omegon-rbac",
     "core/crates/omegon-skills",
+    "core/crates/styrene-work-model",
+    "core/crates/styrene-work-runtime",
     "core/crates/omegon-web",
 ]
 
@@ -50,6 +52,8 @@ clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 indexmap = { version = "2", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+ulid = { version = "1", features = ["serde"] }
 
 # Flynt vault types — used by sentry::flynt_board to surface flynt
 # kanban tasks to the autonomous executor. Lightweight types-only crate
