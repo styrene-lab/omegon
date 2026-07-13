@@ -2217,8 +2217,8 @@ fn assistant_completed_turn_keeps_incomplete_live_plan_lane() {
 
     assert!(app.workbench_state.active.is_some());
     let text = render_app_to_string(&mut app, 140, 18);
-    assert!(text.contains("plan active"), "{text}");
     assert!(text.contains("Harden set_recipe"), "{text}");
+    assert!(!text.contains("plan active"), "{text}");
     assert!(text.contains("turn done"), "{text}");
 }
 

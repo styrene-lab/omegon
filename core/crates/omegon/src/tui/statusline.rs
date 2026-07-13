@@ -110,15 +110,11 @@ impl SessionRow {
         let mut fields = Vec::new();
 
         if let Some(attention) = self
-            .operator_hint
+            .turn_state
             .as_ref()
-            .or(self.turn_state.as_ref())
             .filter(|value| !value.trim().is_empty())
         {
             fields.push((0u8, attention.clone(), t.muted()));
-        }
-        if !self.model_short.is_empty() {
-            fields.push((1, self.model_short.clone(), t.muted()));
         }
         if !self.cwd_basename.is_empty() {
             let workspace = self
@@ -126,9 +122,8 @@ impl SessionRow {
                 .as_ref()
                 .map(|branch| format!("{}:{branch}", self.cwd_basename))
                 .unwrap_or_else(|| self.cwd_basename.clone());
-            fields.push((2, workspace, t.dim()));
+            fields.push((1, workspace, t.dim()));
         }
-        fields.push((3, format!("ctx {:.0}%", self.context_percent), t.dim()));
 
         let right_status = format!(
             "{}  {} ",
@@ -574,12 +569,20 @@ mod tests {
             phase: Some(OodaPhase::Act),
             ..Default::default()
         };
-        sl.operator_hint = Some("plan active".into());
+        sl.operator_hint = Some("plan active · active plan · tracked".into());
+        sl.turn_state = Some("turn done".into());
 
         let backend = ratatui::backend::TestBackend::new(160, 1);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| sl.render(frame.area(), frame, &super::super::theme::Alpharius))
+            .draw(|frame| {
+                sl.render_for_level(
+                    crate::surfaces::layout::UiPresentationLevel::Om,
+                    frame.area(),
+                    frame,
+                    &super::super::theme::Alpharius,
+                )
+            })
             .unwrap();
         let buf = terminal.backend().buffer();
         let mut text = String::new();
@@ -587,11 +590,10 @@ mod tests {
             text.push_str(buf[(x, 0)].symbol());
         }
 
-        assert!(text.contains("session"), "{text}");
-        assert!(text.contains("turn 8"), "{text}");
-        assert!(text.contains("io ↑32k ↓2k"), "{text}");
-        assert!(text.contains("files: 16 touched"), "{text}");
-        assert!(text.contains("oodA Act"), "{text}");
+        assert!(text.contains("om"), "{text}");
+        assert!(text.contains("turn done"), "{text}");
+        assert!(!text.contains("plan active"), "{text}");
+        assert!(!text.contains("active plan"), "{text}");
         assert!(!text.contains("dir omegon"), "{text}");
         assert!(!text.contains("git fix/footer"), "{text}");
         assert!(!text.contains("50%"), "{text}");
