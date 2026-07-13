@@ -11722,6 +11722,11 @@ Scroll transcript:
                 let turn_end_reason = te.turn_end_reason;
                 self.slim_turn_state = SlimTurnState::Finished(match turn_end_reason {
                     omegon_traits::TurnEndReason::AssistantCompleted => "done",
+                    omegon_traits::TurnEndReason::AwaitingOperator => "waiting",
+                    omegon_traits::TurnEndReason::Blocked => "blocked",
+                    omegon_traits::TurnEndReason::TurnLimitReached => "turn limit",
+                    omegon_traits::TurnEndReason::ProviderExhausted => "provider exhausted",
+                    omegon_traits::TurnEndReason::WorkerFailed => "worker failed",
                     omegon_traits::TurnEndReason::ToolContinuation => "continuing",
                     omegon_traits::TurnEndReason::ProgressNudge => "nudged",
                     omegon_traits::TurnEndReason::Cancelled => "cancelled",
@@ -11729,6 +11734,11 @@ Scroll transcript:
                 if matches!(
                     turn_end_reason,
                     omegon_traits::TurnEndReason::AssistantCompleted
+                        | omegon_traits::TurnEndReason::AwaitingOperator
+                        | omegon_traits::TurnEndReason::Blocked
+                        | omegon_traits::TurnEndReason::TurnLimitReached
+                        | omegon_traits::TurnEndReason::ProviderExhausted
+                        | omegon_traits::TurnEndReason::WorkerFailed
                         | omegon_traits::TurnEndReason::Cancelled
                 ) {
                     self.agent_active = false;
@@ -12244,7 +12254,6 @@ Scroll transcript:
             AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
                 self.runtime_queue_snapshot = Some(snapshot_json);
             }
-            AgentEvent::RuntimeTurnLifecycleUpdated { .. } => {}
             AgentEvent::RuntimePromptStarted { text, image_paths } => {
                 if image_paths.is_empty() {
                     self.conversation.push_user(&text);
@@ -12307,6 +12316,46 @@ Scroll transcript:
                 } else {
                     self.conversation.push_system(&message);
                 }
+            }
+            AgentEvent::StreamIdle {
+                provider,
+                model,
+                phase,
+                idle_secs,
+                ambiguous,
+                message,
+            } => {
+                let qualifier = if ambiguous { " · ambiguous" } else { "" };
+                self.slim_turn_state =
+                    SlimTurnState::StreamIdle(format!("{idle_secs}s · {phase}{qualifier}"));
+                self.show_toast(
+                    &format!("Stream idle · {provider}/{model} · {message}"),
+                    ratatui_toaster::ToastType::Warning,
+                );
+            }
+            AgentEvent::ProviderFailure {
+                provider,
+                model,
+                reason,
+                attempts,
+                message,
+                retryable,
+                recommended_action,
+            } => {
+                self.slim_turn_state = SlimTurnState::Finished("provider failed");
+                self.agent_active = false;
+                let retry = if retryable { "retryable" } else { "terminal" };
+                self.conversation.push_system(&format!(
+                    "Provider failure · {provider}/{model} · {reason} · {attempts} attempt(s) · {retry} · {message}\nRecommended action: {recommended_action}"
+                ));
+            }
+            AgentEvent::RuntimeTurnLifecycleUpdated { snapshot_json } => {
+                let phase = snapshot_json
+                    .get("phase")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("active")
+                    .replace('_', " ");
+                self.slim_turn_state = SlimTurnState::Lifecycle(format!("turn {phase}"));
             }
             AgentEvent::PlanUpdated { projection } => {
                 if WorkbenchState::is_workstream_only_projection(&projection) {

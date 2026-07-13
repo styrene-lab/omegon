@@ -472,7 +472,7 @@ pub async fn run(
             )));
             let _ = events.send(AgentEvent::TurnEnd(Box::new(AgentEventTurnEnd {
                 turn,
-                turn_end_reason: TurnEndReason::AssistantCompleted,
+                turn_end_reason: TurnEndReason::TurnLimitReached,
                 model: Some(active_model.clone()),
                 provider: Some(crate::providers::infer_provider_id(&active_model).to_string()),
                 estimated_tokens: conversation.estimate_tokens(),
@@ -2044,16 +2044,11 @@ async fn stream_with_retry(
     loop {
         attempt += 1;
 
-        let provider = config
-            .model
-            .split(':')
-            .next()
-            .unwrap_or("upstream")
-            .to_string();
         let model = options
             .model
             .clone()
             .unwrap_or_else(|| config.model.clone());
+        let provider = crate::providers::infer_provider_id(&model);
 
         // Wrap bridge.stream() so pre-stream network errors (DNS, connection
         // refused, TLS failures) enter the same transient classifier instead
@@ -2107,11 +2102,11 @@ async fn stream_with_retry(
 
         // Soft exhaustion: bail after N consecutive transient failures.
         //
-        // Three exhaustion paths:
+        // Four exhaustion paths:
         // - max_retries > 0 (cleave): hard cap on attempt count
         // - max_retries == 0 (TUI) + rate-limit: bail after 120s continuous
-        // - max_retries == 0 (TUI) + stall: bail after 10 min of cumulative stalls
-        //   (OpenAI's default stream idle is 5 min; 2× that covers a retry cycle)
+        // - max_retries == 0 (TUI) + stall: provider/reasoning-aware cumulative budget
+        // - every other transient family: a finite 10-minute total retry envelope
         let elapsed = started.elapsed();
         let rate_limit_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(TransientFailureKind::RateLimited))
@@ -2120,13 +2115,24 @@ async fn stream_with_retry(
             && matches!(transient_kind, Some(TransientFailureKind::StalledStream))
             && elapsed.as_secs()
                 >= stall_exhaustion_secs(&provider, &model, options.reasoning.as_deref());
+        let transient_envelope_exhausted = transient_retry_envelope_exhausted(
+            config.max_retries,
+            transient_kind,
+            elapsed.as_secs(),
+        );
         let attempt_exhausted = config.max_retries > 0 && attempt >= config.max_retries;
 
-        if attempt_exhausted || rate_limit_exhausted || stall_exhausted {
+        if attempt_exhausted
+            || rate_limit_exhausted
+            || stall_exhausted
+            || transient_envelope_exhausted
+        {
             let reason = if rate_limit_exhausted {
                 "session rate-limit exhaustion"
             } else if stall_exhausted {
                 "stream stall exhaustion"
+            } else if transient_envelope_exhausted {
+                "transient retry exhaustion"
             } else {
                 "upstream exhausted"
             };
@@ -2214,6 +2220,19 @@ async fn stream_with_retry(
         tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
         delay = delay.saturating_mul(2).min(15_000); // exponential backoff, cap at 15s
     }
+}
+
+fn transient_retry_envelope_exhausted(
+    max_retries: u32,
+    transient_kind: Option<TransientFailureKind>,
+    elapsed_secs: u64,
+) -> bool {
+    max_retries == 0
+        && !matches!(
+            transient_kind,
+            Some(TransientFailureKind::RateLimited | TransientFailureKind::StalledStream)
+        )
+        && elapsed_secs >= 600
 }
 
 fn stall_exhaustion_secs(provider: &str, model: &str, reasoning: Option<&str>) -> u64 {
@@ -2366,14 +2385,15 @@ impl StreamIdleState {
 
 fn select_stream_idle_budget(
     phase: StreamIdlePhase,
-    initial: std::time::Duration,
+    _initial: std::time::Duration,
     active: std::time::Duration,
     reasoning_budget: std::time::Duration,
 ) -> std::time::Duration {
     match phase {
-        StreamIdlePhase::AwaitingFirstEvent => initial,
         StreamIdlePhase::OutputStreaming | StreamIdlePhase::ToolStreaming => active,
-        StreamIdlePhase::ReasoningStreaming | StreamIdlePhase::AmbiguousSilent => reasoning_budget,
+        StreamIdlePhase::AwaitingFirstEvent
+        | StreamIdlePhase::ReasoningStreaming
+        | StreamIdlePhase::AmbiguousSilent => reasoning_budget,
     }
 }
 
@@ -2442,15 +2462,16 @@ async fn consume_llm_stream(
     const REPETITION_ABORT_THRESHOLD: usize = 30; // 30 of last 40 chunks identical → abort
 
     // Phase-aware idle timeout:
-    // - Initial: 90s by default. Stale provider sessions can otherwise look
-    //   like silent hangs for too long; override with
-    //   OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS for unusually slow starts.
+    // - Awaiting first substantive event: use the generous reasoning budget.
+    //   Reasoning providers may emit no bytes while preparing the first item.
     // - Active content/tool-call streaming: 90s. Claude Code's
     //   CLAUDE_STREAM_IDLE_TIMEOUT_MS default is 90s; nobody in the industry
     //   uses less than 60s.
     // - Active thinking and inter-item decision gaps: generous reasoning
     //   budget. Reasoning-capable providers may legally go silent between
     //   text/thinking/tool-call blocks while deciding the next item.
+    // The legacy initial budget is retained as an input for compatibility, but
+    // AwaitingFirstEvent intentionally selects the reasoning budget below.
     let initial_idle_timeout = std::env::var("OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -4742,7 +4763,8 @@ mod tests {
             ),
             reasoning
         );
-        // Nothing yet → the initial budget.
+        // Before the first substantive event, reasoning-capable providers may
+        // legitimately stay silent for minutes; use the same generous budget.
         assert_eq!(
             select_stream_idle_budget(
                 StreamIdlePhase::AwaitingFirstEvent,
@@ -4750,7 +4772,7 @@ mod tests {
                 content,
                 reasoning
             ),
-            initial
+            reasoning
         );
         // The reasoning leash must strictly exceed the content leash.
         assert!(reasoning > content);
@@ -6530,6 +6552,38 @@ mod tests {
             stall_exhausted,
             "{threshold}s should trigger stall exhaustion"
         );
+    }
+
+    #[test]
+    fn tui_mode_bounds_all_other_transient_retry_families() {
+        use crate::upstream_errors::TransientFailureKind;
+
+        for kind in [
+            TransientFailureKind::ProviderOverloaded,
+            TransientFailureKind::Upstream5xx,
+            TransientFailureKind::Timeout,
+            TransientFailureKind::NetworkConnect,
+            TransientFailureKind::NetworkReset,
+            TransientFailureKind::Dns,
+            TransientFailureKind::DecodeBody,
+            TransientFailureKind::BridgeDropped,
+            TransientFailureKind::ResponseIncomplete,
+            TransientFailureKind::ResponseCancelled,
+        ] {
+            assert!(!transient_retry_envelope_exhausted(0, Some(kind), 599));
+            assert!(transient_retry_envelope_exhausted(0, Some(kind), 600));
+            assert!(!transient_retry_envelope_exhausted(8, Some(kind), 600));
+        }
+        assert!(!transient_retry_envelope_exhausted(
+            0,
+            Some(TransientFailureKind::RateLimited),
+            600
+        ));
+        assert!(!transient_retry_envelope_exhausted(
+            0,
+            Some(TransientFailureKind::StalledStream),
+            600
+        ));
     }
 
     #[test]

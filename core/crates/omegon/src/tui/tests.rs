@@ -2304,6 +2304,97 @@ fn slim_status_line_marks_turn_state() {
 }
 
 #[test]
+fn turn_terminal_reasons_release_active_gate_and_remain_visible() {
+    for (reason, label) in [
+        (omegon_traits::TurnEndReason::AwaitingOperator, "waiting"),
+        (omegon_traits::TurnEndReason::Blocked, "blocked"),
+        (omegon_traits::TurnEndReason::TurnLimitReached, "turn limit"),
+        (
+            omegon_traits::TurnEndReason::ProviderExhausted,
+            "provider exhausted",
+        ),
+        (omegon_traits::TurnEndReason::WorkerFailed, "worker failed"),
+        (omegon_traits::TurnEndReason::Cancelled, "cancelled"),
+    ] {
+        let mut app = active_test_app();
+        app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
+        app.handle_agent_event(AgentEvent::TurnEnd(Box::new(
+            omegon_traits::AgentEventTurnEnd {
+                turn: 1,
+                turn_end_reason: reason,
+                model: Some("openai:gpt-5.4".into()),
+                provider: Some("openai".into()),
+                estimated_tokens: 0,
+                context_window: 0,
+                context_composition: omegon_traits::ContextComposition::default(),
+                actual_input_tokens: 0,
+                actual_output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                provider_telemetry: None,
+                dominant_phase: None,
+                drift_kind: None,
+                progress_nudge_reason: None,
+                intent_task: None,
+                intent_phase: None,
+                files_read_count: 0,
+                files_modified_count: 0,
+                stats_tool_calls: 0,
+                streaks: omegon_traits::ControllerStreaks::default(),
+            },
+        )));
+
+        assert_eq!(app.slim_turn_state, SlimTurnState::Finished(label));
+        assert!(!app.agent_active, "{reason:?} must release active gate");
+    }
+}
+
+#[test]
+fn stream_idle_provider_failure_and_lifecycle_events_project_into_tui() {
+    let mut app = active_test_app();
+    app.handle_agent_event(AgentEvent::StreamIdle {
+        provider: "openai-codex".into(),
+        model: "gpt-5.4".into(),
+        phase: "reasoning".into(),
+        idle_secs: 90,
+        ambiguous: true,
+        message: "no bytes received".into(),
+    });
+    assert_eq!(
+        app.slim_turn_state,
+        SlimTurnState::StreamIdle("90s · reasoning · ambiguous".into())
+    );
+
+    app.handle_agent_event(AgentEvent::RuntimeTurnLifecycleUpdated {
+        snapshot_json: serde_json::json!({"phase": "awaiting_operator"}),
+    });
+    assert_eq!(
+        app.slim_turn_state,
+        SlimTurnState::Lifecycle("turn awaiting operator".into())
+    );
+
+    app.handle_agent_event(AgentEvent::ProviderFailure {
+        provider: "openai-codex".into(),
+        model: "gpt-5.4".into(),
+        reason: "stream-stall".into(),
+        attempts: 3,
+        message: "silent stream exhausted retries".into(),
+        retryable: false,
+        recommended_action: "switch provider".into(),
+    });
+    assert_eq!(
+        app.slim_turn_state,
+        SlimTurnState::Finished("provider failed")
+    );
+    assert!(!app.agent_active);
+    assert!(app.conversation.segments().iter().any(|segment| {
+        segment
+            .plain_text()
+            .contains("silent stream exhausted retries")
+    }));
+}
+
+#[test]
 fn conversation_scroll_does_not_recall_input_history() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];

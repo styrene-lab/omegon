@@ -6847,6 +6847,46 @@ async fn run_interactive_active_turn(
     }
 
     if let Some(Err(e)) = run_result {
+        let terminal_reason = if r#loop::is_upstream_exhausted(&e) {
+            omegon_traits::TurnEndReason::ProviderExhausted
+        } else {
+            omegon_traits::TurnEndReason::WorkerFailed
+        };
+        let _ = events_tx.send(AgentEvent::TurnEnd(Box::new(
+            omegon_traits::AgentEventTurnEnd {
+                turn: runtime_state.conversation.intent.stats.turns,
+                turn_end_reason: terminal_reason,
+                model: loop_config
+                    .bridge_model
+                    .clone()
+                    .or_else(|| Some(loop_config.model.clone())),
+                provider: loop_config
+                    .bridge_model
+                    .as_deref()
+                    .map(crate::providers::infer_provider_id)
+                    .or_else(|| Some(crate::providers::infer_provider_id(&loop_config.model))),
+                estimated_tokens: runtime_state.conversation.estimate_tokens(),
+                context_window: 0,
+                context_composition: omegon_traits::ContextComposition::default(),
+                actual_input_tokens: 0,
+                actual_output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                provider_telemetry: None,
+                dominant_phase: None,
+                drift_kind: None,
+                progress_nudge_reason: None,
+                intent_task: runtime_state.conversation.intent.current_task.clone(),
+                intent_phase: Some(format!(
+                    "{:?}",
+                    runtime_state.conversation.intent.lifecycle_phase
+                )),
+                files_read_count: runtime_state.conversation.intent.files_read.len(),
+                files_modified_count: runtime_state.conversation.intent.files_modified.len(),
+                stats_tool_calls: runtime_state.conversation.intent.stats.tool_calls,
+                streaks: omegon_traits::ControllerStreaks::default(),
+            },
+        )));
         let recent_telemetry = runtime_state.conversation.last_provider_telemetry(None);
         let user_msg = format_agent_error(&e, recent_telemetry.as_ref());
         tracing::error!(

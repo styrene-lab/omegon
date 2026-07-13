@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 - Fixed the Profile TUI so project-scoped registry selections persist through the canonical `.omegon/active-profile.json` pointer and the profile summary/footer wrap instead of silently truncating paths and commands.
+- Made turn termination and provider stalls explicit: terminal reasons now distinguish completion, operator waits, blocking, turn limits, provider exhaustion, worker failures, and cancellation; the TUI projects lifecycle, stream-idle, and terminal provider-failure evidence instead of collapsing them into generic idle state.
 
 ### Added
 

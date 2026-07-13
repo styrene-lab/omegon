@@ -73,31 +73,31 @@ A `SsePhaseGate` (atomic) is flipped by each provider closure:
 
 Budgets:
 - **active**: `OMEGON_SSE_IDLE_TIMEOUT_SECS` — default **90s**, min 30.
-- **reasoning**: `OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS` — default **300s**, min 60.
+- **reasoning**: `OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS` — default **600s**, min 60.
 
 ### Consumer — `consume_llm_stream`
 A `reasoning` flag (separate from `received_content`) is set on
 `ThinkingStart` / `ThinkingDelta` and cleared on `TextStart` / `ToolCallStart`.
-`ThinkingStart` no longer marks `received_content`. Budget selection is the pure
-helper `select_stream_idle_budget(reasoning, received_content, initial, content,
-reasoning)`:
+`ThinkingStart` no longer marks `received_content`. Current budget selection is
+phase-based through `select_stream_idle_budget`:
 
-- reasoning && !received_content → **reasoning budget**
-- received_content → **content budget**
-- otherwise → **initial budget**
+- `AwaitingFirstEvent` → **reasoning budget**
+- `ReasoningStreaming` / `AmbiguousSilent` → **reasoning budget**
+- `OutputStreaming` / `ToolStreaming` → **content budget**
 
 Budgets:
-- **initial**: `OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS` — default 90s, min 30.
-- **content**: 90s.
-- **reasoning**: `OMEGON_LLM_REASONING_IDLE_TIMEOUT_SECS` — default **300s**, min 60.
+- **content**: `OMEGON_LLM_STREAM_IDLE_TIMEOUT_SECS` — default 90s, min 30.
+- **pre-first-token / reasoning / ambiguous silence**: `OMEGON_LLM_REASONING_IDLE_TIMEOUT_SECS` — default **600s**, min 60.
+- `OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS` remains accepted for compatibility, but awaiting-first-event intentionally uses the reasoning budget.
 
-## Research basis for 300s
+## Research basis for 600s
 
 Not a guess. OpenAI's own SDK ships a 15-minute request timeout and
 high-reasoning-effort streams routinely go silent for minutes. Anthropic SDK
 issues (#998 ping-aware watchdog, #867 "still thinking vs stalled") describe the
-same failure mode. 300s clears observed silent-reasoning gaps while still
-catching a genuinely dead stream inside the retry budget.
+same failure mode. 600s covers observed silent-reasoning gaps and slow first
+response items while still terminating a genuinely dead stream inside the
+provider-aware cumulative retry budget.
 
 ## Tests
 
@@ -119,9 +119,9 @@ catching a genuinely dead stream inside the retry budget.
 | Env var | Layer | Default | Min |
 |---------|-------|---------|-----|
 | `OMEGON_SSE_IDLE_TIMEOUT_SECS` | producer active | 90 | 30 |
-| `OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS` | producer reasoning | 300 | 60 |
-| `OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS` | consumer initial | 90 | 30 |
-| `OMEGON_LLM_REASONING_IDLE_TIMEOUT_SECS` | consumer reasoning | 300 | 60 |
+| `OMEGON_SSE_REASONING_IDLE_TIMEOUT_SECS` | producer reasoning | 600 | 60 |
+| `OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS` | consumer compatibility input (first event uses reasoning budget) | 90 | 30 |
+| `OMEGON_LLM_REASONING_IDLE_TIMEOUT_SECS` | consumer first-event/reasoning | 600 | 60 |
 
 ## Known limitations / future bugs to watch
 
@@ -162,8 +162,10 @@ otherwise. On the first timeout in an active phase the watchdog:
 Any resumed delta flips the phase back to active via
 `stream_idle_phase_after_event`. A *second* silence is now evaluated in
 `AmbiguousSilent`, which does not re-arm, so a genuinely dead stream still dies
-inside the retry budget. `AwaitingFirstEvent` does **not** re-arm — pre-first-token
-silence is a connection problem, not a reasoning gap.
+inside the retry budget. `AwaitingFirstEvent` does **not** re-arm because it
+already receives the generous reasoning budget; this prevents a reasoning model
+from being killed by the old 90s pre-first-token budget without adding another
+full re-arm cycle.
 
 Net effect: the legal inter-item reasoning gap gets one tight budget + one
 reasoning budget (~90s + ~600s) before any stall is counted, while a dead

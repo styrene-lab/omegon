@@ -2287,6 +2287,11 @@ pub trait Feature: Send + Sync {
 #[serde(rename_all = "snake_case")]
 pub enum TurnEndReason {
     AssistantCompleted,
+    AwaitingOperator,
+    Blocked,
+    TurnLimitReached,
+    ProviderExhausted,
+    WorkerFailed,
     ToolContinuation,
     ProgressNudge,
     Cancelled,
