@@ -177,22 +177,10 @@ impl SessionRow {
         let sep = Span::styled(" · ", Style::default().fg(t.dim()));
         let sect = Span::styled(" │ ", Style::default().fg(t.dim()));
 
-        // ── Pinned session fields (always shown) ─────────────────
-
-        let turn_str = format!("turn {}", self.turn);
-        let in_str = format!("↑{}", fmt_tokens(self.session_input_tokens));
-        let out_str = format!("↓{}", fmt_tokens(self.session_output_tokens));
-        let tok_str = format!("io {in_str} {out_str}");
-
-        let mut spans: Vec<Span<'static>> = vec![
-            Span::styled(" session", Style::default().fg(t.accent_muted())),
-            sep.clone(),
-            Span::styled(turn_str, Style::default().fg(t.muted())),
-            sep.clone(),
-            Span::styled(tok_str, Style::default().fg(t.dim())),
-        ];
-
-        let mut used: usize = spans.iter().map(|s| s.width()).sum();
+        // The compact footer only carries state that is not already owned by
+        // the engine block, context instrument, or Workbench.
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut used = 0usize;
 
         // Web-search liveness is persistent chrome, not a transient nag.
         // Missing readiness data and an all-empty keyed set are both degraded:
