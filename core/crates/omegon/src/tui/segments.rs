@@ -2157,9 +2157,26 @@ status: {}
     }
 
     pub fn height_in_mode(&self, width: u16, t: &dyn Theme, mode: SegmentRenderMode) -> u16 {
+        let render_ctx = super::conversation_render_projection::SegmentRenderContext::new(t, mode);
+        self.height_with_context(width, &render_ctx)
+    }
+
+    /// Calculate the height this segment needs at the given width under the
+    /// exact presentation context (mode, density, copy-friendliness) that will
+    /// be used to render it. Measurement and rendering must share one context:
+    /// measuring at a different density than the live render either leaves
+    /// blank voids inside the segment's slot (measured > rendered) or clips
+    /// the tail (measured < rendered).
+    pub fn height_with_context(
+        &self,
+        width: u16,
+        render_ctx: &super::conversation_render_projection::SegmentRenderContext<'_>,
+    ) -> u16 {
         if width == 0 {
             return 1;
         }
+        let t = render_ctx.theme;
+        let mode = render_ctx.mode;
         use SegmentContent::*;
 
         // Quick paths for fixed-height types
@@ -2288,23 +2305,37 @@ status: {}
                 live_partial,
                 ..
             } => {
+                // The full-card estimate must use the same density budgets as
+                // the renderer (`tool_card::render` — expanded overrides to
+                // Verbose). The bordered card paints its full allocated area,
+                // so the temp-buffer scan below cannot trim an inflated
+                // estimate; whatever this arm computes IS the measured height.
+                let effective_density = if *expanded {
+                    crate::settings::ToolDetail::Verbose
+                } else {
+                    render_ctx.density
+                };
+                let args_budget = effective_density.args_budget().max(1);
+                let result_budget = effective_density.result_budget();
+                let diff_budget = effective_density.diff_budget();
+                let tail_budget = effective_density.tail_budget();
                 let inner_width = width.saturating_sub(4).max(1);
                 let compact_arg_rows = match name.as_str() {
                     "bash" => detail_args
                         .as_ref()
-                        .map(|a| a.lines().take(4).count() as u16)
+                        .map(|a| a.lines().take(args_budget).count() as u16)
                         .unwrap_or(0),
                     "edit" | "change" | "read" | "write" | "view" => {
                         u16::from(detail_args.is_some())
                     }
                     _ => detail_args
                         .as_ref()
-                        .map(|a| wrapped_rows(a, inner_width).min(if *expanded { 80 } else { 4 }))
+                        .map(|a| wrapped_rows(a, inner_width).min(args_budget as u16))
                         .unwrap_or(0),
                 };
                 let compact_result_rows = detail_result
                     .as_ref()
-                    .map(|r| wrapped_rows(r, inner_width).min(if *expanded { 220 } else { 12 }))
+                    .map(|r| wrapped_rows(r, inner_width).min(result_budget as u16))
                     .unwrap_or(0);
                 // Diff section rows: edit/change tools render a real
                 // colored diff in place of the boring "Successfully
@@ -2329,7 +2360,7 @@ status: {}
                                 .sum();
                             // +1 summary line, +1 truncation marker (worst case)
                             let with_chrome = total + 2;
-                            with_chrome.min(if *expanded { 200 } else { 8 }) as u16
+                            with_chrome.min(diff_budget.max(1)) as u16
                         })
                         .unwrap_or(0)
                 } else {
@@ -2345,7 +2376,7 @@ status: {}
                         .as_ref()
                         .map(|p| {
                             let lines = p.tail.lines().count() as u16;
-                            lines.min(if *expanded { 50 } else { 12 })
+                            lines.min(tail_budget as u16)
                         })
                         .unwrap_or(0);
                     header + tail
@@ -2407,13 +2438,7 @@ status: {}
         }
         let temp_area = Rect::new(0, 0, width, h);
         let mut temp_buf = Buffer::empty(temp_area);
-        self.render(
-            temp_area,
-            &mut temp_buf,
-            t,
-            mode,
-            crate::settings::ToolDetail::Detailed,
-        );
+        self.render_with_context(temp_area, &mut temp_buf, render_ctx);
 
         // Find the last row with actual text content.
         // Skip border characters (│╰╯┐┘├┤┌└) in the first/last 2 columns
@@ -3598,6 +3623,107 @@ mod tests {
         assert!(
             row_widths(&buf, area).into_iter().all(|width| width <= 64),
             "memory tool rows must fit viewport: {text}"
+        );
+    }
+
+    /// Regression for the conversation "black void" bug: measurement must
+    /// use the exact same presentation context (mode + density) as rendering.
+    /// Before the fix, `height_in_context` dropped the density and always
+    /// measured at `Detailed`, so a completed tool card in a `Lean`/`Compact`
+    /// live render claimed a many-row slot while painting only 1-3 rows —
+    /// leaving the remainder of the slot as an empty gap in the viewport.
+    #[test]
+    fn measured_height_matches_painted_rows_under_same_context() {
+        let mut seg = Segment::tool_card("tool-1", "bash");
+        if let SegmentContent::ToolCard {
+            complete,
+            is_error,
+            detail_args,
+            detail_result,
+            ..
+        } = &mut seg.content
+        {
+            *complete = true;
+            *is_error = true;
+            *detail_args = Some("sleep 360; gh run view 29291810780 --json status".into());
+            *detail_result = Some(
+                "Command timed out after 60 seconds; the process was killed before a final \
+                 exit status could be observed.\nline two\nline three\nline four\nline five\n\
+                 line six\nline seven\nline eight\nline nine\nline ten"
+                    .into(),
+            );
+        }
+
+        for mode in [SegmentRenderMode::Full, SegmentRenderMode::Slim] {
+            for density in [
+                crate::settings::ToolDetail::Lean,
+                crate::settings::ToolDetail::Compact,
+                crate::settings::ToolDetail::Detailed,
+            ] {
+                let ctx = crate::tui::conversation_render_projection::SegmentRenderContext::new(
+                    &Alpharius, mode,
+                )
+                .with_density(density);
+                let measured = seg.height_with_context(80, &ctx);
+                assert!(measured > 0, "{mode:?}/{density:?} must measure non-zero");
+
+                let (area, mut buf) = make_buf(80, measured);
+                seg.render_with_context(area, &mut buf, &ctx);
+                let last_painted = (0..measured)
+                    .rev()
+                    .find(|y| {
+                        (0..80).any(|x| {
+                            let sym = buf[(x, *y)].symbol();
+                            sym != " " && !sym.is_empty()
+                        })
+                    })
+                    .map(|y| y + 1)
+                    .unwrap_or(0);
+                let slack = measured.saturating_sub(last_painted);
+                assert!(
+                    slack <= 1,
+                    "{mode:?}/{density:?}: measured {measured} rows but painted only \
+                     {last_painted} — the difference renders as a void in the conversation"
+                );
+            }
+        }
+    }
+
+    /// The density measurement must actually differentiate: a completed tool
+    /// card at `Lean` density in Full mode must not claim the `Detailed`
+    /// multi-row card height.
+    #[test]
+    fn lean_density_measures_smaller_than_detailed_for_completed_tools() {
+        let mut seg = Segment::tool_card("tool-1", "read");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_args,
+            detail_result,
+            ..
+        } = &mut seg.content
+        {
+            *complete = true;
+            *detail_args = Some("core/crates/omegon/src/tui/segments.rs".into());
+            *detail_result = Some((0..12).map(|i| format!("row {i}\n")).collect::<String>());
+        }
+
+        let lean_ctx = crate::tui::conversation_render_projection::SegmentRenderContext::new(
+            &Alpharius,
+            SegmentRenderMode::Full,
+        )
+        .with_density(crate::settings::ToolDetail::Lean);
+        let detailed_ctx = crate::tui::conversation_render_projection::SegmentRenderContext::new(
+            &Alpharius,
+            SegmentRenderMode::Full,
+        )
+        .with_density(crate::settings::ToolDetail::Detailed);
+
+        let lean = seg.height_with_context(80, &lean_ctx);
+        let detailed = seg.height_with_context(80, &detailed_ctx);
+        assert!(
+            lean < detailed,
+            "lean ({lean}) must measure below detailed ({detailed}); equal heights mean \
+             density is being ignored during measurement again"
         );
     }
 
