@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.3] - 2026-07-14
+
 ### Fixed
 
 - Restored conversation copy, native terminal selection, and detached viewport
