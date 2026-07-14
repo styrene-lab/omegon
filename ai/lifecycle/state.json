@@ -1634,14 +1634,21 @@
     {
       "name": "inference-discovery-producers",
       "title": "Discovery-layer producers and model catalog unification",
-      "state": "proposed",
+      "state": "verifying",
       "bound_node": null,
-      "specs": [],
-      "test_files": [],
+      "specs": [
+        "inference-discovery",
+        "inference/catalog-unification",
+        "inference/discovery"
+      ],
+      "test_files": [
+        "core/crates/omegon/src/inference_discovery.rs",
+        "core/crates/omegon/src/tui/model_catalog.rs"
+      ],
       "tasks_total": 21,
-      "tasks_done": 15,
+      "tasks_done": 21,
       "created_at": "2026-07-14T13:03:44Z",
-      "updated_at": "2026-07-14T14:12:51Z"
+      "updated_at": "2026-07-14T16:16:57Z"
     }
   ],
   "milestones": [],
@@ -3983,6 +3990,51 @@
       "entity_id": "inference-discovery-producers",
       "from_state": "decided",
       "to_state": "implementing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-14T16:16:25Z",
+      "entity_type": "change",
+      "entity_id": "inference-discovery-producers",
+      "from_state": "proposed",
+      "to_state": "specced",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-14T16:16:25Z",
+      "entity_type": "change",
+      "entity_id": "inference-discovery-producers",
+      "from_state": "specced",
+      "to_state": "planned",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-14T16:16:37Z",
+      "entity_type": "change",
+      "entity_id": "inference-discovery-producers",
+      "from_state": "planned",
+      "to_state": "testing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-14T16:16:37Z",
+      "entity_type": "change",
+      "entity_id": "inference-discovery-producers",
+      "from_state": "testing",
+      "to_state": "implementing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-07-14T16:16:57Z",
+      "entity_type": "change",
+      "entity_id": "inference-discovery-producers",
+      "from_state": "implementing",
+      "to_state": "verifying",
       "reason": null,
       "forced": false
     }

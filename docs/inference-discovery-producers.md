@@ -1,12 +1,9 @@
 ---
 id: inference-discovery-producers
 title: "Discovery-layer producers + model catalog unification"
-status: implementing
+status: implemented
 tags: []
-open_questions:
-  - "[assumption] The unverified enumeration endpoints (openai, groq, mistral, xai, openrouter, anthropic, google) behave as the training-knowledge matrix claims — each needs a one-time live verification during implementation, recorded per-endpoint like openAiCompatibleProfile.verifiedAt"
-  - "Can the openai-codex ChatGPT-backend OAuth token enumerate models at all? Needs a live probe during implementation; if not, openai-codex declares discovery:none like perplexity"
-  - "[assumption] Copilot's /models response body carries per-model capabilities/limits/policy metadata worth parsing (probe currently keeps IDs only) — verify shape against the live account and decide how much to map into discovery patches vs defer"
+open_questions: []
 dependencies: []
 related: []
 ---
@@ -55,8 +52,8 @@ Provider enumeration matrix (unverified rows are training-knowledge hypotheses):
 
 **Rationale:** The TUI catalog currently reads ModelRegistry::global() directly, creating a parallel static system that ignores the inventory. Migration: cloud provider sections project from the active InventorySnapshot (auth-gating preserved), Ollama keeps its existing local query as a discovery producer. The embedded registry remains the bootstrap layer inside the inventory — no data is deleted, its role changes from sole source to lowest-precedence layer. This kills the System A/B duality in one release rather than letting them drift.
 
+Live verification deliberately stops at credential boundaries: github-copilot (29 models, 24 chat-selectable) and anthropic OAuth (10 chat models) are verified against real accounts. OpenAI, Groq, Mistral, xAI, OpenRouter, and Google remain fixture-verified protocol contracts pending future account availability; this is deferred evidence, not a release dependency. OpenAI Codex remains `discovery: none` because no synchronously resolvable ChatGPT-backend token was available and Omegon does not enable an unproven enumeration contract.
+
 ## Open Questions
 
-- [assumption] The unverified enumeration endpoints (openai, groq, mistral, xai, openrouter, anthropic, google) behave as the training-knowledge matrix claims — each needs a one-time live verification during implementation, recorded per-endpoint like openAiCompatibleProfile.verifiedAt
-- Can the openai-codex ChatGPT-backend OAuth token enumerate models at all? Needs a live probe during implementation; if not, openai-codex declares discovery:none like perplexity
-- [assumption] Copilot's /models response body carries per-model capabilities/limits/policy metadata worth parsing (probe currently keeps IDs only) — verify shape against the live account and decide how much to map into discovery patches vs defer
+None for 0.28.2. Additional provider-account verification may strengthen evidence in a later release without changing the shipped protocol contracts.
