@@ -2,11 +2,12 @@
 import Docs from "../layouts/Docs.astro";
 import { stripFrontmatter } from "../lib/markdown";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const changelogPath = resolve(here, "../../../CHANGELOG.md");
+// Resolve from the build cwd (site/), matching terms.astro and privacy.astro.
+// import.meta.url points at the Vite-compiled chunk during `astro build`,
+// so source-relative traversal silently misses the repo root.
+const changelogPath = join(process.cwd(), "..", "CHANGELOG.md");
 
 let raw = "";
 try {
