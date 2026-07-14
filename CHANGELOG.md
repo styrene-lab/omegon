@@ -16,6 +16,49 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.3] - 2026-07-14
+
+### Fixed
+
+- Restored conversation copy, native terminal selection, and detached viewport
+  anchoring: assistant `Copy` clicks now resolve through hitboxes owned by the
+  rendered frame instead of reconstructing stale geometry, target the exact
+  later response that painted the affordance, and show success/failure feedback.
+  Mutable live tails are remeasured every frame to eliminate phantom blank rows
+  while render-time logical anchoring keeps the operator's visible location fixed
+  as streaming content grows or shrinks. Mouse capture remains the default for
+  scrolling and pane interaction, while Shift-drag uses the terminal's standard
+  native-selection override and `/mouse off` remains the guaranteed passthrough
+  fallback.
+
+## [0.28.2] - 2026-07-14
+
+### Added
+
+- Inference discovery producers (`inference_discovery.rs`): protocol-keyed live model
+  enumeration for the dynamic inference inventory's Discovery layer. One
+  OpenAI-compatible fetcher covers openai/groq/mistral/xai/hf-router/ollama-cloud;
+  dedicated parsers for OpenRouter, Anthropic, Google, GitHub Copilot (shared
+  token-exchange transport with `auth copilot-probe`), and local Ollama. Discovered
+  ids unknown to the registry surface as ungraded offerings with conservative
+  defaults; registry ids absent from live enumeration are marked unavailable.
+  TTL-cached with persisted last-known-good (`discovery-cache.json`). Discovery
+  results merge into the inference inventory on every runtime refresh; the
+  operator's runtime-refresh command bypasses discovery TTL and reports
+  per-endpoint failures while retaining last-known-good. The model catalog
+  (`/model` selection) now projects from the inventory snapshot instead of the
+  static registry: live-enumerated provider models (e.g. all current GitHub
+  Copilot chat models, not the 4-entry snapshot) appear with per-provider
+  freshness lines; embedding and provider-internal ids are filtered from chat
+  selection; registry ids absent from live enumeration are hidden. Foundation
+  for OpenSpec change `inference-discovery-producers` (0.28.2); startup
+  discovery trigger follows. Live-verified against real accounts: GitHub
+  Copilot (29 models, 24 chat-selectable) and Anthropic OAuth (Bearer + oauth
+  beta headers, mirroring the chat bridge's auth split). Absent local Ollama
+  daemons skip silently instead of emitting refresh diagnostics. Hidden
+  `omegon auth discovery-probe` command forces TTL-bypassing enumeration and
+  prints per-endpoint results with catalog freshness.
+
 ### Fixed
 
 - Fixed the docs-site changelog page rendering "Not available during this build": the page resolved `CHANGELOG.md` relative to `import.meta.url`, which points at the Vite-compiled chunk during `astro build`, so the repo-root file was never found. It now resolves from the build working directory like the terms and privacy pages.

@@ -57,6 +57,7 @@ pub mod features;
 pub(crate) mod filelock;
 mod first_run;
 mod host_context;
+mod inference_discovery;
 mod inference_inventory;
 mod inference_manifest;
 mod inference_runtime;
@@ -357,6 +358,10 @@ enum AuthAction {
     /// Probe GitHub Copilot OpenAI-style tool-call contract with redacted output.
     #[command(hide = true)]
     CopilotToolsProbe,
+    /// Force live model discovery across all credentialed providers and print
+    /// per-endpoint results with the resulting catalog freshness.
+    #[command(hide = true)]
+    DiscoveryProbe,
 }
 
 #[derive(Subcommand)]
@@ -8109,6 +8114,54 @@ async fn run_github_copilot_tools_probe_command() -> anyhow::Result<()> {
     }
 }
 
+/// Live diagnostic for the discovery pipeline: forces TTL-bypassing
+/// enumeration of every credentialed endpoint, persists the cache, and prints
+/// per-endpoint model counts plus catalog freshness. Serves the endpoint
+/// live-verification tasks of OpenSpec change inference-discovery-producers.
+async fn run_discovery_probe_command() -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()?;
+    let runtime = inference_runtime::InferenceRuntimeState::new(&cwd);
+    println!("Discovery probe (TTL bypassed)");
+    let diagnostics = runtime.refresh_discovery(true).await;
+    let report = runtime.refresh().await;
+    println!(
+        "Inventory generation {} → {} ({} endpoints, {} offerings)",
+        report.previous_generation,
+        report.active_generation,
+        report.endpoint_count,
+        report.offering_count
+    );
+    let cache =
+        inference_discovery::DiscoveryCache::load(&inference_discovery::default_cache_path());
+    for (endpoint_id, result) in &cache.endpoints {
+        let chat = result.models.iter().filter(|m| !m.non_chat).count();
+        let non_chat = result.models.len() - chat;
+        println!(
+            "  {endpoint_id}: {} models ({chat} chat, {non_chat} non-chat), ttl={}s{}",
+            result.models.len(),
+            result.ttl_secs,
+            if result.cached { ", cached" } else { ", live" }
+        );
+    }
+    if !diagnostics.is_empty() {
+        println!("Diagnostics (last-known-good retained):");
+        for diagnostic in &diagnostics {
+            println!("  - {diagnostic}");
+        }
+    }
+    let catalog = tui::model_catalog::ModelCatalog::discover();
+    if !catalog.freshness.is_empty() {
+        println!("Catalog freshness:");
+        for (provider, state) in &catalog.freshness {
+            println!("  {provider}: {state}");
+        }
+    }
+    for (provider, models) in &catalog.providers {
+        println!("  {provider}: {} selectable chat models", models.len());
+    }
+    Ok(())
+}
+
 async fn run_github_copilot_probe_command() -> anyhow::Result<()> {
     let probe = github_copilot::probe_github_copilot_contract().await?;
     println!("{}", format_github_copilot_contract_probe(&probe));
@@ -8129,6 +8182,7 @@ async fn run_auth_command(action: &AuthAction) -> anyhow::Result<()> {
         AuthAction::Login { provider } => run_auth_login(provider).await,
         AuthAction::CopilotProbe => run_github_copilot_probe_command().await,
         AuthAction::CopilotToolsProbe => run_github_copilot_tools_probe_command().await,
+        AuthAction::DiscoveryProbe => run_discovery_probe_command().await,
         AuthAction::Logout { provider } => match auth::logout_provider(provider) {
             Ok(()) => {
                 auth::clear_provider_auth_env(provider);

@@ -2606,6 +2606,56 @@ fn completed_assistant_renders_single_click_copy_affordance() {
 }
 
 #[test]
+fn assistant_copy_hitbox_preserves_later_segment_index() {
+    let mut cv = ConversationView::new();
+    cv.push_user("first prompt");
+    cv.append_streaming("first answer");
+    cv.finalize_message();
+    cv.push_user("operator prompt");
+    cv.append_streaming("copy this answer");
+    cv.finalize_message();
+
+    let assistant_idx = cv
+        .segments()
+        .iter()
+        .position(|segment| {
+            matches!(
+                &segment.content,
+                SegmentContent::AssistantText { text, .. } if text == "copy this answer"
+            )
+        })
+        .expect("assistant segment");
+    assert!(
+        assistant_idx > 1,
+        "fixture must exercise a later segment index"
+    );
+
+    let theme = crate::tui::theme::Alpharius;
+    let area = Rect::new(0, 0, 80, 12);
+    let mut buf = Buffer::empty(area);
+    {
+        let (segments, state) = cv.segments_and_state();
+        crate::tui::conv_widget::ConversationWidget::new(segments, &theme)
+            .render(area, &mut buf, state);
+    }
+
+    let hitbox = cv
+        .conv_state
+        .copy_hitboxes
+        .iter()
+        .find_map(|(area, idx)| (*idx == assistant_idx).then_some(*area))
+        .expect("later assistant must own a rendered copy hitbox");
+    assert_eq!(
+        cv.assistant_copy_button_at(area, hitbox.x, hitbox.y),
+        Some(assistant_idx)
+    );
+    assert_eq!(
+        cv.segments()[assistant_idx].human_plaintext_detail(),
+        "copy this answer"
+    );
+}
+
+#[test]
 fn streaming_assistant_omits_quick_copy_affordance() {
     let mut cv = ConversationView::new();
     cv.append_streaming("still arriving");

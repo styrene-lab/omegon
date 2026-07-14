@@ -1492,27 +1492,17 @@ impl ConversationView {
 
     pub fn assistant_copy_button_at(
         &self,
-        viewport: ratatui::prelude::Rect,
+        _viewport: ratatui::prelude::Rect,
         column: u16,
         row: u16,
     ) -> Option<usize> {
-        const COPY_LABEL_WIDTH: u16 = 6;
-        if column < viewport.right().saturating_sub(COPY_LABEL_WIDTH) || column >= viewport.right()
-        {
-            return None;
-        }
-        let (idx, seg_top, top_offset) = self.segment_bounds_at(viewport, row)?;
-        let visible_top = viewport.y + seg_top.saturating_sub(top_offset);
-        if row != visible_top {
-            return None;
-        }
-        self.segments.get(idx).and_then(|segment| {
-            matches!(
-                &segment.content,
-                SegmentContent::AssistantText { complete: true, .. }
-            )
-            .then_some(idx)
-        })
+        self.conv_state
+            .copy_hitboxes
+            .iter()
+            .find_map(|(area, idx)| {
+                (column >= area.x && column < area.right() && row >= area.y && row < area.bottom())
+                    .then_some(*idx)
+            })
     }
 
     pub fn toggle_image_attachments_at(&mut self, segment_idx: usize) -> usize {

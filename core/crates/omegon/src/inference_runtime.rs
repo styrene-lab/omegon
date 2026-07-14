@@ -338,6 +338,8 @@ pub struct InferenceRuntimeState {
     active_sources: Arc<tokio::sync::RwLock<Vec<ManifestSource>>>,
     last_rejected_diagnostics: Arc<tokio::sync::RwLock<Vec<ManifestDiagnostic>>>,
     route_shadow_observations: Arc<tokio::sync::RwLock<Vec<RouteShadowObservation>>>,
+    discovery: Arc<tokio::sync::RwLock<crate::inference_discovery::DiscoveryCache>>,
+    discovery_cache_path: std::path::PathBuf,
 }
 
 impl InferenceRuntimeState {
@@ -347,7 +349,15 @@ impl InferenceRuntimeState {
             .expect("embedded inference registry must project to a valid inventory");
         let home = crate::paths::omegon_home().unwrap_or_else(|_| project_root.join(".omegon"));
         let sources = InferenceManifestLoader::default_sources(&home, project_root);
-        Self::with_runtime_parts(initial, embedded, sources)
+        let mut state = Self::with_runtime_parts(initial, embedded, sources);
+        let cache_path = crate::inference_discovery::default_cache_path();
+        // Cold start projects the persisted last-known-good discovery results
+        // (evidenced as cached) before any network activity.
+        state.discovery = Arc::new(tokio::sync::RwLock::new(
+            crate::inference_discovery::DiscoveryCache::load(&cache_path),
+        ));
+        state.discovery_cache_path = cache_path;
+        state
     }
 
     fn with_runtime_parts(
@@ -362,6 +372,10 @@ impl InferenceRuntimeState {
             active_sources: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             last_rejected_diagnostics: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             route_shadow_observations: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            discovery: Arc::new(tokio::sync::RwLock::new(
+                crate::inference_discovery::DiscoveryCache::default(),
+            )),
+            discovery_cache_path: crate::inference_discovery::default_cache_path(),
         }
     }
 
@@ -524,9 +538,93 @@ impl InferenceRuntimeState {
         *self.last_rejected_diagnostics.write().await = diagnostics;
     }
 
+    /// Enumerate due endpoints and update the persisted discovery cache.
+    /// Fetch failures retain the previous per-endpoint result (last-known-good)
+    /// and are reported as redacted diagnostics. Does not rebuild the snapshot;
+    /// callers follow with `refresh()`.
+    pub async fn refresh_discovery(&self, force: bool) -> Vec<String> {
+        let registry = ModelRegistry::global();
+        let now = crate::inference_discovery::unix_now();
+        let candidate_ids: Vec<String> = registry
+            .endpoints()
+            .iter()
+            .map(|endpoint| endpoint.id.clone())
+            .collect();
+        let due = {
+            let cache = self.discovery.read().await;
+            cache.due_endpoints(candidate_ids.iter().map(String::as_str), now, force)
+        };
+        let mut diagnostics = Vec::new();
+        for endpoint_id in due {
+            if !crate::inference_discovery::endpoint_credentialed(&endpoint_id) {
+                continue;
+            }
+            let base_url = registry
+                .endpoints()
+                .iter()
+                .find(|endpoint| endpoint.id == endpoint_id)
+                .and_then(|endpoint| endpoint.base_url.clone());
+            match crate::inference_discovery::fetch_endpoint(&endpoint_id, base_url.as_deref())
+                .await
+            {
+                Ok(result) => self.discovery.write().await.record(result),
+                Err(error) if error.endpoint_absent => {}
+                Err(error) => diagnostics.push(error.to_string()),
+            }
+        }
+        let cache = self.discovery.read().await;
+        if !cache.endpoints.is_empty()
+            && let Err(error) = cache.store(&self.discovery_cache_path)
+        {
+            diagnostics.push(format!("discovery cache persist failed: {error}"));
+        }
+        diagnostics
+    }
+
+    #[cfg(test)]
+    pub async fn seed_discovery(&self, results: Vec<crate::inference_discovery::DiscoveredModels>) {
+        let mut cache = self.discovery.write().await;
+        for result in results {
+            cache.record(result);
+        }
+    }
+
+    async fn discovery_layer(&self) -> Option<InventoryLayer> {
+        let cache = self.discovery.read().await;
+        let results = cache.results();
+        if results.is_empty() {
+            return None;
+        }
+        Some(crate::inference_discovery::build_discovery_layer(
+            &results,
+            &crate::inference_discovery::registry_ids_by_endpoint(ModelRegistry::global()),
+        ))
+    }
+
     pub async fn refresh(&self) -> InferenceRefreshReport {
         let previous = self.store.snapshot().await;
-        match self.loader.reload(&self.store).await {
+        let rejected = |diagnostics: Vec<ManifestDiagnostic>,
+                        loaded_sources: Vec<ManifestSource>| {
+            InferenceRefreshReport {
+                previous_generation: previous.generation,
+                active_generation: previous.generation,
+                activated: false,
+                loaded_sources,
+                endpoint_count: previous.endpoints.len(),
+                offering_count: previous.offerings.len(),
+                diagnostics,
+            }
+        };
+        let mut layers = match self.loader.load_layers() {
+            Ok(layers) => layers,
+            Err(diagnostics) => {
+                return rejected(diagnostics, self.active_sources.read().await.clone());
+            }
+        };
+        if let Some(discovery) = self.discovery_layer().await {
+            layers.push(discovery);
+        }
+        match self.store.refresh(layers).await {
             Ok(_) => {
                 let active = self.store.snapshot().await;
                 let loaded_sources: Vec<_> = self
@@ -546,15 +644,15 @@ impl InferenceRuntimeState {
                     diagnostics: Vec::new(),
                 }
             }
-            Err(diagnostics) => InferenceRefreshReport {
-                previous_generation: previous.generation,
-                active_generation: previous.generation,
-                activated: false,
-                loaded_sources: self.active_sources.read().await.clone(),
-                endpoint_count: previous.endpoints.len(),
-                offering_count: previous.offerings.len(),
-                diagnostics,
-            },
+            Err(errors) => {
+                let diagnostics = vec![ManifestDiagnostic {
+                    source: crate::inference_inventory::InventorySource::Session,
+                    path: std::path::PathBuf::new(),
+                    phase: crate::inference_manifest::ManifestPhase::Validation,
+                    message: errors.join("; "),
+                }];
+                rejected(diagnostics, self.active_sources.read().await.clone())
+            }
         }
     }
 }
@@ -562,6 +660,76 @@ impl InferenceRuntimeState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn runtime_with_embedded() -> InferenceRuntimeState {
+        let embedded = InventoryLayer::embedded_registry(ModelRegistry::global());
+        let initial = InventorySnapshot::build(1, vec![embedded.clone()]).unwrap();
+        InferenceRuntimeState::with_parts(initial, embedded, Vec::new())
+    }
+
+    #[tokio::test]
+    async fn discovery_layer_merges_into_refreshed_snapshot() {
+        use crate::inference_discovery::{DiscoveredModel, DiscoveredModels};
+        let runtime = runtime_with_embedded();
+        runtime
+            .seed_discovery(vec![DiscoveredModels {
+                endpoint_id: "github-copilot".into(),
+                models: vec![
+                    DiscoveredModel {
+                        id: "gpt-5.6-sol".into(),
+                        ..Default::default()
+                    },
+                    DiscoveredModel {
+                        id: "claude-sonnet-4.6".into(),
+                        ..Default::default()
+                    },
+                ],
+                fetched_at: 1,
+                ttl_secs: 3600,
+                cached: false,
+            }])
+            .await;
+        let report = runtime.refresh().await;
+        assert!(report.activated, "diagnostics: {:?}", report.diagnostics);
+        let snapshot = runtime.snapshot().await;
+        let uncurated = snapshot
+            .offerings
+            .get(&crate::inference_inventory::OfferingId(
+                "github-copilot:gpt-5.6-sol".into(),
+            ))
+            .expect("uncurated discovered offering present");
+        assert!(!uncurated.is_graded());
+        assert!(uncurated.enabled.value);
+        // Registry-curated Copilot ids absent from the live enumeration
+        // (e.g. gpt-5.4) are disabled by the discovery layer.
+        let absent = snapshot
+            .offerings
+            .get(&crate::inference_inventory::OfferingId(
+                "github-copilot:gpt-5.4".into(),
+            ))
+            .expect("registry offering still present");
+        assert!(
+            !absent.enabled.value,
+            "absent-from-live id must be disabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_without_discovery_results_is_bootstrap_only() {
+        let runtime = runtime_with_embedded();
+        let report = runtime.refresh().await;
+        assert!(report.activated);
+        let snapshot = runtime.snapshot().await;
+        // No discovery cache → embedded registry shape passes through intact.
+        assert!(
+            snapshot
+                .offerings
+                .get(&crate::inference_inventory::OfferingId(
+                    "github-copilot:gpt-5.4".into(),
+                ))
+                .is_some_and(|offering| offering.enabled.value)
+        );
+    }
 
     #[test]
     fn classifies_all_route_relationships() {

@@ -2560,7 +2560,13 @@ impl App {
                     format!(", {}", model.capability_str())
                 };
                 let label = format!("{}: {}", provider_name, model.name);
-                let description = format!("{} — {}{}", model.description, context, caps);
+                let freshness = catalog
+                    .freshness
+                    .get(provider_name)
+                    .map(|state| format!(" · inventory {state}"))
+                    .unwrap_or_default();
+                let description =
+                    format!("{} — {}{}{}", model.description, context, caps, freshness);
 
                 options.push(selector::SelectOption {
                     value: model.id.clone(),
@@ -13126,9 +13132,11 @@ pub async fn run_tui(
     io::stdout().execute(crossterm::terminal::Clear(
         crossterm::terminal::ClearType::All,
     ))?;
-    // Mouse capture is ON by default: trackpad/wheel scrolling must be owned by
-    // the conversation view. `/mouse off` is the explicit opt-in escape hatch
-    // for terminal-native drag selection during the current session.
+    // Mouse capture is ON by default for wheel and pane interaction. Native
+    // terminal selection remains available without changing modes by holding
+    // Shift while dragging (the standard terminal mouse-capture override).
+    // `/mouse off` remains the guaranteed passthrough fallback for terminals
+    // that do not implement the Shift override.
     io::stdout().execute(EnableMouseCapture)?;
     io::stdout().execute(crossterm::event::EnableBracketedPaste)?;
 
@@ -13178,8 +13186,8 @@ pub async fn run_tui(
     );
 
     // Mouse capture starts enabled because two-finger/trackpad scrolling is a
-    // conversation-view invariant. `/mouse off` temporarily gives drag selection
-    // back to the terminal for this session.
+    // conversation-view invariant. Shift-drag asks the terminal to bypass
+    // capture for native selection; `/mouse off` is the guaranteed fallback.
     let mut app = App::new(settings.clone());
     app.mouse_capture_enabled = true;
     app.keyboard_enhancement = has_keyboard_enhancement;
@@ -13534,12 +13542,24 @@ pub async fn run_tui(
                                             segment: ConversationSegmentRef::by_index(idx),
                                         },
                                     );
-                                    let _ = app.handle_copy_conversation_segment_action(
+                                    let outcome = app.handle_copy_conversation_segment_action(
                                         CopyConversationSegmentAction {
                                             segment: ConversationSegmentRef::by_index(idx),
                                             mode: SegmentCopyMode::Plaintext,
                                         },
                                     );
+                                    match outcome {
+                                        UiActionOutcome::Accepted { .. } => app.show_toast(
+                                            "Copied assistant response",
+                                            ratatui_toaster::ToastType::Success,
+                                        ),
+                                        UiActionOutcome::Rejected { reason }
+                                        | UiActionOutcome::Noop { reason }
+                                        | UiActionOutcome::Deferred { reason } => app.show_toast(
+                                            &reason,
+                                            ratatui_toaster::ToastType::Warning,
+                                        ),
+                                    }
                                     continue;
                                 }
                                 if let Some(idx) = app.conversation.segment_at(area, mouse.row) {

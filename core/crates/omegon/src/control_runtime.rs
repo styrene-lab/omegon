@@ -1126,6 +1126,12 @@ pub async fn model_list_response() -> SlashCommandResponse {
     let catalog = crate::tui::model_catalog::ModelCatalog::discover();
     let grouped = catalog.by_conceptual_model();
     let mut output = String::from("Available Models\n");
+    if !catalog.freshness.is_empty() {
+        output.push_str("\nInventory freshness (refresh with /runtime refresh):\n");
+        for (provider, state) in &catalog.freshness {
+            output.push_str(&format!("  {provider}: {state}\n"));
+        }
+    }
     for (conceptual_model_id, routes) in grouped {
         output.push_str(&format!("\n{}\n", conceptual_model_id));
         for model in routes {
@@ -1810,6 +1816,12 @@ pub async fn runtime_substrate_refresh_response(
             };
         }
     };
+    // Explicit operator refresh bypasses discovery TTL (spec:
+    // inference/catalog-unification "Explicit refresh bypasses TTL").
+    let discovery_diagnostics = runtime_state
+        .inference_runtime
+        .refresh_discovery(true)
+        .await;
     let inference = runtime_state.inference_runtime.refresh().await;
     runtime_state
         .inference_runtime
@@ -1855,6 +1867,12 @@ pub async fn runtime_substrate_refresh_response(
             " {} extension manifest(s) were invalid.",
             substrate.invalid_manifests.len()
         ));
+    }
+    if !discovery_diagnostics.is_empty() {
+        output.push_str(" Discovery diagnostics (last-known-good retained):");
+        for diagnostic in &discovery_diagnostics {
+            output.push_str(&format!("\n- {diagnostic}"));
+        }
     }
     if !inference.diagnostics.is_empty() {
         output.push_str(" Inference diagnostics:");
