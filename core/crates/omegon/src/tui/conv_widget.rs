@@ -34,6 +34,9 @@ pub struct ConvState {
     /// Total rendered height from the previous frame.
     /// Used to preserve a detached viewport when streaming grows content.
     last_total_height: u16,
+    /// Copy targets painted by the most recent frame. Mouse handling consumes
+    /// these authoritative rectangles instead of reconstructing render geometry.
+    pub copy_hitboxes: Vec<(Rect, usize)>,
 }
 
 impl ConvState {
@@ -48,6 +51,7 @@ impl ConvState {
             cached_selected_segment: None,
             snap_to_selected: false,
             last_total_height: 0,
+            copy_hitboxes: Vec::new(),
         }
     }
 
@@ -101,7 +105,7 @@ impl ConvState {
         segments: &[Segment],
         width: u16,
         ctx: &SegmentRenderContext<'_>,
-        user_scrolled: bool,
+        _user_scrolled: bool,
         selected_segment: Option<usize>,
     ) {
         // Full recompute if width changed
@@ -123,18 +127,14 @@ impl ConvState {
             self.cached_count = segments.len();
         }
 
-        // Recompute the last segment while attached, and always once it is
-        // no longer live. Detached streaming tails intentionally keep their
-        // cached height to preserve the operator's scroll anchor; completed
-        // tails must be measured again or a final assistant response can look
-        // hard-truncated after the turn is marked done.
-        let last_is_live = segments
-            .last()
-            .is_some_and(SegmentRenderMetadata::is_live_render_segment);
-        if !segments.is_empty()
-            && self.cached_count == segments.len()
-            && (!user_scrolled || !last_is_live)
-        {
+        // Recompute the last segment on every frame. Active tool/assistant tails
+        // mutate in place and can both grow and shrink as their projection moves
+        // between live detail and compact status. Keeping a detached tail's old
+        // height creates a phantom segment whose blank rows consume the viewport.
+        // `ConversationWidget::render` preserves the logical top anchor across
+        // this remeasurement, so correctness no longer depends on freezing a
+        // stale live-tail height.
+        if !segments.is_empty() && self.cached_count == segments.len() {
             let last = segments.len() - 1;
             self.heights[last] = measured_segment_height(
                 &segments[last],
@@ -309,6 +309,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
     type State = ConvState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ConvState) {
+        state.copy_hitboxes.clear();
         // Own the entire viewport every frame so shorter/shrinking content,
         // partial clipping, and out-of-band terminal corruption cannot leave
         // stale glyphs behind in the conversation region.
@@ -463,7 +464,11 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                 .render(seg_area, buf, self.theme, |content_area, buf| {
                     segment.render_in_context(content_area, buf, &render_ctx);
                 });
-                render_assistant_copy_affordance(seg_area, buf, self.theme, segment);
+                if let Some(hitbox) =
+                    render_assistant_copy_affordance(seg_area, buf, self.theme, segment)
+                {
+                    state.copy_hitboxes.push((hitbox, i));
+                }
             } else {
                 // Segment starts ABOVE the viewport — partially visible.
                 // Render into a temp buffer at full size, then copy the
@@ -506,7 +511,8 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                         segment.render_in_context(content_area, buf, &render_ctx);
                     },
                 );
-                render_assistant_copy_affordance(temp_area, &mut temp_buf, self.theme, segment);
+                let _ =
+                    render_assistant_copy_affordance(temp_area, &mut temp_buf, self.theme, segment);
                 // Copy the visible portion from temp_buf to main buf
                 for row in 0..visible_rows {
                     let src_y = clip_rows + row;
@@ -602,7 +608,7 @@ fn render_assistant_copy_affordance(
     buf: &mut Buffer,
     theme: &dyn Theme,
     segment: &Segment,
-) {
+) -> Option<Rect> {
     const LABEL: &str = " Copy ";
     let eligible = matches!(
         &segment.content,
@@ -610,7 +616,7 @@ fn render_assistant_copy_affordance(
     );
     let label_width = LABEL.chars().count() as u16;
     if !eligible || area.height == 0 || area.width < label_width {
-        return;
+        return None;
     }
 
     let x = area.right().saturating_sub(label_width);
@@ -624,6 +630,7 @@ fn render_assistant_copy_affordance(
             cell.set_style(style);
         }
     }
+    Some(Rect::new(x, area.y, label_width, 1))
 }
 
 fn is_collapsed_expandable_tool_card(segment: &Segment) -> bool {
@@ -943,7 +950,56 @@ mod tests {
     }
 
     #[test]
-    fn detached_scroll_skips_last_segment_remeasure() {
+    fn detached_streaming_height_growth_preserves_visible_anchor() {
+        let mut segments = vec![
+            Segment::user_prompt("anchor line one\nanchor line two\nanchor line three"),
+            Segment::user_prompt("middle line one\nmiddle line two"),
+            Segment {
+                meta: Default::default(),
+                content: SegmentContent::AssistantText {
+                    text: "short tail".into(),
+                    thinking: String::new(),
+                    complete: false,
+                },
+            },
+        ];
+        let area = Rect::new(0, 0, 24, 4);
+        let mut state = ConvState::new();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+        state.scroll_offset = state.last_total_height.saturating_sub(area.height);
+        state.user_scrolled = true;
+        let anchor_before = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(state.scroll_offset);
+
+        if let SegmentContent::AssistantText { text, .. } = &mut segments[2].content {
+            *text = "a streaming tail that grows across many wrapped terminal rows while the operator reads above"
+                .repeat(3);
+        }
+        state.invalidate();
+        ConversationWidget::new(&segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+        let anchor_after = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(state.scroll_offset);
+
+        assert_eq!(
+            anchor_after, anchor_before,
+            "streaming growth below a detached viewport must not move the visible anchor"
+        );
+    }
+
+    #[test]
+    fn detached_scroll_remeasures_live_tail_without_moving_anchor() {
         let segments = vec![Segment {
             meta: Default::default(),
             content: SegmentContent::AssistantText {
@@ -954,6 +1010,7 @@ mod tests {
         }];
         let mut state = ConvState::new();
         state.ensure_heights(&segments, 40, &Alpharius, SegmentRenderMode::Full);
+        let measured = state.heights[0];
         state.heights[0] = 7;
         state.cached_count = segments.len();
         state.cached_width = 40;
@@ -963,8 +1020,8 @@ mod tests {
         let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Full);
         state.ensure_heights_with_scroll_state(&segments, 40, &ctx, true, None);
         assert_eq!(
-            state.heights[0], 7,
-            "detached viewport should preserve cached tail height instead of remeasuring it"
+            state.heights[0], measured,
+            "detached live tails must be remeasured; render-time anchoring preserves the viewport"
         );
     }
 
@@ -1182,6 +1239,9 @@ mod tests {
         state.scroll_up(3);
         let detached_offset = state.scroll_offset;
         let old_total = state.last_total_height;
+        let old_top = old_total
+            .saturating_sub(area.height)
+            .saturating_sub(detached_offset);
 
         let grown_segments = vec![
             Segment::user_prompt("operator"),
@@ -1201,13 +1261,21 @@ mod tests {
             &mut state,
         );
 
+        let new_top = state
+            .last_total_height
+            .saturating_sub(area.height)
+            .saturating_sub(state.scroll_offset);
         assert_eq!(
-            state.last_total_height, old_total,
-            "detached viewport should preserve cached total height while the streaming tail is off-screen"
+            new_top, old_top,
+            "detached viewport must preserve its logical top anchor while the live tail grows"
         );
-        assert_eq!(
-            state.scroll_offset, detached_offset,
-            "detached viewport should preserve the operator's scroll anchor instead of chasing the live tail"
+        assert!(
+            state.last_total_height > old_total,
+            "live tail growth must be remeasured instead of hidden behind stale cached height"
+        );
+        assert!(
+            state.scroll_offset > detached_offset,
+            "bottom-relative offset must absorb growth below the detached anchor"
         );
     }
 

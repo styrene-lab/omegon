@@ -16,6 +16,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored conversation copy, native terminal selection, and detached viewport
+  anchoring: assistant `Copy` clicks now resolve through hitboxes owned by the
+  rendered frame instead of reconstructing stale geometry, target the exact
+  later response that painted the affordance, and show success/failure feedback.
+  Mutable live tails are remeasured every frame to eliminate phantom blank rows
+  while render-time logical anchoring keeps the operator's visible location fixed
+  as streaming content grows or shrinks. Mouse capture remains the default for
+  scrolling and pane interaction, while Shift-drag uses the terminal's standard
+  native-selection override and `/mouse off` remains the guaranteed passthrough
+  fallback.
+
 ## [0.28.2] - 2026-07-14
 
 ### Added
