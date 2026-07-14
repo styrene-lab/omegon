@@ -1,20 +1,10 @@
 ---
 import Docs from "../layouts/Docs.astro";
-import { stripFrontmatter } from "../lib/markdown";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readRepoDoc } from "../lib/repo-docs";
 
-// Resolve from the build cwd (site/), matching terms.astro and privacy.astro.
-// import.meta.url points at the Vite-compiled chunk during `astro build`,
-// so source-relative traversal silently misses the repo root.
-const changelogPath = join(process.cwd(), "..", "CHANGELOG.md");
-
-let raw = "";
-try {
-  raw = stripFrontmatter(readFileSync(changelogPath, "utf-8"));
-} catch {
-  raw = "# Changelog\n\n*Not available during this build.*";
-}
+// Throws (failing the build) if CHANGELOG.md can't be read — a placeholder
+// changelog in production is worse than a red CI run.
+const raw = readRepoDoc("CHANGELOG.md");
 
 const { default: markdownit } = await import("markdown-it");
 const md = markdownit({ html: true, linkify: true });

@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - Fixed the docs-site changelog page rendering "Not available during this build": the page resolved `CHANGELOG.md` relative to `import.meta.url`, which points at the Vite-compiled chunk during `astro build`, so the repo-root file was never found. It now resolves from the build working directory like the terms and privacy pages.
+- The docs-site build now fails loudly when a repo-root document (`CHANGELOG.md`, `TERMS.md`, `PRIVACY.md`) cannot be read, instead of silently shipping "Not available during this build" placeholder pages to production.
 
 ## [0.28.1] - 2026-07-14
 
