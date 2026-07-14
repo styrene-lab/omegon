@@ -255,7 +255,7 @@ impl<T> RenderableConversationSegment for T where
 
 impl SegmentMeasure for Segment {
     fn height_in_context(&self, width: u16, ctx: &SegmentRenderContext<'_>) -> u16 {
-        self.height_in_mode(width, ctx.theme, ctx.mode)
+        self.height_with_context(width, ctx)
     }
 }
 

@@ -1551,7 +1551,11 @@ mod tests {
             permission.requested_path
         );
         if permission.requested_path.len() > "/etc/evil.txt".len() {
-            assert!(permission.requested_path.contains("permission context warning"));
+            assert!(
+                permission
+                    .requested_path
+                    .contains("permission context warning")
+            );
             assert!(permission.requested_path.contains("HostBridge"));
         }
         assert!(

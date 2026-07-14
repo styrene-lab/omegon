@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed large blank voids in the conversation viewport caused by segment measurement diverging from live rendering: segment heights are now measured under the exact same presentation context (mode and tool-detail density) used to paint them, and full tool-card height estimates use the live density budgets instead of hardcoded `Detailed` caps.
+
 ## [0.28.0] - 2026-07-13
 
 0.28.0 makes Om the outcome-first TUI default, adds bounded Active workflows and evidence-complete Full projection, and completes the permissions intent architecture. Canonical activity, outcomes, and evidence now project consistently across TUI, IPC/WebSocket, transcript export, and replay without changing runtime authority.
