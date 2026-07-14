@@ -25,9 +25,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
   token-exchange transport with `auth copilot-probe`), and local Ollama. Discovered
   ids unknown to the registry surface as ungraded offerings with conservative
   defaults; registry ids absent from live enumeration are marked unavailable.
-  TTL-cached with persisted last-known-good (`discovery-cache.json`). Foundation
-  for OpenSpec change `inference-discovery-producers` (0.28.2); runtime wiring and
-  model-catalog unification follow.
+  TTL-cached with persisted last-known-good (`discovery-cache.json`). Discovery
+  results merge into the inference inventory on every runtime refresh; the
+  operator's runtime-refresh command bypasses discovery TTL and reports
+  per-endpoint failures while retaining last-known-good. Foundation
+  for OpenSpec change `inference-discovery-producers` (0.28.2); startup
+  discovery trigger and model-catalog unification follow.
 
 ### Fixed
 

@@ -526,6 +526,33 @@ pub fn default_cache_path() -> PathBuf {
     crate::paths::user_config_dir().join("discovery-cache.json")
 }
 
+/// Registry-curated model ids grouped by endpoint (provider) id — the "known"
+/// set that `build_discovery_layer` uses to distinguish curated availability
+/// patches from uncurated full-shape offerings.
+pub fn registry_ids_by_endpoint(
+    registry: &crate::model_registry::ModelRegistry,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for model in registry.all_models() {
+        map.entry(model.provider.clone())
+            .or_default()
+            .insert(model.id.clone());
+    }
+    map
+}
+
+/// Whether an endpoint can be enumerated right now: it has a discovery
+/// contract and the credential its fetcher needs resolves. Local Ollama needs
+/// none; Copilot resolves its own github-copilot credential inside the shared
+/// transport, gated here identically.
+pub fn endpoint_credentialed(endpoint_id: &str) -> bool {
+    match contract_for_endpoint(endpoint_id) {
+        Some(DiscoveryContract::OllamaLocal) => true,
+        Some(_) => crate::providers::resolve_api_key_sync(endpoint_id).is_some(),
+        None => false,
+    }
+}
+
 // ── Fetching ─────────────────────────────────────────────────────────────────
 
 fn redact(detail: &str) -> String {

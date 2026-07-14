@@ -18,11 +18,11 @@ Dependencies: group 1 before 2 (scheduler drives fetchers); groups 1–2 before 
 ## 2. Refresh scheduler, TTL cache, persistence
 <!-- specs: inference/discovery -->
 
-- [ ] 2.1 Implement `DiscoveryScheduler` with per-endpoint TTL state (Copilot TTL from `refresh_in`/`expires_at`; default 1h configurable), refresh triggers: startup post-auth, explicit refresh (TTL bypass), TTL expiry
-- [ ] 2.2 Wire scheduler output into `InferenceRuntime`/`InventoryHandle` refresh so discovery layers merge under existing last-known-good semantics and `InferenceRefreshReport` diagnostics
+- [ ] 2.1 (partial: TTL state + explicit-refresh trigger done in DiscoveryCache/refresh_discovery; startup post-auth trigger not yet spawned) Implement `DiscoveryScheduler` with per-endpoint TTL state (Copilot TTL from `refresh_in`/`expires_at`; default 1h configurable), refresh triggers: startup post-auth, explicit refresh (TTL bypass), TTL expiry
+- [x] 2.2 Wire scheduler output into `InferenceRuntime`/`InventoryHandle` refresh so discovery layers merge under existing last-known-good semantics and `InferenceRefreshReport` diagnostics
 - [x] 2.3 Persist discovery cache (per-endpoint layer + fetched_at + ttl) to state dir; load on process start as cached-evidence discovery layer before any network activity
-- [ ] 2.4 Failure handling: retain previous per-endpoint layer on fetch error, emit redacted diagnostic with endpoint id
-- [ ] 2.5 Tests: TTL expiry refetch vs unexpired skip, explicit-refresh bypass, cold-start from cache file, fetch failure retains last-known-good and snapshot still validates
+- [x] 2.4 Failure handling: retain previous per-endpoint layer on fetch error, emit redacted diagnostic with endpoint id
+- [x] 2.5 Tests: TTL expiry refetch vs unexpired skip, explicit-refresh bypass, cold-start from cache file, fetch failure retains last-known-good and snapshot still validates
 
 ## 3. Catalog unification and selection surface
 <!-- specs: inference/catalog-unification -->
