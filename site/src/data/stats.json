@@ -1,6 +1,6 @@
 {
   "crateCount": 11,
-  "downloadMB": null,
+  "downloadMB": 16,
   "releaseTag": "v0.28.0",
   "providerCount": 16,
   "providerNames": [
@@ -42,5 +42,5 @@
   "toolFiles": 24,
   "skillCount": 10,
   "searchProviderCount": 3,
-  "collectedAt": "2026-07-13T16:27:36.949Z"
+  "collectedAt": "2026-07-14T01:20:24.249Z"
 }
