@@ -57,6 +57,7 @@ pub mod features;
 pub(crate) mod filelock;
 mod first_run;
 mod host_context;
+mod inference_discovery;
 mod inference_inventory;
 mod inference_manifest;
 mod inference_runtime;

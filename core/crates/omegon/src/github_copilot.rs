@@ -268,6 +268,55 @@ pub async fn exchange_github_copilot_token(
     })
 }
 
+/// Raw `{copilot_base}/models` payload plus the token expiry hints that drive
+/// the discovery TTL. Shared transport for both the `auth copilot-probe`
+/// diagnostic and the inference discovery producer — one implementation of the
+/// exchange + enumeration contract (spec: inference/discovery).
+#[derive(Debug, Clone)]
+pub struct GithubCopilotModelsPayload {
+    pub body: Value,
+    pub token_refresh_in: Option<i64>,
+    pub token_expires_at: Option<i64>,
+}
+
+/// Discovery requires an explicit Omegon github-copilot login; the diagnostic
+/// gh-CLI / environment fallbacks used by the probe are intentionally not
+/// consulted for a background producer.
+pub async fn fetch_models_payload() -> anyhow::Result<GithubCopilotModelsPayload> {
+    let (github_token, _is_oauth) = crate::providers::resolve_api_key_sync("github-copilot")
+        .ok_or_else(|| {
+            anyhow::anyhow!("no github-copilot credential; run `omegon auth login github-copilot`")
+        })?;
+    let api_token = exchange_github_copilot_token(&github_token).await?;
+    let client = reqwest::Client::new();
+    let copilot_api_base_url = std::env::var("GITHUB_COPILOT_BASE_URL")
+        .unwrap_or_else(|_| DEFAULT_COPILOT_API_BASE_URL.to_string());
+    let models_url = format!("{}/models", copilot_api_base_url.trim_end_matches('/'));
+    let header_profile = GithubCopilotHeaderProfile::from_env();
+    let request = client
+        .get(models_url)
+        .header("Authorization", format!("Bearer {}", api_token.token))
+        .header("Accept", "application/json")
+        .header("User-Agent", "omegon-github-copilot-probe");
+    let response = header_profile.apply_to(request).send().await?;
+    let status = response.status();
+    let body_text = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!(
+            "copilot models endpoint returned {}: {}",
+            status,
+            redact_probe_body(&body_text)
+        );
+    }
+    let body = serde_json::from_str::<Value>(&body_text)
+        .map_err(|e| anyhow::anyhow!("copilot models payload is not JSON: {e}"))?;
+    Ok(GithubCopilotModelsPayload {
+        body,
+        token_refresh_in: api_token.refresh_in,
+        token_expires_at: api_token.expires_at,
+    })
+}
+
 pub async fn probe_github_copilot_contract() -> anyhow::Result<GithubCopilotContractProbe> {
     let signin = resolve_github_signin().await?;
     probe_github_copilot_contract_with_token_and_source(&signin.token, signin.source.as_str()).await

@@ -16,6 +16,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Inference discovery producers (`inference_discovery.rs`): protocol-keyed live model
+  enumeration for the dynamic inference inventory's Discovery layer. One
+  OpenAI-compatible fetcher covers openai/groq/mistral/xai/hf-router/ollama-cloud;
+  dedicated parsers for OpenRouter, Anthropic, Google, GitHub Copilot (shared
+  token-exchange transport with `auth copilot-probe`), and local Ollama. Discovered
+  ids unknown to the registry surface as ungraded offerings with conservative
+  defaults; registry ids absent from live enumeration are marked unavailable.
+  TTL-cached with persisted last-known-good (`discovery-cache.json`). Foundation
+  for OpenSpec change `inference-discovery-producers` (0.28.2); runtime wiring and
+  model-catalog unification follow.
+
 ### Fixed
 
 - Fixed the docs-site changelog page rendering "Not available during this build": the page resolved `CHANGELOG.md` relative to `import.meta.url`, which points at the Vite-compiled chunk during `astro build`, so the repo-root file was never found. It now resolves from the build working directory like the terms and privacy pages.
