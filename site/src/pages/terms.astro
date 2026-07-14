@@ -1,16 +1,9 @@
 ---
 import Docs from "../layouts/Docs.astro";
-import { stripFrontmatter } from "../lib/markdown";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readRepoDoc } from "../lib/repo-docs";
 
-const termsPath = join(process.cwd(), "..", "TERMS.md");
-let raw = "";
-try {
-  raw = stripFrontmatter(readFileSync(termsPath, "utf-8"));
-} catch {
-  raw = "# Terms of Use\n\n*Not available during this build.*";
-}
+// Throws (failing the build) if TERMS.md can't be read.
+const raw = readRepoDoc("TERMS.md");
 
 const { default: markdownit } = await import("markdown-it");
 const md = markdownit({ html: true, linkify: true });

@@ -1,16 +1,9 @@
 ---
 import Docs from "../layouts/Docs.astro";
-import { stripFrontmatter } from "../lib/markdown";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readRepoDoc } from "../lib/repo-docs";
 
-const privacyPath = join(process.cwd(), "..", "PRIVACY.md");
-let raw = "";
-try {
-  raw = stripFrontmatter(readFileSync(privacyPath, "utf-8"));
-} catch {
-  raw = "# Privacy Policy\n\n*Not available during this build.*";
-}
+// Throws (failing the build) if PRIVACY.md can't be read.
+let raw = readRepoDoc("PRIVACY.md");
 
 const siteLabel = "https://omegon.styrene.io";
 raw = raw
