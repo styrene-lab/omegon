@@ -86,6 +86,10 @@ impl ModelInfo {
 pub struct ModelCatalog {
     /// Models keyed by provider, then by model ID
     pub providers: BTreeMap<String, Vec<ModelInfo>>,
+    /// Per-provider discovery freshness (e.g. "live, confirmed 3m ago",
+    /// "stale, confirmed 5h ago"). Empty for bootstrap-only sections.
+    #[serde(default)]
+    pub freshness: BTreeMap<String, String>,
 }
 
 impl ModelCatalog {
@@ -98,20 +102,192 @@ impl ModelCatalog {
 
     /// Discover the live model catalog.
     ///
-    /// - Ollama section is populated by running `ollama list` — only models
-    ///   actually installed on this machine appear.
-    /// - Cloud provider sections are included only when a valid API key or
-    ///   OAuth token can be resolved for that provider.
+    /// - Cloud sections project from an inventory snapshot (embedded registry
+    ///   bootstrap + persisted discovery layer), so live-enumerated provider
+    ///   models appear and chat-incompatible offerings are filtered. Reads the
+    ///   persisted discovery cache only — never the network (spec:
+    ///   inference/catalog-unification "Catalog read is non-blocking").
+    /// - Ollama falls back to a live `ollama list` when discovery has not yet
+    ///   cached local results.
     pub fn discover() -> Self {
-        let mut cat = Self::cloud_only();
+        let cache = crate::inference_discovery::DiscoveryCache::load(
+            &crate::inference_discovery::default_cache_path(),
+        );
+        let mut cat = Self::project_with_gate(&cache, |provider| {
+            crate::providers::resolve_api_key_sync(provider).is_some()
+        });
 
-        // Populate Ollama from live `ollama list`
-        let ollama_models = Self::query_ollama();
-        if !ollama_models.is_empty() {
-            cat.providers.insert("Ollama".to_string(), ollama_models);
+        if !cache.endpoints.contains_key("ollama") {
+            let ollama_models = Self::query_ollama();
+            if !ollama_models.is_empty() {
+                cat.providers.insert("Ollama".to_string(), ollama_models);
+                cat.freshness
+                    .insert("Ollama".to_string(), "live query".to_string());
+            }
         }
 
         cat
+    }
+
+    /// Project the catalog from an inventory snapshot built from the embedded
+    /// registry plus the given discovery cache. `gate` decides which provider
+    /// sections are included (credential resolution in production; injectable
+    /// for tests). Falls back to the registry-only catalog if the snapshot
+    /// cannot be built.
+    pub(crate) fn project_with_gate(
+        cache: &crate::inference_discovery::DiscoveryCache,
+        gate: impl Fn(&str) -> bool,
+    ) -> Self {
+        use crate::inference_discovery as discovery;
+        use crate::inference_inventory::{InventoryLayer, InventorySnapshot, Modality};
+
+        let reg = crate::model_registry::ModelRegistry::global();
+        let mut layers = vec![InventoryLayer::embedded_registry(reg)];
+        let results = cache.results();
+        if !results.is_empty() {
+            layers.push(discovery::build_discovery_layer(
+                &results,
+                &discovery::registry_ids_by_endpoint(reg),
+            ));
+        }
+        let snapshot = match InventorySnapshot::build(1, layers) {
+            Ok(snapshot) => snapshot,
+            Err(errors) => {
+                debug_assert!(false, "catalog projection snapshot rejected: {errors:?}");
+                return Self::cloud_only();
+            }
+        };
+
+        let provider_display: BTreeMap<&str, &str> = [
+            ("anthropic", "Anthropic"),
+            ("openai", "OpenAI"),
+            ("openai-codex", "OpenAI Codex"),
+            ("github-copilot", "GitHub Copilot"),
+            ("ollama-cloud", "Ollama Cloud"),
+            ("ollama", "Ollama"),
+            ("groq", "Groq"),
+            ("xai", "xAI"),
+            ("mistral", "Mistral"),
+            ("google", "Google Gemini"),
+            ("gemini-openai", "Google Gemini"),
+            ("openrouter", "OpenRouter"),
+            ("huggingface-router", "Hugging Face Router"),
+        ]
+        .into();
+
+        let registry_descriptions: BTreeMap<String, String> = reg
+            .all_models()
+            .map(|m| (format!("{}:{}", m.provider, m.id), m.description.clone()))
+            .collect();
+
+        let mut providers: BTreeMap<String, Vec<ModelInfo>> = BTreeMap::new();
+        let mut freshness: BTreeMap<String, String> = BTreeMap::new();
+        let now = discovery::unix_now();
+
+        for (offering_id, offering) in &snapshot.offerings {
+            let endpoint_id = offering.endpoint.value.0.as_str();
+            let Some(&display_name) = provider_display.get(endpoint_id) else {
+                continue;
+            };
+            if !gate(endpoint_id) {
+                continue;
+            }
+            // Disabled offerings include registry ids absent from a successful
+            // live enumeration — excluded from selection by default.
+            if !offering.enabled.value {
+                continue;
+            }
+            // Chat-selection filter: modality plus the non-chat marker that
+            // catches text-output internal aux models.
+            let text_out = offering
+                .output_modalities
+                .value
+                .iter()
+                .any(|m| m.0 == Modality::TEXT);
+            let non_chat_marked = offering
+                .extensions
+                .value
+                .get(discovery::EXT_NON_CHAT)
+                .is_some_and(|v| v == "true");
+            if !text_out || non_chat_marked {
+                continue;
+            }
+
+            let capabilities = offering
+                .capabilities
+                .iter()
+                .filter(|(_, enabled)| enabled.value)
+                .filter_map(|(name, _)| match name.as_str() {
+                    "reasoning" => Some(Capability::Reasoning),
+                    "coding" => Some(Capability::Coding),
+                    "vision" => Some(Capability::Vision),
+                    "fast" => Some(Capability::Fast),
+                    "instruction" => Some(Capability::Instruction),
+                    "multilingual" => Some(Capability::Multilingual),
+                    _ => None,
+                })
+                .collect();
+            let description = registry_descriptions
+                .get(&offering_id.0)
+                .cloned()
+                .unwrap_or_else(|| {
+                    format!("Discovered live on {display_name}; not yet curated (ungraded)")
+                });
+            providers
+                .entry(display_name.to_string())
+                .or_default()
+                .push(ModelInfo {
+                    id: offering_id.0.clone(),
+                    name: offering.display_name.value.clone(),
+                    provider: display_name.to_string(),
+                    context_input: offering.context_input.as_ref().map(|c| c.value).unwrap_or(0),
+                    context_output: offering
+                        .context_output
+                        .as_ref()
+                        .map(|c| c.value)
+                        .unwrap_or(0),
+                    capabilities,
+                    description,
+                    available: true,
+                    conceptual_model_id: offering
+                        .conceptual_model
+                        .as_ref()
+                        .map(|c| c.value.0.clone()),
+                    producer: reg.producer_for_route(&offering_id.0).map(str::to_string),
+                    execution_class: reg
+                        .execution_class_for_route(&offering_id.0)
+                        .map(str::to_string),
+                });
+        }
+
+        for (endpoint_id, result) in &cache.endpoints {
+            let Some(&display_name) = provider_display.get(endpoint_id.as_str()) else {
+                continue;
+            };
+            let age_secs = now.saturating_sub(result.fetched_at);
+            let age = if age_secs < 120 {
+                format!("{age_secs}s ago")
+            } else if age_secs < 7200 {
+                format!("{}m ago", age_secs / 60)
+            } else {
+                format!("{}h ago", age_secs / 3600)
+            };
+            let stale = age_secs > result.ttl_secs;
+            let state = match (result.cached, stale) {
+                (_, true) => "stale",
+                (true, false) => "cached",
+                (false, false) => "live",
+            };
+            freshness.insert(display_name.to_string(), format!("{state}, confirmed {age}"));
+        }
+
+        if providers.is_empty() {
+            return Self::cloud_only();
+        }
+        ModelCatalog {
+            providers,
+            freshness,
+        }
     }
 
     /// Query `ollama list` and parse installed models into ModelInfo entries.
@@ -310,7 +486,10 @@ impl ModelCatalog {
             }
         }
 
-        ModelCatalog { providers }
+        ModelCatalog {
+            providers,
+            freshness: BTreeMap::new(),
+        }
     }
 
     // ── Legacy hardcoded blocks removed — all model data now comes from
@@ -399,6 +578,101 @@ mod tests {
     use super::*;
 
     #[test]
+    fn catalog_projects_discovered_offerings_over_static_registry() {
+        use crate::inference_discovery::{DiscoveredModel, DiscoveredModels, DiscoveryCache};
+        let mut cache = DiscoveryCache::default();
+        cache.record(DiscoveredModels {
+            endpoint_id: "github-copilot".into(),
+            models: vec![
+                DiscoveredModel {
+                    id: "claude-sonnet-4.6".into(),
+                    ..Default::default()
+                },
+                DiscoveredModel {
+                    id: "gpt-5.6-sol".into(),
+                    context_input: Some(400_000),
+                    ..Default::default()
+                },
+                DiscoveredModel {
+                    id: "text-embedding-3-small-inference".into(),
+                    non_chat: true,
+                    ..Default::default()
+                },
+                DiscoveredModel {
+                    id: "trajectory-compaction".into(),
+                    non_chat: true,
+                    ..Default::default()
+                },
+            ],
+            fetched_at: crate::inference_discovery::unix_now(),
+            ttl_secs: 3600,
+            cached: false,
+        });
+        let cat = ModelCatalog::project_with_gate(&cache, |p| p == "github-copilot");
+        let copilot = cat
+            .providers
+            .get("GitHub Copilot")
+            .expect("copilot section present");
+        let ids: Vec<&str> = copilot.iter().map(|m| m.id.as_str()).collect();
+        assert!(
+            ids.contains(&"github-copilot:gpt-5.6-sol"),
+            "uncurated live model must be selectable: {ids:?}"
+        );
+        assert!(
+            ids.contains(&"github-copilot:claude-sonnet-4.6"),
+            "curated live model present: {ids:?}"
+        );
+        assert!(
+            !ids.iter().any(|id| id.contains("embedding")),
+            "embedding models filtered from chat selection: {ids:?}"
+        );
+        assert!(
+            !ids.iter().any(|id| id.contains("trajectory-compaction")),
+            "internal aux models filtered from chat selection: {ids:?}"
+        );
+        // Registry Copilot ids absent from live enumeration (e.g. gpt-5.4)
+        // are excluded from the selection surface.
+        assert!(
+            !ids.contains(&"github-copilot:gpt-5.4"),
+            "absent-from-live registry id must not be selectable: {ids:?}"
+        );
+        // Curated metadata survives the merge.
+        let sonnet = copilot
+            .iter()
+            .find(|m| m.id == "github-copilot:claude-sonnet-4.6")
+            .unwrap();
+        assert_eq!(sonnet.context_input, 128_000);
+        assert_eq!(
+            sonnet.conceptual_model_id.as_deref(),
+            Some("claude-sonnet-4.6")
+        );
+        // Freshness is reported for the enumerated provider.
+        assert!(
+            cat.freshness
+                .get("GitHub Copilot")
+                .is_some_and(|s| s.starts_with("live")),
+            "freshness: {:?}",
+            cat.freshness
+        );
+    }
+
+    #[test]
+    fn catalog_projection_without_cache_matches_bootstrap_and_is_network_free() {
+        use crate::inference_discovery::DiscoveryCache;
+        let cache = DiscoveryCache::default();
+        let cat = ModelCatalog::project_with_gate(&cache, |p| p == "github-copilot");
+        let copilot = cat
+            .providers
+            .get("GitHub Copilot")
+            .expect("bootstrap copilot section");
+        assert!(
+            copilot.iter().any(|m| m.id == "github-copilot:gpt-5.4"),
+            "registry bootstrap serves the selector before any discovery"
+        );
+        assert!(cat.freshness.is_empty());
+    }
+
+    #[test]
     fn catalog_has_cloud_providers() {
         // `new()` / `cloud_only()` returns cloud providers gated by key availability.
         // Ollama is not present here — it only appears via `discover()` at runtime.
@@ -453,7 +727,10 @@ mod tests {
                 execution_class: Some("api-cloud".to_string()),
             }],
         );
-        ModelCatalog { providers }
+        ModelCatalog {
+            providers,
+            freshness: BTreeMap::new(),
+        }
     }
 
     #[test]

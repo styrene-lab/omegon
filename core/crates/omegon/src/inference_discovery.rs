@@ -36,7 +36,7 @@ pub const DEFAULT_TTL_SECS: u64 = 3600;
 /// can never serve chat traffic (embeddings, provider-internal aux models).
 /// The catalog's chat-selection filter excludes offerings carrying this marker
 /// in addition to modality checks (spec: inference/catalog-unification).
-pub const EXT_NON_CHAT: &str = "non_chat";
+pub const EXT_NON_CHAT: &str = "discovery/non_chat";
 
 /// How an endpoint's live model list is enumerated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1126,6 +1126,12 @@ pub async fn model_list_response() -> SlashCommandResponse {
     let catalog = crate::tui::model_catalog::ModelCatalog::discover();
     let grouped = catalog.by_conceptual_model();
     let mut output = String::from("Available Models\n");
+    if !catalog.freshness.is_empty() {
+        output.push_str("\nInventory freshness (refresh with /runtime refresh):\n");
+        for (provider, state) in &catalog.freshness {
+            output.push_str(&format!("  {provider}: {state}\n"));
+        }
+    }
     for (conceptual_model_id, routes) in grouped {
         output.push_str(&format!("\n{}\n", conceptual_model_id));
         for model in routes {

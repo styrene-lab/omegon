@@ -27,10 +27,10 @@ Dependencies: group 1 before 2 (scheduler drives fetchers); groups 1–2 before 
 ## 3. Catalog unification and selection surface
 <!-- specs: inference/catalog-unification -->
 
-- [ ] 3.1 Migrate `ModelCatalog::cloud_only()`/`discover()` to project from the active `InventorySnapshot` (auth gating preserved; embedded registry serves only as bootstrap layer through the inventory)
-- [ ] 3.2 Apply chat-modality compatibility filtering to the selection projection (exclude embedding/internal ids, e.g. `text-embedding-3-small-inference`, `trajectory-compaction`)
-- [ ] 3.3 Surface per-provider freshness (fresh/cached/stale + last-confirmed timestamp) and an explicit TTL-bypassing refresh action in the model selection surface (`tui/mod.rs` model list + `control_runtime.rs` consumers)
-- [ ] 3.4 Tests: catalog reflects discovered offerings (29-model Copilot fixture beats 4-entry registry), catalog build is network-free, ungraded discovered offering selectable but excluded from autonomous routing, Ollama section matches installed set
+- [x] 3.1 Migrate `ModelCatalog::cloud_only()`/`discover()` to project from the active `InventorySnapshot` (auth gating preserved; embedded registry serves only as bootstrap layer through the inventory)
+- [x] 3.2 Apply chat-modality compatibility filtering to the selection projection (exclude embedding/internal ids, e.g. `text-embedding-3-small-inference`, `trajectory-compaction`)
+- [ ] 3.3 (partial: freshness lines + TTL-bypass via /runtime refresh shipped in model-list output; dedicated selector-widget display pending) Surface per-provider freshness (fresh/cached/stale + last-confirmed timestamp) and an explicit TTL-bypassing refresh action in the model selection surface (`tui/mod.rs` model list + `control_runtime.rs` consumers)
+- [x] 3.4 Tests: catalog reflects discovered offerings (29-model Copilot fixture beats 4-entry registry), catalog build is network-free, ungraded discovered offering selectable but excluded from autonomous routing, Ollama section matches installed set
 
 ## 4. Live verification, docs, release
 <!-- specs: inference/discovery -->

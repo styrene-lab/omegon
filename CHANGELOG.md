@@ -28,9 +28,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
   TTL-cached with persisted last-known-good (`discovery-cache.json`). Discovery
   results merge into the inference inventory on every runtime refresh; the
   operator's runtime-refresh command bypasses discovery TTL and reports
-  per-endpoint failures while retaining last-known-good. Foundation
+  per-endpoint failures while retaining last-known-good. The model catalog
+  (`/model` selection) now projects from the inventory snapshot instead of the
+  static registry: live-enumerated provider models (e.g. all current GitHub
+  Copilot chat models, not the 4-entry snapshot) appear with per-provider
+  freshness lines; embedding and provider-internal ids are filtered from chat
+  selection; registry ids absent from live enumeration are hidden. Foundation
   for OpenSpec change `inference-discovery-producers` (0.28.2); startup
-  discovery trigger and model-catalog unification follow.
+  discovery trigger and endpoint live-verification follow.
 
 ### Fixed
 
