@@ -8131,7 +8131,8 @@ async fn run_discovery_probe_command() -> anyhow::Result<()> {
         report.endpoint_count,
         report.offering_count
     );
-    let cache = inference_discovery::DiscoveryCache::load(&inference_discovery::default_cache_path());
+    let cache =
+        inference_discovery::DiscoveryCache::load(&inference_discovery::default_cache_path());
     for (endpoint_id, result) in &cache.endpoints {
         let chat = result.models.iter().filter(|m| !m.non_chat).count();
         let non_chat = result.models.len() - chat;

@@ -582,10 +582,7 @@ impl InferenceRuntimeState {
     }
 
     #[cfg(test)]
-    pub async fn seed_discovery(
-        &self,
-        results: Vec<crate::inference_discovery::DiscoveredModels>,
-    ) {
+    pub async fn seed_discovery(&self, results: Vec<crate::inference_discovery::DiscoveredModels>) {
         let mut cache = self.discovery.write().await;
         for result in results {
             cache.record(result);
@@ -711,7 +708,10 @@ mod tests {
                 "github-copilot:gpt-5.4".into(),
             ))
             .expect("registry offering still present");
-        assert!(!absent.enabled.value, "absent-from-live id must be disabled");
+        assert!(
+            !absent.enabled.value,
+            "absent-from-live id must be disabled"
+        );
     }
 
     #[tokio::test]
@@ -721,12 +721,14 @@ mod tests {
         assert!(report.activated);
         let snapshot = runtime.snapshot().await;
         // No discovery cache → embedded registry shape passes through intact.
-        assert!(snapshot
-            .offerings
-            .get(&crate::inference_inventory::OfferingId(
-                "github-copilot:gpt-5.4".into(),
-            ))
-            .is_some_and(|offering| offering.enabled.value));
+        assert!(
+            snapshot
+                .offerings
+                .get(&crate::inference_inventory::OfferingId(
+                    "github-copilot:gpt-5.4".into(),
+                ))
+                .is_some_and(|offering| offering.enabled.value)
+        );
     }
 
     #[test]

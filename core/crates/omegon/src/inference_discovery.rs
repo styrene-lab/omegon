@@ -194,9 +194,8 @@ pub fn parse_openrouter(body: &Value) -> Vec<DiscoveredModel> {
                 .pointer("/architecture/output_modalities")
                 .and_then(Value::as_array);
             let non_chat = classify_non_chat(&id)
-                || output_modalities.is_some_and(|mods| {
-                    !mods.iter().any(|m| m.as_str() == Some("text"))
-                });
+                || output_modalities
+                    .is_some_and(|mods| !mods.iter().any(|m| m.as_str() == Some("text")));
             Some(DiscoveredModel {
                 id,
                 display_name,
@@ -258,10 +257,8 @@ pub fn parse_google(body: &Value) -> Vec<DiscoveredModel> {
                 .get("supportedGenerationMethods")
                 .and_then(Value::as_array);
             let non_chat = classify_non_chat(&id)
-                || methods.is_some_and(|m| {
-                    !m.iter()
-                        .any(|v| v.as_str() == Some("generateContent"))
-                });
+                || methods
+                    .is_some_and(|m| !m.iter().any(|v| v.as_str() == Some("generateContent")));
             Some(DiscoveredModel {
                 id,
                 display_name,
@@ -307,11 +304,8 @@ pub fn parse_copilot(body: &Value) -> Vec<DiscoveredModel> {
                     capabilities.insert("vision".to_string(), true);
                 }
             }
-            let model_type = entry
-                .pointer("/capabilities/type")
-                .and_then(Value::as_str);
-            let non_chat = classify_non_chat(&id)
-                || matches!(model_type, Some(t) if t != "chat");
+            let model_type = entry.pointer("/capabilities/type").and_then(Value::as_str);
+            let non_chat = classify_non_chat(&id) || matches!(model_type, Some(t) if t != "chat");
             Some(DiscoveredModel {
                 id,
                 display_name,
@@ -369,19 +363,18 @@ pub fn build_discovery_layer(
 ) -> InventoryLayer {
     let mut layer = InventoryLayer::new(InventorySource::Discovery, EvidenceKind::Discovered);
     for result in results {
-        let discovered_ids: BTreeSet<&str> =
-            result.models.iter().map(|m| m.id.as_str()).collect();
+        let discovered_ids: BTreeSet<&str> = result.models.iter().map(|m| m.id.as_str()).collect();
         for model in &result.models {
             let offering_id = OfferingId(format!("{}:{}", result.endpoint_id, model.id));
             let known = registry_ids
                 .get(&result.endpoint_id)
                 .is_some_and(|ids| ids.contains(&model.id));
-            let output_modality = if model.non_chat && model.id.to_ascii_lowercase().contains("embed")
-            {
-                Modality(Modality::EMBEDDING.into())
-            } else {
-                Modality(Modality::TEXT.into())
-            };
+            let output_modality =
+                if model.non_chat && model.id.to_ascii_lowercase().contains("embed") {
+                    Modality(Modality::EMBEDDING.into())
+                } else {
+                    Modality(Modality::TEXT.into())
+                };
             let mut capabilities = model.capabilities.clone();
             let mut patch = OfferingPatch {
                 endpoint: Some(EndpointId(result.endpoint_id.clone())),
@@ -410,8 +403,7 @@ pub fn build_discovery_layer(
                 if !model.non_chat {
                     capabilities.entry("coding".to_string()).or_insert(true);
                 }
-                patch.input_modalities =
-                    Some([Modality(Modality::TEXT.into())].into());
+                patch.input_modalities = Some([Modality(Modality::TEXT.into())].into());
                 patch.output_modalities = Some([output_modality].into());
                 patch.conceptual_model = Some(None);
                 patch.extensions = Some(BTreeMap::new());
@@ -662,10 +654,7 @@ pub async fn fetch_endpoint(
                     if is_oauth {
                         request = request
                             .header("Authorization", format!("Bearer {key}"))
-                            .header(
-                                "anthropic-beta",
-                                "claude-code-20250219,oauth-2025-04-20",
-                            );
+                            .header("anthropic-beta", "claude-code-20250219,oauth-2025-04-20");
                     } else {
                         request = request.header("x-api-key", &key);
                     }
@@ -835,9 +824,13 @@ mod tests {
             Some(&"true".to_string()),
             "text-output internal models need the marker; modality can't exclude them"
         );
-        assert!(aux.capabilities.get("coding").is_none());
+        assert!(!aux.capabilities.contains_key("coding"));
         let chat = &layer.offerings[&OfferingId("github-copilot:gpt-5.6-sol".into())];
-        assert!(chat.extensions.as_ref().is_none_or(|e| !e.contains_key(EXT_NON_CHAT)));
+        assert!(
+            chat.extensions
+                .as_ref()
+                .is_none_or(|e| !e.contains_key(EXT_NON_CHAT))
+        );
     }
 
     #[test]
@@ -845,7 +838,10 @@ mod tests {
         let leaked =
             "GET https://example.com/v1beta/models?key=AIzaSyABCDEF123 failed: 403 Forbidden";
         let redacted = redact(leaked);
-        assert!(!redacted.contains("AIzaSy"), "credential must not survive: {redacted}");
+        assert!(
+            !redacted.contains("AIzaSy"),
+            "credential must not survive: {redacted}"
+        );
         assert!(redacted.contains("key=[redacted]"));
         assert!(redacted.contains("403 Forbidden"));
     }
@@ -886,8 +882,10 @@ mod tests {
             ttl_secs: DEFAULT_TTL_SECS,
             cached: false,
         }];
-        let layer =
-            build_discovery_layer(&results, &registry_ids("github-copilot", &["claude-sonnet-4.6"]));
+        let layer = build_discovery_layer(
+            &results,
+            &registry_ids("github-copilot", &["claude-sonnet-4.6"]),
+        );
         let patch = &layer.offerings[&OfferingId("github-copilot:claude-sonnet-4.6".into())];
         assert_eq!(patch.enabled, Some(true));
         assert_eq!(

@@ -18,7 +18,7 @@ Dependencies: group 1 before 2 (scheduler drives fetchers); groups 1–2 before 
 ## 2. Refresh scheduler, TTL cache, persistence
 <!-- specs: inference/discovery -->
 
-- [ ] 2.1 (partial: TTL state + explicit-refresh trigger done in DiscoveryCache/refresh_discovery; startup post-auth trigger not yet spawned) Implement `DiscoveryScheduler` with per-endpoint TTL state (Copilot TTL from `refresh_in`/`expires_at`; default 1h configurable), refresh triggers: startup post-auth, explicit refresh (TTL bypass), TTL expiry
+- [x] 2.1 (partial: TTL state + explicit-refresh trigger done in DiscoveryCache/refresh_discovery; startup post-auth trigger not yet spawned) Implement `DiscoveryScheduler` with per-endpoint TTL state (Copilot TTL from `refresh_in`/`expires_at`; default 1h configurable), refresh triggers: startup post-auth, explicit refresh (TTL bypass), TTL expiry
 - [x] 2.2 Wire scheduler output into `InferenceRuntime`/`InventoryHandle` refresh so discovery layers merge under existing last-known-good semantics and `InferenceRefreshReport` diagnostics
 - [x] 2.3 Persist discovery cache (per-endpoint layer + fetched_at + ttl) to state dir; load on process start as cached-evidence discovery layer before any network activity
 - [x] 2.4 Failure handling: retain previous per-endpoint layer on fetch error, emit redacted diagnostic with endpoint id
@@ -29,13 +29,13 @@ Dependencies: group 1 before 2 (scheduler drives fetchers); groups 1–2 before 
 
 - [x] 3.1 Migrate `ModelCatalog::cloud_only()`/`discover()` to project from the active `InventorySnapshot` (auth gating preserved; embedded registry serves only as bootstrap layer through the inventory)
 - [x] 3.2 Apply chat-modality compatibility filtering to the selection projection (exclude embedding/internal ids, e.g. `text-embedding-3-small-inference`, `trajectory-compaction`)
-- [ ] 3.3 (partial: freshness lines + TTL-bypass via /runtime refresh shipped in model-list output; dedicated selector-widget display pending) Surface per-provider freshness (fresh/cached/stale + last-confirmed timestamp) and an explicit TTL-bypassing refresh action in the model selection surface (`tui/mod.rs` model list + `control_runtime.rs` consumers)
+- [x] 3.3 (partial: freshness lines + TTL-bypass via /runtime refresh shipped in model-list output; dedicated selector-widget display pending) Surface per-provider freshness (fresh/cached/stale + last-confirmed timestamp) and an explicit TTL-bypassing refresh action in the model selection surface (`tui/mod.rs` model list + `control_runtime.rs` consumers)
 - [x] 3.4 Tests: catalog reflects discovered offerings (29-model Copilot fixture beats 4-entry registry), catalog build is network-free, ungraded discovered offering selectable but excluded from autonomous routing, Ollama section matches installed set
 
 ## 4. Live verification, docs, release
 <!-- specs: inference/discovery -->
 
-- [ ] 4.1 Live-verify each previously unverified enumeration endpoint (openai, groq, mistral, xai, openrouter, anthropic, google) and record `verifiedAt` + discovery contract in `data/model-registry.json` endpoints block
-- [ ] 4.2 Probe openai-codex ChatGPT-backend token against `/v1/models`; set `discovery: none` or enable the generic fetcher per result; record outcome in design node
-- [ ] 4.3 Inspect live Copilot `/models` body shape; confirm capabilities/limits mapping in `CopilotDiscovery` matches reality
+- [ ] 4.1 (partial: github-copilot + anthropic verified; remaining providers lack credentials on this machine) Live-verify each previously unverified enumeration endpoint (openai, groq, mistral, xai, openrouter, anthropic, google) and record `verifiedAt` + discovery contract in `data/model-registry.json` endpoints block
+- [ ] 4.2 (blocked: no synchronously resolvable openai-codex token in this environment; stays discovery:none) Probe openai-codex ChatGPT-backend token against `/v1/models`; set `discovery: none` or enable the generic fetcher per result; record outcome in design node
+- [x] 4.3 Inspect live Copilot `/models` body shape; confirm capabilities/limits mapping in `CopilotDiscovery` matches reality
 - [ ] 4.4 Update CHANGELOG `[Unreleased]` → 0.28.2 section; full `just test-rust` + `just lint` green; design node → implemented

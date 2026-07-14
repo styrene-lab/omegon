@@ -240,7 +240,11 @@ impl ModelCatalog {
                     id: offering_id.0.clone(),
                     name: offering.display_name.value.clone(),
                     provider: display_name.to_string(),
-                    context_input: offering.context_input.as_ref().map(|c| c.value).unwrap_or(0),
+                    context_input: offering
+                        .context_input
+                        .as_ref()
+                        .map(|c| c.value)
+                        .unwrap_or(0),
                     context_output: offering
                         .context_output
                         .as_ref()

@@ -721,6 +721,22 @@ impl AgentSetup {
 
         // ─── Cleave + delegate shared inference runtime ────────────────
         let inference_runtime = crate::inference_runtime::InferenceRuntimeState::new(&project_root);
+        // Startup discovery is deliberately backgrounded: catalog reads project
+        // the persisted cache immediately and never wait on provider networks.
+        // The non-forced pass respects per-endpoint TTL; successful updates are
+        // merged into the shared runtime snapshot for routing/delegate users.
+        let startup_discovery = inference_runtime.clone();
+        tokio::spawn(async move {
+            let diagnostics = startup_discovery.refresh_discovery(false).await;
+            let report = startup_discovery.refresh().await;
+            startup_discovery.record_refresh_report(&report).await;
+            if !diagnostics.is_empty() {
+                tracing::debug!(
+                    diagnostics = ?diagnostics,
+                    "startup inference discovery retained last-known-good endpoint results"
+                );
+            }
+        });
 
         // ─── Cleave (decomposition + dispatch) ─────────────────────────
         let mut cleave_feature = features::cleave::CleaveFeature::new_with_safety(

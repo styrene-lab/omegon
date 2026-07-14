@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-07-14
+
 ### Added
 
 - Inference discovery producers (`inference_discovery.rs`): protocol-keyed live model

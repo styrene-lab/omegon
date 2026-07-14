@@ -2560,7 +2560,13 @@ impl App {
                     format!(", {}", model.capability_str())
                 };
                 let label = format!("{}: {}", provider_name, model.name);
-                let description = format!("{} — {}{}", model.description, context, caps);
+                let freshness = catalog
+                    .freshness
+                    .get(provider_name)
+                    .map(|state| format!(" · inventory {state}"))
+                    .unwrap_or_default();
+                let description =
+                    format!("{} — {}{}{}", model.description, context, caps, freshness);
 
                 options.push(selector::SelectOption {
                     value: model.id.clone(),

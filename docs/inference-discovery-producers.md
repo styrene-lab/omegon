@@ -25,6 +25,10 @@ The dynamic-inference-inventory foundation (inference_inventory.rs) implements l
 
 Provider enumeration matrix (unverified rows are training-knowledge hypotheses): openai/groq/mistral/xai/hf-router/ollama-cloud share OpenAI-compatible GET /v1/models (poor metadata: ids + owned_by; groq adds context_window); openrouter GET /api/v1/models is richest (context, pricing, modalities, supported params); anthropic GET /v1/models (ids + display_name); google GET /v1beta/models (good: token limits, supported methods); github-copilot /models via token exchange (rich: capabilities, limits, policy — verified); ollama local /api/tags (already wired); openai-codex unknown (ChatGPT backend, providers.rs:2917 — needs probe); perplexity believed non-enumerable (docs-only).
 
+### Live verification round 1 (2026-07-14, 0.28.2-dev)
+
+`omegon auth discovery-probe` on the 0.28.2-dev binary: inventory generation 1→2, 15 endpoints, 85 offerings. Live-verified endpoints: github-copilot (29 models, 24 chat-selectable after non-chat filtering, ttl from token refresh_in=1500s) and anthropic via subscription OAuth (10 chat models; required Bearer + claude-code-20250219,oauth-2025-04-20 anthropic-beta headers — x-api-key returns 401 for OAuth tokens). Catalog sections confirmed: GitHub Copilot 24 (was 4 static), Anthropic 10, OpenAI Codex 9 (bootstrap, no discovery contract). Issues found and fixed during verification: Anthropic OAuth auth split, absent local Ollama daemon emitting diagnostics on every refresh (now endpoint_absent silent skip), process-relative live/cached freshness wording (now age-based). NOT yet live-verified (no credentials on this machine): openai, groq, mistral, xai, openrouter, google — enumeration shapes remain training-knowledge hypotheses; openai-codex enumeration probe (task 4.2) still open.
+
 ## Decisions
 
 ### Fetchers are keyed by endpoint protocol, not provider
