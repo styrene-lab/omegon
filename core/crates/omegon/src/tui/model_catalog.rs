@@ -273,12 +273,14 @@ impl ModelCatalog {
                 format!("{}h ago", age_secs / 3600)
             };
             let stale = age_secs > result.ttl_secs;
-            let state = match (result.cached, stale) {
-                (_, true) => "stale",
-                (true, false) => "cached",
-                (false, false) => "live",
+            // live/cached is process-relative (any fresh process loads from
+            // disk), so age + staleness is the operator signal, not source.
+            let state = if stale {
+                format!("stale, last confirmed {age}")
+            } else {
+                format!("confirmed {age}")
             };
-            freshness.insert(display_name.to_string(), format!("{state}, confirmed {age}"));
+            freshness.insert(display_name.to_string(), state);
         }
 
         if providers.is_empty() {
@@ -650,7 +652,7 @@ mod tests {
         assert!(
             cat.freshness
                 .get("GitHub Copilot")
-                .is_some_and(|s| s.starts_with("live")),
+                .is_some_and(|s| s.starts_with("confirmed")),
             "freshness: {:?}",
             cat.freshness
         );

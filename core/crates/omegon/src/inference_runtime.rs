@@ -568,6 +568,7 @@ impl InferenceRuntimeState {
                 .await
             {
                 Ok(result) => self.discovery.write().await.record(result),
+                Err(error) if error.endpoint_absent => {}
                 Err(error) => diagnostics.push(error.to_string()),
             }
         }

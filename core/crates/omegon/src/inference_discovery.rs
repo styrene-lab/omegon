@@ -107,6 +107,9 @@ pub struct DiscoveryError {
     pub endpoint_id: String,
     /// Redacted, operator-safe description. Never contains credentials.
     pub detail: String,
+    /// True when the endpoint is simply not present (e.g. no local Ollama
+    /// daemon) rather than failing — callers skip these without diagnostics.
+    pub endpoint_absent: bool,
 }
 
 impl std::fmt::Display for DiscoveryError {
@@ -586,10 +589,12 @@ pub async fn fetch_endpoint(
     let contract = contract_for_endpoint(endpoint_id).ok_or_else(|| DiscoveryError {
         endpoint_id: endpoint_id.to_string(),
         detail: "no discovery contract".into(),
+        endpoint_absent: false,
     })?;
     let err = |detail: String| DiscoveryError {
         endpoint_id: endpoint_id.to_string(),
         detail: redact(&detail),
+        endpoint_absent: false,
     };
     let (body, ttl_secs) = match contract {
         DiscoveryContract::GithubCopilot => {
@@ -605,11 +610,16 @@ pub async fn fetch_endpoint(
         DiscoveryContract::OllamaLocal => {
             let base = base_url.unwrap_or("http://127.0.0.1:11434");
             let url = format!("{}/api/tags", base.trim_end_matches('/'));
-            let body = reqwest::Client::new()
-                .get(url)
-                .send()
-                .await
-                .map_err(|e| err(e.to_string()))?
+            let response = reqwest::Client::new().get(url).send().await.map_err(|e| {
+                DiscoveryError {
+                    endpoint_id: endpoint_id.to_string(),
+                    detail: redact(&e.to_string()),
+                    // No local daemon is a routine machine state, not a
+                    // discovery failure worth surfacing on every refresh.
+                    endpoint_absent: e.is_connect(),
+                }
+            })?;
+            let body = response
                 .error_for_status()
                 .map_err(|e| err(e.to_string()))?
                 .json::<Value>()
@@ -622,7 +632,7 @@ pub async fn fetch_endpoint(
         | DiscoveryContract::Anthropic
         | DiscoveryContract::Google => {
             let base = base_url.ok_or_else(|| err("endpoint has no base_url".into()))?;
-            let (key, _) = crate::providers::resolve_api_key_sync(endpoint_id)
+            let (key, is_oauth) = crate::providers::resolve_api_key_sync(endpoint_id)
                 .ok_or_else(|| err("no credential resolves".into()))?;
             let url = match contract {
                 DiscoveryContract::OpenRouter => {
@@ -646,9 +656,20 @@ pub async fn fetch_endpoint(
             let mut request = client.get(&url).header("Accept", "application/json");
             match contract {
                 DiscoveryContract::Anthropic => {
-                    request = request
-                        .header("x-api-key", &key)
-                        .header("anthropic-version", "2023-06-01");
+                    // Mirror the chat bridge's auth split: subscription OAuth
+                    // tokens use Bearer + the oauth beta flag; API keys use
+                    // x-api-key (providers.rs Anthropic client).
+                    if is_oauth {
+                        request = request
+                            .header("Authorization", format!("Bearer {key}"))
+                            .header(
+                                "anthropic-beta",
+                                "claude-code-20250219,oauth-2025-04-20",
+                            );
+                    } else {
+                        request = request.header("x-api-key", &key);
+                    }
+                    request = request.header("anthropic-version", "2023-06-01");
                 }
                 DiscoveryContract::Google => {
                     // Header auth, never query-param: reqwest errors display the

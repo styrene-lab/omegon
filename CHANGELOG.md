@@ -35,7 +35,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
   freshness lines; embedding and provider-internal ids are filtered from chat
   selection; registry ids absent from live enumeration are hidden. Foundation
   for OpenSpec change `inference-discovery-producers` (0.28.2); startup
-  discovery trigger and endpoint live-verification follow.
+  discovery trigger follows. Live-verified against real accounts: GitHub
+  Copilot (29 models, 24 chat-selectable) and Anthropic OAuth (Bearer + oauth
+  beta headers, mirroring the chat bridge's auth split). Absent local Ollama
+  daemons skip silently instead of emitting refresh diagnostics. Hidden
+  `omegon auth discovery-probe` command forces TTL-bypassing enumeration and
+  prints per-endpoint results with catalog freshness.
 
 ### Fixed
 
