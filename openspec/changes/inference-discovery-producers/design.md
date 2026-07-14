@@ -16,14 +16,20 @@ Curation cost currently grows with provider×model count.
 
 ### New module: `core/crates/omegon/src/inference_discovery.rs`
 
-```
-pub trait ModelDiscovery: Send + Sync {
-    fn endpoint_id(&self) -> &str;
-    async fn fetch(&self) -> Result<DiscoveredModels, DiscoveryError>;
-}
-```
+Enumeration is dispatched through a `DiscoveryContract` enum resolved per
+endpoint id (`contract_for_endpoint`) plus a single `fetch_endpoint()` async
+entry point, with parsing separated into pure per-contract functions
+(`parse_for_contract`) that are fixture-testable without I/O.
 
-Fetchers are **protocol-keyed** (accepted decision):
+> Amendment (post-implementation): the original sketch here proposed a
+> `ModelDiscovery` trait object per fetcher. Implementation replaced it with
+> the enum + free-function dispatch above — there is exactly one call site
+> (the scheduler) and no external implementors, so trait indirection bought
+> nothing. Non-enumerable endpoints are `contract_for_endpoint() == None`.
+> A `discovery` field on registry endpoint entries (task 4.1) will replace
+> the code-resident mapping once per-endpoint contracts are live-verified.
+
+Contracts are **protocol-keyed** (accepted decision):
 
 | Fetcher | Covers | Contract |
 |---|---|---|

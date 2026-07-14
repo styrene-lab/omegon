@@ -32,6 +32,12 @@ pub const UNCURATED_CONTEXT_OUTPUT: usize = 16_000;
 /// Default refresh interval when the provider does not supply its own expiry.
 pub const DEFAULT_TTL_SECS: u64 = 3600;
 
+/// Extension key marking an offering that enumerates on a chat endpoint but
+/// can never serve chat traffic (embeddings, provider-internal aux models).
+/// The catalog's chat-selection filter excludes offerings carrying this marker
+/// in addition to modality checks (spec: inference/catalog-unification).
+pub const EXT_NON_CHAT: &str = "non_chat";
+
 /// How an endpoint's live model list is enumerated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiscoveryContract {
@@ -409,6 +415,14 @@ pub fn build_discovery_layer(
             } else if model.non_chat {
                 patch.output_modalities = Some([output_modality].into());
             }
+            if model.non_chat {
+                // Modality alone can't exclude internal aux models whose output
+                // is nominally text (e.g. trajectory-compaction); the marker
+                // makes chat-selection filtering possible downstream.
+                let mut extensions = patch.extensions.take().unwrap_or_default();
+                extensions.insert(EXT_NON_CHAT.to_string(), "true".to_string());
+                patch.extensions = Some(extensions);
+            }
             patch.capabilities = capabilities;
             layer.offerings.insert(offering_id, patch);
         }
@@ -515,7 +529,22 @@ pub fn default_cache_path() -> PathBuf {
 // ── Fetching ─────────────────────────────────────────────────────────────────
 
 fn redact(detail: &str) -> String {
-    let mut out = detail.replace('\n', " ");
+    let mut out = String::with_capacity(detail.len().min(300));
+    // Mask query-param credentials (key=, token=, api_key=) as defense in
+    // depth even though fetchers authenticate via headers.
+    for segment in detail.split_whitespace() {
+        let mut segment = segment.to_string();
+        for marker in ["key=", "token=", "api_key="] {
+            if let Some(pos) = segment.to_ascii_lowercase().find(marker) {
+                segment.truncate(pos + marker.len());
+                segment.push_str("[redacted]");
+            }
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&segment);
+    }
     out.truncate(300);
     out
 }
@@ -575,9 +604,7 @@ pub async fn fetch_endpoint(
                     format!("{}/models", base.trim_end_matches('/'))
                 }
                 DiscoveryContract::Google => {
-                    format!(
-                        "https://generativelanguage.googleapis.com/v1beta/models?key={key}"
-                    )
+                    "https://generativelanguage.googleapis.com/v1beta/models".to_string()
                 }
                 DiscoveryContract::Anthropic => {
                     format!("{}/v1/models", base.trim_end_matches('/'))
@@ -596,7 +623,11 @@ pub async fn fetch_endpoint(
                         .header("x-api-key", &key)
                         .header("anthropic-version", "2023-06-01");
                 }
-                DiscoveryContract::Google => {}
+                DiscoveryContract::Google => {
+                    // Header auth, never query-param: reqwest errors display the
+                    // URL, and DiscoveryError details flow into diagnostics.
+                    request = request.header("x-goog-api-key", &key);
+                }
                 _ => {
                     request = request.header("Authorization", format!("Bearer {key}"));
                 }
@@ -728,6 +759,47 @@ mod tests {
             ids.iter().map(|s| s.to_string()).collect(),
         );
         map
+    }
+
+    #[test]
+    fn non_chat_models_carry_the_exclusion_marker() {
+        let results = vec![DiscoveredModels {
+            endpoint_id: "github-copilot".into(),
+            models: vec![
+                DiscoveredModel {
+                    id: "trajectory-compaction".into(),
+                    non_chat: true,
+                    ..Default::default()
+                },
+                DiscoveredModel {
+                    id: "gpt-5.6-sol".into(),
+                    ..Default::default()
+                },
+            ],
+            fetched_at: 1,
+            ttl_secs: DEFAULT_TTL_SECS,
+            cached: false,
+        }];
+        let layer = build_discovery_layer(&results, &registry_ids("github-copilot", &[]));
+        let aux = &layer.offerings[&OfferingId("github-copilot:trajectory-compaction".into())];
+        assert_eq!(
+            aux.extensions.as_ref().and_then(|e| e.get(EXT_NON_CHAT)),
+            Some(&"true".to_string()),
+            "text-output internal models need the marker; modality can't exclude them"
+        );
+        assert!(aux.capabilities.get("coding").is_none());
+        let chat = &layer.offerings[&OfferingId("github-copilot:gpt-5.6-sol".into())];
+        assert!(chat.extensions.as_ref().is_none_or(|e| !e.contains_key(EXT_NON_CHAT)));
+    }
+
+    #[test]
+    fn redact_masks_query_param_credentials() {
+        let leaked =
+            "GET https://example.com/v1beta/models?key=AIzaSyABCDEF123 failed: 403 Forbidden";
+        let redacted = redact(leaked);
+        assert!(!redacted.contains("AIzaSy"), "credential must not survive: {redacted}");
+        assert!(redacted.contains("key=[redacted]"));
+        assert!(redacted.contains("403 Forbidden"));
     }
 
     #[test]
