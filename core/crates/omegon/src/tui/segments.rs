@@ -1277,8 +1277,11 @@ pub struct SegmentMeta {
     pub tier: Option<String>,
     /// Thinking level active at generation time (e.g. "medium", "high").
     pub thinking_level: Option<String>,
-    /// Turn number within the session (1-indexed).
+    /// Turn number within one agent-loop invocation (1-indexed).
     pub turn: Option<u32>,
+    /// Monotonic interactive runtime-turn identity. Combined with `turn`, this
+    /// distinguishes inner turns from separate prompts in one conversation.
+    pub runtime_turn: Option<u64>,
     /// Estimated token cost of this segment (input + output).
     pub est_tokens: Option<u32>,
     /// Provider-reported actual tokens for the turn this segment

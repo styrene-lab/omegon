@@ -707,6 +707,8 @@ struct App {
     oauth_tos_notice_shown: bool,
     /// Authoritative runtime prompt queue snapshot emitted by the coordinator.
     runtime_queue_snapshot: Option<serde_json::Value>,
+    /// Monotonic identity of the active interactive runtime prompt.
+    runtime_turn_id: Option<u64>,
 }
 
 /// Result of handling a slash command.
@@ -2208,6 +2210,7 @@ impl App {
             tier: Some(self.footer_data.model_tier.clone()),
             thinking_level: Some(self.footer_data.thinking_level.clone()),
             turn: Some(self.turn),
+            runtime_turn: self.runtime_turn_id,
             est_tokens: Some(self.footer_data.estimated_tokens as u32),
             actual_tokens: None, // stamped on TurnEnd via stamp_turn_tokens
             context_percent: Some(self.footer_data.context_percent),
@@ -2400,6 +2403,7 @@ impl App {
             active_action_prompt: None,
             oauth_tos_notice_shown: false,
             runtime_queue_snapshot: None,
+            runtime_turn_id: None,
         }
     }
 
@@ -12260,7 +12264,12 @@ Scroll transcript:
             AgentEvent::RuntimeQueueUpdated { snapshot_json } => {
                 self.runtime_queue_snapshot = Some(snapshot_json);
             }
-            AgentEvent::RuntimePromptStarted { text, image_paths } => {
+            AgentEvent::RuntimePromptStarted {
+                runtime_turn_id,
+                text,
+                image_paths,
+            } => {
+                self.runtime_turn_id = Some(runtime_turn_id);
                 if image_paths.is_empty() {
                     self.conversation.push_user(&text);
                 } else {
