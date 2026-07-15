@@ -5895,6 +5895,7 @@ fn build_tui_secret_readiness_snapshot(
                     let mut lifecycle = RuntimeTurnLifecycle::new(&active, "promoted");
                     lifecycle.transition("promoted", runtime.queue_depth(), &events_tx);
                     let _ = events_tx.send(AgentEvent::RuntimePromptStarted {
+                        runtime_turn_id: active.runtime_turn_id,
                         text: active.prompt.text.clone(),
                         image_paths: active.prompt.image_paths.clone(),
                     });

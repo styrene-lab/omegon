@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevented Slim/Om operation outcomes from merging tools across separate interactive runtime prompts when their inner agent-loop turn counters both restart at `1`. Episode identity now uses the authoritative runtime-turn plus inner-turn coordinate, so an old failure no longer contaminates later SITREPs.
+
 ## [0.28.4] - 2026-07-14
 
 ### Fixed

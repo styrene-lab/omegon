@@ -1148,6 +1148,7 @@ async fn idle_submission_waits_for_runtime_prompt_started_segment() {
     );
 
     app.handle_agent_event(AgentEvent::RuntimePromptStarted {
+        runtime_turn_id: 1,
         text: "start actual work".to_string(),
         image_paths: Vec::new(),
     });
@@ -1167,6 +1168,7 @@ fn runtime_prompt_started_event_displays_operator_segment() {
     let mut app = test_app();
 
     app.handle_agent_event(AgentEvent::RuntimePromptStarted {
+        runtime_turn_id: 2,
         text: "follow up after this turn".to_string(),
         image_paths: Vec::new(),
     });

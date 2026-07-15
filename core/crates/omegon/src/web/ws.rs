@@ -2450,9 +2450,14 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "event_name": "runtime.turn_lifecycle_updated",
             "snapshot": snapshot_json,
         }),
-        AgentEvent::RuntimePromptStarted { text, image_paths } => json!({
+        AgentEvent::RuntimePromptStarted {
+            runtime_turn_id,
+            text,
+            image_paths,
+        } => json!({
             "type": "runtime_prompt_started",
             "event_name": "runtime.prompt_started",
+            "runtime_turn_id": runtime_turn_id,
             "text": text,
             "image_paths": image_paths,
         }),
@@ -3329,6 +3334,7 @@ mod tests {
                 snapshot_json: serde_json::json!({"turn_id": 1, "phase": "worker_spawned"}),
             },
             AgentEvent::RuntimePromptStarted {
+                runtime_turn_id: 1,
                 text: "queued prompt".into(),
                 image_paths: Vec::new(),
             },

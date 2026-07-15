@@ -232,9 +232,14 @@ impl AuditLog {
                     "snapshot": snapshot_json,
                 }),
             )),
-            omegon_traits::AgentEvent::RuntimePromptStarted { text, image_paths } => Some((
+            omegon_traits::AgentEvent::RuntimePromptStarted {
+                runtime_turn_id,
+                text,
+                image_paths,
+            } => Some((
                 "runtime_prompt_started",
                 serde_json::json!({
+                    "runtime_turn_id": runtime_turn_id,
                     "text_chars": text.chars().count(),
                     "attachments": image_paths.len(),
                     "preview": Self::str_preview(text, 120),

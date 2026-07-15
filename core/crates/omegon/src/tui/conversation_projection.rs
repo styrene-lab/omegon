@@ -71,29 +71,38 @@ pub fn project_conversation(
         };
     }
 
-    let mut complete_turn_episodes: BTreeMap<u32, OperationEpisodeProjection> = BTreeMap::new();
-    let mut tools_by_turn: BTreeMap<u32, Vec<_>> = BTreeMap::new();
+    let mut complete_turn_episodes: BTreeMap<(Option<u64>, u32), OperationEpisodeProjection> =
+        BTreeMap::new();
+    let mut tools_by_turn: BTreeMap<(Option<u64>, u32), Vec<_>> = BTreeMap::new();
     for segment in segments {
         let Some(turn) = segment.meta.turn else {
             continue;
         };
+        let turn_coordinate = (segment.meta.runtime_turn, turn);
         let projection = segment.project_conversation_segment();
         if matches!(
             projection.kind,
             crate::surfaces::conversation::ConversationSegmentKind::Tool(_)
         ) {
-            tools_by_turn.entry(turn).or_default().push(projection);
+            tools_by_turn
+                .entry(turn_coordinate)
+                .or_default()
+                .push(projection);
         }
     }
-    for (turn, tools) in &tools_by_turn {
+    for ((runtime_turn, turn), tools) in &tools_by_turn {
+        let episode_id = runtime_turn.map_or_else(
+            || format!("turn:{turn}"),
+            |runtime_turn| format!("runtime:{runtime_turn}/turn:{turn}"),
+        );
         if let Some(episode) =
-            OperationEpisodeProjection::from_authoritative_boundary(format!("turn:{turn}"), tools)
+            OperationEpisodeProjection::from_authoritative_boundary(episode_id, tools)
             && matches!(
                 episode.state,
                 OperationEpisodeState::Complete | OperationEpisodeState::Failed
             )
         {
-            complete_turn_episodes.insert(*turn, episode);
+            complete_turn_episodes.insert((*runtime_turn, *turn), episode);
         }
     }
 
@@ -172,18 +181,19 @@ pub fn project_conversation(
             .meta
             .turn
             .and_then(|turn| {
+                let coordinate = (segment.meta.runtime_turn, turn);
                 complete_turn_episodes
-                    .get(&turn)
-                    .map(|episode| (turn, episode))
+                    .get(&coordinate)
+                    .map(|episode| (coordinate, episode))
             })
             .filter(|_| matches!(segment.content, SegmentContent::ToolCard { .. }));
-        if let Some((turn, episode)) = collapsible {
-            if emitted_turn != Some(turn) {
+        if let Some((coordinate, episode)) = collapsible {
+            if emitted_turn != Some(coordinate) {
                 projected.push_synthetic(
                     canonical_index,
                     outcome_segment(segment.meta.clone(), episode),
                 );
-                emitted_turn = Some(turn);
+                emitted_turn = Some(coordinate);
             }
             continue;
         }
@@ -360,6 +370,30 @@ mod tests {
         };
         assert!(text.starts_with("✗ "), "{text}");
         assert!(text.contains("bash failed · exit 1"), "{text}");
+    }
+
+    #[test]
+    fn repeated_inner_turns_from_distinct_runtime_turns_do_not_share_failures() {
+        let mut failed = tool(Some(1), "old", "missing node", true);
+        failed.meta.runtime_turn = Some(7);
+        if let SegmentContent::ToolCard { is_error, .. } = &mut failed.content {
+            *is_error = true;
+        }
+        let mut later = tool(Some(1), "later", "build active", true);
+        later.meta.runtime_turn = Some(8);
+
+        let projected = project_conversation(&[failed, later], UiPresentationLevel::Om);
+        assert_eq!(projected.segments.len(), 2);
+        let outcomes = projected
+            .segments
+            .iter()
+            .map(|segment| match &segment.content {
+                SegmentContent::SystemNotification { text } => text.as_str(),
+                other => panic!("expected outcome, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert!(outcomes[0].contains("missing node"), "{}", outcomes[0]);
+        assert_eq!(outcomes[1], "✓ bash · build active · 1 operation");
     }
 
     #[test]

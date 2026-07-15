@@ -2890,6 +2890,7 @@ pub enum AgentEvent {
     /// being sent to the model. Operator surfaces should render this as the
     /// visible operator segment for that turn.
     RuntimePromptStarted {
+        runtime_turn_id: u64,
         text: String,
         image_paths: Vec<PathBuf>,
     },
