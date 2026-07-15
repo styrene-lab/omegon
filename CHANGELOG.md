@@ -16,6 +16,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.4] - 2026-07-14
+
+### Fixed
+
+- Corrected detached conversation geometry during active turns by measuring live
+  assistant and tool segments from the rows they actually paint. Slim-mode detail
+  reservations and other unpainted rows no longer inflate the `more below` count
+  or leave a mostly blank viewport, while intentionally hidden zero-height
+  projections remain absent from scrollback.
+
 ## [0.28.3] - 2026-07-14
 
 ### Fixed
