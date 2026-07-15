@@ -127,13 +127,9 @@ impl ConvState {
             self.cached_count = segments.len();
         }
 
-        // Recompute the last segment on every frame. Active tool/assistant tails
-        // mutate in place and can both grow and shrink as their projection moves
-        // between live detail and compact status. Keeping a detached tail's old
-        // height creates a phantom segment whose blank rows consume the viewport.
-        // `ConversationWidget::render` preserves the logical top anchor across
-        // this remeasurement, so correctness no longer depends on freezing a
-        // stale live-tail height.
+        // Recompute the last segment on every frame. Live segment measurement is
+        // based on its painted extent, so detached scroll math can follow actual
+        // output without inventing blank rows below the viewport.
         if !segments.is_empty() && self.cached_count == segments.len() {
             let last = segments.len() - 1;
             self.heights[last] = measured_segment_height(
@@ -592,15 +588,46 @@ fn measured_segment_height(
     ctx: &SegmentRenderContext<'_>,
     selected: bool,
 ) -> u16 {
-    let content_width = SelectedSegmentFrame::new(
+    let frame = SelectedSegmentFrame::new(
         selected,
         segment.capabilities().detail_openable,
         segment.capabilities().copyable,
         is_collapsed_expandable_tool_card(segment),
-    )
-    .content_area(Rect::new(0, 0, width, 1))
-    .width;
-    segment.height_in_context(content_width, ctx)
+    );
+    let content_width = frame.content_area(Rect::new(0, 0, width, 1)).width;
+    let estimated = segment.height_in_context(content_width, ctx);
+
+    // Zero-height projections are intentionally suppressed by the active
+    // presentation mode (for example, plan snapshots in Slim scrollback).
+    // Preserve that semantic absence instead of manufacturing a row.
+    if estimated == 0 {
+        return 0;
+    }
+
+    // Live projections can reserve rows for detail that Slim rendering suppresses.
+    // Measure their painted extent rather than trusting that reservation: phantom
+    // rows become a false detached `more below` count and a blank viewport while
+    // the turn is still active. Stable segments retain the cheap cached estimate.
+    if !segment.is_live_render_segment() || width == 0 {
+        return estimated;
+    }
+
+    let area = Rect::new(0, 0, width, estimated);
+    let mut buffer = Buffer::empty(area);
+    frame.render(area, &mut buffer, ctx.theme, |content_area, buffer| {
+        segment.render_in_context(content_area, buffer, ctx);
+    });
+    (0..estimated)
+        .rev()
+        .find(|row| {
+            (0..width).any(|column| {
+                buffer[(column, *row)]
+                    .symbol()
+                    .chars()
+                    .any(|ch| !ch.is_whitespace())
+            })
+        })
+        .map_or(1, |row| row.saturating_add(1))
 }
 
 fn render_assistant_copy_affordance(
@@ -999,7 +1026,7 @@ mod tests {
     }
 
     #[test]
-    fn detached_scroll_remeasures_live_tail_without_moving_anchor() {
+    fn detached_scroll_remeasures_live_tail_to_painted_extent() {
         let segments = vec![Segment {
             meta: Default::default(),
             content: SegmentContent::AssistantText {
@@ -1010,8 +1037,8 @@ mod tests {
         }];
         let mut state = ConvState::new();
         state.ensure_heights(&segments, 40, &Alpharius, SegmentRenderMode::Full);
-        let measured = state.heights[0];
-        state.heights[0] = 7;
+        let painted_height = state.heights[0];
+        state.heights[0] = painted_height.saturating_add(20);
         state.cached_count = segments.len();
         state.cached_width = 40;
         state.cached_mode = Some(SegmentRenderMode::Full);
@@ -1020,8 +1047,8 @@ mod tests {
         let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Full);
         state.ensure_heights_with_scroll_state(&segments, 40, &ctx, true, None);
         assert_eq!(
-            state.heights[0], measured,
-            "detached live tails must be remeasured; render-time anchoring preserves the viewport"
+            state.heights[0], painted_height,
+            "detached live tails must discard estimated rows they do not paint"
         );
     }
 
