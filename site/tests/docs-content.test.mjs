@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 const here = dirname(fileURLToPath(import.meta.url));
 const docsDir = resolve(here, '../src/pages/docs');
 const npmRunBuild = process.platform === 'win32'
-  ? { command: 'cmd', args: ['/c', 'npm', 'run', 'build'] }
+  ? { command: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', 'npm run build'] }
   : { command: 'npm', args: ['run', 'build'] };
 
 function readDoc(name) {
