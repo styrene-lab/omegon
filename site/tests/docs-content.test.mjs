@@ -10,6 +10,10 @@ const docsDir = resolve(here, '../src/pages/docs');
 const npmRunBuild = process.platform === 'win32'
   ? { command: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', 'npm run build'] }
   : { command: 'npm', args: ['run', 'build'] };
+const buildEnvironment = { ...process.env, FORCE_COLOR: '0' };
+if (process.platform === 'win32') {
+  buildEnvironment.CI = 'true';
+}
 
 function readDoc(name) {
   return readFileSync(resolve(docsDir, name), 'utf8');
@@ -64,7 +68,7 @@ test('no page imports siteVariant', () => {
 test('site builds successfully', () => {
   execFileSync(npmRunBuild.command, npmRunBuild.args, {
     cwd: resolve(here, '..'),
-    env: { ...process.env },
+    env: buildEnvironment,
     stdio: 'pipe',
   });
 
