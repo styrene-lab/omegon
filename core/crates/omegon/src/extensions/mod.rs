@@ -1108,23 +1108,20 @@ async fn handshake(
     // stays in the same channel as secrets and never depends on inherited env.
     let config = resolved_config(manifest, ext_dir)?;
     if !config.is_empty() {
-        match handles
+        handles
             .rpc_call_with_notifications(
                 "bootstrap_config",
                 Value::Object(config),
                 notification_sink,
             )
             .await
-        {
-            Ok(_) => tracing::debug!(extension = name, "bootstrap_config delivered"),
-            Err(e) => {
-                tracing::warn!(
-                    extension = name,
-                    error = %e,
-                    "bootstrap_config delivery failed"
-                );
-            }
-        }
+            .map_err(|error| {
+                anyhow!(
+                    "extension '{}' failed to accept bootstrap_config: {error}. Configuration delivery is required when resolved values are present.",
+                    name
+                )
+            })?;
+        tracing::debug!(extension = name, "bootstrap_config delivered");
     }
 
     // 4. Deliver secrets over pipe — never via env var
@@ -1622,6 +1619,65 @@ mod tests {
         assert!(!is_extension_transport_error(&anyhow!(
             "RPC error: MethodNotFound"
         )));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn handshake_rejects_extension_that_refuses_resolved_config() {
+        let _env_guard = crate::test_support::env::lock_async().await;
+        unsafe {
+            std::env::remove_var("OMEGON_RUNTIME_CONTEXT");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("reject-config.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([^,}}]*\).*/\1/p')
+  case "$line" in
+    *initialize*) printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"sdk_contract_version\":\"0.25\"}}" ;;
+    *get_tools*) printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":[]}" ;;
+    *bootstrap_config*) printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32602,\"message\":\"invalid data_dir\"}}" ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions).unwrap();
+        std::fs::write(
+            temp.path().join("manifest.toml"),
+            format!(
+                r#"[extension]
+name = "reject-config"
+version = "0.1.0"
+description = "fixture"
+[runtime]
+type = "native"
+binary = "{}"
+[runtime.config]
+data_dir = "relative"
+"#,
+                script.display()
+            ),
+        )
+        .unwrap();
+
+        let error = match spawn_from_manifest(temp.path(), &[]).await {
+            Ok(_) => panic!("rejected bootstrap config must prevent registration"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("failed to accept bootstrap_config")
+        );
+        assert!(error.to_string().contains("invalid data_dir"));
     }
 
     #[cfg(unix)]

@@ -66,6 +66,8 @@ mod ipc;
 mod local_embedding;
 mod migrate;
 mod observation;
+#[cfg(test)]
+mod recro_coe_integration_tests;
 mod shadow_context;
 mod skills;
 mod smoke;

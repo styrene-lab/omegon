@@ -16,6 +16,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Added an environment-gated `OMEGON_RECRO_COE_DIR` host litmus test that builds and launches the real Recro COE extension, verifies manifest and SDK handshake compatibility, applies typed configuration, executes its partnership workflow, and confirms extension-owned skill discovery.
+
+### Changed
+
+- Extension startup now treats rejected resolved configuration as a registration failure instead of continuing with an extension that did not accept its host-provided settings.
+
 ## [0.28.4] - 2026-07-15
 
 ### Fixed
