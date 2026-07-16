@@ -18,7 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- Installed the docs site's declared npm dependencies before its content/build test in a least-privilege main CI job, and made the test's npm build invocation portable to Windows through an explicit, non-user-controlled command-processor invocation.
+- Installed the docs site's declared npm dependencies before its content/build test in a least-privilege Linux/Windows CI matrix, and made the test's Windows npm build invocation use an explicit command processor with a fixed command payload.
 - Prevented Slim/Om operation outcomes from merging tools across separate interactive runtime prompts when their inner agent-loop turn counters both restart at `1`. Episode identity now uses the authoritative runtime-turn plus inner-turn coordinate, so an old failure no longer contaminates later SITREPs.
 
 ## [0.28.4] - 2026-07-14
