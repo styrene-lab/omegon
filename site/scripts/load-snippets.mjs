@@ -17,7 +17,7 @@ const OUT = resolve(__dirname, "../src/data/snippets.json");
 //   key:
 //     cmd: "value" OR cmd: | (multiline block)
 //     desc: "value"
-function parseSnippetYaml(text) {
+export function parseSnippetYaml(text) {
   const result = {};
   let currentKey = null;
   let currentField = null;
@@ -34,7 +34,7 @@ function parseSnippetYaml(text) {
     currentField = null;
   }
 
-  for (const line of text.split("\n")) {
+  for (const line of text.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n")) {
     // Skip comments and blank lines at top level
     if (line.match(/^\s*#/) || line.match(/^\s*$/)) {
       if (blockIndent !== null && line.match(/^\s*$/)) {

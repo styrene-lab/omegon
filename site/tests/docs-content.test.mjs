@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { parseSnippetYaml } from '../scripts/load-snippets.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const docsDir = resolve(here, '../src/pages/docs');
@@ -63,6 +64,22 @@ test('no page imports siteVariant', () => {
     const content = readDoc(page);
     assert.doesNotMatch(content, /siteVariant/, `${page} still imports siteVariant`);
   }
+});
+
+test('snippet parser preserves multiline commands with CRLF input', () => {
+  const parsed = parseSnippetYaml([
+    'dev_clone_build:',
+    '  cmd: |',
+    '    git clone https://github.com/styrene-lab/omegon.git',
+    '    cd omegon',
+    '  desc: "Clone and build"',
+    '',
+  ].join('\r\n'));
+
+  assert.deepEqual(parsed.dev_clone_build, {
+    cmd: 'git clone https://github.com/styrene-lab/omegon.git\ncd omegon',
+    desc: 'Clone and build',
+  });
 });
 
 test('site builds successfully', () => {
