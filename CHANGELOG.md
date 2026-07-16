@@ -16,15 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.4] - 2026-07-15
+
 ### Fixed
 
 - Installed the docs site's declared npm dependencies before its content/build test in a least-privilege Linux/Windows CI matrix, and made the test's Windows npm build invocation use an explicit command processor with a fixed command payload.
 - Prevented Slim/Om operation outcomes from merging tools across separate interactive runtime prompts when their inner agent-loop turn counters both restart at `1`. Episode identity now uses the authoritative runtime-turn plus inner-turn coordinate, so an old failure no longer contaminates later SITREPs.
-
-## [0.28.4] - 2026-07-14
-
-### Fixed
-
 - Corrected detached conversation geometry during active turns by measuring live
   assistant and tool segments from the rows they actually paint. Slim-mode detail
   reservations and other unpainted rows no longer inflate the `more below` count
