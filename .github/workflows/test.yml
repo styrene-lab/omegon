@@ -111,8 +111,12 @@ jobs:
           "
 
   site-docs:
-    name: Site docs tests
-    runs-on: ubuntu-latest
+    name: Site docs tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     permissions:
       contents: read
