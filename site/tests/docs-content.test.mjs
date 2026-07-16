@@ -4,12 +4,17 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { parseSnippetYaml } from '../scripts/load-snippets.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const docsDir = resolve(here, '../src/pages/docs');
 const npmRunBuild = process.platform === 'win32'
   ? { command: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', 'npm run build'] }
   : { command: 'npm', args: ['run', 'build'] };
+const buildEnvironment = { ...process.env, FORCE_COLOR: '0' };
+if (process.platform === 'win32') {
+  buildEnvironment.CI = 'true';
+}
 
 function readDoc(name) {
   return readFileSync(resolve(docsDir, name), 'utf8');
@@ -61,10 +66,26 @@ test('no page imports siteVariant', () => {
   }
 });
 
+test('snippet parser preserves multiline commands with CRLF input', () => {
+  const parsed = parseSnippetYaml([
+    'dev_clone_build:',
+    '  cmd: |',
+    '    git clone https://github.com/styrene-lab/omegon.git',
+    '    cd omegon',
+    '  desc: "Clone and build"',
+    '',
+  ].join('\r\n'));
+
+  assert.deepEqual(parsed.dev_clone_build, {
+    cmd: 'git clone https://github.com/styrene-lab/omegon.git\ncd omegon',
+    desc: 'Clone and build',
+  });
+});
+
 test('site builds successfully', () => {
   execFileSync(npmRunBuild.command, npmRunBuild.args, {
     cwd: resolve(here, '..'),
-    env: { ...process.env },
+    env: buildEnvironment,
     stdio: 'pipe',
   });
 

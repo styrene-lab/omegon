@@ -5,9 +5,9 @@
 // Uses a minimal YAML parser — only supports the flat key/cmd/desc structure
 // used in our snippet files. No external dependencies.
 
-import { readdirSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { resolve, dirname, basename } from "path";
-import { fileURLToPath } from "url";
+import { readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { resolve, dirname, basename } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SNIPPETS_DIR = resolve(__dirname, "../snippets");
@@ -17,7 +17,7 @@ const OUT = resolve(__dirname, "../src/data/snippets.json");
 //   key:
 //     cmd: "value" OR cmd: | (multiline block)
 //     desc: "value"
-function parseSnippetYaml(text) {
+export function parseSnippetYaml(text) {
   const result = {};
   let currentKey = null;
   let currentField = null;
@@ -34,7 +34,7 @@ function parseSnippetYaml(text) {
     currentField = null;
   }
 
-  for (const line of text.split("\n")) {
+  for (const line of text.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n")) {
     // Skip comments and blank lines at top level
     if (line.match(/^\s*#/) || line.match(/^\s*$/)) {
       if (blockIndent !== null && line.match(/^\s*$/)) {
@@ -92,9 +92,11 @@ function parseSnippetYaml(text) {
 
 const merged = {};
 let total = 0;
+const snippetFiles = readdirSync(SNIPPETS_DIR)
+  .filter((file) => file.endsWith(".yaml") || file.endsWith(".yml"))
+  .sort((a, b) => a.localeCompare(b, "en"));
 
-for (const file of readdirSync(SNIPPETS_DIR).sort()) {
-  if (!file.endsWith(".yaml") && !file.endsWith(".yml")) continue;
+for (const file of snippetFiles) {
   const category = basename(file, file.endsWith(".yaml") ? ".yaml" : ".yml");
   const raw = readFileSync(resolve(SNIPPETS_DIR, file), "utf-8");
   const data = parseSnippetYaml(raw);
@@ -108,6 +110,12 @@ for (const file of readdirSync(SNIPPETS_DIR).sort()) {
     };
     total++;
   }
+}
+
+const requiredKeys = ["cli.dev_clone_build"];
+const missingKeys = requiredKeys.filter((key) => !merged[key]?.cmd);
+if (missingKeys.length > 0) {
+  throw new Error(`Missing required snippet key(s): ${missingKeys.join(", ")}`);
 }
 
 mkdirSync(dirname(OUT), { recursive: true });
