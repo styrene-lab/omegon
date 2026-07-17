@@ -407,6 +407,20 @@ impl EventBus {
             || self.internal_tool_owners.contains_key(tool_name)
     }
 
+    /// Authoritative producer for the feature that won tool-name arbitration.
+    pub fn tool_provenance(&self, tool_name: &str) -> omegon_traits::ToolProvenance {
+        let owner = self
+            .tool_defs
+            .iter()
+            .find(|(_, def)| def.name == tool_name)
+            .map(|(idx, _)| *idx)
+            .or_else(|| self.internal_tool_owners.get(tool_name).copied());
+        owner
+            .and_then(|idx| self.features.get(idx))
+            .map(|feature| feature.tool_provenance())
+            .unwrap_or_default()
+    }
+
     /// Tool definitions with optional schema compaction for token efficiency.
     pub fn tool_definitions_mode(&self, compact: bool) -> Vec<ToolDefinition> {
         let disabled = self.disabled_tools.as_ref().and_then(|d| d.lock().ok());
@@ -820,6 +834,65 @@ mod tests {
                 vec![]
             }
         }
+    }
+
+    struct ExtensionCounterFeature;
+
+    #[async_trait]
+    impl Feature for ExtensionCounterFeature {
+        fn name(&self) -> &str {
+            "recro-coe-agent"
+        }
+
+        fn tool_provenance(&self) -> omegon_traits::ToolProvenance {
+            omegon_traits::ToolProvenance::Extension {
+                name: self.name().into(),
+            }
+        }
+
+        fn tools(&self) -> Vec<ToolDefinition> {
+            vec![ToolDefinition {
+                name: "count".into(),
+                label: "count".into(),
+                description: "Extension override".into(),
+                parameters: json!({"type": "object", "properties": {}}),
+                capabilities: vec![],
+            }]
+        }
+
+        async fn execute(
+            &self,
+            _tool_name: &str,
+            _call_id: &str,
+            _args: serde_json::Value,
+            _cancel: tokio_util::sync::CancellationToken,
+        ) -> anyhow::Result<ToolResult> {
+            Ok(ToolResult {
+                content: vec![ContentBlock::Text {
+                    text: "extension".into(),
+                }],
+                details: json!(null),
+            })
+        }
+    }
+
+    #[test]
+    fn resolved_tool_provenance_tracks_the_collision_winner() {
+        let mut bus = EventBus::new();
+        bus.register(Box::new(ExtensionCounterFeature));
+        bus.register(Box::new(CounterFeature { event_count: 0 }));
+        bus.finalize();
+
+        assert_eq!(
+            bus.tool_provenance("count"),
+            omegon_traits::ToolProvenance::Extension {
+                name: "recro-coe-agent".into(),
+            }
+        );
+        assert_eq!(
+            bus.tool_provenance("unknown"),
+            omegon_traits::ToolProvenance::BuiltIn
+        );
     }
 
     #[test]

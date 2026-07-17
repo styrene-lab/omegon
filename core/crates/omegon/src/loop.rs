@@ -2903,6 +2903,7 @@ async fn dispatch_tools(
                     details: Value::Null,
                 },
                 is_error: true,
+                provenance: bus.tool_provenance(&call.name),
             });
             indexed_results.push((
                 idx,
@@ -2987,6 +2988,7 @@ async fn dispatch_tools(
                     details: Value::Null,
                 },
                 is_error: true,
+                provenance: bus.tool_provenance(&call.name),
             });
 
             indexed_results.push((
@@ -3149,6 +3151,7 @@ async fn execute_tool_invocation(
     permission_policy: Option<&crate::permissions::LayeredPermissionPolicy>,
     permission_role: Option<styrene_rbac::Role>,
 ) -> (omegon_traits::ToolResult, bool) {
+    let provenance = bus.tool_provenance(execution_tool_name);
     if let Some(sm) = secrets
         && let Some(decision) = sm.check_guard(visible_tool_name, visible_args)
         && decision.is_block()
@@ -3169,6 +3172,7 @@ async fn execute_tool_invocation(
                     details: Value::Null,
                 },
                 is_error: true,
+                provenance: provenance.clone(),
             });
         }
         return (
@@ -3185,6 +3189,7 @@ async fn execute_tool_invocation(
             id: visible_call_id.to_string(),
             name: visible_tool_name.to_string(),
             args: visible_args.clone(),
+            provenance: provenance.clone(),
         });
     }
 
@@ -3356,6 +3361,7 @@ async fn execute_tool_invocation(
                 name: visible_tool_name.to_string(),
                 result: tool_result.clone(),
                 is_error,
+                provenance: provenance.clone(),
             });
         }
         return (tool_result, is_error);
@@ -3743,6 +3749,7 @@ async fn execute_tool_invocation(
                 details: result.details.clone(),
             },
             is_error,
+            provenance,
         });
     }
 
@@ -3812,6 +3819,7 @@ async fn dispatch_edit_batch(
             id: call.id.clone(),
             name: call.name.clone(),
             args: call.arguments.clone(),
+            provenance: bus.tool_provenance(&call.name),
         });
     }
 
@@ -3877,6 +3885,7 @@ async fn dispatch_edit_batch(
                 },
             },
             is_error: batch_error,
+            provenance: bus.tool_provenance(&call.name),
         });
 
         indexed_results.push((

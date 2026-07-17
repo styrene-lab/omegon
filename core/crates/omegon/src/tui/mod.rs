@@ -11862,7 +11862,12 @@ Scroll transcript:
                     self.conversation.stamp_meta(self.current_meta());
                 }
             }
-            AgentEvent::ToolStart { id, name, args } => {
+            AgentEvent::ToolStart {
+                id,
+                name,
+                args,
+                provenance,
+            } => {
                 self.working_verb = spinner::next_verb();
                 self.instrument_panel.tool_started(&name);
                 self.slim_turn_state = SlimTurnState::Tool(name.replace('_', " "));
@@ -11936,6 +11941,7 @@ Scroll transcript:
                 self.conversation.push_tool_start_with_expanded(
                     &id,
                     &name,
+                    provenance,
                     args_summary.as_deref(),
                     detail_args.as_deref(),
                     id.starts_with("shell-"),
@@ -12014,6 +12020,7 @@ Scroll transcript:
                 name,
                 result,
                 is_error,
+                provenance,
             } => {
                 if name == crate::tool_registry::core::WAIT_FOR_OPERATOR
                     && self.pending_operator_wait.is_some()
@@ -12053,6 +12060,7 @@ Scroll transcript:
 
                 // Use enriched message if available, otherwise the full text payload.
                 let display = enriched.as_deref().or(full_text.as_deref());
+                let _ = provenance;
                 self.conversation.push_tool_end(&id, is_error, display);
                 self.mark_activity_tool_end(
                     &id,

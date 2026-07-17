@@ -658,6 +658,12 @@ impl Feature for ExtensionFeature {
         &self.runtime.name
     }
 
+    fn tool_provenance(&self) -> omegon_traits::ToolProvenance {
+        omegon_traits::ToolProvenance::Extension {
+            name: self.runtime.name.clone(),
+        }
+    }
+
     fn tools(&self) -> Vec<ToolDefinition> {
         self.tools.clone()
     }

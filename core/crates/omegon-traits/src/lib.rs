@@ -1243,6 +1243,8 @@ pub enum IpcEventPayload {
     ToolStarted {
         id: String,
         name: String,
+        #[serde(default)]
+        provenance: ToolProvenance,
         /// Serialized tool arguments. May be large; clients may truncate for display.
         args: Value,
     },
@@ -1264,6 +1266,8 @@ pub enum IpcEventPayload {
     ToolEnded {
         id: String,
         name: String,
+        #[serde(default)]
+        provenance: ToolProvenance,
         is_error: bool,
         /// Human-readable summary of the result for display purposes.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -2193,10 +2197,29 @@ pub type HostActionApprovalSink = std::sync::Arc<
 /// Features are created during setup, receive `on_event()` calls for the
 /// duration of the session, and are dropped at shutdown. The bus delivers
 /// events sequentially in registration order — `&mut self` is safe.
+/// Authoritative producer of a tool after runtime name arbitration.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolProvenance {
+    BuiltIn,
+    Extension { name: String },
+}
+
+impl Default for ToolProvenance {
+    fn default() -> Self {
+        Self::BuiltIn
+    }
+}
+
 #[async_trait]
 pub trait Feature: Send + Sync {
     /// Human-readable name for logging and debugging.
     fn name(&self) -> &str;
+
+    /// Producer identity attached to tools owned by this feature.
+    fn tool_provenance(&self) -> ToolProvenance {
+        ToolProvenance::BuiltIn
+    }
 
     /// Tool definitions this feature provides. Called once at startup.
     fn tools(&self) -> Vec<ToolDefinition> {
@@ -2746,6 +2769,7 @@ pub enum AgentEvent {
         id: String,
         name: String,
         args: Value,
+        provenance: ToolProvenance,
     },
     ToolUpdate {
         id: String,
@@ -2756,6 +2780,7 @@ pub enum AgentEvent {
         name: String,
         result: ToolResult,
         is_error: bool,
+        provenance: ToolProvenance,
     },
     /// The agent needs operator permission before executing a tool operation.
     /// The operator surface renders a blocking permission prompt and sends
@@ -3313,6 +3338,7 @@ mod tests {
         let ev = IpcEventPayload::ToolEnded {
             id: "call-1".into(),
             name: "bash".into(),
+            provenance: ToolProvenance::BuiltIn,
             is_error: false,
             summary: Some("exit 0".into()),
         };

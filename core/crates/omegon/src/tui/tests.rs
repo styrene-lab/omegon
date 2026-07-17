@@ -289,6 +289,7 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "context_clear".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({}),
     });
 
@@ -2232,6 +2233,7 @@ fn slim_status_line_marks_turn_state() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command":"cargo test"}),
     });
     if let SegmentContent::ToolCard { started_at, .. } =
@@ -7725,6 +7727,7 @@ fn active_tool_phase_beats_runtime_thinking_in_tui() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command": "pwd"}),
     });
 
@@ -7804,11 +7807,13 @@ fn selected_tool_segment_detail_pane_renders_full_tool_context() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command": "cargo test"}),
     });
     app.handle_agent_event(AgentEvent::ToolEnd {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         is_error: false,
         result: omegon_traits::ToolResult {
             content: vec![omegon_traits::ContentBlock::Text {
@@ -7836,11 +7841,13 @@ fn completed_live_tool_lingers_before_activity_clears() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command": "pwd"}),
     });
     app.handle_agent_event(AgentEvent::ToolEnd {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         is_error: false,
         result: omegon_traits::ToolResult {
             content: vec![omegon_traits::ContentBlock::Text { text: "ok".into() }],
@@ -7867,11 +7874,13 @@ fn expired_live_tool_linger_clears_activity_on_render() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command": "pwd"}),
     });
     app.handle_agent_event(AgentEvent::ToolEnd {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         is_error: false,
         result: omegon_traits::ToolResult {
             content: vec![omegon_traits::ContentBlock::Text { text: "ok".into() }],
@@ -7898,11 +7907,13 @@ fn activity_tool_start_refreshes_without_duplicate_entries() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command": "cargo check"}),
     });
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command": "cargo test"}),
     });
 
@@ -7927,11 +7938,13 @@ fn activity_tool_cap_preserves_running_entries_over_completed_entries() {
         app.handle_agent_event(AgentEvent::ToolStart {
             id: id.clone(),
             name: "read".into(),
+            provenance: omegon_traits::ToolProvenance::BuiltIn,
             args: serde_json::json!({"path": format!("file-{idx}.rs")}),
         });
         app.handle_agent_event(AgentEvent::ToolEnd {
             id,
             name: "read".into(),
+            provenance: omegon_traits::ToolProvenance::BuiltIn,
             is_error: false,
             result: omegon_traits::ToolResult {
                 content: vec![omegon_traits::ContentBlock::Text { text: "ok".into() }],
@@ -7943,6 +7956,7 @@ fn activity_tool_cap_preserves_running_entries_over_completed_entries() {
         app.handle_agent_event(AgentEvent::ToolStart {
             id: format!("run-{idx}"),
             name: "bash".into(),
+            provenance: omegon_traits::ToolProvenance::BuiltIn,
             args: serde_json::json!({"command": format!("cmd-{idx}")}),
         });
     }
@@ -7974,11 +7988,13 @@ fn activity_prune_removes_expired_completed_but_keeps_running_entries() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "done".into(),
         name: "read".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"path": "Cargo.toml"}),
     });
     app.handle_agent_event(AgentEvent::ToolEnd {
         id: "done".into(),
         name: "read".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         is_error: false,
         result: omegon_traits::ToolResult {
             content: vec![omegon_traits::ContentBlock::Text { text: "ok".into() }],
@@ -7988,6 +8004,7 @@ fn activity_prune_removes_expired_completed_but_keeps_running_entries() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "running".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command": "sleep 10"}),
     });
     if let Some(tool) = app
@@ -8019,6 +8036,7 @@ fn active_single_running_activity_tool_uses_full_live_card() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command": "cargo check"}),
     });
 
@@ -8034,6 +8052,7 @@ fn om_single_running_activity_tool_stays_one_line() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command": "cargo check"}),
     });
 
@@ -8049,11 +8068,13 @@ fn completed_tools_handoff_to_one_durable_outcome_without_activity_duplication()
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "read".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"path": "Cargo.toml"}),
     });
     app.handle_agent_event(AgentEvent::ToolEnd {
         id: "tool-1".into(),
         name: "read".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         is_error: false,
         result: omegon_traits::ToolResult {
             content: vec![omegon_traits::ContentBlock::Text {
@@ -8065,11 +8086,13 @@ fn completed_tools_handoff_to_one_durable_outcome_without_activity_duplication()
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-2".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"command": "cargo check"}),
     });
     app.handle_agent_event(AgentEvent::ToolEnd {
         id: "tool-2".into(),
         name: "bash".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         is_error: false,
         result: omegon_traits::ToolResult {
             content: vec![omegon_traits::ContentBlock::Text {
@@ -8095,12 +8118,14 @@ fn tool_end_aggregates_all_text_blocks() {
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "codebase_search".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         args: serde_json::json!({"query": "foo"}),
     });
 
     app.handle_agent_event(AgentEvent::ToolEnd {
         id: "tool-1".into(),
         name: "codebase_search".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
         is_error: false,
         result: omegon_traits::ToolResult {
             content: vec![

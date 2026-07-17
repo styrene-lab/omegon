@@ -4630,6 +4630,7 @@ fn build_tui_secret_readiness_snapshot(
                     id: id.clone(),
                     name: "bash".to_string(),
                     args: serde_json::json!({ "command": command }),
+                    provenance: omegon_traits::ToolProvenance::BuiltIn,
                 });
 
                 tokio::spawn(async move {
@@ -4683,6 +4684,7 @@ fn build_tui_secret_readiness_snapshot(
                         name: "bash".to_string(),
                         result: tool_result.clone(),
                         is_error,
+                        provenance: omegon_traits::ToolProvenance::BuiltIn,
                     });
 
                     let exit_code = tool_result
@@ -7553,6 +7555,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
                     name: _,
                     result,
                     is_error,
+                    ..
                 } => {
                     let status = if is_error { "✗" } else { "✓" };
                     let text = result
