@@ -1876,7 +1876,14 @@ impl LlmBridge for OpenAIClient {
         let wire_tools: Vec<Value> = tools
             .iter()
             .map(|t| {
-                let params = openai_function_parameters(&t.parameters);
+                let params = if self.endpoint_id == "moonshot" {
+                    crate::tool_schema::normalize(
+                        &t.parameters,
+                        crate::tool_schema::SchemaDialect::OpenAI,
+                    )
+                } else {
+                    openai_function_parameters(&t.parameters)
+                };
                 json!({
                     "type": "function",
                     "function": {"name": t.name, "description": t.description, "parameters": params},
