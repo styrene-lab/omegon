@@ -16,12 +16,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.5] - 2026-07-19
+
 ### Added
 
 - Tool lifecycle events now preserve the authoritative producer selected by `EventBus` arbitration. Conversation tool cards qualify extension-owned calls as `tool (extension-name)` while built-ins retain their existing labels, and IPC, MQTT, web-stream, WebSocket, and web tool-run projections carry the same provenance for operator-visible auditability.
-
-### Added
-
 - Added an environment-gated `OMEGON_RECRO_COE_DIR` host litmus test that builds and launches the real Recro COE extension, verifies manifest and SDK handshake compatibility, applies typed configuration, executes its partnership workflow, and confirms extension-owned skill discovery.
 
 ### Changed
