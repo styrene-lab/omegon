@@ -1877,10 +1877,11 @@ impl LlmBridge for OpenAIClient {
             .iter()
             .map(|t| {
                 let params = if self.endpoint_id == "moonshot" {
-                    crate::tool_schema::normalize(
-                        &t.parameters,
-                        crate::tool_schema::SchemaDialect::OpenAI,
-                    )
+                    // Kimi's published tool contract accepts standard JSON Schema
+                    // verbatim, including descriptions and properties literally
+                    // named `description`. Do not run Omegon's lossy OpenAI schema
+                    // compactor over Moonshot tool definitions.
+                    t.parameters.clone()
                 } else {
                     openai_function_parameters(&t.parameters)
                 };
