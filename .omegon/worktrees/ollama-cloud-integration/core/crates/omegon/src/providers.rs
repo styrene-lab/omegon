@@ -594,8 +594,8 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
             None
         }
         // OpenAI-compatible providers — all use the Chat Completions protocol
-        "groq" | "xai" | "mistral" | "cerebras" | "moonshot" | "google" | "huggingface" | "ollama"
-        | "opencode-go" | "perplexity" | "dwarfstar" => {
+        "groq" | "xai" | "mistral" | "cerebras" | "moonshot" | "google" | "huggingface"
+        | "ollama" | "opencode-go" | "perplexity" | "dwarfstar" => {
             OpenAICompatClient::from_env(provider_id).map(|c| Box::new(c) as Box<dyn LlmBridge>)
         }
         "ollama-cloud" => OllamaCloudClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
@@ -5637,6 +5637,7 @@ mod tests {
             "xai",
             "mistral",
             "cerebras",
+            "moonshot",
             "huggingface",
             "ollama",
         ] {
@@ -5669,6 +5670,7 @@ mod tests {
                 "xai",
                 "mistral",
                 "cerebras",
+                "moonshot",
                 "huggingface",
                 "ollama",
             ]

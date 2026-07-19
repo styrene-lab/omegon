@@ -3512,6 +3512,8 @@ mod tests {
         assert_eq!(canonical_provider_id("chatgpt"), "openai-codex");
         assert_eq!(canonical_provider_id("codex"), "openai-codex");
         assert_eq!(canonical_provider_id("openai"), "openai");
+        assert_eq!(canonical_provider_id("kimi"), "moonshot");
+        assert_eq!(canonical_provider_id("moonshot"), "moonshot");
     }
 
     #[test]
@@ -3527,6 +3529,7 @@ mod tests {
             "xai",
             "mistral",
             "cerebras",
+            "moonshot",
             "brave",
             "tavily",
             "serper",

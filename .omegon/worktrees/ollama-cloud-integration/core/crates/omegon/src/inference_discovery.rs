@@ -63,8 +63,8 @@ pub enum DiscoveryContract {
 /// and openai-codex's ChatGPT-backend token is unverified against `/v1/models`.
 pub fn contract_for_endpoint(endpoint_id: &str) -> Option<DiscoveryContract> {
     match endpoint_id {
-        "openai" | "groq" | "mistral" | "xai" | "moonshot" | "huggingface-router" | "ollama-cloud"
-        | "gemini-openai" => Some(DiscoveryContract::OpenAiCompatible),
+        "openai" | "groq" | "mistral" | "xai" | "moonshot" | "huggingface-router"
+        | "ollama-cloud" | "gemini-openai" => Some(DiscoveryContract::OpenAiCompatible),
         "openrouter" => Some(DiscoveryContract::OpenRouter),
         "anthropic" => Some(DiscoveryContract::Anthropic),
         "google" => Some(DiscoveryContract::Google),

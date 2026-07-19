@@ -81,7 +81,9 @@ fn provider_class(provider: &str) -> ProviderClass {
     match provider {
         "github-copilot" => ProviderClass::Subscription,
         "anthropic" | "openai" | "openai-codex" | "google" | "google-antigravity" | "xai"
-        | "mistral" | "groq" | "cerebras" | "moonshot" | "ollama-cloud" | "opencode-go" => ProviderClass::Direct,
+        | "mistral" | "groq" | "cerebras" | "moonshot" | "ollama-cloud" | "opencode-go" => {
+            ProviderClass::Direct
+        }
         "openrouter" | "perplexity" | "huggingface" => ProviderClass::Broker,
         "ollama" | "local" => ProviderClass::Local,
         _ => ProviderClass::Other,
