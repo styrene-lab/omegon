@@ -9187,7 +9187,8 @@ async fn run_bounded_task(
         },
     );
 
-    let bridge = bootstrap::resolve_bridge_or_bail(model).await?;
+    let bridge =
+        bootstrap::resolve_bridge_or_bail_with_secrets(model, Some(agent.secrets.as_ref())).await?;
     let (events_tx, mut events_rx) = bootstrap::wire_event_channel(&agent, 256);
 
     // Token tracking

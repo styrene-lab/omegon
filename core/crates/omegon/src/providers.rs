@@ -567,6 +567,17 @@ pub async fn delegate_default_model() -> String {
 /// return None here — they need an OpenAI-compatible client layer
 /// which is tracked for re-implementation.
 pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
+    resolve_provider_with_secrets(provider_id, None).await
+}
+
+/// Resolve a provider at an explicit execution boundary. When a secrets manager
+/// is supplied, a missing ambient credential may be resolved from its named
+/// recipe (including one Keychain interaction) and retained in the manager's
+/// session cache; unrelated recipes are never inspected.
+pub async fn resolve_provider_with_secrets(
+    provider_id: &str,
+    secrets: Option<&omegon_secrets::SecretsManager>,
+) -> Option<Box<dyn LlmBridge>> {
     match provider_id {
         "anthropic" => {
             if let Some(client) = AnthropicClient::from_env() {
@@ -596,7 +607,21 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
         // OpenAI-compatible providers — all use the Chat Completions protocol
         "groq" | "xai" | "mistral" | "cerebras" | "moonshot" | "google" | "huggingface"
         | "ollama" | "opencode-go" | "perplexity" | "dwarfstar" => {
-            OpenAICompatClient::from_env(provider_id).map(|c| Box::new(c) as Box<dyn LlmBridge>)
+            if let Some(client) = OpenAICompatClient::from_env(provider_id) {
+                return Some(Box::new(client));
+            }
+            let endpoint_refs = crate::auth::endpoint_secret_refs(provider_id);
+            let secret_name = crate::auth::provider_env_vars(provider_id)
+                .first()
+                .copied()
+                .or_else(|| endpoint_refs.first().map(String::as_str))?;
+            let api_key = secrets?.resolve_async(secret_name).await?;
+            let base_url = compat_base_url(provider_id)?;
+            Some(Box::new(OpenAICompatClient::new(
+                api_key,
+                base_url.to_string(),
+                provider_id.to_string(),
+            )))
         }
         "ollama-cloud" => OllamaCloudClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         // Codex uses the Responses API (not Chat Completions) with OAuth JWT tokens
@@ -615,11 +640,18 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
 /// Auto-detect the best available native provider from configured keys.
 /// Tries sync resolution first, then async (with token refresh) if needed.
 pub async fn auto_detect_bridge(model_spec: &str) -> Option<Box<dyn LlmBridge>> {
+    auto_detect_bridge_with_secrets(model_spec, None).await
+}
+
+pub async fn auto_detect_bridge_with_secrets(
+    model_spec: &str,
+    secrets: Option<&omegon_secrets::SecretsManager>,
+) -> Option<Box<dyn LlmBridge>> {
     let requested = infer_provider_id(model_spec);
     let attempts = fallback_order_for_model(model_spec);
 
     for provider in attempts {
-        if let Some(bridge) = resolve_provider(provider).await {
+        if let Some(bridge) = resolve_provider_with_secrets(provider, secrets).await {
             if provider != requested {
                 tracing::info!(requested = %requested, resolved = provider, model_spec, "falling back to alternate executable provider");
             }
