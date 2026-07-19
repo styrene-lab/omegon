@@ -25,6 +25,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Normal startup now defers Keychain-backed secret resolution, external CLI credential adoption, Vault authentication, and extension secret resolution until an explicit operation boundary. Startup hydrates only an already-stored credential for the selected provider, while extension registration consumes only credentials already resident in memory, preventing repeated macOS authorization prompt storms after development rebuilds.
+
 - Extension startup now treats rejected resolved configuration as a registration failure instead of continuing with an extension that did not accept its host-provided settings.
 
 ## [0.28.4] - 2026-07-15

@@ -482,12 +482,25 @@ impl SecretsManager {
         diagnostics
     }
 
-    /// Resolve a secret by name. Checks the session cache first, then the
-    /// redaction cache, then falls back to recipe resolution.
+    /// Return a secret only when it is already resident in the process.
     ///
-    /// Security: the redaction set already caches all resolved secrets as
-    /// `SecretString` (zeroized on drop) for the Aho-Corasick output redactor.
-    /// This method reads that existing cache — it doesn't create a new one.
+    /// This is the side-effect-free lookup for startup/status surfaces: it never
+    /// executes a recipe and therefore cannot display Keychain UI or perform
+    /// network/file/shell I/O.
+    pub fn resolve_cached(&self, name: &str) -> Option<String> {
+        if let Some(cached) = self.session_cache.read().unwrap().get(name) {
+            return Some(cached.expose_secret().to_string());
+        }
+        self.redaction_set
+            .read()
+            .unwrap()
+            .get(name)
+            .map(|cached| cached.expose_secret().to_string())
+    }
+
+    /// Resolve a secret by name. Checks in-memory caches first, then falls back
+    /// to recipe resolution. Call only at an explicit operation boundary: a
+    /// cache miss may execute Keychain, file, shell, or environment I/O.
     pub fn resolve(&self, name: &str) -> Option<String> {
         // Session cache first — deterministic runtime path after startup preflight.
         {
