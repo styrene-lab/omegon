@@ -74,6 +74,20 @@ pub struct ToolCardChrome {
 pub fn tool_display_name(name: &str, detail_args: Option<&str>) -> String {
     crate::surfaces::conversation::tool_visual_identity(name, detail_args).label
 }
+pub fn tool_display_label(
+    name: &str,
+    detail_args: Option<&str>,
+    provenance: &omegon_traits::ToolProvenance,
+) -> String {
+    let display_name = tool_display_name(name, detail_args);
+    match provenance {
+        omegon_traits::ToolProvenance::BuiltIn => display_name,
+        omegon_traits::ToolProvenance::Extension { name: extension } => {
+            format!("{display_name} ({extension})")
+        }
+    }
+}
+
 pub fn tool_card_chrome(
     name: &str,
     detail_args: Option<&str>,
@@ -300,6 +314,34 @@ mod tests {
         assert_eq!(tool_display_name("request_context", None), "context");
         assert_eq!(tool_display_name("wait_for_operator", None), "tool");
         assert_eq!(tool_display_name("browser_search", None), "browser");
+    }
+
+    #[test]
+    fn tool_display_label_discloses_extension_without_renaming_builtins() {
+        assert_eq!(
+            tool_display_label("read", None, &omegon_traits::ToolProvenance::BuiltIn),
+            "read"
+        );
+        assert_eq!(
+            tool_display_label(
+                "read",
+                None,
+                &omegon_traits::ToolProvenance::Extension {
+                    name: "recro-coe-agent".into(),
+                },
+            ),
+            "read (recro-coe-agent)"
+        );
+        assert_eq!(
+            tool_display_label(
+                "bash",
+                Some("cargo check"),
+                &omegon_traits::ToolProvenance::Extension {
+                    name: "recro-coe-agent".into(),
+                },
+            ),
+            "cargo (recro-coe-agent)"
+        );
     }
 
     #[test]

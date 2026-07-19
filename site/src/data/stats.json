@@ -1,7 +1,7 @@
 {
   "crateCount": 11,
   "downloadMB": 16,
-  "releaseTag": "v0.28.1",
+  "releaseTag": "v0.28.3",
   "providerCount": 16,
   "providerNames": [
     "Anthropic/Claude",
@@ -42,5 +42,5 @@
   "toolFiles": 24,
   "skillCount": 10,
   "searchProviderCount": 3,
-  "collectedAt": "2026-07-14T01:51:08.902Z"
+  "collectedAt": "2026-07-14T23:31:13.565Z"
 }

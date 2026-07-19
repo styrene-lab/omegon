@@ -651,10 +651,16 @@ impl WebState {
             return;
         };
         match event {
-            AgentEvent::ToolStart { id, name, args } => {
+            AgentEvent::ToolStart {
+                id,
+                name,
+                args,
+                provenance,
+            } => {
                 let redacted_args = self.redact_web_value(args);
                 if let Some(existing) = tools.iter_mut().find(|tool| tool.id == *id) {
                     existing.name = name.clone();
+                    existing.provenance = provenance.clone();
                     existing.status = "running".to_string();
                     existing.args = redacted_args;
                     existing.output_tail = None;
@@ -666,6 +672,7 @@ impl WebState {
                     tools.push_back(surfaces::WebToolRunSurface {
                         id: id.clone(),
                         name: name.clone(),
+                        provenance: provenance.clone(),
                         status: "running".to_string(),
                         args: redacted_args,
                         output_tail: None,
@@ -690,6 +697,7 @@ impl WebState {
                 name,
                 result,
                 is_error,
+                provenance,
             } => {
                 let summary = result
                     .content
@@ -699,6 +707,7 @@ impl WebState {
                     .map(|text| self.redact_web_text(&text.chars().take(240).collect::<String>()));
                 if let Some(tool) = tools.iter_mut().rev().find(|tool| tool.id == *id) {
                     tool.name = name.clone();
+                    tool.provenance = provenance.clone();
                     tool.status = if *is_error { "failed" } else { "completed" }.to_string();
                     tool.result_summary = summary;
                     tool.is_error = *is_error;
@@ -706,6 +715,7 @@ impl WebState {
                     tools.push_back(surfaces::WebToolRunSurface {
                         id: id.clone(),
                         name: name.clone(),
+                        provenance: provenance.clone(),
                         status: if *is_error { "failed" } else { "completed" }.to_string(),
                         args: serde_json::Value::Null,
                         output_tail: None,
@@ -2225,6 +2235,7 @@ mod tests {
         state.fold_conversation_event(&omegon_traits::AgentEvent::ToolStart {
             id: "tool-1".into(),
             name: "bash".into(),
+            provenance: omegon_traits::ToolProvenance::BuiltIn,
             args: serde_json::json!({"command":"pwd"}),
         });
         state.fold_conversation_event(&omegon_traits::AgentEvent::ToolUpdate {
@@ -2242,6 +2253,7 @@ mod tests {
         state.fold_conversation_event(&omegon_traits::AgentEvent::ToolEnd {
             id: "tool-1".into(),
             name: "bash".into(),
+            provenance: omegon_traits::ToolProvenance::BuiltIn,
             result: omegon_traits::ToolResult {
                 content: vec![omegon_traits::ContentBlock::Text {
                     text: "done".into(),
@@ -2277,6 +2289,7 @@ mod tests {
         state.fold_conversation_event(&omegon_traits::AgentEvent::ToolStart {
             id: "tool-secret".into(),
             name: "bash".into(),
+            provenance: omegon_traits::ToolProvenance::BuiltIn,
             args: serde_json::json!({"command":"curl -H 'Authorization: Bearer super-secret-token'"}),
         });
         state.fold_conversation_event(&omegon_traits::AgentEvent::ToolUpdate {
@@ -2290,6 +2303,7 @@ mod tests {
         state.fold_conversation_event(&omegon_traits::AgentEvent::ToolEnd {
             id: "tool-secret".into(),
             name: "bash".into(),
+            provenance: omegon_traits::ToolProvenance::BuiltIn,
             result: omegon_traits::ToolResult {
                 content: vec![omegon_traits::ContentBlock::Text {
                     text: "result contained super-secret-token".into(),
@@ -2316,6 +2330,7 @@ mod tests {
             state.fold_conversation_event(&omegon_traits::AgentEvent::ToolStart {
                 id: format!("tool-{idx}"),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args: serde_json::json!({}),
             });
         }

@@ -534,13 +534,21 @@ impl ConversationView {
         args_summary: Option<&str>,
         detail_args: Option<&str>,
     ) {
-        self.push_tool_start_with_expanded(id, name, args_summary, detail_args, false);
+        self.push_tool_start_with_expanded(
+            id,
+            name,
+            omegon_traits::ToolProvenance::BuiltIn,
+            args_summary,
+            detail_args,
+            false,
+        );
     }
 
     pub fn push_tool_start_with_expanded(
         &mut self,
         id: &str,
         name: &str,
+        provenance: omegon_traits::ToolProvenance,
         args_summary: Option<&str>,
         detail_args: Option<&str>,
         expanded_by_default: bool,
@@ -558,7 +566,7 @@ impl ConversationView {
             return;
         }
 
-        let mut seg = Segment::tool_card(id, name);
+        let mut seg = Segment::tool_card_with_provenance(id, name, provenance);
         if let SegmentContent::ToolCard {
             args_summary: ref mut a,
             detail_args: ref mut d,
@@ -2190,7 +2198,14 @@ mod tests {
     #[test]
     fn tool_start_can_opt_into_default_expansion() {
         let mut cv = ConversationView::new();
-        cv.push_tool_start_with_expanded("t1", "bash", Some("ls"), Some("ls"), true);
+        cv.push_tool_start_with_expanded(
+            "t1",
+            "bash",
+            omegon_traits::ToolProvenance::BuiltIn,
+            Some("ls"),
+            Some("ls"),
+            true,
+        );
         cv.push_tool_start("t2", "bash", Some("echo hi"), Some("echo hi"));
 
         if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[0].content {

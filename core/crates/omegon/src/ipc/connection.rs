@@ -1008,9 +1008,15 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
             Some(IpcEventPayload::ThinkingDelta { text: text.clone() })
         }
         AgentEvent::MessageEnd => Some(IpcEventPayload::MessageCompleted),
-        AgentEvent::ToolStart { id, name, args } => Some(IpcEventPayload::ToolStarted {
+        AgentEvent::ToolStart {
+            id,
+            name,
+            args,
+            provenance,
+        } => Some(IpcEventPayload::ToolStarted {
             id: id.clone(),
             name: name.clone(),
+            provenance: provenance.clone(),
             args: args.clone(),
         }),
         AgentEvent::ToolUpdate { id, partial } => Some(IpcEventPayload::ToolUpdated {
@@ -1022,6 +1028,7 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
             name,
             result,
             is_error,
+            provenance,
         } => {
             let summary = result
                 .content
@@ -1035,6 +1042,7 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
             Some(IpcEventPayload::ToolEnded {
                 id: id.clone(),
                 name: name.clone(),
+                provenance: provenance.clone(),
                 is_error: *is_error,
                 summary: if summary.is_empty() {
                     None

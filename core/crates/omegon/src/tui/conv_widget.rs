@@ -1219,6 +1219,7 @@ mod tests {
                 content: SegmentContent::ToolCard {
                     id: "1".into(),
                     name: "bash".into(),
+                    provenance: omegon_traits::ToolProvenance::BuiltIn,
                     args_summary: None,
                     detail_args: Some("echo hi".into()),
                     result_summary: None,

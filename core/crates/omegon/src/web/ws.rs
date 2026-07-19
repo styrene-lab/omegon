@@ -2187,12 +2187,18 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "type": "message_abort",
             "reason": reason,
         }),
-        AgentEvent::ToolStart { id, name, args } => json!({
+        AgentEvent::ToolStart {
+            id,
+            name,
+            args,
+            provenance,
+        } => json!({
             "type": "tool_start",
             "event_name": "tool.started",
             "id": id,
             "name": name,
             "tool_name": name,
+            "provenance": provenance,
             "args": args,
         }),
         AgentEvent::ToolUpdate { id, partial } => {
@@ -2234,6 +2240,7 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             name,
             result,
             is_error,
+            provenance,
         } => {
             // Serialize ALL content blocks, not just the first
             let texts: Vec<&str> = result.content.iter().filter_map(|c| c.as_text()).collect();
@@ -2244,6 +2251,7 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
                 "id": id,
                 "name": name,
                 "tool_name": name,
+                "provenance": provenance,
                 "result": escape_html(&result_text),
                 "is_error": is_error,
                 "block_count": result.content.len(),
@@ -3004,6 +3012,7 @@ mod tests {
         let event = AgentEvent::ToolEnd {
             id: "tc1".into(),
             name: "bash".into(),
+            provenance: omegon_traits::ToolProvenance::BuiltIn,
             result: omegon_traits::ToolResult {
                 content: vec![
                     omegon_traits::ContentBlock::Text {
@@ -3205,6 +3214,7 @@ mod tests {
             AgentEvent::ToolStart {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args: serde_json::json!({}),
             },
             AgentEvent::ToolUpdate {
@@ -3214,6 +3224,7 @@ mod tests {
             AgentEvent::ToolEnd {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 result: omegon_traits::ToolResult {
                     content: vec![omegon_traits::ContentBlock::Text { text: "ok".into() }],
                     details: serde_json::json!(null),

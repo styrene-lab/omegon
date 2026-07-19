@@ -300,6 +300,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: id.into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: None,
                 result_summary: Some(result.into()),
