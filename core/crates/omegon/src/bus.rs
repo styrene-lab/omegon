@@ -75,9 +75,28 @@ fn compact_tool_schema(def: &ToolDefinition) -> ToolDefinition {
                 let mut out = serde_json::Map::new();
                 for (key, value) in map {
                     if key == "description" {
-                        continue; // strip parameter descriptions
+                        continue; // schema annotation at this level
                     }
-                    out.insert(key.clone(), strip_descriptions(value));
+                    if key == "properties" {
+                        // Property names are user-defined identifiers. A property
+                        // literally named `description` is not a schema annotation
+                        // and must survive compaction (Moonshot validates required
+                        // names against this map).
+                        let properties = match value {
+                            Value::Object(properties) => Value::Object(
+                                properties
+                                    .iter()
+                                    .map(|(name, schema)| {
+                                        (name.clone(), strip_descriptions(schema))
+                                    })
+                                    .collect(),
+                            ),
+                            other => strip_descriptions(other),
+                        };
+                        out.insert(key.clone(), properties);
+                    } else {
+                        out.insert(key.clone(), strip_descriptions(value));
+                    }
                 }
                 Value::Object(out)
             }
@@ -1132,6 +1151,39 @@ mod tests {
         assert_eq!(bus.drain_requests().len(), 1);
         // Second drain should be empty
         assert!(bus.drain_requests().is_empty());
+    }
+
+    #[test]
+    fn compact_tool_schema_preserves_property_named_description() {
+        let def = ToolDefinition {
+            name: "memory_connect".into(),
+            label: "Connect".into(),
+            description: "Connect facts".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "required": ["relation", "description"],
+                "properties": {
+                    "relation": { "type": "string", "description": "Edge type" },
+                    "description": { "type": "string", "description": "Edge rationale" }
+                }
+            }),
+            capabilities: vec![],
+        };
+
+        let compact = compact_tool_schema(&def);
+        let properties = compact.parameters["properties"].as_object().unwrap();
+        assert!(properties.contains_key("description"));
+        assert_eq!(properties["description"]["type"], "string");
+        assert!(
+            !properties["description"]
+                .as_object()
+                .unwrap()
+                .contains_key("description")
+        );
+        assert_eq!(
+            compact.parameters["required"],
+            serde_json::json!(["relation", "description"])
+        );
     }
 
     #[test]
