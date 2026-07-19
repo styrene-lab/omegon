@@ -20,6 +20,7 @@ fn compact_provider_suffix(provider: &str) -> &'static str {
         "xai" => "xAI",
         "mistral" => "Mistral",
         "cerebras" => "Cerebras",
+        "moonshot" => "Moonshot",
         "opencode-go" => "OpenCode",
         "perplexity" => "Perplexity",
         _ => "",

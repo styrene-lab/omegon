@@ -57,6 +57,7 @@
     "xai": "grok-3",
     "mistral": "mistral-small-latest",
     "cerebras": "llama-3.3-70b",
+    "moonshot": "kimi-k3",
     "google": "gemini-2.5-flash",
     "google-antigravity": "gemini-2.5-flash",
     "openrouter": "anthropic/claude-sonnet-4-7",
@@ -76,6 +77,7 @@
       "google-antigravity": "gemini-3.1-pro-preview",
       "openrouter": "anthropic/claude-opus-4-7",
       "xai": "grok-4-0709",
+      "moonshot": "kimi-k3",
       "github-copilot": "gpt-5.4"
     },
     "B": {
@@ -308,6 +310,33 @@
         ],
         "docsUrl": "https://docs.x.ai/docs/api-reference#chat-completions",
         "verifiedAt": "2026-06-11"
+      }
+    },
+    {
+      "id": "moonshot",
+      "displayName": "Moonshot AI",
+      "class": "upstream",
+      "protocol": "openAiCompatible",
+      "baseUrl": "https://api.moonshot.ai/v1",
+      "authScheme": {
+        "kind": "bearerToken",
+        "secretRef": "MOONSHOT_API_KEY"
+      },
+      "enabled": true,
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": true,
+        "supportsResponsesApi": false,
+        "supportsStreaming": true,
+        "supportsTools": true,
+        "unsupportedRequestFields": [],
+        "requiredHeaders": [],
+        "optionalHeaders": [],
+        "quirks": [
+          "kimi-k3 uses always-on reasoning and accepts reasoning_effort=max",
+          "streaming reasoning is returned as reasoning_content"
+        ],
+        "docsUrl": "https://platform.kimi.ai/docs/guide/kimi-k3-quickstart",
+        "verifiedAt": "2026-07-19"
       }
     },
     {
@@ -867,6 +896,23 @@
       "supportsReasoning": true,
       "description": "Efficient o-series reasoning (succeeded by GPT-5 mini)",
       "producer": "openai",
+      "executionClass": "api-cloud"
+    },
+    {
+      "id": "kimi-k3",
+      "provider": "moonshot",
+      "name": "Kimi K3",
+      "contextInput": 1048576,
+      "contextOutput": 131072,
+      "capabilities": [
+        "reasoning",
+        "coding",
+        "vision",
+        "instruction"
+      ],
+      "supportsReasoning": true,
+      "description": "Moonshot AI flagship with always-on reasoning, native vision, tools, and a 1M-token context window",
+      "producer": "moonshot",
       "executionClass": "api-cloud"
     },
     {

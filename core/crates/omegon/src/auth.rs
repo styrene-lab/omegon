@@ -135,6 +135,14 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         description: "API key — hardware-accelerated inference",
     },
     ProviderCredential {
+        id: "moonshot",
+        auth_key: "moonshot",
+        display_name: "Moonshot AI",
+        env_vars: &["MOONSHOT_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — Kimi models via api.moonshot.ai",
+    },
+    ProviderCredential {
         id: "google",
         auth_key: "google",
         display_name: "Google Gemini",
@@ -272,6 +280,7 @@ pub fn canonical_provider_id(id: &str) -> &str {
         "xai" => "xai",
         "mistral" => "mistral",
         "cerebras" => "cerebras",
+        "moonshot" | "kimi" => "moonshot",
         "google" => "google",
         "gemini" => "google",
         "antigravity" | "google-antigravity" => "google-antigravity",
@@ -3503,6 +3512,8 @@ mod tests {
         assert_eq!(canonical_provider_id("chatgpt"), "openai-codex");
         assert_eq!(canonical_provider_id("codex"), "openai-codex");
         assert_eq!(canonical_provider_id("openai"), "openai");
+        assert_eq!(canonical_provider_id("kimi"), "moonshot");
+        assert_eq!(canonical_provider_id("moonshot"), "moonshot");
     }
 
     #[test]
@@ -3518,6 +3529,7 @@ mod tests {
             "xai",
             "mistral",
             "cerebras",
+            "moonshot",
             "brave",
             "tavily",
             "serper",

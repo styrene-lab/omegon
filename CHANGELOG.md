@@ -20,6 +20,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added Moonshot AI as a first-class upstream OpenAI-compatible provider with the `moonshot:kimi-k3` route, `MOONSHOT_API_KEY` authentication, live model discovery, Kimi K3 reasoning request semantics, and streamed `reasoning_content` projection into Omegon thinking events.
+
 - Tool lifecycle events now preserve the authoritative producer selected by `EventBus` arbitration. Conversation tool cards qualify extension-owned calls as `tool (extension-name)` while built-ins retain their existing labels, and IPC, MQTT, web-stream, WebSocket, and web tool-run projections carry the same provenance for operator-visible auditability.
 - Added an environment-gated `OMEGON_RECRO_COE_DIR` host litmus test that builds and launches the real Recro COE extension, verifies manifest and SDK handshake compatibility, applies typed configuration, executes its partnership workflow, and confirms extension-owned skill discovery.
 

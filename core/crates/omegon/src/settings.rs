@@ -956,6 +956,7 @@ const PROVIDER_PREFIXES: &[&str] = &[
     "xai",
     "mistral",
     "cerebras",
+    "moonshot",
     "google",
     "google-antigravity",
     "huggingface",

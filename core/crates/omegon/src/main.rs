@@ -9516,6 +9516,7 @@ filesystem_write = true
                     "api.x.ai",
                     "api.mistral.ai",
                     "api.cerebras.ai",
+                    "api.moonshot.ai",
                     "api.perplexity.ai",
                     "generativelanguage.googleapis.com",
                     "cloudcode-pa.googleapis.com",
