@@ -246,13 +246,18 @@ fn surface_stream_event(
             Some("conversation"),
             json!({ "text": text }),
         ),
-        AgentEvent::ToolStart { id, name, args } => {
+        AgentEvent::ToolStart {
+            id,
+            name,
+            args,
+            provenance,
+        } => {
             let args = state.redact_web_value(&args);
             WebSurfaceStreamEnvelope::default_session(
                 revision,
                 "tool_started",
                 Some("instruments"),
-                json!({ "id": id, "name": name, "args": args }),
+                json!({ "id": id, "name": name, "args": args, "provenance": provenance }),
             )
         }
         AgentEvent::ToolUpdate { id, partial } => {
@@ -266,12 +271,16 @@ fn surface_stream_event(
             )
         }
         AgentEvent::ToolEnd {
-            id, name, is_error, ..
+            id,
+            name,
+            is_error,
+            provenance,
+            ..
         } => WebSurfaceStreamEnvelope::default_session(
             revision,
             "tool_completed",
             Some("instruments"),
-            json!({ "id": id, "name": name, "is_error": is_error }),
+            json!({ "id": id, "name": name, "is_error": is_error, "provenance": provenance }),
         ),
         AgentEvent::PermissionRequest {
             tool_name,
@@ -518,6 +527,7 @@ mod tests {
             AgentEvent::ToolStart {
                 id: "t1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args: serde_json::json!({"command":"pwd"}),
             },
         ))
@@ -538,6 +548,7 @@ mod tests {
             AgentEvent::ToolStart {
                 id: "t-secret".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args: serde_json::json!({"command":"echo super-secret-token"}),
             },
         ))

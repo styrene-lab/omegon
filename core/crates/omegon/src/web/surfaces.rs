@@ -104,6 +104,7 @@ pub struct WebInstrumentsSurface {
 pub struct WebToolRunSurface {
     pub id: String,
     pub name: String,
+    pub provenance: omegon_traits::ToolProvenance,
     pub status: String,
     pub args: Value,
     pub output_tail: Option<String>,
@@ -524,6 +525,7 @@ mod tests {
             tools.push_back(WebToolRunSurface {
                 id: "tool-1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 status: "completed".into(),
                 args: serde_json::json!({"path": "src/lib.rs"}),
                 output_tail: None,
@@ -535,6 +537,7 @@ mod tests {
             tools.push_back(WebToolRunSurface {
                 id: "tool-2".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 status: "running".into(),
                 args: serde_json::json!({"command": "cargo test"}),
                 output_tail: Some("running 8 tests".into()),
@@ -546,6 +549,7 @@ mod tests {
             tools.push_back(WebToolRunSurface {
                 id: "tool-3".into(),
                 name: "write".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 status: "running".into(),
                 args: serde_json::json!({"path": "src/web.rs"}),
                 output_tail: None,

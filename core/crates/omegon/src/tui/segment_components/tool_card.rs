@@ -143,6 +143,7 @@ fn slim_tool_header_cells(
 
 pub struct ToolCardRenderProps<'a> {
     pub name: &'a str,
+    pub provenance: &'a omegon_traits::ToolProvenance,
     pub detail_args: Option<&'a str>,
     pub detail_result: Option<&'a str>,
     pub is_error: bool,
@@ -739,6 +740,7 @@ pub fn render(
     let theme = ctx.theme;
     render_tool_card(
         props.name,
+        props.provenance,
         props.detail_args,
         props.detail_result,
         props.is_error,
@@ -760,6 +762,7 @@ pub fn render(
 #[allow(clippy::too_many_arguments)]
 fn render_tool_card(
     name: &str,
+    provenance: &omegon_traits::ToolProvenance,
     detail_args: Option<&str>,
     detail_result: Option<&str>,
     is_error: bool,
@@ -786,7 +789,11 @@ fn render_tool_card(
         tool_category,
         t,
     );
-    let display_name = chrome.display_name;
+    let display_name = crate::tui::conversation_render_projection::tool_display_label(
+        name,
+        detail_args,
+        provenance,
+    );
     let status_icon = chrome.status_icon;
     let status_color = chrome.status_color;
     let border_color = chrome.border_color;
@@ -1178,6 +1185,7 @@ mod tests {
             content: segments::SegmentContent::ToolCard {
                 id: "tool-1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("git status".into()),
                 result_summary: None,
@@ -1448,6 +1456,7 @@ mod tests {
         let meta = SegmentMeta::default();
         let props = ToolCardRenderProps {
             name: "bash",
+            provenance: &omegon_traits::ToolProvenance::BuiltIn,
             detail_args: Some("cargo check"),
             detail_result: Some("ok"),
             is_error: false,

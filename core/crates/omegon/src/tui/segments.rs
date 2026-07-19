@@ -1423,6 +1423,7 @@ pub enum SegmentContent {
     ToolCard {
         id: String,
         name: String,
+        provenance: omegon_traits::ToolProvenance,
         args_summary: Option<String>,
         detail_args: Option<String>,
         result_summary: Option<String>,
@@ -1534,11 +1535,20 @@ impl Segment {
         }
     }
     pub fn tool_card(id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self::tool_card_with_provenance(id, name, omegon_traits::ToolProvenance::BuiltIn)
+    }
+
+    pub fn tool_card_with_provenance(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        provenance: omegon_traits::ToolProvenance,
+    ) -> Self {
         Self {
             meta: SegmentMeta::default(),
             content: SegmentContent::ToolCard {
                 id: id.into(),
                 name: name.into(),
+                provenance,
                 args_summary: None,
                 detail_args: None,
                 result_summary: None,
@@ -2054,6 +2064,7 @@ status: {}
             }
             ToolCard {
                 name,
+                provenance,
                 detail_args,
                 detail_result,
                 is_error,
@@ -2066,6 +2077,7 @@ status: {}
                 super::segment_components::tool_card::render(
                     super::segment_components::tool_card::ToolCardRenderProps {
                         name,
+                        provenance,
                         detail_args: detail_args.as_deref(),
                         detail_result: detail_result.as_deref(),
                         is_error: *is_error,
@@ -4193,6 +4205,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("echo hi".into()),
                 result_summary: None,
@@ -4237,6 +4250,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("echo hi".into()),
                 result_summary: None,
@@ -4316,6 +4330,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "edit".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some(args),
                 result_summary: None,
@@ -4389,6 +4404,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "change".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some(args),
                 result_summary: None,
@@ -4455,6 +4471,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "edit".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some(args),
                 result_summary: None,
@@ -4621,6 +4638,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "tool-1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: Some("cargo check".into()),
                 detail_args: Some("cargo check -p omegon".into()),
                 result_summary: Some("ok".into()),
@@ -4981,6 +4999,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "edit".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some(
                     r#"{"file":"src/main.rs","oldText":"a\nb","newText":"c\nd\ne"}"#.into(),
@@ -5024,6 +5043,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "change".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some(
                     r#"{"edits":[{"file":"src/main.rs","oldText":"a","newText":"b"},{"file":"src/lib.rs","oldText":"c","newText":"d"}],"validate":"cargo test"}"#.into(),
@@ -5071,6 +5091,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("/tmp/demo.rs".into()),
                 result_summary: None,
@@ -5134,6 +5155,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "codebase_search".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("{\"query\":\"foo\"}".into()),
                 result_summary: None,
@@ -5443,6 +5465,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("cargo build".into()),
                 result_summary: None,
@@ -5499,6 +5522,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("sleep 30".into()),
                 result_summary: None,
@@ -5553,6 +5577,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("cargo build".into()),
                 result_summary: None,
@@ -5635,6 +5660,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("sleep 60".into()),
                 result_summary: None,
@@ -5687,6 +5713,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("sleep 30".into()),
                 result_summary: None,
@@ -5724,6 +5751,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "codebase_search".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("{\"query\":\"foo\"}".into()),
                 result_summary: None,
@@ -5806,6 +5834,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: Some("ls -la".into()),
                 detail_args: Some("ls -la".into()),
                 result_summary: Some("total 42".into()),
@@ -5847,6 +5876,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("/Users/cwilson/workspace/black-meridian/omegon/core/crates/omegon/src/tui/really_long_filename.rs".into()),
                 result_summary: Some("fn main() {}".into()),
@@ -5863,6 +5893,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("src/tui/mod.rs".into()),
                 result_summary: Some("mod tui;".into()),
@@ -5914,6 +5945,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some(
                     "/very/long/path/to/some_extremely_verbose_filename_that_used_to_bleed.rs"
@@ -5966,6 +5998,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some(
                     "/Users/cwilson/workspace/black-meridian/omegon/core/Cargo.toml".into(),
@@ -5984,6 +6017,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("package.json".into()),
                 result_summary: None,
@@ -6036,6 +6070,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "write".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("/tmp/test".into()),
                 result_summary: None,
@@ -6074,6 +6109,7 @@ mod tests {
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("Cargo.toml".into()),
                 result_summary: None,
@@ -6220,6 +6256,7 @@ After fence text.
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("echo hello".into()),
                 result_summary: None,
@@ -6244,6 +6281,7 @@ After fence text.
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("echo hello".into()),
                 result_summary: None,
@@ -6275,6 +6313,7 @@ After fence text.
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("echo hi".into()),
                 result_summary: None,
@@ -6298,6 +6337,7 @@ After fence text.
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("/tmp/example.rs".into()),
                 result_summary: None,
@@ -6608,6 +6648,7 @@ After fence text.
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("file.rs".into()),
                 result_summary: None,
@@ -6624,6 +6665,7 @@ After fence text.
             content: SegmentContent::ToolCard {
                 id: "1".into(),
                 name: "read".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: None,
                 detail_args: Some("file.rs".into()),
                 result_summary: None,
@@ -6651,6 +6693,7 @@ After fence text.
             content: SegmentContent::ToolCard {
                 id: "t1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: Some("echo hi".into()),
                 detail_args: Some("echo hi".into()),
                 result_summary: None,
@@ -6682,6 +6725,7 @@ After fence text.
             content: SegmentContent::ToolCard {
                 id: "t1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: Some("printf smoke".into()),
                 detail_args: Some("printf smoke".into()),
                 result_summary: None,
@@ -6719,6 +6763,7 @@ After fence text.
             content: SegmentContent::ToolCard {
                 id: "t1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: Some("cargo check".into()),
                 detail_args: Some("cargo check".into()),
                 result_summary: None,
@@ -6759,6 +6804,7 @@ After fence text.
             content: SegmentContent::ToolCard {
                 id: "t1".into(),
                 name: "bash".into(),
+                provenance: omegon_traits::ToolProvenance::BuiltIn,
                 args_summary: Some("echo hi".into()),
                 detail_args: Some("echo hi".into()),
                 result_summary: None,
