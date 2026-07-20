@@ -247,7 +247,7 @@ fn menu_lines<'a>(
                 visible.row,
                 end == selected,
                 width,
-                columns,
+                &columns,
             ));
             if end == selected && !visible.row.description.is_empty() {
                 lines.extend(menu_description_lines(
@@ -412,14 +412,29 @@ fn truncate_menu_text(value: &str, max_width: usize) -> String {
     out
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct MenuRowColumns {
     label: usize,
     value: usize,
+    badges: Vec<usize>,
 }
 
 impl MenuRowColumns {
     fn for_rows(rows: &[VisibleMenuRow<'_>]) -> Self {
+        let badge_count = rows
+            .iter()
+            .map(|visible| visible.row.badges.len())
+            .max()
+            .unwrap_or(0);
+        let badges = (0..badge_count)
+            .map(|idx| {
+                rows.iter()
+                    .filter_map(|visible| visible.row.badges.get(idx))
+                    .map(|badge| UnicodeWidthStr::width(badge.label.as_str()) + 2)
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
         Self {
             label: rows
                 .iter()
@@ -432,6 +447,7 @@ impl MenuRowColumns {
                 .map(UnicodeWidthStr::width)
                 .max()
                 .unwrap_or(0),
+            badges,
         }
     }
 }
@@ -446,7 +462,7 @@ fn menu_row_line<'a>(
     row: &'a MenuRowProjection,
     selected: bool,
     width: usize,
-    columns: MenuRowColumns,
+    columns: &MenuRowColumns,
 ) -> Line<'a> {
     let marker = if selected { "›" } else { " " };
     let label_style = match row.kind {
@@ -468,18 +484,22 @@ fn menu_row_line<'a>(
             Style::default().fg(theme.accent_bright()),
         ));
     }
-    for badge in &row.badges {
+    for (idx, column_width) in columns.badges.iter().copied().enumerate() {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            format!("[{}]", badge.label),
-            Style::default().fg(match badge.tone {
-                MenuBadgeTone::Neutral => theme.muted(),
-                MenuBadgeTone::Success => theme.success(),
-                MenuBadgeTone::Warning => theme.warning(),
-                MenuBadgeTone::Danger => theme.error(),
-                MenuBadgeTone::Info => theme.accent_bright(),
-            }),
-        ));
+        if let Some(badge) = row.badges.get(idx) {
+            spans.push(Span::styled(
+                padded_menu_field(&format!("[{}]", badge.label), column_width),
+                Style::default().fg(match badge.tone {
+                    MenuBadgeTone::Neutral => theme.muted(),
+                    MenuBadgeTone::Success => theme.success(),
+                    MenuBadgeTone::Warning => theme.warning(),
+                    MenuBadgeTone::Danger => theme.error(),
+                    MenuBadgeTone::Info => theme.accent_bright(),
+                }),
+            ));
+        } else {
+            spans.push(Span::raw(" ".repeat(column_width)));
+        }
     }
     if row.primary_action.is_some() {
         spans.push(Span::styled("  ↵", Style::default().fg(theme.dim())));
@@ -911,16 +931,28 @@ mod tests {
         let mut projection = projection();
         projection.tabs[0].groups[0].rows[0].label = "SHORT".into();
         projection.tabs[0].groups[0].rows[0].value = Some("ready".into());
-        projection.tabs[0].groups[0].rows[0].badges = vec![MenuBadgeProjection {
-            label: "optional".into(),
-            tone: MenuBadgeTone::Neutral,
-        }];
+        projection.tabs[0].groups[0].rows[0].badges = vec![
+            MenuBadgeProjection {
+                label: "not configured".into(),
+                tone: MenuBadgeTone::Warning,
+            },
+            MenuBadgeProjection {
+                label: "optional".into(),
+                tone: MenuBadgeTone::Neutral,
+            },
+        ];
         projection.tabs[0].groups[0].rows[1].label = "MUCH_LONGER_NAME".into();
         projection.tabs[0].groups[0].rows[1].value = Some("missing".into());
-        projection.tabs[0].groups[0].rows[1].badges = vec![MenuBadgeProjection {
-            label: "required".into(),
-            tone: MenuBadgeTone::Danger,
-        }];
+        projection.tabs[0].groups[0].rows[1].badges = vec![
+            MenuBadgeProjection {
+                label: "ready".into(),
+                tone: MenuBadgeTone::Success,
+            },
+            MenuBadgeProjection {
+                label: "required".into(),
+                tone: MenuBadgeTone::Danger,
+            },
+        ];
         let state = MenuState::new(&projection);
         let rows = state.visible_rows(&projection);
         let columns = MenuRowColumns::for_rows(&rows);
@@ -929,7 +961,7 @@ mod tests {
         let rendered = rows
             .iter()
             .map(|visible| {
-                menu_row_line(&theme, visible.row, false, 80, columns)
+                menu_row_line(&theme, visible.row, false, 80, &columns)
                     .spans
                     .into_iter()
                     .map(|span| span.content.into_owned())
@@ -939,9 +971,48 @@ mod tests {
 
         assert_eq!(rendered[0].find("ready"), rendered[1].find("missing"));
         assert_eq!(
+            rendered[0].find("[not configured]"),
+            rendered[1].find("[ready]")
+        );
+        assert_eq!(
             rendered[0].find("[optional]"),
             rendered[1].find("[required]")
         );
+    }
+
+    #[test]
+    fn rendered_rows_reserve_missing_badge_columns_before_action_marker() {
+        let mut projection = projection();
+        projection.tabs[0].groups[0].rows[0].badges = vec![MenuBadgeProjection {
+            label: "wide status".into(),
+            tone: MenuBadgeTone::Warning,
+        }];
+        projection.tabs[0].groups[0].rows[1].badges = vec![
+            MenuBadgeProjection {
+                label: "ready".into(),
+                tone: MenuBadgeTone::Success,
+            },
+            MenuBadgeProjection {
+                label: "required".into(),
+                tone: MenuBadgeTone::Danger,
+            },
+        ];
+        let state = MenuState::new(&projection);
+        let rows = state.visible_rows(&projection);
+        let columns = MenuRowColumns::for_rows(&rows);
+        let theme = Alpharius;
+        let rendered = rows
+            .iter()
+            .map(|visible| {
+                menu_row_line(&theme, visible.row, false, 80, &columns)
+                    .spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(rendered[0].find('↵'), rendered[1].find('↵'));
     }
 
     #[test]
