@@ -88,8 +88,9 @@ impl RecipeStore {
 
     /// Set a recipe for a secret.
     pub fn set(&mut self, name: String, recipe: Recipe) -> anyhow::Result<()> {
-        self.recipes.insert(name, recipe);
-        self.save()
+        self.mutate_locked(move |recipes| {
+            recipes.insert(name, recipe);
+        })
     }
 
     /// Set a vault recipe for a secret.
@@ -104,10 +105,11 @@ impl RecipeStore {
 
     /// Remove a recipe.
     pub fn remove(&mut self, name: &str) -> anyhow::Result<bool> {
-        let existed = self.recipes.remove(name).is_some();
-        if existed {
-            self.save()?;
-        }
+        let name = name.to_string();
+        let mut existed = false;
+        self.mutate_locked(|recipes| {
+            existed = recipes.remove(&name).is_some();
+        })?;
         Ok(existed)
     }
 
@@ -125,37 +127,116 @@ impl RecipeStore {
         self.recipes.is_empty()
     }
 
-    fn save(&self) -> anyhow::Result<()> {
+    fn mutate_locked(
+        &mut self,
+        mutation: impl FnOnce(&mut HashMap<String, Recipe>),
+    ) -> anyhow::Result<()> {
+        if self.path.as_os_str().is_empty() {
+            mutation(&mut self.recipes);
+            return Ok(());
+        }
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let file = RecipeFile {
-            recipes: self.recipes.clone(),
-        };
-        let json = serde_json::to_string_pretty(&file)?;
+        let lock_path = self.path.with_extension("json.lock");
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)?;
+        lock_exclusive(&lock)?;
 
-        // Atomic write: write to temp file then rename. Prevents data loss
-        // if the process crashes or is killed mid-write.
-        let tmp_path = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp_path, &json)?;
-
-        // Restrict file permissions before rename — recipes contain sensitive
-        // metadata (keyring service names, file paths, vault paths, shell commands).
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o600);
-            std::fs::set_permissions(&tmp_path, perms)?;
-        }
-
-        std::fs::rename(&tmp_path, &self.path)?;
+        // Reload while holding the inter-process lock. Each mutation is applied
+        // to current disk state rather than this process's potentially stale
+        // startup snapshot, preventing one Omegon process from erasing another's
+        // newly-created recipe.
+        let mut merged = load_recipe_map(&self.path)?;
+        mutation(&mut merged);
+        save_recipe_map(&self.path, &merged)?;
+        self.recipes = merged;
+        unlock(&lock)?;
         Ok(())
     }
+}
+
+fn load_recipe_map(path: &Path) -> anyhow::Result<HashMap<String, Recipe>> {
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let content = std::fs::read_to_string(path)?;
+    let file: RecipeFile = serde_json::from_str(&content)?;
+    Ok(file.recipes)
+}
+
+fn save_recipe_map(path: &Path, recipes: &HashMap<String, Recipe>) -> anyhow::Result<()> {
+    let file = RecipeFile {
+        recipes: recipes.clone(),
+    };
+    let json = serde_json::to_string_pretty(&file)?;
+    let tmp_path = path.with_extension(format!("json.tmp.{}", std::process::id()));
+    std::fs::write(&tmp_path, &json)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    std::fs::rename(&tmp_path, path)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn lock_exclusive(file: &std::fs::File) -> anyhow::Result<()> {
+    use std::os::fd::AsRawFd;
+    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().into())
+    }
+}
+
+#[cfg(unix)]
+fn unlock(file: &std::fs::File) -> anyhow::Result<()> {
+    use std::os::fd::AsRawFd;
+    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().into())
+    }
+}
+
+#[cfg(not(unix))]
+fn lock_exclusive(_file: &std::fs::File) -> anyhow::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn unlock(_file: &std::fs::File) -> anyhow::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_instances_merge_mutations_without_lost_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut first = RecipeStore::load(dir.path()).unwrap();
+        let mut stale = RecipeStore::load(dir.path()).unwrap();
+
+        first
+            .set_string("MOONSHOT_API_KEY".into(), "keyring:MOONSHOT_API_KEY".into())
+            .unwrap();
+        stale
+            .set_string("OTHER_API_KEY".into(), "env:OTHER_API_KEY".into())
+            .unwrap();
+
+        let merged = RecipeStore::load(dir.path()).unwrap();
+        assert!(merged.get("MOONSHOT_API_KEY").is_some());
+        assert!(merged.get("OTHER_API_KEY").is_some());
+    }
 
     #[test]
     fn round_trip() {

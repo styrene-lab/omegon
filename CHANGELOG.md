@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Secret recipe mutations now take an inter-process lock and merge against current disk state before atomically writing, preventing a long-running Omegon process from erasing recipes created by another process, such as newly stored provider or web-search credentials.
+
 ## [0.28.5] - 2026-07-19
 
 ### Added
