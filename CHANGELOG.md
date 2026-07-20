@@ -18,7 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- Changed `/secrets` unresolved bindings to read `unavailable to session` rather than globally `missing`; the menu now explains process scope and shows redacted process-environment, recipe, resolution, and warm-cache diagnostics. Configured recipes that fail a readiness check are reported unavailable instead of misleadingly remaining `configured`.
+- Changed `/secrets` unresolved bindings to read `unavailable to session` rather than globally `missing`; the menu now explains process scope and shows redacted process-environment, recipe, resolution, and warm-cache diagnostics. Configured recipes that fail a readiness check are reported unavailable instead of misleadingly remaining `configured`, while older serialized readiness snapshots remain compatible.
+- Made secret recipe lock-file creation explicitly non-truncating, preserving lock semantics while satisfying release Clippy checks.
 - Changed `/secrets` inventory activation so pressing Enter on a selected secret immediately starts its hidden set/replace flow instead of running a resolution check and returning a missing-secret message; redacted resolution checks remain available as a secondary row action.
 - Aligned labels, values, badges, and action markers into stable columns across shared internal menu entry lists, so status-heavy surfaces such as `/secrets` remain scannable even when row labels vary substantially in length.
 - Fixed `/update` in-place upgrades failing with `blob signature verification failed: malformedframing`: `cosign sign-blob --output-certificate` now base64-encodes the PEM certificate it emits, while the verifier expected raw PEM. The updater normalizes the downloaded certificate, accepting both raw and base64-encoded PEM so releases signed by newer cosign verify correctly.

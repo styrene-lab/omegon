@@ -938,7 +938,10 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(rendered[0].find("ready"), rendered[1].find("missing"));
-        assert_eq!(rendered[0].find("[optional]"), rendered[1].find("[required]"));
+        assert_eq!(
+            rendered[0].find("[optional]"),
+            rendered[1].find("[required]")
+        );
     }
 
     #[test]

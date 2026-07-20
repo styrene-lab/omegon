@@ -69,6 +69,7 @@ pub struct SecretReadiness {
     pub consumers: Vec<SecretConsumer>,
     pub status: SecretReadinessStatus,
     pub recipe_kind: Option<String>,
+    #[serde(default)]
     pub process_env_available: bool,
     pub warmed: bool,
 }
@@ -693,6 +694,47 @@ mod tests {
         assert_eq!(recipe.status, SecretReadinessStatus::Configured);
         assert_eq!(recipe.recipe_kind.as_deref(), Some("env"));
         assert!(recipe.consumers.is_empty());
+    }
+
+    #[test]
+    fn checked_configured_recipe_that_did_not_warm_is_unavailable() {
+        let snapshot = build_secret_readiness_snapshot(
+            &[],
+            &[],
+            SecretReadinessInputs {
+                session_diagnostics: Vec::new(),
+                recipe_descriptors: vec![SecretRecipeDescriptorSummary {
+                    name: "CUSTOM_RECIPE_SECRET".into(),
+                    kind: "env".into(),
+                }],
+                checked_names: vec!["CUSTOM_RECIPE_SECRET".into()],
+            },
+        );
+
+        let secret = snapshot
+            .secrets
+            .iter()
+            .find(|secret| secret.name == "CUSTOM_RECIPE_SECRET")
+            .expect("configured secret should remain visible");
+        assert_eq!(secret.status, SecretReadinessStatus::Missing);
+        assert_eq!(secret.recipe_kind.as_deref(), Some("env"));
+        assert!(!secret.warmed);
+    }
+
+    #[test]
+    fn secret_readiness_deserializes_snapshots_without_process_env_metadata() {
+        let secret: SecretReadiness = serde_json::from_value(serde_json::json!({
+            "name": "LEGACY_SECRET",
+            "required": false,
+            "optional": true,
+            "consumers": [],
+            "status": "unchecked",
+            "recipe_kind": null,
+            "warmed": false
+        }))
+        .expect("older readiness snapshots remain compatible");
+
+        assert!(!secret.process_env_available);
     }
 
     #[test]
