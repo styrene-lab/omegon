@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.6] - 2026-07-19
+
 ### Added
 
 - Added Moonshot AI as a first-class upstream OpenAI-compatible provider with the `moonshot:kimi-k3` route, `MOONSHOT_API_KEY` authentication, live model discovery, Kimi K3 reasoning request semantics, and streamed `reasoning_content` projection into Omegon thinking events.
