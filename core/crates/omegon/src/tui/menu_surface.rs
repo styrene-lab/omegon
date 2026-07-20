@@ -202,6 +202,7 @@ fn menu_lines<'a>(
         )));
     } else {
         let selected = state.selected_row.min(rows.len().saturating_sub(1));
+        let columns = MenuRowColumns::for_rows(&rows);
         let selected_height = menu_row_render_height(&rows, selected, true, width);
         let mut start = selected;
         let mut used = selected_height;
@@ -241,7 +242,13 @@ fn menu_lines<'a>(
                         .add_modifier(Modifier::BOLD),
                 )));
             }
-            lines.push(menu_row_line(theme, visible.row, end == selected, width));
+            lines.push(menu_row_line(
+                theme,
+                visible.row,
+                end == selected,
+                width,
+                columns,
+            ));
             if end == selected && !visible.row.description.is_empty() {
                 lines.extend(menu_description_lines(
                     theme,
@@ -405,11 +412,41 @@ fn truncate_menu_text(value: &str, max_width: usize) -> String {
     out
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MenuRowColumns {
+    label: usize,
+    value: usize,
+}
+
+impl MenuRowColumns {
+    fn for_rows(rows: &[VisibleMenuRow<'_>]) -> Self {
+        Self {
+            label: rows
+                .iter()
+                .map(|visible| UnicodeWidthStr::width(visible.row.label.as_str()))
+                .max()
+                .unwrap_or(0),
+            value: rows
+                .iter()
+                .filter_map(|visible| visible.row.value.as_deref())
+                .map(UnicodeWidthStr::width)
+                .max()
+                .unwrap_or(0),
+        }
+    }
+}
+
+fn padded_menu_field(value: &str, width: usize) -> String {
+    let padding = width.saturating_sub(UnicodeWidthStr::width(value));
+    format!("{value}{}", " ".repeat(padding))
+}
+
 fn menu_row_line<'a>(
     theme: &dyn Theme,
     row: &'a MenuRowProjection,
     selected: bool,
     width: usize,
+    columns: MenuRowColumns,
 ) -> Line<'a> {
     let marker = if selected { "›" } else { " " };
     let label_style = match row.kind {
@@ -421,11 +458,13 @@ fn menu_row_line<'a>(
     };
     let mut spans = vec![
         Span::styled(format!("{marker} "), Style::default().fg(theme.accent())),
-        Span::styled(row.label.clone(), label_style),
+        Span::styled(padded_menu_field(&row.label, columns.label), label_style),
     ];
-    if let Some(value) = row.value.as_deref().filter(|value| !value.is_empty()) {
+    if columns.value > 0 {
+        let value = row.value.as_deref().unwrap_or_default();
+        spans.push(Span::raw("  "));
         spans.push(Span::styled(
-            format!("  {value}"),
+            padded_menu_field(value, columns.value),
             Style::default().fg(theme.accent_bright()),
         ));
     }
@@ -865,6 +904,41 @@ mod tests {
         assert_eq!(menu_visible_window(4, 10, 3), 2..5);
         assert_eq!(menu_visible_window(9, 10, 3), 7..10);
         assert_eq!(menu_visible_window(0, 0, 3), 0..0);
+    }
+
+    #[test]
+    fn rendered_rows_align_values_and_badges_as_columns() {
+        let mut projection = projection();
+        projection.tabs[0].groups[0].rows[0].label = "SHORT".into();
+        projection.tabs[0].groups[0].rows[0].value = Some("ready".into());
+        projection.tabs[0].groups[0].rows[0].badges = vec![MenuBadgeProjection {
+            label: "optional".into(),
+            tone: MenuBadgeTone::Neutral,
+        }];
+        projection.tabs[0].groups[0].rows[1].label = "MUCH_LONGER_NAME".into();
+        projection.tabs[0].groups[0].rows[1].value = Some("missing".into());
+        projection.tabs[0].groups[0].rows[1].badges = vec![MenuBadgeProjection {
+            label: "required".into(),
+            tone: MenuBadgeTone::Danger,
+        }];
+        let state = MenuState::new(&projection);
+        let rows = state.visible_rows(&projection);
+        let columns = MenuRowColumns::for_rows(&rows);
+        let theme = Alpharius;
+
+        let rendered = rows
+            .iter()
+            .map(|visible| {
+                menu_row_line(&theme, visible.row, false, 80, columns)
+                    .spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(rendered[0].find("ready"), rendered[1].find("missing"));
+        assert_eq!(rendered[0].find("[optional]"), rendered[1].find("[required]"));
     }
 
     #[test]
