@@ -281,6 +281,7 @@ fn is_known_provider_id(provider_id: &str) -> bool {
             | "xai"
             | "mistral"
             | "cerebras"
+            | "moonshot"
             | "google"
             | "google-antigravity"
             | "huggingface"
@@ -544,6 +545,7 @@ pub async fn delegate_default_model() -> String {
         ("xai", "grok-3-mini-fast"),
         ("mistral", "devstral-small-2505"),
         ("cerebras", "llama-3.3-70b"),
+        ("moonshot", "kimi-k3"),
         ("huggingface", "Qwen/Qwen3-32B"),
         ("ollama", "qwen3:32b"),
     ];
@@ -565,6 +567,17 @@ pub async fn delegate_default_model() -> String {
 /// return None here — they need an OpenAI-compatible client layer
 /// which is tracked for re-implementation.
 pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
+    resolve_provider_with_secrets(provider_id, None).await
+}
+
+/// Resolve a provider at an explicit execution boundary. When a secrets manager
+/// is supplied, a missing ambient credential may be resolved from its named
+/// recipe (including one Keychain interaction) and retained in the manager's
+/// session cache; unrelated recipes are never inspected.
+pub async fn resolve_provider_with_secrets(
+    provider_id: &str,
+    secrets: Option<&omegon_secrets::SecretsManager>,
+) -> Option<Box<dyn LlmBridge>> {
     match provider_id {
         "anthropic" => {
             if let Some(client) = AnthropicClient::from_env() {
@@ -592,9 +605,23 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
             None
         }
         // OpenAI-compatible providers — all use the Chat Completions protocol
-        "groq" | "xai" | "mistral" | "cerebras" | "google" | "huggingface" | "ollama"
-        | "opencode-go" | "perplexity" | "dwarfstar" => {
-            OpenAICompatClient::from_env(provider_id).map(|c| Box::new(c) as Box<dyn LlmBridge>)
+        "groq" | "xai" | "mistral" | "cerebras" | "moonshot" | "google" | "huggingface"
+        | "ollama" | "opencode-go" | "perplexity" | "dwarfstar" => {
+            if let Some(client) = OpenAICompatClient::from_env(provider_id) {
+                return Some(Box::new(client));
+            }
+            let endpoint_refs = crate::auth::endpoint_secret_refs(provider_id);
+            let secret_name = crate::auth::provider_env_vars(provider_id)
+                .first()
+                .copied()
+                .or_else(|| endpoint_refs.first().map(String::as_str))?;
+            let api_key = secrets?.resolve_async(secret_name).await?;
+            let base_url = compat_base_url(provider_id)?;
+            Some(Box::new(OpenAICompatClient::new(
+                api_key,
+                base_url.to_string(),
+                provider_id.to_string(),
+            )))
         }
         "ollama-cloud" => OllamaCloudClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         // Codex uses the Responses API (not Chat Completions) with OAuth JWT tokens
@@ -613,11 +640,18 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
 /// Auto-detect the best available native provider from configured keys.
 /// Tries sync resolution first, then async (with token refresh) if needed.
 pub async fn auto_detect_bridge(model_spec: &str) -> Option<Box<dyn LlmBridge>> {
+    auto_detect_bridge_with_secrets(model_spec, None).await
+}
+
+pub async fn auto_detect_bridge_with_secrets(
+    model_spec: &str,
+    secrets: Option<&omegon_secrets::SecretsManager>,
+) -> Option<Box<dyn LlmBridge>> {
     let requested = infer_provider_id(model_spec);
     let attempts = fallback_order_for_model(model_spec);
 
     for provider in attempts {
-        if let Some(bridge) = resolve_provider(provider).await {
+        if let Some(bridge) = resolve_provider_with_secrets(provider, secrets).await {
             if provider != requested {
                 tracing::info!(requested = %requested, resolved = provider, model_spec, "falling back to alternate executable provider");
             }
@@ -1842,7 +1876,15 @@ impl LlmBridge for OpenAIClient {
         let wire_tools: Vec<Value> = tools
             .iter()
             .map(|t| {
-                let params = openai_function_parameters(&t.parameters);
+                let params = if self.endpoint_id == "moonshot" {
+                    // Kimi's published tool contract accepts standard JSON Schema
+                    // verbatim, including descriptions and properties literally
+                    // named `description`. Do not run Omegon's lossy OpenAI schema
+                    // compactor over Moonshot tool definitions.
+                    t.parameters.clone()
+                } else {
+                    openai_function_parameters(&t.parameters)
+                };
                 json!({
                     "type": "function",
                     "function": {"name": t.name, "description": t.description, "parameters": params},
@@ -1861,14 +1903,19 @@ impl LlmBridge for OpenAIClient {
         let _ = crate::model_registry::ModelRegistry::global()
             .shape_openai_request(&self.endpoint_id, &mut body);
 
-        // Apply reasoning_effort for models that support it (o-series, gpt-5+).
-        // OpenAI's /v1/chat/completions rejects reasoning_effort when tools are
-        // present for gpt-5.4+. Strip it in that case — the model still reasons,
-        // it just ignores the effort hint.
+        // Apply reasoning effort using provider-specific semantics. Kimi K3 has
+        // always-on reasoning and Moonshot documents `reasoning_effort=max`;
+        // unlike OpenAI chat completions, the hint remains valid with tools.
         let has_tools = body.get("tools").is_some_and(|t| t.is_array());
-        if let Some(effort) = openai_reasoning_effort(options.reasoning.as_deref())
+        if self.endpoint_id == "moonshot" {
+            if options.reasoning.as_deref() != Some("off") {
+                body["reasoning_effort"] = json!("max");
+            }
+        } else if let Some(effort) = openai_reasoning_effort(options.reasoning.as_deref())
             && !has_tools
         {
+            // OpenAI's /v1/chat/completions rejects reasoning_effort when tools
+            // are present for gpt-5.4+. The model still reasons without the hint.
             body["reasoning_effort"] = json!(effort);
         }
 
@@ -1927,6 +1974,8 @@ async fn parse_openai_stream(
     tx: &mpsc::Sender<LlmEvent>,
 ) -> anyhow::Result<()> {
     let mut full_text = String::new();
+    let mut full_thinking = String::new();
+    let mut thinking_started = false;
     let mut tool_calls: Vec<ToolCallAccum> = Vec::new();
     let mut acc_input_tokens: u64 = 0;
     let mut acc_output_tokens: u64 = 0;
@@ -1967,6 +2016,22 @@ async fn parse_openai_stream(
         };
         let delta = &choice["delta"];
 
+        // Reasoning tokens. Moonshot streams Kimi K3 reasoning in the
+        // OpenAI-compatible `reasoning_content` delta field.
+        if let Some(reasoning) = delta.get("reasoning_content").and_then(|c| c.as_str())
+            && !reasoning.is_empty()
+        {
+            gate.active();
+            if !thinking_started {
+                let _ = tx.try_send(LlmEvent::ThinkingStart);
+                thinking_started = true;
+            }
+            full_thinking.push_str(reasoning);
+            let _ = tx.try_send(LlmEvent::ThinkingDelta {
+                delta: reasoning.to_string(),
+            });
+        }
+
         // Text
         if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
             gate.active();
@@ -2004,6 +2069,9 @@ async fn parse_openai_stream(
 
         // Finish
         if let Some(finish_reason) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+            if thinking_started {
+                let _ = tx.try_send(LlmEvent::ThinkingEnd);
+            }
             for tc in &tool_calls {
                 let _ = tx.try_send(LlmEvent::ToolCallEnd {
                     tool_call: crate::bridge::WireToolCall {
@@ -2018,6 +2086,7 @@ async fn parse_openai_stream(
             let _ = tx.try_send(LlmEvent::Done {
                 message: json!({
                     "text": full_text,
+                    "thinking": full_thinking,
                     "tool_calls": tc_vals,
                     "provider_stop_reason": finish_reason,
                 }),
@@ -2038,17 +2107,19 @@ async fn parse_openai_stream(
         // SSE byte stream ended without a `finish_reason` terminal event — the
         // provider dropped the connection mid-response. Surface an error so the
         // retry loop handles it; never silently feed truncated content back.
-        if !full_text.is_empty() || !tool_calls.is_empty() {
+        if !full_text.is_empty() || !full_thinking.is_empty() || !tool_calls.is_empty() {
             tracing::warn!(
                 text_len = full_text.len(),
+                thinking_len = full_thinking.len(),
                 tool_calls = tool_calls.len(),
                 "OpenAI stream closed without finish_reason — treating as error to prevent partial-content poisoning"
             );
             let _ = tx
                 .send(LlmEvent::Error {
                     message: format!(
-                        "openai: stream closed without completion (had {}b text, {} tool calls)",
+                        "openai: stream closed without completion (had {}b text, {}b thinking, {} tool calls)",
                         full_text.len(),
+                        full_thinking.len(),
                         tool_calls.len()
                     ),
                 })
@@ -3437,6 +3508,7 @@ pub fn compat_base_url(provider_id: &str) -> Option<&'static str> {
         "xai" => Some("https://api.x.ai"),
         "mistral" => Some("https://api.mistral.ai"),
         "cerebras" => Some("https://api.cerebras.ai"),
+        "moonshot" => Some("https://api.moonshot.ai"),
         "opencode-go" => Some("https://opencode.ai/zen/go"),
         "perplexity" => Some("https://api.perplexity.ai"),
         "google" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
@@ -5605,6 +5677,7 @@ mod tests {
             "xai",
             "mistral",
             "cerebras",
+            "moonshot",
             "huggingface",
             "ollama",
         ] {
@@ -5637,6 +5710,7 @@ mod tests {
                 "xai",
                 "mistral",
                 "cerebras",
+                "moonshot",
                 "huggingface",
                 "ollama",
             ]

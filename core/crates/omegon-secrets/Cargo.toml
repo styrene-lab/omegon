@@ -40,6 +40,7 @@ tokio = { version = "1", features = ["full"] }
 url = "2"
 globset = "0.4"
 regex = "1"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

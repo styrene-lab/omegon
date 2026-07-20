@@ -2198,17 +2198,14 @@ pub type HostActionApprovalSink = std::sync::Arc<
 /// duration of the session, and are dropped at shutdown. The bus delivers
 /// events sequentially in registration order — `&mut self` is safe.
 /// Authoritative producer of a tool after runtime name arbitration.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolProvenance {
+    #[default]
     BuiltIn,
-    Extension { name: String },
-}
-
-impl Default for ToolProvenance {
-    fn default() -> Self {
-        Self::BuiltIn
-    }
+    Extension {
+        name: String,
+    },
 }
 
 #[async_trait]

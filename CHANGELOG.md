@@ -16,20 +16,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- Development builds now report the current `0.28.5` release line, so `just run` no longer presents a stale `0.28.4` package version while running newer source.
+- Added Moonshot AI as a first-class upstream OpenAI-compatible provider with the `moonshot:kimi-k3` route, `MOONSHOT_API_KEY` authentication, live model discovery, Kimi K3 reasoning request semantics, and streamed `reasoning_content` projection into Omegon thinking events.
+- Added Ollama Cloud as a first-class upstream provider with API-key authentication and model discovery.
+
+### Changed
+
+- Normal startup now defers Keychain-backed secret resolution, external CLI credential adoption, Vault authentication, and extension secret resolution until an explicit operation boundary, preventing repeated macOS authorization prompts after development rebuilds.
 - `/runtime restart` and `/extension restart` now reload the runtime substrate in-process instead of replacing the harness-attached process and severing the active session transport.
 
+### Fixed
+
+- Secret recipe mutations now take an inter-process lock and merge against current disk state before atomically writing, preventing a long-running Omegon process from erasing recipes created by another process, such as newly stored provider or web-search credentials.
+- Development builds now report the current release line instead of presenting a stale package version while running newer source.
+
+## [0.28.5] - 2026-07-19
+
 ### Added
+
+- Added Moonshot AI as a first-class upstream OpenAI-compatible provider with the `moonshot:kimi-k3` route, `MOONSHOT_API_KEY` authentication, live model discovery, Kimi K3 reasoning request semantics, and streamed `reasoning_content` projection into Omegon thinking events.
 
 - Tool lifecycle events now preserve the authoritative producer selected by `EventBus` arbitration. Conversation tool cards qualify extension-owned calls as `tool (extension-name)` while built-ins retain their existing labels, and IPC, MQTT, web-stream, WebSocket, and web tool-run projections carry the same provenance for operator-visible auditability.
-
-### Added
-
 - Added an environment-gated `OMEGON_RECRO_COE_DIR` host litmus test that builds and launches the real Recro COE extension, verifies manifest and SDK handshake compatibility, applies typed configuration, executes its partnership workflow, and confirms extension-owned skill discovery.
 
 ### Changed
+
+- Normal startup now defers Keychain-backed secret resolution, external CLI credential adoption, Vault authentication, and extension secret resolution until an explicit operation boundary. Startup hydrates only an already-stored credential for the selected provider, while extension registration consumes only credentials already resident in memory, preventing repeated macOS authorization prompt storms after development rebuilds.
 
 - Extension startup now treats rejected resolved configuration as a registration failure instead of continuing with an extension that did not accept its host-provided settings.
 

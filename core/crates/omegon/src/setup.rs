@@ -336,59 +336,34 @@ impl AgentSetup {
                 )
             }
         };
-        let mut preflight = std::collections::BTreeSet::<String>::new();
-        if let Some(settings) = settings.as_ref()
-            && let Ok(guard) = settings.lock()
-        {
-            let provider = crate::providers::infer_provider_id(&guard.model);
-            // Add only the FIRST env var per provider (highest priority auth method),
-            // but only when the shared auth store cannot already satisfy the active
-            // route. This avoids an extra macOS Keychain prompt on every ad-hoc
-            // rebuilt binary when auth.json already has valid OAuth for the model
-            // (for example, gpt-* routes backed by openai-codex OAuth).
-            if !crate::auth::provider_connected_for_model(&guard.model)
-                && let Some(env_var) = crate::auth::provider_env_vars(&provider).first()
-            {
-                preflight.insert((*env_var).to_string());
-            }
-        }
-        // Extension-declared required secrets — read manifests early so keyring-backed
-        // secrets (e.g. GITHUB_TOKEN) are resolved before extension subprocesses spawn.
-        for name in collect_extension_secret_requirements(&cwd) {
-            preflight.insert(name);
-        }
-        // Plugin MCP env templates — scan {VAR_NAME} references so vault-backed
-        // secrets referenced in plugin.toml / mcp.toml are warmed before plugins connect.
-        for name in collect_plugin_secret_requirements(&cwd) {
-            preflight.insert(name);
-        }
-        // Web search API keys are resolved LAZILY — only when the web_search
-        // tool actually fires. Eagerly preflighting them causes 3 macOS Keychain
-        // prompts on every launch for ad-hoc signed dev builds (signature changes
-        // on each rebuild, invalidating "Always Allow" ACLs).
-        // NOTE: OMEGON_WEB_AUTH_SECRET is NOT preflighted here.
-        // Web browsing auth is only needed on-demand during web search.
-        // Resolving it lazily avoids an extra keychain prompt at startup.
+        // Normal startup is metadata-only for Keychain-backed secrets. Provider
+        // clients and extension operations resolve their credentials lazily at
+        // the explicit operation boundary; eagerly warming manifest/plugin
+        // declarations causes one macOS authorization dialog per Keychain item
+        // after ad-hoc development rebuilds.
+        let selected_provider = settings
+            .as_ref()
+            .and_then(|settings| settings.lock().ok())
+            .map(|guard| crate::providers::infer_provider_id(&guard.model));
         tracing::info!(
-            requested = preflight.len(),
-            names = ?preflight,
+            selected_provider = ?selected_provider,
             child = is_child,
-            "startup secret preflight plan"
+            "startup secret resolution deferred until use"
         );
 
-        // Initialize vault client BEFORE preflight so vault: recipes can resolve.
-        // Fail-open: vault unavailability is warned, not fatal — keyring/env still work.
-        if let Err(e) = secrets.init_vault(&secrets_dir).await {
-            tracing::warn!(error = %e, "vault init failed — vault: recipes will return None");
-        }
-
-        // Async preflight resolves ALL recipe types including vault:.
-        // Replaces the sync preflight_session_cache() which silently skips vault recipes.
-        secrets.preflight_session_cache_async(preflight).await;
-        crate::auth::import_discovered_provider_credentials();
+        // Vault authentication is also deferred. A token recipe may itself be
+        // Keychain-backed, so initializing the authenticated client here would
+        // violate the zero-prompt startup invariant. Explicit Vault/secret
+        // operations initialize or authenticate at their own boundary.
         let mut session_secret_env = secrets.session_env();
         let pre_hydrated_env_len = session_secret_env.len();
-        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
+        if let Some(provider) = selected_provider.as_deref() {
+            hydrate_selected_provider_auth_env_from_auth_json(
+                provider,
+                &mut session_secret_env,
+                &secrets,
+            );
+        }
         for (idx, (name, value)) in session_secret_env.iter().enumerate() {
             if idx >= pre_hydrated_env_len
                 || omegon_secrets::is_refreshable_oauth_secret_env(name.as_str())
@@ -1693,68 +1668,58 @@ fn collect_extension_secret_requirements(cwd: &Path) -> Vec<String> {
     names
 }
 
-fn hydrate_provider_auth_env_from_auth_json(
+fn hydrate_selected_provider_auth_env_from_auth_json(
+    provider_id: &str,
     session_secret_env: &mut Vec<(String, String)>,
     secrets: &omegon_secrets::SecretsManager,
 ) {
-    // Hydrate credentials for ALL providers that have stored auth, not just the
-    // parent session's model. Children (cleave, delegate) may use any provider
-    // and need the corresponding API keys in their inherited environment.
-    for provider in crate::auth::PROVIDERS {
-        let Some(primary_env) = provider.env_vars.first().copied() else {
-            continue;
-        };
-        if session_secret_env
-            .iter()
-            .any(|(name, _)| name == primary_env)
-        {
-            continue;
-        }
-        let mut source = "auth.json";
-        let creds = match crate::auth::read_credentials(provider.auth_key) {
-            Some(creds) if creds.cred_type == "oauth" && creds.is_expired() => {
-                tracing::debug!(
-                    provider = provider.id,
-                    env = primary_env,
-                    "stored provider OAuth credential expired; trying external adoption before env hydration"
-                );
-                source = "external";
-                crate::auth::adopt_external_credentials(provider.auth_key)
-            }
-            Some(creds) => Some(creds),
-            None => {
-                source = "external";
-                crate::auth::adopt_external_credentials(provider.auth_key)
-            }
-        };
-
-        if let Some(creds) = creds {
-            secrets.register_redaction_secret(primary_env, &creds.access);
-            secrets.register_redaction_secret(
-                &format!("{}_AUTH_JSON_ACCESS", provider.id),
-                &creds.access,
-            );
-            secrets.register_redaction_secret(
-                &format!("{}_AUTH_JSON_REFRESH", provider.id),
-                &creds.refresh,
-            );
-            if let Some(account_id) =
-                crate::auth::read_credential_extra(provider.auth_key, "accountId")
-            {
-                secrets.register_redaction_secret(
-                    &format!("{}_AUTH_JSON_ACCOUNT_ID", provider.id),
-                    &account_id,
-                );
-            }
-            session_secret_env.push((primary_env.to_string(), creds.access));
-            tracing::info!(
-                provider = provider.id,
-                env = primary_env,
-                source,
-                "hydrated provider auth env"
-            );
-        }
+    let Some(provider) = crate::auth::provider_by_id(provider_id) else {
+        return;
+    };
+    let Some(primary_env) = provider.env_vars.first().copied() else {
+        return;
+    };
+    if session_secret_env
+        .iter()
+        .any(|(name, _)| name == primary_env)
+    {
+        return;
     }
+
+    // Startup reads only Omegon-owned auth.json. External CLI adoption is an
+    // explicit login/first-use concern and must not fan out into Keychain/UI
+    // interaction while the application is merely starting.
+    let Some(creds) = crate::auth::read_credentials(provider.auth_key) else {
+        return;
+    };
+    if creds.cred_type == "oauth" && creds.is_expired() {
+        tracing::debug!(
+            provider = provider.id,
+            env = primary_env,
+            "skipping expired provider OAuth env hydration from auth.json"
+        );
+        return;
+    }
+
+    secrets.register_redaction_secret(primary_env, &creds.access);
+    secrets.register_redaction_secret(&format!("{}_AUTH_JSON_ACCESS", provider.id), &creds.access);
+    secrets.register_redaction_secret(
+        &format!("{}_AUTH_JSON_REFRESH", provider.id),
+        &creds.refresh,
+    );
+    if let Some(account_id) = crate::auth::read_credential_extra(provider.auth_key, "accountId") {
+        secrets.register_redaction_secret(
+            &format!("{}_AUTH_JSON_ACCOUNT_ID", provider.id),
+            &account_id,
+        );
+    }
+    session_secret_env.push((primary_env.to_string(), creds.access));
+    tracing::info!(
+        provider = provider.id,
+        env = primary_env,
+        source = "auth.json",
+        "hydrated selected provider auth env"
+    );
 }
 
 /// Scan plugin manifests and project MCP config for `{VAR_NAME}` template references.
@@ -1914,18 +1879,22 @@ async fn discover_and_register_extensions(
             continue;
         }
 
-        // Resolve declared secrets from session cache — these were preflighted
-        // at startup so no new Keychain prompts happen here.
-        // Use resolve_async so vault: recipes (which require an async client) work.
+        // Extension registration is non-interactive. Inject only credentials
+        // already resident in process memory; required secrets that need
+        // Keychain/Vault interaction remain unavailable until an explicit
+        // operation resolves them rather than prompting during startup.
         let resolved_secrets: Vec<(String, String)> = {
             if let Ok(manifest) = crate::extensions::ExtensionManifest::from_extension_dir(&path) {
-                let mut pairs = Vec::new();
-                for name in &manifest.secrets.required {
-                    if let Some(v) = secrets.resolve_async(name).await {
-                        pairs.push((name.clone(), v));
-                    }
-                }
-                pairs
+                manifest
+                    .secrets
+                    .required
+                    .iter()
+                    .filter_map(|name| {
+                        secrets
+                            .resolve_cached(name)
+                            .map(|value| (name.clone(), value))
+                    })
+                    .collect()
             } else {
                 vec![]
             }
@@ -2127,7 +2096,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_auth_hydration_skips_expired_oauth_credentials() {
+    fn selected_provider_auth_hydration_skips_expired_oauth_and_unselected_credentials() {
         let dir = tempfile::tempdir().unwrap();
         let auth_path = dir.path().join("auth.json");
         let expired = std::time::SystemTime::now()
@@ -2142,8 +2111,7 @@ mod tests {
                     "type": "oauth",
                     "access": "expired-codex-token",
                     "refresh": "refresh-token",
-                    "expires": expired,
-                    "accountId": "acct_123"
+                    "expires": expired
                 },
                 "brave": {
                     "type": "api-key",
@@ -2161,7 +2129,11 @@ mod tests {
             unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path) };
             let secrets = omegon_secrets::SecretsManager::new(dir.path()).expect("secrets manager");
             let mut session_secret_env = Vec::new();
-            hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
+            hydrate_selected_provider_auth_env_from_auth_json(
+                "openai-codex",
+                &mut session_secret_env,
+                &secrets,
+            );
             unsafe {
                 match original {
                     Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
@@ -2170,68 +2142,30 @@ mod tests {
             }
 
             assert!(
-                !session_secret_env
-                    .iter()
-                    .any(|(name, value)| name == "CHATGPT_OAUTH_TOKEN"
-                        && value == "expired-codex-token"),
-                "expired Codex OAuth must not be inherited by child sessions"
-            );
-            assert!(
-                session_secret_env
-                    .iter()
-                    .any(|(name, value)| name == "BRAVE_API_KEY" && value == "brave-token"),
-                "static credentials should still be hydrated"
+                session_secret_env.is_empty(),
+                "expired selected OAuth and unrelated credentials must not be hydrated"
             );
         });
     }
 
     #[test]
-    fn provider_auth_hydration_adopts_fresh_external_codex_when_internal_is_expired() {
+    fn selected_provider_auth_hydration_reads_only_selected_internal_credential() {
         let dir = tempfile::tempdir().unwrap();
         let auth_path = dir.path().join("auth.json");
-        let home = dir.path().join("home");
-        let codex_dir = home.join(".codex");
-        std::fs::create_dir_all(&codex_dir).unwrap();
-        let expired = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64
-            - 1_000;
-        let fresh_external_access = format!(
-            "e30.{}.sig",
-            base64::Engine::encode(
-                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-                serde_json::json!({
-                    "exp": std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs()
-                        + 3600
-                })
-                .to_string()
-            )
-        );
         std::fs::write(
             &auth_path,
             serde_json::json!({
-                "openai-codex": {
-                    "type": "oauth",
-                    "access": "expired-codex-token",
-                    "refresh": "expired-refresh-token",
-                    "expires": expired,
-                    "accountId": "acct_expired"
-                }
-            })
-            .to_string(),
-        )
-        .unwrap();
-        std::fs::write(
-            codex_dir.join("auth.json"),
-            serde_json::json!({
-                "tokens": {
-                    "access_token": fresh_external_access,
-                    "refresh_token": "fresh-external-refresh",
-                    "account_id": "acct_external"
+                "brave": {
+                    "type": "api-key",
+                    "access": "brave-token",
+                    "refresh": "",
+                    "expires": u64::MAX
+                },
+                "tavily": {
+                    "type": "api-key",
+                    "access": "tavily-token",
+                    "refresh": "",
+                    "expires": u64::MAX
                 }
             })
             .to_string(),
@@ -2239,40 +2173,25 @@ mod tests {
         .unwrap();
 
         with_auth_env_lock(|| {
-            let original_auth = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
-            let original_home = std::env::var("HOME").ok();
-            unsafe {
-                std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path);
-                std::env::set_var("HOME", &home);
-            }
+            let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+            unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path) };
             let secrets = omegon_secrets::SecretsManager::new(dir.path()).expect("secrets manager");
             let mut session_secret_env = Vec::new();
-            hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
+            hydrate_selected_provider_auth_env_from_auth_json(
+                "brave",
+                &mut session_secret_env,
+                &secrets,
+            );
             unsafe {
-                match original_auth {
+                match original {
                     Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
                     None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
                 }
-                match original_home {
-                    Some(value) => std::env::set_var("HOME", value),
-                    None => std::env::remove_var("HOME"),
-                }
             }
 
-            assert!(
-                session_secret_env
-                    .iter()
-                    .any(|(name, value)| name == "CHATGPT_OAUTH_TOKEN"
-                        && value == &fresh_external_access),
-                "fresh external Codex OAuth should be hydrated when internal auth is expired"
-            );
-            let persisted: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&auth_path).unwrap()).unwrap();
             assert_eq!(
-                persisted
-                    .pointer("/openai-codex/accountId")
-                    .and_then(|v| v.as_str()),
-                Some("acct_external")
+                session_secret_env,
+                vec![("BRAVE_API_KEY".into(), "brave-token".into())]
             );
         });
     }

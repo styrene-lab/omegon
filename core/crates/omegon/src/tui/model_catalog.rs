@@ -168,6 +168,7 @@ impl ModelCatalog {
             ("groq", "Groq"),
             ("xai", "xAI"),
             ("mistral", "Mistral"),
+            ("moonshot", "Moonshot AI"),
             ("google", "Google Gemini"),
             ("gemini-openai", "Google Gemini"),
             ("openrouter", "OpenRouter"),
