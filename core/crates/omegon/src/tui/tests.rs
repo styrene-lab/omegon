@@ -4360,13 +4360,20 @@ fn slash_login_provider_opens_hidden_secret_input_for_api_key_provider() {
     let tx = test_tx();
     let result = app.handle_slash_command("/login openai", &tx);
 
-    assert!(matches!(result, SlashResult::Display(_)));
+    let SlashResult::Display(message) = result else {
+        panic!("API-key login should return compact guidance");
+    };
+    app.show_slash_response("/login openai", &message);
     assert!(matches!(
         app.editor.mode(),
         super::editor::EditorMode::SecretInput { .. }
     ));
     assert!(app.active_menu.is_none());
     assert!(app.command_panel.is_none());
+    assert_eq!(
+        app.operator_events.back().map(|event| event.message.as_str()),
+        Some("Paste OPENAI_API_KEY — input hidden")
+    );
 }
 
 #[test]
@@ -6147,12 +6154,15 @@ fn slash_secrets_set_without_value_opens_menu() {
 }
 
 #[test]
-fn slash_secrets_set_name_enters_hidden_secret_input() {
+fn slash_secrets_set_name_enters_hidden_secret_input_without_command_panel() {
     let mut app = test_app();
     let tx = test_tx();
 
     let result = app.handle_slash_command("/secrets set VAULT_ROOT_TOKEN", &tx);
-    assert!(matches!(result, SlashResult::Display(_)));
+    let SlashResult::Display(message) = result else {
+        panic!("secret entry should return compact guidance");
+    };
+    app.show_slash_response("/secrets set VAULT_ROOT_TOKEN", &message);
     let (label, masked) = app
         .editor
         .secret_display()
@@ -6160,6 +6170,9 @@ fn slash_secrets_set_name_enters_hidden_secret_input() {
 
     assert_eq!(label, "VAULT_ROOT_TOKEN");
     assert!(masked.is_empty(), "secret buffer should start empty");
+    assert!(app.command_panel.is_none());
+    let event = app.operator_events.back().expect("compact secret hint");
+    assert_eq!(event.message, "Paste VAULT_ROOT_TOKEN — input hidden");
 }
 
 #[test]

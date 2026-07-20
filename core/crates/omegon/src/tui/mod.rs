@@ -6616,11 +6616,9 @@ warning: {warning}"
                 }
                 self.editor.start_secret_input(name);
                 SlashResult::Display(if acquisition.is_some() {
-                    format!(
-                        "Opening the provider key console… 🔒 paste {name} here (input is hidden):"
-                    )
+                    format!("Paste {name} — input hidden; provider console opened")
                 } else {
-                    format!("🔒 Paste or type value for {name} (input is hidden):")
+                    format!("Paste {name} — input hidden")
                 })
             }
             // /secrets configure and /secrets set with no name/value → open shared menu
@@ -6652,9 +6650,7 @@ warning: {warning}"
                     }
                 } else {
                     self.editor.start_secret_input(name);
-                    SlashResult::Display(format!(
-                        "🔒 Direct secret values are captured only through hidden input. Paste or type value for {name} now (input is hidden):"
-                    ))
+                    SlashResult::Display(format!("Paste {name} — input hidden"))
                 }
             }
             _ => {
@@ -7209,7 +7205,10 @@ warning: {warning}"
                     SlashResult::Display(response) => {
                         self.history.push(action.raw.clone());
                         self.exit_history_recall();
-                        self.open_command_panel(CommandPanel::from_slash(&action.raw, &response));
+                        // Route command feedback through the same semantic surface policy as
+                        // keyboard-submitted slash commands. In particular, hidden secret
+                        // entry is an editor mode with a compact hint, not a command modal.
+                        self.show_slash_response(&action.raw, &response);
                         UiActionOutcome::accepted_message(response)
                     }
                     SlashResult::Handled => {
@@ -9438,7 +9437,12 @@ warning: {warning}"
     }
 
     fn show_slash_response(&mut self, command: &str, response: &str) {
-        if response.starts_with("Unknown command: /") {
+        if matches!(self.editor.mode(), editor::EditorMode::SecretInput { .. }) {
+            // Secret entry already owns the normal editor. Keep its acquisition
+            // guidance compact instead of obscuring the workspace with a modal.
+            self.command_panel = None;
+            self.show_command_toast(CommandToast::new(response, CommandSeverity::Info));
+        } else if response.starts_with("Unknown command: /") {
             self.show_command_toast(CommandToast::new(response, CommandSeverity::Warning));
         } else if should_toast_slash_response(response) {
             self.show_command_toast(CommandToast::new(response, CommandSeverity::Info));
@@ -11065,10 +11069,19 @@ Scroll transcript:
                     let key_name = crate::auth::provider_by_id(args)
                         .and_then(|p| p.env_vars.first().copied())
                         .unwrap_or("OPENAI_API_KEY");
+                    let acquisition = crate::capabilities::secrets::secret_console_url(key_name);
+                    if let Some(url) = acquisition {
+                        let url = url.to_string();
+                        std::thread::spawn(move || {
+                            let _ = open::that(url);
+                        });
+                    }
                     self.editor.start_secret_input(key_name);
-                    SlashResult::Display(format!(
-                        "🔒 Paste your {args} API key into {key_name} (input is hidden):"
-                    ))
+                    SlashResult::Display(if acquisition.is_some() {
+                        format!("Paste {key_name} — input hidden; provider console opened")
+                    } else {
+                        format!("Paste {key_name} — input hidden")
+                    })
                 } else if let Some(CanonicalSlashCommand::AuthLogin(provider)) =
                     canonical_slash_command("login", args)
                 {
