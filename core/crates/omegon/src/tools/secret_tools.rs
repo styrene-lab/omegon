@@ -270,7 +270,7 @@ mod tests {
             .await
             .unwrap();
         let text = listed.content[0].as_text().unwrap();
-        assert!(text.contains("BRAVE_API_KEY: keyring:BRAVE_API_KEY"));
+        assert!(text.contains("BRAVE_API_KEY: store:"));
         assert!(!text.contains("[resolves]"));
     }
 

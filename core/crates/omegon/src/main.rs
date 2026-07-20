@@ -1110,6 +1110,8 @@ enum SecretAction {
     },
     /// List configured secrets (values are never shown).
     List,
+    /// Migrate legacy per-secret OS keyring items into Omegon's single encrypted store.
+    Migrate,
     /// Delete a secret and its recipe.
     Delete {
         /// Secret name to delete.
@@ -1473,6 +1475,7 @@ async fn main() -> anyhow::Result<()> {
                     stdin,
                 } => secret_cli::set(name, value.as_deref(), recipe.as_deref(), *stdin)?,
                 SecretAction::List => secret_cli::list()?,
+                SecretAction::Migrate => secret_cli::migrate()?,
                 SecretAction::Delete { name } => secret_cli::delete(name)?,
             }
             Ok(())

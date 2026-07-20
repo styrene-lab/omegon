@@ -63,7 +63,7 @@ pub fn set(
         }
         (Some(val), None) => {
             secrets.set_keyring_secret(name, val)?;
-            println!("Stored '{name}' in keyring.");
+            println!("Stored '{name}' in Omegon's encrypted store.");
         }
         (None, Some(recipe)) => {
             secrets.set_recipe(name, recipe)?;
@@ -94,7 +94,15 @@ pub fn list() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Delete a secret recipe (and attempt keyring cleanup).
+/// Migrate legacy per-secret keyring values into the single encrypted store.
+pub fn migrate() -> anyhow::Result<()> {
+    let secrets = create_manager()?;
+    let migrated = secrets.migrate_legacy_keyring_secrets()?;
+    println!("Migrated {migrated} legacy secret(s) into Omegon's encrypted store.");
+    Ok(())
+}
+
+/// Delete a secret recipe and its associated managed value.
 pub fn delete(name: &str) -> anyhow::Result<()> {
     let secrets = create_manager()?;
     secrets.delete_recipe(name)?;

@@ -33,7 +33,8 @@ pub use vault::{AuthConfig, VaultClient, VaultConfig};
 
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use tokio::sync::Mutex;
 
 /// Why a secret was preflighted/warmed into the session cache.
@@ -114,6 +115,10 @@ pub struct SecretsManager {
     redactor: Arc<RwLock<Redactor>>,
     /// Recipe store (persisted to ~/.omegon/secrets.json)
     recipes: RwLock<RecipeStore>,
+    /// Omegon-managed encrypted store. Its one master key is the only Keychain
+    /// item used for raw managed secret values.
+    managed_store: StdMutex<Option<SecretStore>>,
+    managed_store_path: PathBuf,
     /// Path guard for sensitive file access
     path_guard: PathGuard,
     /// Audit log
@@ -151,6 +156,8 @@ impl SecretsManager {
             session_cache: Arc::new(RwLock::new(HashMap::new())),
             session_meta: Arc::new(RwLock::new(HashMap::new())),
             recipes: RwLock::new(recipes),
+            managed_store: StdMutex::new(None),
+            managed_store_path: config_dir.join("secrets.db"),
             path_guard,
             audit,
             vault_client: Arc::new(Mutex::new(None)),
@@ -498,6 +505,26 @@ impl SecretsManager {
             .map(|cached| cached.expose_secret().to_string())
     }
 
+    fn with_managed_store<T>(
+        &self,
+        operation: impl FnOnce(&SecretStore) -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        let mut slot = self.managed_store.lock().unwrap();
+        if slot.is_none() {
+            let store = if SecretStore::exists(&self.managed_store_path) {
+                SecretStore::open_keyring(&self.managed_store_path)?
+            } else {
+                SecretStore::init_keyring(&self.managed_store_path)?
+            };
+            *slot = Some(store);
+        }
+        operation(slot.as_ref().expect("managed store initialized"))
+    }
+
+    fn load_managed_secret(&self, name: &str) -> anyhow::Result<Option<SecretString>> {
+        self.with_managed_store(|store| store.get(name))
+    }
+
     /// Resolve a secret by name. Checks in-memory caches first, then falls back
     /// to recipe resolution. Call only at an explicit operation boundary: a
     /// cache miss may execute Keychain, file, shell, or environment I/O.
@@ -525,7 +552,12 @@ impl SecretsManager {
             recipes.get(name).cloned()
         };
         let recipe = recipe?;
-        let resolved = resolve::execute_recipe(name, &recipe)?;
+        let resolved = match &recipe {
+            crate::recipes::Recipe::String(recipe_str) if recipe_str == "store:" => {
+                self.load_managed_secret(name).ok().flatten()?
+            }
+            _ => resolve::execute_recipe(name, &recipe)?,
+        };
         let value = resolved.expose_secret().to_string();
         {
             let mut set = self.redaction_set.write().unwrap();
@@ -555,12 +587,19 @@ impl SecretsManager {
         };
 
         if let Some(recipe) = recipe {
-            // Recipe exists — resolve it (may be keyring, vault, or shell)
-            // Acquire vault client only when we actually need it for recipe execution
-            let client = self.vault_client.lock().await;
-            let vault_client = client.as_ref();
+            // Recipe exists — resolve it (may be managed store, keyring, vault, or shell)
+            let secret = match &recipe {
+                crate::recipes::Recipe::String(recipe_str) if recipe_str == "store:" => {
+                    self.load_managed_secret(name).ok().flatten()
+                }
+                _ => {
+                    // Acquire vault client only when we actually need it for recipe execution.
+                    let client = self.vault_client.lock().await;
+                    resolve::execute_recipe_async(name, &recipe, client.as_ref()).await
+                }
+            };
 
-            if let Some(secret) = resolve::execute_recipe_async(name, &recipe, vault_client).await {
+            if let Some(secret) = secret {
                 let value = secret.expose_secret().to_string();
                 let mut set = self.redaction_set.write().unwrap();
                 set.insert(name.to_string(), secret);
@@ -639,12 +678,15 @@ impl SecretsManager {
 
     /// List all configured secret recipes with their resolution hints.
     pub fn list_recipes(&self) -> Vec<(String, String)> {
-        self.recipes
+        let mut recipes: Vec<_> = self
+            .recipes
             .read()
             .unwrap()
             .iter()
             .map(|(name, recipe)| (name.clone(), recipe.as_string()))
-            .collect()
+            .collect();
+        recipes.sort_by(|a, b| a.0.cmp(&b.0));
+        recipes
     }
 
     /// List configured secret recipes without resolving them.
@@ -693,6 +735,12 @@ impl SecretsManager {
                 let recipe_text = recipe.as_string();
                 let status = if recipe.is_vault() {
                     SecretRecipeStatus::Deferred
+                } else if recipe_text == "store:" {
+                    if self.resolve_cached(&name).is_some() {
+                        SecretRecipeStatus::Resolved
+                    } else {
+                        SecretRecipeStatus::Deferred
+                    }
                 } else if resolve::execute_recipe(&name, &recipe).is_some() {
                     SecretRecipeStatus::Resolved
                 } else {
@@ -741,81 +789,14 @@ impl SecretsManager {
         Ok(())
     }
 
-    /// Repair a named well-known keyring entry after a failed write or explicit
-    /// secret mutation. This is deliberately not run as a startup scan: on
-    /// macOS, each attempted Keychain read can produce its own authorization
-    /// dialog for ad-hoc rebuilt binaries.
-    fn repair_well_known_keyring_recipe(&self, name: &str) -> bool {
-        if !resolve::STATIC_SECRET_ENVS.contains(&name) {
-            return false;
-        }
-        let has_recipe = self.recipes.read().unwrap().get(name).is_some();
-        if has_recipe {
-            return false;
-        }
-        let Ok(Some(secret)) = load_from_keyring(name) else {
-            return false;
-        };
-        if self
-            .recipes
-            .write()
-            .unwrap()
-            .set_string(name.to_string(), format!("keyring:{name}"))
-            .is_err()
-        {
-            return false;
-        }
-        self.redaction_set
-            .write()
-            .unwrap()
-            .insert(name.to_string(), secret.clone());
-        self.session_cache
-            .write()
-            .unwrap()
-            .insert(name.to_string(), secret);
-        let use_case = match name {
-            "BRAVE_API_KEY" | "TAVILY_API_KEY" | "SERPER_API_KEY" | "FIRECRAWL_API_KEY" => {
-                SecretUse::WebSearch
-            }
-            _ => SecretUse::Other,
-        };
-        self.session_meta.write().unwrap().insert(
-            name.to_string(),
-            CachedSecretMeta {
-                source: "keyring-repaired",
-                warmed: true,
-                required_at_startup: false,
-                used_by: HashSet::from([use_case]),
-            },
-        );
-        tracing::info!(name = name, "repaired orphaned well-known keyring secret");
-        true
-    }
-
-    /// Store a raw value in the OS keyring and create a keyring: recipe for it.
-    pub fn set_keyring_secret(&self, name: &str, value: &str) -> anyhow::Result<()> {
-        // Upsert in keyring first. If the platform refuses to update an existing
-        // item but readback succeeds, repair metadata/cache using the existing
-        // secure value instead of leaving the harness unable to see the secret.
-        let secret = match store_in_keyring(name, value) {
-            Ok(()) => SecretString::from(value.to_string()),
-            Err(write_error) => match load_from_keyring(name)? {
-                Some(existing) => {
-                    tracing::warn!(
-                        name = name,
-                        error = %write_error,
-                        "keyring write failed but existing item resolved; repairing secret metadata"
-                    );
-                    existing
-                }
-                None => return Err(write_error),
-            },
-        };
-        self.repair_well_known_keyring_recipe(name);
+    /// Store a raw value in Omegon's encrypted store and create a `store:` recipe.
+    pub fn set_managed_secret(&self, name: &str, value: &str) -> anyhow::Result<()> {
+        let secret = SecretString::from(value.to_string());
+        self.with_managed_store(|store| store.put(name, &secret))?;
         self.recipes
             .write()
             .unwrap()
-            .set_string(name.to_string(), format!("keyring:{name}"))?;
+            .set_string(name.to_string(), "store:".to_string())?;
 
         self.redaction_set
             .write()
@@ -834,7 +815,7 @@ impl SecretsManager {
                 m.used_by.insert(SecretUse::Other);
             })
             .or_insert_with(|| CachedSecretMeta {
-                source: "keyring",
+                source: "encrypted-store",
                 warmed: true,
                 required_at_startup: false,
                 used_by: HashSet::from([SecretUse::Other]),
@@ -842,6 +823,38 @@ impl SecretsManager {
         self.rebuild_redactor();
         self.hydrate_process_env();
         Ok(())
+    }
+
+    /// Backward-compatible API name for callers that store a raw managed value.
+    pub fn set_keyring_secret(&self, name: &str, value: &str) -> anyhow::Result<()> {
+        self.set_managed_secret(name, value)
+    }
+
+    /// Migrate all legacy per-secret Keychain recipes into Omegon's encrypted
+    /// store. Each legacy item may prompt once during this explicit migration;
+    /// after migration, normal access uses only the store master-key item.
+    pub fn migrate_legacy_keyring_secrets(&self) -> anyhow::Result<usize> {
+        let legacy: Vec<(String, String)> = self
+            .recipes
+            .read()
+            .unwrap()
+            .iter()
+            .filter_map(|(name, recipe)| {
+                let text = recipe.as_string();
+                (text.starts_with("keyring:") || text.starts_with("keychain:"))
+                    .then(|| (name.clone(), text))
+            })
+            .collect();
+        let mut migrated = 0;
+        for (name, recipe) in legacy {
+            let Some(secret) = resolve::execute_string_recipe(&name, &recipe) else {
+                continue;
+            };
+            self.set_managed_secret(&name, secret.expose_secret())?;
+            delete_from_keyring(&name)?;
+            migrated += 1;
+        }
+        Ok(migrated)
     }
 
     /// Evict one or more secrets from the session cache, redaction set, and
@@ -868,13 +881,26 @@ impl SecretsManager {
         tracing::info!(evicted = ?names, "evicted secrets from session cache");
     }
 
-    /// Delete a secret recipe and any same-name keyring entry.
+    /// Delete a secret recipe and any associated managed or legacy keyring value.
     ///
-    /// Deletion is idempotent across the secrets surface: absent recipes and
-    /// absent keychain entries are success states. The same-name keyring cleanup
-    /// handles repaired/orphaned harness-managed secrets without keychain scans.
+    /// Deletion is idempotent across the secrets surface. Managed values are
+    /// removed from the encrypted store; legacy same-name keyring cleanup is
+    /// retained only for migration compatibility.
     pub fn delete_recipe(&self, name: &str) -> anyhow::Result<()> {
-        delete_from_keyring(name)?;
+        let recipe = self
+            .recipes
+            .read()
+            .unwrap()
+            .get(name)
+            .map(|recipe| recipe.as_string());
+        if recipe.as_deref() == Some("store:") && SecretStore::exists(&self.managed_store_path) {
+            self.with_managed_store(|store| store.delete(name).map(|_| ()))?;
+        } else if recipe
+            .as_deref()
+            .is_some_and(|recipe| recipe.starts_with("keyring:") || recipe.starts_with("keychain:"))
+        {
+            delete_from_keyring(name)?;
+        }
         self.recipes.write().unwrap().remove(name).map(|_| ())?;
         self.evict_secrets(&[name]);
         self.refresh_redaction_set();
@@ -898,12 +924,16 @@ impl SecretsManager {
         for (name, recipe) in self.recipes.read().unwrap().iter() {
             match recipe {
                 crate::recipes::Recipe::String(recipe_str)
-                    if recipe_str.starts_with("keyring:") =>
+                    if recipe_str == "store:"
+                        || recipe_str.starts_with("keyring:")
+                        || recipe_str.starts_with("keychain:") =>
                 {
-                    // Skip keyring recipes at startup — will resolve on-demand
+                    // Managed-store and legacy keyring recipes are explicit-use
+                    // boundaries; never touch Keychain while refreshing startup
+                    // redaction metadata.
                     tracing::debug!(
                         name = name,
-                        "skipping keyring recipe at startup (will resolve on-demand)"
+                        "skipping secure-store recipe at startup (will resolve on-demand)"
                     );
                     continue;
                 }
@@ -939,7 +969,7 @@ impl SecretsManager {
 
         tracing::info!(
             count = count,
-            "redaction set refreshed (keyring + aho-corasick) - vault recipes require async refresh"
+            "redaction set refreshed - secure-store and vault recipes require explicit resolution"
         );
     }
 }
@@ -950,6 +980,45 @@ mod tests {
     use std::sync::{LazyLock, Mutex};
 
     static ENV_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    #[test]
+    fn migration_moves_legacy_items_to_one_managed_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SecretsManager::new(dir.path()).unwrap();
+        store_in_keyring("FIRST", "one").unwrap();
+        store_in_keyring("SECOND", "two").unwrap();
+        mgr.set_recipe("FIRST", "keyring:FIRST").unwrap();
+        mgr.set_recipe("SECOND", "keyring:SECOND").unwrap();
+
+        assert_eq!(mgr.migrate_legacy_keyring_secrets().unwrap(), 2);
+        assert_eq!(
+            mgr.list_recipes(),
+            vec![
+                ("FIRST".to_string(), "store:".to_string()),
+                ("SECOND".to_string(), "store:".to_string()),
+            ]
+        );
+        assert!(load_from_keyring("FIRST").unwrap().is_none());
+        assert!(load_from_keyring("SECOND").unwrap().is_none());
+        assert_eq!(mgr.resolve("FIRST").as_deref(), Some("one"));
+        assert_eq!(mgr.resolve("SECOND").as_deref(), Some("two"));
+    }
+
+    #[test]
+    fn managed_secret_uses_one_store_recipe_for_multiple_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            SecretStore::init_passphrase(&dir.path().join("secrets.db"), "test-pass").unwrap();
+        store
+            .put("FIRST", &SecretString::from("one".to_string()))
+            .unwrap();
+        store
+            .put("SECOND", &SecretString::from("two".to_string()))
+            .unwrap();
+        assert_eq!(store.list().unwrap(), vec!["FIRST", "SECOND"]);
+        assert_eq!(store.get("FIRST").unwrap().unwrap().expose_secret(), "one");
+        assert_eq!(store.get("SECOND").unwrap().unwrap().expose_secret(), "two");
+    }
 
     #[test]
     fn runtime_projected_secret_is_redacted_without_recipe() {
@@ -1006,10 +1075,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             mgr.list_recipes(),
-            vec![(
-                "BRAVE_API_KEY".to_string(),
-                "keyring:BRAVE_API_KEY".to_string()
-            )]
+            vec![("BRAVE_API_KEY".to_string(), "store:".to_string())]
         );
         assert_eq!(mgr.resolve("BRAVE_API_KEY").as_deref(), Some("new-value"));
         assert_eq!(
@@ -1030,33 +1096,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_repair_restores_orphaned_firecrawl_keyring_secret() {
-        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = tempfile::tempdir().unwrap();
-        store_in_keyring("FIRECRAWL_API_KEY", "firecrawl-value").unwrap();
-
-        let mgr = SecretsManager::new(dir.path()).unwrap();
-        assert!(mgr.resolve("FIRECRAWL_API_KEY").is_none());
-
-        assert!(mgr.repair_well_known_keyring_recipe("FIRECRAWL_API_KEY"));
-
-        assert_eq!(
-            mgr.resolve("FIRECRAWL_API_KEY").as_deref(),
-            Some("firecrawl-value")
-        );
-        assert!(mgr.list_recipes().contains(&(
-            "FIRECRAWL_API_KEY".to_string(),
-            "keyring:FIRECRAWL_API_KEY".to_string()
-        )));
-        assert!(mgr.session_diagnostics().iter().any(|diag| {
-            diag.name == "FIRECRAWL_API_KEY" && diag.used_by.contains(&SecretUse::WebSearch)
-        }));
-
-        mgr.delete_recipe("FIRECRAWL_API_KEY").unwrap();
-    }
-
-    #[test]
-    fn delete_recipe_is_idempotent_and_clears_same_name_keyring_secret() {
+    fn delete_recipe_is_idempotent_and_clears_managed_secret() {
         let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let mgr = SecretsManager::new(dir.path()).unwrap();
@@ -1144,7 +1184,7 @@ mod tests {
         let diagnostics = mgr.list_recipe_diagnostics();
         assert!(diagnostics.iter().any(|entry| {
             entry.name == "BRAVE_API_KEY"
-                && entry.recipe == "keyring:BRAVE_API_KEY"
+                && entry.recipe == "store:"
                 && entry.status == SecretRecipeStatus::Resolved
         }));
         assert!(diagnostics.iter().any(|entry| {
