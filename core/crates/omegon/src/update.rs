@@ -375,6 +375,35 @@ async fn download_to_path(client: &reqwest::Client, url: &str, path: &Path) -> a
     Ok(())
 }
 
+/// Normalize a downloaded signing certificate for signature/identity verification.
+///
+/// `cosign sign-blob --output-certificate` emits the PEM certificate
+/// base64-encoded (sigstore/cosign#2059). Older releases shipped the raw PEM
+/// text. Accept either: if the content doesn't begin with a PEM boundary,
+/// attempt one base64 decode and require the result to be PEM.
+fn normalize_certificate_pem(content: &str) -> anyhow::Result<String> {
+    use base64::Engine;
+
+    let trimmed = content.trim();
+    if trimmed.contains("-----BEGIN") {
+        return Ok(trimmed.to_string());
+    }
+
+    let compact: String = trimmed.split_whitespace().collect();
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(&compact)
+        .map_err(|e| {
+            anyhow::anyhow!("certificate is neither PEM text nor base64-encoded PEM: {e}")
+        })?;
+    let decoded = String::from_utf8(decoded)
+        .map_err(|e| anyhow::anyhow!("base64-decoded certificate is not UTF-8: {e}"))?;
+    let decoded = decoded.trim().to_string();
+    if !decoded.contains("-----BEGIN") {
+        anyhow::bail!("base64-decoded certificate does not contain a PEM boundary");
+    }
+    Ok(decoded)
+}
+
 fn verify_archive_signature(
     archive_path: &Path,
     sig_path: &Path,
@@ -383,6 +412,7 @@ fn verify_archive_signature(
     let blob = std::fs::read(archive_path)?;
     let signature = std::fs::read_to_string(sig_path)?;
     let cert_pem = std::fs::read_to_string(cert_path)?;
+    let cert_pem = normalize_certificate_pem(&cert_pem)?;
 
     <sigstore::cosign::Client as sigstore::cosign::CosignCapabilities>::verify_blob(
         &cert_pem,
@@ -1010,6 +1040,45 @@ mod tests {
         assert!(
             err.to_string().contains("parse PEM certificate")
                 || err.to_string().contains("parse certificate DER")
+        );
+    }
+
+    #[test]
+    fn normalize_certificate_pem_accepts_raw_pem() {
+        let pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+        let normalized = normalize_certificate_pem(pem).expect("raw pem should pass through");
+        assert!(normalized.starts_with("-----BEGIN CERTIFICATE-----"));
+        assert!(normalized.ends_with("-----END CERTIFICATE-----"));
+    }
+
+    #[test]
+    fn normalize_certificate_pem_decodes_cosign_output() {
+        use base64::Engine;
+        let pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+        let encoded = base64::engine::general_purpose::STANDARD.encode(pem);
+        let normalized = normalize_certificate_pem(&encoded).expect("base64 pem should decode");
+        assert_eq!(normalized, pem.trim());
+    }
+
+    #[test]
+    fn normalize_certificate_pem_rejects_neither_pem_nor_base64() {
+        let err =
+            normalize_certificate_pem("definitely not a cert!!!").expect_err("garbage should fail");
+        assert!(
+            err.to_string().contains("neither PEM text nor base64"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn normalize_certificate_pem_rejects_base64_without_pem_boundary() {
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode("just some bytes");
+        let err = normalize_certificate_pem(&encoded)
+            .expect_err("base64 without PEM boundary should fail");
+        assert!(
+            err.to_string().contains("does not contain a PEM boundary"),
+            "{err}"
         );
     }
 }
