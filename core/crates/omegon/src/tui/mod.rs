@@ -6241,6 +6241,10 @@ warning: {warning}"
                             });
                         }
                         self.editor.start_secret_input(key_name);
+                        // A login selector can be opened from the auth menu. Once hidden
+                        // input owns the keyboard, remove that underlying menu so the
+                        // first pasted character/Enter is not intercepted by stale UI.
+                        self.active_menu = None;
                         Some(if acquisition.is_some() {
                             format!(
                                 "Opening the {value} key console… 🔒 paste {key_name} here (input is hidden):"
@@ -14044,11 +14048,15 @@ pub async fn run_tui(
                             KeyCode::Enter => {
                                 if let Some((label, value)) = app.editor.take_secret() {
                                     if value.is_empty() {
+                                        app.operator_events.clear();
                                         app.show_command_toast(CommandToast::new(
                                             "Cancelled — no value entered",
                                             CommandSeverity::Warning,
                                         ));
                                     } else {
+                                        // The acquisition hint has served its purpose once a
+                                        // value is submitted; do not leave it obscuring the TUI.
+                                        app.operator_events.clear();
                                         // Store in secrets engine
                                         let _ = command_tx
                                             .send(TuiCommand::ExecuteControl {
@@ -14094,6 +14102,8 @@ pub async fn run_tui(
                             }
                             KeyCode::Esc => {
                                 app.editor.cancel_secret();
+                                app.operator_events.clear();
+                                app.active_menu = None;
                                 app.show_command_toast(CommandToast::new(
                                     "Secret input cancelled",
                                     CommandSeverity::Info,

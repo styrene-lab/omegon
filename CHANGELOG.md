@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Preserved happy-path browser acquisition for Brave, Serper, and Tavily API keys while making hidden secret input take keyboard ownership immediately, closing the originating auth menu, and replacing stale acquisition notices on submit or cancellation.
+
 - Reconciled stale ACP, web API, and slash-command tests with the 0.28.6 secret-readiness and runtime-refresh contracts so the post-publish smoke gate exercises the shipped behavior consistently.
 - Changed `/secrets` unresolved bindings to read `unavailable to session` rather than globally `missing`; the menu now explains process scope and shows redacted process-environment, recipe, resolution, and warm-cache diagnostics. Configured recipes that fail a readiness check are reported unavailable instead of misleadingly remaining `configured`, while older serialized readiness snapshots remain compatible.
 - Made secret recipe lock-file creation explicitly non-truncating, preserving lock semantics while satisfying release Clippy checks.
