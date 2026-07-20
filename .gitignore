@@ -43,6 +43,7 @@ ai/benchmarks/archive/
 # Jujutsu VCS (co-located with git)
 .jj/
 .omegon/history
+.omegon/worktrees/
 .omegon/release-worktrees/
 .omegon/runtime/
 **/.omegon/runtime/
