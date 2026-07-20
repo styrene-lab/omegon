@@ -155,8 +155,6 @@ impl ContextManager {
         user_prompt: &str,
         conversation: &ConversationState,
     ) -> String {
-        self.decay_expired();
-
         let recent_tools_vec: Vec<String> = self.recent_tools.iter().cloned().collect();
         let recent_files_vec: Vec<PathBuf> = self.recent_files.iter().cloned().collect();
 
@@ -200,7 +198,12 @@ impl ContextManager {
             },
         });
 
-        self.assemble(user_prompt, conversation)
+        let prompt = self.assemble(user_prompt, conversation);
+        // TTL counts completed prompt assemblies. Decaying before assembly made
+        // one-turn snapshots (intent, active plan, attachments) expire without
+        // ever becoming visible to the provider.
+        self.decay_expired();
+        prompt
     }
 
     /// Build the session HUD line.
@@ -267,7 +270,13 @@ impl ContextManager {
     fn decay_expired(&mut self) {
         self.active_injections.retain_mut(|a| {
             a.remaining_turns = a.remaining_turns.saturating_sub(1);
-            a.remaining_turns > 0
+            if a.remaining_turns == 0 {
+                self.shadow
+                    .remove_by_source_prefix(&format!("inj:{}", a.injection.source));
+                false
+            } else {
+                true
+            }
         });
     }
 
@@ -556,6 +565,44 @@ mod tests {
         let prompt = cm.build_system_prompt("show me the image again", &conv);
         assert!(prompt.contains("[Attachment files]"));
         assert!(prompt.contains("/tmp/demo.png"));
+    }
+
+    #[test]
+    fn active_plan_intent_is_visible_in_the_current_provider_prompt() {
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .set_work_plan(vec!["Inspect".into(), "Patch".into()]);
+        conversation.intent.execute_work_plan();
+
+        let mut cm = ContextManager::new("You are an assistant.".into(), vec![]);
+        cm.inject_intent(conversation.render_intent_for_injection());
+        let prompt = cm.build_system_prompt("continue", &conversation);
+
+        assert!(prompt.contains("[Intent — session state]"));
+        assert!(prompt.contains("Plan (0/2):"));
+        assert!(prompt.contains("Plan mode: executing"));
+        assert!(prompt.contains("Plan execution contract:"));
+        assert!(prompt.contains("◐ Inspect"));
+        assert!(prompt.contains("○ Patch"));
+    }
+
+    #[test]
+    fn one_turn_external_injection_participates_in_current_prompt() {
+        let mut cm = ContextManager::new("You are an assistant.".into(), vec![]);
+        cm.inject_external(vec![omegon_traits::ContextInjection {
+            source: "current-turn-state".into(),
+            content: "[Current authoritative state]".into(),
+            priority: 190,
+            ttl_turns: 1,
+        }]);
+        let conv = ConversationState::new();
+
+        let current = cm.build_system_prompt("continue", &conv);
+        assert!(current.contains("[Current authoritative state]"));
+
+        let next = cm.build_system_prompt("continue", &conv);
+        assert!(!next.contains("[Current authoritative state]"));
     }
 
     #[test]

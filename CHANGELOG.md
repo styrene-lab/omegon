@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Kept one-turn authoritative context snapshots alive through the provider prompt that consumes them, so the agent now sees the current Workbench plan/intent state instead of having it expire during prompt assembly; unfinished visible plans also trigger reconciliation regardless of the assistant's closing wording.
+
 - Aligned every badge position as its own shared menu column, preventing secondary secret-status badges and action markers from drifting when readiness labels have different widths or a row omits a badge.
 - Changed secret inventory activation to follow diagnosed recovery state: genuinely missing bindings open hidden input immediately, environment recipes absent from the running process expose the configured variable and a re-check/repair path, and other configured-source failures default to source inspection with an explicit **Replace entirely** action.
 - Replaced the ambiguous `unavailable to session` row label with operator-actionable states including `environment not inherited`, `source failed`, `configured — not loaded`, and `loads on demand`.

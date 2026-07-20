@@ -4236,8 +4236,8 @@ fn plan_open_fingerprint(intent: &IntentDocument) -> u64 {
     hash
 }
 
-fn should_nudge_plan_reconciliation(intent: &IntentDocument, assistant_text: &str) -> bool {
-    if plan_open_items(intent).is_empty() || !looks_like_completion(assistant_text) {
+fn should_nudge_plan_reconciliation(intent: &IntentDocument, _assistant_text: &str) -> bool {
+    if plan_open_items(intent).is_empty() {
         return false;
     }
     // A new or changed stale-plan state always re-arms the nudge.
@@ -5693,7 +5693,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_reconciliation_nudge_requires_incomplete_plan_and_completion_language() {
+    fn plan_reconciliation_nudge_requires_incomplete_plan_regardless_of_wording() {
         let mut intent = IntentDocument::default();
         intent.set_work_plan(vec!["Inspect".into(), "Patch".into()]);
 
@@ -5701,10 +5701,11 @@ mod tests {
             &intent,
             "Done! The patch is validated."
         ));
-        assert!(!should_nudge_plan_reconciliation(
+        assert!(should_nudge_plan_reconciliation(
             &intent,
             "I found the likely issue and will patch the handler next."
         ));
+        assert!(should_nudge_plan_reconciliation(&intent, ""));
 
         intent.advance_work_plan();
         intent.advance_work_plan();
