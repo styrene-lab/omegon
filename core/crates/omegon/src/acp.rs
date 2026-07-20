@@ -5464,7 +5464,7 @@ required = ["BRAVE_API_KEY"]
             .iter()
             .find(|secret| secret["name"] == "BRAVE_API_KEY")
             .expect("BRAVE_API_KEY readiness");
-        assert_eq!(readiness["status"], "configured");
+        assert_eq!(readiness["status"], "missing");
         assert_eq!(readiness["recipe_kind"], "env");
         assert!(!response.to_string().contains("brave-test-key"));
         assert!(!response.to_string().contains("OMEGON_TEST_BRAVE_KEY"));

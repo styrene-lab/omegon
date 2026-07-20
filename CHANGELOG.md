@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Reconciled stale ACP, web API, and slash-command tests with the 0.28.6 secret-readiness and runtime-refresh contracts so the post-publish smoke gate exercises the shipped behavior consistently.
 - Changed `/secrets` unresolved bindings to read `unavailable to session` rather than globally `missing`; the menu now explains process scope and shows redacted process-environment, recipe, resolution, and warm-cache diagnostics. Configured recipes that fail a readiness check are reported unavailable instead of misleadingly remaining `configured`, while older serialized readiness snapshots remain compatible.
 - Made secret recipe lock-file creation explicitly non-truncating, preserving lock semantics while satisfying release Clippy checks.
 - Changed `/secrets` inventory activation so pressing Enter on a selected secret immediately starts its hidden set/replace flow instead of running a resolution check and returning a missing-secret message; redacted resolution checks remain available as a secondary row action.

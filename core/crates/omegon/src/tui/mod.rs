@@ -15695,17 +15695,11 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn runtime_reload_and_restart_have_distinct_semantics() {
-        for args in ["refresh", "reload", "hup", "kick"] {
+    fn runtime_reload_and_restart_aliases_refresh_the_runtime_substrate() {
+        for args in ["refresh", "reload", "hup", "kick", "restart", "hot-restart"] {
             assert!(matches!(
                 canonical_slash_command("runtime", args),
                 Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
-            ));
-        }
-        for args in ["restart", "hot-restart"] {
-            assert!(matches!(
-                canonical_slash_command("runtime", args),
-                Some(CanonicalSlashCommand::RuntimeProcessRestart)
             ));
         }
     }
@@ -16041,17 +16035,13 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn extension_reload_aliases_runtime_refresh_but_restart_is_process_restart() {
-        for args in ["refresh", "reload"] {
+    fn extension_reload_and_restart_alias_runtime_refresh() {
+        for args in ["refresh", "reload", "restart"] {
             assert!(matches!(
                 canonical_slash_command("extension", args),
                 Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
             ));
         }
-        assert!(matches!(
-            canonical_slash_command("extension", "restart"),
-            Some(CanonicalSlashCommand::RuntimeProcessRestart)
-        ));
     }
 
     #[test]
