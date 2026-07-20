@@ -3388,15 +3388,18 @@ impl App {
             MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
         };
         let mut menu = MenuProjection::new("secrets", "Secrets");
-        menu.summary = Some("Secret configuration surface. Statuses are checked before the menu opens; values are never displayed and setting plaintext secrets always uses hidden input.".into());
-        menu.footer = Some("↑/↓ navigate · Enter set/replace with hidden input · / filter · Esc close · → more actions".into());
+        menu.summary = Some("Secret readiness and recovery surface. Enter follows the selected binding's diagnosed next step; values are never displayed and plaintext replacement always uses hidden input.".into());
+        menu.footer = Some(
+            "↑/↓ navigate · Enter recommended action · / filter · Esc close · → alternatives"
+                .into(),
+        );
         menu.tabs = vec![MenuTabProjection {
             id: "inventory".into(),
             label: "Manage".into(),
             groups: vec![MenuGroupProjection {
                 id: "secrets.inventory".into(),
                 label: "Manage secret bindings".into(),
-                description: Some("Known and declared secret bindings from first-party harness capabilities and extension/agent metadata. Status is checked before the menu opens; Enter immediately starts hidden input for the selected secret, while resolution checks and recipes remain available as row actions.".into()),
+                description: Some("Known and declared secret bindings. Enter follows the diagnosed recovery path: missing values open hidden input, ready or deferred bindings verify resolution, and failed configured sources open source-specific repair actions.".into()),
                 rows: self.secret_readiness_rows(),
             }],
         }, MenuTabProjection {
@@ -3677,14 +3680,20 @@ impl App {
             .secrets
             .iter()
             .map(|secret| {
-                let (status_label, status_tone) = match secret.status {
-                    SecretReadinessStatus::Warmed => ("warmed", MenuBadgeTone::Success),
-                    SecretReadinessStatus::Configured => ("configured", MenuBadgeTone::Info),
-                    SecretReadinessStatus::Deferred => ("deferred", MenuBadgeTone::Warning),
-                    SecretReadinessStatus::Unchecked => ("not checked", MenuBadgeTone::Neutral),
-                    SecretReadinessStatus::Missing => {
-                        ("unavailable to session", MenuBadgeTone::Danger)
+                let (status_label, status_tone) = match secret.reason.as_ref() {
+                    Some(crate::capabilities::secrets::SecretReadinessReason::EnvironmentNotInherited) => {
+                        ("environment not inherited", MenuBadgeTone::Warning)
                     }
+                    Some(crate::capabilities::secrets::SecretReadinessReason::SourceFailed) => {
+                        ("source failed", MenuBadgeTone::Danger)
+                    }
+                    None => match secret.status {
+                        SecretReadinessStatus::Warmed => ("ready this session", MenuBadgeTone::Success),
+                        SecretReadinessStatus::Configured => ("configured — not loaded", MenuBadgeTone::Info),
+                        SecretReadinessStatus::Deferred => ("loads on demand", MenuBadgeTone::Info),
+                        SecretReadinessStatus::Unchecked => ("not checked", MenuBadgeTone::Neutral),
+                        SecretReadinessStatus::Missing => ("not configured", MenuBadgeTone::Danger),
+                    },
                 };
                 let mut badges = vec![MenuBadgeProjection {
                     label: status_label.into(),
@@ -3713,8 +3722,18 @@ impl App {
                 ));
                 if let Some(kind) = secret.recipe_kind.as_deref() {
                     metadata.push(format!("recipe: {kind}"));
+                    if kind == "env"
+                        && let Some(source) = secret.recipe_source.as_deref()
+                    {
+                        metadata.push(format!("configured source: env:{source}"));
+                    }
                     if matches!(secret.status, SecretReadinessStatus::Missing) {
-                        metadata.push("resolution: configured recipe did not resolve".into());
+                        metadata.push(match secret.reason.as_ref() {
+                            Some(crate::capabilities::secrets::SecretReadinessReason::EnvironmentNotInherited) => {
+                                "evidence: configured environment variable is absent from the current process"
+                            }
+                            _ => "resolution: configured source did not resolve; no policy denial was observed",
+                        }.into());
                     }
                 } else {
                     metadata.push("recipe: none".into());
@@ -3727,53 +3746,108 @@ impl App {
                 for consumer in &secret.consumers {
                     metadata.push(format!("consumer: {:?}:{}", consumer.kind, consumer.id));
                 }
-                MenuRowProjection {
-                    id: format!("secrets.inventory.{}", secret.name),
-                    label: secret.name.clone(),
-                    description:
-                        "Manage this secret binding; readiness describes availability to this Omegon session, not whether the secret exists elsewhere on the machine. Values are never displayed."
-                            .into(),
-                    value: Some(status_label.into()),
-                    kind: MenuRowKind::Object,
-                    badges,
-                    metadata,
-                    primary_action: Some(MenuActionProjection::prime_editor(
-                        format!("secrets.set.hidden.{}", secret.name),
-                        "Set / replace",
+                let configured_source_failed = matches!(secret.status, SecretReadinessStatus::Missing)
+                    && secret.recipe_kind.is_some();
+                let truly_missing = matches!(secret.status, SecretReadinessStatus::Missing)
+                    && secret.recipe_kind.is_none()
+                    && !secret.process_env_available;
+                let (description, primary_action) = if truly_missing {
+                    (
+                        "No usable source is configured for this secret. Enter a new value using hidden input.",
+                        MenuActionProjection::prime_editor(
+                            format!("secrets.set.hidden.{}", secret.name),
+                            "Enter value",
+                            format!("/secrets set {}", secret.name),
+                            "Capture a new value with hidden input",
+                        ),
+                    )
+                } else if matches!(
+                    secret.reason.as_ref(),
+                    Some(crate::capabilities::secrets::SecretReadinessReason::EnvironmentNotInherited)
+                ) {
+                    (
+                        "The configured environment variable is absent from this process. Enter re-checks the evidence; repair the source or replace it with a known-good value.",
+                        MenuActionProjection::command(
+                            format!("secrets.get.{}", secret.name),
+                            "Re-check environment",
+                            format!("/secrets get {}", secret.name),
+                        ),
+                    )
+                } else if configured_source_failed {
+                    (
+                        "The configured source did not resolve in this session. Inspect or replace the source; values remain redacted.",
+                        MenuActionProjection::command(
+                            format!("secrets.get.{}", secret.name),
+                            "Inspect failing source",
+                            format!("/secrets get {}", secret.name),
+                        ),
+                    )
+                } else {
+                    (
+                        "This binding has a configured or session-available source. Enter verifies redacted resolution; replacement remains available as an explicit alternative.",
+                        MenuActionProjection::command(
+                            format!("secrets.get.{}", secret.name),
+                            "Check readiness",
+                            format!("/secrets get {}", secret.name),
+                        ),
+                    )
+                };
+                let mut actions = vec![
+                    MenuActionProjection::prime_editor(
+                        format!("secrets.replace.hidden.{}", secret.name),
+                        "Replace entirely",
                         format!("/secrets set {}", secret.name),
-                        "Press Enter to capture a value with hidden input",
-                    )),
-                    actions: vec![
+                        "Replace the current source with a value captured using hidden input",
+                    ),
+                    MenuActionProjection::prime_editor(
+                        format!("secrets.recipe.env.{}", secret.name),
+                        if secret.recipe_kind.as_deref() == Some("env") {
+                            "Repair env source"
+                        } else {
+                            "Use env source"
+                        },
+                        format!("/secrets set {} env:", secret.name),
+                        "Type the environment variable name after env:; Omegon will prove whether the current process inherited it",
+                    ),
+                    MenuActionProjection::prime_editor(
+                        format!("secrets.recipe.cmd.{}", secret.name),
+                        "Use cmd source",
+                        format!("/secrets set {} cmd:", secret.name),
+                        "Type the command after cmd:; resolved output stays redacted",
+                    ),
+                    MenuActionProjection::prime_editor(
+                        format!("secrets.recipe.vault.{}", secret.name),
+                        "Use vault source",
+                        format!("/secrets set {} vault:", secret.name),
+                        "Type the vault path after vault:",
+                    ),
+                    MenuActionProjection::prime_editor(
+                        format!("secrets.delete.{}", secret.name),
+                        "Clear binding",
+                        format!("/secrets delete {}", secret.name),
+                        "Clear the configured value or recipe; capability requirement remains visible",
+                    ),
+                ];
+                if !matches!(secret.status, SecretReadinessStatus::Missing) {
+                    actions.insert(
+                        0,
                         MenuActionProjection::command(
                             format!("secrets.get.{}", secret.name),
                             "Check resolution",
                             format!("/secrets get {}", secret.name),
                         ),
-                        MenuActionProjection::prime_editor(
-                            format!("secrets.recipe.env.{}", secret.name),
-                            "Use env recipe",
-                            format!("/secrets set {} env:", secret.name),
-                            "Type the environment variable name after env:",
-                        ),
-                        MenuActionProjection::prime_editor(
-                            format!("secrets.recipe.cmd.{}", secret.name),
-                            "Use cmd recipe",
-                            format!("/secrets set {} cmd:", secret.name),
-                            "Type the command after cmd:; resolved output stays redacted",
-                        ),
-                        MenuActionProjection::prime_editor(
-                            format!("secrets.recipe.vault.{}", secret.name),
-                            "Use vault recipe",
-                            format!("/secrets set {} vault:", secret.name),
-                            "Type the vault path after vault:",
-                        ),
-                        MenuActionProjection::prime_editor(
-                            format!("secrets.delete.{}", secret.name),
-                            "Clear binding",
-                            format!("/secrets delete {}", secret.name),
-                            "Clear the configured value or recipe; capability requirement remains visible",
-                        ),
-                    ],
+                    );
+                }
+                MenuRowProjection {
+                    id: format!("secrets.inventory.{}", secret.name),
+                    label: secret.name.clone(),
+                    description: description.into(),
+                    value: Some(status_label.into()),
+                    kind: MenuRowKind::Object,
+                    badges,
+                    metadata,
+                    primary_action: Some(primary_action),
+                    actions,
                     safety: None,
                     availability: None,
                 }

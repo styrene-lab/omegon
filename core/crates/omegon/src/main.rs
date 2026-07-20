@@ -4356,7 +4356,8 @@ fn build_tui_secret_readiness_snapshot(
                 .into_iter()
                 .map(|descriptor| crate::capabilities::secrets::SecretRecipeDescriptorSummary {
                     name: descriptor.name,
-                    kind: descriptor.kind,
+                    source: (descriptor.kind == "env").then_some(descriptor.payload),
+                            kind: descriptor.kind,
                 })
                 .collect(),
             checked_names,

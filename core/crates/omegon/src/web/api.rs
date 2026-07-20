@@ -669,6 +669,7 @@ fn capability_inventory_snapshot(
                     .map(
                         |descriptor| crate::capabilities::secrets::SecretRecipeDescriptorSummary {
                             name: descriptor.name,
+                            source: (descriptor.kind == "env").then_some(descriptor.payload),
                             kind: descriptor.kind,
                         },
                     )

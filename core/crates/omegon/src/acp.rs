@@ -2503,6 +2503,8 @@ impl OmegonAcpAgent {
                                 .map(|descriptor| {
                                     crate::capabilities::secrets::SecretRecipeDescriptorSummary {
                                         name: descriptor.name,
+                                        source: (descriptor.kind == "env")
+                                            .then_some(descriptor.payload),
                                         kind: descriptor.kind,
                                     }
                                 })
@@ -2565,6 +2567,8 @@ impl OmegonAcpAgent {
                                 .map(|descriptor| {
                                     crate::capabilities::secrets::SecretRecipeDescriptorSummary {
                                         name: descriptor.name,
+                                        source: (descriptor.kind == "env")
+                                            .then_some(descriptor.payload),
                                         kind: descriptor.kind,
                                     }
                                 })
@@ -2620,6 +2624,8 @@ impl OmegonAcpAgent {
                                 .map(|descriptor| {
                                     crate::capabilities::secrets::SecretRecipeDescriptorSummary {
                                         name: descriptor.name,
+                                        source: (descriptor.kind == "env")
+                                            .then_some(descriptor.payload),
                                         kind: descriptor.kind,
                                     }
                                 })

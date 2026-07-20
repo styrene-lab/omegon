@@ -62,6 +62,13 @@ pub enum HarnessCapabilityReadinessStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SecretReadinessReason {
+    EnvironmentNotInherited,
+    SourceFailed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecretReadiness {
     pub name: String,
     pub required: bool,
@@ -69,6 +76,10 @@ pub struct SecretReadiness {
     pub consumers: Vec<SecretConsumer>,
     pub status: SecretReadinessStatus,
     pub recipe_kind: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub recipe_source: Option<String>,
+    #[serde(default)]
+    pub reason: Option<SecretReadinessReason>,
     #[serde(default)]
     pub process_env_available: bool,
     pub warmed: bool,
@@ -115,6 +126,7 @@ pub struct SecretSessionDiagnostic {
 pub struct SecretRecipeDescriptorSummary {
     pub name: String,
     pub kind: String,
+    pub source: Option<String>,
 }
 
 /// Per-provider readiness slice for the footer web-search liveness gauge.
@@ -227,7 +239,7 @@ pub fn build_secret_readiness_snapshot(
     let recipes: BTreeMap<_, _> = inputs
         .recipe_descriptors
         .into_iter()
-        .map(|descriptor| (descriptor.name, descriptor.kind))
+        .map(|descriptor| (descriptor.name, (descriptor.kind, descriptor.source)))
         .collect();
 
     for name in warmed.iter().chain(recipes.keys()).chain(checked.iter()) {
@@ -238,9 +250,14 @@ pub fn build_secret_readiness_snapshot(
         .into_iter()
         .map(|(name, requirement)| {
             let warmed = warmed.contains(&name);
-            let recipe_kind = recipes.get(&name).cloned();
-            let process_env_available =
-                std::env::var_os(&name).is_some_and(|value| !value.is_empty());
+            let recipe_kind = recipes.get(&name).map(|(kind, _)| kind.clone());
+            let recipe_source = recipes.get(&name).and_then(|(_, source)| source.clone());
+            let process_env_available = std::env::var_os(&name)
+                .is_some_and(|value| !value.is_empty())
+                || (recipe_kind.as_deref() == Some("env")
+                    && recipe_source.as_deref().is_some_and(|source| {
+                        std::env::var_os(source).is_some_and(|value| !value.is_empty())
+                    }));
             let status = if warmed {
                 SecretReadinessStatus::Warmed
             } else if matches!(recipe_kind.as_deref(), Some("vault")) {
@@ -251,6 +268,16 @@ pub fn build_secret_readiness_snapshot(
                 SecretReadinessStatus::Configured
             } else {
                 SecretReadinessStatus::Unchecked
+            };
+            let reason = if matches!(status, SecretReadinessStatus::Missing)
+                && recipe_kind.as_deref() == Some("env")
+                && !process_env_available
+            {
+                Some(SecretReadinessReason::EnvironmentNotInherited)
+            } else if matches!(status, SecretReadinessStatus::Missing) && recipe_kind.is_some() {
+                Some(SecretReadinessReason::SourceFailed)
+            } else {
+                None
             };
             SecretReadiness {
                 name,
@@ -263,6 +290,8 @@ pub fn build_secret_readiness_snapshot(
                     .collect(),
                 status,
                 recipe_kind,
+                recipe_source,
+                reason,
                 process_env_available,
                 warmed,
             }
@@ -569,6 +598,7 @@ mod tests {
                 recipe_descriptors: vec![SecretRecipeDescriptorSummary {
                     name: "BRAVE_API_KEY".into(),
                     kind: "env".into(),
+                    source: None,
                 }],
                 checked_names: Vec::new(),
             },
@@ -605,6 +635,7 @@ mod tests {
                 recipe_descriptors: vec![SecretRecipeDescriptorSummary {
                     name: "BRAVE_API_KEY".into(),
                     kind: "vault".into(),
+                    source: None,
                 }],
                 checked_names: Vec::new(),
             },
@@ -673,6 +704,7 @@ mod tests {
                 recipe_descriptors: vec![SecretRecipeDescriptorSummary {
                     name: "CUSTOM_RECIPE_SECRET".into(),
                     kind: "env".into(),
+                    source: None,
                 }],
                 checked_names: Vec::new(),
             },
@@ -704,20 +736,29 @@ mod tests {
             SecretReadinessInputs {
                 session_diagnostics: Vec::new(),
                 recipe_descriptors: vec![SecretRecipeDescriptorSummary {
-                    name: "CUSTOM_RECIPE_SECRET".into(),
+                    name: "OMEGON_TEST_ENV_IMPORT_SECRET".into(),
                     kind: "env".into(),
+                    source: Some("OMEGON_TEST_ENV_IMPORT_SOURCE".into()),
                 }],
-                checked_names: vec!["CUSTOM_RECIPE_SECRET".into()],
+                checked_names: vec!["OMEGON_TEST_ENV_IMPORT_SECRET".into()],
             },
         );
 
         let secret = snapshot
             .secrets
             .iter()
-            .find(|secret| secret.name == "CUSTOM_RECIPE_SECRET")
+            .find(|secret| secret.name == "OMEGON_TEST_ENV_IMPORT_SECRET")
             .expect("configured secret should remain visible");
         assert_eq!(secret.status, SecretReadinessStatus::Missing);
         assert_eq!(secret.recipe_kind.as_deref(), Some("env"));
+        assert_eq!(
+            secret.recipe_source.as_deref(),
+            Some("OMEGON_TEST_ENV_IMPORT_SOURCE")
+        );
+        assert_eq!(
+            secret.reason,
+            Some(SecretReadinessReason::EnvironmentNotInherited)
+        );
         assert!(!secret.warmed);
     }
 
@@ -768,6 +809,7 @@ mod tests {
                 recipe_descriptors: vec![SecretRecipeDescriptorSummary {
                     name: "VAULT_TOKEN".into(),
                     kind: "vault".into(),
+                    source: None,
                 }],
                 checked_names: Vec::new(),
             },

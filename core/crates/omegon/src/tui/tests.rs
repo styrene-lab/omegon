@@ -4371,7 +4371,9 @@ fn slash_login_provider_opens_hidden_secret_input_for_api_key_provider() {
     assert!(app.active_menu.is_none());
     assert!(app.command_panel.is_none());
     assert_eq!(
-        app.operator_events.back().map(|event| event.message.as_str()),
+        app.operator_events
+            .back()
+            .map(|event| event.message.as_str()),
         Some("Paste OPENAI_API_KEY — input hidden")
     );
 }
@@ -9565,6 +9567,10 @@ fn secrets_menu_inventory_rows_offer_safe_crud_actions() {
             consumers: vec![],
             status: crate::capabilities::secrets::SecretReadinessStatus::Configured,
             recipe_kind: Some("env".into()),
+            recipe_source: Some("GITHUB_TOKEN".into()),
+            reason: Some(
+                crate::capabilities::secrets::SecretReadinessReason::EnvironmentNotInherited,
+            ),
             process_env_available: false,
             warmed: false,
         }],
@@ -9586,17 +9592,25 @@ fn secrets_menu_inventory_rows_offer_safe_crud_actions() {
         })
         .expect("GITHUB_TOKEN inventory row");
 
+    assert_eq!(row.value.as_deref(), Some("environment not inherited"));
     assert_eq!(
         row.primary_action
             .as_ref()
-            .and_then(|action| action.editor_text.as_deref()),
-        Some("/secrets set GITHUB_TOKEN")
+            .and_then(|action| action.command.as_deref()),
+        Some("/secrets get GITHUB_TOKEN")
+    );
+    assert_eq!(
+        row.primary_action
+            .as_ref()
+            .map(|action| action.label.as_str()),
+        Some("Re-check environment")
     );
     assert!(
-        row.actions
-            .iter()
-            .any(|action| action.command.as_deref() == Some("/secrets get GITHUB_TOKEN")),
-        "missing redacted resolution check action"
+        row.actions.iter().any(|action| {
+            action.label == "Replace entirely"
+                && action.editor_text.as_deref() == Some("/secrets set GITHUB_TOKEN")
+        }),
+        "configured bindings must make replacement explicit rather than the default"
     );
     for expected in [
         "/secrets set GITHUB_TOKEN env:",
@@ -9664,12 +9678,17 @@ fn secrets_menu_inventory_includes_first_party_catalog_rows() {
             .iter()
             .any(|item| item == "consumer: HarnessCapability:web_search")
     );
+    assert_eq!(row.value.as_deref(), Some("not checked"));
     assert_eq!(
         row.primary_action
             .as_ref()
-            .and_then(|action| action.editor_text.as_deref()),
-        Some("/secrets set BRAVE_API_KEY")
+            .and_then(|action| action.command.as_deref()),
+        Some("/secrets get BRAVE_API_KEY")
     );
+    assert!(row.actions.iter().any(|action| {
+        action.label == "Replace entirely"
+            && action.editor_text.as_deref() == Some("/secrets set BRAVE_API_KEY")
+    }));
     assert!(
         row.actions
             .iter()
@@ -9704,6 +9723,7 @@ fn secrets_menu_capabilities_tab_groups_first_party_secret_readiness() {
                     crate::capabilities::secrets::SecretRecipeDescriptorSummary {
                         name: "BRAVE_API_KEY".into(),
                         kind: "env".into(),
+                        source: None,
                     },
                 ],
                 checked_names: Vec::new(),

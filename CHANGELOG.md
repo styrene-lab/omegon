@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Changed secret inventory activation to follow diagnosed recovery state: genuinely missing bindings open hidden input immediately, environment recipes absent from the running process expose the configured variable and a re-check/repair path, and other configured-source failures default to source inspection with an explicit **Replace entirely** action.
+- Replaced the ambiguous `unavailable to session` row label with operator-actionable states including `environment not inherited`, `source failed`, `configured — not loaded`, and `loads on demand`.
 - Kept API-key secret entry in the normal masked editor with a compact acquisition hint instead of opening the full-screen command response panel.
 - Preserved happy-path browser acquisition for Brave, Serper, and Tavily API keys while making hidden secret input take keyboard ownership immediately, closing the originating auth menu, and replacing stale acquisition notices on submit or cancellation.
 
