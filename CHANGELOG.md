@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Set `0.28.6` as the active stable working milestone for the integrated Moonshot/Kimi, Ollama Cloud, Keychain, secret-store, and runtime restart improvements.
 - Normal startup now defers Keychain-backed secret resolution, external CLI credential adoption, Vault authentication, and extension secret resolution until an explicit operation boundary, preventing repeated macOS authorization prompts after development rebuilds.
 - `/runtime restart` and `/extension restart` now reload the runtime substrate in-process instead of replacing the harness-attached process and severing the active session transport.
 
