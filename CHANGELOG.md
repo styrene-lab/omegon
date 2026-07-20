@@ -30,6 +30,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Removed the obsolete, accidentally tracked `0.28.4-prep` release-worktree snapshot and pruned stale Git worktree metadata so old release files no longer dirty or obstruct the active checkout.
 - Secret recipe mutations now take an inter-process lock and merge against current disk state before atomically writing, preventing a long-running Omegon process from erasing recipes created by another process, such as newly stored provider or web-search credentials.
 - Development builds now report the current release line instead of presenting a stale package version while running newer source.
 
