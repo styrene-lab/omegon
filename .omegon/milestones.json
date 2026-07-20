@@ -1222,12 +1222,12 @@
     "notes": []
   },
   "0.28.6": {
-    "status": "open",
+    "status": "released",
     "channel": "stable",
     "nodes": [],
-    "frozen": false,
+    "frozen": true,
     "opened": "2026-07-20T01:44:51Z",
-    "released": null,
+    "released": "2026-07-20T15:01:18Z",
     "notes": []
   }
 }
