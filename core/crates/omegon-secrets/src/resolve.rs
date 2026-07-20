@@ -63,6 +63,7 @@ pub const WELL_KNOWN_SECRET_ENVS: &[&str] = &[
     "OPENAI_API_KEY",
     "CHATGPT_OAUTH_TOKEN",
     "OPENROUTER_API_KEY",
+    "MOONSHOT_API_KEY",
     "ANTIGRAVITY_OAUTH_TOKEN",
     "BRAVE_API_KEY",
     "TAVILY_API_KEY",
@@ -468,6 +469,11 @@ pub fn expose(secret: &SecretString) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn well_known_secret_envs_include_moonshot() {
+        assert!(WELL_KNOWN_SECRET_ENVS.contains(&"MOONSHOT_API_KEY"));
+    }
 
     #[test]
     fn resolve_from_env() {

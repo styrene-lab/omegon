@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Added `MOONSHOT_API_KEY` to the first-party secrets-to-populate catalog and well-known secret discovery/redaction set, so the built-in Moonshot provider's credential is surfaced and protected consistently.
 - Changed raw managed secrets from one macOS Keychain item per secret to one encrypted Omegon store backed by a single Keychain master key. `omegon secret migrate` explicitly imports and removes legacy per-secret items, so secret count no longer multiplies future Keychain authorization prompts.
 
 ## [0.28.6] - 2026-07-19
