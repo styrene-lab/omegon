@@ -16,6 +16,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Development builds now report the current `0.28.5` release line, so `just run` no longer presents a stale `0.28.4` package version while running newer source.
+- `/runtime restart` and `/extension restart` now reload the runtime substrate in-process instead of replacing the harness-attached process and severing the active session transport.
+
 ### Added
 
 - Tool lifecycle events now preserve the authoritative producer selected by `EventBus` arbitration. Conversation tool cards qualify extension-owned calls as `tool (extension-name)` while built-ins retain their existing labels, and IPC, MQTT, web-stream, WebSocket, and web tool-run projections carry the same provenance for operator-visible auditability.

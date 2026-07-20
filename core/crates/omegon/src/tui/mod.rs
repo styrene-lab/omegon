@@ -1076,11 +1076,14 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "runtime" if matches!(args, "status" | "inventory") => {
             Some(CanonicalSlashCommand::RuntimeInventoryStatus)
         }
-        "runtime" if matches!(args, "refresh" | "reload" | "hup" | "kick") => {
+        "runtime"
+            if matches!(
+                args,
+                "refresh" | "reload" | "hup" | "kick" | "restart" | "hot-restart"
+            ) =>
+        {
+            // Preserve the process that owns the active TUI/ACP/harness transport.
             Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
-        }
-        "runtime" if matches!(args, "restart" | "hot-restart") => {
-            Some(CanonicalSlashCommand::RuntimeProcessRestart)
         }
         "workspace" if args.is_empty() => Some(CanonicalSlashCommand::WorkspaceStatusView),
         "workspace" if args == "status" => Some(CanonicalSlashCommand::WorkspaceStatusView),
@@ -1332,10 +1335,14 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             } else if let Some(name) = args.strip_prefix("remove ") {
                 let name = name.trim();
                 (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionRemove(name.to_string()))
-            } else if matches!(args, "refresh" | "reload" | "hup" | "kick") {
+            } else if matches!(
+                args,
+                "refresh" | "reload" | "hup" | "kick" | "restart" | "hot-restart"
+            ) {
+                // Extension code and manifests are runtime substrates. Reload them
+                // in-process so the process that owns the active harness transport
+                // remains alive.
                 Some(CanonicalSlashCommand::RuntimeSubstrateRefresh)
-            } else if matches!(args, "restart" | "hot-restart") {
-                Some(CanonicalSlashCommand::RuntimeProcessRestart)
             } else if args == "update" {
                 Some(CanonicalSlashCommand::ExtensionUpdate(None))
             } else if let Some(name) = args.strip_prefix("update ") {

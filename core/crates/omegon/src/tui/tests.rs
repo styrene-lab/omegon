@@ -5667,17 +5667,10 @@ fn runtime_inventory_status_queues_shared_control() {
 
 #[test]
 fn runtime_refresh_aliases_canonicalize() {
-    for args in ["refresh", "reload"] {
+    for args in ["refresh", "reload", "restart", "hot-restart"] {
         assert_eq!(
             crate::tui::canonical_slash_command("runtime", args),
             Some(crate::tui::CanonicalSlashCommand::RuntimeSubstrateRefresh),
-            "runtime {args}"
-        );
-    }
-    for args in ["restart", "hot-restart"] {
-        assert_eq!(
-            crate::tui::canonical_slash_command("runtime", args),
-            Some(crate::tui::CanonicalSlashCommand::RuntimeProcessRestart),
             "runtime {args}"
         );
     }
@@ -5785,7 +5778,12 @@ fn extension_search_menu_row_primes_editor_for_query() {
 
 #[test]
 fn extension_refresh_aliases_execute_shared_runtime_refresh() {
-    for command in ["/extension refresh", "/extension reload"] {
+    for command in [
+        "/extension refresh",
+        "/extension reload",
+        "/extension restart",
+        "/runtime restart",
+    ] {
         let mut app = test_app();
         let (tx, mut rx) = test_tx_with_rx();
         assert!(matches!(
@@ -5800,34 +5798,6 @@ fn extension_refresh_aliases_execute_shared_runtime_refresh() {
             })
         ));
     }
-}
-
-#[test]
-fn extension_restart_queues_graceful_process_restart() {
-    let mut app = test_app();
-    let (tx, mut rx) = test_tx_with_rx();
-
-    assert!(matches!(
-        app.handle_slash_command("/extension restart", &tx),
-        SlashResult::Handled
-    ));
-    assert!(matches!(
-        rx.try_recv(),
-        Ok(TuiCommand::RestartProcess { .. })
-    ));
-}
-
-#[test]
-fn slash_runtime_restart_queues_graceful_process_restart() {
-    let mut app = test_app();
-    let (tx, mut rx) = test_tx_with_rx();
-
-    let result = app.handle_slash_command("/runtime restart", &tx);
-    assert!(matches!(result, SlashResult::Handled));
-    assert!(matches!(
-        rx.try_recv(),
-        Ok(TuiCommand::RestartProcess { .. })
-    ));
 }
 
 #[test]
