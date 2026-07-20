@@ -3389,14 +3389,14 @@ impl App {
         };
         let mut menu = MenuProjection::new("secrets", "Secrets");
         menu.summary = Some("Secret configuration surface. Statuses are checked before the menu opens; values are never displayed and setting plaintext secrets always uses hidden input.".into());
-        menu.footer = Some("↑/↓ navigate · Enter check resolution · / filter · Esc close · set/replace is an explicit row action".into());
+        menu.footer = Some("↑/↓ navigate · Enter set/replace with hidden input · / filter · Esc close · → more actions".into());
         menu.tabs = vec![MenuTabProjection {
             id: "inventory".into(),
             label: "Manage".into(),
             groups: vec![MenuGroupProjection {
                 id: "secrets.inventory".into(),
                 label: "Manage secret bindings".into(),
-                description: Some("Known and declared secret bindings from first-party harness capabilities and extension/agent metadata. Status is checked before the menu opens; Enter checks redacted resolution and set/replace is explicit.".into()),
+                description: Some("Known and declared secret bindings from first-party harness capabilities and extension/agent metadata. Status is checked before the menu opens; Enter immediately starts hidden input for the selected secret, while resolution checks and recipes remain available as row actions.".into()),
                 rows: self.secret_readiness_rows(),
             }],
         }, MenuTabProjection {
@@ -3720,17 +3720,17 @@ impl App {
                     kind: MenuRowKind::Object,
                     badges,
                     metadata,
-                    primary_action: Some(MenuActionProjection::command(
-                        format!("secrets.get.{}", secret.name),
-                        "Check resolution",
-                        format!("/secrets get {}", secret.name),
+                    primary_action: Some(MenuActionProjection::prime_editor(
+                        format!("secrets.set.hidden.{}", secret.name),
+                        "Set / replace",
+                        format!("/secrets set {}", secret.name),
+                        "Press Enter to capture a value with hidden input",
                     )),
                     actions: vec![
-                        MenuActionProjection::prime_editor(
-                            format!("secrets.set.hidden.{}", secret.name),
-                            "Set / replace",
-                            format!("/secrets set {}", secret.name),
-                            "Capture a value with hidden input after you choose to set it",
+                        MenuActionProjection::command(
+                            format!("secrets.get.{}", secret.name),
+                            "Check resolution",
+                            format!("/secrets get {}", secret.name),
                         ),
                         MenuActionProjection::prime_editor(
                             format!("secrets.recipe.env.{}", secret.name),

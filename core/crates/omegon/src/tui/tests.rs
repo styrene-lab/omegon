@@ -9575,14 +9575,14 @@ fn secrets_menu_inventory_rows_offer_safe_crud_actions() {
     assert_eq!(
         row.primary_action
             .as_ref()
-            .and_then(|action| action.command.as_deref()),
-        Some("/secrets get GITHUB_TOKEN")
+            .and_then(|action| action.editor_text.as_deref()),
+        Some("/secrets set GITHUB_TOKEN")
     );
     assert!(
         row.actions
             .iter()
-            .any(|action| action.editor_text.as_deref() == Some("/secrets set GITHUB_TOKEN")),
-        "missing hidden set/replace action"
+            .any(|action| action.command.as_deref() == Some("/secrets get GITHUB_TOKEN")),
+        "missing redacted resolution check action"
     );
     for expected in [
         "/secrets set GITHUB_TOKEN env:",
@@ -9642,14 +9642,14 @@ fn secrets_menu_inventory_includes_first_party_catalog_rows() {
     assert_eq!(
         row.primary_action
             .as_ref()
-            .and_then(|action| action.command.as_deref()),
-        Some("/secrets get BRAVE_API_KEY")
+            .and_then(|action| action.editor_text.as_deref()),
+        Some("/secrets set BRAVE_API_KEY")
     );
     assert!(
         row.actions
             .iter()
-            .any(|action| action.editor_text.as_deref() == Some("/secrets set BRAVE_API_KEY")),
-        "missing hidden set/replace action"
+            .any(|action| action.command.as_deref() == Some("/secrets get BRAVE_API_KEY")),
+        "missing redacted resolution check action"
     );
     for expected in [
         "/secrets set BRAVE_API_KEY env:",

@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Changed `/secrets` inventory activation so pressing Enter on a selected secret immediately starts its hidden set/replace flow instead of running a resolution check and returning a missing-secret message; redacted resolution checks remain available as a secondary row action.
 - Aligned labels, values, badges, and action markers into stable columns across shared internal menu entry lists, so status-heavy surfaces such as `/secrets` remain scannable even when row labels vary substantially in length.
 - Fixed `/update` in-place upgrades failing with `blob signature verification failed: malformedframing`: `cosign sign-blob --output-certificate` now base64-encodes the PEM certificate it emits, while the verifier expected raw PEM. The updater normalizes the downloaded certificate, accepting both raw and base64-encoded PEM so releases signed by newer cosign verify correctly.
 - Added `MOONSHOT_API_KEY` to the first-party secrets-to-populate catalog and well-known secret discovery/redaction set, so the built-in Moonshot provider's credential is surfaced and protected consistently.
