@@ -69,6 +69,7 @@ pub struct SecretReadiness {
     pub consumers: Vec<SecretConsumer>,
     pub status: SecretReadinessStatus,
     pub recipe_kind: Option<String>,
+    pub process_env_available: bool,
     pub warmed: bool,
 }
 
@@ -237,14 +238,16 @@ pub fn build_secret_readiness_snapshot(
         .map(|(name, requirement)| {
             let warmed = warmed.contains(&name);
             let recipe_kind = recipes.get(&name).cloned();
+            let process_env_available =
+                std::env::var_os(&name).is_some_and(|value| !value.is_empty());
             let status = if warmed {
                 SecretReadinessStatus::Warmed
             } else if matches!(recipe_kind.as_deref(), Some("vault")) {
                 SecretReadinessStatus::Deferred
-            } else if recipe_kind.is_some() {
-                SecretReadinessStatus::Configured
             } else if checked.contains(&name) || requirement.required {
                 SecretReadinessStatus::Missing
+            } else if recipe_kind.is_some() {
+                SecretReadinessStatus::Configured
             } else {
                 SecretReadinessStatus::Unchecked
             };
@@ -259,6 +262,7 @@ pub fn build_secret_readiness_snapshot(
                     .collect(),
                 status,
                 recipe_kind,
+                process_env_available,
                 warmed,
             }
         })

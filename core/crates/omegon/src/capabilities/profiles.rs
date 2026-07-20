@@ -431,6 +431,7 @@ mod tests {
                     consumers: Vec::new(),
                     status: SecretReadinessStatus::Deferred,
                     recipe_kind: Some("vault".into()),
+                    process_env_available: false,
                     warmed: false,
                 },
             ],
@@ -593,6 +594,7 @@ mod tests {
             consumers: Vec::new(),
             status: SecretReadinessStatus::Warmed,
             recipe_kind: None,
+            process_env_available: true,
             warmed: true,
         }
     }

@@ -3682,7 +3682,9 @@ impl App {
                     SecretReadinessStatus::Configured => ("configured", MenuBadgeTone::Info),
                     SecretReadinessStatus::Deferred => ("deferred", MenuBadgeTone::Warning),
                     SecretReadinessStatus::Unchecked => ("not checked", MenuBadgeTone::Neutral),
-                    SecretReadinessStatus::Missing => ("missing", MenuBadgeTone::Danger),
+                    SecretReadinessStatus::Missing => {
+                        ("unavailable to session", MenuBadgeTone::Danger)
+                    }
                 };
                 let mut badges = vec![MenuBadgeProjection {
                     label: status_label.into(),
@@ -3701,11 +3703,26 @@ impl App {
                     });
                 }
                 let mut metadata = vec!["value redacted".into()];
+                metadata.push(format!(
+                    "process environment: {}",
+                    if secret.process_env_available {
+                        "available"
+                    } else {
+                        "not inherited"
+                    }
+                ));
                 if let Some(kind) = secret.recipe_kind.as_deref() {
                     metadata.push(format!("recipe: {kind}"));
+                    if matches!(secret.status, SecretReadinessStatus::Missing) {
+                        metadata.push("resolution: configured recipe did not resolve".into());
+                    }
+                } else {
+                    metadata.push("recipe: none".into());
                 }
                 if secret.warmed {
                     metadata.push("session: warmed".into());
+                } else {
+                    metadata.push("session: not warmed".into());
                 }
                 for consumer in &secret.consumers {
                     metadata.push(format!("consumer: {:?}:{}", consumer.kind, consumer.id));
@@ -3714,7 +3731,7 @@ impl App {
                     id: format!("secrets.inventory.{}", secret.name),
                     label: secret.name.clone(),
                     description:
-                        "Manage this secret binding; readiness is metadata-only and values are never resolved or displayed while rendering this menu."
+                        "Manage this secret binding; readiness describes availability to this Omegon session, not whether the secret exists elsewhere on the machine. Values are never displayed."
                             .into(),
                     value: Some(status_label.into()),
                     kind: MenuRowKind::Object,

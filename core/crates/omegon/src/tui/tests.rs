@@ -9552,6 +9552,7 @@ fn secrets_menu_inventory_rows_offer_safe_crud_actions() {
             consumers: vec![],
             status: crate::capabilities::secrets::SecretReadinessStatus::Configured,
             recipe_kind: Some("env".into()),
+            process_env_available: false,
             warmed: false,
         }],
         harness_capabilities: vec![],
@@ -9598,6 +9599,17 @@ fn secrets_menu_inventory_rows_offer_safe_crud_actions() {
         );
     }
     assert!(row.metadata.iter().any(|item| item == "value redacted"));
+    assert!(
+        row.metadata
+            .iter()
+            .any(|item| item == "process environment: not inherited")
+    );
+    assert!(row.metadata.iter().any(|item| item == "recipe: env"));
+    assert!(
+        row.metadata
+            .iter()
+            .any(|item| item == "session: not warmed")
+    );
 }
 
 #[test]
