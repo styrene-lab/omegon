@@ -18,7 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
-- Replaced the extension menu's legacy inventory text-dump action with structured rows for every installed extension, including version, runtime, enabled state, source/status metadata, and direct inspect, enable/disable, update, and remove actions.
+- Replaced the extension menu's legacy inventory text-dump action with structured rows for every local extension installation candidate, including invalid manifests, missing manifests, broken symlinks, and unreadable entries. Valid rows retain direct lifecycle actions; invalid rows expose diagnostics and safe removal only.
+- Changed `/extension search` to report Armory catalog and installed-extension matches as separate scopes, so a local invalid installation is no longer reported as nonexistent merely because it is absent from the remote catalog.
 
 - Made release-branch forward synchronization a hard stable-publication prerequisite: both `just publish` and the release workflow now refuse to publish a stable tag while `origin/main` still builds an older workspace version.
 

@@ -4733,8 +4733,41 @@ pub async fn extension_disable_response(name: &str) -> SlashCommandResponse {
     }
 }
 
+fn extension_installation_search_matches(
+    query: Option<&str>,
+) -> Vec<(String, &'static str, String)> {
+    use crate::capabilities::extensions::ExtensionInstallationDiagnosis;
+    let query = query.map(str::trim).filter(|query| !query.is_empty());
+    let Some(query) = query else {
+        return Vec::new();
+    };
+    let query = query.to_lowercase();
+    crate::extension_cli::extensions_dir()
+        .ok()
+        .and_then(|dir| {
+            crate::capabilities::extensions::list_extension_installations_from_dir(&dir).ok()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|installation| installation.filesystem_name.to_lowercase().contains(&query))
+        .map(|installation| {
+            let (state, problem) = match installation.diagnosis {
+                ExtensionInstallationDiagnosis::Valid { capability } => (
+                    "installed",
+                    format!("v{} · {}", capability.version, capability.description),
+                ),
+                ExtensionInstallationDiagnosis::Invalid { problem } => ("invalid", problem),
+                ExtensionInstallationDiagnosis::BrokenLink { problem } => ("broken link", problem),
+                ExtensionInstallationDiagnosis::Unreadable { problem } => ("unreadable", problem),
+            };
+            (installation.filesystem_name, state, problem)
+        })
+        .collect()
+}
+
 pub async fn extension_search_response(query: Option<&str>) -> SlashCommandResponse {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let local_matches = extension_installation_search_matches(query);
     match crate::armory::browse(crate::armory::BrowseOptions::new(
         crate::armory::ArmoryKind::Extensions,
         query,
@@ -4743,27 +4776,33 @@ pub async fn extension_search_response(query: Option<&str>) -> SlashCommandRespo
     .await
     {
         Ok(items) => {
+            let mut sections = Vec::new();
             if items.is_empty() {
-                return SlashCommandResponse {
-                    accepted: true,
-                    output: Some(match query {
-                        Some(q) => format!("No extensions found matching '{q}'"),
-                        None => "No extensions found in registry.".into(),
-                    }),
-                };
+                sections.push(match query {
+                    Some(q) => format!("No Armory catalog extensions found matching '{q}'."),
+                    None => "No extensions found in the Armory catalog.".into(),
+                });
+            } else {
+                let mut catalog = format!("Armory catalog extensions ({}):\n", items.len());
+                for item in &items {
+                    catalog.push_str(&format!(
+                        "\n  {:<28} {}\n    {}\n",
+                        item.id, item.category, item.description
+                    ));
+                }
+                catalog.push_str("\nInstall: /extension install <name>");
+                sections.push(catalog);
             }
-
-            let mut out = format!("Available extensions ({}):\n\n", items.len());
-            for item in &items {
-                out.push_str(&format!(
-                    "  {:<28} {}\n    {}\n\n",
-                    item.id, item.category, item.description
-                ));
+            if !local_matches.is_empty() {
+                let mut local = format!("Installed extension matches ({}):\n", local_matches.len());
+                for (name, state, problem) in local_matches {
+                    local.push_str(&format!("\n  {name:<28} {state}\n    {problem}\n"));
+                }
+                sections.push(local);
             }
-            out.push_str("Install: /extension install <name>");
             SlashCommandResponse {
                 accepted: true,
-                output: Some(out),
+                output: Some(sections.join("\n\n")),
             }
         }
         Err(e) => SlashCommandResponse {

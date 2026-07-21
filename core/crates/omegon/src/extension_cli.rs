@@ -315,7 +315,7 @@ pub fn remove(name: &str) -> anyhow::Result<()> {
     let extensions_dir = extensions_dir()?;
     let ext_path = extensions_dir.join(name);
 
-    if !ext_path.exists() {
+    if !ext_path.exists() && !ext_path.is_symlink() {
         anyhow::bail!(
             "Extension '{}' not found in {}",
             name,

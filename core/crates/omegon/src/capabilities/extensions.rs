@@ -6,6 +6,38 @@ use crate::extensions::manifest::{ExtensionManifest, RuntimeConfig};
 use crate::extensions::state::{ExtensionState, StabilityMetrics};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionInstallationSummary {
+    pub filesystem_name: String,
+    pub source_path: String,
+    pub source_kind: ExtensionInstallationSourceKind,
+    pub diagnosis: ExtensionInstallationDiagnosis,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtensionInstallationSourceKind {
+    Directory,
+    Symlink,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ExtensionInstallationDiagnosis {
+    Valid {
+        capability: ExtensionCapabilitySummary,
+    },
+    Invalid {
+        problem: String,
+    },
+    BrokenLink {
+        problem: String,
+    },
+    Unreadable {
+        problem: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionCapabilitySummary {
     pub name: String,
     pub version: String,
@@ -69,41 +101,103 @@ pub struct ExtensionStabilitySummary {
     pub auto_disabled: bool,
 }
 
-pub fn list_installed_extension_capabilities_from_dir(
+pub fn list_extension_installations_from_dir(
     extensions_dir: &Path,
-) -> anyhow::Result<Vec<ExtensionCapabilitySummary>> {
+) -> anyhow::Result<Vec<ExtensionInstallationSummary>> {
     if !extensions_dir.exists() {
         return Ok(Vec::new());
     }
 
-    let mut summaries = Vec::new();
+    let mut installations = Vec::new();
     for entry in std::fs::read_dir(extensions_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_dir() && !path.is_symlink() {
-            continue;
-        }
-        let resolved = if path.is_symlink() {
-            std::fs::read_link(&path).unwrap_or(path.clone())
-        } else {
-            path.clone()
-        };
-        if !resolved.join("manifest.toml").exists() {
-            continue;
-        }
-        match extension_capability_summary_from_dir(&resolved) {
-            Ok(summary) => summaries.push(summary),
+        let entry = match entry {
+            Ok(entry) => entry,
             Err(error) => {
-                tracing::warn!(
-                    error = ?error,
-                    path = %resolved.display(),
-                    "skipping invalid installed extension capability summary"
-                );
+                tracing::warn!(?error, "could not inspect extension installation entry");
+                continue;
             }
+        };
+        let path = entry.path();
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                installations.push(ExtensionInstallationSummary {
+                    filesystem_name: entry.file_name().to_string_lossy().into_owned(),
+                    source_path: path.display().to_string(),
+                    source_kind: ExtensionInstallationSourceKind::Directory,
+                    diagnosis: ExtensionInstallationDiagnosis::Unreadable {
+                        problem: format!("could not inspect installation: {error}"),
+                    },
+                });
+                continue;
+            }
+        };
+        if !file_type.is_dir() && !file_type.is_symlink() {
+            continue;
         }
+
+        let filesystem_name = entry.file_name().to_string_lossy().into_owned();
+        let source_path = path.display().to_string();
+        let source_kind = if file_type.is_symlink() {
+            ExtensionInstallationSourceKind::Symlink
+        } else {
+            ExtensionInstallationSourceKind::Directory
+        };
+        let resolved = if file_type.is_symlink() {
+            match std::fs::canonicalize(&path) {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    installations.push(ExtensionInstallationSummary {
+                        filesystem_name,
+                        source_path,
+                        source_kind,
+                        diagnosis: ExtensionInstallationDiagnosis::BrokenLink {
+                            problem: format!("symlink target cannot be resolved: {error}"),
+                        },
+                    });
+                    continue;
+                }
+            }
+        } else {
+            path
+        };
+
+        let manifest_path = resolved.join("manifest.toml");
+        let diagnosis = if !manifest_path.exists() {
+            ExtensionInstallationDiagnosis::Invalid {
+                problem: "missing manifest.toml".into(),
+            }
+        } else {
+            match extension_capability_summary_from_dir(&resolved) {
+                Ok(capability) => ExtensionInstallationDiagnosis::Valid { capability },
+                Err(error) => ExtensionInstallationDiagnosis::Invalid {
+                    problem: format!("invalid manifest or state: {error}"),
+                },
+            }
+        };
+        installations.push(ExtensionInstallationSummary {
+            filesystem_name,
+            source_path,
+            source_kind,
+            diagnosis,
+        });
     }
-    summaries.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(summaries)
+    installations.sort_by(|a, b| a.filesystem_name.cmp(&b.filesystem_name));
+    Ok(installations)
+}
+
+pub fn list_installed_extension_capabilities_from_dir(
+    extensions_dir: &Path,
+) -> anyhow::Result<Vec<ExtensionCapabilitySummary>> {
+    Ok(list_extension_installations_from_dir(extensions_dir)?
+        .into_iter()
+        .filter_map(|installation| match installation.diagnosis {
+            ExtensionInstallationDiagnosis::Valid { capability } => Some(capability),
+            ExtensionInstallationDiagnosis::Invalid { .. }
+            | ExtensionInstallationDiagnosis::BrokenLink { .. }
+            | ExtensionInstallationDiagnosis::Unreadable { .. } => None,
+        })
+        .collect())
 }
 
 pub fn extension_capability_summary_from_dir(
@@ -255,6 +349,45 @@ serve_subcommand = "serve"
         assert_eq!(summary.mcp.as_ref().unwrap().transport, "http");
         assert!(summary.capabilities.is_object());
         assert!(summary.permissions.is_object());
+    }
+
+    #[test]
+    fn diagnoses_invalid_extension_installation_candidates_without_hiding_them() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing_manifest = temp.path().join("scry");
+        std::fs::create_dir_all(&missing_manifest).unwrap();
+        let invalid_manifest = temp.path().join("malformed");
+        std::fs::create_dir_all(&invalid_manifest).unwrap();
+        std::fs::write(invalid_manifest.join("manifest.toml"), "not = [valid toml").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(temp.path().join("absent"), temp.path().join("dangling"))
+            .unwrap();
+
+        let installations = list_extension_installations_from_dir(temp.path()).unwrap();
+
+        assert!(installations.iter().any(|entry| {
+            entry.filesystem_name == "scry"
+                && matches!(
+                    &entry.diagnosis,
+                    ExtensionInstallationDiagnosis::Invalid { problem }
+                        if problem == "missing manifest.toml"
+                )
+        }));
+        assert!(installations.iter().any(|entry| {
+            entry.filesystem_name == "malformed"
+                && matches!(
+                    entry.diagnosis,
+                    ExtensionInstallationDiagnosis::Invalid { .. }
+                )
+        }));
+        #[cfg(unix)]
+        assert!(installations.iter().any(|entry| {
+            entry.filesystem_name == "dangling"
+                && matches!(
+                    entry.diagnosis,
+                    ExtensionInstallationDiagnosis::BrokenLink { .. }
+                )
+        }));
     }
 
     #[test]

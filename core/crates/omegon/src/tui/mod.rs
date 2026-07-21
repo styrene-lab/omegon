@@ -4269,10 +4269,7 @@ impl App {
         let installed_extensions = crate::extension_cli::extensions_dir()
             .ok()
             .and_then(|dir| {
-                crate::capabilities::extensions::list_installed_extension_capabilities_from_dir(
-                    &dir,
-                )
-                .ok()
+                crate::capabilities::extensions::list_extension_installations_from_dir(&dir).ok()
             })
             .unwrap_or_default();
         let extension_rows = if installed_extensions.is_empty() {
@@ -4295,63 +4292,85 @@ impl App {
         } else {
             installed_extensions
                 .into_iter()
-                .map(|extension| {
-                    let runtime = match extension.runtime {
-                        crate::capabilities::extensions::ExtensionRuntimeSummary::Native {
-                            ..
-                        } => "native",
-                        crate::capabilities::extensions::ExtensionRuntimeSummary::Oci {
-                            ..
-                        } => "oci",
-                    };
-                    let name = extension.name;
-                    let enabled = extension.enabled;
-                    let mut update = MenuActionProjection::command(
-                        format!("extension.{name}.update"),
-                        "Update",
-                        format!("/extension update {name}"),
-                    );
-                    update.requires_confirmation = true;
-                    let mut remove = MenuActionProjection::command(
-                        format!("extension.{name}.remove"),
-                        "Remove",
-                        format!("/extension remove {name}"),
-                    );
-                    remove.requires_confirmation = true;
-                    MenuRowProjection {
-                        id: format!("extension.installed.{name}"),
-                        label: name.clone(),
-                        description: extension.description,
-                        value: Some(format!("v{} · {runtime}", extension.version)),
-                        kind: MenuRowKind::Action,
-                        badges: vec![MenuBadgeProjection {
-                            label: if enabled { "enabled" } else { "disabled" }.into(),
-                            tone: if enabled {
-                                MenuBadgeTone::Success
-                            } else {
-                                MenuBadgeTone::Warning
-                            },
-                        }],
-                        metadata: vec![extension.status, extension.source_path],
-                        primary_action: Some(MenuActionProjection::command(
-                            format!("extension.{name}.inspect"),
-                            "Inspect",
-                            format!("/extension get {name}"),
-                        )),
-                        actions: vec![
-                            MenuActionProjection::command(
-                                format!("extension.{name}.toggle"),
-                                if enabled { "Disable" } else { "Enable" },
-                                format!(
-                                    "/extension {} {name}",
-                                    if enabled { "disable" } else { "enable" }
-                                ),
-                            ),
-                            update,
-                            remove,
-                        ],
-                        safety: None,
-                        availability: None,
+                .map(|installation| {
+                    use crate::capabilities::extensions::ExtensionInstallationDiagnosis;
+                    let filesystem_name = installation.filesystem_name;
+                    match installation.diagnosis {
+                        ExtensionInstallationDiagnosis::Valid { capability: extension } => {
+                            let runtime = match extension.runtime {
+                                crate::capabilities::extensions::ExtensionRuntimeSummary::Native { .. } => "native",
+                                crate::capabilities::extensions::ExtensionRuntimeSummary::Oci { .. } => "oci",
+                            };
+                            let name = extension.name;
+                            let enabled = extension.enabled;
+                            let mut update = MenuActionProjection::command(
+                                format!("extension.{name}.update"),
+                                "Update",
+                                format!("/extension update {name}"),
+                            );
+                            update.requires_confirmation = true;
+                            let mut remove = MenuActionProjection::command(
+                                format!("extension.{name}.remove"),
+                                "Remove",
+                                format!("/extension remove {filesystem_name}"),
+                            );
+                            remove.requires_confirmation = true;
+                            MenuRowProjection {
+                                id: format!("extension.installed.{filesystem_name}"),
+                                label: name.clone(),
+                                description: extension.description,
+                                value: Some(format!("v{} · {runtime}", extension.version)),
+                                kind: MenuRowKind::Action,
+                                badges: vec![MenuBadgeProjection {
+                                    label: if enabled { "enabled" } else { "disabled" }.into(),
+                                    tone: if enabled { MenuBadgeTone::Success } else { MenuBadgeTone::Warning },
+                                }],
+                                metadata: vec![extension.status, installation.source_path],
+                                primary_action: Some(MenuActionProjection::command(
+                                    format!("extension.{name}.inspect"),
+                                    "Inspect",
+                                    format!("/extension get {filesystem_name}"),
+                                )),
+                                actions: vec![
+                                    MenuActionProjection::command(
+                                        format!("extension.{name}.toggle"),
+                                        if enabled { "Disable" } else { "Enable" },
+                                        format!("/extension {} {filesystem_name}", if enabled { "disable" } else { "enable" }),
+                                    ),
+                                    update,
+                                    remove,
+                                ],
+                                safety: None,
+                                availability: None,
+                            }
+                        }
+                        diagnosis => {
+                            let (state, problem) = match diagnosis {
+                                ExtensionInstallationDiagnosis::Invalid { problem } => ("invalid", problem),
+                                ExtensionInstallationDiagnosis::BrokenLink { problem } => ("broken link", problem),
+                                ExtensionInstallationDiagnosis::Unreadable { problem } => ("unreadable", problem),
+                                ExtensionInstallationDiagnosis::Valid { .. } => unreachable!(),
+                            };
+                            let mut remove = MenuActionProjection::command(
+                                format!("extension.{filesystem_name}.remove"),
+                                "Remove",
+                                format!("/extension remove {filesystem_name}"),
+                            );
+                            remove.requires_confirmation = true;
+                            MenuRowProjection {
+                                id: format!("extension.installed.{filesystem_name}"),
+                                label: filesystem_name.clone(),
+                                description: problem.clone(),
+                                value: Some(state.into()),
+                                kind: MenuRowKind::Action,
+                                badges: vec![MenuBadgeProjection { label: "invalid".into(), tone: MenuBadgeTone::Warning }],
+                                metadata: vec![problem, installation.source_path],
+                                primary_action: None,
+                                actions: vec![remove],
+                                safety: None,
+                                availability: None,
+                            }
+                        }
                     }
                 })
                 .collect()
