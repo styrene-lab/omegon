@@ -1974,9 +1974,11 @@ pub enum NotifyLevel {
 /// Response to a permission request from an operator surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionResponse {
-    /// Allow this one operation.
+    /// Allow this one operation without changing directory trust.
     Allow,
-    /// Allow operations in this directory and persist the grant to project permissions.
+    /// Allow operations in the proposed directory for the remainder of this session.
+    AllowSession,
+    /// Allow operations in the proposed directory and persist the grant to project permissions.
     AlwaysAllow,
     /// Deny the operation.
     Deny,

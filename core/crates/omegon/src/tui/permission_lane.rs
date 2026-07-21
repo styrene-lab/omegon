@@ -35,6 +35,9 @@ pub fn permission_response_for_key(
 ) -> Option<omegon_traits::PermissionResponse> {
     match code {
         KeyCode::Char('y') | KeyCode::Char('Y') => Some(omegon_traits::PermissionResponse::Allow),
+        KeyCode::Char('a') if !modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(omegon_traits::PermissionResponse::AllowSession)
+        }
         KeyCode::Char('A') => Some(omegon_traits::PermissionResponse::AlwaysAllow),
         KeyCode::Char('a') if modifiers.contains(KeyModifiers::SHIFT) => {
             Some(omegon_traits::PermissionResponse::AlwaysAllow)
@@ -113,27 +116,17 @@ pub fn render_permission_lane(
 pub fn format_permission_prompt(
     tool_name: &str,
     path: &str,
-    kind: PermissionRequestKind,
-    persistence: PermissionPersistence,
+    _kind: PermissionRequestKind,
+    _persistence: PermissionPersistence,
     grant_path: Option<&str>,
 ) -> String {
-    let scope = permission_persist_scope_label(tool_name, kind, persistence);
     let grant = grant_path
         .map(|path| format!("Grant: {path}\n"))
         .unwrap_or_default();
-    let persist = match persistence {
-        PermissionPersistence::ProjectDirectory => "project profile directory permission",
-        PermissionPersistence::SessionDirectory => "session directory permission",
-        PermissionPersistence::None => "not persisted; approval applies to this operation only",
-    };
     format!(
-        "Permission required\n\
-         Tool: {tool_name}\n\
+        "Tool: {tool_name}\n\
          Target: {path}\n\
-         {grant}\
-         Reason: grant required for this operation\n\
-         Persist: {persist}\n\n\
-         [y] once   [Shift+A] {scope}   [n/Esc] deny"
+         {grant}"
     )
 }
 
@@ -154,6 +147,10 @@ mod tests {
         assert_eq!(
             permission_response_for_key(KeyCode::Esc, KeyModifiers::NONE),
             Some(omegon_traits::PermissionResponse::Deny)
+        );
+        assert_eq!(
+            permission_response_for_key(KeyCode::Char('a'), KeyModifiers::NONE),
+            Some(omegon_traits::PermissionResponse::AllowSession)
         );
         assert_eq!(
             permission_response_for_key(KeyCode::Char('A'), KeyModifiers::NONE),

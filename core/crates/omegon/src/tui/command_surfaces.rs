@@ -26,6 +26,33 @@ pub(crate) fn command_modal_area(area: Rect) -> Rect {
     }
 }
 
+pub(crate) fn prompt_modal_area(area: Rect, prompt: &CommandPrompt) -> Rect {
+    let content_width = prompt
+        .body
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    let actions_width = prompt
+        .actions
+        .iter()
+        .map(|action| action.key.len() + action.label.len() + 3)
+        .sum::<usize>()
+        .saturating_add(prompt.actions.len().saturating_sub(1) * 3);
+    let desired_width = content_width.max(actions_width).saturating_add(4) as u16;
+    let desired_height = prompt.body.lines().count().saturating_add(5) as u16;
+    let max_width = area.width.saturating_sub(COMMAND_MODAL_MARGIN).max(1);
+    let max_height = area.height.saturating_sub(COMMAND_MODAL_MARGIN).max(1);
+    let width = desired_width.clamp(48.min(max_width), COMMAND_MODAL_WIDTH.min(max_width));
+    let height = desired_height.clamp(6.min(max_height), 14.min(max_height));
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
 pub fn render_prompt(area: Rect, buf: &mut Buffer, theme: &dyn Theme, prompt: &CommandPrompt) {
     let actions = prompt
         .actions
@@ -47,7 +74,8 @@ pub fn render_prompt(area: Rect, buf: &mut Buffer, theme: &dyn Theme, prompt: &C
         scroll: 0,
         return_target: None,
     };
-    render_panel(area, buf, theme, &panel);
+    let panel_area = prompt_modal_area(area, prompt);
+    render_panel_in(panel_area, buf, theme, &panel);
 }
 
 pub fn render_panel(area: Rect, buf: &mut Buffer, theme: &dyn Theme, panel: &CommandPanel) {
@@ -56,6 +84,13 @@ pub fn render_panel(area: Rect, buf: &mut Buffer, theme: &dyn Theme, panel: &Com
     }
 
     let panel_area = command_modal_area(area);
+    render_panel_in(panel_area, buf, theme, panel);
+}
+
+fn render_panel_in(panel_area: Rect, buf: &mut Buffer, theme: &dyn Theme, panel: &CommandPanel) {
+    if panel_area.width < 20 || panel_area.height < 6 {
+        return;
+    }
 
     Clear.render(panel_area, buf);
     let border = match panel.severity {
@@ -98,7 +133,10 @@ pub fn render_panel(area: Rect, buf: &mut Buffer, theme: &dyn Theme, panel: &Com
 
 #[cfg(test)]
 mod tests {
-    use super::{COMMAND_MODAL_HEIGHT, COMMAND_MODAL_WIDTH, command_modal_area};
+    use super::{
+        COMMAND_MODAL_HEIGHT, COMMAND_MODAL_WIDTH, CommandPrompt, command_modal_area,
+        prompt_modal_area,
+    };
 
     #[test]
     fn command_modal_area_uses_stable_centered_geometry() {
@@ -109,6 +147,34 @@ mod tests {
         assert_eq!(modal.height, COMMAND_MODAL_HEIGHT);
         assert_eq!(modal.x, 10);
         assert_eq!(modal.y, 4);
+    }
+
+    #[test]
+    fn prompt_modal_area_fits_content_instead_of_filling_the_screen() {
+        let area = ratatui::layout::Rect::new(0, 0, 180, 50);
+        let prompt = CommandPrompt::new(
+            "Permission required",
+            "Tool: read\nTarget: /tmp/project/Cargo.toml\nGrant: /tmp/project",
+        )
+        .with_actions(vec![
+            crate::surfaces::command::CommandPromptAction::new("y", "this operation"),
+            crate::surfaces::command::CommandPromptAction::new(
+                "a",
+                "this directory · session",
+            ),
+            crate::surfaces::command::CommandPromptAction::new(
+                "Shift+A",
+                "this directory · project",
+            ),
+            crate::surfaces::command::CommandPromptAction::new("n", "deny"),
+        ]);
+
+        let modal = prompt_modal_area(area, &prompt);
+
+        assert!(modal.width < COMMAND_MODAL_WIDTH);
+        assert_eq!(modal.height, 8);
+        assert_eq!(modal.x, (area.width - modal.width) / 2);
+        assert_eq!(modal.y, (area.height - modal.height) / 2);
     }
 
     #[test]

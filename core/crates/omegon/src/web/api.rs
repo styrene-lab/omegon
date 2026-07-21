@@ -1213,6 +1213,9 @@ pub async fn post_web_action(
                         Some(
                             match decision {
                                 omegon_traits::PermissionResponse::Allow => "permission allowed",
+                                omegon_traits::PermissionResponse::AllowSession => {
+                                    "permission allowed for session directory"
+                                }
                                 omegon_traits::PermissionResponse::AlwaysAllow => {
                                     "permission always allowed"
                                 }

@@ -3285,6 +3285,7 @@ async fn execute_tool_invocation(
 
                 match response {
                     omegon_traits::PermissionResponse::Allow
+                    | omegon_traits::PermissionResponse::AllowSession
                     | omegon_traits::PermissionResponse::AlwaysAllow => {
                         permission_log.push(PermissionRecord {
                             tool_name: visible_tool_name.to_string(),
@@ -3613,11 +3614,54 @@ async fn execute_tool_invocation(
 
             match response {
                 omegon_traits::PermissionResponse::Allow => {
-                    tracing::info!(path = %perm_err.requested_path, decision = "allow", "permission decision");
+                    tracing::info!(path = %perm_err.requested_path, decision = "allow_once", "permission decision");
                     permission_log.push(PermissionRecord {
                         tool_name: visible_tool_name.to_string(),
                         path: perm_err.requested_path.clone(),
-                        decision: "allow".into(),
+                        decision: "allow_once".into(),
+                        kind: omegon_traits::PermissionRequestKind::PathBoundary,
+                        persistence: omegon_traits::PermissionPersistence::None,
+                        grant_path: None,
+                    });
+                    // Approve only the canonical target. For a file this grants that
+                    // one path, not its siblings; directories remain explicit scopes.
+                    let target = crate::tools::canonicalize_existing_parent_for_permissions(
+                        std::path::Path::new(&perm_err.requested_path),
+                    );
+                    let trust_args = serde_json::json!({
+                        "path": target,
+                        "scope": "session",
+                    });
+                    if let Err(e) = bus
+                        .execute_internal(
+                            crate::tool_registry::core::TRUST_DIRECTORY,
+                            "__permission_grant",
+                            trust_args,
+                            cancel.clone(),
+                        )
+                        .await
+                    {
+                        tracing::error!(error = %e, "trust_directory internal call failed — permission may not take effect");
+                    }
+                    match execute(cancel, sink).await {
+                        Ok(result) => (result, false),
+                        Err(e) => (
+                            omegon_traits::ToolResult {
+                                content: vec![ContentBlock::Text {
+                                    text: e.to_string(),
+                                }],
+                                details: Value::Null,
+                            },
+                            true,
+                        ),
+                    }
+                }
+                omegon_traits::PermissionResponse::AllowSession => {
+                    tracing::info!(dir = %perm_err.directory, decision = "allow_session", "permission decision");
+                    permission_log.push(PermissionRecord {
+                        tool_name: visible_tool_name.to_string(),
+                        path: perm_err.requested_path.clone(),
+                        decision: "allow_session".into(),
                         kind: omegon_traits::PermissionRequestKind::PathBoundary,
                         persistence: omegon_traits::PermissionPersistence::SessionDirectory,
                         grant_path: Some(perm_err.directory.clone()),
@@ -3641,9 +3685,7 @@ async fn execute_tool_invocation(
                         Ok(result) => (result, false),
                         Err(e) => (
                             omegon_traits::ToolResult {
-                                content: vec![ContentBlock::Text {
-                                    text: e.to_string(),
-                                }],
+                                content: vec![ContentBlock::Text { text: e.to_string() }],
                                 details: Value::Null,
                             },
                             true,

@@ -901,7 +901,7 @@ async fn ui_action_permission_response_unblocks_pending_permission() {
     );
     assert_eq!(
         outcome,
-        UiActionOutcome::accepted_message("→ allowed (this session): write src/lib.rs")
+        UiActionOutcome::accepted_message("→ allowed for this operation: write src/lib.rs")
     );
     assert!(app.pending_permission.is_none());
     assert!(app.pending_permission_context.is_none());

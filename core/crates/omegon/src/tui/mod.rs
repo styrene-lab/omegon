@@ -7537,7 +7537,10 @@ warning: {warning}"
             let _ = tx.send(action.response);
         }
         let label = match action.response {
-            omegon_traits::PermissionResponse::Allow => "allowed (this session)",
+            omegon_traits::PermissionResponse::Allow => "allowed for this operation",
+            omegon_traits::PermissionResponse::AllowSession => {
+                "allowed - session directory grant"
+            }
             omegon_traits::PermissionResponse::AlwaysAllow => {
                 match context.as_ref().map(|ctx| ctx.persistence) {
                     Some(omegon_traits::PermissionPersistence::ProjectDirectory) => {
@@ -7554,7 +7557,8 @@ warning: {warning}"
         let message = if let Some(context) = context {
             if matches!(
                 action.response,
-                omegon_traits::PermissionResponse::AlwaysAllow
+                omegon_traits::PermissionResponse::AllowSession
+                    | omegon_traits::PermissionResponse::AlwaysAllow
             ) {
                 if let Some(grant_path) = context.grant_path {
                     let target = crate::tools::canonicalize_existing_parent_for_permissions(
@@ -12085,8 +12089,9 @@ Scroll transcript:
                 self.command_prompt = Some(
                     CommandPrompt::new("Permission required", prompt_text.clone()).with_actions(
                         vec![
-                            CommandPromptAction::new("y", "allow once"),
-                            CommandPromptAction::new("A", "always allow"),
+                            CommandPromptAction::new("y", "this operation"),
+                            CommandPromptAction::new("a", "this directory · session"),
+                            CommandPromptAction::new("Shift+A", "this directory · project"),
                             CommandPromptAction::new("n", "deny"),
                         ],
                     ),
