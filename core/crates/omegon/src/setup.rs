@@ -720,7 +720,9 @@ impl AgentSetup {
             sandbox,
             dangerously_bypass_permissions,
         );
-        cleave_feature = cleave_feature.with_inference_runtime(inference_runtime.clone());
+        cleave_feature = cleave_feature
+            .with_inference_runtime(inference_runtime.clone())
+            .with_secrets(secrets.clone());
         if let Some(settings) = settings.as_ref() {
             cleave_feature = cleave_feature.with_settings(settings.clone());
         }
@@ -748,7 +750,9 @@ impl AgentSetup {
             sandbox,
             dangerously_bypass_permissions,
         );
-        delegate_feature = delegate_feature.with_inference_runtime(inference_runtime.clone());
+        delegate_feature = delegate_feature
+            .with_inference_runtime(inference_runtime.clone())
+            .with_secrets(secrets.clone());
         if let Some(settings) = settings.as_ref() {
             delegate_feature = delegate_feature.with_settings(settings.clone());
         }

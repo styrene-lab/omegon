@@ -886,8 +886,11 @@ pub struct CleaveFeature {
     pub inventory: Option<std::sync::Arc<tokio::sync::RwLock<crate::routing::ProviderInventory>>>,
     /// Shared inference runtime used to pin and resolve one snapshot per run.
     inference_runtime: Option<crate::inference_runtime::InferenceRuntimeState>,
-    /// Startup-approved secret env inherited by child runs.
+    /// Startup-resolved fallback env retained for compatibility with direct/test construction.
     session_secret_env: Vec<(String, String)>,
+    /// Live secrets manager consulted at every child-spawn boundary so secrets
+    /// added through `/secrets set` are immediately inherited.
+    secrets: Option<Arc<omegon_secrets::SecretsManager>>,
     /// Slot holding the runtime-supplied `BusRequestSink` once the
     /// runtime has constructed it. See [`CleaveEventSlot`] for the
     /// rationale.
@@ -927,6 +930,7 @@ impl CleaveFeature {
             inventory: None,
             inference_runtime: None,
             session_secret_env,
+            secrets: None,
             bus_request_sink: Arc::new(Mutex::new(None)),
             settings: None,
             sandbox,
@@ -948,6 +952,18 @@ impl CleaveFeature {
     pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
         self.settings = Some(settings);
         self
+    }
+
+    pub fn with_secrets(mut self, secrets: Arc<omegon_secrets::SecretsManager>) -> Self {
+        self.secrets = Some(secrets);
+        self
+    }
+
+    fn child_secret_env(&self) -> Vec<(String, String)> {
+        self.secrets
+            .as_ref()
+            .map(|secrets| secrets.session_env())
+            .unwrap_or_else(|| self.session_secret_env.clone())
     }
 
     fn subagent_policy(&self) -> crate::autonomy::SubagentPolicy {
@@ -1961,7 +1977,7 @@ Directive: {}{}",
                     crate::routing::ProviderInventory::probe(),
                 )))
             }),
-            inherited_env: self.session_secret_env.clone(),
+            inherited_env: self.child_secret_env(),
             injected_env: Vec::new(),
             child_runtime: crate::cleave::CleaveChildRuntimeProfile::default(),
             progress_sink,
@@ -2664,6 +2680,22 @@ mod tests {
 
     use super::*;
     use omegon_traits::OperationKind;
+
+    #[test]
+    fn cleave_child_secret_env_reads_live_manager_state() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let secrets = Arc::new(omegon_secrets::SecretsManager::new(temp.path()).expect("manager"));
+        let feature = CleaveFeature::new(temp.path(), vec![], false).with_secrets(secrets.clone());
+
+        assert!(feature.child_secret_env().is_empty());
+        secrets
+            .set_managed_secret("GITHUB_TOKEN", "ghp_live_cleave")
+            .expect("set secret");
+        assert_eq!(
+            feature.child_secret_env(),
+            vec![("GITHUB_TOKEN".into(), "ghp_live_cleave".into())]
+        );
+    }
 
     #[test]
     fn cleave_assessment_is_advisory_until_run_requests_approval() {
