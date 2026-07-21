@@ -685,8 +685,9 @@ struct App {
     mouse_capture_enabled: bool,
     /// When true, terminal-native selection/copy mode is active.
     terminal_copy_mode: bool,
-    /// Last left-click press used to detect double-click expansion.
-    last_left_click: Option<(u16, u16, std::time::Instant)>,
+    /// Last left-click press, including its semantic conversation target. The
+    /// target survives selection-induced reflow between the two presses.
+    last_left_click: Option<LastLeftClick>,
     /// Extension widgets discovered during setup — keyed by widget_id.
     extension_widgets: std::collections::HashMap<String, crate::extensions::ExtensionTabWidget>,
     /// Broadcast receivers for widget events — one per extension.
@@ -709,6 +710,23 @@ struct App {
     runtime_queue_snapshot: Option<serde_json::Value>,
     /// Monotonic identity of the active interactive runtime prompt.
     runtime_turn_id: Option<u64>,
+}
+
+type LastLeftClick = (u16, u16, std::time::Instant, Option<usize>);
+
+fn semantic_double_click_target(
+    previous: Option<LastLeftClick>,
+    column: u16,
+    row: u16,
+    now: std::time::Instant,
+) -> Option<usize> {
+    previous.and_then(|(previous_column, previous_row, pressed_at, target)| {
+        (previous_column.abs_diff(column) <= 1
+            && previous_row.abs_diff(row) <= 1
+            && now.duration_since(pressed_at) <= Duration::from_millis(400))
+        .then_some(target)
+        .flatten()
+    })
 }
 
 /// Result of handling a slash command.
@@ -13654,7 +13672,7 @@ pub async fn run_tui(
                         } else if point_in(app.workbench_area) {
                             app.dashboard.sidebar_active = false;
                             let now = std::time::Instant::now();
-                            let is_double = app.last_left_click.is_some_and(|(col, row, t)| {
+                            let is_double = app.last_left_click.is_some_and(|(col, row, t, _)| {
                                 row == mouse.row
                                     && col.abs_diff(mouse.column) <= 1
                                     && row.abs_diff(mouse.row) <= 1
@@ -13663,7 +13681,7 @@ pub async fn run_tui(
                             if is_double {
                                 app.expand_workbench_plan_details();
                             }
-                            app.last_left_click = Some((mouse.column, mouse.row, now));
+                            app.last_left_click = Some((mouse.column, mouse.row, now, None));
                         } else if point_in(app.conversation_area) {
                             app.dashboard.sidebar_active = false;
                             if let Some(area) = app.conversation_area {
@@ -13697,16 +13715,20 @@ pub async fn run_tui(
                                     }
                                     continue;
                                 }
-                                if let Some(idx) = app.conversation.segment_at(area, mouse.row) {
-                                    let now = std::time::Instant::now();
-                                    let is_double =
-                                        app.last_left_click.is_some_and(|(col, row, t)| {
-                                            row == mouse.row
-                                                && col.abs_diff(mouse.column) <= 1
-                                                && row.abs_diff(mouse.row) <= 1
-                                                && now.duration_since(t)
-                                                    <= Duration::from_millis(400)
-                                        });
+                                let now = std::time::Instant::now();
+                                let prior_double_target = semantic_double_click_target(
+                                    app.last_left_click,
+                                    mouse.column,
+                                    mouse.row,
+                                    now,
+                                );
+                                // Selecting the first click adds a focus rail/hint and can
+                                // reflow short, bottom-aligned content. Prefer the semantic
+                                // target captured on that first press, rather than hit-testing
+                                // the second press against the newly shifted frame.
+                                let hit_idx = app.conversation.segment_at(area, mouse.row);
+                                if let Some(idx) = prior_double_target.or(hit_idx) {
+                                    let is_double = prior_double_target == Some(idx);
                                     let _ = app.handle_select_conversation_segment_action(
                                         SelectConversationSegmentAction {
                                             segment: ConversationSegmentRef::by_index(idx),
@@ -13731,7 +13753,8 @@ pub async fn run_tui(
                                             );
                                         }
                                     }
-                                    app.last_left_click = Some((mouse.column, mouse.row, now));
+                                    app.last_left_click =
+                                        Some((mouse.column, mouse.row, now, Some(idx)));
                                 }
                             }
                         } else if point_in(app.editor_area) {

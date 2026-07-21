@@ -15,6 +15,7 @@ use crate::web::WebDaemonStatus;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 struct CurrentDirGuard {
@@ -2985,6 +2986,24 @@ fn slash_focus_reports_removed_command() {
 
     let result = app.handle_slash_command("/focus", &tx);
     assert!(matches!(result, SlashResult::Display(message) if message.contains("removed")));
+}
+
+#[test]
+fn semantic_double_click_keeps_first_press_target_across_reflow() {
+    let now = Instant::now();
+    let previous = Some((12, 18, now - Duration::from_millis(200), Some(7)));
+
+    assert_eq!(semantic_double_click_target(previous, 13, 17, now), Some(7));
+}
+
+#[test]
+fn semantic_double_click_rejects_stale_or_distant_press() {
+    let now = Instant::now();
+    let stale = Some((12, 18, now - Duration::from_millis(401), Some(7)));
+    let distant = Some((12, 18, now - Duration::from_millis(200), Some(7)));
+
+    assert_eq!(semantic_double_click_target(stale, 12, 18, now), None);
+    assert_eq!(semantic_double_click_target(distant, 12, 20, now), None);
 }
 
 #[test]

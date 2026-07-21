@@ -20,6 +20,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Made release-branch forward synchronization a hard stable-publication prerequisite: both `just publish` and the release workflow now refuse to publish a stable tag while `origin/main` still builds an older workspace version.
 
+### Fixed
+
+- Kept conversation double-clicks bound to the semantic segment selected by the first press, so selection-induced layout reflow no longer swallows double-click copy or collapsed-image expansion.
+
 ## [0.28.8] - 2026-07-21
 
 ### Fixed
