@@ -80,6 +80,27 @@ Bash mediation is static and advisory for common shell forms (redirects, `tee`, 
 
 The key improvement over OpenCode: our permissions compose with personas. The tutor persona says "no bash" — that's a persona-level deny that the operator can't accidentally override with a session sticky. The Lex Imperialis could define absolute denies (e.g. never allow `rm -rf /`).
 
+## Operator prompt controls (shipped in 0.28.7)
+
+Workspace-boundary prompts suspend the active run and show the tool, exact target, and proposed directory. The operator selects an explicit grant scope:
+
+| Key | Scope | Runtime effect |
+|---|---|---|
+| `y` | one operation | Approves only the requested canonical target; sibling files are not implicitly trusted. |
+| `a` | current session | Trusts the proposed directory until the Omegon process exits. |
+| `Shift+A` | project | Persists the proposed directory in the active project profile for future sessions. |
+| `n` / `Esc` | deny | Rejects the operation without adding trust. |
+
+These directory scopes apply to workspace-boundary prompts. Policy prompts without a durable grant target remain allow-once.
+
+Operators can deliberately bypass Omegon's interactive tool-policy and filesystem-boundary mediation for one process:
+
+```bash
+omegon --dangerously-bypass-permissions
+```
+
+This does not persist trusted directories or override operating-system permissions, macOS privacy controls, container/mount boundaries, missing credentials, or upstream API authorization. Child runs inherit the bypass posture. Use it only where the operator accepts the consequences of every tool call.
+
 ## Open Questions
 
 - What is the permission config format — TOML file in .omegon/permissions.toml, inline in opencode.json-style config, or both?

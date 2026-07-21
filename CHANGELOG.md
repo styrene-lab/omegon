@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Documented the permission modal's one-operation, session-directory, and persistent project-directory choices on the public security page, including the exact `--dangerously-bypass-permissions` freedom-mode boundary and inherited child-run semantics.
+
 - Reworked path-boundary permission prompts into a compact, content-sized modal with non-duplicated copy and explicit choices for one operation, a session directory grant, or a persistent project directory grant; one-operation approval no longer implicitly trusts sibling files.
 
 - Kept one-turn authoritative context snapshots alive through the provider prompt that consumes them, so the agent now sees the current Workbench plan/intent state instead of having it expire during prompt assembly; unfinished visible plans also trigger reconciliation regardless of the assistant's closing wording.
