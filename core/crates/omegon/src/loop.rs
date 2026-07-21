@@ -3685,7 +3685,9 @@ async fn execute_tool_invocation(
                         Ok(result) => (result, false),
                         Err(e) => (
                             omegon_traits::ToolResult {
-                                content: vec![ContentBlock::Text { text: e.to_string() }],
+                                content: vec![ContentBlock::Text {
+                                    text: e.to_string(),
+                                }],
                                 details: Value::Null,
                             },
                             true,

@@ -158,10 +158,7 @@ mod tests {
         )
         .with_actions(vec![
             crate::surfaces::command::CommandPromptAction::new("y", "this operation"),
-            crate::surfaces::command::CommandPromptAction::new(
-                "a",
-                "this directory · session",
-            ),
+            crate::surfaces::command::CommandPromptAction::new("a", "this directory · session"),
             crate::surfaces::command::CommandPromptAction::new(
                 "Shift+A",
                 "this directory · project",

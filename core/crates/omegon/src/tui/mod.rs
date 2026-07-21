@@ -7538,9 +7538,7 @@ warning: {warning}"
         }
         let label = match action.response {
             omegon_traits::PermissionResponse::Allow => "allowed for this operation",
-            omegon_traits::PermissionResponse::AllowSession => {
-                "allowed - session directory grant"
-            }
+            omegon_traits::PermissionResponse::AllowSession => "allowed - session directory grant",
             omegon_traits::PermissionResponse::AlwaysAllow => {
                 match context.as_ref().map(|ctx| ctx.persistence) {
                     Some(omegon_traits::PermissionPersistence::ProjectDirectory) => {
