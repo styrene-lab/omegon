@@ -13,10 +13,22 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tokio::process::Command;
 
-/// Maximum time to wait for a validation command to complete.
-/// cargo check on a large project can take a while; 30s is generous
-/// but prevents indefinite hangs from build locks or broken toolchains.
-const VALIDATION_TIMEOUT_SECS: u64 = 30;
+/// Validation deadlines must cover healthy cold-cache toolchains, not just warm
+/// incremental runs. A timeout is an infrastructure bound, not a performance
+/// target: keep enough headroom to avoid reporting active compilers as failures.
+const RUST_VALIDATION_TIMEOUT_SECS: u64 = 600;
+const TYPESCRIPT_VALIDATION_TIMEOUT_SECS: u64 = 180;
+const PYTHON_VALIDATION_TIMEOUT_SECS: u64 = 120;
+const EMBEDDED_VALIDATION_TIMEOUT_SECS: u64 = 30;
+const OPERATOR_VALIDATION_TIMEOUT_SECS: u64 = 300;
+
+fn validation_timeout_secs(kind: ValidatorKind) -> u64 {
+    match kind {
+        ValidatorKind::Rust => RUST_VALIDATION_TIMEOUT_SECS,
+        ValidatorKind::TypeScript => TYPESCRIPT_VALIDATION_TIMEOUT_SECS,
+        ValidatorKind::Python => PYTHON_VALIDATION_TIMEOUT_SECS,
+    }
+}
 
 /// Cached project validators, keyed by the cwd they were discovered from.
 /// Re-discovers if cwd changes (Phase 1 multi-project support).
@@ -482,7 +494,7 @@ fn default_true() -> bool {
 }
 
 fn default_operator_timeout_secs() -> u64 {
-    VALIDATION_TIMEOUT_SECS
+    OPERATOR_VALIDATION_TIMEOUT_SECS
 }
 
 impl OperatorValidator {
@@ -1887,7 +1899,8 @@ async fn validate_language_paths(
         .kill_on_drop(true)
         .output();
 
-    let result = tokio::time::timeout(Duration::from_secs(VALIDATION_TIMEOUT_SECS), child).await;
+    let timeout_secs = validation_timeout_secs(kind);
+    let result = tokio::time::timeout(Duration::from_secs(timeout_secs), child).await;
 
     match result {
         Ok(Ok(output)) => {
@@ -1927,7 +1940,7 @@ async fn validate_language_paths(
         Err(_) => {
             tracing::warn!(
                 "Validation timed out after {}s for `{}`",
-                VALIDATION_TIMEOUT_SECS,
+                timeout_secs,
                 format_command(config.command, &config.args)
             );
             format!(
@@ -1935,7 +1948,7 @@ async fn validate_language_paths(
                 format_command(config.command, &config.args),
                 paths.len(),
                 kind.label(),
-                VALIDATION_TIMEOUT_SECS
+                timeout_secs
             )
         }
     }
@@ -2002,7 +2015,8 @@ pub async fn run_affected_tests(cwd: &Path, files: &[&PathBuf]) -> Option<String
         .kill_on_drop(true)
         .output();
 
-    let result = tokio::time::timeout(Duration::from_secs(VALIDATION_TIMEOUT_SECS), child).await;
+    let result =
+        tokio::time::timeout(Duration::from_secs(EMBEDDED_VALIDATION_TIMEOUT_SECS), child).await;
     match result {
         Ok(Ok(output)) if output.status.success() => {
             Some(format!("Affected tests (`{cmd}`): ✓ passed"))
@@ -2014,7 +2028,7 @@ pub async fn run_affected_tests(cwd: &Path, files: &[&PathBuf]) -> Option<String
         Ok(Err(e)) => Some(format!("Affected tests (`{cmd}`): failed to execute: {e}")),
         Err(_) => Some(format!(
             "Affected tests (`{cmd}`): ⏱ timed out after {}s",
-            VALIDATION_TIMEOUT_SECS
+            EMBEDDED_VALIDATION_TIMEOUT_SECS
         )),
     }
 }
@@ -2241,6 +2255,15 @@ fn truncate_validation(text: &str, max_bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validation_defaults_have_cold_cache_headroom() {
+        assert_eq!(validation_timeout_secs(ValidatorKind::Rust), 600);
+        assert_eq!(validation_timeout_secs(ValidatorKind::TypeScript), 180);
+        assert_eq!(validation_timeout_secs(ValidatorKind::Python), 120);
+        assert_eq!(EMBEDDED_VALIDATION_TIMEOUT_SECS, 30);
+        assert_eq!(default_operator_timeout_secs(), 300);
+    }
 
     #[test]
     fn validator_for_known_extensions() {
