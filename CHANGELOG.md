@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.7] - 2026-07-21
+
 ### Fixed
 
 - Reworked path-boundary permission prompts into a compact, content-sized modal with non-duplicated copy and explicit choices for one operation, a session directory grant, or a persistent project directory grant; one-operation approval no longer implicitly trusts sibling files.
