@@ -546,6 +546,9 @@ pub struct DelegateRunner {
     wall_timeout_secs: u64,
     idle_timeout_secs: u64,
     dangerously_bypass_permissions: bool,
+    /// Live secrets manager consulted at each child spawn so `/secrets set`
+    /// mutations become available without restarting the parent session.
+    secrets: Option<Arc<omegon_secrets::SecretsManager>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -808,7 +811,20 @@ impl DelegateRunner {
             wall_timeout_secs: 300,
             idle_timeout_secs: 120,
             dangerously_bypass_permissions,
+            secrets: None,
         }
+    }
+
+    fn with_secrets(mut self, secrets: Arc<omegon_secrets::SecretsManager>) -> Self {
+        self.secrets = Some(secrets);
+        self
+    }
+
+    fn child_secret_env(&self) -> Vec<(String, String)> {
+        self.secrets
+            .as_ref()
+            .map(|secrets| secrets.session_env())
+            .unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -943,7 +959,7 @@ If blocked, say the blocker plainly.\n",
                 .context("delegate runner could not locate current executable")?,
             model: model.clone(),
             max_turns: runtime.worker_profile.max_turns(),
-            inherited_env: Vec::new(),
+            inherited_env: self.child_secret_env(),
             injected_env: Vec::new(),
             runtime: child_runtime,
             dangerously_bypass_permissions: self.dangerously_bypass_permissions,
@@ -1417,6 +1433,13 @@ impl DelegateFeature {
         inference_runtime: crate::inference_runtime::InferenceRuntimeState,
     ) -> Self {
         self.inference_runtime = Some(inference_runtime);
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Arc<omegon_secrets::SecretsManager>) -> Self {
+        Arc::get_mut(&mut self.runner)
+            .expect("delegate runner must be uniquely owned during feature setup")
+            .secrets = Some(secrets);
         self
     }
 
@@ -2678,6 +2701,28 @@ fn parse_agent_spec(content: &str) -> Option<AgentSpec> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn delegate_runner_reads_live_secret_environment() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let secrets = Arc::new(omegon_secrets::SecretsManager::new(temp.path()).expect("manager"));
+        let runner = DelegateRunner::new_with_safety(
+            temp.path().to_path_buf(),
+            Arc::new(DelegateResultStore::new()),
+            false,
+            false,
+        )
+        .with_secrets(secrets.clone());
+
+        assert!(runner.child_secret_env().is_empty());
+        secrets
+            .set_managed_secret("GITHUB_TOKEN", "ghp_live_delegate")
+            .expect("set secret");
+        assert_eq!(
+            runner.child_secret_env(),
+            vec![("GITHUB_TOKEN".into(), "ghp_live_delegate".into())]
+        );
+    }
 
     #[test]
     fn background_delegate_started_includes_machine_result_tool_call() {

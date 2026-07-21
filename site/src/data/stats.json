@@ -1,8 +1,8 @@
 {
   "crateCount": 11,
   "downloadMB": 16,
-  "releaseTag": "v0.28.3",
-  "providerCount": 16,
+  "releaseTag": "v0.28.7",
+  "providerCount": 17,
   "providerNames": [
     "Anthropic/Claude",
     "OpenAI API",
@@ -13,6 +13,7 @@
     "xAI (Grok)",
     "Mistral AI",
     "Cerebras",
+    "Moonshot AI",
     "Google Gemini",
     "Google Antigravity",
     "OpenCode Go",
@@ -31,6 +32,7 @@
     "xai",
     "mistral",
     "cerebras",
+    "moonshot",
     "google",
     "google-antigravity",
     "opencode-go",
@@ -42,5 +44,5 @@
   "toolFiles": 24,
   "skillCount": 10,
   "searchProviderCount": 3,
-  "collectedAt": "2026-07-14T23:31:13.565Z"
+  "collectedAt": "2026-07-21T03:54:07.085Z"
 }

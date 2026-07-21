@@ -76,12 +76,47 @@ import { snippet } from "../../lib/snippets";
   "allowed_paths": ["secret/data/omegon/*"]
 }`}</code></pre>
 
+  <h2>Tool and Filesystem Permissions</h2>
+  <p>
+    Omegon mediates operations through layered tool policy and workspace-boundary checks.
+    When a tool targets a path outside the currently trusted workspace, the agent run pauses
+    until you choose a scope in the permission modal. The prompt shows the tool, exact target,
+    and proposed directory before any grant is installed.
+  </p>
+  <table>
+    <thead><tr><th>Key</th><th>Scope</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td><code>y</code></td><td>One operation</td><td>Approve only the requested canonical target. Sibling files are not implicitly trusted.</td></tr>
+      <tr><td><code>a</code></td><td>Current session</td><td>Trust the proposed directory until this Omegon process exits.</td></tr>
+      <tr><td><code>Shift+A</code></td><td>Project</td><td>Persist the proposed directory in the active project profile for future sessions.</td></tr>
+      <tr><td><code>n</code> or <code>Esc</code></td><td>Deny</td><td>Reject the operation without adding trust.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    These directory choices apply to workspace-boundary prompts. A policy prompt without a
+    durable grant target remains allow-once even if a frontend offers broader approval wording.
+  </p>
+
+  <h3>Hands-off permission bypass</h3>
+  <p>
+    Operators who intentionally want a non-interactive, unrestricted Omegon permission posture
+    can opt in when launching the process:
+  </p>
+  <pre><code>omegon --dangerously-bypass-permissions</code></pre>
+  <p>
+    This bypasses Omegon's interactive tool-policy and filesystem-boundary mediation for that
+    process. It does not write trusted-directory grants, and it cannot override operating-system
+    permissions, macOS privacy controls, container or mount boundaries, missing credentials, or
+    upstream API authorization. Use it only in an environment where you accept the consequences
+    of every tool call made by the agent and its inherited child runs.
+  </p>
+
   <h2>Process Safety</h2>
   <ul>
     <li>The agent executes tools directly under a layered tool policy. Per-tool rules can allow, prompt, or deny operations with wildcard subject matching.</li>
     <li>Policy prompts are currently allow-once decisions until durable grants are configured; unknown tools remain default-open unless policy says otherwise.</li>
     <li>Bash mediation is static and advisory for common shell forms. Hard filesystem containment belongs to the sandbox layer.</li>
-    <li>Outside-workspace file prompts wait for an explicit operator allow/deny decision instead of timing out as denial; run cancellation still unblocks the wait.</li>
+    <li>Outside-workspace file prompts wait for an explicit operator decision instead of timing out as denial; run cancellation still unblocks the wait.</li>
     <li>All tool calls are logged in the conversation with full arguments and results.</li>
     <li><code>Esc</code> or <code>Ctrl+C</code> cancels the active turn immediately.</li>
     <li>Session auto-save means you can always audit what happened.</li>
