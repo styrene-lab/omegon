@@ -16,13 +16,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-## [0.28.7] - 2026-07-21
+## [0.28.8] - 2026-07-21
 
 ### Fixed
 
 - Made delegate and cleave child launches resolve managed secret environment from the live session manager at each spawn boundary, so secrets added through `/secrets set` are immediately injectable without restarting Omegon or repeating the write through the CLI.
 
 - Replaced the validator's one-size-fits-all 30-second deadline with cold-cache-safe defaults: 10 minutes for Rust, 3 minutes for TypeScript, 2 minutes for Python, 5 minutes for project-defined validators, and 30 seconds for embedded syntax checks. This prevents healthy compilers and dependency-heavy checks from being reported as first-attempt failures while retaining bounded execution.
+
+## [0.28.7] - 2026-07-21
+
+### Fixed
 
 - Documented the permission modal's one-operation, session-directory, and persistent project-directory choices on the public security page, including the exact `--dangerously-bypass-permissions` freedom-mode boundary and inherited child-run semantics.
 
