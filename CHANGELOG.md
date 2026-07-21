@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Replaced the extension menu's legacy inventory text-dump action with structured rows for every installed extension, including version, runtime, enabled state, source/status metadata, and direct inspect, enable/disable, update, and remove actions.
+
 - Made release-branch forward synchronization a hard stable-publication prerequisite: both `just publish` and the release workflow now refuse to publish a stable tag while `origin/main` still builds an older workspace version.
 
 ### Fixed

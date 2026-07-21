@@ -4266,6 +4266,96 @@ impl App {
             MenuActionProjection, MenuBadgeProjection, MenuBadgeTone, MenuGroupProjection,
             MenuProjection, MenuRowKind, MenuRowProjection, MenuTabProjection,
         };
+        let installed_extensions = crate::extension_cli::extensions_dir()
+            .ok()
+            .and_then(|dir| {
+                crate::capabilities::extensions::list_installed_extension_capabilities_from_dir(
+                    &dir,
+                )
+                .ok()
+            })
+            .unwrap_or_default();
+        let extension_rows = if installed_extensions.is_empty() {
+            vec![MenuRowProjection {
+                id: "extension.empty".into(),
+                label: "No extensions installed".into(),
+                description: "Search the extension catalog or install from a URL/path.".into(),
+                value: None,
+                kind: MenuRowKind::Object,
+                badges: vec![MenuBadgeProjection {
+                    label: "empty".into(),
+                    tone: MenuBadgeTone::Neutral,
+                }],
+                metadata: vec![],
+                primary_action: None,
+                actions: vec![],
+                safety: None,
+                availability: None,
+            }]
+        } else {
+            installed_extensions
+                .into_iter()
+                .map(|extension| {
+                    let runtime = match extension.runtime {
+                        crate::capabilities::extensions::ExtensionRuntimeSummary::Native {
+                            ..
+                        } => "native",
+                        crate::capabilities::extensions::ExtensionRuntimeSummary::Oci {
+                            ..
+                        } => "oci",
+                    };
+                    let name = extension.name;
+                    let enabled = extension.enabled;
+                    let mut update = MenuActionProjection::command(
+                        format!("extension.{name}.update"),
+                        "Update",
+                        format!("/extension update {name}"),
+                    );
+                    update.requires_confirmation = true;
+                    let mut remove = MenuActionProjection::command(
+                        format!("extension.{name}.remove"),
+                        "Remove",
+                        format!("/extension remove {name}"),
+                    );
+                    remove.requires_confirmation = true;
+                    MenuRowProjection {
+                        id: format!("extension.installed.{name}"),
+                        label: name.clone(),
+                        description: extension.description,
+                        value: Some(format!("v{} · {runtime}", extension.version)),
+                        kind: MenuRowKind::Action,
+                        badges: vec![MenuBadgeProjection {
+                            label: if enabled { "enabled" } else { "disabled" }.into(),
+                            tone: if enabled {
+                                MenuBadgeTone::Success
+                            } else {
+                                MenuBadgeTone::Warning
+                            },
+                        }],
+                        metadata: vec![extension.status, extension.source_path],
+                        primary_action: Some(MenuActionProjection::command(
+                            format!("extension.{name}.inspect"),
+                            "Inspect",
+                            format!("/extension get {name}"),
+                        )),
+                        actions: vec![
+                            MenuActionProjection::command(
+                                format!("extension.{name}.toggle"),
+                                if enabled { "Disable" } else { "Enable" },
+                                format!(
+                                    "/extension {} {name}",
+                                    if enabled { "disable" } else { "enable" }
+                                ),
+                            ),
+                            update,
+                            remove,
+                        ],
+                        safety: None,
+                        availability: None,
+                    }
+                })
+                .collect()
+        };
         let mut menu = MenuProjection::new("extension-runtime", "Extensions & Runtime");
         menu.summary = Some("Extension inventory and runtime substrate controls. Argument-taking extension operations remain direct slash commands.".into());
         menu.footer = Some("↑/↓ navigate · / filter · Enter run · Esc close".into());
@@ -4276,21 +4366,14 @@ impl App {
                 MenuGroupProjection {
                     id: "extension.inventory".into(),
                     label: "Extensions".into(),
-                    description: Some("Read extension inventory or search/install through explicit slash commands.".into()),
+                    description: Some("Installed extensions and their live state. Enter inspects; row actions enable, update, or remove.".into()),
+                    rows: extension_rows,
+                },
+                MenuGroupProjection {
+                    id: "extension.actions".into(),
+                    label: "Discover & maintain".into(),
+                    description: Some("Find new extensions or update the installed set.".into()),
                     rows: vec![
-                        MenuRowProjection {
-                            id: "extension.view".into(),
-                            label: "Extension inventory".into(),
-                            description: "Show installed extension inventory as a text readout.".into(),
-                            value: None,
-                            kind: MenuRowKind::Action,
-                            badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
-                            metadata: vec!["/extension view".into(), "/extension list".into()],
-                            primary_action: Some(MenuActionProjection::command("extension.view.primary", "View", "/extension view")),
-                            actions: vec![],
-                            safety: None,
-                            availability: None,
-                        },
                         MenuRowProjection {
                             id: "extension.search".into(),
                             label: "Search extensions".into(),

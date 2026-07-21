@@ -5705,6 +5705,28 @@ fn runtime_refresh_aliases_canonicalize() {
 }
 
 #[test]
+fn extension_menu_projects_installed_inventory_instead_of_text_dump_action() {
+    let app = test_app();
+    let menu = app.extension_runtime_menu_projection();
+    let row_ids = menu
+        .tabs
+        .iter()
+        .flat_map(|tab| &tab.groups)
+        .flat_map(|group| &group.rows)
+        .map(|row| row.id.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(!row_ids.contains(&"extension.view"));
+    assert!(
+        row_ids.contains(&"extension.empty")
+            || row_ids
+                .iter()
+                .any(|id| id.starts_with("extension.installed.")),
+        "menu must project inventory rows: {row_ids:?}"
+    );
+}
+
+#[test]
 fn runtime_refresh_menu_action_requires_confirmation() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
