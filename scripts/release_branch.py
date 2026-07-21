@@ -147,6 +147,22 @@ def create_branch(repo_root: Path) -> None:
     print(f"workspace version: {version}")
 
 
+def assert_main_version_not_behind(repo_root: Path, release_version: str) -> None:
+    """Refuse publication while origin/main builds an older workspace version."""
+    main_cargo = subprocess.check_output(
+        ["git", "show", "origin/main:Cargo.toml"], cwd=repo_root, text=True
+    )
+    match = VERSION_RE.search(main_cargo)
+    if not match:
+        raise ReleaseBranchError("could not read workspace version from origin/main Cargo.toml")
+    main_version = match.group(1)
+    if version_sort_key(main_version) < version_sort_key(release_version):
+        raise ReleaseBranchError(
+            f"origin/main workspace version {main_version} is behind release version "
+            f"{release_version}; merge the release branch forward before publishing"
+        )
+
+
 def merge_forward(repo_root: Path, release_branch: str | None) -> None:
     ensure_clean(repo_root)
     start_branch = current_branch(repo_root)
@@ -227,6 +243,19 @@ def merge_forward(repo_root: Path, release_branch: str | None) -> None:
     print(f"merged {branch} forward to main and restored release working branch")
 
 
+def verify_publish_invariant(repo_root: Path) -> None:
+    """Verify the release branch and public trunk cannot advertise different versions."""
+    ensure_clean(repo_root)
+    branch = current_branch(repo_root)
+    if not branch:
+        raise ReleaseBranchError("detached HEAD; check out a release/X.Y branch first")
+    validate_release_branch_name(branch)
+    release_version = read_workspace_version(repo_root)
+    run(repo_root, "fetch", "origin", "main")
+    assert_main_version_not_behind(repo_root, release_version)
+    print(f"publish invariant satisfied: origin/main builds {release_version} or newer")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -234,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     subcommands.add_parser("branch-release")
     merge_parser = subcommands.add_parser("merge-forward")
     merge_parser.add_argument("release_branch", nargs="?")
+    subcommands.add_parser("verify-publish")
     args = parser.parse_args(argv)
 
     repo_root = args.repo_root.resolve()
@@ -242,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
             create_branch(repo_root)
         elif args.command == "merge-forward":
             merge_forward(repo_root, args.release_branch)
+        elif args.command == "verify-publish":
+            verify_publish_invariant(repo_root)
         else:
             parser.error(f"unknown command {args.command}")
     except (ReleaseBranchError, subprocess.CalledProcessError) as err:

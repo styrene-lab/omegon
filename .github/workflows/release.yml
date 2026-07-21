@@ -28,10 +28,30 @@ env:
   APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
 jobs:
+  # Stable tags are not publishable until trunk advertises the same or a newer
+  # workspace version. This server-side gate also covers direct tag pushes and
+  # manual workflow dispatches that bypass the local `just publish` guard.
+  verify-trunk-version:
+    name: Verify trunk release version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+          fetch-depth: 0
+
+      - name: Require stable release version on main
+        if: ${{ !contains(env.RELEASE_TAG, '-nightly.') }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          python3 scripts/release_branch.py verify-publish
+
   # ── Primary builds (macOS + Linux x86_64) ──────────────────────
   # These finish in ~10 minutes and unblock the release.
   build:
     name: Build ${{ matrix.target }}
+    needs: verify-trunk-version
     if: ${{ !contains(inputs.tag_name || github.ref_name, '-rc.') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30

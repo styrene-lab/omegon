@@ -168,6 +168,20 @@ class ReleaseRecipeTests(unittest.TestCase):
         end = justfile.index("# Sign the local macOS validation binary", start)
         return justfile[start:end]
 
+    def publish_block(self) -> str:
+        justfile = (ROOT / "justfile").read_text()
+        start = justfile.index("# Publish: push refs, trigger CI release/site workflows")
+        end = justfile.index("\nsmoke:\n", start)
+        return justfile[start:end]
+
+    def test_publish_requires_main_version_before_push(self) -> None:
+        block = self.publish_block()
+        self.assertIn("python3 scripts/release_branch.py verify-publish", block)
+        self.assertLess(
+            block.index("python3 scripts/release_branch.py verify-publish"),
+            block.index('git push origin "$BRANCH" "$TAG"'),
+        )
+
     def test_release_recipe_runs_preflight_before_mutation(self) -> None:
         block = self.release_block()
         self.assertIn("just preflight", block)

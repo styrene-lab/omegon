@@ -830,6 +830,12 @@ publish:
         exit 1
     fi
 
+    # Stable publication is forbidden until the release branch has been merged
+    # forward and origin/main builds this release version (or a newer one).
+    # This makes trunk synchronization a publication prerequisite rather than
+    # a follow-up step that can be forgotten after artifacts are public.
+    python3 scripts/release_branch.py verify-publish
+
     # Push current release branch + the specific stable tag only.
     # Do NOT use --tags: pushing many accumulated tags at once causes GitHub
     # Actions to silently drop workflow triggers beyond ~3 ref changes per push.
