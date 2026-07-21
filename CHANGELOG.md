@@ -20,6 +20,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Restored terminal modes before printing exit diagnostics or exec-restarting after `/update install`, preventing saved primary-screen content from bleeding through and corrupting the freshly restarted TUI.
+
 - Made delegate and cleave child launches resolve managed secret environment from the live session manager at each spawn boundary, so secrets added through `/secrets set` are immediately injectable without restarting Omegon or repeating the write through the CLI.
 
 - Replaced the validator's one-size-fits-all 30-second deadline with cold-cache-safe defaults: 10 minutes for Rust, 3 minutes for TypeScript, 2 minutes for Python, 5 minutes for project-defined validators, and 30 seconds for embedded syntax checks. This prevents healthy compilers and dependency-heavy checks from being reported as first-attempt failures while retaining bounded execution.

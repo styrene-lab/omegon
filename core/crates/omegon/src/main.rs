@@ -6086,6 +6086,19 @@ fn build_tui_secret_readiness_snapshot(
         }
     }
 
+    // The runtime command loop owns restart/update decisions, but the TUI task
+    // owns terminal modes. Stop it and restore those modes before printing
+    // session diagnostics or exec-restarting; otherwise those writes land in
+    // the still-active alternate screen and corrupt the next TUI frame.
+    tui_handle.abort();
+    let _ = tui_handle.await;
+    let _ = io::stdout().execute(crossterm::event::DisableBracketedPaste);
+    let _ = io::stdout().execute(DisableMouseCapture);
+    let _ = io::stdout().execute(crossterm::event::PopKeyboardEnhancementFlags);
+    let _ = disable_raw_mode();
+    let _ = io::stdout().execute(crossterm::terminal::LeaveAlternateScreen);
+    let _ = io::stdout().flush();
+
     // Save session + profile
     if !cli.no_session {
         match session::save_session(
@@ -6144,7 +6157,6 @@ fn build_tui_secret_readiness_snapshot(
     }
 
     bridge.read().await.shutdown().await;
-    tui_handle.abort();
     if let Some((binary, args)) = restart_request {
         let args = restart_args_for_session(args, &agent.session_id);
         crate::update::exec_restart(&binary, &args)?;
