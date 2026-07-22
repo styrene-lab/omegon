@@ -4382,7 +4382,8 @@ impl App {
         };
         let mut menu = MenuProjection::new("extension-runtime", "Extensions & Runtime");
         menu.summary = Some("Browse installed extensions, toggle state with Space, or open an extension to manage it.".into());
-        menu.footer = Some("↑/↓ navigate · Space toggle · Enter open · / filter · Esc close".into());
+        menu.footer =
+            Some("↑/↓ navigate · Space toggle · Enter open · / filter · Esc close".into());
         menu.tabs = vec![MenuTabProjection {
             id: "overview".into(),
             label: "Overview".into(),
@@ -4497,43 +4498,80 @@ impl App {
         };
         let installation = crate::extension_cli::extensions_dir()
             .ok()
-            .and_then(|dir| crate::capabilities::extensions::list_extension_installations_from_dir(&dir).ok())?
+            .and_then(|dir| {
+                crate::capabilities::extensions::list_extension_installations_from_dir(&dir).ok()
+            })?
             .into_iter()
             .find(|installation| installation.filesystem_name == filesystem_name)?;
         let mut rows = Vec::new();
         let title = match installation.diagnosis {
-            ExtensionInstallationDiagnosis::Valid { capability: extension } => {
+            ExtensionInstallationDiagnosis::Valid {
+                capability: extension,
+            } => {
                 let name = extension.name;
                 let enabled = extension.enabled;
                 rows.push(MenuRowProjection {
                     id: format!("extension.detail.{filesystem_name}.toggle"),
-                    label: if enabled { "Disable extension" } else { "Enable extension" }.into(),
-                    description: "Change whether this extension is loaded. The detail page remains open.".into(),
+                    label: if enabled {
+                        "Disable extension"
+                    } else {
+                        "Enable extension"
+                    }
+                    .into(),
+                    description:
+                        "Change whether this extension is loaded. The detail page remains open."
+                            .into(),
                     value: Some(if enabled { "enabled" } else { "disabled" }.into()),
                     kind: MenuRowKind::Action,
-                    badges: vec![MenuBadgeProjection { label: "Space".into(), tone: MenuBadgeTone::Info }],
+                    badges: vec![MenuBadgeProjection {
+                        label: "Space".into(),
+                        tone: MenuBadgeTone::Info,
+                    }],
                     metadata: vec![],
                     primary_action: Some({
                         let mut action = MenuActionProjection::command(
                             format!("extension.{name}.toggle"),
                             if enabled { "Disable" } else { "Enable" },
-                            format!("/extension {} {filesystem_name}", if enabled { "disable" } else { "enable" }),
+                            format!(
+                                "/extension {} {filesystem_name}",
+                                if enabled { "disable" } else { "enable" }
+                            ),
                         );
                         action.key = Some(" ".into());
-                        action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                        action.close_policy =
+                            crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
                         action
                     }),
-                    actions: vec![], safety: None, availability: None,
+                    actions: vec![],
+                    safety: None,
+                    availability: None,
                 });
                 rows.push(MenuRowProjection {
                     id: format!("extension.detail.{filesystem_name}.update"),
                     label: "Update extension".into(),
-                    description: "Fetch and install the latest available extension revision.".into(),
-                    value: Some(format!("v{}", extension.version)), kind: MenuRowKind::Action,
-                    badges: vec![MenuBadgeProjection { label: "mutates".into(), tone: MenuBadgeTone::Warning }],
+                    description: "Fetch and install the latest available extension revision."
+                        .into(),
+                    value: Some(format!("v{}", extension.version)),
+                    kind: MenuRowKind::Action,
+                    badges: vec![MenuBadgeProjection {
+                        label: "mutates".into(),
+                        tone: MenuBadgeTone::Warning,
+                    }],
                     metadata: vec![],
-                    primary_action: Some({ let mut action = MenuActionProjection::command(format!("extension.{name}.update"), "Update", format!("/extension update {name}")); action.requires_confirmation = true; action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
-                    actions: vec![], safety: None, availability: None,
+                    primary_action: Some({
+                        let mut action = MenuActionProjection::command(
+                            format!("extension.{name}.update"),
+                            "Update",
+                            format!("/extension update {name}"),
+                        );
+                        action.requires_confirmation = true;
+                        action.close_policy =
+                            crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                        action
+                    }),
+                    actions: vec![],
+                    safety: None,
+                    availability: None,
                 });
                 name
             }
@@ -4545,26 +4583,67 @@ impl App {
                     ExtensionInstallationDiagnosis::Valid { .. } => unreachable!(),
                 };
                 rows.push(MenuRowProjection {
-                    id: format!("extension.detail.{filesystem_name}.diagnosis"), label: "Installation problem".into(),
-                    description: problem, value: Some("invalid".into()), kind: MenuRowKind::Object,
-                    badges: vec![MenuBadgeProjection { label: "diagnostic".into(), tone: MenuBadgeTone::Warning }],
-                    metadata: vec![], primary_action: None, actions: vec![], safety: None, availability: None,
+                    id: format!("extension.detail.{filesystem_name}.diagnosis"),
+                    label: "Installation problem".into(),
+                    description: problem,
+                    value: Some("invalid".into()),
+                    kind: MenuRowKind::Object,
+                    badges: vec![MenuBadgeProjection {
+                        label: "diagnostic".into(),
+                        tone: MenuBadgeTone::Warning,
+                    }],
+                    metadata: vec![],
+                    primary_action: None,
+                    actions: vec![],
+                    safety: None,
+                    availability: None,
                 });
                 filesystem_name.to_string()
             }
         };
         rows.push(MenuRowProjection {
-            id: format!("extension.detail.{filesystem_name}.remove"), label: "Remove extension".into(),
-            description: "Remove this extension installation from Omegon.".into(), value: None,
+            id: format!("extension.detail.{filesystem_name}.remove"),
+            label: "Remove extension".into(),
+            description: "Remove this extension installation from Omegon.".into(),
+            value: None,
             kind: MenuRowKind::Action,
-            badges: vec![MenuBadgeProjection { label: "destructive".into(), tone: MenuBadgeTone::Warning }], metadata: vec![],
-            primary_action: Some({ let mut action = MenuActionProjection::command(format!("extension.{filesystem_name}.remove"), "Remove", format!("/extension remove {filesystem_name}")); action.requires_confirmation = true; action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu; action }),
-            actions: vec![], safety: None, availability: None,
+            badges: vec![MenuBadgeProjection {
+                label: "destructive".into(),
+                tone: MenuBadgeTone::Warning,
+            }],
+            metadata: vec![],
+            primary_action: Some({
+                let mut action = MenuActionProjection::command(
+                    format!("extension.{filesystem_name}.remove"),
+                    "Remove",
+                    format!("/extension remove {filesystem_name}"),
+                );
+                action.requires_confirmation = true;
+                action.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
+                action
+            }),
+            actions: vec![],
+            safety: None,
+            availability: None,
         });
-        let mut menu = MenuProjection::new(format!("extension-detail:{filesystem_name}"), format!("Extension · {title}"));
-        menu.summary = Some(format!("Installed as {filesystem_name}. Manage this extension without leaving the menu surface."));
+        let mut menu = MenuProjection::new(
+            format!("extension-detail:{filesystem_name}"),
+            format!("Extension · {title}"),
+        );
+        menu.summary = Some(format!(
+            "Installed as {filesystem_name}. Manage this extension without leaving the menu surface."
+        ));
         menu.footer = Some("↑/↓ navigate · Space toggle · Enter run · Esc back".into());
-        menu.tabs = vec![MenuTabProjection { id: "manage".into(), label: "Manage".into(), groups: vec![MenuGroupProjection { id: "extension.detail.actions".into(), label: "Extension actions".into(), description: None, rows }] }];
+        menu.tabs = vec![MenuTabProjection {
+            id: "manage".into(),
+            label: "Manage".into(),
+            groups: vec![MenuGroupProjection {
+                id: "extension.detail.actions".into(),
+                label: "Extension actions".into(),
+                description: None,
+                rows,
+            }],
+        }];
         Some(menu)
     }
 
@@ -5638,6 +5717,11 @@ impl App {
             crate::surfaces::menu::MenuActionDisposition::OpenExtensionDetail => {
                 if let Some(extension_name) = action.target_row_id.as_deref() {
                     self.open_extension_detail_menu(extension_name);
+                } else {
+                    self.show_command_toast(CommandToast::new(
+                        "Extension detail target is unavailable",
+                        CommandSeverity::Warning,
+                    ));
                 }
                 SlashResult::Handled
             }
@@ -14289,7 +14373,8 @@ pub async fn run_tui(
                                                 menu.projection.footer = input.original_footer;
                                             }
                                         } else {
-                                            let command = format!("{}{}", input.command_prefix, value);
+                                            let command =
+                                                format!("{}{}", input.command_prefix, value);
                                             app.execute_active_menu_command(command, &command_tx);
                                         }
                                     }
@@ -14413,8 +14498,16 @@ pub async fn run_tui(
                                     .as_mut()
                                     .is_some_and(|menu| menu.state.exit_search());
                                 if !handled {
-                                    app.active_menu = None;
-                                    app.pending_menu_confirmation = None;
+                                    let is_extension_detail =
+                                        app.active_menu.as_ref().is_some_and(|menu| {
+                                            menu.projection.id.starts_with("extension-detail:")
+                                        });
+                                    if is_extension_detail {
+                                        app.open_extension_runtime_menu();
+                                    } else {
+                                        app.active_menu = None;
+                                        app.pending_menu_confirmation = None;
+                                    }
                                 }
                             }
                             KeyCode::Char('c') | KeyCode::Char('C')

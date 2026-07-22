@@ -5744,8 +5744,7 @@ fn extension_menu_projects_installed_inventory_instead_of_text_dump_action() {
             .find(|action| action.key.as_deref() == Some(" "))
             .expect("Space toggle action");
         assert!(toggle.command.as_deref().is_some_and(|command| {
-            command.starts_with("/extension enable ")
-                || command.starts_with("/extension disable ")
+            command.starts_with("/extension enable ") || command.starts_with("/extension disable ")
         }));
         assert_ne!(toggle.command.as_deref(), Some("/extension get"));
     }

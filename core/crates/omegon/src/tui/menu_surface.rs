@@ -635,12 +635,23 @@ impl MenuState {
         let key = key.to_ascii_lowercase().to_string();
         self.selected_row(projection)
             .and_then(|row| {
-                row.row.actions.iter().find(|action| {
-                    action
-                        .key
-                        .as_deref()
-                        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(&key))
-                })
+                row.row
+                    .primary_action
+                    .as_ref()
+                    .filter(|action| {
+                        action
+                            .key
+                            .as_deref()
+                            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(&key))
+                    })
+                    .or_else(|| {
+                        row.row.actions.iter().find(|action| {
+                            action
+                                .key
+                                .as_deref()
+                                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(&key))
+                        })
+                    })
             })
             .or_else(|| {
                 projection.actions.iter().find(|action| {
@@ -880,6 +891,20 @@ mod tests {
             state.selected_command(&projection).as_deref(),
             Some("/skills get python")
         );
+    }
+
+    #[test]
+    fn selected_action_for_key_accepts_keyed_primary_action() {
+        let mut projection = projection();
+        let row = &mut projection.tabs[0].groups[0].rows[0];
+        row.primary_action.as_mut().expect("primary action").key = Some(" ".into());
+
+        let state = MenuState::new(&projection);
+        let action = state
+            .selected_action_for_key(&projection, ' ')
+            .expect("keyed primary action");
+
+        assert_eq!(action.command.as_deref(), Some("/skills get rust"));
     }
 
     #[test]
