@@ -5639,7 +5639,7 @@ fn selected_terminal_result_resolves_retained_process_session() {
         "terminal-card",
         false,
         Some(&format!(
-            "Terminal session 'selected-card-viewer-test' ({id}) started."
+            "Started terminal 'selected-card-viewer-test' ({id}) PID 12345"
         )),
     );
     let idx = app.conversation.segments().len() - 1;

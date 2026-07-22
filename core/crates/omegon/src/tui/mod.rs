@@ -10023,10 +10023,13 @@ warning: {warning}"
             return None;
         }
         let result = detail_result.as_deref()?;
-        let marker = "Terminal session '";
-        let after = result
-            .find(marker)
-            .map(|index| &result[index + marker.len()..])?;
+        let after = ["Started terminal '", "Terminal session '"]
+            .into_iter()
+            .find_map(|marker| {
+                result
+                    .find(marker)
+                    .map(|index| &result[index + marker.len()..])
+            })?;
         let (_, after_name) = after.split_once("' (")?;
         let (id, _) = after_name.split_once(')')?;
         crate::tools::terminal::execution_session_snapshot_by_id(id).map(|snapshot| snapshot.id)
