@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "theme": "default",
+  "grid": {
+    "cols": 12,
+    "rows": 7,
+    "gap": 12
+  },
+  "cells": [
+    {
+      "id": "intent",
+      "x": 0,
+      "y": 0,
+      "w": 12,
+      "h": 2,
+      "content": {
+        "kind": "component",
+        "component": "Frame",
+        "props": {
+          "body": "Authoritative tool ownership flows from EventBus resolution into runtime events and every conversation projection.",
+          "subtitle": "Extension-aware execution evidence",
+          "title": "Tool Provenance"
+        },
+        "variant": "hero"
+      }
+    },
+    {
+      "id": "resolve",
+      "x": 0,
+      "y": 2,
+      "w": 4,
+      "h": 3,
+      "content": {
+        "kind": "component",
+        "component": "Stack",
+        "props": {
+          "items": [
+            "Resolve winning feature after duplicate-name arbitration",
+            "Classify built-in versus extension owner",
+            "Attach immutable provenance to tool lifecycle events"
+          ],
+          "title": "1 · Resolve"
+        },
+        "variant": "numbered"
+      }
+    },
+    {
+      "id": "propagate",
+      "x": 4,
+      "y": 2,
+      "w": 4,
+      "h": 3,
+      "content": {
+        "kind": "component",
+        "component": "Stack",
+        "props": {
+          "items": [
+            "Preserve provenance in segments and semantic DTOs",
+            "Project through TUI, ACP, IPC, MQTT, and audit",
+            "Keep callable tool name unchanged"
+          ],
+          "title": "2 · Propagate"
+        },
+        "variant": "numbered"
+      }
+    },
+    {
+      "id": "present",
+      "x": 8,
+      "y": 2,
+      "w": 4,
+      "h": 3,
+      "content": {
+        "kind": "component",
+        "component": "Stack",
+        "props": {
+          "items": [
+            "Render tool (extension-name) in compact rows",
+            "Use muted extension accent only for suffix",
+            "Test built-in, extension winner, and collision loser"
+          ],
+          "title": "3 · Present"
+        },
+        "variant": "numbered"
+      }
+    },
+    {
+      "id": "invariant",
+      "x": 0,
+      "y": 5,
+      "w": 12,
+      "h": 2,
+      "content": {
+        "kind": "component",
+        "component": "Panel",
+        "props": {
+          "badge": "Invariant",
+          "body": "The displayed producer must be the feature that actually executed. Never infer provenance from a name prefix or from all providers that advertised the name.",
+          "footer": "Resolved ownership is the source of truth.",
+          "title": "Evidence contract"
+        },
+        "variant": "accent"
+      }
+    }
+  ]
+}
