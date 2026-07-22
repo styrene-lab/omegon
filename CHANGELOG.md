@@ -18,7 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
-- Reworked extension create, install, and search entry points as inline menu inputs that execute without closing into the global editor; installed extension rows now perform enable/disable on Enter and expose update/remove as row actions instead of defaulting to a plain-text inspect dump.
+- Reworked extension create, install, and search entry points as explicit inline menu-input actions that execute without closing into the global editor; installed extension rows now perform enable/disable on Enter and expose confirmed update/remove actions that refresh the inventory instead of defaulting to a plain-text inspect dump.
 
 ## [0.28.9] - 2026-07-21
 

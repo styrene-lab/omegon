@@ -4324,12 +4324,14 @@ impl App {
                                 format!("/extension update {name}"),
                             );
                             update.requires_confirmation = true;
+                            update.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
                             let mut remove = MenuActionProjection::command(
                                 format!("extension.{name}.remove"),
                                 "Remove",
                                 format!("/extension remove {filesystem_name}"),
                             );
                             remove.requires_confirmation = true;
+                            remove.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
                             MenuRowProjection {
                                 id: format!("extension.installed.{filesystem_name}"),
                                 label: name.clone(),
@@ -4364,6 +4366,7 @@ impl App {
                                 format!("/extension remove {filesystem_name}"),
                             );
                             remove.requires_confirmation = true;
+                            remove.close_policy = crate::surfaces::menu::MenuActionClosePolicy::RefreshMenu;
                             MenuRowProjection {
                                 id: format!("extension.installed.{filesystem_name}"),
                                 label: filesystem_name.clone(),
@@ -4408,7 +4411,7 @@ impl App {
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: "create".into(), tone: MenuBadgeTone::Warning }],
                             metadata: vec!["/extension init <name>".into()],
-                            primary_action: Some(MenuActionProjection::prime_editor("extension.create.primary", "Create", "/extension init ", "Type the new extension name, then press Enter")),
+                            primary_action: Some(MenuActionProjection::inline_input("extension.create.primary", "Create", "/extension init ")),
                             actions: vec![],
                             safety: None,
                             availability: None,
@@ -4421,7 +4424,7 @@ impl App {
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: "create".into(), tone: MenuBadgeTone::Warning }],
                             metadata: vec!["/extension install <source>".into()],
-                            primary_action: Some(MenuActionProjection::prime_editor("extension.install.primary", "Install", "/extension install ", "Type a catalog name, URL, or local path, then press Enter")),
+                            primary_action: Some(MenuActionProjection::inline_input("extension.install.primary", "Install", "/extension install ")),
                             actions: vec![],
                             safety: None,
                             availability: None,
@@ -4434,7 +4437,7 @@ impl App {
                             kind: MenuRowKind::Action,
                             badges: vec![MenuBadgeProjection { label: "read".into(), tone: MenuBadgeTone::Neutral }],
                             metadata: vec!["/extension search".into(), "/extension search <query>".into()],
-                            primary_action: Some(MenuActionProjection::prime_editor("extension.search.primary", "Search", "/extension search ", "Type an extension search query, then press Enter")),
+                            primary_action: Some(MenuActionProjection::inline_input("extension.search.primary", "Search", "/extension search ")),
                             actions: vec![],
                             safety: None,
                             availability: None,
@@ -5496,33 +5499,30 @@ impl App {
                 SlashResult::Handled
             }
             crate::surfaces::menu::MenuActionDisposition::PrimeEditor => {
-                if action.id.starts_with("extension.") {
-                    if let Some(text) = action.editor_text {
-                        let original_footer = self
-                            .active_menu
-                            .as_ref()
-                            .and_then(|menu| menu.projection.footer.clone());
-                        self.menu_input = Some(MenuInput {
-                            action_label: action.label,
-                            command_prefix: text,
-                            value: String::new(),
-                            original_footer,
-                        });
-                        if let Some(menu) = self.active_menu.as_mut() {
-                            menu.projection.footer =
-                                Some("Type value · Enter execute · Esc cancel".into());
-                        }
-                    }
-                } else {
-                    self.active_menu = None;
-                    if let Some(text) = action.editor_text {
-                        self.editor.set_text(&text);
-                    }
-                    if let Some(message) = action.message {
-                        self.show_command_toast(CommandToast::new(
-                            message,
-                            CommandSeverity::Info,
-                        ));
+                self.active_menu = None;
+                if let Some(text) = action.editor_text {
+                    self.editor.set_text(&text);
+                }
+                if let Some(message) = action.message {
+                    self.show_command_toast(CommandToast::new(message, CommandSeverity::Info));
+                }
+                SlashResult::Handled
+            }
+            crate::surfaces::menu::MenuActionDisposition::InlineInput => {
+                if let Some(command_prefix) = action.editor_text {
+                    let original_footer = self
+                        .active_menu
+                        .as_ref()
+                        .and_then(|menu| menu.projection.footer.clone());
+                    self.menu_input = Some(MenuInput {
+                        action_label: action.label,
+                        command_prefix,
+                        value: String::new(),
+                        original_footer,
+                    });
+                    if let Some(menu) = self.active_menu.as_mut() {
+                        menu.projection.footer =
+                            Some("Type value · Enter execute · Esc cancel".into());
                     }
                 }
                 SlashResult::Handled

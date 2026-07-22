@@ -5809,6 +5809,15 @@ fn extension_menu_runs_create_and_install_flows_inside_the_menu() {
         assert_eq!(input.command_prefix, expected);
         assert!(app.active_menu.is_some());
         assert_eq!(app.editor.render_text(), "");
+        let action = app
+            .active_menu
+            .as_ref()
+            .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
+            .expect("extension inline-input action");
+        assert!(matches!(
+            action.disposition,
+            crate::surfaces::menu::MenuActionDisposition::InlineInput
+        ));
     }
 }
 
@@ -5845,7 +5854,7 @@ fn extension_update_menu_action_requires_confirmation() {
 }
 
 #[test]
-fn extension_search_menu_row_primes_editor_for_query() {
+fn extension_search_menu_row_accepts_query_inside_menu() {
     let mut app = test_app();
     app.open_extension_runtime_menu();
     {

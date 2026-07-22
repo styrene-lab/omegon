@@ -78,6 +78,7 @@ pub enum MenuActionDisposition {
     RunCommand,
     FocusRow,
     PrimeEditor,
+    InlineInput,
     OpenSelector,
     OpenSettingsRow,
 }
@@ -438,6 +439,25 @@ impl MenuActionProjection {
             message: Some(message.into()),
             disposition: MenuActionDisposition::PrimeEditor,
             close_policy: MenuActionClosePolicy::CloseMenu,
+            requires_confirmation: false,
+        }
+    }
+
+    pub fn inline_input(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        command_prefix: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            key: None,
+            command: None,
+            target_row_id: None,
+            editor_text: Some(command_prefix.into()),
+            message: None,
+            disposition: MenuActionDisposition::InlineInput,
+            close_policy: MenuActionClosePolicy::KeepOpen,
             requires_confirmation: false,
         }
     }
