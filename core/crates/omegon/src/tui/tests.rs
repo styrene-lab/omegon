@@ -5614,6 +5614,51 @@ fn slash_skills_reload_displays_current_session_reload() {
 }
 
 #[test]
+fn selected_terminal_result_resolves_retained_process_session() {
+    let cwd = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let result = runtime
+        .block_on(crate::tools::terminal::execute(
+            "start",
+            &serde_json::json!({"name": "selected-card-viewer-test", "command": "cat"}),
+            cwd.path(),
+            Some(crate::tools::WorkspaceBoundary::new(
+                cwd.path().to_path_buf(),
+            )),
+        ))
+        .unwrap();
+    let id = result.details["session_id"].as_str().unwrap().to_string();
+    let mut app = test_app();
+    app.conversation.push_tool_start(
+        "terminal-card",
+        "terminal",
+        Some("start selected-card-viewer-test"),
+        None,
+    );
+    app.conversation.push_tool_end(
+        "terminal-card",
+        false,
+        Some(&format!(
+            "Terminal session 'selected-card-viewer-test' ({id}) started."
+        )),
+    );
+    let idx = app.conversation.segments().len() - 1;
+    app.conversation.select_segment(idx);
+
+    assert_eq!(
+        app.selected_terminal_session_id().as_deref(),
+        Some(id.as_str())
+    );
+
+    let _ = runtime.block_on(crate::tools::terminal::execute(
+        "stop",
+        &serde_json::json!({"session_id": id}),
+        cwd.path(),
+        None,
+    ));
+}
+
+#[test]
 fn processes_command_opens_read_only_viewer_for_named_session() {
     let cwd = tempfile::tempdir().unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
