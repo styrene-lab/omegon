@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Added the first renderer-neutral managed-execution session projection over background PTY sessions, exposing lifecycle, provenance, retained output, transcript metadata, and interaction capabilities for future process-viewer surfaces.
+
 ### Changed
 
 - Hardened extension detail navigation after adversarial review: keyed primary actions now respond to Space, Escape returns from an extension detail page to the extension inventory, and missing detail targets produce visible feedback instead of silently doing nothing.

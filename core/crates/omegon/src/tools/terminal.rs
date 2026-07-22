@@ -7,6 +7,7 @@
 use anyhow::{Context, Result, anyhow};
 use omegon_traits::{ContentBlock, ToolResult};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -80,6 +81,42 @@ pub struct HostTerminalCreateResponse {
     pub transcript: String,
     pub tail: String,
     pub inspect_hint: String,
+}
+
+/// Renderer-neutral lifecycle state for a managed execution session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionSessionState {
+    Running,
+    Exited,
+    Failed,
+}
+
+/// Capabilities exposed to process viewers without leaking the PTY implementation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionSessionCapabilities {
+    pub read: bool,
+    pub write: bool,
+    pub resize: bool,
+    pub stop: bool,
+    pub terminal: bool,
+}
+
+/// Semantic snapshot consumed by TUI, ACP, or web process viewers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionSessionSnapshot {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    pub cwd: PathBuf,
+    pub pid: u32,
+    pub state: ExecutionSessionState,
+    pub exit_code: Option<u32>,
+    pub elapsed_secs: u64,
+    pub transcript_path: PathBuf,
+    pub transcript_truncated: bool,
+    pub output: String,
+    pub capabilities: ExecutionSessionCapabilities,
 }
 
 pub fn host_terminal_runtime_available() -> Result<(), String> {
@@ -650,6 +687,50 @@ fn find_session(id_or_name: &str) -> Option<Arc<TerminalSession>> {
         .get(id_or_name)
         .cloned()
         .or_else(|| sessions.values().find(|s| s.name == id_or_name).cloned())
+}
+
+/// Return renderer-neutral snapshots of all retained background terminal sessions.
+pub fn execution_session_snapshots() -> Vec<ExecutionSessionSnapshot> {
+    let sessions: Vec<_> = registry().lock().unwrap().values().cloned().collect();
+    let mut snapshots = sessions
+        .iter()
+        .map(execution_session_snapshot)
+        .collect::<Vec<_>>();
+    snapshots.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+    snapshots
+}
+
+/// Return one renderer-neutral snapshot by stable id or operator-facing name.
+pub fn execution_session_snapshot_by_id(id_or_name: &str) -> Option<ExecutionSessionSnapshot> {
+    find_session(id_or_name).map(|session| execution_session_snapshot(&session))
+}
+
+fn execution_session_snapshot(session: &Arc<TerminalSession>) -> ExecutionSessionSnapshot {
+    let running = session_alive(session);
+    ExecutionSessionSnapshot {
+        id: session.id.clone(),
+        name: session.name.clone(),
+        command: session.command.clone(),
+        cwd: session.cwd.clone(),
+        pid: session.pid,
+        state: if running {
+            ExecutionSessionState::Running
+        } else {
+            ExecutionSessionState::Exited
+        },
+        exit_code: None,
+        elapsed_secs: session.started.elapsed().as_secs(),
+        transcript_path: session.transcript_path.clone(),
+        transcript_truncated: *session.transcript_truncated.lock().unwrap(),
+        output: session.tail.lock().unwrap().clone(),
+        capabilities: ExecutionSessionCapabilities {
+            read: true,
+            write: running,
+            resize: running,
+            stop: running,
+            terminal: true,
+        },
+    }
 }
 
 fn session_alive(session: &Arc<TerminalSession>) -> bool {
@@ -1512,6 +1593,35 @@ mod tests {
 
         assert_eq!(file_mode, 0o600);
         assert_eq!(dir_mode, 0o700);
+    }
+
+    #[tokio::test]
+    async fn execution_snapshot_projects_terminal_state_and_capabilities() {
+        let cwd = tempfile::tempdir().unwrap();
+        let result = execute(
+            "start",
+            &json!({
+                "name": "snapshot-projection-test",
+                "command": "cat"
+            }),
+            cwd.path(),
+            Some(WorkspaceBoundary::new(cwd.path().to_path_buf())),
+        )
+        .await
+        .unwrap();
+        let id = result.details["session_id"].as_str().unwrap();
+
+        let snapshot = execution_session_snapshot_by_id(id).expect("execution snapshot");
+        assert_eq!(snapshot.name, "snapshot-projection-test");
+        assert_eq!(snapshot.state, ExecutionSessionState::Running);
+        assert_eq!(snapshot.cwd, cwd.path());
+        assert!(snapshot.capabilities.read);
+        assert!(snapshot.capabilities.write);
+        assert!(snapshot.capabilities.resize);
+        assert!(snapshot.capabilities.stop);
+        assert!(snapshot.capabilities.terminal);
+
+        let _ = execute("stop", &json!({"session_id": id}), cwd.path(), None).await;
     }
 
     #[test]
