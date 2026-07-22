@@ -61,9 +61,15 @@ Once connected (status bar shows "ACP: Omegon Agent"):
 
 - **Send prompts** in the ACP chat panel
 - **Switch modes** via `Cmd+Shift+P` → "ACP: Set Agent Mode" (Code, Architect, Ask, Agent)
-- **Switch models** via `Cmd+Shift+P` → "ACP: Set Agent Model"
+- **Switch models and settings** through ACP session selectors when rendered by the installed extension; `/model`, `/thinking`, `/profile`, and `/context` remain portable fallbacks
 - **Attach files** via `Cmd+Shift+P` → "ACP: Attach File to Prompt"
 - **View protocol traffic** via `Cmd+Shift+P` → "ACP: Show Protocol Traffic"
+
+## Portable Session Controls
+
+Omegon publishes semantically categorized ACP selectors for model and thinking level, plus Omegon-specific profile and context-window selectors. Applying a profile refreshes the complete selector set because a profile may change model, thinking, and context together. Posture is represented through ACP's first-class mode selector rather than duplicated as a settings dropdown.
+
+The community extension may not render every optional ACP selector in every release. The corresponding slash commands remain available as a compatibility fallback.
 
 ## Secrets
 

@@ -645,9 +645,8 @@ pub struct OmegonAcpAgent {
     secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
     host_caps: RefCell<HostCapabilities>,
     extension_metadata: Rc<RefCell<std::collections::BTreeMap<String, serde_json::Value>>>,
-    extension_rpc_handles: Rc<
-        RefCell<std::collections::BTreeMap<String, extension_rpc::ExtensionRpcHandle>>,
-    >,
+    extension_rpc_handles:
+        Rc<RefCell<std::collections::BTreeMap<String, extension_rpc::ExtensionRpcHandle>>>,
     session_task_bindings: RefCell<Vec<crate::conversation::SessionTaskBinding>>,
     surface_updates_enabled: RefCell<bool>,
     dangerously_bypass_permissions: bool,
@@ -666,10 +665,7 @@ impl OmegonAcpAgent {
         )
     }
 
-    pub(crate) fn new_for_websocket(
-        model: &str,
-        dangerously_bypass_permissions: bool,
-    ) -> Self {
+    pub(crate) fn new_for_websocket(model: &str, dangerously_bypass_permissions: bool) -> Self {
         Self::new_with_transport(
             model,
             Default::default(),
@@ -751,7 +747,9 @@ impl OmegonAcpAgent {
         &self,
         current_model: &str,
         current_thinking: &str,
-        current_posture: &str,
+        current_context_class: &str,
+        current_profile: &str,
+        cwd: &std::path::Path,
     ) -> Vec<SessionConfigOption> {
         let mut model_options: Vec<SessionConfigSelectOption> = Vec::new();
 
@@ -837,15 +835,44 @@ impl OmegonAcpAgent {
         .map(|(id, name)| SessionConfigSelectOption::new(*id, *name))
         .collect();
 
-        let posture_options: Vec<SessionConfigSelectOption> = [
-            ("fabricator", "Fabricator — balanced coding"),
-            ("architect", "Architect — orchestrator"),
-            ("explorator", "Explorator — lean, read-heavy"),
-            ("devastator", "Devastator — maximum force"),
-        ]
-        .iter()
-        .map(|(id, name)| SessionConfigSelectOption::new(*id, *name))
-        .collect();
+        let context_options: Vec<SessionConfigSelectOption> = crate::settings::ContextClass::all()
+            .iter()
+            .map(|class| {
+                SessionConfigSelectOption::new(class.short().to_ascii_lowercase(), class.label())
+            })
+            .collect();
+
+        let registry = crate::settings::ProfileRegistry::discover(cwd);
+        let mut profile_options: Vec<SessionConfigSelectOption> = registry
+            .entries
+            .iter()
+            .map(|entry| {
+                let scope = entry.scope.as_str();
+                SessionConfigSelectOption::new(
+                    format!("{scope}:{}", entry.id),
+                    format!(
+                        "{} — {scope}",
+                        entry.profile.compact_label().unwrap_or(&entry.id)
+                    ),
+                )
+            })
+            .collect();
+        if !profile_options.iter().any(|option| {
+            option
+                .value
+                .0
+                .rsplit_once(':')
+                .is_some_and(|(_, id)| id == current_profile)
+                || option.value.0.as_ref() == current_profile
+        }) {
+            profile_options.insert(
+                0,
+                SessionConfigSelectOption::new(
+                    current_profile.to_string(),
+                    format!("{current_profile} — current"),
+                ),
+            );
+        }
 
         vec![
             SessionConfigOption::new(
@@ -855,7 +882,9 @@ impl OmegonAcpAgent {
                     current_model.to_string(),
                     model_options,
                 )),
-            ),
+            )
+            .description("Language model used for subsequent turns")
+            .category(SessionConfigOptionCategory::Model),
             SessionConfigOption::new(
                 "thinking",
                 "Thinking Level",
@@ -863,15 +892,29 @@ impl OmegonAcpAgent {
                     current_thinking.to_string(),
                     thinking_options,
                 )),
-            ),
+            )
+            .description("Reasoning effort for subsequent turns")
+            .category(SessionConfigOptionCategory::ThoughtLevel),
             SessionConfigOption::new(
-                "posture",
-                "Posture",
+                "profile",
+                "Profile",
                 SessionConfigKind::Select(SessionConfigSelect::new(
-                    current_posture.to_string(),
-                    posture_options,
+                    current_profile.to_string(),
+                    profile_options,
                 )),
-            ),
+            )
+            .description("Apply a named Omegon profile to this project session")
+            .category(SessionConfigOptionCategory::Other("_omegon_profile".into())),
+            SessionConfigOption::new(
+                "context_class",
+                "Context Window",
+                SessionConfigKind::Select(SessionConfigSelect::new(
+                    current_context_class.to_string(),
+                    context_options,
+                )),
+            )
+            .description("Requested context-window class for subsequent turns")
+            .category(SessionConfigOptionCategory::Other("_omegon_context".into())),
         ]
     }
 
@@ -995,7 +1038,7 @@ impl OmegonAcpAgent {
     /// Read the worker's current settings — model/thinking/posture as actually
     /// applied. Falls back to the bootstrap defaults if the worker isn't up yet
     /// or the lock is poisoned.
-    fn current_settings(&self) -> (String, String, String) {
+    fn current_settings(&self) -> (String, String, String, String, String) {
         let settings_arc = self.worker.borrow().as_ref().map(|w| w.settings.clone());
         if let Some(s) = settings_arc
             && let Ok(g) = s.lock()
@@ -1004,13 +1047,23 @@ impl OmegonAcpAgent {
                 g.model.clone(),
                 g.thinking.as_str().to_string(),
                 g.posture.effective.as_str().to_string(),
+                g.effective_requested_class().short().to_ascii_lowercase(),
+                g.profile_name
+                    .clone()
+                    .unwrap_or_else(|| "built-in-default".into()),
             );
         }
-        (self.model.clone(), "minimal".into(), "fabricator".into())
+        (
+            self.model.clone(),
+            "minimal".into(),
+            "fabricator".into(),
+            "standard".into(),
+            "built-in-default".into(),
+        )
     }
 
     fn runtime_status_json(&self) -> serde_json::Value {
-        let (model, thinking, posture) = self.current_settings();
+        let (model, thinking, posture, context_class, profile) = self.current_settings();
         let cwd = std::env::current_dir().ok();
         let session_cwd = self.session_cwd.borrow().clone().or_else(|| cwd.clone());
         let session_id = self.session_id.borrow().as_ref().map(|id| id.to_string());
@@ -1038,10 +1091,11 @@ impl OmegonAcpAgent {
             },
             "agent": {
                 "id": "default",
-                "profile": serde_json::Value::Null,
+                "profile": profile,
                 "model": model,
                 "thinking": thinking,
-                "posture": posture
+                "posture": posture,
+                "context_class": context_class
             },
             "memory": {
                 "scope": "project",
@@ -1051,7 +1105,7 @@ impl OmegonAcpAgent {
     }
 
     fn provider_status_json(&self) -> serde_json::Value {
-        let (model, _thinking, _posture) = self.current_settings();
+        let (model, _thinking, _posture, _context_class, _profile) = self.current_settings();
         let active_provider_id = crate::providers::infer_provider_id(&model);
         let providers: Vec<serde_json::Value> = crate::auth::PROVIDERS
             .iter()
@@ -1245,7 +1299,7 @@ impl OmegonAcpAgent {
     }
 
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
-        let cwd = args.cwd;
+        let cwd = args.cwd.clone();
         *self.session_cwd.borrow_mut() = Some(cwd.clone());
 
         // Create session ID *before* ensure_worker so the proxy pump
@@ -1288,9 +1342,15 @@ impl OmegonAcpAgent {
         // Read the *worker's* current settings, not self.model — the worker may
         // have already received SetModel/SetThinking/SetPosture before this
         // session started, and we need to advertise what's actually running.
-        let (current_model, current_thinking, current_posture) = self.current_settings();
-        response.config_options =
-            Some(self.build_config_options(&current_model, &current_thinking, &current_posture));
+        let (current_model, current_thinking, _current_posture, current_context, current_profile) =
+            self.current_settings();
+        response.config_options = Some(self.build_config_options(
+            &current_model,
+            &current_thinking,
+            &current_context,
+            &current_profile,
+            &cwd,
+        ));
 
         // Send available commands after response (via spawned task)
         let conn = self.conn.clone();
@@ -1808,51 +1868,70 @@ impl OmegonAcpAgent {
             _ => return Err(Error::invalid_params()),
         };
 
-        // Use ack so we read shared_settings AFTER the worker has applied the
-        // mutation. Without this the response would race the worker thread
-        // and report the previous value.
-        let (req, ack_rx) = match config_id.as_str() {
+        // Use acknowledgements so the complete config update is built only
+        // after the worker has applied the requested mutation.
+        let result = match config_id.as_str() {
             "model" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                (
-                    WorkerRequest::SetModel {
-                        value: value.clone(),
-                        ack: Some(tx),
-                    },
-                    rx,
-                )
+                self.send_to_worker_ack(WorkerRequest::SetModel {
+                    value: value.clone(),
+                    ack: Some(tx),
+                })
+                .await;
+                rx.await.map_err(|_| Error::internal_error())?;
+                Ok(())
             }
             "thinking" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                (
-                    WorkerRequest::SetThinking {
-                        value: value.clone(),
-                        ack: Some(tx),
-                    },
-                    rx,
-                )
+                self.send_to_worker_ack(WorkerRequest::SetThinking {
+                    value: value.clone(),
+                    ack: Some(tx),
+                })
+                .await;
+                rx.await.map_err(|_| Error::internal_error())?;
+                Ok(())
             }
-            "posture" => {
+            "context_class" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                (
-                    WorkerRequest::SetPosture {
-                        value: value.clone(),
-                        ack: Some(tx),
-                    },
-                    rx,
-                )
+                self.send_to_worker_ack(WorkerRequest::SetContextClass {
+                    value: value.clone(),
+                    ack: tx,
+                })
+                .await;
+                rx.await.map_err(|_| Error::internal_error())?
+            }
+            "profile" => {
+                let (scope, id) = value
+                    .split_once(':')
+                    .map_or((None, value.as_str()), |(scope, id)| (Some(scope), id));
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                self.send_to_worker_ack(WorkerRequest::ApplyProfile {
+                    id: id.to_string(),
+                    scope: scope.map(str::to_string),
+                    ack: tx,
+                })
+                .await;
+                rx.await.map_err(|_| Error::internal_error())?
             }
             _ => return Err(Error::invalid_params()),
         };
-        self.send_to_worker_ack(req).await;
-        let _ = ack_rx.await;
+        result.map_err(|message| Error::new(i32::from(ErrorCode::InvalidParams), message))?;
 
         // Read back from the worker's settings — send_to_worker awaits the
         // mutation, so this captures the actually-applied state (which may
         // differ from `value` if the worker rejected/normalised the input).
-        let (current_model, current_thinking, current_posture) = self.current_settings();
-        let options =
-            self.build_config_options(&current_model, &current_thinking, &current_posture);
+        let (current_model, current_thinking, _current_posture, current_context, current_profile) =
+            self.current_settings();
+        let options = self.build_config_options(
+            &current_model,
+            &current_thinking,
+            &current_context,
+            &current_profile,
+            self.session_cwd
+                .borrow()
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+        );
 
         // Also push a ConfigOptionUpdate notification so clients that don't
         // inspect the response value (e.g. flynt-app's set_config which
@@ -6290,6 +6369,47 @@ Progress: 1/2"
     }
 
     #[test]
+    fn config_options_expose_profile_context_and_semantic_categories() {
+        let cwd = tempfile::tempdir().unwrap();
+        let agent = OmegonAcpAgent::new("test-model");
+        let options = agent.build_config_options(
+            "test-model",
+            "minimal",
+            "standard",
+            "built-in-default",
+            cwd.path(),
+        );
+
+        let by_id = |id: &str| {
+            options
+                .iter()
+                .find(|option| option.id.0.as_ref() == id)
+                .expect("config option")
+        };
+        assert_eq!(
+            by_id("model").category,
+            Some(SessionConfigOptionCategory::Model)
+        );
+        assert_eq!(
+            by_id("thinking").category,
+            Some(SessionConfigOptionCategory::ThoughtLevel)
+        );
+        assert_eq!(
+            by_id("profile").category,
+            Some(SessionConfigOptionCategory::Other("_omegon_profile".into()))
+        );
+        assert_eq!(
+            by_id("context_class").category,
+            Some(SessionConfigOptionCategory::Other("_omegon_context".into()))
+        );
+        assert!(
+            options
+                .iter()
+                .all(|option| option.id.0.as_ref() != "posture")
+        );
+    }
+
+    #[test]
     fn runtime_status_reports_turn_phase_and_last_error() {
         let agent = OmegonAcpAgent::new("test-model");
         *agent.turn_state.borrow_mut() = AcpTurnState {
@@ -6299,10 +6419,7 @@ Progress: 1/2"
 
         let status = agent.runtime_status_json();
         assert_eq!(status["acp"]["turn"]["phase"], "failed");
-        assert_eq!(
-            status["acp"]["turn"]["last_error"],
-            "provider unavailable"
-        );
+        assert_eq!(status["acp"]["turn"]["last_error"], "provider unavailable");
     }
 
     #[test]
