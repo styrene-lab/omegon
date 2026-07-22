@@ -27,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Replaced the selected conversation row's width-shifting glyph rail with a stable full-row background highlight, and changed completed terminal rows from the stale `dbl-click copy` hint to `dbl-click process`.
 - Routed double-clicks on retained `terminal` result cards using the current `Started terminal 'name' (session-id)` output to the canonical managed-process viewer instead of the generic conversation-segment plaintext copy action.
 - Hardened extension detail navigation after adversarial review: keyed primary actions now respond to Space, Escape returns from an extension detail page to the extension inventory, and missing detail targets produce visible feedback instead of silently doing nothing.
 - Reworked the extension runtime menu interaction model: Space now toggles enabled/disabled state in place, Enter opens an extension-specific management page, and update/remove actions live on that detail page instead of the collection browser.
