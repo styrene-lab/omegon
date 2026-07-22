@@ -172,6 +172,8 @@ Omegon does not advertise session load support while `load_session` remains shal
 
 The registry-driven model dropdown filters providers through configured or usable unexpired credentials. An active model that becomes unavailable remains visible as `(current, unavailable)` rather than disappearing.
 
+When the host advertises `fs.readTextFile`, Omegon treats host permission denials and ordinary host read failures as authoritative. A direct local fallback is permitted only when the host method is unavailable at runtime and the target is an existing regular file; fallback use and its reason are reported in tool details.
+
 ### P1: non-text tool outputs
 
 Tool outputs are currently forwarded to ACP as text blocks. Rich tool outputs (image/resource/blob) need a structured `WorkerEvent` path so ACP clients can render them natively.

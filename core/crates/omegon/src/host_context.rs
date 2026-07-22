@@ -594,6 +594,23 @@ pub async fn try_delegate_to_host(
     }
 }
 
+fn host_read_fallback_allowed(path: &std::path::Path, error: &anyhow::Error) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let message = error.to_string().to_ascii_lowercase();
+    [
+        "method not found",
+        "not implemented",
+        "unsupported",
+        "host proxy channel closed",
+        "host proxy reply dropped",
+        "client connection not ready",
+    ]
+    .iter()
+    .any(|marker| message.contains(marker))
+}
+
 async fn delegate_read(
     ctx: &HostContext,
     path: PathBuf,
@@ -602,15 +619,25 @@ async fn delegate_read(
     limit: Option<usize>,
 ) -> anyhow::Result<ToolResult> {
     // Prefer the host when available so editor clients can apply their own
-    // workspace/security semantics. If the host rejects a normal local file,
-    // fall back to local read instead of making ACP-host flakiness break tools.
-    let content = match ctx.proxy.read_text_file(path.clone()).await {
-        Ok(content) => content,
-        Err(host_err) if path.is_file() => std::fs::read_to_string(&path).map_err(|local_err| {
-            anyhow::anyhow!(
-                "host read failed for {path_str}: {host_err}; local fallback failed: {local_err}"
-            )
-        })?,
+    // workspace/security semantics. Fall back only when the host capability is
+    // unavailable at runtime; permission denials and ordinary host read errors
+    // remain authoritative and must not be bypassed with a local read.
+    let (content, delegated, fallback_reason) = match ctx.proxy.read_text_file(path.clone()).await {
+        Ok(content) => (content, true, None),
+        Err(host_err) if host_read_fallback_allowed(&path, &host_err) => {
+            let fallback_reason = host_err.to_string();
+            let content = std::fs::read_to_string(&path).map_err(|local_err| {
+                anyhow::anyhow!(
+                    "host read was unavailable for {path_str}: {host_err}; local fallback failed: {local_err}"
+                )
+            })?;
+            tracing::warn!(
+                path = %path.display(),
+                error = %host_err,
+                "ACP host read unavailable; used local fallback"
+            );
+            (content, false, Some(fallback_reason))
+        }
         Err(host_err) => return Err(host_err),
     };
     let lines: Vec<&str> = content.lines().collect();
@@ -646,7 +673,8 @@ async fn delegate_read(
             "totalLines": total_lines,
             "shownLines": shown_lines,
             "offset": start + 1,
-            "delegated": true,
+            "delegated": delegated,
+            "fallbackReason": fallback_reason,
         }),
     })
 }
@@ -774,4 +802,44 @@ async fn delegate_bash(
             "delegated": true,
         }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_read_fallback_allowed;
+
+    #[test]
+    fn host_read_fallback_is_limited_to_unavailable_capabilities() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+
+        assert!(host_read_fallback_allowed(
+            file.path(),
+            &anyhow::anyhow!("method not found: fs/read_text_file")
+        ));
+        assert!(host_read_fallback_allowed(
+            file.path(),
+            &anyhow::anyhow!("host proxy channel closed")
+        ));
+        assert!(!host_read_fallback_allowed(
+            file.path(),
+            &anyhow::anyhow!("permission denied by host")
+        ));
+        assert!(!host_read_fallback_allowed(
+            file.path(),
+            &anyhow::anyhow!("read failed: EACCES")
+        ));
+    }
+
+    #[test]
+    fn host_read_fallback_requires_a_local_regular_file() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!host_read_fallback_allowed(
+            dir.path(),
+            &anyhow::anyhow!("unsupported")
+        ));
+        assert!(!host_read_fallback_allowed(
+            &dir.path().join("missing.txt"),
+            &anyhow::anyhow!("unsupported")
+        ));
+    }
 }
