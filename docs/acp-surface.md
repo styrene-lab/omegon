@@ -81,6 +81,8 @@ The ACP model selector is registry-driven via `ModelRegistry::global()`, with lo
 
 ACP startup treats the launch `--model` as a fallback when no profile model exists, not as an unconditional override. This prevents editor launch config from clobbering the user's last model choice.
 
+ACP does not currently advertise `load_session`: persisted transcript hydration and replay are not implemented yet, so clients cannot mistake the shallow internal attach path for full resume support.
+
 ### Tool/UI behavior
 
 Running tool cards are expandable through the same detail surface as completed cards. Ctrl+O/toggle-pin prefers:
@@ -134,21 +136,13 @@ Recommended client behavior:
 
 ## Known remaining gaps
 
-### P0: line and symbol slicing
+### Completed: line and symbol slicing
 
-Zed can encode selections and symbols through URI fragments:
+Zed selection and symbol URI fragments (`#L10`, `#L10:20`, and `#L10-L20`) are resolved to bounded line ranges before prompt injection.
 
-- `file:///path#L10`
-- `file:///path#L10:20`
-- `file:///path#L10-L20`
-- `zed:///agent/selection?path=/path#L10:20`
-- `zed:///agent/symbol/name?path=/path&symbol=name#L10:20`
+### Completed: directory mentions
 
-Omegon currently reads the full file once the path is resolved. Correct behavior is to slice bounded line ranges for selections, and use the symbol range as the primary injected content for symbol mentions.
-
-### P0: directory mentions
-
-A directory mention with no file label should not vanish. If a `file:///path/` or `zed:///agent/directory?path=...` resource resolves to a directory, Omegon should inject a bounded directory listing/tree instead of file contents.
+Resolved directory resources produce a bounded listing rooted in the session workspace, excluding common generated and metadata directories.
 
 ### P0: host read fallback clarity
 
@@ -168,13 +162,13 @@ Virtual resources (`zed:///agent/diagnostics`, git diff, terminal selection, pas
 
 No silent fallback to guesses.
 
-### P1: session load/resume
+### Completed: session load capability honesty
 
-Omegon advertises session load support, but `load_session` is still shallow. Either implement transcript hydration/replay or narrow advertised capability so external clients do not infer full resume semantics.
+Omegon does not advertise session load support while `load_session` remains shallow. Transcript hydration and replay remain future work, but external clients no longer infer full resume semantics.
 
-### P1: model availability annotation
+### Completed: model availability annotation
 
-The model dropdown is registry-driven but not auth-aware. Future hardening should use provider status to mark or order available models so clients do not present unavailable cloud providers as equally ready.
+The registry-driven model dropdown filters providers through configured or usable unexpired credentials. An active model that becomes unavailable remains visible as `(current, unavailable)` rather than disappearing.
 
 ### P1: non-text tool outputs
 

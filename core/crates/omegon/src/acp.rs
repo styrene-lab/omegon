@@ -587,8 +587,28 @@ fn acp_status_is_provider_telemetry(msg: &str) -> bool {
     msg.contains("— retrying") || msg.contains("transient upstream failures")
 }
 
+fn validate_active_session(
+    active_session_id: &Option<SessionId>,
+    requested_session_id: &SessionId,
+) -> Result<()> {
+    if active_session_id.as_ref() == Some(requested_session_id) {
+        Ok(())
+    } else {
+        tracing::warn!(
+            requested_session_id = %requested_session_id.0,
+            active_session_id = active_session_id
+                .as_ref()
+                .map(|id| id.0.as_ref())
+                .unwrap_or("<none>"),
+            "rejected ACP request for non-active session"
+        );
+        Err(Error::invalid_params())
+    }
+}
+
 pub struct OmegonAcpAgent {
     model: String,
+    transport: &'static str,
     worker: RefCell<Option<WorkerHandle>>,
     conn: SharedAcpClientConnection,
     session_id: RefCell<Option<SessionId>>,
@@ -616,6 +636,18 @@ impl OmegonAcpAgent {
         )
     }
 
+    pub(crate) fn new_for_websocket(
+        model: &str,
+        dangerously_bypass_permissions: bool,
+    ) -> Self {
+        Self::new_with_transport(
+            model,
+            Default::default(),
+            dangerously_bypass_permissions,
+            "websocket",
+        )
+    }
+
     pub fn new_with_extension_metadata(
         model: &str,
         extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
@@ -628,8 +660,23 @@ impl OmegonAcpAgent {
         extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
         dangerously_bypass_permissions: bool,
     ) -> Self {
+        Self::new_with_transport(
+            model,
+            extension_metadata,
+            dangerously_bypass_permissions,
+            "stdio",
+        )
+    }
+
+    fn new_with_transport(
+        model: &str,
+        extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+        dangerously_bypass_permissions: bool,
+        transport: &'static str,
+    ) -> Self {
         Self {
             model: model.to_string(),
+            transport,
             worker: RefCell::new(None),
             conn: Rc::new(RefCell::new(None)),
             session_id: RefCell::new(None),
@@ -947,7 +994,7 @@ impl OmegonAcpAgent {
             },
             "acp": {
                 "protocol_version": 1,
-                "transport": "stdio",
+                "transport": self.transport,
                 "session_id": session_id,
                 "session_cwd": session_cwd.as_ref().map(|p| p.display().to_string()),
                 "connected": self.conn.borrow().is_some()
@@ -1137,7 +1184,6 @@ impl OmegonAcpAgent {
         response.agent_info =
             Some(Implementation::new("omegon", env!("CARGO_PKG_VERSION")).title("Omegon Agent"));
         response.agent_capabilities = AgentCapabilities::default()
-            .load_session(true)
             .prompt_capabilities(PromptCapabilities::new().embedded_context(true))
             .session_capabilities(
                 SessionCapabilities::new()
@@ -1231,9 +1277,13 @@ impl OmegonAcpAgent {
 
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
         let sid = args.session_id.clone();
+        validate_active_session(&self.session_id.borrow(), &sid)?;
 
-        // Ensure worker exists
-        let cwd = std::env::current_dir().unwrap_or_default();
+        let cwd = self
+            .session_cwd
+            .borrow()
+            .clone()
+            .ok_or_else(Error::invalid_params)?;
         self.ensure_worker(&cwd);
 
         // Extract user text and referenced context. ACP requires agents to
@@ -1790,11 +1840,13 @@ impl OmegonAcpAgent {
         Ok(ListSessionsResponse::new(sessions))
     }
 
-    async fn close_session(&self, _args: CloseSessionRequest) -> Result<CloseSessionResponse> {
+    async fn close_session(&self, args: CloseSessionRequest) -> Result<CloseSessionResponse> {
+        validate_active_session(&self.session_id.borrow(), &args.session_id)?;
         self.send_to_worker(WorkerRequest::Cancel).await;
         self.send_to_worker(WorkerRequest::Shutdown).await;
         *self.worker.borrow_mut() = None;
         *self.session_id.borrow_mut() = None;
+        *self.session_cwd.borrow_mut() = None;
         tracing::info!("ACP session closed");
         Ok(CloseSessionResponse::new())
     }
@@ -6166,6 +6218,58 @@ Progress: 1/2"
             acp_surface_tool_result(&serde_json::json!({"ok":true})).as_deref(),
             Some(r#"{"ok":true}"#)
         );
+    }
+
+    #[tokio::test]
+    async fn initialize_does_not_advertise_unimplemented_session_loading() {
+        let agent = OmegonAcpAgent::new("test-model");
+        let response = agent
+            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+            .await
+            .expect("initialize");
+
+        assert!(!response.agent_capabilities.load_session);
+    }
+
+    #[test]
+    fn websocket_agent_reports_websocket_transport() {
+        let agent = OmegonAcpAgent::new_for_websocket("test-model", false);
+        assert_eq!(agent.transport, "websocket");
+    }
+
+    #[tokio::test]
+    async fn prompt_rejects_non_active_session_before_worker_start() {
+        let agent = OmegonAcpAgent::new("test-model");
+        *agent.session_id.borrow_mut() = Some(SessionId::new("session-a"));
+        *agent.session_cwd.borrow_mut() = Some(std::env::current_dir().unwrap());
+
+        let result = agent
+            .prompt(PromptRequest::new(
+                SessionId::new("session-b"),
+                vec![ContentBlock::Text(TextContent::new("hello"))],
+            ))
+            .await;
+
+        assert!(result.is_err());
+        assert!(agent.worker.borrow().is_none());
+    }
+
+    #[tokio::test]
+    async fn close_rejects_non_active_session_without_clearing_state() {
+        let agent = OmegonAcpAgent::new("test-model");
+        *agent.session_id.borrow_mut() = Some(SessionId::new("session-a"));
+        *agent.session_cwd.borrow_mut() = Some(std::env::current_dir().unwrap());
+
+        let result = agent
+            .close_session(CloseSessionRequest::new(SessionId::new("session-b")))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            agent.session_id.borrow().as_ref(),
+            Some(&SessionId::new("session-a"))
+        );
+        assert!(agent.session_cwd.borrow().is_some());
     }
 
     #[test]

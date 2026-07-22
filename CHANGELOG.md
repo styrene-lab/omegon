@@ -22,6 +22,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a read-only managed-process viewer in the TUI, opened with `/processes [session-id-or-name]`, with lifecycle/provenance metadata, retained output, scrolling, and follow mode over the shared execution-session projection.
 - Added the first renderer-neutral managed-execution session projection over background PTY sessions, exposing lifecycle, provenance, retained output, transcript metadata, and interaction capabilities for future process-viewer surfaces.
 
+### Fixed
+
+- Hardened ACP session ownership by rejecting prompts and closes for non-active session IDs, retaining the negotiated session working directory for prompts, clearing it on close, and no longer advertising shallow transcript resume as supported.
+- Corrected ACP runtime status to report WebSocket transport for WebSocket sessions instead of hard-coding `stdio`.
+
 ### Changed
 
 - Hardened extension detail navigation after adversarial review: keyed primary actions now respond to Space, Escape returns from an extension detail page to the extension inventory, and missing detail targets produce visible feedback instead of silently doing nothing.
