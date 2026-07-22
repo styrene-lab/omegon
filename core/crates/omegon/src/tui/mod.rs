@@ -32,6 +32,7 @@ pub mod layout_projection;
 pub(crate) mod menu_surface;
 pub mod model_catalog;
 pub mod permission_lane;
+pub mod process_viewer;
 pub mod segment_components;
 pub mod segment_detail;
 pub mod segments;
@@ -593,6 +594,8 @@ struct App {
     selector_kind: Option<SelectorKind>,
     /// Active structured menu popup for command inventories such as /skills.
     active_menu: Option<ActiveMenu>,
+    /// Read-only detail viewer for a retained managed execution session.
+    process_viewer: Option<process_viewer::ProcessViewerState>,
     /// Last provider route state observed from route-change events.
     route_state: Option<String>,
     /// Last selected model observed from route-change events.
@@ -2384,6 +2387,7 @@ impl App {
             selector: None,
             selector_kind: None,
             active_menu: None,
+            process_viewer: None,
             route_state: None,
             route_selected_model: None,
             route_serving_model: None,
@@ -9239,6 +9243,10 @@ warning: {warning}"
             );
         }
 
+        if let Some(viewer) = &self.process_viewer {
+            process_viewer::render_process_viewer(frame, area, self.theme.as_ref(), viewer);
+        }
+
         // Selector popup (overlays everything when active)
         if let Some(ref sel) = self.selector {
             sel.render(area, frame, t.as_ref());
@@ -10001,6 +10009,35 @@ warning: {warning}"
         }
     }
 
+    fn open_process_viewer(&mut self, session: &str) {
+        let requested = (!session.is_empty()).then(|| {
+            crate::tools::terminal::execution_session_snapshot_by_id(session)
+                .map(|snapshot| snapshot.id)
+                .unwrap_or_else(|| session.to_string())
+        });
+        let session_id = requested.or_else(|| {
+            crate::tools::terminal::execution_session_snapshots()
+                .into_iter()
+                .find(|snapshot| {
+                    snapshot.state == crate::tools::terminal::ExecutionSessionState::Running
+                })
+                .or_else(|| {
+                    crate::tools::terminal::execution_session_snapshots()
+                        .into_iter()
+                        .next()
+                })
+                .map(|snapshot| snapshot.id)
+        });
+        if let Some(session_id) = session_id {
+            self.process_viewer = Some(process_viewer::ProcessViewerState::new(session_id));
+        } else {
+            self.show_command_toast(CommandToast::new(
+                "No managed background processes or terminal sessions are retained",
+                CommandSeverity::Info,
+            ));
+        }
+    }
+
     fn handle_slash_command(&mut self, text: &str, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
         let trimmed = text.trim();
         if !trimmed.starts_with('/') {
@@ -10022,6 +10059,10 @@ warning: {warning}"
         }
 
         match cmd {
+            "processes" | "process" | "terminals" => {
+                self.open_process_viewer(args);
+                SlashResult::Handled
+            }
             "help" => {
                 if matches!(args, "tutorial" | "tour") {
                     return self.handle_tutorial("", tx);
@@ -14337,6 +14378,28 @@ pub async fn run_tui(
                     }
 
                     // ── Structured menu intercepts navigation when open ────
+                    if app.process_viewer.is_some() {
+                        match key.code {
+                            KeyCode::Up | KeyCode::PageUp => {
+                                if let Some(viewer) = app.process_viewer.as_mut() {
+                                    viewer.scroll_up();
+                                }
+                            }
+                            KeyCode::Down | KeyCode::PageDown => {
+                                if let Some(viewer) = app.process_viewer.as_mut() {
+                                    viewer.scroll_down();
+                                }
+                            }
+                            KeyCode::Char('f') | KeyCode::Char('F') => {
+                                if let Some(viewer) = app.process_viewer.as_mut() {
+                                    viewer.toggle_follow();
+                                }
+                            }
+                            KeyCode::Esc => app.process_viewer = None,
+                            _ => {}
+                        }
+                        continue;
+                    }
                     if app.active_menu.is_some() {
                         if app.menu_input.is_some() {
                             match key.code {

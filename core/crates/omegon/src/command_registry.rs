@@ -299,6 +299,11 @@ pub(crate) fn builtin_command_definitions() -> Vec<omegon_traits::CommandDefinit
 pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::cli_acp_read_only("help", "open command inventory", &[]),
     BuiltinCommandSpec::read_only(
+        "processes",
+        "open managed background process and terminal sessions",
+        &[],
+    ),
+    BuiltinCommandSpec::read_only(
         "copy",
         "copy selected segment, latest answer, or session",
         &["raw", "plain", "answer", "latest", "session"],

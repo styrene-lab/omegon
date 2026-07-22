@@ -5614,6 +5614,42 @@ fn slash_skills_reload_displays_current_session_reload() {
 }
 
 #[test]
+fn processes_command_opens_read_only_viewer_for_named_session() {
+    let cwd = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let result = runtime
+        .block_on(crate::tools::terminal::execute(
+            "start",
+            &serde_json::json!({"name": "viewer-command-test", "command": "cat"}),
+            cwd.path(),
+            Some(crate::tools::WorkspaceBoundary::new(
+                cwd.path().to_path_buf(),
+            )),
+        ))
+        .unwrap();
+    let id = result.details["session_id"].as_str().unwrap().to_string();
+    let mut app = test_app();
+
+    assert!(matches!(
+        app.handle_slash_command("/processes viewer-command-test", &test_tx()),
+        SlashResult::Handled
+    ));
+    assert_eq!(
+        app.process_viewer
+            .as_ref()
+            .map(|viewer| viewer.session_id.as_str()),
+        Some(id.as_str())
+    );
+
+    let _ = runtime.block_on(crate::tools::terminal::execute(
+        "stop",
+        &serde_json::json!({"session_id": id}),
+        cwd.path(),
+        None,
+    ));
+}
+
+#[test]
 fn slash_extension_opens_runtime_menu() {
     let mut app = test_app();
     let tx = test_tx();

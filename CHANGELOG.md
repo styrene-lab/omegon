@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added a read-only managed-process viewer in the TUI, opened with `/processes [session-id-or-name]`, with lifecycle/provenance metadata, retained output, scrolling, and follow mode over the shared execution-session projection.
 - Added the first renderer-neutral managed-execution session projection over background PTY sessions, exposing lifecycle, provenance, retained output, transcript metadata, and interaction capabilities for future process-viewer surfaces.
 
 ### Changed
