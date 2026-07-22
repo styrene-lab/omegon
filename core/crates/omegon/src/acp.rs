@@ -17,6 +17,8 @@ use anyhow::Context;
 use crate::acp_worker::{self, WorkerEvent, WorkerHandle, WorkerRequest};
 use crate::host_context::{self, HostCapabilities, HostContext, HostProxySender};
 
+#[path = "acp/extension_rpc.rs"]
+mod extension_rpc;
 #[path = "acp/labels.rs"]
 mod labels;
 #[path = "acp/model_options.rs"]
@@ -616,8 +618,9 @@ pub struct OmegonAcpAgent {
     secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
     host_caps: RefCell<HostCapabilities>,
     extension_metadata: Rc<RefCell<std::collections::BTreeMap<String, serde_json::Value>>>,
-    extension_rpc_handles:
-        Rc<RefCell<std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>>>,
+    extension_rpc_handles: Rc<
+        RefCell<std::collections::BTreeMap<String, extension_rpc::ExtensionRpcHandle>>,
+    >,
     session_task_bindings: RefCell<Vec<crate::conversation::SessionTaskBinding>>,
     surface_updates_enabled: RefCell<bool>,
     dangerously_bypass_permissions: bool,
@@ -925,7 +928,8 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ExtensionHandles(handles)) => {
-                            *extension_rpc_handles.borrow_mut() = handles;
+                            *extension_rpc_handles.borrow_mut() =
+                                extension_rpc::erase_extension_rpc_handles(handles);
                         }
                         Ok(_) => {}
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -2828,23 +2832,17 @@ impl OmegonAcpAgent {
                 let rpc_method = params["method"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("invalid_request: missing 'method' field"))?;
-                if rpc_method.trim().is_empty() {
-                    anyhow::bail!("invalid_request: 'method' field must not be empty");
-                }
                 let rpc_params = params
                     .get("params")
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({}));
-                let handle = self.extension_rpc_handles.borrow().get(extension).cloned();
-                let Some(handle) = handle else {
-                    anyhow::bail!(
-                        "extension_not_loaded: extension '{extension}' is not loaded or is not callable"
-                    );
-                };
-                handle
-                    .rpc_call(rpc_method, rpc_params)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("method_failed: {err}"))
+                extension_rpc::call_extension_rpc(
+                    &self.extension_rpc_handles,
+                    extension,
+                    rpc_method,
+                    rpc_params,
+                )
+                .await
             }
 
             "extensions/get" => {
