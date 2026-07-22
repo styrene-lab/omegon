@@ -5733,11 +5733,21 @@ fn extension_menu_projects_installed_inventory_instead_of_text_dump_action() {
         .find(|row| row.id.starts_with("extension.installed."))
     {
         let primary = row.primary_action.as_ref().expect("installed row action");
-        assert!(primary.command.as_deref().is_some_and(|command| {
+        assert!(matches!(
+            primary.disposition,
+            crate::surfaces::menu::MenuActionDisposition::OpenExtensionDetail
+        ));
+        assert!(primary.command.is_none());
+        let toggle = row
+            .actions
+            .iter()
+            .find(|action| action.key.as_deref() == Some(" "))
+            .expect("Space toggle action");
+        assert!(toggle.command.as_deref().is_some_and(|command| {
             command.starts_with("/extension enable ")
                 || command.starts_with("/extension disable ")
         }));
-        assert_ne!(primary.command.as_deref(), Some("/extension get"));
+        assert_ne!(toggle.command.as_deref(), Some("/extension get"));
     }
 }
 

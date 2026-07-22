@@ -81,6 +81,7 @@ pub enum MenuActionDisposition {
     InlineInput,
     OpenSelector,
     OpenSettingsRow,
+    OpenExtensionDetail,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,6 +477,25 @@ impl MenuActionProjection {
             editor_text: None,
             message: None,
             disposition: MenuActionDisposition::OpenSelector,
+            close_policy: MenuActionClosePolicy::KeepOpen,
+            requires_confirmation: false,
+        }
+    }
+
+    pub fn open_extension_detail(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        extension_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            key: None,
+            command: None,
+            target_row_id: Some(extension_name.into()),
+            editor_text: None,
+            message: None,
+            disposition: MenuActionDisposition::OpenExtensionDetail,
             close_policy: MenuActionClosePolicy::KeepOpen,
             requires_confirmation: false,
         }
