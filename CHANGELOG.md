@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added `scripts/terminal_test_workload.py`, a deterministic long-running mixed-output workload with heartbeats, bursts, signal handling, natural completion, and interactive `status`, `burst`, `fail`, and `quit` commands for exercising managed terminal sessions and the process viewer.
 - Added design artifacts for authoritative extension tool provenance across conversation surfaces, and captured the remaining operator-visible terminal-session questions alongside the new managed process viewer.
 - Connected completed `terminal` conversation cards to the managed-process viewer: select a retained terminal result and press Enter to open its canonical live session instead of inspecting a stale text dump.
 - Expanded the managed-process viewer with previous/next session switching and a confirmed stop action while keeping terminal input disabled.
