@@ -26,6 +26,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Routed double-clicks on retained `terminal` result cards to the canonical managed-process viewer instead of the generic conversation-segment plaintext copy action.
 - Hardened extension detail navigation after adversarial review: keyed primary actions now respond to Space, Escape returns from an extension detail page to the extension inventory, and missing detail targets produce visible feedback instead of silently doing nothing.
 - Reworked the extension runtime menu interaction model: Space now toggles enabled/disabled state in place, Enter opens an extension-specific management page, and update/remove actions live on that detail page instead of the collection browser.
 - Reworked extension create, install, and search entry points as explicit inline menu-input actions that execute without closing into the global editor; installed extension rows now perform enable/disable on Enter and expose confirmed update/remove actions that refresh the inventory instead of defaulting to a plain-text inspect dump.

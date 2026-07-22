@@ -10032,6 +10032,14 @@ warning: {warning}"
         crate::tools::terminal::execution_session_snapshot_by_id(id).map(|snapshot| snapshot.id)
     }
 
+    fn open_selected_terminal_process_viewer(&mut self) -> bool {
+        let Some(session_id) = self.selected_terminal_session_id() else {
+            return false;
+        };
+        self.open_process_viewer(&session_id);
+        true
+    }
+
     fn open_process_viewer(&mut self, session: &str) {
         let requested = (!session.is_empty()).then(|| {
             crate::tools::terminal::execution_session_snapshot_by_id(session)
@@ -14137,7 +14145,9 @@ pub async fn run_tui(
                                         },
                                     );
                                     if is_double {
-                                        if app.conversation.toggle_image_attachments_at(idx) > 0 {
+                                        if app.open_selected_terminal_process_viewer()
+                                            || app.conversation.toggle_image_attachments_at(idx) > 0
+                                        {
                                             app.effects.pulse_conversation_action();
                                         } else if app
                                             .conversation

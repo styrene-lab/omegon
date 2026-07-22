@@ -5649,6 +5649,13 @@ fn selected_terminal_result_resolves_retained_process_session() {
         app.selected_terminal_session_id().as_deref(),
         Some(id.as_str())
     );
+    assert!(app.open_selected_terminal_process_viewer());
+    assert_eq!(
+        app.process_viewer
+            .as_ref()
+            .map(|viewer| viewer.session_id.as_str()),
+        Some(id.as_str())
+    );
 
     let _ = runtime.block_on(crate::tools::terminal::execute(
         "stop",
