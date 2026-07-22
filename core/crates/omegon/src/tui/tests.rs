@@ -5724,6 +5724,21 @@ fn extension_menu_projects_installed_inventory_instead_of_text_dump_action() {
                 .any(|id| id.starts_with("extension.installed.")),
         "menu must project inventory rows: {row_ids:?}"
     );
+
+    if let Some(row) = menu
+        .tabs
+        .iter()
+        .flat_map(|tab| &tab.groups)
+        .flat_map(|group| &group.rows)
+        .find(|row| row.id.starts_with("extension.installed."))
+    {
+        let primary = row.primary_action.as_ref().expect("installed row action");
+        assert!(primary.command.as_deref().is_some_and(|command| {
+            command.starts_with("/extension enable ")
+                || command.starts_with("/extension disable ")
+        }));
+        assert_ne!(primary.command.as_deref(), Some("/extension get"));
+    }
 }
 
 #[test]
@@ -5770,7 +5785,7 @@ fn runtime_refresh_menu_action_requires_confirmation() {
 }
 
 #[test]
-fn extension_menu_exposes_create_and_install_flows() {
+fn extension_menu_runs_create_and_install_flows_inside_the_menu() {
     let mut app = test_app();
     for (row_id, expected) in [
         ("extension.create", "/extension init "),
@@ -5790,8 +5805,10 @@ fn extension_menu_exposes_create_and_install_flows() {
             app.execute_active_menu_action(action, &test_tx()),
             SlashResult::Handled
         ));
-        assert_eq!(app.editor.render_text(), expected);
-        assert!(app.active_menu.is_none());
+        let input = app.menu_input.as_ref().expect("inline menu argument input");
+        assert_eq!(input.command_prefix, expected);
+        assert!(app.active_menu.is_some());
+        assert_eq!(app.editor.render_text(), "");
     }
 }
 
@@ -5848,8 +5865,10 @@ fn extension_search_menu_row_primes_editor_for_query() {
         app.execute_active_menu_action(action, &test_tx()),
         SlashResult::Handled
     ));
-    assert_eq!(app.editor.render_text(), "/extension search ");
-    assert!(app.active_menu.is_none());
+    let input = app.menu_input.as_ref().expect("inline search input");
+    assert_eq!(input.command_prefix, "/extension search ");
+    assert!(app.active_menu.is_some());
+    assert_eq!(app.editor.render_text(), "");
 }
 
 #[test]

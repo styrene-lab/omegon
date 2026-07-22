@@ -526,6 +526,14 @@ impl CopyTextModal {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MenuInput {
+    action_label: String,
+    command_prefix: String,
+    value: String,
+    original_footer: Option<String>,
+}
+
 struct App {
     editor: Editor,
     conversation: ConversationView,
@@ -595,6 +603,8 @@ struct App {
     secret_readiness: Option<crate::capabilities::secrets::SecretReadinessSnapshot>,
     /// Pending confirmation action id for menu actions that require a second activation.
     pending_menu_confirmation: Option<String>,
+    /// Inline argument editor for menu actions that require operator input.
+    menu_input: Option<MenuInput>,
     /// Active @-file picker popup.
     at_picker: Option<selector::Selector>,
     /// Last tool name from ToolStart — used to track memory mutations.
@@ -2379,6 +2389,7 @@ impl App {
             route_serving_model: None,
             secret_readiness: None,
             pending_menu_confirmation: None,
+            menu_input: None,
             at_picker: None,
             last_tool_name: None,
             completed_tool_name: None,
@@ -4331,19 +4342,11 @@ impl App {
                                 }],
                                 metadata: vec![extension.status, installation.source_path],
                                 primary_action: Some(MenuActionProjection::command(
-                                    format!("extension.{name}.inspect"),
-                                    "Inspect",
-                                    format!("/extension get {filesystem_name}"),
+                                    format!("extension.{name}.toggle"),
+                                    if enabled { "Disable" } else { "Enable" },
+                                    format!("/extension {} {filesystem_name}", if enabled { "disable" } else { "enable" }),
                                 )),
-                                actions: vec![
-                                    MenuActionProjection::command(
-                                        format!("extension.{name}.toggle"),
-                                        if enabled { "Disable" } else { "Enable" },
-                                        format!("/extension {} {filesystem_name}", if enabled { "disable" } else { "enable" }),
-                                    ),
-                                    update,
-                                    remove,
-                                ],
+                                actions: vec![update, remove],
                                 safety: None,
                                 availability: None,
                             }
@@ -4380,7 +4383,7 @@ impl App {
                 .collect()
         };
         let mut menu = MenuProjection::new("extension-runtime", "Extensions & Runtime");
-        menu.summary = Some("Create, install, inspect, update, enable, disable, and remove extensions without leaving the menu.".into());
+        menu.summary = Some("Create, install, update, enable, disable, and remove extensions directly in this menu.".into());
         menu.footer = Some("↑/↓ navigate · / filter · Enter run · Esc close".into());
         menu.tabs = vec![MenuTabProjection {
             id: "overview".into(),
@@ -4389,7 +4392,7 @@ impl App {
                 MenuGroupProjection {
                     id: "extension.inventory".into(),
                     label: "Extensions".into(),
-                    description: Some("Installed extensions and their live state. Enter inspects; row actions enable, update, or remove.".into()),
+                    description: Some("Installed extensions and their live state. Enter enables or disables; row actions update or remove.".into()),
                     rows: extension_rows,
                 },
                 MenuGroupProjection {
@@ -5493,12 +5496,34 @@ impl App {
                 SlashResult::Handled
             }
             crate::surfaces::menu::MenuActionDisposition::PrimeEditor => {
-                self.active_menu = None;
-                if let Some(text) = action.editor_text {
-                    self.editor.set_text(&text);
-                }
-                if let Some(message) = action.message {
-                    self.show_command_toast(CommandToast::new(message, CommandSeverity::Info));
+                if action.id.starts_with("extension.") {
+                    if let Some(text) = action.editor_text {
+                        let original_footer = self
+                            .active_menu
+                            .as_ref()
+                            .and_then(|menu| menu.projection.footer.clone());
+                        self.menu_input = Some(MenuInput {
+                            action_label: action.label,
+                            command_prefix: text,
+                            value: String::new(),
+                            original_footer,
+                        });
+                        if let Some(menu) = self.active_menu.as_mut() {
+                            menu.projection.footer =
+                                Some("Type value · Enter execute · Esc cancel".into());
+                        }
+                    }
+                } else {
+                    self.active_menu = None;
+                    if let Some(text) = action.editor_text {
+                        self.editor.set_text(&text);
+                    }
+                    if let Some(message) = action.message {
+                        self.show_command_toast(CommandToast::new(
+                            message,
+                            CommandSeverity::Info,
+                        ));
+                    }
                 }
                 SlashResult::Handled
             }
@@ -14132,6 +14157,57 @@ pub async fn run_tui(
 
                     // ── Structured menu intercepts navigation when open ────
                     if app.active_menu.is_some() {
+                        if app.menu_input.is_some() {
+                            match key.code {
+                                KeyCode::Char(ch)
+                                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                                {
+                                    if let Some(input) = app.menu_input.as_mut() {
+                                        input.value.push(ch);
+                                        if let Some(menu) = app.active_menu.as_mut() {
+                                            menu.projection.footer = Some(format!(
+                                                "{}: {}▌ · Enter execute · Esc cancel",
+                                                input.action_label, input.value
+                                            ));
+                                        }
+                                    }
+                                }
+                                KeyCode::Backspace => {
+                                    if let Some(input) = app.menu_input.as_mut() {
+                                        input.value.pop();
+                                        if let Some(menu) = app.active_menu.as_mut() {
+                                            menu.projection.footer = Some(format!(
+                                                "{}: {}▌ · Enter execute · Esc cancel",
+                                                input.action_label, input.value
+                                            ));
+                                        }
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    if let Some(input) = app.menu_input.take() {
+                                        let value = input.value.trim();
+                                        if value.is_empty() {
+                                            if let Some(menu) = app.active_menu.as_mut() {
+                                                menu.projection.footer = input.original_footer;
+                                            }
+                                        } else {
+                                            let command = format!("{}{}", input.command_prefix, value);
+                                            app.execute_active_menu_command(command, &command_tx);
+                                        }
+                                    }
+                                }
+                                KeyCode::Esc => {
+                                    if let Some(input) = app.menu_input.take()
+                                        && let Some(menu) = app.active_menu.as_mut()
+                                    {
+                                        menu.projection.footer = input.original_footer;
+                                    }
+                                }
+                                _ => {}
+                            }
+                            continue;
+                        }
                         if matches!(key.code, KeyCode::Esc)
                             && app.should_discard_key_after_interrupt(&key)
                         {
