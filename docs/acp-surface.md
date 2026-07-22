@@ -81,6 +81,8 @@ The ACP model selector is registry-driven via `ModelRegistry::global()`, with lo
 
 ACP startup treats the launch `--model` as a fallback when no profile model exists, not as an unconditional override. This prevents editor launch config from clobbering the user's last model choice.
 
+`_runtime/status` now also exposes `acp.turn.phase` (`idle`, `running`, `cancelling`, or `failed`) and a redacted `acp.turn.last_error`. Reconnecting clients should query this state rather than infer whether a turn is still active from stream timing.
+
 ACP does not currently advertise `load_session`: persisted transcript hydration and replay are not implemented yet, so clients cannot mistake the shallow internal attach path for full resume support.
 
 ### Tool/UI behavior

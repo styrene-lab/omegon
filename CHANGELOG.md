@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Added explicit ACP turn lifecycle telemetry (`idle`, `running`, `cancelling`, or `failed`) and redacted last-error reporting to `_runtime/status`, giving reconnecting clients an authoritative view of in-flight work.
 - Added an in-memory ACP extension RPC invocation seam with success and failure-path regression coverage, preserving production extension polling while making `_extensions/call` behavior directly testable.
 - Hardened ACP session ownership by rejecting prompts and closes for non-active session IDs, retaining the negotiated session working directory for prompts, clearing it on close, and no longer advertising shallow transcript resume as supported.
 - Corrected ACP runtime status to report WebSocket transport for WebSocket sessions instead of hard-coding `stdio`.

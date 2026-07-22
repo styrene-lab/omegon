@@ -608,6 +608,32 @@ fn validate_active_session(
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum AcpTurnPhase {
+    #[default]
+    Idle,
+    Running,
+    Cancelling,
+    Failed,
+}
+
+impl AcpTurnPhase {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Running => "running",
+            Self::Cancelling => "cancelling",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct AcpTurnState {
+    phase: AcpTurnPhase,
+    last_error: Option<String>,
+}
+
 pub struct OmegonAcpAgent {
     model: String,
     transport: &'static str,
@@ -615,6 +641,7 @@ pub struct OmegonAcpAgent {
     conn: SharedAcpClientConnection,
     session_id: RefCell<Option<SessionId>>,
     session_cwd: RefCell<Option<std::path::PathBuf>>,
+    turn_state: RefCell<AcpTurnState>,
     secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
     host_caps: RefCell<HostCapabilities>,
     extension_metadata: Rc<RefCell<std::collections::BTreeMap<String, serde_json::Value>>>,
@@ -684,6 +711,7 @@ impl OmegonAcpAgent {
             conn: Rc::new(RefCell::new(None)),
             session_id: RefCell::new(None),
             session_cwd: RefCell::new(None),
+            turn_state: RefCell::new(AcpTurnState::default()),
             secrets: RefCell::new(None),
             host_caps: RefCell::new(HostCapabilities::default()),
             extension_metadata: Rc::new(RefCell::new(extension_metadata)),
@@ -986,6 +1014,7 @@ impl OmegonAcpAgent {
         let cwd = std::env::current_dir().ok();
         let session_cwd = self.session_cwd.borrow().clone().or_else(|| cwd.clone());
         let session_id = self.session_id.borrow().as_ref().map(|id| id.to_string());
+        let turn_state = self.turn_state.borrow().clone();
         let binary = std::env::current_exe().ok();
         serde_json::json!({
             "runtime": {
@@ -1001,7 +1030,11 @@ impl OmegonAcpAgent {
                 "transport": self.transport,
                 "session_id": session_id,
                 "session_cwd": session_cwd.as_ref().map(|p| p.display().to_string()),
-                "connected": self.conn.borrow().is_some()
+                "connected": self.conn.borrow().is_some(),
+                "turn": {
+                    "phase": turn_state.phase.as_str(),
+                    "last_error": turn_state.last_error
+                }
             },
             "agent": {
                 "id": "default",
@@ -1319,6 +1352,10 @@ impl OmegonAcpAgent {
 
         // Send prompt to worker and stream events back
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        *self.turn_state.borrow_mut() = AcpTurnState {
+            phase: AcpTurnPhase::Running,
+            last_error: None,
+        };
 
         self.send_to_worker(WorkerRequest::Prompt {
             text: user_text,
@@ -1661,8 +1698,27 @@ impl OmegonAcpAgent {
 
         // Wait for the worker to finish AND the event forwarder to flush
         // all notifications to Zed before signaling end-of-turn.
-        let worker_resp = response_rx.await.map_err(|_| Error::internal_error())?;
+        let worker_resp = match response_rx.await {
+            Ok(response) => response,
+            Err(_) => {
+                *self.turn_state.borrow_mut() = AcpTurnState {
+                    phase: AcpTurnPhase::Failed,
+                    last_error: Some("ACP worker dropped the prompt response".into()),
+                };
+                return Err(Error::internal_error());
+            }
+        };
         let _ = done_rx.await;
+
+        let next_turn_state = if let Some(error) = &worker_resp.error {
+            AcpTurnState {
+                phase: AcpTurnPhase::Failed,
+                last_error: Some(self.redact(error)),
+            }
+        } else {
+            AcpTurnState::default()
+        };
+        *self.turn_state.borrow_mut() = next_turn_state;
 
         // Send error after all chunks have been delivered
         if let Some(error) = &worker_resp.error {
@@ -1697,6 +1753,9 @@ impl OmegonAcpAgent {
             && active != &args.session_id
         {
             return Err(Error::invalid_params());
+        }
+        if self.turn_state.borrow().phase == AcpTurnPhase::Running {
+            self.turn_state.borrow_mut().phase = AcpTurnPhase::Cancelling;
         }
         self.send_to_worker(WorkerRequest::Cancel).await;
         Ok(())
@@ -1851,6 +1910,7 @@ impl OmegonAcpAgent {
         *self.worker.borrow_mut() = None;
         *self.session_id.borrow_mut() = None;
         *self.session_cwd.borrow_mut() = None;
+        *self.turn_state.borrow_mut() = AcpTurnState::default();
         tracing::info!("ACP session closed");
         Ok(CloseSessionResponse::new())
     }
@@ -6227,6 +6287,22 @@ Progress: 1/2"
             .expect("initialize");
 
         assert!(!response.agent_capabilities.load_session);
+    }
+
+    #[test]
+    fn runtime_status_reports_turn_phase_and_last_error() {
+        let agent = OmegonAcpAgent::new("test-model");
+        *agent.turn_state.borrow_mut() = AcpTurnState {
+            phase: AcpTurnPhase::Failed,
+            last_error: Some("provider unavailable".into()),
+        };
+
+        let status = agent.runtime_status_json();
+        assert_eq!(status["acp"]["turn"]["phase"], "failed");
+        assert_eq!(
+            status["acp"]["turn"]["last_error"],
+            "provider unavailable"
+        );
     }
 
     #[test]
