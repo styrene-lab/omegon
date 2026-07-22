@@ -5770,6 +5770,32 @@ fn runtime_refresh_menu_action_requires_confirmation() {
 }
 
 #[test]
+fn extension_menu_exposes_create_and_install_flows() {
+    let mut app = test_app();
+    for (row_id, expected) in [
+        ("extension.create", "/extension init "),
+        ("extension.install", "/extension install "),
+    ] {
+        app.open_extension_runtime_menu();
+        {
+            let menu = app.active_menu.as_mut().expect("runtime menu");
+            assert!(menu.state.select_row_by_id(&menu.projection, row_id));
+        }
+        let action = app
+            .active_menu
+            .as_ref()
+            .and_then(|menu| menu.state.selected_primary_action(&menu.projection))
+            .expect("extension CRUD action");
+        assert!(matches!(
+            app.execute_active_menu_action(action, &test_tx()),
+            SlashResult::Handled
+        ));
+        assert_eq!(app.editor.render_text(), expected);
+        assert!(app.active_menu.is_none());
+    }
+}
+
+#[test]
 fn extension_update_menu_action_requires_confirmation() {
     let mut app = test_app();
     let tx = test_tx();

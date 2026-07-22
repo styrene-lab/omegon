@@ -4376,7 +4376,7 @@ impl App {
                 .collect()
         };
         let mut menu = MenuProjection::new("extension-runtime", "Extensions & Runtime");
-        menu.summary = Some("Extension inventory and runtime substrate controls. Argument-taking extension operations remain direct slash commands.".into());
+        menu.summary = Some("Create, install, inspect, update, enable, disable, and remove extensions without leaving the menu.".into());
         menu.footer = Some("↑/↓ navigate · / filter · Enter run · Esc close".into());
         menu.tabs = vec![MenuTabProjection {
             id: "overview".into(),
@@ -4391,8 +4391,34 @@ impl App {
                 MenuGroupProjection {
                     id: "extension.actions".into(),
                     label: "Discover & maintain".into(),
-                    description: Some("Find new extensions or update the installed set.".into()),
+                    description: Some("Create or install extensions, discover catalog entries, and update the installed set.".into()),
                     rows: vec![
+                        MenuRowProjection {
+                            id: "extension.create".into(),
+                            label: "Create extension".into(),
+                            description: "Scaffold a new extension project. Enter a lowercase name, then press Enter.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection { label: "create".into(), tone: MenuBadgeTone::Warning }],
+                            metadata: vec!["/extension init <name>".into()],
+                            primary_action: Some(MenuActionProjection::prime_editor("extension.create.primary", "Create", "/extension init ", "Type the new extension name, then press Enter")),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
+                        MenuRowProjection {
+                            id: "extension.install".into(),
+                            label: "Install extension".into(),
+                            description: "Install from a catalog name, URL, or local path.".into(),
+                            value: None,
+                            kind: MenuRowKind::Action,
+                            badges: vec![MenuBadgeProjection { label: "create".into(), tone: MenuBadgeTone::Warning }],
+                            metadata: vec!["/extension install <source>".into()],
+                            primary_action: Some(MenuActionProjection::prime_editor("extension.install.primary", "Install", "/extension install ", "Type a catalog name, URL, or local path, then press Enter")),
+                            actions: vec![],
+                            safety: None,
+                            availability: None,
+                        },
                         MenuRowProjection {
                             id: "extension.search".into(),
                             label: "Search extensions".into(),

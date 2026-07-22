@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Changed
+
+- Added extension create and install entry points to the structured extension menu, completing menu access to extension CRUD/lifecycle operations alongside inspect, enable/disable, update, and remove actions.
+
 ## [0.28.9] - 2026-07-21
 
 ### Changed
