@@ -172,6 +172,9 @@ pub enum ControlRequest {
         name: String,
     },
     ExtensionView,
+    ExtensionInit {
+        name: String,
+    },
     ExtensionGet {
         name: String,
     },
@@ -444,6 +447,9 @@ pub fn control_request_from_slash(
         | crate::tui::CanonicalSlashCommand::PlanSkip
         | crate::tui::CanonicalSlashCommand::PlanClear => return None,
         crate::tui::CanonicalSlashCommand::ExtensionView => ControlRequest::ExtensionView,
+        crate::tui::CanonicalSlashCommand::ExtensionInit(name) => {
+            ControlRequest::ExtensionInit { name: name.clone() }
+        }
         crate::tui::CanonicalSlashCommand::ExtensionGet(name) => {
             ControlRequest::ExtensionGet { name: name.clone() }
         }
@@ -559,6 +565,7 @@ async fn try_stateless_control(
         ControlRequest::SkillGet { name } => skill_get_response(name).await,
         ControlRequest::SkillDelete { name } => skill_delete_response(name).await,
         ControlRequest::ExtensionView => extension_view_response().await,
+        ControlRequest::ExtensionInit { name } => extension_init_response(name).await,
         ControlRequest::ExtensionGet { name } => extension_get_response(name).await,
         ControlRequest::ExtensionInstall { uri } => extension_install_response(uri).await,
         ControlRequest::ExtensionRemove { name } => extension_remove_response(name).await,
@@ -4601,6 +4608,19 @@ pub async fn extension_view_response() -> SlashCommandResponse {
         Err(err) => SlashCommandResponse {
             accepted: false,
             output: Some(format!("/extension list failed: {err}")),
+        },
+    }
+}
+
+pub async fn extension_init_response(name: &str) -> SlashCommandResponse {
+    match crate::extension_cli::init(name.trim()) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!("Created extension scaffold `{}`", name.trim())),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/extension init failed: {err}")),
         },
     }
 }

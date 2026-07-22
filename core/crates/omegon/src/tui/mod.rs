@@ -854,6 +854,7 @@ pub enum CanonicalSlashCommand {
     PlanSkip,
     PlanClear,
     ExtensionView,
+    ExtensionInit(String),
     ExtensionGet(String),
     ExtensionInstall(String),
     ExtensionRemove(String),
@@ -1344,6 +1345,9 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "extension" | "ext" => {
             if matches!(args, "" | "list" | "view") {
                 Some(CanonicalSlashCommand::ExtensionView)
+            } else if let Some(name) = args.strip_prefix("init ") {
+                let name = name.trim();
+                (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionInit(name.to_string()))
             } else if let Some(name) = args.strip_prefix("get ") {
                 let name = name.trim();
                 (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionGet(name.to_string()))
@@ -10209,13 +10213,13 @@ Scroll transcript:
                         SlashResult::Handled
                     } else {
                         SlashResult::Display(
-                            "Usage: /extension [list|view|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|refresh|reload|restart|search [query]]"
+                            "Usage: /extension [list|view|init <name>|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|refresh|reload|restart|search [query]]"
                                 .into(),
                         )
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /extension [list|view|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|refresh|reload|restart|search [query]]"
+                        "Usage: /extension [list|view|init <name>|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|refresh|reload|restart|search [query]]"
                             .into(),
                     )
                 }
@@ -16241,6 +16245,14 @@ mod slash_command_parsing_tests {
             canonical_slash_command("ext", "list"),
             Some(CanonicalSlashCommand::ExtensionView)
         ));
+    }
+
+    #[test]
+    fn extension_init() {
+        match canonical_slash_command("extension", "init telemetry") {
+            Some(CanonicalSlashCommand::ExtensionInit(name)) => assert_eq!(name, "telemetry"),
+            other => panic!("expected ExtensionInit, got {other:?}"),
+        }
     }
 
     #[test]

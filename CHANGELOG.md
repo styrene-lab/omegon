@@ -18,7 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
-- Added extension create and install entry points to the structured extension menu, completing menu access to extension CRUD/lifecycle operations alongside inspect, enable/disable, update, and remove actions.
+- Added extension create and install entry points to the structured extension menu, completing menu access to extension CRUD/lifecycle operations alongside inspect, enable/disable, update, and remove actions; `/extension init <name>` now executes through the shared control runtime instead of falling through to usage output.
 
 ## [0.28.9] - 2026-07-21
 
