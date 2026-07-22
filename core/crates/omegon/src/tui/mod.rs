@@ -13468,6 +13468,81 @@ fn load_tutorial_progress(tutorial_dir: &std::path::Path) -> TutorialProgress {
         .unwrap_or_default()
 }
 
+fn merge_zed_agent_server(
+    content: &str,
+    omegon_entry: serde_json::Value,
+) -> anyhow::Result<String> {
+    let parsed = jsonc_parser::parse_to_serde_value(
+        content,
+        &jsonc_parser::ParseOptions {
+            allow_comments: true,
+            allow_loose_object_property_names: false,
+            allow_trailing_commas: true,
+        },
+    )?
+    .unwrap_or_else(|| serde_json::json!({}));
+    let mut settings = parsed;
+    let root = settings
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("Zed settings root must be a JSON object"))?;
+    let servers = root
+        .entry("agent_servers")
+        .or_insert_with(|| serde_json::json!({}));
+    let servers = servers
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("Zed `agent_servers` must be a JSON object"))?;
+    servers.insert("Omegon".to_string(), omegon_entry);
+    Ok(serde_json::to_string_pretty(&settings)? + "\n")
+}
+
+#[cfg(test)]
+mod editor_config_tests {
+    use super::merge_zed_agent_server;
+
+    #[test]
+    fn merges_zed_jsonc_with_comments_and_trailing_commas() {
+        let content = r#"{
+  // Existing editor preference
+  "theme": "One Dark",
+  "agent_servers": {
+    "Other": { "command": "other", },
+  },
+}"#;
+        let merged = merge_zed_agent_server(
+            content,
+            serde_json::json!({"type":"custom","command":"omegon","args":["acp"]}),
+        )
+        .expect("JSONC merges");
+        let parsed: serde_json::Value = serde_json::from_str(&merged).expect("normalized JSON");
+
+        assert_eq!(parsed["theme"], "One Dark");
+        assert_eq!(parsed["agent_servers"]["Other"]["command"], "other");
+        assert_eq!(parsed["agent_servers"]["Omegon"]["command"], "omegon");
+    }
+
+    #[test]
+    fn refuses_invalid_zed_settings_instead_of_replacing_them() {
+        let error = merge_zed_agent_server(
+            "{ this is not valid JSONC }",
+            serde_json::json!({"command":"omegon"}),
+        )
+        .expect_err("invalid settings must fail closed");
+
+        assert!(!error.to_string().is_empty());
+    }
+
+    #[test]
+    fn refuses_non_object_agent_servers() {
+        let error = merge_zed_agent_server(
+            r#"{ "agent_servers": [] }"#,
+            serde_json::json!({"command":"omegon"}),
+        )
+        .expect_err("wrong shape must fail closed");
+
+        assert!(error.to_string().contains("agent_servers"));
+    }
+}
+
 /// Handle `/editor` subcommands — IDE integration setup and status.
 fn handle_editor_command(args: &str) -> String {
     let omegon_bin = std::env::current_exe()
@@ -13491,31 +13566,25 @@ fn handle_editor_command(args: &str) -> String {
             let mut result_lines = Vec::new();
 
             if config_path.exists() {
-                // Read existing settings, merge our agent_servers entry
                 let content = std::fs::read_to_string(&config_path).unwrap_or_default();
-                let mut settings: serde_json::Value =
-                    serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
-
-                let servers = settings
-                    .as_object_mut()
-                    .unwrap()
-                    .entry("agent_servers")
-                    .or_insert_with(|| serde_json::json!({}));
-
-                if let Some(obj) = servers.as_object_mut() {
-                    if obj.contains_key("Omegon") {
-                        result_lines.push("Zed settings already contain Omegon agent.".to_string());
-                    } else {
-                        obj.insert("Omegon".to_string(), omegon_entry);
-                        let json = serde_json::to_string_pretty(&settings).unwrap_or_default();
-                        if std::fs::write(&config_path, &json).is_ok() {
-                            result_lines
-                                .push(format!("✓ Added Omegon to {}", config_path.display()));
+                match merge_zed_agent_server(&content, omegon_entry) {
+                    Ok(json) => {
+                        if crate::filelock::atomic_write_locked(&config_path, json.as_bytes())
+                            .is_ok()
+                        {
+                            result_lines.push(format!(
+                                "✓ Added or updated Omegon in {}",
+                                config_path.display()
+                            ));
                         } else {
                             result_lines
                                 .push(format!("✗ Failed to write {}", config_path.display()));
                         }
                     }
+                    Err(error) => result_lines.push(format!(
+                        "✗ Refused to modify {}: {error}",
+                        config_path.display()
+                    )),
                 }
             } else {
                 // Create settings.json from scratch

@@ -41,6 +41,7 @@ repository = "https://github.com/styrene-lab/omegon"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+jsonc-parser = { version = "0.26", features = ["serde"] }
 serde_yaml = "0.9"
 toml = "0.8"
 anyhow = "1"

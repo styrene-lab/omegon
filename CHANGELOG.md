@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Made `/editor zed` parse comments and trailing commas in Zed's JSONC settings, write atomically, and fail closed on malformed or incompatible existing settings instead of replacing them with a new empty document.
 - Exposed portable ACP Profile and Context Window selectors with semantic categories/descriptions, full aggregate refresh after profile application, and slash-command fallbacks; posture now uses the first-class ACP mode selector instead of a duplicate settings dropdown.
 - Added explicit ACP turn lifecycle telemetry (`idle`, `running`, `cancelling`, or `failed`) and redacted last-error reporting to `_runtime/status`, giving reconnecting clients an authoritative view of in-flight work.
 - Added an in-memory ACP extension RPC invocation seam with success and failure-path regression coverage, preserving production extension polling while making `_extensions/call` behavior directly testable.
