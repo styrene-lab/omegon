@@ -14390,12 +14390,59 @@ pub async fn run_tui(
                                     viewer.scroll_down();
                                 }
                             }
+                            KeyCode::Left => {
+                                if let Some(viewer) = app.process_viewer.as_mut() {
+                                    viewer.switch_session(-1);
+                                }
+                            }
+                            KeyCode::Right => {
+                                if let Some(viewer) = app.process_viewer.as_mut() {
+                                    viewer.switch_session(1);
+                                }
+                            }
                             KeyCode::Char('f') | KeyCode::Char('F') => {
                                 if let Some(viewer) = app.process_viewer.as_mut() {
                                     viewer.toggle_follow();
                                 }
                             }
-                            KeyCode::Esc => app.process_viewer = None,
+                            KeyCode::Char('x') | KeyCode::Char('X') => {
+                                let session_id = app.process_viewer.as_mut().and_then(|viewer| {
+                                    viewer.request_stop().then(|| viewer.session_id.clone())
+                                });
+                                if let Some(session_id) = session_id {
+                                    match crate::tools::terminal::stop_execution_session(
+                                        &session_id,
+                                    )
+                                    .await
+                                    {
+                                        Ok(()) => {
+                                            let replacement = crate::tools::terminal::execution_session_snapshots()
+                                                .into_iter()
+                                                .next()
+                                                .map(|snapshot| snapshot.id);
+                                            app.process_viewer = replacement
+                                                .map(process_viewer::ProcessViewerState::new);
+                                            app.show_command_toast(CommandToast::new(
+                                                "Managed process stopped",
+                                                CommandSeverity::Success,
+                                            ));
+                                        }
+                                        Err(err) => app.show_command_toast(CommandToast::new(
+                                            format!("Could not stop managed process: {err}"),
+                                            CommandSeverity::Error,
+                                        )),
+                                    }
+                                }
+                            }
+                            KeyCode::Esc => {
+                                let cancelled = app
+                                    .process_viewer
+                                    .as_mut()
+                                    .is_some_and(|viewer| viewer.cancel_confirmation());
+                                if !cancelled {
+                                    app.process_viewer = None;
+                                }
+                            }
                             _ => {}
                         }
                         continue;

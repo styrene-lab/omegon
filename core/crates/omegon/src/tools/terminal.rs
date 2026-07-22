@@ -586,6 +586,13 @@ async fn read(args: &serde_json::Value) -> Result<ToolResult> {
     })
 }
 
+pub async fn stop_execution_session(id_or_name: &str) -> Result<(), String> {
+    stop(&json!({"session_id": id_or_name}))
+        .await
+        .map(|_| ())
+        .map_err(|err| err.to_string())
+}
+
 async fn stop(args: &serde_json::Value) -> Result<ToolResult> {
     let session = requested_session(args)?;
     let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
