@@ -16,8 +16,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.9] - 2026-07-21
+
 ### Changed
 
+- Restored the complete permission prompt contract and aligned its shortcut regression coverage with session-directory grants, preventing the release suite from diverging from the shipped permission controls.
 - Replaced the extension menu's legacy inventory text-dump action with structured rows for every local extension installation candidate, including invalid manifests, missing manifests, broken symlinks, and unreadable entries. Valid rows retain direct lifecycle actions; invalid rows expose diagnostics and safe removal only.
 - Changed `/extension search` to report Armory catalog and installed-extension matches as separate scopes, so a local invalid installation is no longer reported as nonexistent merely because it is absent from the remote catalog.
 

@@ -116,17 +116,26 @@ pub fn render_permission_lane(
 pub fn format_permission_prompt(
     tool_name: &str,
     path: &str,
-    _kind: PermissionRequestKind,
-    _persistence: PermissionPersistence,
+    kind: PermissionRequestKind,
+    persistence: PermissionPersistence,
     grant_path: Option<&str>,
 ) -> String {
     let grant = grant_path
         .map(|path| format!("Grant: {path}\n"))
         .unwrap_or_default();
+    let persist = match persistence {
+        PermissionPersistence::ProjectDirectory => "project profile directory permission",
+        PermissionPersistence::SessionDirectory => "session directory permission",
+        PermissionPersistence::None => "no persisted permission",
+    };
+    let scope = permission_persist_scope_label(tool_name, kind, persistence);
     format!(
         "Tool: {tool_name}\n\
          Target: {path}\n\
-         {grant}"
+         Reason: grant required for this operation\n\
+         Persist: {persist}\n\
+         {grant}\
+         [y] once · [a] this directory for this session · [Shift+A] {scope} · [n] deny"
     )
 }
 

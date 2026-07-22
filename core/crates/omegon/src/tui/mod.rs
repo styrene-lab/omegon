@@ -15427,7 +15427,7 @@ mod slash_command_parsing_tests {
         );
         assert_eq!(
             permission_response_for_key(KeyCode::Char('a'), KeyModifiers::empty()),
-            None
+            Some(omegon_traits::PermissionResponse::AllowSession)
         );
         assert_eq!(
             permission_response_for_key(KeyCode::Char('A'), KeyModifiers::SHIFT),

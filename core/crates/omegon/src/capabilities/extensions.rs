@@ -24,7 +24,7 @@ pub enum ExtensionInstallationSourceKind {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ExtensionInstallationDiagnosis {
     Valid {
-        capability: ExtensionCapabilitySummary,
+        capability: Box<ExtensionCapabilitySummary>,
     },
     Invalid {
         problem: String,
@@ -169,7 +169,9 @@ pub fn list_extension_installations_from_dir(
             }
         } else {
             match extension_capability_summary_from_dir(&resolved) {
-                Ok(capability) => ExtensionInstallationDiagnosis::Valid { capability },
+                Ok(capability) => ExtensionInstallationDiagnosis::Valid {
+                    capability: Box::new(capability),
+                },
                 Err(error) => ExtensionInstallationDiagnosis::Invalid {
                     problem: format!("invalid manifest or state: {error}"),
                 },
@@ -192,7 +194,7 @@ pub fn list_installed_extension_capabilities_from_dir(
     Ok(list_extension_installations_from_dir(extensions_dir)?
         .into_iter()
         .filter_map(|installation| match installation.diagnosis {
-            ExtensionInstallationDiagnosis::Valid { capability } => Some(capability),
+            ExtensionInstallationDiagnosis::Valid { capability } => Some(*capability),
             ExtensionInstallationDiagnosis::Invalid { .. }
             | ExtensionInstallationDiagnosis::BrokenLink { .. }
             | ExtensionInstallationDiagnosis::Unreadable { .. } => None,
