@@ -10036,11 +10036,23 @@ warning: {warning}"
     }
 
     fn open_selected_terminal_process_viewer(&mut self) -> bool {
-        let Some(session_id) = self.selected_terminal_session_id() else {
+        let Some(segment) = self.conversation.selected_segment() else {
             return false;
         };
+        let crate::tui::segments::SegmentContent::ToolCard { name, .. } = &segment.content else {
+            return false;
+        };
+        if name != "terminal" {
+            return false;
+        }
+
+        // A terminal card such as `list` may not carry a session id even when a
+        // later `start` result has been collapsed out of the Slim projection.
+        // Prefer the selected card's retained id, then use the same running/most-
+        // recent fallback as `/processes` rather than dropping into generic copy.
+        let session_id = self.selected_terminal_session_id().unwrap_or_default();
         self.open_process_viewer(&session_id);
-        true
+        self.process_viewer.is_some()
     }
 
     fn open_process_viewer(&mut self, session: &str) {
@@ -12571,6 +12583,11 @@ Scroll transcript:
                 is_error,
                 provenance,
             } => {
+                // Tool execution can mutate repository state (commit, checkout,
+                // merge, delegated worktrees). Refresh the branch affordance at
+                // the event boundary instead of retaining the startup snapshot.
+                self.workbench_state.workspace = self.current_workbench_workspace_context();
+
                 if name == crate::tool_registry::core::WAIT_FOR_OPERATOR
                     && self.pending_operator_wait.is_some()
                 {
@@ -14139,7 +14156,15 @@ pub async fn run_tui(
                                 // reflow short, bottom-aligned content. Prefer the semantic
                                 // target captured on that first press, rather than hit-testing
                                 // the second press against the newly shifted frame.
-                                let hit_idx = app.conversation.segment_at(area, mouse.row);
+                                let projection = conversation_projection::project_conversation(
+                                    app.conversation.segments(),
+                                    app.ui_presentation.level,
+                                );
+                                let hit_idx = app.conversation.projected_segment_at(
+                                    area,
+                                    mouse.row,
+                                    &projection.canonical_indices,
+                                );
                                 if let Some(idx) = prior_double_target.or(hit_idx) {
                                     let is_double = prior_double_target == Some(idx);
                                     let _ = app.handle_select_conversation_segment_action(
