@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added ten shared golden JSON fixtures for the Auspex managed-delegation contract, with typed Omegon serialization and Auspex deserialization coverage for lifecycle observations, dispatch policy, raw results, cancellation states, and rejection envelopes.
 - Added an authenticated Auspex managed-delegation boundary over Omegon's live delegate runtime, with versioned dispatch/get/result/cancel envelopes, exact task IDs, effective policy reporting, bounded cancellation reasons and result payloads, and runtime-owned execution rather than summary scraping.
 - Added `scripts/terminal_test_workload.py`, a deterministic long-running mixed-output workload with heartbeats, bursts, signal handling, natural completion, and interactive `status`, `burst`, `fail`, and `quit` commands for exercising managed terminal sessions and the process viewer.
 - Added design artifacts for authoritative extension tool provenance across conversation surfaces, and captured the remaining operator-visible terminal-session questions alongside the new managed process viewer.

@@ -89,6 +89,8 @@ pub enum DelegateTaskStatus {
     },
     Cancelled {
         reason: Option<String>,
+        /// True only after the delegate child execution has actually stopped.
+        termination_confirmed: bool,
     },
 }
 
@@ -190,22 +192,8 @@ impl DelegateResultStore {
         tasks.get(task_id).cloned()
     }
 
-    pub fn task_observation(&self, task_id: &str) -> Option<serde_json::Value> {
-        self.get_task(task_id).map(|task| serde_json::json!({
-            "task_id": task.task_id,
-            "label": task.label,
-            "agent_name": task.agent_name,
-            "task_description": task.task_description,
-            "status": task.status,
-            "result": task.result,
-            "result_viewed": task.result_viewed,
-            "started_at_unix_ms": task.started_at.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
-            "completed_at_unix_ms": task.completed_at.and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64),
-            "last_tool": task.last_tool.map(|tool| serde_json::json!({"tool": tool, "args_summary": task.last_tool_activity.and_then(|activity| activity.args_summary)})),
-            "last_turn": task.last_turn,
-            "checklist": task.tasks.into_iter().map(|item| serde_json::json!({"label": item.description, "done": item.done})).collect::<Vec<_>>(),
-            "route": task.route_decision.map(|route| serde_json::json!({"model": route.selected_model, "provider": serde_json::Value::Null, "fallback_used": route.fallback_reason.is_some()})),
-        }))
+    pub fn task_observation(&self, task_id: &str) -> Option<crate::managed_agent_supervisor::DelegateObservation> {
+        self.get_task(task_id).map(Into::into)
     }
 
     pub fn mark_result_viewed(&self, task_id: &str) {
@@ -268,18 +256,33 @@ impl DelegateResultStore {
             .ok_or_else(|| anyhow::anyhow!("Task not found: {}", task_id))?;
         match &task.status {
             DelegateTaskStatus::Running => {
+                // Cancellation acknowledgement is not proof that the child has
+                // stopped. The runner/exit observer promotes this state to a
+                // confirmed cancellation when termination is observed.
                 let status = DelegateTaskStatus::Cancelled {
                     reason: reason.clone(),
+                    termination_confirmed: false,
                 };
                 task.status = status.clone();
-                task.result = reason;
                 task.result_viewed = false;
-                task.completed_at = Some(SystemTime::now());
                 Ok(status)
             }
             status @ (DelegateTaskStatus::Completed { .. }
             | DelegateTaskStatus::Failed { .. }
             | DelegateTaskStatus::Cancelled { .. }) => Ok(status.clone()),
+        }
+    }
+
+    pub fn confirm_task_cancelled(&self, task_id: &str) {
+        let mut tasks = self.tasks.lock().unwrap();
+        if let Some(task) = tasks.get_mut(task_id)
+            && let DelegateTaskStatus::Cancelled { reason, .. } = &task.status
+        {
+            task.status = DelegateTaskStatus::Cancelled {
+                reason: reason.clone(),
+                termination_confirmed: true,
+            };
+            task.completed_at = Some(SystemTime::now());
         }
     }
 
@@ -1224,11 +1227,15 @@ If blocked, say the blocker plainly.\n",
                 .await
             {
                 Ok(result) => {
-                    store.update_task_status(
-                        &task_id,
-                        DelegateTaskStatus::Completed { success: true },
-                        Some(result.clone()),
-                    );
+                    if matches!(store.get_task(&task_id).map(|task| task.status), Some(DelegateTaskStatus::Cancelled { .. })) {
+                        store.confirm_task_cancelled(&task_id);
+                    } else {
+                        store.update_task_status(
+                            &task_id,
+                            DelegateTaskStatus::Completed { success: true },
+                            Some(result.clone()),
+                        );
+                    }
                     if let Ok(mut handle) = progress_handle.lock() {
                         *handle = store.progress_snapshot();
                     }
@@ -1257,14 +1264,18 @@ If blocked, say the blocker plainly.\n",
                     {
                         *count += 1;
                     }
-                    store.update_task_status(
-                        &task_id,
-                        DelegateTaskStatus::Failed {
-                            error: error.clone(),
-                            kind: failure_kind,
-                        },
-                        None,
-                    );
+                    if matches!(store.get_task(&task_id).map(|task| task.status), Some(DelegateTaskStatus::Cancelled { .. })) {
+                        store.confirm_task_cancelled(&task_id);
+                    } else {
+                        store.update_task_status(
+                            &task_id,
+                            DelegateTaskStatus::Failed {
+                                error: error.clone(),
+                                kind: failure_kind,
+                            },
+                            None,
+                        );
+                    }
                     if let Ok(mut handle) = progress_handle.lock() {
                         *handle = store.progress_snapshot();
                     }
@@ -1309,7 +1320,7 @@ If blocked, say the blocker plainly.\n",
                     DelegateTaskStatus::Failed { error, .. } => {
                         return Err(anyhow::anyhow!("Task failed: {}", error));
                     }
-                    DelegateTaskStatus::Cancelled { reason } => {
+                    DelegateTaskStatus::Cancelled { reason, .. } => {
                         return Err(anyhow::anyhow!(
                             "Task cancelled{}",
                             reason
@@ -2084,7 +2095,7 @@ impl Feature for DelegateFeature {
                                 details: json!({ "status": "failed", "error": error, "task_id": task_id, "result_viewed": true }),
                             })
                         }
-                        DelegateTaskStatus::Cancelled { reason } => {
+                        DelegateTaskStatus::Cancelled { reason, .. } => {
                             self.result_store.mark_result_viewed(&task_id);
                             Ok(ToolResult {
                                 content: vec![ContentBlock::Text {
@@ -2116,7 +2127,7 @@ impl Feature for DelegateFeature {
                     *handle = self.result_store.progress_snapshot();
                 }
                 let text = match status {
-                    DelegateTaskStatus::Cancelled { ref reason } => reason
+                    DelegateTaskStatus::Cancelled { ref reason, .. } => reason
                         .as_ref()
                         .map(|reason| format!("Delegate task {task_id} cancelled: {reason}"))
                         .unwrap_or_else(|| format!("Delegate task {task_id} cancelled")),
@@ -2145,7 +2156,7 @@ impl Feature for DelegateFeature {
                             DelegateTaskStatus::Failed { .. } => "failed",
                         },
                         "reason": reason,
-                        "termination_confirmed": matches!(status, DelegateTaskStatus::Cancelled { .. }),
+                        "termination_confirmed": matches!(status, DelegateTaskStatus::Cancelled { termination_confirmed: true, .. }),
                     }),
                 })
             }
@@ -3424,6 +3435,7 @@ This agent runs in write mode and can modify files.
             task_description: "Verify cancellation".into(),
             status: DelegateTaskStatus::Cancelled {
                 reason: Some("operator stopped task".into()),
+                termination_confirmed: true,
             },
             result: Some("operator stopped task".into()),
             result_viewed: false,

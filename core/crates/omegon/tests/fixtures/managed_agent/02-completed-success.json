@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "managed_run_id": "11111111-1111-4111-8111-111111111111",
+  "worker_id": "22222222-2222-4222-8222-222222222222",
+  "observation": {
+    "task_id": "delegate_1",
+    "label": "worker",
+    "agent_name": "scout",
+    "task_description": "inspect",
+    "result": "done",
+    "result_viewed": false,
+    "started_at_unix_ms": 1000,
+    "completed_at_unix_ms": 2000,
+    "last_tool": null,
+    "last_turn": null,
+    "checklist": [],
+    "route": null,
+    "status": {
+      "kind": "completed",
+      "success": true
+    }
+  }
+}
