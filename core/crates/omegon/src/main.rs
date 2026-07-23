@@ -50,7 +50,6 @@ mod control;
 mod control_actions;
 mod control_runtime;
 mod control_tls;
-mod editor_skills;
 mod embedding;
 mod execution_substrate;
 pub mod extensions;
@@ -851,11 +850,6 @@ enum SkillsAction {
         /// Armory skill name or skills/<name>. Omit to install bundled skills.
         name: Option<String>,
     },
-    /// Inspect or synchronize portable Omegon skills with an editor-native skill inventory.
-    Editor {
-        #[command(subcommand)]
-        action: SkillsEditorAction,
-    },
     /// Show details of a specific skill.
     Get {
         /// Skill name (e.g., "rust", "security").
@@ -888,30 +882,6 @@ enum SkillsAction {
         /// Skill name to delete.
         name: String,
     },
-}
-
-#[derive(Subcommand)]
-enum SkillsEditorAction {
-    /// Inspect editor-native skill bridge state.
-    Status {
-        /// Editor integration target.
-        #[arg(value_enum, default_value_t = SkillEditorTarget::Zed)]
-        editor: SkillEditorTarget,
-    },
-    /// Synchronize portable user-level Omegon skills into an editor-native inventory.
-    Sync {
-        /// Editor integration target.
-        #[arg(value_enum, default_value_t = SkillEditorTarget::Zed)]
-        editor: SkillEditorTarget,
-        /// Report changes without writing them.
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
-#[derive(Clone, Copy, Debug, clap::ValueEnum)]
-enum SkillEditorTarget {
-    Zed,
 }
 
 #[derive(Subcommand)]
@@ -1738,27 +1708,6 @@ async fn main() -> anyhow::Result<()> {
                         skills::cmd_install()
                     }
                 }
-                SkillsAction::Editor { action } => match action {
-                    SkillsEditorAction::Status {
-                        editor: SkillEditorTarget::Zed,
-                    } => match editor_skills::zed_status() {
-                        Ok(report) => {
-                            println!("{}", report.render());
-                            Ok(())
-                        }
-                        Err(error) => Err(error),
-                    },
-                    SkillsEditorAction::Sync {
-                        editor: SkillEditorTarget::Zed,
-                        dry_run,
-                    } => match editor_skills::zed_sync(*dry_run) {
-                        Ok(report) => {
-                            println!("{}", report.render());
-                            Ok(())
-                        }
-                        Err(error) => Err(error),
-                    },
-                },
                 SkillsAction::Get { name } => match skills::get_skill_details(name) {
                     Ok(details) => {
                         let manifest = &details.manifest;
