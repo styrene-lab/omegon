@@ -26,6 +26,10 @@ fn persist_runtime_profile(cwd: &Path, settings: &crate::settings::Settings) -> 
 }
 
 pub(crate) fn set_model(shared: &SharedSettings, cwd: &Path, value: &str) -> Result<(), String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("model must not be empty".into());
+    }
     with_settings(shared, |settings| {
         settings.set_model(value);
         persist_runtime_profile(cwd, settings)
@@ -96,11 +100,13 @@ mod tests {
         let shared = crate::settings::shared("test-model");
         let before = shared.lock().unwrap().clone();
 
+        assert!(set_model(&shared, cwd.path(), " ").is_err());
         assert!(set_thinking(&shared, cwd.path(), "impossible").is_err());
         assert!(set_posture(&shared, cwd.path(), "impossible").is_err());
         assert!(set_context_class(&shared, cwd.path(), "impossible").is_err());
 
         let after = shared.lock().unwrap().clone();
+        assert_eq!(after.model, before.model);
         assert_eq!(after.thinking, before.thinking);
         assert_eq!(after.posture, before.posture);
         assert_eq!(

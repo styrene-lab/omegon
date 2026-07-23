@@ -1951,8 +1951,7 @@ impl OmegonAcpAgent {
                     ack: Some(tx),
                 })
                 .await;
-                rx.await.map_err(|_| Error::internal_error())?;
-                Ok(())
+                rx.await.map_err(|_| Error::internal_error())?
             }
             "thinking" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -1961,8 +1960,7 @@ impl OmegonAcpAgent {
                     ack: Some(tx),
                 })
                 .await;
-                rx.await.map_err(|_| Error::internal_error())?;
-                Ok(())
+                rx.await.map_err(|_| Error::internal_error())?
             }
             "context_class" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -4282,6 +4280,31 @@ impl OmegonAcpAgent {
         }
     }
 
+    fn request_worker_setting(
+        &self,
+        request: impl FnOnce(tokio::sync::oneshot::Sender<Result<(), String>>) -> WorkerRequest,
+        success: String,
+    ) -> String {
+        let worker_tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
+        let Some(worker_tx) = worker_tx else {
+            return "ACP worker is not initialized".into();
+        };
+        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+        let runtime = tokio::runtime::Handle::current();
+        if runtime.block_on(worker_tx.send(request(ack_tx))).is_err() {
+            return "ACP worker is not accepting requests".into();
+        }
+        match runtime.block_on(tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            ack_rx,
+        )) {
+            Ok(Ok(Ok(()))) => success,
+            Ok(Ok(Err(error))) => error,
+            Ok(Err(_)) => "ACP worker dropped setting response".into(),
+            Err(_) => "ACP setting request timed out".into(),
+        }
+    }
+
     fn handle_slash_command(&self, input: &str) -> String {
         let trimmed = input.trim();
         let (cmd, args) = trimmed
@@ -4313,43 +4336,29 @@ impl OmegonAcpAgent {
         }
 
         match cmd {
-            "/model" if !args.is_empty() => {
-                let rt = tokio::runtime::Handle::current();
-                let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
-                if let Some(tx) = tx {
-                    let _ = rt.block_on(tx.send(WorkerRequest::SetModel {
-                        value: args.trim().to_string(),
-                        ack: None,
-                    }));
-                }
-                format!("Model set to: {}", args.trim())
-            }
+            "/model" if !args.is_empty() => self.request_worker_setting(
+                |ack| WorkerRequest::SetModel {
+                    value: args.trim().to_string(),
+                    ack: Some(ack),
+                },
+                format!("Model set to: {}", args.trim()),
+            ),
             "/model" => "Current model from CLI args. Use the model dropdown or /model <provider:model> to switch.".into(),
-            "/thinking" | "/think" if !args.is_empty() => {
-                let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
-                if let Some(tx) = tx {
-                    let _ = tokio::runtime::Handle::current().block_on(tx.send(
-                        WorkerRequest::SetThinking {
-                            value: args.trim().to_string(),
-                            ack: None,
-                        },
-                    ));
-                }
-                format!("Thinking set to: {}", args.trim())
-            }
+            "/thinking" | "/think" if !args.is_empty() => self.request_worker_setting(
+                |ack| WorkerRequest::SetThinking {
+                    value: args.trim().to_string(),
+                    ack: Some(ack),
+                },
+                format!("Thinking set to: {}", args.trim()),
+            ),
             "/thinking" | "/think" => "Use the thinking dropdown or /think <off|minimal|low|medium|high>".into(),
-            "/posture" if !args.is_empty() => {
-                let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
-                if let Some(tx) = tx {
-                    let _ = tokio::runtime::Handle::current().block_on(tx.send(
-                        WorkerRequest::SetPosture {
-                            value: args.trim().to_string(),
-                            ack: None,
-                        },
-                    ));
-                }
-                format!("Posture set to: {}", args.trim())
-            }
+            "/posture" if !args.is_empty() => self.request_worker_setting(
+                |ack| WorkerRequest::SetPosture {
+                    value: args.trim().to_string(),
+                    ack: Some(ack),
+                },
+                format!("Posture set to: {}", args.trim()),
+            ),
             "/posture" => "Use the posture dropdown or /posture <fabricator|architect|explorator|devastator>".into(),
             "/compact" => "Context compaction happens automatically. The model manages its own context window.".into(),
             "/clear" => "Start a new thread via the + button to clear the conversation.".into(),
