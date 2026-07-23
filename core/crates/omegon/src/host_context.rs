@@ -241,6 +241,7 @@ pub struct HostContext {
     pub caps: Arc<HostCapabilities>,
     pub proxy: HostProxySender,
     pub session_id: String,
+    pub cwd: PathBuf,
 }
 
 // ---------------------------------------------------------------------------
@@ -745,7 +746,7 @@ async fn delegate_bash(
         .create_terminal(
             "bash".into(),
             vec!["-c".into(), command.into()],
-            None,
+            Some(ctx.cwd.clone()),
             output_byte_limit,
         )
         .await?;

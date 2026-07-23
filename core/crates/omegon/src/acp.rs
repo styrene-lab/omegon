@@ -934,6 +934,7 @@ impl OmegonAcpAgent {
                     caps,
                     proxy: HostProxySender::new(proxy_tx),
                     session_id: session_id_str.clone(),
+                    cwd: cwd.to_path_buf(),
                 };
                 // Spawn the ACP-thread pump that services proxy requests.
                 let sid = self
@@ -1450,6 +1451,7 @@ impl OmegonAcpAgent {
                     }
                 };
                 let mut plan_state: Vec<acp_worker::PlanEntryData> = Vec::new();
+                let mut last_acp_plan_entries: Option<Vec<PlanEntry>> = None;
                 let mut surface_adapter =
                     AcpConversationSurfaceAdapter::with_turn_id(stream_sid.to_string());
                 loop {
@@ -1619,19 +1621,29 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::PlanUpdate { entries }) => {
-                            if let Some(c) = conn.borrow().as_ref() {
-                                // Merge into running plan state.
-                                // DecompositionStarted sends the full initial set;
-                                // subsequent updates send single-entry patches.
-                                // We maintain the full plan and re-emit it.
-                                merge_plan_entries(&mut plan_state, entries);
-                                let plan_entries = acp_plan_entries(&plan_state);
-                                let _ = send_session_update(
-                                    c,
-                                    stream_sid.clone(),
-                                    SessionUpdate::Plan(Plan::new(plan_entries)),
-                                )
-                                .await;
+                            // ACP plans are complete replacement snapshots. Suppress
+                            // initial/repeated empties and identical projections; send
+                            // one empty snapshot only when clearing a visible plan.
+                            merge_plan_entries(&mut plan_state, entries);
+                            let plan_entries = acp_plan_entries(&plan_state);
+                            let should_send = match &last_acp_plan_entries {
+                                None => !plan_entries.is_empty(),
+                                Some(previous) => previous != &plan_entries,
+                            };
+                            if should_send {
+                                if let Some(c) = conn.borrow().as_ref() {
+                                    let _ = send_session_update(
+                                        c,
+                                        stream_sid.clone(),
+                                        SessionUpdate::Plan(Plan::new(plan_entries.clone())),
+                                    )
+                                    .await;
+                                }
+                                last_acp_plan_entries = if plan_entries.is_empty() {
+                                    None
+                                } else {
+                                    Some(plan_entries)
+                                };
                             }
                         }
                         Ok(WorkerEvent::StreamIdle {
@@ -6461,6 +6473,20 @@ Progress: 1/2"
             Some(&SessionId::new("session-a"))
         );
         assert!(agent.session_cwd.borrow().is_some());
+    }
+
+    #[test]
+    fn host_context_preserves_session_cwd_for_terminal_delegation() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let cwd = std::path::PathBuf::from("/tmp/omegon-acp-session");
+        let context = HostContext {
+            caps: std::sync::Arc::new(HostCapabilities::default()),
+            proxy: HostProxySender::new(tx),
+            session_id: "session-a".into(),
+            cwd: cwd.clone(),
+        };
+
+        assert_eq!(context.cwd, cwd);
     }
 
     #[test]
