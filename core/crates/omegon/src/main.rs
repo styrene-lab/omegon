@@ -4566,9 +4566,19 @@ fn build_tui_secret_readiness_snapshot(
 
             tui::TuiCommand::ManagedDelegateControl { method, payload, respond_to } => {
                 let reply = match crate::managed_agent_supervisor::tool_args(&method, &payload) {
-                    Ok((envelope, tool, args)) => match runtime_state.bus.execute_tool(tool, "auspex-supervisor", args, tokio_util::sync::CancellationToken::new()).await {
-                        Ok(result) => crate::managed_agent_supervisor::response(&method, &envelope, result).unwrap_or_else(|error| serde_json::json!({"type": format!("{method}_result"), "schema_version": crate::managed_agent_supervisor::SCHEMA_VERSION, "managed_run_id": envelope.managed_run_id, "worker_id": envelope.worker_id, "accepted": false, "error": error})),
-                        Err(error) => serde_json::json!({"type": format!("{method}_result"), "schema_version": crate::managed_agent_supervisor::SCHEMA_VERSION, "managed_run_id": envelope.managed_run_id, "worker_id": envelope.worker_id, "accepted": false, "error": error.to_string()}),
+                    Ok((envelope, tool, args)) => {
+                        if method == "delegate_get" {
+                            let task_id = args.get("task_id").and_then(serde_json::Value::as_str).unwrap_or_default();
+                            match agent.dashboard_handles.delegate_tasks.as_ref().and_then(|store| store.task_observation(task_id)) {
+                                Some(observation) => crate::managed_agent_supervisor::observation_response(&envelope, observation),
+                                None => crate::managed_agent_supervisor::error_response(&method, &envelope, "unknown_task"),
+                            }
+                        } else {
+                            match runtime_state.bus.execute_tool(tool, "auspex-supervisor", args, tokio_util::sync::CancellationToken::new()).await {
+                                Ok(result) => crate::managed_agent_supervisor::response(&method, &envelope, result).unwrap_or_else(|error| crate::managed_agent_supervisor::error_response(&method, &envelope, &error)),
+                                Err(error) => crate::managed_agent_supervisor::error_response(&method, &envelope, &error.to_string()),
+                            }
+                        }
                     },
                     Err(error) => serde_json::json!({"type": format!("{method}_result"), "accepted": false, "error": error}),
                 };

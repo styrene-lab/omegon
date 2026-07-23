@@ -1,13 +1,5 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-
-static TASK_OWNERS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
-
-fn task_owners() -> &'static Mutex<HashMap<String, (String, String)>> {
-    TASK_OWNERS.get_or_init(|| Mutex::new(HashMap::new()))
-}
 
 pub const SCHEMA_VERSION: u32 = 1;
 pub const MAX_RESULT_BYTES: usize = 1024 * 1024;
@@ -90,17 +82,14 @@ pub fn tool_args(method: &str, payload: &Value) -> Result<(Envelope<Value>, &'st
         }
         "delegate_get" => {
             let body: TaskBody = serde_json::from_value(body.clone()).map_err(|e| format!("invalid_task_request:{e}"))?;
-            validate_task_owner(&envelope, &body.task_id)?;
             (crate::tool_registry::delegate::DELEGATE_STATUS, serde_json::json!({"task_id": body.task_id}))
         }
         "delegate_result" => {
             let body: TaskBody = serde_json::from_value(body.clone()).map_err(|e| format!("invalid_task_request:{e}"))?;
-            validate_task_owner(&envelope, &body.task_id)?;
             (crate::tool_registry::delegate::DELEGATE_RESULT, serde_json::json!({"task_id": body.task_id}))
         }
         "delegate_cancel" => {
             let body: CancelBody = serde_json::from_value(body.clone()).map_err(|e| format!("invalid_cancel_request:{e}"))?;
-            validate_task_owner(&envelope, &body.task_id)?;
             if body.reason.as_ref().is_some_and(|r| r.len() > MAX_REASON_BYTES) { return Err("oversized_reason".into()); }
             (crate::tool_registry::delegate::DELEGATE_CANCEL, serde_json::json!({"task_id": body.task_id, "reason": body.reason}))
         }
@@ -109,26 +98,17 @@ pub fn tool_args(method: &str, payload: &Value) -> Result<(Envelope<Value>, &'st
     Ok((envelope, tool, args))
 }
 
-fn validate_task_owner<T>(envelope: &Envelope<T>, task_id: &str) -> Result<(), String> {
-    let owners = task_owners().lock().map_err(|_| "task_owner_store_unavailable".to_string())?;
-    match owners.get(task_id) {
-        Some((run, worker)) if run == &envelope.managed_run_id && worker == &envelope.worker_id => Ok(()),
-        Some(_) => Err("task_identity_mismatch".into()),
-        None => Err("unknown_task".into()),
-    }
+pub fn observation_response(envelope: &Envelope<Value>, observation: Value) -> Value {
+    serde_json::json!({"type": "delegate_get_result", "schema_version": SCHEMA_VERSION, "managed_run_id": envelope.managed_run_id, "worker_id": envelope.worker_id, "observation": observation})
+}
+
+pub fn error_response(method: &str, envelope: &Envelope<Value>, error: &str) -> Value {
+    serde_json::json!({"type": format!("{method}_result"), "schema_version": SCHEMA_VERSION, "managed_run_id": envelope.managed_run_id, "worker_id": envelope.worker_id, "accepted": false, "rejection": {"code": error, "safe_message": error}})
 }
 
 pub fn response(method: &str, envelope: &Envelope<Value>, result: omegon_traits::ToolResult) -> Result<Value, String> {
     let details = result.details;
     let task_id = details.get("task_id").and_then(Value::as_str).map(str::to_string);
-    if method == "delegate_dispatch" {
-        if let Some(task_id) = task_id.as_ref() {
-            task_owners().lock().map_err(|_| "task_owner_store_unavailable".to_string())?.insert(
-                task_id.clone(),
-                (envelope.managed_run_id.clone(), envelope.worker_id.clone()),
-            );
-        }
-    }
     let text = result.content.iter().find_map(|block| match block { omegon_traits::ContentBlock::Text { text } => Some(text.clone()), _ => None }).unwrap_or_default();
     if method == "delegate_result" && text.len() > MAX_RESULT_BYTES { return Err("oversized_result".into()); }
     let body = match method {
@@ -138,7 +118,11 @@ pub fn response(method: &str, envelope: &Envelope<Value>, result: omegon_traits:
         "delegate_cancel" => serde_json::json!({"task_id": task_id, "acknowledged": true, "termination_confirmed": details.get("termination_confirmed").and_then(Value::as_bool).unwrap_or(false), "reason": details.get("reason")}),
         _ => return Err("unsupported_method".into()),
     };
-    Ok(serde_json::json!({"type": format!("{method}_result"), "schema_version": SCHEMA_VERSION, "managed_run_id": envelope.managed_run_id, "worker_id": envelope.worker_id, "body": body}))
+    let mut response = serde_json::json!({"type": format!("{method}_result"), "schema_version": SCHEMA_VERSION, "managed_run_id": envelope.managed_run_id, "worker_id": envelope.worker_id});
+    if let (Some(target), Value::Object(fields)) = (response.as_object_mut(), body) {
+        target.extend(fields);
+    }
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -151,5 +135,13 @@ mod tests {
         let reason = "x".repeat(MAX_REASON_BYTES + 1);
         let bad = serde_json::json!({"schema_version": 1, "managed_run_id":"r", "worker_id":"w", "task_id":"delegate_1", "reason":reason});
         assert_eq!(tool_args("delegate_cancel", &bad).unwrap_err(), "oversized_reason");
+    }
+
+    #[test]
+    fn responses_match_auspex_flat_envelope() {
+        let envelope = Envelope { schema_version: 1, managed_run_id: "run".into(), worker_id: "worker".into(), body: Value::Null };
+        let response = observation_response(&envelope, serde_json::json!({"task_id":"delegate_1"}));
+        assert_eq!(response["observation"]["task_id"], "delegate_1");
+        assert!(response.get("body").is_none());
     }
 }

@@ -190,6 +190,24 @@ impl DelegateResultStore {
         tasks.get(task_id).cloned()
     }
 
+    pub fn task_observation(&self, task_id: &str) -> Option<serde_json::Value> {
+        self.get_task(task_id).map(|task| serde_json::json!({
+            "task_id": task.task_id,
+            "label": task.label,
+            "agent_name": task.agent_name,
+            "task_description": task.task_description,
+            "status": task.status,
+            "result": task.result,
+            "result_viewed": task.result_viewed,
+            "started_at_unix_ms": task.started_at.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
+            "completed_at_unix_ms": task.completed_at.and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64),
+            "last_tool": task.last_tool.map(|tool| serde_json::json!({"tool": tool, "args_summary": task.last_tool_activity.and_then(|activity| activity.args_summary)})),
+            "last_turn": task.last_turn,
+            "checklist": task.tasks.into_iter().map(|item| serde_json::json!({"label": item.description, "done": item.done})).collect::<Vec<_>>(),
+            "route": task.route_decision.map(|route| serde_json::json!({"model": route.selected_model, "provider": serde_json::Value::Null, "fallback_used": route.fallback_reason.is_some()})),
+        }))
+    }
+
     pub fn mark_result_viewed(&self, task_id: &str) {
         let mut tasks = self.tasks.lock().unwrap();
         if let Some(task) = tasks.get_mut(task_id) {
@@ -1519,6 +1537,10 @@ impl DelegateFeature {
         self.progress_handle.clone()
     }
 
+    pub fn result_store_handle(&self) -> Arc<DelegateResultStore> {
+        self.result_store.clone()
+    }
+
     pub fn event_sender_slot(&self) -> DelegateEventSlot {
         self.event_slot.clone()
     }
@@ -2123,6 +2145,7 @@ impl Feature for DelegateFeature {
                             DelegateTaskStatus::Failed { .. } => "failed",
                         },
                         "reason": reason,
+                        "termination_confirmed": matches!(status, DelegateTaskStatus::Cancelled { .. }),
                     }),
                 })
             }
