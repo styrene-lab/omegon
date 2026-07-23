@@ -97,14 +97,9 @@ mod tests {
             }) as ExtensionRpcHandle,
         )]));
 
-        let result = call_extension_rpc(
-            &handles,
-            "fake",
-            "ping",
-            serde_json::json!({"value": 7}),
-        )
-        .await
-        .expect("RPC succeeds");
+        let result = call_extension_rpc(&handles, "fake", "ping", serde_json::json!({"value": 7}))
+            .await
+            .expect("RPC succeeds");
 
         assert_eq!(result, serde_json::json!({"pong": true}));
         assert_eq!(
