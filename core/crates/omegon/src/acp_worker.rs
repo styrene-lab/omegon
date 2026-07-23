@@ -83,6 +83,14 @@ pub struct WorkerResponse {
     pub cancelled: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanUpdateDisposition {
+    Replace,
+    Merge,
+    Retain,
+    Clear,
+}
+
 /// Event streamed from the worker during prompt execution.
 #[derive(Clone, Debug)]
 pub enum WorkerEvent {
@@ -112,6 +120,7 @@ pub enum WorkerEvent {
     /// Execution plan update (decomposition children, phased work).
     PlanUpdate {
         entries: Vec<PlanEntryData>,
+        disposition: PlanUpdateDisposition,
     },
     /// Session title derived from the first prompt or active skill.
     SessionTitle(String),
@@ -378,7 +387,10 @@ async fn worker_loop(
                                         status: PlanEntryState::Pending,
                                     })
                                     .collect();
-                                Some(WorkerEvent::PlanUpdate { entries })
+                                Some(WorkerEvent::PlanUpdate {
+                                    entries,
+                                    disposition: PlanUpdateDisposition::Replace,
+                                })
                             }
                             omegon_traits::AgentEvent::DecompositionChildCompleted {
                                 label,
@@ -397,6 +409,7 @@ async fn worker_loop(
                                         content: label,
                                         status,
                                     }],
+                                    disposition: PlanUpdateDisposition::Merge,
                                 })
                             }
                             omegon_traits::AgentEvent::DecompositionCompleted { .. } => {
@@ -406,7 +419,19 @@ async fn worker_loop(
                             }
                             omegon_traits::AgentEvent::PlanUpdated { projection } => {
                                 let entries = crate::acp::plan_entries_from_projection(&projection);
-                                Some(WorkerEvent::PlanUpdate { entries })
+                                let disposition = if entries.is_empty()
+                                    && projection.completed_session.is_some()
+                                {
+                                    PlanUpdateDisposition::Retain
+                                } else if entries.is_empty() {
+                                    PlanUpdateDisposition::Clear
+                                } else {
+                                    PlanUpdateDisposition::Replace
+                                };
+                                Some(WorkerEvent::PlanUpdate {
+                                    entries,
+                                    disposition,
+                                })
                             }
                             omegon_traits::AgentEvent::SystemNotification { message } => {
                                 Some(WorkerEvent::StatusUpdate(message))

@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Preserved the final completed ACP plan snapshot for Zed instead of clearing it when the internal plan archives, while explicit plan clears still remove the native plan UI; internal planning-gate receipts are no longer duplicated in the assistant transcript.
 - Restricted ACP host-read fallback to genuine capability-unavailable failures, preserving host permission denials and ordinary read errors as authoritative while reporting fallback provenance in tool details.
 - Added ACP profile open/copy workflows: editable project/user profiles return editor-openable file links, built-in profiles explain their immutable status, and copies use atomic writes without overwriting existing profiles.
 - Fixed ACP Profile selectors to use the authoritative scope-qualified active selection and guarantee that `currentValue` is present in the advertised inventory, preventing Zed/VS Code from rendering the active profile as `Unknown`.

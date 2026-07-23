@@ -508,20 +508,22 @@ pub(crate) fn plan_entries_from_snapshot_json(
 fn merge_plan_entries(
     plan_state: &mut Vec<acp_worker::PlanEntryData>,
     entries: Vec<acp_worker::PlanEntryData>,
+    disposition: acp_worker::PlanUpdateDisposition,
 ) {
-    if entries.is_empty() {
-        plan_state.clear();
-    } else if entries.len() > 1 || plan_state.is_empty() {
-        *plan_state = entries;
-    } else {
-        for update in entries {
-            if let Some(existing) = plan_state
-                .iter_mut()
-                .find(|entry| entry.content == update.content)
-            {
-                existing.status = update.status;
-            } else {
-                plan_state.push(update);
+    match disposition {
+        acp_worker::PlanUpdateDisposition::Retain => {}
+        acp_worker::PlanUpdateDisposition::Clear => plan_state.clear(),
+        acp_worker::PlanUpdateDisposition::Replace => *plan_state = entries,
+        acp_worker::PlanUpdateDisposition::Merge => {
+            for update in entries {
+                if let Some(existing) = plan_state
+                    .iter_mut()
+                    .find(|entry| entry.content == update.content)
+                {
+                    existing.status = update.status;
+                } else {
+                    plan_state.push(update);
+                }
             }
         }
     }
@@ -560,32 +562,16 @@ fn acp_status_message_text(msg: &str) -> Option<String> {
         return None;
     }
 
-    if trimmed.contains("Plan mode:") || trimmed.starts_with("Plan ") {
-        let mode = trimmed
-            .lines()
-            .find_map(|line| line.trim().strip_prefix("Plan mode:"))
-            .map(str::trim)
-            .unwrap_or("");
-
-        let text = if trimmed.starts_with("Plan progress") {
-            return None;
-        } else if trimmed.starts_with("Plan set") && mode == "planning" {
-            "Planning mode — edits blocked until approval.".to_string()
-        } else if trimmed.starts_with("Plan approved") || mode == "approved" {
-            "Plan approved — execution may proceed.".to_string()
-        } else if trimmed.starts_with("Plan executing") || mode == "executing" {
-            "Plan executing.".to_string()
-        } else if trimmed.starts_with("Plan cleared") || mode == "off" {
-            "Plan cleared.".to_string()
-        } else if trimmed.starts_with("Plan item skipped") {
-            "Plan item skipped.".to_string()
-        } else if mode == "complete" {
-            return None;
-        } else {
-            "Plan updated.".to_string()
-        };
-
-        return Some(text);
+    let lowercase = trimmed.to_ascii_lowercase();
+    if lowercase.starts_with("plan ")
+        || lowercase.starts_with("planning mode")
+        || lowercase.starts_with("planning complete")
+        || lowercase.contains("plan mode:")
+    {
+        // ACP clients receive the complete plan through the native
+        // SessionUpdate::Plan projection. Do not duplicate internal plan gate
+        // receipts in the assistant transcript.
+        return None;
     }
 
     Some(trimmed.to_string())
@@ -1636,11 +1622,14 @@ impl OmegonAcpAgent {
                                 .await;
                             }
                         }
-                        Ok(WorkerEvent::PlanUpdate { entries }) => {
-                            // ACP plans are complete replacement snapshots. Suppress
-                            // initial/repeated empties and identical projections; send
-                            // one empty snapshot only when clearing a visible plan.
-                            merge_plan_entries(&mut plan_state, entries);
+                        Ok(WorkerEvent::PlanUpdate {
+                            entries,
+                            disposition,
+                        }) => {
+                            // ACP plans are complete replacement snapshots. A
+                            // completed plan remains visible for the rest of the
+                            // turn; only an explicit clear sends an empty snapshot.
+                            merge_plan_entries(&mut plan_state, entries, disposition);
                             let plan_entries = acp_plan_entries(&plan_state);
                             let should_send = match &last_acp_plan_entries {
                                 None => !plan_entries.is_empty(),
@@ -6119,10 +6108,7 @@ Progress: 0/4
 
 1. ◐ Inventory docs";
 
-        assert_eq!(
-            acp_status_message_text(raw).as_deref(),
-            Some("Planning mode — edits blocked until approval.")
-        );
+        assert_eq!(acp_status_message_text(raw), None);
     }
 
     #[test]
@@ -6132,9 +6118,8 @@ Progress: 0/4
                 "Plan approved
 Plan mode: approved
 Progress: 0/2"
-            )
-            .as_deref(),
-            Some("Plan approved — execution may proceed.")
+            ),
+            None
         );
         assert_eq!(
             acp_status_message_text(
@@ -6327,7 +6312,11 @@ Progress: 1/2"
                 status: PlanEntryState::Pending,
             },
         ];
-        merge_plan_entries(&mut plan_state, entries);
+        merge_plan_entries(
+            &mut plan_state,
+            entries,
+            crate::acp_worker::PlanUpdateDisposition::Replace,
+        );
         assert_eq!(plan_state.len(), 3);
 
         // Single entry update merges
@@ -6335,7 +6324,11 @@ Progress: 1/2"
             content: "B".into(),
             status: PlanEntryState::Completed,
         }];
-        merge_plan_entries(&mut plan_state, update);
+        merge_plan_entries(
+            &mut plan_state,
+            update,
+            crate::acp_worker::PlanUpdateDisposition::Merge,
+        );
         assert_eq!(plan_state[0].status, PlanEntryState::Pending);
         assert_eq!(plan_state[1].status, PlanEntryState::Completed);
         assert_eq!(plan_state[2].status, PlanEntryState::Pending);
@@ -6532,6 +6525,33 @@ Progress: 1/2"
     }
 
     #[test]
+    fn completed_plan_projection_retains_final_snapshot() {
+        use crate::acp_worker::{PlanEntryData, PlanEntryState, PlanUpdateDisposition};
+
+        let mut plan_state = vec![PlanEntryData {
+            content: "Finished".into(),
+            status: PlanEntryState::Completed,
+        }];
+        merge_plan_entries(&mut plan_state, Vec::new(), PlanUpdateDisposition::Retain);
+
+        assert_eq!(plan_state.len(), 1);
+        assert_eq!(plan_state[0].status, PlanEntryState::Completed);
+    }
+
+    #[test]
+    fn explicit_plan_clear_removes_snapshot() {
+        use crate::acp_worker::{PlanEntryData, PlanEntryState, PlanUpdateDisposition};
+
+        let mut plan_state = vec![PlanEntryData {
+            content: "Finished".into(),
+            status: PlanEntryState::Completed,
+        }];
+        merge_plan_entries(&mut plan_state, Vec::new(), PlanUpdateDisposition::Clear);
+
+        assert!(plan_state.is_empty());
+    }
+
+    #[test]
     fn plan_merge_single_entry_initializes_empty() {
         use crate::acp_worker::{PlanEntryData, PlanEntryState};
 
@@ -6542,7 +6562,11 @@ Progress: 1/2"
             content: "Solo".into(),
             status: PlanEntryState::Pending,
         }];
-        merge_plan_entries(&mut plan_state, entries);
+        merge_plan_entries(
+            &mut plan_state,
+            entries,
+            crate::acp_worker::PlanUpdateDisposition::Replace,
+        );
         assert_eq!(plan_state.len(), 1);
         assert_eq!(plan_state[0].content, "Solo");
     }
@@ -6573,7 +6597,11 @@ Progress: 1/2"
                 status: PlanEntryState::Pending,
             },
         ];
-        merge_plan_entries(&mut plan_state, new_entries);
+        merge_plan_entries(
+            &mut plan_state,
+            new_entries,
+            crate::acp_worker::PlanUpdateDisposition::Replace,
+        );
         assert_eq!(plan_state.len(), 2);
         assert_eq!(plan_state[0].content, "New X");
     }
