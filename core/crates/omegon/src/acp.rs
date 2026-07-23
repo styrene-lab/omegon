@@ -4309,13 +4309,32 @@ impl OmegonAcpAgent {
             .clone()
             .unwrap_or_else(|| std::path::PathBuf::from("."));
         let secrets = self.secrets.borrow().clone()?;
-        let settings = crate::settings::shared(&self.model);
+        let settings = self
+            .worker
+            .borrow()
+            .as_ref()
+            .map(|worker| worker.settings.clone())?;
         let handles = crate::tui::dashboard::DashboardHandles::default();
         crate::control_runtime::execute_stateless_control(
             &request, &settings, &secrets, &cwd, &handles,
         )
         .await
         .and_then(|response| response.output)
+    }
+
+    async fn execute_worker_control_command(
+        &self,
+        request: crate::control_runtime::ControlRequest,
+    ) -> Option<String> {
+        let tx = self.worker.borrow().as_ref()?.request_tx.clone();
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        tx.send(WorkerRequest::CanonicalControlRequest {
+            request,
+            response_tx,
+        })
+        .await
+        .ok()?;
+        response_rx.await.ok().map(|response| response.text)
     }
 
     async fn handle_slash_command(&self, input: &str) -> String {
@@ -4335,9 +4354,17 @@ impl OmegonAcpAgent {
                     | crate::tui::CanonicalSlashCommand::SkillGet(_)
                     | crate::tui::CanonicalSlashCommand::SkillDelete(_)
             )
-            && let Some(output) = self.execute_shared_control_command(&command).await
         {
-            return output;
+            if let Some(output) = self.execute_shared_control_command(&command).await {
+                return output;
+            }
+            let Some(request) = crate::control_runtime::control_request_from_slash(&command) else {
+                return "Unsupported ACP control request".into();
+            };
+            if let Some(output) = self.execute_worker_control_command(request).await {
+                return output;
+            }
+            return "ACP worker is not initialized".into();
         }
 
         if let Some(binding) = acp_command_binding(advertised_name)

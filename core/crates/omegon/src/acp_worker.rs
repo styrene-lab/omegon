@@ -68,6 +68,12 @@ pub enum WorkerRequest {
         command: String,
         response_tx: oneshot::Sender<WorkerResponse>,
     },
+    /// Execute a normalized control request directly, avoiding reparsing when
+    /// the ACP transport has already resolved the canonical command.
+    CanonicalControlRequest {
+        request: crate::control_runtime::ControlRequest,
+        response_tx: oneshot::Sender<WorkerResponse>,
+    },
     /// Connect MCP servers forwarded by the ACP client.
     ConnectMcpServers {
         servers: Vec<(String, crate::plugins::mcp::McpServerConfig)>,
@@ -669,6 +675,28 @@ async fn worker_loop(
                         Err(e) => text = format!("Persona switch failed: {e}"),
                     }
                 }
+                let _ = response_tx.send(WorkerResponse {
+                    text,
+                    error: None,
+                    cancelled: false,
+                });
+            }
+
+            WorkerRequest::CanonicalControlRequest {
+                request,
+                response_tx,
+            } => {
+                let handles = crate::tui::dashboard::DashboardHandles::default();
+                let text = crate::control_runtime::execute_stateless_control(
+                    &request,
+                    &shared_settings,
+                    &secrets,
+                    &cwd,
+                    &handles,
+                )
+                .await
+                .and_then(|response| response.output)
+                .unwrap_or_else(|| "Unsupported ACP control request".into());
                 let _ = response_tx.send(WorkerResponse {
                     text,
                     error: None,
