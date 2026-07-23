@@ -18,7 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
-- Fixed Zed native skill synchronization to emit Zed-compatible YAML-frontmatter projections under `~/.omegon/zed-skills` before linking them into `~/.agents/skills`; TOML-frontmatter Omegon skills are now discoverable by Zed while Omegon remains canonical.
+- Fixed Zed native skill synchronization to emit Zed-compatible YAML-frontmatter projections as real managed directories under `~/.agents/skills`; this avoids Zed's global inventory ignoring directory symlinks while retaining marker-based ownership and safe updates.
+- Fixed Zed native skill synchronization to emit Zed-compatible YAML-frontmatter projections under `~/.omegon/zed-skills` before installing them into `~/.agents/skills`; TOML-frontmatter Omegon skills are now discoverable by Zed while Omegon remains canonical.
 - Added an explicit `omegon skills editor status|sync zed` bridge that symlinks portable user-level Omegon skills into Zed's native `~/.agents/skills` inventory under collision-safe `omegon-<name>` entries, with legacy bridge cleanup, dry-run/status reporting, and idempotent ownership while keeping Omegon canonical.
 - Expanded the managed-process viewer with previous/next session switching and a confirmed stop action while keeping terminal input disabled.
 - Added a read-only managed-process viewer in the TUI, opened with `/processes [session-id-or-name]`, with lifecycle/provenance metadata, retained output, scrolling, and follow mode over the shared execution-session projection.

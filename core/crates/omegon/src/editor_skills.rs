@@ -1,8 +1,8 @@
 //! Explicit bridges from Omegon's canonical skill inventory to editor-native inventories.
 //!
-//! Omegon remains the source of truth. The Zed bridge uses symlinks rather than
-//! copying skill contents, writes only links it can prove it owns, and refuses
-//! to replace user-authored files or links.
+//! Omegon remains the source of truth. The Zed bridge writes normalized
+//! YAML-frontmatter projections directly into Zed's native inventory and
+//! refuses to replace user-authored files.
 
 use std::path::{Path, PathBuf};
 
@@ -51,17 +51,13 @@ impl ZedSkillBridgeReport {
 }
 
 pub fn zed_status() -> anyhow::Result<ZedSkillBridgeReport> {
-    let source = zed_bridge_source_dir()?;
-    let target = zed_managed_skills_dir()?;
-    inspect_zed_bridge(&source, &target)
+    inspect_zed_bridge(&user_skills_dir()?, &zed_managed_skills_dir()?)
 }
 
 pub fn zed_sync(dry_run: bool) -> anyhow::Result<ZedSkillBridgeReport> {
     let source = user_skills_dir()?;
-    let bridge_source = zed_bridge_source_dir()?;
-    prepare_zed_yaml_skills(&source, &bridge_source, dry_run)?;
     let target = zed_managed_skills_dir()?;
-    let mut report = sync_zed_bridge(&bridge_source, &target, dry_run)?;
+    let mut report = sync_zed_bridge(&source, &target, dry_run)?;
     cleanup_legacy_zed_bridge(&mut report, dry_run)?;
     Ok(report)
 }
@@ -75,12 +71,6 @@ fn user_skills_dir() -> anyhow::Result<PathBuf> {
 fn zed_managed_skills_dir() -> anyhow::Result<PathBuf> {
     dirs::home_dir()
         .map(|home| home.join(".agents/skills"))
-        .ok_or_else(|| anyhow::anyhow!("home directory is unavailable"))
-}
-
-fn zed_bridge_source_dir() -> anyhow::Result<PathBuf> {
-    dirs::home_dir()
-        .map(|home| home.join(".omegon/zed-skills"))
         .ok_or_else(|| anyhow::anyhow!("home directory is unavailable"))
 }
 
@@ -121,25 +111,6 @@ fn portable_skill_sources(source: &Path) -> anyhow::Result<Vec<(String, PathBuf)
     }
     skills.sort_by(|left, right| left.0.cmp(&right.0));
     Ok(skills)
-}
-
-fn prepare_zed_yaml_skills(source: &Path, target: &Path, dry_run: bool) -> anyhow::Result<()> {
-    for (name, source_dir) in portable_skill_sources(source)? {
-        let content = std::fs::read_to_string(source_dir.join("SKILL.md"))?;
-        let (manifest, body) = omegon_skills::parse_skill_file(&content);
-        let rendered = format!(
-            "---\nname: {}\ndescription: {}\n---\n{}",
-            serde_json::to_string(&manifest.name)?,
-            serde_json::to_string(&manifest.description)?,
-            body.trim_start()
-        );
-        if !dry_run {
-            let skill_dir = target.join(&name);
-            std::fs::create_dir_all(&skill_dir)?;
-            crate::filelock::atomic_write_locked(&skill_dir.join("SKILL.md"), rendered.as_bytes())?;
-        }
-    }
-    Ok(())
 }
 
 fn inspect_zed_bridge(source: &Path, target: &Path) -> anyhow::Result<ZedSkillBridgeReport> {
@@ -192,72 +163,102 @@ fn sync_zed_bridge(
         std::fs::create_dir_all(target)?;
     }
 
-    for (name, source_path) in &sources {
-        let link_name = zed_link_name(name);
-        let link = target.join(&link_name);
-        match std::fs::symlink_metadata(&link) {
+    for (name, source_dir) in &sources {
+        let entry_name = zed_link_name(name);
+        let destination = target.join(&entry_name);
+        match std::fs::symlink_metadata(&destination) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                let existing = std::fs::read_link(&link)?;
-                if existing == *source_path {
-                    report.unchanged_count += 1;
-                } else if is_owned_omegon_skill_target(&existing) {
-                    if !dry_run {
-                        std::fs::remove_file(&link)?;
-                        create_dir_symlink(source_path, &link)?;
-                    }
-                    report.linked_count += 1;
-                    report.removed_count += 1;
-                } else {
+                let existing = std::fs::read_link(&destination)?;
+                if !is_owned_omegon_skill_target(&existing) {
                     report.conflict_count += 1;
                     report
                         .conflicts
-                        .push(format!("{name}: existing symlink points elsewhere"));
+                        .push(format!("{name}: existing symlink is not owned by Omegon"));
+                    continue;
+                }
+                if !dry_run {
+                    std::fs::remove_file(&destination)?;
+                }
+                report.removed_count += 1;
+            }
+            Ok(metadata) if metadata.is_dir() => {
+                let marker = destination.join(".omegon-managed");
+                if !marker.is_file() {
+                    report.conflict_count += 1;
+                    report
+                        .conflicts
+                        .push(format!("{name}: existing directory is not owned by Omegon"));
+                    continue;
                 }
             }
             Ok(_) => {
                 report.conflict_count += 1;
                 report
                     .conflicts
-                    .push(format!("{name}: target exists and is not a symlink"));
+                    .push(format!("{name}: target exists and is not a directory"));
+                continue;
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if !dry_run {
-                    create_dir_symlink(source_path, &link)?;
-                }
-                report.linked_count += 1;
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
+
+        let content = std::fs::read_to_string(source_dir.join("SKILL.md"))?;
+        let (manifest, body) = omegon_skills::parse_skill_file(&content);
+        let rendered = format!(
+            "---\nname: {}\ndescription: {}\n---\n{}",
+            serde_json::to_string(&manifest.name)?,
+            serde_json::to_string(&manifest.description)?,
+            body.trim_start()
+        );
+        let current = std::fs::read_to_string(destination.join("SKILL.md")).ok();
+        if current.as_deref() == Some(rendered.as_str()) {
+            report.unchanged_count += 1;
+            continue;
+        }
+        if !dry_run {
+            std::fs::create_dir_all(&destination)?;
+            crate::filelock::atomic_write_locked(
+                &destination.join("SKILL.md"),
+                rendered.as_bytes(),
+            )?;
+            crate::filelock::atomic_write_locked(
+                &destination.join(".omegon-managed"),
+                b"managed by omegon skills editor sync zed\n",
+            )?;
+        }
+        report.linked_count += 1;
     }
 
     if target.exists() {
         for entry in std::fs::read_dir(target)? {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().to_string();
-            if source_names.contains(&name) {
-                continue;
-            }
-            if !name.starts_with("omegon-") {
+            if source_names.contains(&name) || !name.starts_with("omegon-") {
                 continue;
             }
             let metadata = std::fs::symlink_metadata(entry.path())?;
-            if metadata.file_type().is_symlink() {
+            let owned = metadata.file_type().is_symlink()
+                || (metadata.is_dir() && entry.path().join(".omegon-managed").is_file());
+            if owned {
                 if !dry_run {
-                    std::fs::remove_file(entry.path())?;
+                    if metadata.file_type().is_symlink() {
+                        std::fs::remove_file(entry.path())?;
+                    } else {
+                        std::fs::remove_dir_all(entry.path())?;
+                    }
                 }
                 report.removed_count += 1;
             } else {
                 report.conflict_count += 1;
                 report
                     .conflicts
-                    .push(format!("{name}: stale target is not a symlink"));
+                    .push(format!("{name}: stale target is not owned by Omegon"));
             }
         }
     }
 
     Ok(report)
 }
-
 fn cleanup_legacy_zed_bridge(
     report: &mut ZedSkillBridgeReport,
     dry_run: bool,
@@ -328,10 +329,10 @@ mod tests {
 
         let first = sync_zed_bridge(&source, &target, false).unwrap();
         assert_eq!(first.linked_count, 1);
-        assert_eq!(
-            std::fs::read_link(target.join("omegon-rust")).unwrap(),
-            source.join("rust")
-        );
+        let installed = target.join("omegon-rust");
+        assert!(installed.join(".omegon-managed").is_file());
+        let content = std::fs::read_to_string(installed.join("SKILL.md")).unwrap();
+        assert!(content.starts_with("---\nname: \"rust\""));
 
         let second = sync_zed_bridge(&source, &target, false).unwrap();
         assert_eq!(second.unchanged_count, 1);
@@ -365,10 +366,15 @@ mod tests {
         let report = sync_zed_bridge(&source, &target, false).unwrap();
         assert_eq!(report.linked_count, 1);
         assert_eq!(report.removed_count, 1);
-        assert_eq!(
-            std::fs::read_link(target.join("omegon-rust")).unwrap(),
-            source.join("rust")
+        let installed = target.join("omegon-rust");
+        assert!(installed.is_dir());
+        assert!(
+            !std::fs::symlink_metadata(&installed)
+                .unwrap()
+                .file_type()
+                .is_symlink()
         );
+        assert!(installed.join(".omegon-managed").is_file());
     }
 
     #[test]
