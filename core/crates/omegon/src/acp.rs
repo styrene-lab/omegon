@@ -567,7 +567,9 @@ fn acp_status_message_text(msg: &str) -> Option<String> {
             .map(str::trim)
             .unwrap_or("");
 
-        let text = if trimmed.starts_with("Plan set") && mode == "planning" {
+        let text = if trimmed.starts_with("Plan progress") {
+            return None;
+        } else if trimmed.starts_with("Plan set") && mode == "planning" {
             "Planning mode — edits blocked until approval.".to_string()
         } else if trimmed.starts_with("Plan approved") || mode == "approved" {
             "Plan approved — execution may proceed.".to_string()
@@ -577,7 +579,7 @@ fn acp_status_message_text(msg: &str) -> Option<String> {
             "Plan cleared.".to_string()
         } else if trimmed.starts_with("Plan item skipped") {
             "Plan item skipped.".to_string()
-        } else if trimmed.starts_with("Plan progress") || mode == "complete" {
+        } else if mode == "complete" {
             return None;
         } else {
             "Plan updated.".to_string()
@@ -847,59 +849,34 @@ impl OmegonAcpAgent {
             .collect();
 
         let registry = crate::settings::ProfileRegistry::discover(cwd);
-        let selected_profile = crate::settings::active_profile_selection(cwd)
-            .map(|selection| {
-                format!(
-                    "{}:{}",
-                    selection.scope.as_deref().unwrap_or("project"),
-                    selection.id
-                )
-            })
-            .unwrap_or_else(|| {
-                if current_profile.contains(':') {
-                    current_profile.to_string()
-                } else {
-                    format!("built-in:{current_profile}")
-                }
-            });
         let mut profile_options: Vec<SessionConfigSelectOption> = registry
             .entries
             .iter()
             .map(|entry| {
                 let scope = entry.scope.as_str();
-                let label = entry.profile.compact_label().unwrap_or(&entry.id);
-                let description = match (&entry.path, entry.editable) {
-                    (Some(path), true) => format!(
-                        "Editable {scope} profile · {} · /profile open {scope}:{}",
-                        path.display(),
-                        entry.id
-                    ),
-                    (Some(path), false) => {
-                        format!("Read-only {scope} profile · {}", path.display())
-                    }
-                    (None, _) => format!(
-                        "Read-only built-in defaults · /profile copy built-in:{} project:<new-id>",
-                        entry.id
-                    ),
-                };
                 SessionConfigSelectOption::new(
                     format!("{scope}:{}", entry.id),
-                    format!("{label} — {scope}"),
+                    format!(
+                        "{} — {scope}",
+                        entry.profile.compact_label().unwrap_or(&entry.id)
+                    ),
                 )
-                .description(description)
             })
             .collect();
-        if !profile_options
-            .iter()
-            .any(|option| option.value.0.as_ref() == selected_profile)
-        {
+        if !profile_options.iter().any(|option| {
+            option
+                .value
+                .0
+                .rsplit_once(':')
+                .is_some_and(|(_, id)| id == current_profile)
+                || option.value.0.as_ref() == current_profile
+        }) {
             profile_options.insert(
                 0,
                 SessionConfigSelectOption::new(
-                    selected_profile.clone(),
+                    current_profile.to_string(),
                     format!("{current_profile} — current"),
-                )
-                .description("Current profile selection"),
+                ),
             );
         }
 
@@ -928,7 +905,7 @@ impl OmegonAcpAgent {
                 "profile",
                 "Profile",
                 SessionConfigKind::Select(SessionConfigSelect::new(
-                    selected_profile,
+                    current_profile.to_string(),
                     profile_options,
                 )),
             )
@@ -1483,6 +1460,7 @@ impl OmegonAcpAgent {
                 let mut last_acp_plan_entries: Option<Vec<PlanEntry>> = None;
                 let mut surface_adapter =
                     AcpConversationSurfaceAdapter::with_turn_id(stream_sid.to_string());
+                let mut native_plan_tool_ids = std::collections::BTreeSet::new();
                 loop {
                     match event_rx.recv().await {
                         Ok(WorkerEvent::TextChunk(text)) => {
@@ -1527,6 +1505,7 @@ impl OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::ToolStart { id, name, args }) => {
                             if is_plan_tool(&name) {
+                                native_plan_tool_ids.insert(id);
                                 continue;
                             }
                             let (surface_args_summary, surface_detail_args) =
@@ -1588,11 +1567,10 @@ impl OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::ToolEnd {
                             id,
-                            name,
                             success,
                             details,
                         }) => {
-                            if is_plan_tool(&name) {
+                            if native_plan_tool_ids.remove(&id) {
                                 continue;
                             }
                             let surface_result = acp_surface_tool_result(&details);
@@ -4151,8 +4129,6 @@ impl OmegonAcpAgent {
             | "control/max_turns"
             | "control/persona_list"
             | "control/persona_switch"
-            | "control/profile_open"
-            | "control/profile_copy"
             | "control/profile_view"
             | "control/profile_capture"
             | "control/profile_apply"
