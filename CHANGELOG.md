@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - Restricted ACP host-read fallback to genuine capability-unavailable failures, preserving host permission denials and ordinary read errors as authoritative while reporting fallback provenance in tool details.
+- Suppressed ACP plan pseudo-tool rows and redundant `Plan progress updated.` transcript text so native plan updates are the sole checklist presentation in editor clients.
 - Corrected ACP plan snapshot delivery to suppress initial/repeated empty projections and duplicate snapshots, while retaining a single empty replacement when an existing plan is explicitly cleared.
 - Preserved the negotiated ACP session working directory when delegating terminal commands to the editor host.
 - Made `/editor zed` parse comments and trailing commas in Zed's JSONC settings, write atomically, and fail closed on malformed or incompatible existing settings instead of replacing them with a new empty document.

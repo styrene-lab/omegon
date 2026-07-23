@@ -550,6 +550,10 @@ fn acp_plan_entries(entries: &[acp_worker::PlanEntryData]) -> Vec<PlanEntry> {
         .collect()
 }
 
+fn is_plan_tool(name: &str) -> bool {
+    name == crate::tool_registry::core::PLAN
+}
+
 fn acp_status_message_text(msg: &str) -> Option<String> {
     let trimmed = msg.trim();
     if trimmed.is_empty() {
@@ -574,7 +578,7 @@ fn acp_status_message_text(msg: &str) -> Option<String> {
         } else if trimmed.starts_with("Plan item skipped") {
             "Plan item skipped.".to_string()
         } else if trimmed.starts_with("Plan progress") || mode == "complete" {
-            "Plan progress updated.".to_string()
+            return None;
         } else {
             "Plan updated.".to_string()
         };
@@ -843,34 +847,59 @@ impl OmegonAcpAgent {
             .collect();
 
         let registry = crate::settings::ProfileRegistry::discover(cwd);
+        let selected_profile = crate::settings::active_profile_selection(cwd)
+            .map(|selection| {
+                format!(
+                    "{}:{}",
+                    selection.scope.as_deref().unwrap_or("project"),
+                    selection.id
+                )
+            })
+            .unwrap_or_else(|| {
+                if current_profile.contains(':') {
+                    current_profile.to_string()
+                } else {
+                    format!("built-in:{current_profile}")
+                }
+            });
         let mut profile_options: Vec<SessionConfigSelectOption> = registry
             .entries
             .iter()
             .map(|entry| {
                 let scope = entry.scope.as_str();
+                let label = entry.profile.compact_label().unwrap_or(&entry.id);
+                let description = match (&entry.path, entry.editable) {
+                    (Some(path), true) => format!(
+                        "Editable {scope} profile · {} · /profile open {scope}:{}",
+                        path.display(),
+                        entry.id
+                    ),
+                    (Some(path), false) => {
+                        format!("Read-only {scope} profile · {}", path.display())
+                    }
+                    (None, _) => format!(
+                        "Read-only built-in defaults · /profile copy built-in:{} project:<new-id>",
+                        entry.id
+                    ),
+                };
                 SessionConfigSelectOption::new(
                     format!("{scope}:{}", entry.id),
-                    format!(
-                        "{} — {scope}",
-                        entry.profile.compact_label().unwrap_or(&entry.id)
-                    ),
+                    format!("{label} — {scope}"),
                 )
+                .description(description)
             })
             .collect();
-        if !profile_options.iter().any(|option| {
-            option
-                .value
-                .0
-                .rsplit_once(':')
-                .is_some_and(|(_, id)| id == current_profile)
-                || option.value.0.as_ref() == current_profile
-        }) {
+        if !profile_options
+            .iter()
+            .any(|option| option.value.0.as_ref() == selected_profile)
+        {
             profile_options.insert(
                 0,
                 SessionConfigSelectOption::new(
-                    current_profile.to_string(),
+                    selected_profile.clone(),
                     format!("{current_profile} — current"),
-                ),
+                )
+                .description("Current profile selection"),
             );
         }
 
@@ -899,7 +928,7 @@ impl OmegonAcpAgent {
                 "profile",
                 "Profile",
                 SessionConfigKind::Select(SessionConfigSelect::new(
-                    current_profile.to_string(),
+                    selected_profile,
                     profile_options,
                 )),
             )
@@ -1497,6 +1526,9 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ToolStart { id, name, args }) => {
+                            if is_plan_tool(&name) {
+                                continue;
+                            }
                             let (surface_args_summary, surface_detail_args) =
                                 acp_surface_tool_args(&name, args.as_ref());
                             shadow_surface_update(
@@ -1556,9 +1588,13 @@ impl OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::ToolEnd {
                             id,
+                            name,
                             success,
                             details,
                         }) => {
+                            if is_plan_tool(&name) {
+                                continue;
+                            }
                             let surface_result = acp_surface_tool_result(&details);
                             shadow_surface_update(
                                 conn.borrow().as_ref(),
@@ -4115,6 +4151,8 @@ impl OmegonAcpAgent {
             | "control/max_turns"
             | "control/persona_list"
             | "control/persona_switch"
+            | "control/profile_open"
+            | "control/profile_copy"
             | "control/profile_view"
             | "control/profile_capture"
             | "control/profile_apply"
@@ -6123,10 +6161,15 @@ Progress: 0/2"
                 "Plan progress
 Plan mode: executing
 Progress: 1/2"
-            )
-            .as_deref(),
-            Some("Plan executing.")
+            ),
+            None
         );
+    }
+
+    #[test]
+    fn plan_tool_is_identified_for_native_only_acp_projection() {
+        assert!(is_plan_tool("plan"));
+        assert!(!is_plan_tool("bash"));
     }
 
     #[test]
