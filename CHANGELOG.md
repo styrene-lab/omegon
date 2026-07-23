@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Clarified the ACP/editor ownership boundary: Zed's native Skills settings page belongs to Zed's built-in agent and is not populated by ACP agents; Omegon `/skills` remains the supported skill inventory and execution surface in Omegon ACP threads.
 - Fixed Zed native skill synchronization to emit Zed-compatible YAML-frontmatter projections as real managed directories under `~/.agents/skills`; this avoids Zed's global inventory ignoring directory symlinks while retaining marker-based ownership and safe updates.
 - Fixed Zed native skill synchronization to emit Zed-compatible YAML-frontmatter projections under `~/.omegon/zed-skills` before installing them into `~/.agents/skills`; TOML-frontmatter Omegon skills are now discoverable by Zed while Omegon remains canonical.
 - Added an explicit `omegon skills editor status|sync zed` bridge that symlinks portable user-level Omegon skills into Zed's native `~/.agents/skills` inventory under collision-safe `omegon-<name>` entries, with legacy bridge cleanup, dry-run/status reporting, and idempotent ownership while keeping Omegon canonical.

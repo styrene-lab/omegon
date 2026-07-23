@@ -4321,6 +4321,10 @@ impl OmegonAcpAgent {
 
         let advertised_name = cmd.strip_prefix('/').unwrap_or(cmd);
 
+        if matches!(advertised_name, "skills" | "skill") && args.starts_with("editor ") {
+            return "Zed's native Skills settings are owned by Zed's native agent and are not an ACP extension surface. Omegon skills remain available through `/skills` and to the Omegon ACP agent; use a Zed-native thread if you want entries in Zed's native Skills page.".into();
+        }
+
         if let Some(command) = crate::tui::canonical_slash_command(advertised_name, args) {
             if let Some(request) = crate::control_runtime::control_request_from_slash(&command) {
                 if let Some(output) = self.execute_worker_control_command(request).await {
@@ -4330,7 +4334,7 @@ impl OmegonAcpAgent {
             }
 
             if matches!(command, crate::tui::CanonicalSlashCommand::SkillsReload) {
-                return "Skill reload requires restarting this ACP session; start a new editor thread to activate user or project skill changes.".into();
+                return "Skill reload requires restarting this ACP session. Zed's native Skills settings are owned by Zed's built-in agent and do not reflect ACP agent skills.".into();
             }
 
             if matches!(
@@ -4771,6 +4775,12 @@ mod extension_metadata_tests {
                 .handle_slash_command("/skills create --project")
                 .await
                 .contains("agent turn")
+        );
+        assert!(
+            agent
+                .handle_slash_command("/skills editor sync zed")
+                .await
+                .contains("native agent")
         );
     }
 
