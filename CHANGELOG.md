@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - Advertised exact ACP build identity through standard `agentInfo.version` and title (`<semver>+git.<sha>[.dirty]`), attached structured build metadata, and added a portable `/version` command so IDE operators can immediately detect stale agent subprocesses.
+- Marked all remaining non-failed ACP plan entries complete when the internal plan archives at successful turn completion, preventing editor clients from retaining a final in-progress spinner after the answer has finished.
 - Preserved the final completed ACP plan snapshot for Zed instead of clearing it when the internal plan archives, while explicit plan clears still remove the native plan UI; internal planning-gate receipts are no longer duplicated in the assistant transcript.
 - Restricted ACP host-read fallback to genuine capability-unavailable failures, preserving host permission denials and ordinary read errors as authoritative while reporting fallback provenance in tool details.
 - Added ACP profile open/copy workflows: editable project/user profiles return editor-openable file links, built-in profiles explain their immutable status, and copies use atomic writes without overwriting existing profiles.

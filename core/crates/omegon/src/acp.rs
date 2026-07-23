@@ -572,6 +572,21 @@ fn is_plan_tool(name: &str) -> bool {
     name == crate::tool_registry::core::PLAN
 }
 
+fn complete_plan_entries(
+    plan_state: &[acp_worker::PlanEntryData],
+) -> Vec<acp_worker::PlanEntryData> {
+    plan_state
+        .iter()
+        .cloned()
+        .map(|mut entry| {
+            if entry.status != acp_worker::PlanEntryState::Failed {
+                entry.status = acp_worker::PlanEntryState::Completed;
+            }
+            entry
+        })
+        .collect()
+}
+
 fn acp_status_message_text(msg: &str) -> Option<String> {
     let trimmed = msg.trim();
     if trimmed.is_empty() {
@@ -1651,6 +1666,9 @@ impl OmegonAcpAgent {
                             // completed plan remains visible for the rest of the
                             // turn; only an explicit clear sends an empty snapshot.
                             merge_plan_entries(&mut plan_state, entries, disposition);
+                            if disposition == acp_worker::PlanUpdateDisposition::Retain {
+                                plan_state = complete_plan_entries(&plan_state);
+                            }
                             let plan_entries = acp_plan_entries(&plan_state);
                             let should_send = match &last_acp_plan_entries {
                                 None => !plan_entries.is_empty(),
@@ -6550,6 +6568,30 @@ Progress: 1/2"
         };
 
         assert_eq!(context.cwd, cwd);
+    }
+
+    #[test]
+    fn completed_plan_projection_marks_remaining_items_complete() {
+        use crate::acp_worker::{PlanEntryData, PlanEntryState};
+
+        let completed = complete_plan_entries(&[
+            PlanEntryData {
+                content: "Already done".into(),
+                status: PlanEntryState::Completed,
+            },
+            PlanEntryData {
+                content: "Final summary".into(),
+                status: PlanEntryState::InProgress,
+            },
+            PlanEntryData {
+                content: "Failed item".into(),
+                status: PlanEntryState::Failed,
+            },
+        ]);
+
+        assert_eq!(completed[0].status, PlanEntryState::Completed);
+        assert_eq!(completed[1].status, PlanEntryState::Completed);
+        assert_eq!(completed[2].status, PlanEntryState::Failed);
     }
 
     #[test]
