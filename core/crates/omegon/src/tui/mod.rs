@@ -306,6 +306,12 @@ pub enum TuiCommand {
         request: crate::control_runtime::ControlRequest,
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
+    /// Execute an authenticated Auspex supervisor request against the live delegate feature.
+    ManagedDelegateControl {
+        method: String,
+        payload: serde_json::Value,
+        respond_to: tokio::sync::oneshot::Sender<serde_json::Value>,
+    },
     /// Execute canonical slash semantics from a non-TUI caller.
     RunSlashCommand {
         name: String,

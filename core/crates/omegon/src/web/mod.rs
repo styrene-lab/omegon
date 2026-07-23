@@ -790,6 +790,11 @@ pub enum WebCommand {
         request: crate::control_runtime::ControlRequest,
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
+    ManagedDelegateControl {
+        method: String,
+        payload: serde_json::Value,
+        respond_to: tokio::sync::oneshot::Sender<serde_json::Value>,
+    },
     Cancel,
     Shutdown,
     CancelCleaveChild {

@@ -1952,6 +1952,11 @@ impl Feature for DelegateFeature {
                 };
                 let selected_model = (route_decision.selected_model != "auto")
                     .then(|| route_decision.selected_model.clone());
+                let effective_model = selected_model.clone();
+                let effective_thinking_level = thinking_level.clone();
+                let effective_tools = worker_profile
+                    .runtime_profile(scope.as_deref(), thinking_level.as_deref(), None)
+                    .enabled_tools;
                 self.runner.spawn_delegate(
                     task_id.clone(),
                     label.clone(),
@@ -1990,6 +1995,15 @@ impl Feature for DelegateFeature {
                             "label": label,
                             "background": true,
                             "status": "running",
+                            "effective_policy": {
+                                "worker_profile": worker_profile.as_str(),
+                                "max_turns": worker_profile.max_turns(),
+                                "wall_timeout_seconds": self.runner.wall_timeout_secs,
+                                "idle_timeout_seconds": self.runner.idle_timeout_secs,
+                                "enabled_tools": effective_tools,
+                                "model": effective_model,
+                                "thinking_level": effective_thinking_level,
+                            },
                             "result_tool_call": result_tool_call,
                             "next_action": result_tool_call,
                         }),
