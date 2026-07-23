@@ -39,17 +39,17 @@ pub enum WorkerRequest {
     /// channel.
     SetModel {
         value: String,
-        ack: Option<oneshot::Sender<()>>,
+        ack: Option<oneshot::Sender<Result<(), String>>>,
     },
     /// Change thinking level.
     SetThinking {
         value: String,
-        ack: Option<oneshot::Sender<()>>,
+        ack: Option<oneshot::Sender<Result<(), String>>>,
     },
     /// Change posture.
     SetPosture {
         value: String,
-        ack: Option<oneshot::Sender<()>>,
+        ack: Option<oneshot::Sender<Result<(), String>>>,
     },
     /// Change the requested context class.
     SetContextClass {
@@ -582,25 +582,32 @@ async fn worker_loop(
             }
 
             WorkerRequest::SetModel { value, ack } => {
-                let _ = crate::session_settings_commands::set_model(&shared_settings, &cwd, &value);
+                let result =
+                    crate::session_settings_commands::set_model(&shared_settings, &cwd, &value);
                 if let Some(tx) = ack {
-                    let _ = tx.send(());
+                    let _ = tx.send(result);
+                } else if let Err(error) = result {
+                    tracing::warn!(%error, "failed to persist ACP model setting");
                 }
             }
 
             WorkerRequest::SetThinking { value, ack } => {
-                let _ =
+                let result =
                     crate::session_settings_commands::set_thinking(&shared_settings, &cwd, &value);
                 if let Some(tx) = ack {
-                    let _ = tx.send(());
+                    let _ = tx.send(result);
+                } else if let Err(error) = result {
+                    tracing::warn!(%error, "failed to persist ACP thinking setting");
                 }
             }
 
             WorkerRequest::SetPosture { value, ack } => {
-                let _ =
+                let result =
                     crate::session_settings_commands::set_posture(&shared_settings, &cwd, &value);
                 if let Some(tx) = ack {
-                    let _ = tx.send(());
+                    let _ = tx.send(result);
+                } else if let Err(error) = result {
+                    tracing::warn!(%error, "failed to persist ACP posture setting");
                 }
             }
 
