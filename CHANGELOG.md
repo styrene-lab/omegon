@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added an explicit `omegon skills editor status|sync zed` bridge that symlinks portable user-level Omegon skills into Zed's native `~/.config/zed/skills/omegon-managed` inventory, with dry-run/status reporting, idempotent cleanup, and collision refusal while keeping Omegon canonical.
 - Expanded the managed-process viewer with previous/next session switching and a confirmed stop action while keeping terminal input disabled.
 - Added a read-only managed-process viewer in the TUI, opened with `/processes [session-id-or-name]`, with lifecycle/provenance metadata, retained output, scrolling, and follow mode over the shared execution-session projection.
 - Added the first renderer-neutral managed-execution session projection over background PTY sessions, exposing lifecycle, provenance, retained output, transcript metadata, and interaction capabilities for future process-viewer surfaces.
