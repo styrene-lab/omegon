@@ -61,36 +61,53 @@ fn acp_build_metadata() -> serde_json::Value {
     })
 }
 
-fn acp_available_commands() -> Vec<AvailableCommand> {
-    let mut commands = Vec::new();
-    for definition in crate::command_registry::builtin_command_definitions()
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AcpCommandRoute {
+    WorkerControl(&'static str),
+    Local,
+}
+
+struct AcpCommandBinding {
+    definition: omegon_traits::CommandDefinition,
+    advertised_name: String,
+    route: AcpCommandRoute,
+}
+
+fn acp_command_bindings() -> Vec<AcpCommandBinding> {
+    crate::command_registry::builtin_command_definitions()
         .into_iter()
         .filter(|definition| definition.availability.acp)
-    {
-        // Preserve ACP's already-advertised slash names while sourcing the
-        // underlying command metadata from the shared registry. The local handler
-        // accepts both these ACP names and the canonical TUI registry names.
-        let name = match definition.name.as_str() {
-            "think" => "thinking".to_string(),
-            "auth" => "login".to_string(),
-            _ => definition.name,
-        };
-        commands.push(AvailableCommand::new(name, definition.description));
+        .map(|definition| {
+            let (advertised_name, route) = match definition.name.as_str() {
+                "version" => ("version", AcpCommandRoute::WorkerControl("version")),
+                "status" => ("status", AcpCommandRoute::WorkerControl("status")),
+                "stats" => ("stats", AcpCommandRoute::WorkerControl("stats")),
+                "think" => ("thinking", AcpCommandRoute::Local),
+                "auth" => ("login", AcpCommandRoute::Local),
+                _ => (definition.name.as_str(), AcpCommandRoute::Local),
+            };
+            AcpCommandBinding {
+                advertised_name: advertised_name.to_string(),
+                definition,
+                route,
+            }
+        })
+        .collect()
+}
 
-        // ACP exposes posture as a client/workbench mode control, not a TUI
-        // slash command. Keep it next to thinking, matching the historical
-        // advertised command ordering.
-        if commands
-            .last()
-            .is_some_and(|command| command.name == "thinking")
-        {
-            commands.push(AvailableCommand::new(
-                "posture",
-                "Show or set behavioral posture",
-            ));
-        }
-    }
-    commands
+fn acp_command_binding(name: &str) -> Option<AcpCommandBinding> {
+    acp_command_bindings()
+        .into_iter()
+        .find(|binding| binding.advertised_name == name)
+}
+
+fn acp_available_commands() -> Vec<AvailableCommand> {
+    acp_command_bindings()
+        .into_iter()
+        .map(|binding| {
+            AvailableCommand::new(binding.advertised_name, binding.definition.description)
+        })
+        .collect()
 }
 
 pub(crate) type SharedAcpClientConnection = Rc<RefCell<Option<AcpClientConnection>>>;
@@ -4271,10 +4288,19 @@ impl OmegonAcpAgent {
             .split_once(char::is_whitespace)
             .unwrap_or((trimmed, ""));
 
+        let advertised_name = cmd.strip_prefix('/').unwrap_or(cmd);
+        if let Some(binding) = acp_command_binding(advertised_name)
+            && let AcpCommandRoute::WorkerControl(worker_command) = binding.route
+        {
+            let command = if args.is_empty() {
+                worker_command.to_string()
+            } else {
+                format!("{worker_command} {args}")
+            };
+            return self.request_worker_control(&command);
+        }
+
         let worker_command = match cmd {
-            "/version" => Some("version".to_string()),
-            "/status" => Some("status".to_string()),
-            "/stats" => Some("stats".to_string()),
             "/profile" => Some(if args.is_empty() {
                 "profile_view".to_string()
             } else {
@@ -4630,14 +4656,26 @@ mod extension_metadata_tests {
         assert!(!names.contains(&"auth".to_string()), "{names:?}");
 
         let definitions = crate::command_registry::builtin_command_definitions();
-        for (advertised, registry_name) in [("thinking", "think"), ("login", "auth")] {
+        for binding in acp_command_bindings() {
             let definition = definitions
                 .iter()
-                .find(|definition| definition.name == registry_name)
-                .expect("ACP aliased command should come from shared registry");
+                .find(|definition| definition.name == binding.definition.name)
+                .expect("ACP binding should come from shared registry");
             assert!(definition.availability.acp, "{definition:?}");
-            assert!(names.contains(&advertised.to_string()), "{names:?}");
+            assert!(
+                names.contains(&binding.advertised_name.to_string()),
+                "{names:?}"
+            );
         }
+
+        let worker_routes: Vec<&str> = acp_command_bindings()
+            .iter()
+            .filter_map(|binding| match binding.route {
+                AcpCommandRoute::WorkerControl(command) => Some(command),
+                AcpCommandRoute::Local => None,
+            })
+            .collect();
+        assert_eq!(worker_routes, vec!["version", "status", "stats"]);
     }
 
     #[test]

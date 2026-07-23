@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Bound ACP command advertisement and execution to one explicit adapter table, with exhaustive registry coverage and authoritative worker routes for version, status, and stats.
 - Advertised exact ACP build identity through standard `agentInfo.version` and title (`<semver>+git.<sha>[.dirty]`), attached structured build metadata, and added a portable `/version` command so IDE operators can immediately detect stale agent subprocesses.
 - Marked all remaining non-failed ACP plan entries complete when the internal plan archives at successful turn completion, preventing editor clients from retaining a final in-progress spinner after the answer has finished.
 - Audited ACP-advertised slash commands against the shared registry: `/status`, `/stats`, `/version`, and profile operations now route to authoritative worker state, while the TUI-only `/profile` menu is no longer falsely advertised as an ACP command.
