@@ -18,6 +18,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Added `scripts/terminal_test_workload.py`, a deterministic long-running mixed-output workload with heartbeats, bursts, signal handling, natural completion, and interactive `status`, `burst`, `fail`, and `quit` commands for exercising managed terminal sessions and the process viewer.
+- Added design artifacts for authoritative extension tool provenance across conversation surfaces, and captured the remaining operator-visible terminal-session questions alongside the new managed process viewer.
+- Connected completed `terminal` conversation cards to the managed-process viewer: select a retained terminal result and press Enter to open its canonical live session instead of inspecting a stale text dump.
 - Expanded the managed-process viewer with previous/next session switching and a confirmed stop action while keeping terminal input disabled.
 - Added a read-only managed-process viewer in the TUI, opened with `/processes [session-id-or-name]`, with lifecycle/provenance metadata, retained output, scrolling, and follow mode over the shared execution-session projection.
 - Added the first renderer-neutral managed-execution session projection over background PTY sessions, exposing lifecycle, provenance, retained output, transcript metadata, and interaction capabilities for future process-viewer surfaces.
@@ -33,6 +36,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Kept the TUI workbench branch affordance live after tool-driven repository mutations by refreshing workspace state at each completed tool event instead of retaining the startup snapshot.
+- Replaced the selected conversation row's width-shifting glyph rail with a stable full-row background highlight, and changed completed terminal rows from the stale `dbl-click copy` hint to `dbl-click process`.
+- Routed double-clicks on retained `terminal` result cards using the current `Started terminal 'name' (session-id)` output to the canonical managed-process viewer instead of the generic conversation-segment plaintext copy action.
 - Hardened extension detail navigation after adversarial review: keyed primary actions now respond to Space, Escape returns from an extension detail page to the extension inventory, and missing detail targets produce visible feedback instead of silently doing nothing.
 - Reworked the extension runtime menu interaction model: Space now toggles enabled/disabled state in place, Enter opens an extension-specific management page, and update/remove actions live on that detail page instead of the collection browser.
 - Reworked extension create, install, and search entry points as explicit inline menu-input actions that execute without closing into the global editor; installed extension rows now perform enable/disable on Enter and expose confirmed update/remove actions that refresh the inventory instead of defaulting to a plain-text inspect dump.
