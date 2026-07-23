@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - Restricted ACP host-read fallback to genuine capability-unavailable failures, preserving host permission denials and ordinary read errors as authoritative while reporting fallback provenance in tool details.
+- Fixed ACP Profile selectors to use the authoritative scope-qualified active selection and guarantee that `currentValue` is present in the advertised inventory, preventing Zed/VS Code from rendering the active profile as `Unknown`.
 - Suppressed ACP plan pseudo-tool rows and redundant `Plan progress updated.` transcript text so native plan updates are the sole checklist presentation in editor clients.
 - Corrected ACP plan snapshot delivery to suppress initial/repeated empty projections and duplicate snapshots, while retaining a single empty replacement when an existing plan is explicitly cleared.
 - Preserved the negotiated ACP session working directory when delegating terminal commands to the editor host.

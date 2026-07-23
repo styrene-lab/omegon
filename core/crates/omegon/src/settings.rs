@@ -1855,6 +1855,68 @@ fn global_active_profile_path() -> Option<std::path::PathBuf> {
         .or_else(|| dirs::config_dir().map(|d| d.join("omegon/active-profile.json")))
 }
 
+fn read_active_profile_selection(
+    path: &std::path::Path,
+    registry: &ProfileRegistry,
+) -> Option<ActiveProfileSelection> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let selection = serde_json::from_str::<ActiveProfileSelection>(&content).ok()?;
+    registry.resolve_explicit(&selection)?;
+    Some(selection)
+}
+
+pub fn active_profile_selection(cwd: &std::path::Path) -> ActiveProfileSelection {
+    let registry = ProfileRegistry::discover(cwd);
+    if let Some(path) = project_active_profile_path_from_registry(&registry)
+        && let Some(selection) = read_active_profile_selection(&path, &registry)
+    {
+        return selection;
+    }
+
+    if let Some(entry) = registry.entries.iter().find(|entry| {
+        entry.scope == ProfileRegistryScope::Project
+            && entry.source_kind == ProfileRegistrySourceKind::LegacySingleton
+    }) {
+        return ActiveProfileSelection {
+            id: entry.id.clone(),
+            scope: Some(entry.scope.as_str().to_string()),
+        };
+    }
+
+    if let Some(path) = global_active_profile_path()
+        && let Some(selection) = read_active_profile_selection(&path, &registry)
+    {
+        return selection;
+    }
+
+    for (scope, kind) in [
+        (
+            ProfileRegistryScope::User,
+            ProfileRegistrySourceKind::LegacySingleton,
+        ),
+        (
+            ProfileRegistryScope::BuiltIn,
+            ProfileRegistrySourceKind::BuiltInDefault,
+        ),
+    ] {
+        if let Some(entry) = registry
+            .entries
+            .iter()
+            .find(|entry| entry.scope == scope && entry.source_kind == kind)
+        {
+            return ActiveProfileSelection {
+                id: entry.id.clone(),
+                scope: Some(entry.scope.as_str().to_string()),
+            };
+        }
+    }
+
+    ActiveProfileSelection {
+        id: "built-in-default".into(),
+        scope: Some("built-in".into()),
+    }
+}
+
 pub fn save_project_active_profile_selection(
     cwd: &std::path::Path,
     selection: &ActiveProfileSelection,

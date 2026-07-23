@@ -849,6 +849,12 @@ impl OmegonAcpAgent {
             .collect();
 
         let registry = crate::settings::ProfileRegistry::discover(cwd);
+        let active_profile = crate::settings::active_profile_selection(cwd);
+        let active_profile_value = format!(
+            "{}:{}",
+            active_profile.scope.as_deref().unwrap_or("built-in"),
+            active_profile.id
+        );
         let mut profile_options: Vec<SessionConfigSelectOption> = registry
             .entries
             .iter()
@@ -863,18 +869,14 @@ impl OmegonAcpAgent {
                 )
             })
             .collect();
-        if !profile_options.iter().any(|option| {
-            option
-                .value
-                .0
-                .rsplit_once(':')
-                .is_some_and(|(_, id)| id == current_profile)
-                || option.value.0.as_ref() == current_profile
-        }) {
+        if !profile_options
+            .iter()
+            .any(|option| option.value.0.as_ref() == active_profile_value)
+        {
             profile_options.insert(
                 0,
                 SessionConfigSelectOption::new(
-                    current_profile.to_string(),
+                    active_profile_value.clone(),
                     format!("{current_profile} — current"),
                 ),
             );
@@ -905,7 +907,7 @@ impl OmegonAcpAgent {
                 "profile",
                 "Profile",
                 SessionConfigKind::Select(SessionConfigSelect::new(
-                    current_profile.to_string(),
+                    active_profile_value,
                     profile_options,
                 )),
             )
@@ -6425,9 +6427,28 @@ Progress: 1/2"
             by_id("thinking").category,
             Some(SessionConfigOptionCategory::ThoughtLevel)
         );
+        let profile = by_id("profile");
         assert_eq!(
-            by_id("profile").category,
+            profile.category,
             Some(SessionConfigOptionCategory::Other("_omegon_profile".into()))
+        );
+        let SessionConfigKind::Select(profile_select) = &profile.kind else {
+            panic!("profile should be a select option");
+        };
+        let selection = crate::settings::active_profile_selection(cwd.path());
+        let expected_profile = format!(
+            "{}:{}",
+            selection.scope.as_deref().unwrap_or("project"),
+            selection.id
+        );
+        assert_eq!(profile_select.current_value.0.as_ref(), expected_profile);
+        let SessionConfigSelectOptions::Ungrouped(profile_options) = &profile_select.options else {
+            panic!("profile options should be ungrouped")
+        };
+        assert!(
+            profile_options.iter().any(|option| {
+                option.value.0.as_ref() == profile_select.current_value.0.as_ref()
+            })
         );
         assert_eq!(
             by_id("context_class").category,

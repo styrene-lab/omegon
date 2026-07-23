@@ -9,7 +9,7 @@ kind = "design_node"
 
 [data]
 title = "Profile Registry and Session Scope"
-status = "exploring"
+status = "implementing"
 issue_type = "architecture"
 priority = 2
 dependencies = []
@@ -204,6 +204,29 @@ Profiles are runtime/operator policy. Agents are executable/persona/workflow bun
 
 A profile may specify a default agent id in the future, but active agent resolution should remain explicit in `SessionPlan`. Dormant catalog agents must remain inventory only.
 
+## ACP editor profile contract
+
+ACP editor clients consume the profile registry through a portable select option, not by
+reconstructing profile identity from the effective settings label. The contract is:
+
+1. `active_profile_selection(cwd)` is the authoritative persisted selection using project,
+   legacy-project, user, legacy-user, and built-in precedence.
+2. ACP option values are always scope-qualified (`project:<id>`, `user:<id>`, or
+   `built-in:<id>`).
+3. The selector's `currentValue` exactly matches one advertised option value. Clients must
+   never receive a bare display name that they render as `Unknown`.
+4. Selecting a profile persists the project pointer, applies the resolved profile to the live
+   worker, and emits one complete `ConfigOptionUpdate` because model, thinking, and context may
+   all change together.
+5. Profile inventory remains read-only through the selector. Editing, copying, importing, and
+   deletion are explicit operator commands or richer first-party surfaces; generic ACP clients
+   are not expected to synthesize forms from inventory metadata.
+6. Built-in profiles remain immutable. A future portable edit flow opens editable project/user
+   files and copies built-ins before modification.
+
+This keeps ACP, TUI, CLI, and web surfaces pointed at the same selection authority while leaving
+presentation client-owned.
+
 ## Implementation slices
 
 ### Slice 1 — Registry discovery and compatibility
@@ -240,6 +263,17 @@ A profile may specify a default agent id in the future, but active agent resolut
 - Introduce `SessionPlan` as the startup contract.
 - Bind selected profile and optional active agent before TUI/web/ACP surfaces are built.
 - Feed `/secrets` and launch readiness from `SessionPlan`, not catalog inventory.
+
+### Slice 6 — ACP editor profile identity
+
+- Publish scope-qualified profile option values and derive `currentValue` from the authoritative
+  active-profile selection.
+- Guarantee that the current value exists in the option inventory, including compatibility
+  fallbacks.
+- Keep profile application aggregate: persist selection, apply live settings, and push the full
+  option set.
+- Add regression coverage for selected-value membership so Zed/VS Code cannot regress to
+  `Unknown`.
 
 ## Open questions
 
