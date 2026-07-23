@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Made loaded ACP sessions preserve their canonical session ID on subsequent saves instead of forking into a new persistence record.
 - Advertised ACP session loading now that transcript replay, worker-session restoration, and editor-facing session enumeration are implemented and covered.
 - Advertised the scope-aware `/profile` command to ACP clients and routed canonical profile/skill commands exclusively through the authoritative worker runtime, avoiding transport-local settings drift; unsupported skill reload/create/import operations now return explicit editor guidance.
 - Routed ACP read-only commands as typed canonical control requests to the owning worker, preserving authoritative session settings without reparsing slash text, spawning duplicate state, or requiring SecretsManager initialization for commands that do not use secrets.

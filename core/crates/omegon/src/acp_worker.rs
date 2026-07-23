@@ -32,6 +32,12 @@ pub enum WorkerRequest {
         text: String,
         response_tx: oneshot::Sender<WorkerResponse>,
     },
+    /// Replace the worker conversation with a persisted Omegon session.
+    LoadSession {
+        path: PathBuf,
+        resume_id: String,
+        ack: oneshot::Sender<Result<(), String>>,
+    },
     /// Cancel the current prompt.
     Cancel,
     /// Change the model. `ack` (when provided) fires after shared_settings is
@@ -292,6 +298,7 @@ async fn worker_loop(
     let extension_metadata = agent_setup.extension_metadata.clone();
     let extension_rpc_handles = agent_setup.extension_rpc_handles.clone();
     let mut cancel = CancellationToken::new();
+    let mut resume_id: Option<String> = None;
 
     let _ = secrets_tx.send(secrets.clone());
     if !extension_metadata.is_empty() {
@@ -567,8 +574,8 @@ async fn worker_loop(
                     }
                 };
 
-                // Save session
-                let _ = crate::session::save_session(&conversation, &cwd, None);
+                // Save session, preserving the canonical ID after a load.
+                let _ = crate::session::save_session(&conversation, &cwd, resume_id.as_deref());
 
                 let _ = response_tx.send(WorkerResponse {
                     text: response_text,
@@ -578,6 +585,21 @@ async fn worker_loop(
                 if cancelled {
                     cancel = CancellationToken::new();
                 }
+            }
+
+            WorkerRequest::LoadSession {
+                path,
+                resume_id: requested_id,
+                ack,
+            } => {
+                let result = crate::conversation::ConversationState::load_session(&path)
+                    .map(|loaded| {
+                        conversation = loaded;
+                        resume_id = Some(requested_id);
+                        first_prompt = false;
+                    })
+                    .map_err(|error| format!("could not load session: {error}"));
+                let _ = ack.send(result);
             }
 
             WorkerRequest::Cancel => {
