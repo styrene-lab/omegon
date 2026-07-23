@@ -25,7 +25,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - Restricted ACP host-read fallback to genuine capability-unavailable failures, preserving host permission denials and ordinary read errors as authoritative while reporting fallback provenance in tool details.
+- Added ACP profile open/copy workflows: editable project/user profiles return editor-openable file links, built-in profiles explain their immutable status, and copies use atomic writes without overwriting existing profiles.
 - Fixed ACP Profile selectors to use the authoritative scope-qualified active selection and guarantee that `currentValue` is present in the advertised inventory, preventing Zed/VS Code from rendering the active profile as `Unknown`.
+- Completed the portable ACP profile workflow with authoritative scope-qualified selection, editor-openable project/user profile paths, immutable built-in diagnostics, and copy-to-project/user commands.
 - Suppressed ACP plan pseudo-tool rows and redundant `Plan progress updated.` transcript text so native plan updates are the sole checklist presentation in editor clients.
 - Corrected ACP plan snapshot delivery to suppress initial/repeated empty projections and duplicate snapshots, while retaining a single empty replacement when an existing plan is explicitly cleared.
 - Preserved the negotiated ACP session working directory when delegating terminal commands to the editor host.

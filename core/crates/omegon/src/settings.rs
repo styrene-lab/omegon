@@ -1865,6 +1865,17 @@ fn read_active_profile_selection(
     Some(selection)
 }
 
+pub fn parse_scoped_profile_selection(value: &str) -> Option<ActiveProfileSelection> {
+    let (scope, id) = value.split_once(':')?;
+    if id.trim().is_empty() || !matches!(scope, "project" | "user" | "built-in") {
+        return None;
+    }
+    Some(ActiveProfileSelection {
+        id: id.to_string(),
+        scope: Some(scope.to_string()),
+    })
+}
+
 pub fn active_profile_selection(cwd: &std::path::Path) -> ActiveProfileSelection {
     let registry = ProfileRegistry::discover(cwd);
     if let Some(path) = project_active_profile_path_from_registry(&registry)
@@ -1915,6 +1926,48 @@ pub fn active_profile_selection(cwd: &std::path::Path) -> ActiveProfileSelection
         id: "built-in-default".into(),
         scope: Some("built-in".into()),
     }
+}
+
+pub fn copy_profile(
+    cwd: &std::path::Path,
+    source: &ActiveProfileSelection,
+    target_scope: ProfileRegistryScope,
+    target_id: &str,
+) -> anyhow::Result<std::path::PathBuf> {
+    if target_scope == ProfileRegistryScope::BuiltIn {
+        anyhow::bail!("built-in profiles are read-only");
+    }
+    let target_id = target_id.trim();
+    if target_id.is_empty()
+        || target_id.contains('/')
+        || target_id.contains('\\')
+        || target_id == "."
+        || target_id == ".."
+    {
+        anyhow::bail!("profile id must be a non-empty file-safe name");
+    }
+    let registry = ProfileRegistry::discover(cwd);
+    let entry = registry
+        .find_explicit(source)
+        .ok_or_else(|| anyhow::anyhow!("profile `{}` was not found", source.id))?;
+    let dir = match target_scope {
+        ProfileRegistryScope::Project => project_profiles_dir(cwd),
+        ProfileRegistryScope::User => global_profiles_dir()
+            .ok_or_else(|| anyhow::anyhow!("user profile directory is unavailable"))?,
+        ProfileRegistryScope::BuiltIn => unreachable!(),
+    };
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{target_id}.json"));
+    if path.exists() {
+        anyhow::bail!("profile `{target_id}` already exists");
+    }
+    let mut profile = entry.profile.clone();
+    profile.name = Some(target_id.to_string());
+    crate::filelock::atomic_write_locked(
+        &path,
+        (serde_json::to_string_pretty(&profile)? + "\n").as_bytes(),
+    )?;
+    Ok(path)
 }
 
 pub fn save_project_active_profile_selection(
@@ -1986,6 +2039,13 @@ impl ProfileRegistry {
         });
         registry.compute_shadows();
         registry
+    }
+
+    pub fn find_explicit(
+        &self,
+        selection: &ActiveProfileSelection,
+    ) -> Option<&ProfileRegistryEntry> {
+        self.find_selected(selection)
     }
 
     /// Resolve one explicit registry selection without mutating active-profile state.
@@ -2433,6 +2493,33 @@ fn custom_posture_dirs(cwd: &std::path::Path) -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copy_profile_creates_editable_project_entry_without_selecting_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let source = ActiveProfileSelection {
+            id: "built-in-default".into(),
+            scope: Some("built-in".into()),
+        };
+
+        let path = copy_profile(tmp.path(), &source, ProfileRegistryScope::Project, "review")
+            .expect("copy built-in profile");
+
+        assert!(path.ends_with(".omegon/profiles/review.json"));
+        let copied: Profile = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(copied.name.as_deref(), Some("review"));
+        assert!(!tmp.path().join(".omegon/active-profile.json").exists());
+        assert!(
+            copy_profile(
+                tmp.path(),
+                &source,
+                ProfileRegistryScope::Project,
+                "../escape"
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn resolve_explicit_profile_does_not_change_active_selection() {

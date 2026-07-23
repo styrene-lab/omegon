@@ -864,6 +864,64 @@ async fn handle_control_request(
             }
         }
 
+        "profile_open" => {
+            let selection = if args.trim().is_empty() {
+                crate::settings::active_profile_selection(cwd)
+            } else {
+                let Some(selection) = crate::settings::parse_scoped_profile_selection(args.trim())
+                else {
+                    return "Usage: profile_open [project|user|built-in:<id>]".into();
+                };
+                selection
+            };
+            let registry = crate::settings::ProfileRegistry::discover(cwd);
+            let Some(entry) = registry.find_explicit(&selection) else {
+                return format!("Profile `{}` was not found.", selection.id);
+            };
+            let Some(path) = entry.path.as_ref() else {
+                return format!(
+                    "Profile `built-in:{}` is read-only and has no file. Copy it first with `/profile copy built-in:{} project:<new-id>`.",
+                    entry.id, entry.id
+                );
+            };
+            format!(
+                "Profile `{}` is at [`{}`](file://{}). Open that path in the editor to modify it; changes apply after re-selecting the profile.",
+                selection.id,
+                path.display(),
+                path.display()
+            )
+        }
+
+        "profile_copy" => {
+            let mut parts = args.split_whitespace();
+            let source = parts
+                .next()
+                .and_then(crate::settings::parse_scoped_profile_selection);
+            let target = parts
+                .next()
+                .and_then(crate::settings::parse_scoped_profile_selection);
+            if parts.next().is_some() || source.is_none() || target.is_none() {
+                return "Usage: profile_copy <scope:id> <project|user:new-id>".into();
+            }
+            let source = source.expect("checked");
+            let target = target.expect("checked");
+            let scope = match target.scope.as_deref() {
+                Some("project") => crate::settings::ProfileRegistryScope::Project,
+                Some("user") => crate::settings::ProfileRegistryScope::User,
+                _ => return "Target scope must be `project` or `user`.".into(),
+            };
+            match crate::settings::copy_profile(cwd, &source, scope, &target.id) {
+                Ok(path) => format!(
+                    "Copied profile to [`{}`](file://{}). Select `{}:{}` from the Profile menu after editing.",
+                    path.display(),
+                    path.display(),
+                    target.scope.as_deref().unwrap_or("project"),
+                    target.id
+                ),
+                Err(error) => format!("failed to copy profile: {error}"),
+            }
+        }
+
         "profile_view" => {
             let settings = shared_settings
                 .lock()

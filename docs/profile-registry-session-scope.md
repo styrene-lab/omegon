@@ -222,7 +222,9 @@ reconstructing profile identity from the effective settings label. The contract 
    deletion are explicit operator commands or richer first-party surfaces; generic ACP clients
    are not expected to synthesize forms from inventory metadata.
 6. Built-in profiles remain immutable. A future portable edit flow opens editable project/user
-   files and copies built-ins before modification.
+   files and copies built-ins before modification. Omegon exposes these portable command fallbacks:
+   `/profile open [scope:id]` returns an editor-openable file link, and
+   `/profile copy <scope:id> <project|user:new-id>` creates a non-overwriting editable copy.
 
 This keeps ACP, TUI, CLI, and web surfaces pointed at the same selection authority while leaving
 presentation client-owned.
@@ -264,7 +266,7 @@ presentation client-owned.
 - Bind selected profile and optional active agent before TUI/web/ACP surfaces are built.
 - Feed `/secrets` and launch readiness from `SessionPlan`, not catalog inventory.
 
-### Slice 6 — ACP editor profile identity
+### Slice 6 — ACP editor profile identity and operability
 
 - Publish scope-qualified profile option values and derive `currentValue` from the authoritative
   active-profile selection.
@@ -274,6 +276,15 @@ presentation client-owned.
   option set.
 - Add regression coverage for selected-value membership so Zed/VS Code cannot regress to
   `Unknown`.
+- Expose `control/profile_open` to return editor-openable project/user profile paths while
+  explaining that built-in profiles are immutable.
+- Expose `control/profile_copy` to materialize a source profile into project or user scope without
+  overwriting an existing profile.
+- Require re-selection after external edits so the worker validates and reapplies the aggregate
+  profile before refreshing ACP controls.
+
+**Status:** implemented. Generic ACP owns selection and command fallback; a rich profile editor
+remains a first-party client concern.
 
 ## Open questions
 

@@ -4131,6 +4131,8 @@ impl OmegonAcpAgent {
             | "control/max_turns"
             | "control/persona_list"
             | "control/persona_switch"
+            | "control/profile_open"
+            | "control/profile_copy"
             | "control/profile_view"
             | "control/profile_capture"
             | "control/profile_apply"
