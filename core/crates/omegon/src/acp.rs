@@ -45,6 +45,22 @@ type PendingResponseTx =
     futures::channel::oneshot::Sender<agent_client_protocol::Result<serde_json::Value>>;
 type PendingResponses = Rc<RefCell<std::collections::BTreeMap<String, PendingResponseTx>>>;
 
+fn acp_build_identity() -> String {
+    format!(
+        "{}+git.{}",
+        env!("CARGO_PKG_VERSION"),
+        env!("OMEGON_GIT_SHA").replace("-dirty", ".dirty")
+    )
+}
+
+fn acp_build_metadata() -> serde_json::Value {
+    serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "commit": env!("OMEGON_GIT_SHA"),
+        "buildDate": env!("OMEGON_BUILD_DATE")
+    })
+}
+
 fn acp_available_commands() -> Vec<AvailableCommand> {
     let mut commands = Vec::new();
     for definition in crate::command_registry::builtin_command_definitions()
@@ -1267,8 +1283,13 @@ impl OmegonAcpAgent {
         *self.surface_updates_enabled.borrow_mut() = surface_updates_enabled;
 
         let mut response = InitializeResponse::new(args.protocol_version);
-        response.agent_info =
-            Some(Implementation::new("omegon", env!("CARGO_PKG_VERSION")).title("Omegon Agent"));
+        let mut build_meta = serde_json::Map::new();
+        build_meta.insert("omegon/build".into(), acp_build_metadata());
+        response.agent_info = Some(
+            Implementation::new("omegon", acp_build_identity())
+                .title(format!("Omegon {}", acp_build_identity()))
+                .meta(build_meta),
+        );
         response.agent_capabilities = AgentCapabilities::default()
             .prompt_capabilities(PromptCapabilities::new().embedded_context(true))
             .session_capabilities(
@@ -4571,6 +4592,7 @@ mod extension_metadata_tests {
         assert!(names.contains(&"thinking".to_string()), "{names:?}");
         assert!(names.contains(&"login".to_string()), "{names:?}");
         assert!(names.contains(&"posture".to_string()), "{names:?}");
+        assert!(names.contains(&"version".to_string()), "{names:?}");
         assert!(!names.contains(&"think".to_string()), "{names:?}");
         assert!(!names.contains(&"auth".to_string()), "{names:?}");
 
@@ -6394,6 +6416,12 @@ Progress: 1/2"
             .expect("initialize");
 
         assert!(!response.agent_capabilities.load_session);
+        let info = response.agent_info.expect("agent info");
+        assert_eq!(info.version, acp_build_identity());
+        let expected_title = format!("Omegon {}", acp_build_identity());
+        assert_eq!(info.title.as_deref(), Some(expected_title.as_str()));
+        let meta = info.meta.expect("agent metadata");
+        assert_eq!(meta["omegon/build"]["commit"], env!("OMEGON_GIT_SHA"));
     }
 
     #[test]

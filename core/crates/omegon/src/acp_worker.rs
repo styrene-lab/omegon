@@ -774,6 +774,15 @@ async fn handle_control_request(
     let args = parts.get(1).unwrap_or(&"").trim();
 
     match cmd {
+        "version" => format!(
+            "Omegon {}\nBuild {}\nBuilt {}\nBinary {}",
+            env!("CARGO_PKG_VERSION"),
+            env!("OMEGON_GIT_SHA"),
+            env!("OMEGON_BUILD_DATE"),
+            std::env::current_exe()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|_| "unknown".into())
+        ),
         "status" => {
             let settings = shared_settings
                 .lock()

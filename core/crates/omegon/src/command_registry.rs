@@ -298,6 +298,7 @@ pub(crate) fn builtin_command_definitions() -> Vec<omegon_traits::CommandDefinit
 /// spec instead of adding renderer-local autocomplete tables.
 pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::cli_acp_read_only("help", "open command inventory", &[]),
+    BuiltinCommandSpec::cli_acp_read_only("version", "show exact Omegon build identity", &[]),
     BuiltinCommandSpec::read_only(
         "processes",
         "open managed background process and terminal sessions",
