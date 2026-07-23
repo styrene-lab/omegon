@@ -4271,6 +4271,21 @@ impl OmegonAcpAgent {
             .split_once(char::is_whitespace)
             .unwrap_or((trimmed, ""));
 
+        let worker_command = match cmd {
+            "/version" => Some("version".to_string()),
+            "/status" => Some("status".to_string()),
+            "/stats" => Some("stats".to_string()),
+            "/profile" => Some(if args.is_empty() {
+                "profile_view".to_string()
+            } else {
+                format!("profile_{args}")
+            }),
+            _ => None,
+        };
+        if let Some(command) = worker_command {
+            return self.request_worker_control(&command);
+        }
+
         match cmd {
             "/model" if !args.is_empty() => {
                 let rt = tokio::runtime::Handle::current();
@@ -4312,8 +4327,6 @@ impl OmegonAcpAgent {
             "/posture" => "Use the posture dropdown or /posture <fabricator|architect|explorator|devastator>".into(),
             "/compact" => "Context compaction happens automatically. The model manages its own context window.".into(),
             "/clear" => "Start a new thread via the + button to clear the conversation.".into(),
-            "/status" => self.request_worker_control("status"),
-            "/version" => self.request_worker_control("version"),
             "/secrets" => {
                 // Read recipes file for a diagnostic view — no values exposed
                 let secrets_path = dirs::home_dir()
@@ -4611,6 +4624,8 @@ mod extension_metadata_tests {
         assert!(names.contains(&"login".to_string()), "{names:?}");
         assert!(names.contains(&"posture".to_string()), "{names:?}");
         assert!(names.contains(&"version".to_string()), "{names:?}");
+        assert!(names.contains(&"stats".to_string()), "{names:?}");
+        assert!(!names.contains(&"profile".to_string()), "{names:?}");
         assert!(!names.contains(&"think".to_string()), "{names:?}");
         assert!(!names.contains(&"auth".to_string()), "{names:?}");
 
@@ -4632,6 +4647,22 @@ mod extension_metadata_tests {
 
         assert_eq!(text, "ACP worker is not initialized");
         assert_ne!(text, format!("omegon {}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(
+            agent.handle_slash_command("/status"),
+            "ACP worker is not initialized"
+        );
+        assert_eq!(
+            agent.handle_slash_command("/stats"),
+            "ACP worker is not initialized"
+        );
+        assert_eq!(
+            agent.handle_slash_command("/profile"),
+            "ACP worker is not initialized"
+        );
+        assert_eq!(
+            agent.handle_slash_command("/profile open built-in:built-in-default"),
+            "ACP worker is not initialized"
+        );
     }
 
     #[test]
