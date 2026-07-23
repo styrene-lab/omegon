@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Fixed ACP slash commands such as `/version` aborting the editor agent process by blocking the active Tokio runtime; command and setting round-trips now await worker responses asynchronously.
 - Made ACP slash-command setting mutations wait for worker acknowledgement and report validation/persistence failures instead of claiming success after fire-and-forget sends; empty model values are now rejected.
 - Centralized ACP session-setting mutations behind shared canonical handlers for model, thinking, posture, context class, and profile application, including uniform validation and persistence errors.
 - Bound ACP command advertisement and execution to one explicit adapter table, with exhaustive registry coverage and authoritative worker routes for version, status, and stats.

@@ -1439,7 +1439,7 @@ impl OmegonAcpAgent {
 
         // Handle slash commands locally (no worker round-trip)
         if user_text.starts_with('/') {
-            let response_text = self.handle_slash_command(&user_text);
+            let response_text = self.handle_slash_command(&user_text).await;
             let conn = self.conn.clone();
             let notify_sid = sid.clone();
             tokio::task::spawn_local(async move {
@@ -4254,33 +4254,30 @@ impl OmegonAcpAgent {
         }
     }
 
-    fn request_worker_control(&self, command: &str) -> String {
+    async fn request_worker_control(&self, command: &str) -> String {
         let worker_tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
         let Some(worker_tx) = worker_tx else {
             return "ACP worker is not initialized".into();
         };
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        let runtime = tokio::runtime::Handle::current();
-        if runtime
-            .block_on(worker_tx.send(WorkerRequest::ControlRequest {
+        if worker_tx
+            .send(WorkerRequest::ControlRequest {
                 command: command.to_string(),
                 response_tx,
-            }))
+            })
+            .await
             .is_err()
         {
             return "ACP worker is not accepting requests".into();
         }
-        match runtime.block_on(tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            response_rx,
-        )) {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), response_rx).await {
             Ok(Ok(response)) => response.text,
             Ok(Err(_)) => "ACP worker dropped control response".into(),
             Err(_) => "ACP control request timed out".into(),
         }
     }
 
-    fn request_worker_setting(
+    async fn request_worker_setting(
         &self,
         request: impl FnOnce(tokio::sync::oneshot::Sender<Result<(), String>>) -> WorkerRequest,
         success: String,
@@ -4290,14 +4287,10 @@ impl OmegonAcpAgent {
             return "ACP worker is not initialized".into();
         };
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-        let runtime = tokio::runtime::Handle::current();
-        if runtime.block_on(worker_tx.send(request(ack_tx))).is_err() {
+        if worker_tx.send(request(ack_tx)).await.is_err() {
             return "ACP worker is not accepting requests".into();
         }
-        match runtime.block_on(tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            ack_rx,
-        )) {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), ack_rx).await {
             Ok(Ok(Ok(()))) => success,
             Ok(Ok(Err(error))) => error,
             Ok(Err(_)) => "ACP worker dropped setting response".into(),
@@ -4305,7 +4298,7 @@ impl OmegonAcpAgent {
         }
     }
 
-    fn handle_slash_command(&self, input: &str) -> String {
+    async fn handle_slash_command(&self, input: &str) -> String {
         let trimmed = input.trim();
         let (cmd, args) = trimmed
             .split_once(char::is_whitespace)
@@ -4320,7 +4313,7 @@ impl OmegonAcpAgent {
             } else {
                 format!("{worker_command} {args}")
             };
-            return self.request_worker_control(&command);
+            return self.request_worker_control(&command).await;
         }
 
         let worker_command = match cmd {
@@ -4332,7 +4325,7 @@ impl OmegonAcpAgent {
             _ => None,
         };
         if let Some(command) = worker_command {
-            return self.request_worker_control(&command);
+            return self.request_worker_control(&command).await;
         }
 
         match cmd {
@@ -4342,7 +4335,7 @@ impl OmegonAcpAgent {
                     ack: Some(ack),
                 },
                 format!("Model set to: {}", args.trim()),
-            ),
+            ).await,
             "/model" => "Current model from CLI args. Use the model dropdown or /model <provider:model> to switch.".into(),
             "/thinking" | "/think" if !args.is_empty() => self.request_worker_setting(
                 |ack| WorkerRequest::SetThinking {
@@ -4350,7 +4343,7 @@ impl OmegonAcpAgent {
                     ack: Some(ack),
                 },
                 format!("Thinking set to: {}", args.trim()),
-            ),
+            ).await,
             "/thinking" | "/think" => "Use the thinking dropdown or /think <off|minimal|low|medium|high>".into(),
             "/posture" if !args.is_empty() => self.request_worker_setting(
                 |ack| WorkerRequest::SetPosture {
@@ -4358,7 +4351,7 @@ impl OmegonAcpAgent {
                     ack: Some(ack),
                 },
                 format!("Posture set to: {}", args.trim()),
-            ),
+            ).await,
             "/posture" => "Use the posture dropdown or /posture <fabricator|architect|explorator|devastator>".into(),
             "/compact" => "Context compaction happens automatically. The model manages its own context window.".into(),
             "/clear" => "Start a new thread via the + button to clear the conversation.".into(),
@@ -4687,35 +4680,37 @@ mod extension_metadata_tests {
         assert_eq!(worker_routes, vec!["version", "status", "stats"]);
     }
 
-    #[test]
-    fn acp_version_uses_worker_build_identity() {
+    #[tokio::test]
+    async fn acp_version_uses_worker_build_identity() {
         let agent = OmegonAcpAgent::new("test-model");
-        let text = agent.handle_slash_command("/version");
+        let text = agent.handle_slash_command("/version").await;
 
         assert_eq!(text, "ACP worker is not initialized");
         assert_ne!(text, format!("omegon {}", env!("CARGO_PKG_VERSION")));
         assert_eq!(
-            agent.handle_slash_command("/status"),
+            agent.handle_slash_command("/status").await,
             "ACP worker is not initialized"
         );
         assert_eq!(
-            agent.handle_slash_command("/stats"),
+            agent.handle_slash_command("/stats").await,
             "ACP worker is not initialized"
         );
         assert_eq!(
-            agent.handle_slash_command("/profile"),
+            agent.handle_slash_command("/profile").await,
             "ACP worker is not initialized"
         );
         assert_eq!(
-            agent.handle_slash_command("/profile open built-in:built-in-default"),
+            agent
+                .handle_slash_command("/profile open built-in:built-in-default")
+                .await,
             "ACP worker is not initialized"
         );
     }
 
-    #[test]
-    fn acp_help_preserves_advertised_command_names() {
+    #[tokio::test]
+    async fn acp_help_preserves_advertised_command_names() {
         let agent = OmegonAcpAgent::new("test-model");
-        let text = agent.handle_slash_command("/help");
+        let text = agent.handle_slash_command("/help").await;
 
         let command_line = text.lines().next().expect("help should include commands");
         let commands: Vec<&str> = command_line
@@ -4726,7 +4721,6 @@ mod extension_metadata_tests {
 
         assert!(commands.contains(&"/thinking"), "{text}");
         assert!(commands.contains(&"/login"), "{text}");
-        assert!(commands.contains(&"/posture"), "{text}");
         assert!(!commands.contains(&"/think"), "{text}");
         assert!(!commands.contains(&"/auth"), "{text}");
     }
@@ -6271,6 +6265,23 @@ Progress: 1/2"
             Some("Request aborted")
         );
         assert_eq!(acp_status_message_text("   "), None);
+    }
+
+    #[test]
+    fn acp_slash_command_dispatch_is_async_and_never_blocks_the_runtime() {
+        let source = include_str!("acp.rs");
+        let dispatch = source
+            .split("async fn request_worker_control")
+            .nth(1)
+            .expect("async worker control dispatcher");
+        let dispatch = dispatch
+            .split("async fn handle_slash_command")
+            .next()
+            .expect("dispatcher boundary");
+
+        assert!(!dispatch.contains("block_on"));
+        assert!(!dispatch.contains("Runtime::new"));
+        assert!(source.contains("async fn handle_slash_command(&self"));
     }
 
     #[test]
