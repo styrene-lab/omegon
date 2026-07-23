@@ -4313,7 +4313,7 @@ impl OmegonAcpAgent {
             "/compact" => "Context compaction happens automatically. The model manages its own context window.".into(),
             "/clear" => "Start a new thread via the + button to clear the conversation.".into(),
             "/status" => self.request_worker_control("status"),
-            "/version" => format!("omegon {}", env!("CARGO_PKG_VERSION")),
+            "/version" => self.request_worker_control("version"),
             "/secrets" => {
                 // Read recipes file for a diagnostic view — no values exposed
                 let secrets_path = dirs::home_dir()
@@ -4623,6 +4623,15 @@ mod extension_metadata_tests {
             assert!(definition.availability.acp, "{definition:?}");
             assert!(names.contains(&advertised.to_string()), "{names:?}");
         }
+    }
+
+    #[test]
+    fn acp_version_uses_worker_build_identity() {
+        let agent = OmegonAcpAgent::new("test-model");
+        let text = agent.handle_slash_command("/version");
+
+        assert_eq!(text, "ACP worker is not initialized");
+        assert_ne!(text, format!("omegon {}", env!("CARGO_PKG_VERSION")));
     }
 
     #[test]
