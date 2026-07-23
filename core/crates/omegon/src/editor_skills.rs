@@ -51,15 +51,17 @@ impl ZedSkillBridgeReport {
 }
 
 pub fn zed_status() -> anyhow::Result<ZedSkillBridgeReport> {
-    let source = user_skills_dir()?;
+    let source = zed_bridge_source_dir()?;
     let target = zed_managed_skills_dir()?;
     inspect_zed_bridge(&source, &target)
 }
 
 pub fn zed_sync(dry_run: bool) -> anyhow::Result<ZedSkillBridgeReport> {
     let source = user_skills_dir()?;
+    let bridge_source = zed_bridge_source_dir()?;
+    prepare_zed_yaml_skills(&source, &bridge_source, dry_run)?;
     let target = zed_managed_skills_dir()?;
-    let mut report = sync_zed_bridge(&source, &target, dry_run)?;
+    let mut report = sync_zed_bridge(&bridge_source, &target, dry_run)?;
     cleanup_legacy_zed_bridge(&mut report, dry_run)?;
     Ok(report)
 }
@@ -73,6 +75,12 @@ fn user_skills_dir() -> anyhow::Result<PathBuf> {
 fn zed_managed_skills_dir() -> anyhow::Result<PathBuf> {
     dirs::home_dir()
         .map(|home| home.join(".agents/skills"))
+        .ok_or_else(|| anyhow::anyhow!("home directory is unavailable"))
+}
+
+fn zed_bridge_source_dir() -> anyhow::Result<PathBuf> {
+    dirs::home_dir()
+        .map(|home| home.join(".omegon/zed-skills"))
         .ok_or_else(|| anyhow::anyhow!("home directory is unavailable"))
 }
 
@@ -113,6 +121,25 @@ fn portable_skill_sources(source: &Path) -> anyhow::Result<Vec<(String, PathBuf)
     }
     skills.sort_by(|left, right| left.0.cmp(&right.0));
     Ok(skills)
+}
+
+fn prepare_zed_yaml_skills(source: &Path, target: &Path, dry_run: bool) -> anyhow::Result<()> {
+    for (name, source_dir) in portable_skill_sources(source)? {
+        let content = std::fs::read_to_string(source_dir.join("SKILL.md"))?;
+        let (manifest, body) = omegon_skills::parse_skill_file(&content);
+        let rendered = format!(
+            "---\nname: {}\ndescription: {}\n---\n{}",
+            serde_json::to_string(&manifest.name)?,
+            serde_json::to_string(&manifest.description)?,
+            body.trim_start()
+        );
+        if !dry_run {
+            let skill_dir = target.join(&name);
+            std::fs::create_dir_all(&skill_dir)?;
+            crate::filelock::atomic_write_locked(&skill_dir.join("SKILL.md"), rendered.as_bytes())?;
+        }
+    }
+    Ok(())
 }
 
 fn inspect_zed_bridge(source: &Path, target: &Path) -> anyhow::Result<ZedSkillBridgeReport> {
@@ -170,8 +197,16 @@ fn sync_zed_bridge(
         let link = target.join(&link_name);
         match std::fs::symlink_metadata(&link) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                if std::fs::read_link(&link)? == *source_path {
+                let existing = std::fs::read_link(&link)?;
+                if existing == *source_path {
                     report.unchanged_count += 1;
+                } else if is_owned_omegon_skill_target(&existing) {
+                    if !dry_run {
+                        std::fs::remove_file(&link)?;
+                        create_dir_symlink(source_path, &link)?;
+                    }
+                    report.linked_count += 1;
+                    report.removed_count += 1;
                 } else {
                     report.conflict_count += 1;
                     report
@@ -249,6 +284,17 @@ fn cleanup_legacy_zed_bridge(
     Ok(())
 }
 
+fn is_owned_omegon_skill_target(path: &Path) -> bool {
+    path.components()
+        .any(|component| component.as_os_str() == ".omegon")
+        && path.components().any(|component| {
+            matches!(
+                component.as_os_str().to_str(),
+                Some("skills" | "zed-skills")
+            )
+        })
+}
+
 #[cfg(unix)]
 fn create_dir_symlink(source: &Path, target: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(source, target)
@@ -303,6 +349,26 @@ mod tests {
         let report = sync_zed_bridge(&source, &target, false).unwrap();
         assert_eq!(report.conflict_count, 1);
         assert!(target.join("omegon-rust").is_dir());
+    }
+
+    #[test]
+    fn zed_sync_migrates_owned_omegon_symlink_to_normalized_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join(".omegon/zed-skills");
+        let old_source = temp.path().join(".omegon/skills/rust");
+        let target = temp.path().join("target");
+        write_skill(&source, "rust");
+        write_skill(&temp.path().join(".omegon/skills"), "rust");
+        std::fs::create_dir_all(&target).unwrap();
+        create_dir_symlink(&old_source, &target.join("omegon-rust")).unwrap();
+
+        let report = sync_zed_bridge(&source, &target, false).unwrap();
+        assert_eq!(report.linked_count, 1);
+        assert_eq!(report.removed_count, 1);
+        assert_eq!(
+            std::fs::read_link(target.join("omegon-rust")).unwrap(),
+            source.join("rust")
+        );
     }
 
     #[test]
