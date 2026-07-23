@@ -582,87 +582,43 @@ async fn worker_loop(
             }
 
             WorkerRequest::SetModel { value, ack } => {
-                if let Ok(mut s) = shared_settings.lock() {
-                    s.set_model(&value);
-                    let mut profile = crate::settings::Profile::load(&cwd);
-                    profile.capture_from(&s);
-                    let _ = profile.save(&cwd);
-                }
+                let _ = crate::session_settings_commands::set_model(&shared_settings, &cwd, &value);
                 if let Some(tx) = ack {
                     let _ = tx.send(());
                 }
             }
 
             WorkerRequest::SetThinking { value, ack } => {
-                if let Some(l) = crate::settings::ThinkingLevel::parse(&value)
-                    && let Ok(mut s) = shared_settings.lock()
-                {
-                    s.thinking = l;
-                    let mut profile = crate::settings::Profile::load(&cwd);
-                    profile.capture_from(&s);
-                    let _ = profile.save(&cwd);
-                }
+                let _ =
+                    crate::session_settings_commands::set_thinking(&shared_settings, &cwd, &value);
                 if let Some(tx) = ack {
                     let _ = tx.send(());
                 }
             }
 
             WorkerRequest::SetPosture { value, ack } => {
-                let posture = match value.as_str() {
-                    "fabricator" => Some(crate::settings::PosturePreset::Fabricator),
-                    "architect" => Some(crate::settings::PosturePreset::Architect),
-                    "explorator" => Some(crate::settings::PosturePreset::Explorator),
-                    "devastator" => Some(crate::settings::PosturePreset::Devastator),
-                    _ => None,
-                };
-                if let Some(p) = posture
-                    && let Ok(mut s) = shared_settings.lock()
-                {
-                    s.set_posture(p);
-                    let mut profile = crate::settings::Profile::load(&cwd);
-                    profile.capture_from(&s);
-                    let _ = profile.save(&cwd);
-                }
+                let _ =
+                    crate::session_settings_commands::set_posture(&shared_settings, &cwd, &value);
                 if let Some(tx) = ack {
                     let _ = tx.send(());
                 }
             }
 
             WorkerRequest::SetContextClass { value, ack } => {
-                let result = crate::settings::ContextClass::parse(&value)
-                    .ok_or_else(|| format!("unknown context class `{value}`"))
-                    .and_then(|context_class| {
-                        let mut settings = shared_settings
-                            .lock()
-                            .map_err(|_| "settings lock poisoned".to_string())?;
-                        settings.set_requested_context_class(context_class);
-                        let mut profile = crate::settings::Profile::load(&cwd);
-                        profile.capture_from(&settings);
-                        profile
-                            .save(&cwd)
-                            .map_err(|error| format!("could not persist context class: {error}"))?;
-                        Ok(())
-                    });
+                let result = crate::session_settings_commands::set_context_class(
+                    &shared_settings,
+                    &cwd,
+                    &value,
+                );
                 let _ = ack.send(result);
             }
 
             WorkerRequest::ApplyProfile { id, scope, ack } => {
-                let result = (|| {
-                    let selection = crate::settings::ActiveProfileSelection { id, scope };
-                    let registry = crate::settings::ProfileRegistry::discover(&cwd);
-                    let loaded = registry
-                        .resolve_explicit(&selection)
-                        .ok_or_else(|| format!("profile `{}` was not found", selection.id))?;
-                    crate::settings::save_project_active_profile_selection(&cwd, &selection)
-                        .map_err(|error| format!("could not select profile: {error}"))?;
-                    let mut settings = shared_settings
-                        .lock()
-                        .map_err(|_| "settings lock poisoned".to_string())?;
-                    loaded.profile.apply_to_with_posture(&mut settings, &cwd);
-                    settings.provider_connected =
-                        crate::auth::provider_connected_for_model(&settings.model);
-                    Ok(())
-                })();
+                let result = crate::session_settings_commands::apply_profile(
+                    &shared_settings,
+                    &cwd,
+                    crate::settings::ActiveProfileSelection { id, scope },
+                );
                 let _ = ack.send(result);
             }
 

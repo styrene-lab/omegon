@@ -69,6 +69,7 @@ mod migrate;
 mod observation;
 #[cfg(test)]
 mod recro_coe_integration_tests;
+mod session_settings_commands;
 mod shadow_context;
 mod skills;
 mod smoke;
