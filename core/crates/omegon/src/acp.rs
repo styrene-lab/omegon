@@ -1328,7 +1328,8 @@ impl OmegonAcpAgent {
                 SessionCapabilities::new()
                     .list(SessionListCapabilities::new())
                     .close(SessionCloseCapabilities::new()),
-            );
+            )
+            .load_session(true);
         response.auth_methods = vec![AuthMethod::Agent(
             AuthMethodAgent::new("omegon-auth", "Omegon Authentication")
                 .description("Run `omegon auth login` in a terminal or set API keys."),
@@ -2027,11 +2028,41 @@ impl OmegonAcpAgent {
     }
 
     async fn load_session(&self, args: LoadSessionRequest) -> Result<LoadSessionResponse> {
-        // Ensure worker is ready for this cwd
+        let session_id = args.session_id.to_string();
+        let entry = crate::session::list_sessions(&args.cwd)
+            .into_iter()
+            .find(|entry| entry.meta.session_id == session_id)
+            .ok_or_else(|| {
+                Error::new(
+                    i32::from(ErrorCode::InvalidParams),
+                    format!(
+                        "session `{session_id}` was not found for {}",
+                        args.cwd.display()
+                    ),
+                )
+            })?;
+
+        *self.session_cwd.borrow_mut() = Some(args.cwd.clone());
+        *self.session_id.borrow_mut() = Some(args.session_id.clone());
         self.ensure_worker(&args.cwd);
 
+        let (ack, loaded) = tokio::sync::oneshot::channel();
+        self.send_to_worker_ack(WorkerRequest::LoadSession {
+            path: entry.path,
+            resume_id: session_id,
+            ack,
+        })
+        .await;
+        loaded
+            .await
+            .map_err(|_| Error::internal_error())?
+            .map_err(|message| Error::new(i32::from(ErrorCode::InternalError), message))?;
+
+        let (model, thinking, _posture, context, profile) = self.current_settings();
         let mut response = LoadSessionResponse::new();
         response.modes = Some(Self::modes());
+        response.config_options =
+            Some(self.build_config_options(&model, &thinking, &context, &profile, &args.cwd));
         Ok(response)
     }
 
@@ -6591,14 +6622,14 @@ Progress: 1/2"
     }
 
     #[tokio::test]
-    async fn initialize_does_not_advertise_unimplemented_session_loading() {
+    async fn initialize_advertises_implemented_session_loading() {
         let agent = OmegonAcpAgent::new("test-model");
         let response = agent
             .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
             .await
             .expect("initialize");
 
-        assert!(!response.agent_capabilities.load_session);
+        assert!(response.agent_capabilities.load_session);
         let info = response.agent_info.expect("agent info");
         assert_eq!(info.version, acp_build_identity());
         let expected_title = format!("Omegon {}", acp_build_identity());
