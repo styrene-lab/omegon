@@ -54,7 +54,7 @@ The TS→Rust migration is half-done. Cleave currently dispatches TS children (n
 
 **The bridge**: The TS harness can optionally dispatch cleave children to the Rust binary instead of to itself. A flag like `--experimental-backend rust` or an env var `OMEGON_CLEAVE_BACKEND=native` switches the child dispatch from `node bin/omegon.mjs` to the Rust `omegon` binary. This is the discovery path — operators who try experimental cleave get faster, more reliable children, and eventually realize the Rust binary does everything.
 
-**Migration endpoint**: When the Rust binary handles all the use cases the TS harness does (including the extensions that matter), the TS version becomes a compatibility shim that launches the Rust binary. Eventually it's just `npm install -g omegon` downloading a platform binary — no Node.js at all.
+**Migration endpoint**: The Rust binary handles the supported product surface and ships directly through GitHub Releases, the install script, and Homebrew, with no Node.js distribution layer.
 
 ### What needs to happen concretely
 
@@ -71,7 +71,7 @@ The TS→Rust migration is half-done. Cleave currently dispatches TS children (n
 **Medium-term (Rust as default)**:
 7. Make Rust the default cleave backend, TS as fallback
 8. Install script (`omegon.styrene.dev/install.sh`) already delivers the Rust binary
-9. `npm install -g omegon` downloads the platform binary (no Node.js child needed)
+9. GitHub Releases, the install script, or Homebrew installs the platform binary directly
 
 **The Vault work we were doing**: continues in the Rust crate, cleave'd using Rust children. The TS side doesn't need Vault — it's a feature for the Rust product.
 

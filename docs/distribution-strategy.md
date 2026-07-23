@@ -22,7 +22,6 @@ Map all distribution channels for the omegon binary: install.sh, GitHub Releases
 | `install.sh` | Working | SHA-256 mandatory, cosign optional | Automatic |
 | GitHub Releases | Working | cosign keyless + SBOM + attestations | Manual |
 | Homebrew stable / RC tap | Working | points at GitHub Release assets | Automatic formula update |
-| npm (`omegon`) | Working | npm provenance | Automatic |
 | Local build | Working | Developer ID (YubiKey) | `codesign -dvvv` |
 
 ## Signing Pipeline

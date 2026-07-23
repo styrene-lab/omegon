@@ -13,7 +13,6 @@ visibility = "private"
 
 [data]
 open_questions = []
-parent = "core-distribution"
 +++
 
 # omegon.styrene.dev — installation landing page + install.sh hosting

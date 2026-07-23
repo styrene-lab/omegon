@@ -21,7 +21,7 @@ priority = "1"
 
 ## Overview
 
-The Rust binary ships via GitHub Releases with SHA256 checksums but no code signing, no SBOM, and no provenance attestation. The npm package has sigstore provenance via `npm publish --provenance`, but the Rust binary — the actual thing operators run — has none of these. This node covers three layers: SBOM generation (what's in the binary), code signing (who built it), and provenance attestation (how it was built).
+The Rust binary ships via GitHub Releases. This node covers three layers of release assurance: SBOM generation (what is in the binary), code signing (who built it), and provenance attestation (how it was built).
 
 ## Research
 
@@ -31,11 +31,11 @@ The Rust binary ships via GitHub Releases with SHA256 checksums but no code sign
 
 ### Release workflow design — the missing piece
 
-The biggest gap isn't signing or SBOM — it's that **no GitHub Actions workflow builds and releases the Rust binary at all.** The publish.yml only publishes the npm package. The install.sh expects GitHub Releases to exist with platform-specific archives and checksums. Something has to create those.
+The release workflow must build and publish platform-specific archives and checksums consumed by install.sh.
 
 ### Proposed: `.github/workflows/release.yml`
 
-Triggered on: git tag `v*` pushed (same tag that publish.yml creates).
+Triggered when a `v*` release tag is pushed.
 
 **Matrix build:**
 ```yaml
@@ -98,7 +98,7 @@ The site container (omegon.styrene.dev) is already deployed via ArgoCD. If we si
 ### Decision: Release workflow triggered by v* tag, matrix build for 4 targets
 
 **Status:** decided
-**Rationale:** The publish.yml already creates git tags. release.yml triggers on the same tag. Matrix: x86_64-linux (ubuntu), aarch64-linux (cross-compile), x86_64-macos (macos-13), aarch64-macos (macos-14 Apple Silicon). Each target produces a stripped binary in a tar.gz. Post-matrix: checksums, SBOM, signing, provenance, GitHub Release creation.
+**Rationale:** release.yml triggers on the release tag. Matrix: x86_64-linux (ubuntu), aarch64-linux (cross-compile), x86_64-macos, and aarch64-macos. Each target produces a stripped binary in a tar.gz. Post-matrix: checksums, SBOM, signing, provenance, and GitHub Release creation.
 
 ## Open Questions
 
@@ -117,11 +117,9 @@ The site container (omegon.styrene.dev) is already deployed via ArgoCD. If we si
 - Cosign verification in install.sh is optional — doesn't block install if cosign not present
 - SBOM is CycloneDX JSON format attached to every GitHub Release
 - Signing uses OIDC keyless (GitHub Actions identity) — zero secrets to manage
-- Release workflow only triggers on v* tags — same tags publish.yml creates
+- Release workflow only triggers on v* tags
 
 ## What exists today
-
-**npm package:** `npm publish --provenance` in publish.yml → sigstore-based provenance attestation. npm shows a "Published with provenance" badge. This covers the TS harness package.
 
 **Rust binary:** install.sh downloads from GitHub Releases, verifies SHA256 from `checksums.sha256` file. But:
 - No release workflow exists — there's no GitHub Actions job that builds the Rust binary and creates a release. The `checksums.sha256` and archives are presumably created manually or by an untracked process.
