@@ -51,6 +51,17 @@ pub enum WorkerRequest {
         value: String,
         ack: Option<oneshot::Sender<()>>,
     },
+    /// Change the requested context class.
+    SetContextClass {
+        value: String,
+        ack: oneshot::Sender<Result<(), String>>,
+    },
+    /// Apply one named profile from the project/user profile registry.
+    ApplyProfile {
+        id: String,
+        scope: Option<String>,
+        ack: oneshot::Sender<Result<(), String>>,
+    },
     /// Execute a control request (slash command) and return the response.
     /// This gives ACP clients access to every operation the TUI has.
     ControlRequest {
@@ -590,6 +601,44 @@ async fn worker_loop(
                 if let Some(tx) = ack {
                     let _ = tx.send(());
                 }
+            }
+
+            WorkerRequest::SetContextClass { value, ack } => {
+                let result = crate::settings::ContextClass::parse(&value)
+                    .ok_or_else(|| format!("unknown context class `{value}`"))
+                    .and_then(|context_class| {
+                        let mut settings = shared_settings
+                            .lock()
+                            .map_err(|_| "settings lock poisoned".to_string())?;
+                        settings.set_requested_context_class(context_class);
+                        let mut profile = crate::settings::Profile::load(&cwd);
+                        profile.capture_from(&settings);
+                        profile
+                            .save(&cwd)
+                            .map_err(|error| format!("could not persist context class: {error}"))?;
+                        Ok(())
+                    });
+                let _ = ack.send(result);
+            }
+
+            WorkerRequest::ApplyProfile { id, scope, ack } => {
+                let result = (|| {
+                    let selection = crate::settings::ActiveProfileSelection { id, scope };
+                    let registry = crate::settings::ProfileRegistry::discover(&cwd);
+                    let loaded = registry
+                        .resolve_explicit(&selection)
+                        .ok_or_else(|| format!("profile `{}` was not found", selection.id))?;
+                    crate::settings::save_project_active_profile_selection(&cwd, &selection)
+                        .map_err(|error| format!("could not select profile: {error}"))?;
+                    let mut settings = shared_settings
+                        .lock()
+                        .map_err(|_| "settings lock poisoned".to_string())?;
+                    loaded.profile.apply_to_with_posture(&mut settings, &cwd);
+                    settings.provider_connected =
+                        crate::auth::provider_connected_for_model(&settings.model);
+                    Ok(())
+                })();
+                let _ = ack.send(result);
             }
 
             WorkerRequest::ControlRequest {

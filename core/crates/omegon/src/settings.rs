@@ -1860,7 +1860,7 @@ pub fn save_project_active_profile_selection(
     selection: &ActiveProfileSelection,
 ) -> anyhow::Result<std::path::PathBuf> {
     let registry = ProfileRegistry::discover(cwd);
-    if registry.find_selected(selection).is_none() {
+    if registry.resolve_explicit(selection).is_none() {
         let scope = selection.scope.as_deref().unwrap_or("any scope");
         anyhow::bail!("profile `{}` was not found in {}", selection.id, scope);
     }
@@ -1869,7 +1869,10 @@ pub fn save_project_active_profile_selection(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, serde_json::to_string_pretty(selection)? + "\n")?;
+    crate::filelock::atomic_write_locked(
+        &path,
+        (serde_json::to_string_pretty(selection)? + "\n").as_bytes(),
+    )?;
     Ok(path)
 }
 
@@ -1921,6 +1924,19 @@ impl ProfileRegistry {
         });
         registry.compute_shadows();
         registry
+    }
+
+    /// Resolve one explicit registry selection without mutating active-profile state.
+    pub fn resolve_explicit(&self, selection: &ActiveProfileSelection) -> Option<LoadedProfile> {
+        let entry = self.find_selected(selection)?;
+        let mut profile = entry.profile.clone();
+        if profile.compact_label().is_none() {
+            profile.name = Some(entry.id.clone());
+        }
+        Some(LoadedProfile {
+            profile,
+            source: entry.source(),
+        })
     }
 
     pub fn resolve_active(&self) -> LoadedProfile {
@@ -2355,6 +2371,29 @@ fn custom_posture_dirs(cwd: &std::path::Path) -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_explicit_profile_does_not_change_active_selection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let profile_dir = tmp.path().join(".omegon/profiles");
+        std::fs::create_dir_all(&profile_dir).unwrap();
+        std::fs::write(
+            profile_dir.join("review.json"),
+            r#"{"name":"review","thinkingLevel":"high"}"#,
+        )
+        .unwrap();
+
+        let registry = ProfileRegistry::discover(tmp.path());
+        let loaded = registry
+            .resolve_explicit(&ActiveProfileSelection {
+                id: "review".into(),
+                scope: Some("project".into()),
+            })
+            .expect("explicit profile");
+
+        assert_eq!(loaded.profile.compact_label(), Some("review"));
+        assert!(!tmp.path().join(".omegon/active-profile.json").exists());
+    }
 
     #[test]
     fn posture_default_is_architect() {

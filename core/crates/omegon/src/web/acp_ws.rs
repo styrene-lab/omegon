@@ -238,7 +238,7 @@ async fn run_acp_session(
         }
     }
 
-    let agent = Rc::new(crate::acp::OmegonAcpAgent::new_with_safety(
+    let agent = Rc::new(crate::acp::OmegonAcpAgent::new_for_websocket(
         &model,
         dangerously_bypass_permissions,
     ));

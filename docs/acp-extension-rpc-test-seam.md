@@ -1,7 +1,7 @@
 ---
 id: acp-extension-rpc-test-seam
 title: "ACP extension RPC test seam"
-status: seed
+status: implemented
 tags: [acp, extensions, testing, issue-132-followup]
 open_questions:
   - "[assumption] ExtensionPollingHandle should remain the production transport wrapper while ACP depends on a small trait for invocation tests."
@@ -55,6 +55,10 @@ BTreeMap<String, Arc<dyn ExtensionRpcInvoker>>
 - Unit-test `method_failed` with a fake invoker returning an error.
 - Keep current missing/not-loaded validation tests.
 - Leave subprocess protocol coverage in extension integration tests.
+
+## Implementation
+
+Implemented in `core/crates/omegon/src/acp/extension_rpc.rs`. ACP stores production handles unchanged, while the call helper accepts any `ExtensionRpcInvoker` implementation. Unit tests use an in-memory fake to verify method/parameter forwarding and `method_failed` error mapping without spawning an extension process.
 
 ## Acceptance criteria
 

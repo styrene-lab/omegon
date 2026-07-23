@@ -55,11 +55,14 @@ Switch modes via the mode selector in Zed's Agent Panel.
 
 ## Configuration Dropdowns
 
-Three config dropdowns appear at the bottom of the Agent Panel:
+Four portable config dropdowns appear at the bottom of the Agent Panel:
 
-- **Model** — LLM provider and model. Auto-detects local Ollama models alongside Anthropic, OpenAI, and OpenRouter options.
+- **Model** — LLM provider and model. Auto-detects local Ollama models alongside authenticated cloud-provider options.
 - **Thinking Level** — off, minimal, low, medium, high. Controls extended thinking budget.
-- **Posture** — fabricator, architect, explorator, devastator. Controls resource allocation and behavioral profile.
+- **Profile** — applies a named project/user Omegon profile and refreshes all resulting controls.
+- **Context Window** — compact, standard, extended, or massive requested context policy.
+
+Posture is represented by Zed's first-class **Mode** selector rather than a duplicate config dropdown. ACP also assigns semantic categories and descriptions to these controls so clients can place model and thinking selectors natively.
 
 ## Host Delegation
 

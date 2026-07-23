@@ -27,6 +27,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a read-only managed-process viewer in the TUI, opened with `/processes [session-id-or-name]`, with lifecycle/provenance metadata, retained output, scrolling, and follow mode over the shared execution-session projection.
 - Added the first renderer-neutral managed-execution session projection over background PTY sessions, exposing lifecycle, provenance, retained output, transcript metadata, and interaction capabilities for future process-viewer surfaces.
 
+### Fixed
+
+- Made `/editor zed` parse comments and trailing commas in Zed's JSONC settings, write atomically, and fail closed on malformed or incompatible existing settings instead of replacing them with a new empty document.
+- Exposed portable ACP Profile and Context Window selectors with semantic categories/descriptions, full aggregate refresh after profile application, and slash-command fallbacks; posture now uses the first-class ACP mode selector instead of a duplicate settings dropdown.
+- Added explicit ACP turn lifecycle telemetry (`idle`, `running`, `cancelling`, or `failed`) and redacted last-error reporting to `_runtime/status`, giving reconnecting clients an authoritative view of in-flight work.
+- Added an in-memory ACP extension RPC invocation seam with success and failure-path regression coverage, preserving production extension polling while making `_extensions/call` behavior directly testable.
+- Hardened ACP session ownership by rejecting prompts and closes for non-active session IDs, retaining the negotiated session working directory for prompts, clearing it on close, and no longer advertising shallow transcript resume as supported.
+- Corrected ACP runtime status to report WebSocket transport for WebSocket sessions instead of hard-coding `stdio`.
+
 ### Changed
 
 - Replaced the selected conversation row's width-shifting glyph rail with a stable full-row background highlight, and changed completed terminal rows from the stale `dbl-click copy` hint to `dbl-click process`.
