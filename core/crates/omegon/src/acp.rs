@@ -4298,6 +4298,26 @@ impl OmegonAcpAgent {
         }
     }
 
+    async fn execute_shared_control_command(
+        &self,
+        command: &crate::tui::CanonicalSlashCommand,
+    ) -> Option<String> {
+        let request = crate::control_runtime::control_request_from_slash(command)?;
+        let cwd = self
+            .session_cwd
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let secrets = self.secrets.borrow().clone()?;
+        let settings = crate::settings::shared(&self.model);
+        let handles = crate::tui::dashboard::DashboardHandles::default();
+        crate::control_runtime::execute_stateless_control(
+            &request, &settings, &secrets, &cwd, &handles,
+        )
+        .await
+        .and_then(|response| response.output)
+    }
+
     async fn handle_slash_command(&self, input: &str) -> String {
         let trimmed = input.trim();
         let (cmd, args) = trimmed
@@ -4305,6 +4325,21 @@ impl OmegonAcpAgent {
             .unwrap_or((trimmed, ""));
 
         let advertised_name = cmd.strip_prefix('/').unwrap_or(cmd);
+
+        if let Some(command) = crate::tui::canonical_slash_command(advertised_name, args)
+            && matches!(
+                command,
+                crate::tui::CanonicalSlashCommand::SkillsView
+                    | crate::tui::CanonicalSlashCommand::SkillsHelp
+                    | crate::tui::CanonicalSlashCommand::SkillsInstall(_)
+                    | crate::tui::CanonicalSlashCommand::SkillGet(_)
+                    | crate::tui::CanonicalSlashCommand::SkillDelete(_)
+            )
+            && let Some(output) = self.execute_shared_control_command(&command).await
+        {
+            return output;
+        }
+
         if let Some(binding) = acp_command_binding(advertised_name)
             && let AcpCommandRoute::WorkerControl(worker_command) = binding.route
         {
