@@ -329,7 +329,7 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
         "set thinking level",
         &["off", "minimal", "low", "medium", "high"],
     ),
-    BuiltinCommandSpec::cli_state_changing(
+    BuiltinCommandSpec::cli_acp_state_changing(
         "profile",
         "open profile menu or manage runtime profile defaults",
         &[

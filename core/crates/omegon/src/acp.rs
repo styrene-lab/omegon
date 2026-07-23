@@ -4298,30 +4298,6 @@ impl OmegonAcpAgent {
         }
     }
 
-    async fn execute_shared_control_command(
-        &self,
-        command: &crate::tui::CanonicalSlashCommand,
-    ) -> Option<String> {
-        let request = crate::control_runtime::control_request_from_slash(command)?;
-        let cwd = self
-            .session_cwd
-            .borrow()
-            .clone()
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let secrets = self.secrets.borrow().clone()?;
-        let settings = self
-            .worker
-            .borrow()
-            .as_ref()
-            .map(|worker| worker.settings.clone())?;
-        let handles = crate::tui::dashboard::DashboardHandles::default();
-        crate::control_runtime::execute_stateless_control(
-            &request, &settings, &secrets, &cwd, &handles,
-        )
-        .await
-        .and_then(|response| response.output)
-    }
-
     async fn execute_worker_control_command(
         &self,
         request: crate::control_runtime::ControlRequest,
@@ -4345,26 +4321,25 @@ impl OmegonAcpAgent {
 
         let advertised_name = cmd.strip_prefix('/').unwrap_or(cmd);
 
-        if let Some(command) = crate::tui::canonical_slash_command(advertised_name, args)
-            && matches!(
+        if let Some(command) = crate::tui::canonical_slash_command(advertised_name, args) {
+            if let Some(request) = crate::control_runtime::control_request_from_slash(&command) {
+                if let Some(output) = self.execute_worker_control_command(request).await {
+                    return output;
+                }
+                return "ACP worker is not initialized".into();
+            }
+
+            if matches!(command, crate::tui::CanonicalSlashCommand::SkillsReload) {
+                return "Skill reload requires restarting this ACP session; start a new editor thread to activate user or project skill changes.".into();
+            }
+
+            if matches!(
                 command,
-                crate::tui::CanonicalSlashCommand::SkillsView
-                    | crate::tui::CanonicalSlashCommand::SkillsHelp
-                    | crate::tui::CanonicalSlashCommand::SkillsInstall(_)
-                    | crate::tui::CanonicalSlashCommand::SkillGet(_)
-                    | crate::tui::CanonicalSlashCommand::SkillDelete(_)
-            )
-        {
-            if let Some(output) = self.execute_shared_control_command(&command).await {
-                return output;
+                crate::tui::CanonicalSlashCommand::SkillCreate(_)
+                    | crate::tui::CanonicalSlashCommand::SkillImport { .. }
+            ) {
+                return "Skill creation and import require an agent turn because they validate and write files. Describe the skill or import path in a normal prompt.".into();
             }
-            let Some(request) = crate::control_runtime::control_request_from_slash(&command) else {
-                return "Unsupported ACP control request".into();
-            };
-            if let Some(output) = self.execute_worker_control_command(request).await {
-                return output;
-            }
-            return "ACP worker is not initialized".into();
         }
 
         if let Some(binding) = acp_command_binding(advertised_name)
@@ -4712,10 +4687,9 @@ mod extension_metadata_tests {
         assert!(names.contains(&"model".to_string()), "{names:?}");
         assert!(names.contains(&"thinking".to_string()), "{names:?}");
         assert!(names.contains(&"login".to_string()), "{names:?}");
-        assert!(names.contains(&"posture".to_string()), "{names:?}");
         assert!(names.contains(&"version".to_string()), "{names:?}");
         assert!(names.contains(&"stats".to_string()), "{names:?}");
-        assert!(!names.contains(&"profile".to_string()), "{names:?}");
+        assert!(names.contains(&"profile".to_string()), "{names:?}");
         assert!(!names.contains(&"think".to_string()), "{names:?}");
         assert!(!names.contains(&"auth".to_string()), "{names:?}");
 
@@ -4739,7 +4713,7 @@ mod extension_metadata_tests {
                 AcpCommandRoute::Local => None,
             })
             .collect();
-        assert_eq!(worker_routes, vec!["version", "status", "stats"]);
+        assert_eq!(worker_routes, vec!["version", "stats", "status"]);
     }
 
     #[tokio::test]
@@ -4766,6 +4740,37 @@ mod extension_metadata_tests {
                 .handle_slash_command("/profile open built-in:built-in-default")
                 .await,
             "ACP worker is not initialized"
+        );
+    }
+
+    #[tokio::test]
+    async fn acp_canonical_profile_and_skill_commands_require_the_authoritative_worker() {
+        let agent = OmegonAcpAgent::new("test-model");
+
+        for command in [
+            "/profile view",
+            "/profile use built-in-default built-in",
+            "/skills list",
+            "/skills install rust",
+        ] {
+            assert_eq!(
+                agent.handle_slash_command(command).await,
+                "ACP worker is not initialized",
+                "{command} must not execute against transport-local settings"
+            );
+        }
+
+        assert!(
+            agent
+                .handle_slash_command("/skills reload")
+                .await
+                .contains("restart")
+        );
+        assert!(
+            agent
+                .handle_slash_command("/skills create --project")
+                .await
+                .contains("agent turn")
         );
     }
 

@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Advertised the scope-aware `/profile` command to ACP clients and routed canonical profile/skill commands exclusively through the authoritative worker runtime, avoiding transport-local settings drift; unsupported skill reload/create/import operations now return explicit editor guidance.
 - Routed ACP read-only commands as typed canonical control requests to the owning worker, preserving authoritative session settings without reparsing slash text, spawning duplicate state, or requiring SecretsManager initialization for commands that do not use secrets.
 - Routed ACP skill commands through the shared stateless control runtime used by native surfaces instead of maintaining an ACP-only execution path.
 - Fixed ACP slash commands such as `/version` aborting the editor agent process by blocking the active Tokio runtime; command and setting round-trips now await worker responses asynchronously.
