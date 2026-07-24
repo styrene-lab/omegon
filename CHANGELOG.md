@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Made ACP session loading transactional at the transport boundary: the active session ID and working directory are published only after worker restoration succeeds, and worker resume IDs are revalidated before they can reach persistence.
 - Made loaded ACP sessions preserve their canonical session ID on subsequent saves instead of forking into a new persistence record.
 - Advertised ACP session loading now that transcript replay, worker-session restoration, and editor-facing session enumeration are implemented and covered.
 - Advertised the scope-aware `/profile` command to ACP clients and routed canonical profile/skill commands exclusively through the authoritative worker runtime, avoiding transport-local settings drift; unsupported skill reload/create/import operations now return explicit editor guidance.

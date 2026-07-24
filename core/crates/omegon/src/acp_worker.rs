@@ -592,13 +592,17 @@ async fn worker_loop(
                 resume_id: requested_id,
                 ack,
             } => {
-                let result = crate::conversation::ConversationState::load_session(&path)
-                    .map(|loaded| {
-                        conversation = loaded;
-                        resume_id = Some(requested_id);
-                        first_prompt = false;
-                    })
-                    .map_err(|error| format!("could not load session: {error}"));
+                let result = if !crate::session::is_canonical_session_id(&requested_id) {
+                    Err(format!("invalid session id `{requested_id}`"))
+                } else {
+                    crate::conversation::ConversationState::load_session(&path)
+                        .map(|loaded| {
+                            conversation = loaded;
+                            resume_id = Some(requested_id);
+                            first_prompt = false;
+                        })
+                        .map_err(|error| format!("could not load session: {error}"))
+                };
                 let _ = ack.send(result);
             }
 

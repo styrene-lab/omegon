@@ -2042,13 +2042,12 @@ impl OmegonAcpAgent {
                 )
             })?;
 
-        *self.session_cwd.borrow_mut() = Some(args.cwd.clone());
-        *self.session_id.borrow_mut() = Some(args.session_id.clone());
+        let path = entry.path;
         self.ensure_worker(&args.cwd);
 
         let (ack, loaded) = tokio::sync::oneshot::channel();
         self.send_to_worker_ack(WorkerRequest::LoadSession {
-            path: entry.path,
+            path,
             resume_id: session_id,
             ack,
         })
@@ -2057,6 +2056,12 @@ impl OmegonAcpAgent {
             .await
             .map_err(|_| Error::internal_error())?
             .map_err(|message| Error::new(i32::from(ErrorCode::InternalError), message))?;
+
+        // Publish the new active identity only after worker restoration succeeds.
+        // A malformed session must not leave transport state pointing at content
+        // the worker failed to load.
+        *self.session_cwd.borrow_mut() = Some(args.cwd.clone());
+        *self.session_id.borrow_mut() = Some(args.session_id.clone());
 
         let (model, thinking, _posture, context, profile) = self.current_settings();
         let mut response = LoadSessionResponse::new();
