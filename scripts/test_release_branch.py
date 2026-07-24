@@ -40,6 +40,11 @@ class PublishInvariantTests(unittest.TestCase):
     def test_accepts_main_at_release_version(self) -> None:
         release_branch.assert_main_version_not_behind(self.repo, "0.28.7")
 
+    def test_verify_publish_accepts_detached_release_tag_checkout(self) -> None:
+        subprocess.run(["git", "checkout", "--detach", "-q", "HEAD"], cwd=self.repo, check=True)
+
+        release_branch.verify_publish_invariant(self.repo)
+
     def test_accepts_main_newer_than_release(self) -> None:
         release_branch.assert_main_version_not_behind(self.repo, "0.28.6")
 

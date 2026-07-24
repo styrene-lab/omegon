@@ -244,16 +244,17 @@ def merge_forward(repo_root: Path, release_branch: str | None) -> None:
 
 
 def verify_publish_invariant(repo_root: Path) -> None:
-    """Verify the release branch and public trunk cannot advertise different versions."""
+    """Verify the tagged release and public trunk cannot advertise different versions."""
     ensure_clean(repo_root)
-    branch = current_branch(repo_root)
-    if not branch:
-        raise ReleaseBranchError("detached HEAD; check out a release/X.Y branch first")
-    validate_release_branch_name(branch)
     release_version = read_workspace_version(repo_root)
     run(repo_root, "fetch", "origin", "main")
     assert_main_version_not_behind(repo_root, release_version)
-    print(f"publish invariant satisfied: origin/main builds {release_version} or newer")
+    branch = current_branch(repo_root)
+    source = branch if branch else "detached release tag"
+    print(
+        f"publish invariant satisfied from {source}: "
+        f"origin/main builds {release_version} or newer"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

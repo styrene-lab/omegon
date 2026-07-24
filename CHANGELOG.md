@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Allowed stable-release publish verification to run from GitHub Actions' detached tag checkout while still enforcing that `origin/main` advertises the same or a newer workspace version.
 - Kept the Workbench `plan` tool in every actionable turn's lazy schema so the agent can reconcile plan state after turn one without permanently injecting broader lifecycle and orchestration families.
 - Reserved a response-only turn when tool execution reaches the hard turn limit, preventing a final tool result from leaving the operator at `turn supervisor completed` without an assistant conclusion.
 - Stopped successful Workbench plan reconciliation from triggering generic progress-pressure and redundant closure-narration turns, so end-of-turn plan cleanup produces one operator-facing completion instead of repeated acknowledgements.
