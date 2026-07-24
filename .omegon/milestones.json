@@ -1249,12 +1249,12 @@
     "notes": []
   },
   "0.28.9": {
-    "status": "open",
+    "status": "released",
     "channel": "stable",
     "nodes": [],
-    "frozen": false,
+    "frozen": true,
     "opened": "2026-07-21T23:48:32Z",
-    "released": null,
+    "released": "2026-07-24T17:16:43Z",
     "notes": []
   }
 }

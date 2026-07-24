@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.28.9] - 2026-07-24
+
 ### Added
 
 - Clarified the ACP/editor ownership boundary: Zed's native Skills settings page belongs to Zed's built-in agent and is not populated by ACP agents; Omegon `/skills` remains the supported skill inventory and execution surface in Omegon ACP threads.
