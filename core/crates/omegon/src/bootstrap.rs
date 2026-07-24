@@ -26,7 +26,8 @@ pub struct SettingsInit<'a> {
     pub slim: bool,
     /// Whether full/default posture was explicitly requested, overriding `slim`.
     pub full: bool,
-    /// CLI max_turns value. Only applied if != the default (50).
+    /// Runtime max_turns value after entrypoint-specific default resolution.
+    /// Zero means unlimited; bounded automation generally supplies a positive cap.
     pub max_turns: u32,
     /// Whether to apply posture from the profile (uses `apply_to_with_posture`
     /// vs plain `apply_to`).
@@ -79,10 +80,9 @@ pub fn initialize_shared_settings(init: &SettingsInit<'_>) -> SharedSettings {
             }
         }
 
-        // Only override max_turns when explicitly set (50 is the default).
-        if init.max_turns != 50 {
-            s.max_turns = init.max_turns;
-        }
+        // The CLI owns the runtime default. Interactive mode passes zero
+        // (unlimited); bounded/headless callers pass an explicit positive cap.
+        s.max_turns = init.max_turns;
 
         // Apply child runtime profile overrides from env (set by orchestrator).
         if let Some(thinking) = std::env::var("OMEGON_CHILD_THINKING_LEVEL")

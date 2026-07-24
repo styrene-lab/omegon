@@ -1502,6 +1502,49 @@ impl ConversationView {
         self.segment_bounds_at(viewport, row).map(|(idx, _, _)| idx)
     }
 
+    /// Hit-test rows rendered from a conversation projection and return the
+    /// canonical segment index. The height cache belongs to the projected rows,
+    /// so it must not be indexed as if it described the canonical segment list.
+    pub fn projected_segment_at(
+        &self,
+        viewport: ratatui::prelude::Rect,
+        row: u16,
+        canonical_indices: &[usize],
+    ) -> Option<usize> {
+        let heights = &self.conv_state.heights;
+        if heights.len() != canonical_indices.len() || row < viewport.y || row >= viewport.bottom()
+        {
+            return None;
+        }
+
+        let viewport_height = viewport.height;
+        let total_height: u16 = heights.iter().copied().sum();
+        let top_offset = total_height.saturating_sub(viewport_height).saturating_sub(
+            self.conv_state
+                .scroll_offset
+                .min(total_height.saturating_sub(viewport_height)),
+        );
+        let viewport_origin_y = if total_height < viewport_height {
+            viewport.y.saturating_add(viewport_height - total_height)
+        } else {
+            viewport.y
+        };
+        if row < viewport_origin_y {
+            return None;
+        }
+
+        let target_y = top_offset + (row - viewport_origin_y);
+        let mut y_cursor = 0;
+        for (projected_idx, height) in heights.iter().copied().enumerate() {
+            let bottom = y_cursor + height;
+            if target_y >= y_cursor && target_y < bottom {
+                return canonical_indices.get(projected_idx).copied();
+            }
+            y_cursor = bottom;
+        }
+        None
+    }
+
     pub fn assistant_copy_button_at(
         &self,
         _viewport: ratatui::prelude::Rect,

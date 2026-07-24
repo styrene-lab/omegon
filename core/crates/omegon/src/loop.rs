@@ -396,6 +396,11 @@ pub async fn run(
     let mut session_used_tools: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     let mut turn: u32 = 0;
+    // A tool call on the nominal last turn is not a completed operator turn: the
+    // model has not yet seen the tool result and cannot report the outcome.
+    // Reserve one response-only turn so the hard ceiling cannot strand the TUI
+    // at "turn supervisor completed" without an assistant conclusion.
+    let mut final_response_turn_due = false;
     // Infer the guidance task mode for this operator prompt (A1). Explicit
     // operator declarations pin the mode; otherwise inference updates it for
     // the current task without overriding a previously pinned mode.
@@ -427,8 +432,11 @@ pub async fn run(
         // mid-session and we must reflect that in the schema sent to the LLM.
         // Slim/constrained modes use compact schemas and lazy injection to reduce
         // token overhead: core tools always present, extended tools only if used.
+        let is_final_response_turn = final_response_turn_due;
         let is_constrained = matches!(behavioral_tier(config), BehavioralTier::Constrained);
-        let tool_defs = if is_constrained {
+        let tool_defs = if is_final_response_turn {
+            Vec::new()
+        } else if is_constrained {
             // Constrained models (≤32B, Ollama, etc.) get core-only tools
             // even on turn 1 — 50+ schemas overwhelm small context windows.
             bus.tool_definitions_lean(turn, &session_used_tools)
@@ -446,7 +454,7 @@ pub async fn run(
             context.set_context_window(context_window);
         }
 
-        if config.max_turns > 0 && turn > config.max_turns {
+        if config.max_turns > 0 && turn > config.max_turns && !final_response_turn_due {
             tracing::warn!(
                 "Hard turn limit reached ({} turns). Stopping.",
                 config.max_turns
@@ -494,6 +502,17 @@ pub async fn run(
                 streaks: controller.streaks(),
             })));
             break;
+        }
+
+        if final_response_turn_due {
+            tracing::info!(
+                "Tool activity reached the nominal turn limit — reserving this turn for the operator-facing result"
+            );
+            conversation.push_user(
+                "[System: You have reached the tool-execution limit. Do not call more tools. Report the concrete outcome to the operator now, including any blocker or unfinished work.]"
+                    .to_string(),
+            );
+            final_response_turn_due = false;
         }
 
         // Constrained models get an earlier soft limit (max/2 instead of max*2/3)
@@ -1366,10 +1385,23 @@ pub async fn run(
             .as_ref()
             .map(|(policy, role)| (Some(policy), *role))
             .unwrap_or_else(|| (config.permission_policy.as_ref(), config.permission_role));
-        let dispatch_calls = tool_calls;
+        let dispatch_calls = if config.max_turns > 0 && turn > config.max_turns {
+            tracing::warn!(
+                requested = tool_calls.len(),
+                "Ignoring tool calls from the reserved final-response turn"
+            );
+            let _ = events.send(AgentEvent::SystemNotification {
+                message:
+                    "Agent reached the tool-execution limit; additional tool calls were not run."
+                        .into(),
+            });
+            Vec::new()
+        } else {
+            tool_calls.to_vec()
+        };
         let dispatch = dispatch_tools(
             bus,
-            dispatch_calls,
+            &dispatch_calls,
             events,
             cancel.clone(),
             &config.cwd,
@@ -1380,6 +1412,9 @@ pub async fn run(
         )
         .await;
         let results = dispatch.results;
+        if needs_final_response_turn(config.max_turns, turn, dispatch_calls.len()) {
+            final_response_turn_due = true;
+        }
 
         // Emit permission decisions as bus events (requires &mut bus).
         for perm in dispatch.permission_decisions {
@@ -1399,15 +1434,15 @@ pub async fn run(
             work_plan_snapshot_with_lifecycle(&conversation.intent, &config.cwd);
         conversation
             .intent
-            .update_from_tools(&tool_catalog, dispatch_calls, &results);
-        enrich_plan_list_tool_results(&mut results, dispatch_calls, &conversation.intent);
+            .update_from_tools(&tool_catalog, &dispatch_calls, &results);
+        enrich_plan_list_tool_results(&mut results, &dispatch_calls, &conversation.intent);
         for result in &results {
             conversation.push_tool_result(result.clone());
         }
         let plan_snapshot_after =
             work_plan_snapshot_with_lifecycle(&conversation.intent, &config.cwd);
 
-        if let Some(message) = plan_status_notification(dispatch_calls, &conversation.intent) {
+        if let Some(message) = plan_status_notification(&dispatch_calls, &conversation.intent) {
             let _ = events.send(AgentEvent::SystemNotification { message });
         }
         if work_plan_snapshot_changed(&plan_snapshot_before, &plan_snapshot_after) {
@@ -1428,15 +1463,17 @@ pub async fn run(
             && dispatch_calls.iter().any(|call| {
                 call.name == crate::tool_registry::core::PLAN
                     && matches!(
-                        call.arguments.get("action").and_then(|value| value.as_str()),
+                        call.arguments
+                            .get("action")
+                            .and_then(|value| value.as_str()),
                         Some("advance" | "complete" | "skip" | "clear")
                     )
             })
             && plan_open_items(&conversation.intent).is_empty();
 
-        let dominant_phase = classify_turn_phase(&tool_catalog, dispatch_calls, &results);
+        let dominant_phase = classify_turn_phase(&tool_catalog, &dispatch_calls, &results);
         let drift_kind =
-            classify_drift_kind(&tool_catalog, turn, conversation, dispatch_calls, &results);
+            classify_drift_kind(&tool_catalog, turn, conversation, &dispatch_calls, &results);
         let constraints_before = captured
             .iter()
             .filter(|capture| {
@@ -1451,10 +1488,10 @@ pub async fn run(
             constraints_after.saturating_sub(constraints_before),
             constraints_after,
             &tool_catalog,
-            dispatch_calls,
+            &dispatch_calls,
             &results,
         );
-        let evidence = assess_evidence(conversation, &tool_catalog, dispatch_calls, &results);
+        let evidence = assess_evidence(conversation, &tool_catalog, &dispatch_calls, &results);
         controller.observe_turn(
             TurnEndReason::ToolContinuation,
             drift_kind,
@@ -1467,7 +1504,7 @@ pub async fn run(
             config,
             &controller,
             conversation,
-            dispatch_calls,
+            &dispatch_calls,
             dominant_phase,
             behavior,
         );
@@ -1491,7 +1528,7 @@ pub async fn run(
                 config,
                 conversation,
                 &tool_catalog,
-                dispatch_calls,
+                &dispatch_calls,
             )
         {
             tracing::info!("First-turn orientation churn — injecting execution-bias nudge");
@@ -1522,7 +1559,7 @@ pub async fn run(
             config,
             conversation,
             &tool_catalog,
-            dispatch_calls,
+            &dispatch_calls,
             behavior,
         ) {
             tracing::info!("Execution stall — injecting execution-pressure nudge");
@@ -1567,21 +1604,21 @@ pub async fn run(
             });
         }
 
-        for call in dispatch_calls {
+        for call in &dispatch_calls {
             context.record_tool_call(&call.name);
             // Track file access from tool arguments
             if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
                 context.record_file_access(std::path::PathBuf::from(path));
             }
         }
-        context.update_phase_from_activity(dispatch_calls);
+        context.update_phase_from_activity(&dispatch_calls);
 
         let observations = crate::observation::ObservationNormalizer::new(&tool_catalog)
-            .normalize(dispatch_calls, &results);
+            .normalize(&dispatch_calls, &results);
         for event in &observations {
             stuck_detector.record_observation(event);
         }
-        for call in dispatch_calls {
+        for call in &dispatch_calls {
             let is_error = results
                 .iter()
                 .find(|r| r.call_id == call.id)
@@ -3978,6 +4015,10 @@ fn extract_mutation_path(args: &Value) -> Option<String> {
     args.get("path")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+fn needs_final_response_turn(max_turns: u32, turn: u32, tool_call_count: usize) -> bool {
+    max_turns > 0 && turn >= max_turns && tool_call_count > 0
 }
 
 /// Check if the conversation contains any file mutations (edit or write calls).
@@ -8918,9 +8959,20 @@ This is the right first slice."#;
     }
 
     #[test]
+    fn tool_call_at_turn_limit_reserves_operator_facing_response() {
+        assert!(needs_final_response_turn(50, 50, 1));
+        assert!(needs_final_response_turn(1, 1, 3));
+        assert!(!needs_final_response_turn(50, 49, 1));
+        assert!(!needs_final_response_turn(50, 50, 0));
+        assert!(!needs_final_response_turn(0, 500, 1));
+    }
+
+    #[test]
     fn plan_reconciliation_suppresses_post_reconciliation_progress_nudges() {
         let source = include_str!("loop.rs");
-        assert!(source.contains("if !reconciled_visible_plan\n            && is_first_turn_orientation_churn"));
+        assert!(source.contains(
+            "if !reconciled_visible_plan\n            && is_first_turn_orientation_churn"
+        ));
         assert!(source.contains("if reconciled_visible_plan {\n            tracing::info!("));
         assert!(source.contains("ending without a redundant closure narration turn"));
     }
